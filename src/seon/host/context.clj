@@ -1034,6 +1034,24 @@
   [writer query-form arguments]
   (apply db-query writer query-form arguments))
 
+(defn query-writer-at!
+  "Run one host query at the caller's explicit immutable database value."
+  {:malli/schema
+   [:=> [:cat ::writer :seon.db/db :any [:sequential :any]] :any]}
+  [writer database query-form arguments]
+  (let [response
+        (writer-call!
+         writer
+         (protocol/query-request
+          (with-read-provenance
+            {::protocol/request-id (str (random-uuid))
+             :seon.db/db database
+             ::protocol/query-form query-form
+             ::protocol/arguments (vec arguments)})))]
+    (if (::protocol/success? response)
+      (:datahike.query/result response)
+      (protocol-error-value response))))
+
 (def ^:private committed-schema-query
   '[:find ?key ?form
     :where

@@ -1087,16 +1087,6 @@
   []
   (env "ANTHROPIC_API_KEY"))
 
-(defn result-vars-cap
-  "Max live `result/<id>` vars kept per session.
-
-   A COUNT of retained vars,
-   not a render width, so it keeps the `SEON_EVAL_*` prefix distinct from the
-   render-cap family (`SEON_EVAL_RESULT_VARS_CAP`, default 200)."
-  {:malli/schema [:=> [:cat] :int]}
-  []
-  (env-int "SEON_EVAL_RESULT_VARS_CAP" 200))
-
 ;;; --- Render/output caps — the coherent `SEON_RENDER_*` family (#46). These
 ;;; are read-time, LLM-facing display truncations. Env OVERRIDES config (owner
 ;;; model): the manifest's `:seon.config/render` section declares each knob as

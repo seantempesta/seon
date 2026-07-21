@@ -82,6 +82,38 @@
                            :seon.render.value/tree
                            :seon.eval/opaque])))))
 
+(deftest retained-value-admission-is-portable-bounded-and-identity-preserving
+  (let [ordinary {:portable/value [1 2 3]}
+        shared (vec (range 3000))
+        shared-container [shared shared]
+        hundred-mb (.repeat "x" 100000000)]
+    (is (identical? ordinary (value/admit-retained-value ordinary)))
+    (is (identical? shared-container
+                    (value/admit-retained-value shared-container)))
+    (is (= :seon.eval/weight-cap-exceeded
+           (:seon.eval/retained-reason
+            (value/admit-retained-value {:portable/payload hundred-mb}))))
+    (is (= :seon.eval/node-cap-exceeded
+           (:seon.eval/retained-reason
+            (value/admit-retained-value (vec (range 5000))))))
+    (is (= :seon.eval/unbounded-collection
+           (:seon.eval/retained-reason
+            (value/admit-retained-value (iterate inc 0)))))
+    (is (= :seon.eval/opaque-value
+           (:seon.eval/retained-reason
+            (value/admit-retained-value (Object.)))))))
+
+(deftest effective-limits-may-only-narrow-each-trusted-component
+  (is (value/effective-limits-within? limits limits))
+  (doseq [k (keys limits)]
+    (let [narrowed (update limits k #(max 1 (dec %)))
+          widened (update limits k inc)]
+      (is (value/effective-limits-within? narrowed limits) (str k))
+      (is (not (value/effective-limits-within? widened limits)) (str k))))
+  (is (not (value/effective-limits-within? (dissoc limits
+                                                   :seon.render.value/page-size)
+                                           limits))))
+
 (deftest schema-aware-map-drills-have-the-exact-portable-bytes
   (let [projection (schema/projection-from-rows fixture/rows)]
     (is (= fixture/expected-fingerprint

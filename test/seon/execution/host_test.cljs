@@ -5,6 +5,8 @@
    [seon.execution :as execution]
    [seon.execution.host :as host]
    [seon.launch :as launch]
+   [seon.render.value :as render.value]
+   [seon.schema :as schema]
    [seon.subprocess :as subprocess]))
 
 (def digest (apply str (repeat 64 "e")))
@@ -17,8 +19,90 @@
    :history false
    :datahike/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"})
 
+(def sample-limits
+  {:seon.config.render/value-max-path-segments 32
+   :seon.config.render/value-max-path-bytes 4096
+   :seon.config.render/value-max-realized-items 32
+   :seon.config.render/value-max-depth 3
+   :seon.config.render/value-max-string 80
+   :seon.config.render/value-shape-sample 2
+   :seon.render.value/page-size 3})
+
+(def sample
+  {::execution/message execution/value-sample-message
+   ::execution/protocol-version execution/protocol-version
+   ::execution/agent-id "agent-1"
+   ::execution/request-id "request-1"
+   ::execution/eval-id "eval-1"
+   :seon.render.value/path [:items]
+   :seon.render.value/offset 0
+   :seon.render.value/effective-limits sample-limits})
+
+(declare configure fake-process)
+
 (deftest default-idle-retention-covers-ordinary-interactive-work
   (is (= 300000 @#'host/default-idle-timeout-ms)))
+
+(deftest retained-eval-ownership-is-oldest-first-and-bounded
+  (let [cap render.value/retained-value-cap
+        ids (mapv #(str "eval-" %) (range (+ cap 5)))
+        order (@#'host/append-owned-eval-ids [] ids)]
+    (is (= cap (count order)))
+    (is (= (subvec ids 5) order))
+    (is (= (last ids) (last order)))))
+
+(deftest sample-settlement-requires-agent-correlation-and-exact-page-echo
+  (let [request (assoc sample :seon.render.value/path [])
+        drill-request (select-keys request
+                                   [:seon.render.value/path
+                                    :seon.render.value/offset
+                                    :seon.render.value/effective-limits])
+        result (render.value/drill-value (schema/current-projection)
+                                         [1 2 3 4] drill-request)
+        frame {::execution/message execution/value-sample-result-message
+               ::execution/protocol-version execution/protocol-version
+               ::execution/agent-id "agent-1"
+               ::execution/request-id "request-1"
+               :seon.render.value/result result}]
+    (is (= :available (:seon.render.value/availability result)))
+    (is (@#'host/sample-message-current? request frame))
+    (is (false? (@#'host/sample-message-current?
+                 request (assoc frame ::execution/agent-id "agent-2"))))
+    (is (false? (@#'host/sample-message-current?
+                 request (assoc-in frame
+                                   [:seon.render.value/result
+                                    :seon.render.value/projection
+                                   :seon.render.value/offset]
+                                   1))))
+    (is (false? (@#'host/sample-message-current?
+                 request (assoc-in frame
+                                   [:seon.render.value/result
+                                    :seon.render.value/projection
+                                    :seon.render.value/path]
+                                   [:wrong]))))
+    (is (false? (@#'host/sample-message-current?
+                 request (assoc-in frame
+                                   [:seon.render.value/result
+                                    :seon.render.value/projection
+                                    :seon.render.value/page-size]
+                                   4))))))
+
+(deftest missing-value-owner-is-unavailable-without-spawn
+  (async done
+    (let [spawns (atom 0)]
+      (configure (fn [_] (swap! spawns inc) (:process (fake-process 999))))
+      (-> (host/sample-value!
+           "missing-agent" "missing-eval"
+           (select-keys sample [:seon.render.value/path
+                                :seon.render.value/offset
+                                :seon.render.value/effective-limits]))
+          (.then
+           (fn [result]
+             (is (= :unavailable (:seon.render.value/availability result)))
+             (is (true? (:seon.render.value/recompute? result)))
+             (is (zero? @spawns))))
+          (.catch #(is false (str %)))
+          (.finally done)))))
 
 (defn descriptor []
   (launch/with-execution-artifact
@@ -98,11 +182,13 @@
      :kills kills
      :resolve-exit! @resolve-exit!})))
 
-(defn configure [spawn!]
-  (host/configure!
+(defn configure
+  ([spawn!] (configure spawn! 1000))
+  ([spawn! ready-timeout-ms]
+   (host/configure!
    {::host/launch-descriptor (descriptor)
     ::host/javascript-runtime "bun"
-    ::host/ready-timeout-ms 1000
+    ::host/ready-timeout-ms ready-timeout-ms
     ::host/idle-timeout-ms 60000
     ::host/cancel-grace-ms 5
     ::host/spawn!
@@ -113,7 +199,7 @@
                 (spawn! {::host/cmd (vec (js->clj (.-cmd options)))
                          ::host/ipc (.-ipc options)
                          ::host/stdout "pipe"
-                         ::host/stderr "pipe"})))))}))
+                         ::host/stderr "pipe"})))))})))
 
 (defn feed! [options process message]
   ((::host/ipc options) (execution/encode-message message) process))
@@ -1137,3 +1223,178 @@
              (fn []
                (reset! !connect-native prior-connect)
                (done))))))))
+
+(deftest value-owner-selection-ignores-the-current-tier-selector
+  (let [state @#'host/!host
+        prior @state
+        child-lane @#'host/child-lane
+        host-lane @#'host/host-lane]
+    (try
+      (reset! state
+              {::host/generation 9
+               child-lane {"agent-1" {::host/eval-id-order ["eval-owned"]}}
+               host-lane {"agent-1" {::host/eval-id-order ["other-eval"]}}})
+      (let [[lane _] (@#'host/sample-owner "agent-1" "eval-owned")]
+        (is (= child-lane lane)
+            "sampling uses recorded ownership, not a fresh tier lookup"))
+      (is (nil? (@#'host/sample-owner "agent-1" "missing")))
+      (finally (reset! state prior)))))
+
+(deftest configuration-retirement-settles-an-active-sample-as-unavailable
+  (let [resolved (atom [])
+        sent (atom [])
+        killed (atom [])
+        timer (js/setTimeout (fn []) 60000)
+        current {::host/ready? true
+                 ::host/ready-timer nil
+                 ::host/active {::host/sample sample
+                                ::host/timer timer
+                                ::host/resolve! #(swap! resolved conj %)}
+                 ::host/control
+                 {::subprocess/send! #(swap! sent conj %)
+                  ::subprocess/kill! #(swap! killed conj %)}}]
+    (@#'host/retire-child! current 1)
+    (is (= 1 (count @resolved)))
+    (is (= :seon.runtime/unavailable
+           (get-in (first @resolved)
+                   [::execution/error :seon.error/kind])))
+    (is (= "request-1"
+           (::execution/request-id (first @resolved))))
+    (is (= 1 (count @sent)))
+    (js/clearTimeout timer)))
+
+(deftest retained-sample-shares-the-agent-fifo-with-invocations
+  (async done
+    (let [options (atom nil)
+          child (fake-process 130)
+          phase (atom :seed)
+          finished? (atom false)
+          watchdog (js/setTimeout
+                    (fn []
+                      (when (compare-and-set! finished? false true)
+                        (is false (str "sample FIFO stalled at " @phase))
+                        ((:resolve-exit! child) 1)
+                        (done)))
+                    1000)
+          _ (configure (fn [value]
+                         (reset! options value)
+                         (:process child)))
+          seed (host/invoke! (invocation "seed-owner"))]
+      (feed! @options (:process child) (ready-message))
+      (-> (js/Promise.resolve nil)
+          (.then
+           (fn [_]
+             (feed! @options (:process child)
+                    (result-message "seed-owner"
+                                    {:seon.eval/ids ["eval-1"]}))))
+          (.then (fn [_] seed))
+          (.then
+           (fn [_]
+             (reset! phase :sample)
+             (let [sampled (host/sample-value!
+                            "agent-1" "eval-1"
+                            (select-keys sample
+                                         [:seon.render.value/path
+                                          :seon.render.value/offset
+                                          :seon.render.value/effective-limits]))
+                   next (host/invoke! (invocation "fifo-next"))]
+               (-> (js/Promise.resolve nil)
+                   (.then
+                    (fn [_]
+                      (reset! phase :sample-sent)
+                      (let [request (last @(:sent child))]
+                        (is (= execution/value-sample-message
+                               (::execution/message request)))
+                        (is (= ["seed-owner"]
+                               (keep ::execution/invocation-id
+                                     @(:sent child)))
+                            "a later invocation waits behind the sample")
+                        (feed! @options (:process child)
+                               {::execution/message
+                                execution/value-sample-result-message
+                                ::execution/protocol-version
+                                execution/protocol-version
+                                ::execution/agent-id "agent-1"
+                                ::execution/request-id
+                                (::execution/request-id request)
+                                :seon.render.value/result
+                                (render.value/sampling-policy-refusal)}))))
+                   (.then (fn [_] sampled))
+                   (.then
+                    (fn [result]
+                      (reset! phase :sample-settled)
+                      (is (= (render.value/sampling-policy-refusal) result))
+                      (js/Promise.resolve nil)))
+                   (.then
+                    (fn [_]
+                      (reset! phase :next-sent)
+                      (is (= ["seed-owner" "fifo-next"]
+                             (keep ::execution/invocation-id @(:sent child))))
+                      (feed! @options (:process child)
+                             (result-message "fifo-next" :next))))
+                   (.then (fn [_] next))))))
+          (.then
+           (fn [result]
+             (reset! phase :complete)
+             (is (= :next (::execution/result result)))
+             ((:resolve-exit! child) 0)))
+          (.catch #(is false (str "sample FIFO rejected: " %)))
+          (.finally
+           (fn []
+             (js/clearTimeout watchdog)
+             (when (compare-and-set! finished? false true) (done))))))))
+
+(deftest retained-sample-timeout-settles-once-and-retires-its-owner
+  (async done
+    (let [options (atom nil)
+          child (fake-process 131)
+          _ (configure (fn [value]
+                         (reset! options value)
+                         (:process child)) 10)
+          seed (host/invoke! (invocation "seed-timeout"))]
+      (feed! @options (:process child) (ready-message))
+      (-> (js/Promise.resolve nil)
+          (.then
+           (fn [_]
+             (feed! @options (:process child)
+                    (result-message "seed-timeout"
+                                    {:seon.eval/ids ["eval-1"]}))))
+          (.then (fn [_] seed))
+          (.then
+           (fn [_]
+             (host/sample-value!
+              "agent-1" "eval-1"
+              (select-keys sample
+                           [:seon.render.value/path
+                            :seon.render.value/offset
+                            :seon.render.value/effective-limits]))))
+          (.then
+           (fn [result]
+             (is (= :unavailable
+                    (:seon.render.value/availability result)))
+             (is (true? (:seon.render.value/recompute? result)))
+             (is (= ["SIGKILL"] @(:kills child)))
+             (let [request (last @(:sent child))]
+               (feed! @options (:process child)
+                      {::execution/message execution/value-sample-result-message
+                       ::execution/protocol-version execution/protocol-version
+                       ::execution/agent-id "agent-1"
+                       ::execution/request-id (::execution/request-id request)
+                       :seon.render.value/result
+                       (render.value/sampling-policy-refusal)}))
+             (-> (js/Promise.resolve nil)
+                 (.then
+                  (fn [_]
+                    (is (= ["SIGKILL"] @(:kills child))
+                        "a late terminal frame has no second side effect")
+                    (is (true? (::host/retiring?
+                                (get-in @@#'host/!host
+                                        [@#'host/child-lane "agent-1"]))))
+                    ((:resolve-exit! child) 1)))
+                 (.then (fn [_] (js/Promise.resolve nil)))
+                 (.then
+                  (fn [_]
+                    (is (nil? (get-in @@#'host/!host
+                                      [@#'host/child-lane "agent-1"]))))))))
+          (.catch #(is false (str "sample timeout rejected: " %)))
+          (.finally done)))))

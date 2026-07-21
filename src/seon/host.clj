@@ -68,6 +68,7 @@
      keeps rendering); routing them here answers with a steering error."
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
+            [seon.db.protocol :as db.protocol]
             [sci.core :as sci]
             [seon.db.transport.uds :as uds]
             [seon.host.context :as context]
@@ -93,6 +94,9 @@
 (def result-message :seon.execution.message/result)
 (def error-message :seon.execution.message/error)
 (def stopped-message :seon.execution.message/stopped)
+(def value-sample-message :seon.execution.message/value-sample)
+(def value-sample-result-message :seon.execution.message/value-sample-result)
+(def value-sample-error-message :seon.execution.message/value-sample-error)
 
 ;; JVM projection of the `seon.execution` wire contract (seam above).
 (schema/register! ::protocol-version [:= protocol-version])
@@ -214,6 +218,148 @@
    :seon.execution/result value
    :seon.execution/result-bytes result-bytes})
 
+(declare send-frame! retained-live-entry retained-live-value)
+
+(defn- sample-error-frame
+  ([sample message] (sample-error-frame sample message :core-bug))
+  ([sample message kind]
+  {:seon.execution/message value-sample-error-message
+   :seon.execution/protocol-version protocol-version
+   :seon.execution/agent-id (:seon.execution/agent-id sample)
+   :seon.execution/request-id (:seon.execution/request-id sample)
+   :seon.execution/error (error-value message kind)}))
+
+(defn- unavailable-drill-result [projection request miss]
+  (let [root-request (assoc request
+                            :seon.render.value/path []
+                            :seon.render.value/offset 0)
+        rendered (render.value/drill-value projection miss root-request)]
+    (if (:seon.render.value/ok? rendered)
+      (-> rendered
+          (assoc :seon.render.value/availability :unavailable
+                 :seon.render.value/recompute? true)
+          (assoc-in [:seon.render.value/projection :seon.render.value/path]
+                    (:seon.render.value/path request))
+          (assoc-in [:seon.render.value/projection :seon.render.value/offset]
+                    (:seon.render.value/offset request)))
+      rendered)))
+
+(defn- serve-value-sample! [host session sample]
+  (let [request (select-keys sample
+                             [:seon.render.value/path
+                              :seon.render.value/offset
+                              :seon.render.value/effective-limits])]
+    (cond
+      (some? @(::active session))
+      (send-frame! session
+                   (sample-error-frame sample
+                                       "The execution host already has active work."))
+
+      (not= (:seon.execution/agent-id @(::startup session))
+            (:seon.execution/agent-id sample))
+      (send-frame! session
+                   (sample-error-frame sample
+                                       "The value sample names another agent."))
+
+      (not (render.value/admitted-drill-request? request))
+      (send-frame! session
+                   (sample-error-frame sample
+                                       "The value sample request is invalid or over budget."))
+
+      :else
+      (let [admitted (context/current-committed-projection
+                      (::projection-state host))
+            projection (::context/projection admitted)
+            retained (retained-live-entry
+                      session (:seon.execution/eval-id sample))
+            found? (::found? retained)
+            trusted-limits (::limits retained)
+            metadata-invalid? (and found?
+                                   (or
+                                    (not (db.protocol/database-value?
+                                          (::database retained)))
+                                    (not (render.value/effective-limits-within?
+                                          trusted-limits trusted-limits))))
+            policy-refused? (and found?
+                                 (not metadata-invalid?)
+                                 (not (render.value/effective-limits-within?
+                                       (:seon.render.value/effective-limits request)
+                                       trusted-limits)))
+            result (cond
+                     metadata-invalid?
+                     nil
+                     (:seon/error admitted)
+                     {:seon.render.value/ok? false
+                      :seon/error {:seon.error/message
+                                   "Schema-aware value browsing is unavailable."
+                                   :seon.error/kind :core-bug}}
+                     policy-refused?
+                     (render.value/sampling-policy-refusal)
+                     found?
+                     (render.value/drill-value
+                      projection
+                      (retained-live-value session
+                                           (:seon.execution/eval-id sample))
+                     request)
+                     :else
+                     (unavailable-drill-result projection request
+                                               (::value retained)))
+            limits (:seon.render.value/effective-limits request)]
+        (if metadata-invalid?
+          (send-frame! session
+                       (sample-error-frame
+                        sample render.value/sampling-policy-unavailable-message
+                        :seon.runtime/unavailable))
+          (if (render.value/bounded-drill-result? result limits)
+          (send-frame! session
+                       {:seon.execution/message value-sample-result-message
+                        :seon.execution/protocol-version protocol-version
+                        :seon.execution/agent-id
+                        (:seon.execution/agent-id sample)
+                        :seon.execution/request-id
+                        (:seon.execution/request-id sample)
+                        :seon.render.value/result result})
+          (send-frame! session
+                       (sample-error-frame
+                        sample "The value sample result exceeded its bounds."))))))))
+
+(defn- valid-value-sample? [message]
+  ;; JVM projection of the portable closed request: exact outer keys and
+  ;; scalar correlation here; the one total drill predicate owns every path
+  ;; and realization-work rule on both runtimes. This avoids registering a
+  ;; second JVM-only schema graph for the same frame.
+  (let [request (select-keys message
+                             [:seon.render.value/path
+                              :seon.render.value/offset
+                              :seon.render.value/effective-limits])]
+    (and (= 8 (count message))
+         (every? #(contains? message %)
+                 [:seon.execution/message
+                  :seon.execution/protocol-version
+                  :seon.execution/agent-id
+                  :seon.execution/request-id
+                  :seon.execution/eval-id
+                  :seon.render.value/path
+                  :seon.render.value/offset
+                  :seon.render.value/effective-limits])
+         (render.value/admitted-drill-request? request)
+         (= value-sample-message (:seon.execution/message message))
+         (= protocol-version (:seon.execution/protocol-version message))
+         (every? #(and (string? %) (seq %))
+                 ((juxt :seon.execution/agent-id
+                        :seon.execution/request-id
+                        :seon.execution/eval-id)
+                  message)))))
+
+(defn- safe-sample-correlation [session message]
+  (let [startup-agent (:seon.execution/agent-id @(::startup session))
+        agent-id (:seon.execution/agent-id message)
+        request-id (:seon.execution/request-id message)]
+    {:seon.execution/agent-id
+     (if (and (string? agent-id) (seq agent-id)) agent-id startup-agent)
+     :seon.execution/request-id
+     (if (and (string? request-id) (seq request-id)) request-id "invalid")}))
+
 (defn- send-frame!
   "Write one frame on the session under its write lock."
   [session message]
@@ -277,6 +423,74 @@
               (dissoc :seon.eval/value)
               (assoc :seon.eval/value-display (pr-str value))))))))
 
+(defn- admitted-retained-value
+  "Apply the one portable bounded live-result admission policy."
+  [value]
+  (render.value/admit-retained-value value))
+
+(defn- retain-live-value!
+  "Retain one managed eval value in oldest-first bounded session state."
+  [session eval-id value limits database]
+  (swap! (::live-values session)
+         (fn [{::keys [order values]}]
+           (let [order (conj (vec (remove #{eval-id} order)) eval-id)
+                 values (assoc values eval-id
+                               {::value (admitted-retained-value value)
+                                ::limits limits
+                                ::database database})
+                 over (max 0 (- (count order)
+                                render.value/retained-value-cap))
+                 evicted (subvec order 0 over)
+                 kept (subvec order over)]
+             {::order kept ::values (apply dissoc values evicted)})))
+  nil)
+
+(defn- retained-live-entry [session eval-id]
+  (let [values (::values @(::live-values session))]
+    (if (contains? values eval-id)
+      (merge {::found? true}
+             (select-keys (get values eval-id) [::limits ::database]))
+      {::found? false
+       ::value
+       {:seon.eval/ok? false
+        :seon.error/message
+        (str "eval " eval-id " isn't live — its bounded result slot was "
+             "evicted or belonged to a prior process. Re-run the form to recompute it.")}})))
+
+(defn- retained-live-value [session eval-id]
+  (get-in @(::live-values session) [::values eval-id ::value]))
+
+(def ^:private sampling-policy-query
+  '[:find [?path-segments ?path-bytes ?realized ?depth ?string ?shape ?items] .
+    :in $ ?id
+    :where
+    [?config :seon.config/id ?id]
+    [?config :seon.config.render/value-max-path-segments ?path-segments]
+    [?config :seon.config.render/value-max-path-bytes ?path-bytes]
+    [?config :seon.config.render/value-max-realized-items ?realized]
+    [?config :seon.config.render/value-max-depth ?depth]
+    [?config :seon.config.render/value-max-string ?string]
+    [?config :seon.config.render/value-shape-sample ?shape]
+    [?config :seon.config.render/value-max-items ?items]])
+
+(defn- acquire-sampling-policy! [writer database]
+  (let [row (context/query-writer-at! writer database
+                                      sampling-policy-query ["cluster"])
+        limits (when (and (vector? row) (= 7 (count row)))
+                 (zipmap
+                  [:seon.config.render/value-max-path-segments
+                   :seon.config.render/value-max-path-bytes
+                   :seon.config.render/value-max-realized-items
+                   :seon.config.render/value-max-depth
+                   :seon.config.render/value-max-string
+                   :seon.config.render/value-shape-sample
+                   :seon.render.value/page-size]
+                  row))]
+    (if (and limits (render.value/effective-limits-within? limits limits))
+      limits
+      (throw (ex-info "The invocation database lacks a complete value-sampling policy."
+                      {:seon.error/kind :core-bug})))))
+
 (defn- eval-form!
   "Evaluate one prepared source in the agent context; every outcome a value.
 
@@ -286,8 +500,9 @@
   [ctx source]
   (try
     (let [value (sci/eval-string* ctx source)]
-      (cond-> (wire-safe-value {:seon.eval/ok? true
-                                :seon.eval/value value})
+      (cond-> (assoc (wire-safe-value {:seon.eval/ok? true
+                                       :seon.eval/value value})
+                     ::live-value value)
         (instance? sci.lang.Var value)
         (assoc ::var-meta (meta value))))
     (catch Throwable throwable
@@ -348,7 +563,8 @@
    with empty `:seon.eval/ids`."
   [session {parsed :seon.eval/parsed
             starting-ns :seon.eval/starting-ns
-            turn-id :seon.agent.turn/id-of-turn}]
+            turn-id :seon.agent.turn/id-of-turn}
+   sampling-limits database]
   (let [ctx (::ctx session)
         writer (::writer session)
         agent-id (:seon.execution/agent-id @(::startup session))
@@ -408,7 +624,8 @@
                                 ::record/ns-sym current-ns})
                               [])
                       var-meta (::var-meta raw-envelope)
-                      envelope (dissoc raw-envelope ::var-meta)
+                      live-value (::live-value raw-envelope)
+                      envelope (dissoc raw-envelope ::var-meta ::live-value)
                       eval-id (:seon.eval/id started)
                       ;; An interrupted form leaves the worker's interrupt
                       ;; status set, which would kill the writer channel's
@@ -451,6 +668,9 @@
                       ids (if (and recorded (:seon.db/ok? recorded))
                             (conj ids eval-id)
                             ids)
+                      _ (when (and ok? recorded (:seon.db/ok? recorded))
+                          (retain-live-value! session eval-id live-value
+                                              sampling-limits database))
                       envelope (if (and recorded
                                         (not (:seon.db/ok? recorded)))
                                  ;; The outcome could not become durable —
@@ -519,10 +739,13 @@
                       {:seon.execution/function-symbol function-symbol})}
 
             (= function-symbol 'seon.execution.runtime/eval-batch!)
-            (let [result (binding [context/*agent-id*
+            (let [sampling-limits (acquire-sampling-policy!
+                                   (::writer session) database)
+                  result (binding [context/*agent-id*
                                    (:seon.execution/agent-id
                                     @(::startup session))]
-                           (eval-batch-result session (first arguments)))]
+                           (eval-batch-result session (first arguments)
+                                              sampling-limits database))]
               (if (and (interrupted-batch? result)
                        @(::cancel-requested? session))
                 {::error (error-value "The invocation was canceled." :agent)}
@@ -633,6 +856,7 @@
   ;; Park = drop: restore forks the base and replays defs from the corpus.
   (when-let [agent-id (:seon.execution/agent-id @(::startup session))]
     (swap! (::contexts session) dissoc agent-id))
+  (reset! (::live-values session) {::order [] ::values {}})
   (send-frame! session {:seon.execution/message stopped-message
                         :seon.execution/protocol-version protocol-version})
   nil)
@@ -723,6 +947,7 @@
                  ::active (atom nil)
                  ::active-run (atom nil)
                  ::cancel-requested? (atom false)
+                 ::live-values (atom {::order [] ::values {}})
                  ::contexts (::contexts host)
                  ::writer (::writer host)
                  ::projection-state (::projection-state host)
@@ -752,14 +977,32 @@
                        (:seon.execution/invocation-id message))
                       nil)
 
+                  :seon.execution.message/value-sample
+                  (do (if (valid-value-sample? message)
+                        (serve-value-sample! host ready-session message)
+                        (let [safe-sample
+                              (safe-sample-correlation ready-session message)]
+                          (send-frame!
+                           ready-session
+                           (sample-error-frame
+                            safe-sample
+                            "The parent sent an invalid value sample."))))
+                      (recur))
+
                   :seon.execution.message/shutdown
                   (shutdown-session! ready-session)
 
-                  (do (send-frame! ready-session
-                                   (invalid-message-frame message))
+                  (do (send-frame!
+                       ready-session
+                       (if (contains? message :seon.execution/request-id)
+                         (sample-error-frame
+                          (safe-sample-correlation ready-session message)
+                          "The parent sent an invalid value sample.")
+                         (invalid-message-frame message)))
                       (recur))))))))
       (catch Throwable _ nil)
       (finally
+        (reset! (::live-values session) {::order [] ::values {}})
         (try (.close channel) (catch Throwable _))))))
 
 (defn start!

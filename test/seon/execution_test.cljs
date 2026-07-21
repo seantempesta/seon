@@ -8,6 +8,7 @@
    [seon.error :as error]
    [seon.eval :as seval]
    [seon.execution :as execution]
+   [seon.render.value :as render.value]
    [seon.runtime.admission :as admission]
    [seon.schema :as schema]))
 
@@ -65,6 +66,25 @@
 
 (def prompt-function 'seon.execution.runtime/render-prompt!)
 
+(def sample-limits
+  {:seon.config.render/value-max-path-segments 32
+   :seon.config.render/value-max-path-bytes 4096
+   :seon.config.render/value-max-realized-items 32
+   :seon.config.render/value-max-depth 3
+   :seon.config.render/value-max-string 80
+   :seon.config.render/value-shape-sample 2
+   :seon.render.value/page-size 3})
+
+(defn sample-request [path]
+  {::execution/message execution/value-sample-message
+   ::execution/protocol-version execution/protocol-version
+   ::execution/agent-id "agent-1"
+   ::execution/request-id "sample-1"
+   ::execution/eval-id "eval-1"
+   :seon.render.value/path path
+   :seon.render.value/offset 0
+   :seon.render.value/effective-limits sample-limits})
+
 (defn decoded-sender [messages]
   (fn [encoded]
     (swap! messages conj (execution/decode-message encoded))))
@@ -78,6 +98,179 @@
                (assoc invocation ::execution/arguments
                       [(js/Promise.resolve 1)]))))
   (is (execution/valid-parent-message? invocation)))
+
+(deftest value-sample-frames-are-closed-and-preflight-work-bounded
+  (let [request (sample-request [])
+        oversized (sample-request (vec (repeat 1000000 :x)))
+        visits (atom 0)
+        original render.value/drill-path-segment?]
+    (is (execution/valid-parent-message?
+         (execution/decode-message (execution/encode-message request))))
+    (is (false? (execution/valid-parent-message? (assoc request ::extra true))))
+    (with-redefs [render.value/drill-path-segment?
+                  (fn [segment] (swap! visits inc) (original segment))]
+      (is (false? (execution/valid-parent-message? oversized)))
+      (is (zero? @visits) "a million-segment vector is count-rejected")
+      (is (execution/valid-parent-message?
+           (sample-request (vec (repeat 32 :x)))))
+      (is (= 32 @visits)))
+    (is (= 1000000 (count (:seon.render.value/path oversized))))))
+
+(deftest value-sample-terminal-frames-round-trip-as-closed-ordinary-data
+  (let [request (sample-request [])
+        drill-request (select-keys request
+                                   [:seon.render.value/path
+                                    :seon.render.value/offset
+                                    :seon.render.value/effective-limits])
+        result (render.value/drill-value (schema/current-projection)
+                                         [1 2 3 4] drill-request)
+        result-frame {::execution/message
+                      execution/value-sample-result-message
+                      ::execution/protocol-version execution/protocol-version
+                      ::execution/agent-id "agent-1"
+                      ::execution/request-id "sample-1"
+                      :seon.render.value/result result}
+        error-frame {::execution/message execution/value-sample-error-message
+                     ::execution/protocol-version execution/protocol-version
+                     ::execution/agent-id "agent-1"
+                     ::execution/request-id "sample-1"
+                     ::execution/error {:seon.error/message "unavailable"
+                                        :seon.error/kind
+                                        :seon.runtime/unavailable}}]
+    (doseq [frame [result-frame error-frame]]
+      (let [decoded (execution/decode-message (execution/encode-message frame))]
+        (is (= frame decoded))
+        (is (execution/valid-child-message? decoded))
+        (is (false? (execution/valid-child-message?
+                     (assoc decoded ::extra true))))))))
+
+(deftest child-samples-a-live-value-without-interpreting-its-map-shape
+  (async done
+    (let [messages (atom [])
+          raw {:seon.eval/ok? false :user/value 42}
+          state (atom {::execution/startup startup
+                       ::execution/compile-state (atom {})
+                       ::execution/compiled-functions {}})]
+      (with-redefs [seval/result-live? (constantly true)
+                    seval/result-sampling-entry
+                    (fn [_ _] {:seon.eval/found? true
+                               :seon.eval/metadata-valid? true
+                               :seon.eval/sampling-limits sample-limits
+                               :seon.eval/sampling-database database})
+                    seval/lookup-result (fn [_] (js/Promise.resolve raw))]
+        (@#'execution/receive! state
+         (execution/encode-message (sample-request []))
+         (decoded-sender messages) (fn [_]) 0)
+        (-> (js/Promise.resolve nil)
+            (.then (fn [_] (js/Promise.resolve nil)))
+            (.then
+             (fn [_]
+               (let [frame (first @messages)
+                     result (:seon.render.value/result frame)]
+                 (is (= execution/value-sample-result-message
+                        (::execution/message frame)))
+                 (is (= :available (:seon.render.value/availability result)))
+                 (is (= [[:seon.eval/ok? false] [:user/value 42]]
+                        (get-in result [:seon.render.value/projection
+                                        :seon.render.value/tree
+                                        :seon.render.value/map-entries]))))))
+            (.catch #(is false (str %)))
+            (.finally done))))))
+
+(deftest shutdown-invalidates-an-in-flight-sample-before-stopped
+  (async done
+    (let [messages (atom [])
+          resolve-lookup! (atom nil)
+          lookup (js/Promise. (fn [resolve _] (reset! resolve-lookup! resolve)))
+          state (atom {::execution/startup startup
+                       ::execution/compile-state (atom {})
+                       ::execution/compiled-functions {}})]
+      (with-redefs [seval/result-live? (constantly true)
+                    seval/result-sampling-entry
+                    (fn [_ _] {:seon.eval/found? true
+                               :seon.eval/metadata-valid? true
+                               :seon.eval/sampling-limits sample-limits
+                               :seon.eval/sampling-database database})
+                    seval/lookup-result (fn [_] lookup)]
+        (@#'execution/receive! state
+         (execution/encode-message (sample-request []))
+         (decoded-sender messages) (fn [_]) 0)
+        (@#'execution/receive!
+         state
+         (execution/encode-message
+          {::execution/message execution/shutdown-message
+           ::execution/protocol-version execution/protocol-version})
+         (decoded-sender messages) (fn [_]) 0)
+        (@resolve-lookup! {:late true})
+        (-> (js/Promise.resolve nil)
+            (.then (fn [_] (js/Promise.resolve nil)))
+            (.then
+             (fn [_]
+               (is (= [execution/stopped-message]
+                      (mapv ::execution/message @messages)))
+               (is (nil? (::execution/active @state)))))
+            (.catch #(is false (str %)))
+            (.finally done))))))
+
+(deftest forged-wide-sample-limits-are-rejected-before-live-slot-lookup
+  (let [lookups (atom 0)]
+    (doseq [[field maximum] sample-limits]
+      (let [messages (atom [])
+            state (atom {::execution/startup startup
+                         ::execution/compile-state (atom {})
+                         ::execution/compiled-functions {}})
+            forged (assoc-in (sample-request [])
+                             [:seon.render.value/effective-limits field]
+                             (inc maximum))]
+        (with-redefs [seval/result-sampling-entry
+                      (fn [_ _] {:seon.eval/found? true
+                                 :seon.eval/metadata-valid? true
+                                 :seon.eval/sampling-limits sample-limits
+                                 :seon.eval/sampling-database database})
+                      seval/result-live? (fn [_] (swap! lookups inc) true)
+                      seval/lookup-result (fn [_]
+                                            (swap! lookups inc)
+                                            (js/Promise.resolve [1 2 3]))]
+          (@#'execution/receive! state
+           (execution/encode-message forged)
+           (decoded-sender messages) (fn [_]) 0))
+        (is (= execution/value-sample-result-message
+               (::execution/message (first @messages))) (str field))
+        (is (= (render.value/sampling-policy-refusal)
+               (:seon.render.value/result (first @messages))) (str field))))
+    (is (zero? @lookups))))
+
+(deftest incomplete-retained-policy-is-unavailable-before-live-slot-lookup
+  (doseq [definition [{:seon.eval/result-var? true
+                       :seon.eval/sampling-limits sample-limits}
+                      {:seon.eval/result-var? true
+                       :seon.eval/sampling-limits {:bad true}
+                       :seon.eval/sampling-database database}]]
+    (let [messages (atom [])
+          lookups (atom 0)
+          state (atom {::execution/startup startup
+                       ::execution/compile-state
+                       (atom {:cljs.analyzer/namespaces
+                              {seval/result-ns-sym
+                               {:defs {'eval-1 definition}}}})
+                       ::execution/compiled-functions {}})]
+      (with-redefs [seval/result-live? (fn [_] (swap! lookups inc) true)
+                    seval/lookup-result (fn [_]
+                                          (swap! lookups inc)
+                                          (js/Promise.resolve [1]))]
+        (@#'execution/receive! state
+         (execution/encode-message (sample-request []))
+         (decoded-sender messages) (fn [_]) 0))
+      (is (zero? @lookups))
+      (is (= {::execution/message execution/value-sample-error-message
+              ::execution/protocol-version execution/protocol-version
+              ::execution/agent-id "agent-1"
+              ::execution/request-id "sample-1"
+              ::execution/error
+              {:seon.error/message
+               render.value/sampling-policy-unavailable-message
+               :seon.error/kind :seon.runtime/unavailable}}
+             (first @messages))))))
 
 (deftest non-ordinary-parent-message-reports-an-ordinary-value-path
   (let [failure

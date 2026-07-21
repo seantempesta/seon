@@ -4,12 +4,24 @@
    [cljs.test :refer [async deftest is testing]]
    [seon.config :as config]
    [seon.eval :as eval]
+   [seon.render.value :as render.value]
    [seon.repl :as repl]))
 
 (def ^:private configuration (config/resolve-config-singleton {}))
 (def ^:private result-cap (deref #'eval/result-vars-cap))
 (def ^:private replace-live-result! (deref #'eval/replace-live-result!))
 (def ^:private unbind-result-var! (deref #'eval/unbind-result-var!))
+(def ^:private bind-admitted-result-var!
+  (deref #'eval/bind-admitted-result-var!))
+
+(defn- sampling-database [basis commit]
+  {:db-name "sampling-test"
+   :store-id [#uuid "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" :db]
+   :t basis
+   :as-of nil
+   :since nil
+   :history false
+   :datahike/commit-id commit})
 
 (defn- evaluate-result [compile-state namespace id]
   (eval/eval compile-state (str "result/" id)
@@ -24,6 +36,39 @@
   (is (false? (eval/result-var-ref? "(+ 1 2)")))
   (is (false? (eval/result-var-ref? "my.kb/something")))
   (is (false? (eval/result-var-ref? "result/a result/b"))))
+
+(deftest retained-slot-keeps-policy-and-producing-database-atomically
+  (let [compile-state (atom {})
+        id-a "basis-a"
+        id-b "basis-b"
+        limits-a (config/effective-value-drill-limits
+                  {:seon.config/configuration configuration})
+        limits-b (assoc limits-a :seon.render.value/page-size 2)
+        database-a (sampling-database
+                    41 #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+        database-b (sampling-database
+                    42 #uuid "cccccccc-cccc-4ccc-8ccc-cccccccccccc")]
+    (try
+      (bind-admitted-result-var! compile-state id-a :a limits-a database-a)
+      (bind-admitted-result-var! compile-state id-b :b limits-b database-b)
+      (is (= {:seon.eval/found? true
+              :seon.eval/metadata-valid? true
+              :seon.eval/sampling-limits limits-a
+              :seon.eval/sampling-database database-a}
+             (eval/result-sampling-entry compile-state id-a)))
+      (is (= {:seon.eval/found? true
+              :seon.eval/metadata-valid? true
+              :seon.eval/sampling-limits limits-b
+              :seon.eval/sampling-database database-b}
+             (eval/result-sampling-entry compile-state id-b)))
+      (is (render.value/effective-limits-within? limits-b limits-a))
+      (is (not (render.value/effective-limits-within? limits-a limits-b)))
+      (unbind-result-var! compile-state id-a)
+      (is (= {:seon.eval/found? false}
+             (eval/result-sampling-entry compile-state id-a)))
+      (finally
+        (unbind-result-var! compile-state id-a)
+        (unbind-result-var! compile-state id-b)))))
 
 (deftest ordinary-form-evaluation-returns-its-value
   (async done

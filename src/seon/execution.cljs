@@ -14,6 +14,7 @@
    [seon.db.protocol :as db.protocol]
    [seon.error :as error]
    [seon.eval :as eval]
+   [seon.render.value :as render.value]
    [seon.runtime.admission :as admission]
    [seon.schema :as schema]))
 
@@ -33,11 +34,16 @@
 (def result-message :seon.execution.message/result)
 (def error-message :seon.execution.message/error)
 (def stopped-message :seon.execution.message/stopped)
+(def value-sample-message :seon.execution.message/value-sample)
+(def value-sample-result-message :seon.execution.message/value-sample-result)
+(def value-sample-error-message :seon.execution.message/value-sample-error)
 
 (schema/register! ::protocol-version [:= protocol-version])
 (schema/register! ::message :keyword)
 (schema/register! ::agent-id [:string {:min 1}])
 (schema/register! ::invocation-id [:string {:min 1}])
+(schema/register! ::request-id [:string {:min 1}])
+(schema/register! ::eval-id [:string {:min 1}])
 (schema/register! ::function-symbol :qualified-symbol)
 (schema/register! ::compiled-function 'fn?)
 (schema/register! ::pin-database? :boolean)
@@ -100,7 +106,19 @@
  [:map {:closed true}
   [::message [:= shutdown-message]]
   [::protocol-version ::protocol-version]])
-(schema/register! ::parent-message [:or ::invoke ::cancel ::shutdown])
+(schema/register!
+ ::value-sample
+ [:map {:closed true}
+  [::message [:= value-sample-message]]
+  [::protocol-version ::protocol-version]
+  [::agent-id ::agent-id]
+  [::request-id ::request-id]
+  [::eval-id ::eval-id]
+  [:seon.render.value/path :seon.render.value/path]
+  [:seon.render.value/offset :seon.render.value/offset]
+  [:seon.render.value/effective-limits :seon.render.value/effective-limits]])
+(schema/register! ::parent-message [:or ::invoke ::cancel ::shutdown
+                                    ::value-sample])
 (schema/register! ::result :any)
 (schema/register! ::result-bytes [:int {:min 1 :max maximum-result-bytes}])
 (schema/register! ::error
@@ -141,8 +159,25 @@
  [:map {:closed true}
   [::message [:= stopped-message]]
   [::protocol-version ::protocol-version]])
+(schema/register!
+ ::value-sample-result
+ [:map {:closed true}
+  [::message [:= value-sample-result-message]]
+  [::protocol-version ::protocol-version]
+  [::agent-id ::agent-id]
+  [::request-id ::request-id]
+  [:seon.render.value/result :seon.render.value/drill-result]])
+(schema/register!
+ ::value-sample-error
+ [:map {:closed true}
+  [::message [:= value-sample-error-message]]
+  [::protocol-version ::protocol-version]
+  [::agent-id ::agent-id]
+  [::request-id ::request-id]
+  [::error ::error]])
 (schema/register! ::child-message
-                  [:or ::ready ::result-message ::error-message ::stopped])
+                  [:or ::ready ::result-message ::error-message ::stopped
+                   ::value-sample-result ::value-sample-error])
 
 (schema/register!
  ::invocation-plan
@@ -245,7 +280,18 @@
   "True when a value is one complete ordinary parent message."
   {:malli/schema [:=> [:cat :any] :boolean]}
   [message]
-  (and ((::parent-message message-validators) message)
+  (and (or (not= value-sample-message (::message message))
+           (and (= 8 (count message))
+                (every? #(contains? message %)
+                        [::message ::protocol-version ::agent-id ::request-id
+                         ::eval-id :seon.render.value/path
+                         :seon.render.value/offset
+                         :seon.render.value/effective-limits])
+                (render.value/admitted-drill-request?
+                 (select-keys message [:seon.render.value/path
+                                       :seon.render.value/offset
+                                       :seon.render.value/effective-limits]))))
+       ((::parent-message message-validators) message)
        (db.protocol/ordinary-wire-value? message)))
 
 (defn valid-child-message?
@@ -855,6 +901,126 @@
                    :seon.error/kind kind}})
   state)
 
+(defn- sample-error-frame
+  ([sample message] (sample-error-frame sample message :core-bug))
+  ([sample message kind]
+  {::message value-sample-error-message
+   ::protocol-version protocol-version
+   ::agent-id (::agent-id sample)
+   ::request-id (::request-id sample)
+   ::error {:seon.error/message message :seon.error/kind kind}}))
+
+(defn- unavailable-drill-result
+  "Render an honest bounded miss without treating persisted text as live."
+  [projection request miss]
+  (let [root-request (assoc request
+                            :seon.render.value/path []
+                            :seon.render.value/offset 0)
+        rendered (render.value/drill-value projection miss root-request)]
+    (if (:seon.render.value/ok? rendered)
+      (-> rendered
+          (assoc :seon.render.value/availability :unavailable
+                 :seon.render.value/recompute? true)
+          (assoc-in [:seon.render.value/projection :seon.render.value/path]
+                    (:seon.render.value/path request))
+          (assoc-in [:seon.render.value/projection :seon.render.value/offset]
+                    (:seon.render.value/offset request)))
+      rendered)))
+
+(defn- sample-live-value!
+  "Sample one child-local eval slot and return only its bounded projection."
+  [state sample send-message!]
+  (let [request (select-keys sample
+                             [:seon.render.value/path
+                              :seon.render.value/offset
+                              :seon.render.value/effective-limits])
+        trusted (if-let [compile-state (::compile-state @state)]
+                  (eval/result-sampling-entry compile-state (::eval-id sample))
+                  {:seon.eval/found? false})]
+    (cond
+      (::active @state)
+      (send! send-message!
+             (sample-error-frame sample
+                                 "The execution child already has active work."))
+
+      (not= (get-in @state [::startup ::agent-id]) (::agent-id sample))
+      (send! send-message!
+             (sample-error-frame sample
+                                 "The value sample names another agent."))
+
+      (not (render.value/admitted-drill-request? request))
+      (send! send-message!
+             (sample-error-frame sample
+                                 "The value sample request is invalid or over budget."))
+
+      (not (:seon.eval/found? trusted))
+      (let [projection (schema/current-projection)
+            miss {:seon.eval/ok? false
+                  :seon.error/message
+                  (str "eval " (::eval-id sample)
+                       " isn't live — re-run the form to recompute it.")}
+            result (unavailable-drill-result projection request miss)
+            limits (:seon.render.value/effective-limits request)]
+        (send! send-message!
+               (if (render.value/bounded-drill-result? result limits)
+                 {::message value-sample-result-message
+                  ::protocol-version protocol-version
+                  ::agent-id (::agent-id sample)
+                  ::request-id (::request-id sample)
+                  :seon.render.value/result result}
+                 (sample-error-frame sample
+                                     "The value sample refusal is invalid."))))
+
+      (not (:seon.eval/metadata-valid? trusted))
+      (send! send-message!
+             (sample-error-frame
+              sample render.value/sampling-policy-unavailable-message
+              :seon.runtime/unavailable))
+
+      (not (render.value/effective-limits-within?
+            (:seon.render.value/effective-limits request)
+            (:seon.eval/sampling-limits trusted)))
+      (let [result (render.value/sampling-policy-refusal)
+            limits (:seon.render.value/effective-limits request)]
+        (send! send-message!
+               (if (render.value/bounded-drill-result? result limits)
+                 {::message value-sample-result-message
+                  ::protocol-version protocol-version
+                  ::agent-id (::agent-id sample)
+                  ::request-id (::request-id sample)
+                  :seon.render.value/result result}
+                 (sample-error-frame sample
+                                     "The value sample refusal is invalid."))))
+
+      :else
+      (let [token (js-obj)
+            projection (schema/current-projection)
+            live? (eval/result-live? (::eval-id sample))]
+        (swap! state assoc ::active {::token token ::sample sample})
+        (-> (eval/lookup-result (::eval-id sample))
+            (.then
+             (fn [value]
+               (let [result (if live?
+                              (render.value/drill-value projection value request)
+                              (unavailable-drill-result projection request value))
+                     limits (:seon.render.value/effective-limits request)]
+                 (settle-active!
+                  state token send-message!
+                  (if (render.value/bounded-drill-result? result limits)
+                    {::message value-sample-result-message
+                     ::protocol-version protocol-version
+                     ::agent-id (::agent-id sample)
+                     ::request-id (::request-id sample)
+                     :seon.render.value/result result}
+                    (sample-error-frame
+                     sample "The value sample result exceeded its bounds."))))))
+            (.catch
+             (fn [_]
+               (settle-active!
+                state token send-message!
+                (sample-error-frame sample
+                                    "The execution child could not sample the live value.")))))))))
+
 (defn- ensure-session! [state]
   (db/open-session! (get-in @state [::startup ::database-selection])))
 
@@ -1002,6 +1168,10 @@
   (when-let [invocation-id (get-in @state [::active ::invocation
                                             ::invocation-id])]
     (cancel-active! state invocation-id send-message!))
+  ;; A sample has no authored invocation id. Invalidate its token before
+  ;; closing so a late lookup continuation cannot write after `stopped`.
+  (when (get-in @state [::active ::sample])
+    (swap! state dissoc ::active))
   (db/close-session!)
   (when send-message!
     (send! send-message!
@@ -1031,6 +1201,9 @@
             ;; state after Promise settlement. Never reuse that process.
             (swap! state assoc ::poisoned? true)
             (exit! 1))
+
+          :seon.execution.message/value-sample
+          (sample-live-value! state message send-message!)
 
           :seon.execution.message/shutdown
           (shutdown! state send-message! exit!))))

@@ -1072,21 +1072,8 @@
 (def ^:private result-vars-cap
   "Max live `result/<id>` vars kept per session. Older ids are pruned
    (undef'd from globalThis + the analyzer) to bound memory. Override
-   with SEON_EVAL_RESULT_VARS_CAP."
-  (config/result-vars-cap))
-
-(def ^:private result-retained-node-cap
-  "Maximum distinct structural nodes inspected and retained by one
-   `result/<id>` value. This is a hard safety ceiling, not a display knob."
-  4096)
-
-(def ^:private result-retained-weight-cap
-  "Maximum shallow retention weight for one `result/<id>` value.
-
-   Strings and byte buffers charge their complete length in O(1); ordinary
-   nodes charge one unit. Two hundred maximally admitted slots therefore have
-   a finite upper envelope instead of a count-only bound."
-  (* 256 1024))
+   by the same portable policy as the JVM host."
+  value/retained-value-cap)
 
 (schema/register! ::retained? :boolean)
 (schema/register! ::retained-reason :keyword)
@@ -1097,27 +1084,6 @@
 (schema/register! ::retained-summary :string)
 (schema/register! ::retained-recovery :string)
 (schema/register! ::retained-value :any)
-
-(defn- retained-rejection
-  [reason nodes weight summary]
-  {::retained? false
-   ::retained-reason reason
-   ::retained-observed-nodes nodes
-   ::retained-observed-weight weight
-   ::retained-node-cap result-retained-node-cap
-   ::retained-weight-cap result-retained-weight-cap
-   ::retained-summary summary
-   ::retained-recovery
-   "Use a narrower seon.db/query, seon.db/pull, or seon.db/index-datoms request; persist intentional large text incrementally with my.blob/put!."})
-
-(defn- byte-length
-  "Return an ArrayBuffer/typed-array byte length without copying, else nil."
-  [x]
-  (cond
-    (instance? js/ArrayBuffer x) (.-byteLength x)
-    (and (exists? js/ArrayBuffer)
-         (.isView js/ArrayBuffer x)) (.-byteLength x)
-    :else nil))
 
 (defn admit-result-value
   "Return `v` unchanged when it is safe to retain as `result/<id>`.
@@ -1130,93 +1096,7 @@
    `v`; callers record and retain that descriptor instead of the raw value."
   {:malli/schema [:=> [:catn [::value :any]] :any]}
   [v]
-  (try
-    (let [seen (js/WeakSet.)]
-      (loop [work [v]
-             nodes 0
-             weight 0]
-        (if (empty? work)
-          v
-          (let [x (peek work)
-                work (pop work)
-                bytes (byte-length x)
-                reference? (or (coll? x) (object? x) (some? bytes))
-                seen? (and reference? (.has seen x))]
-            (if seen?
-              (recur work nodes weight)
-              (let [_ (when reference? (.add seen x))
-                    nodes' (inc nodes)
-                    weight' (+ weight
-                               (cond
-                                 (string? x) (count x)
-                                 (some? bytes) bytes
-                                 :else 1))]
-                (cond
-                  (> nodes' result-retained-node-cap)
-                  (retained-rejection
-                    ::node-cap-exceeded nodes' weight'
-                    "result was not retained because its structure exceeds the live-result node budget")
-
-                  (> weight' result-retained-weight-cap)
-                  (retained-rejection
-                    ::weight-cap-exceeded nodes' weight'
-                    "result was not retained because its shallow weight exceeds the live-result budget")
-
-                  (some? bytes)
-                  (recur work nodes' weight')
-
-                  (value/opaque? x)
-                  (retained-rejection
-                    ::opaque-value nodes' weight'
-                    "result was not retained because it contains an opaque runtime handle")
-
-                  (and (coll? x) (not (counted? x)))
-                  (retained-rejection
-                    ::unbounded-collection nodes' weight'
-                    "result was not retained because it contains a lazy or unbounded collection")
-
-                  (map? x)
-                  (let [metadata (meta x)
-                        child-count (+ (* 2 (count x))
-                                       (if (seq metadata) 1 0))]
-                    (if (> (+ nodes' (count work) child-count)
-                           result-retained-node-cap)
-                      (retained-rejection
-                        ::node-cap-exceeded
-                        (inc result-retained-node-cap)
-                        weight'
-                        "result was not retained because its structure exceeds the live-result node budget")
-                      (recur
-                        (cond->
-                          (reduce-kv (fn [stack k child]
-                                       (conj stack k child))
-                                     work x)
-                          (seq metadata) (conj metadata))
-                        nodes' weight')))
-
-                  (coll? x)
-                  (let [metadata (meta x)
-                        child-count (+ (count x) (if (seq metadata) 1 0))]
-                    (if (> (+ nodes' (count work) child-count)
-                           result-retained-node-cap)
-                      (retained-rejection
-                        ::node-cap-exceeded
-                        (inc result-retained-node-cap)
-                        weight'
-                        "result was not retained because its structure exceeds the live-result node budget")
-                      (recur (cond-> (reduce conj work x)
-                               (seq metadata) (conj metadata))
-                             nodes' weight')))
-
-                  :else
-                  (recur work nodes' weight'))))))))
-    (catch :default e
-      (retained-rejection
-        ::inspection-failed 0 0
-        (str "result was not retained because bounded structural inspection failed: "
-             (subs (or (some-> ^js e .-message) (str e))
-                   0 (min 160 (count (or (some-> ^js e .-message)
-                                         (str e))))))))))
+  (value/admit-retained-value v))
 
 (defn result-live?
   "True when the bounded runtime owns `result/<id>`."
@@ -1653,7 +1533,9 @@
 
    Failed evals never call this — there is no value to bind. Soft-fails
    (logs + ignores) so a bind hiccup never breaks the eval pipeline."
-  [compile-state id v]
+  ([compile-state id v]
+   (bind-admitted-result-var! compile-state id v nil nil))
+  ([compile-state id v sampling-limits database]
   (try
     (let [munged (cljs.core/munge id)
           robj (result-globalthis-obj)]
@@ -1673,9 +1555,16 @@
                              result-ns-sym)
                    (assoc-in [:cljs.analyzer/namespaces result-ns-sym :defs
                              (symbol id)]
-                             {:name (symbol (str result-ns-sym) id)
+                             (cond->
+                              {:name (symbol (str result-ns-sym) id)
                               :seon.eval/result-var? true
-                              :seon.eval/result-runtime-key munged}))))
+                              :seon.eval/result-runtime-key munged}
+                               sampling-limits
+                               (assoc :seon.eval/sampling-limits
+                                      sampling-limits)
+                               database
+                               (assoc :seon.eval/sampling-database
+                                      database))))))
       ;; 3. Prune oldest live runtime keys. The runtime object is already the
       ;;    value authority; deriving the bounded key set from it removes the
       ;;    former process-global mirror and its drift modes.
@@ -1690,7 +1579,38 @@
       ;; returns nil (a benign miss).
       (unbind-result-runtime-key! compile-state (cljs.core/munge id))
       (error/record! {:seon.error/raw e :seon.error/fault :core})))
-  nil)
+  nil))
+
+(defn result-sampling-entry
+  "Return analyzer-owned retained sampling metadata without reading its value."
+  {:malli/schema
+   [:=> [:cat :any :string]
+    [:or
+     [:map {:closed true} [:seon.eval/found? [:= false]]]
+     [:map {:closed true}
+      [:seon.eval/found? [:= true]]
+      [:seon.eval/metadata-valid? [:= false]]]
+     [:map {:closed true}
+      [:seon.eval/found? [:= true]]
+      [:seon.eval/metadata-valid? [:= true]]
+      [:seon.eval/sampling-limits :seon.render.value/effective-limits]
+      [:seon.eval/sampling-database :seon.db/db]]]]}
+  [compile-state id]
+  (let [definition (get-in @compile-state
+                           [:cljs.analyzer/namespaces result-ns-sym :defs
+                            (symbol (str id))])]
+    (if-not (:seon.eval/result-var? definition)
+      {:seon.eval/found? false}
+      (let [limits (:seon.eval/sampling-limits definition)
+            database (:seon.eval/sampling-database definition)]
+        (if (and (value/effective-limits-within? limits limits)
+                 (db.protocol/database-value? database))
+          {:seon.eval/found? true
+           :seon.eval/metadata-valid? true
+           :seon.eval/sampling-limits limits
+           :seon.eval/sampling-database database}
+          {:seon.eval/found? true
+           :seon.eval/metadata-valid? false})))))
 
 (defn bind-result-var!
   "Admit and store a successful eval value as `result/<id>`.
@@ -4645,7 +4565,11 @@
             (let [live-value (if pending?
                                pending-promise
                                (::retained-value recorded))]
-              (bind-admitted-result-var! compile-state eval-id live-value)
+              (bind-admitted-result-var!
+               compile-state eval-id live-value
+               (config/effective-value-drill-limits
+                {:seon.config/configuration configuration})
+               database)
               (when pending?
                 (-> pending-promise
                     (.then (fn [v]
@@ -4751,8 +4675,11 @@
       (when (and (not (database-error? recorded)) (::ok? result) committed!)
         (await (committed!)))
       (when (and (not (database-error? recorded)) (::ok? result))
-        (bind-admitted-result-var! compile-state (:seon.eval/id recorded)
-                                   (::retained-value recorded)))
+        (bind-admitted-result-var!
+         compile-state (:seon.eval/id recorded) (::retained-value recorded)
+         (config/effective-value-drill-limits
+          {:seon.config/configuration configuration})
+         database))
       (if (::ok? result) (vswap! n-ok inc) (vswap! n-fail inc)))
     recorded))
 
@@ -5013,6 +4940,7 @@
   [{::keys [compile-state authored-sources current-ns n-ok n-fail
             failed-defs outer-test-run? entry narration]
     configuration :seon.config/configuration
+    database ::db/db
     turn-id :seon.agent.turn/id-of-turn}]
   ;; A `#code` heredoc form carries `:seon.repl/eval-source` — the
   ;; machine-escaped, cljs-READABLE rewrite of the byte-faithful (but not
@@ -5053,8 +4981,11 @@
                           ::ending-ns   @current-ns
                           ::result      result}))]
         (when (and (not (database-error? recorded)) (::ok? result))
-          (bind-admitted-result-var! compile-state (:seon.eval/id recorded)
-                                     (::retained-value recorded)))
+          (bind-admitted-result-var!
+           compile-state (:seon.eval/id recorded) (::retained-value recorded)
+           (config/effective-value-drill-limits
+            {:seon.config/configuration configuration})
+           database))
         (if (::ok? result)
           (vswap! n-ok   inc)
           (vswap! n-fail inc))
@@ -5366,6 +5297,7 @@
                                 (await
                                   (dispatch-eval-entry!
                                     {::compile-state   compile-state
+                                     ::db/db           database
                                      :seon.config/configuration configuration
                                      ::authored-sources authored-sources
                                      :seon.agent.turn/id-of-turn turn-id
@@ -5410,6 +5342,7 @@
                     (await
                       (dispatch-eval-entry!
                         {::compile-state   compile-state
+                         ::db/db           database
                          :seon.config/configuration configuration
                          ::authored-sources authored-sources
                          :seon.agent.turn/id-of-turn turn-id

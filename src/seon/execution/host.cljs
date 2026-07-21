@@ -25,6 +25,7 @@
    [seon.db.transport.uds :as uds]
    [seon.execution :as execution]
    [seon.launch :as launch]
+   [seon.render.value :as render.value]
    [seon.schema :as schema]
    [seon.subprocess :as subprocess]))
 
@@ -45,6 +46,7 @@
 (schema/register! ::cancel-grace-ms [:int {:min 1}])
 (schema/register! ::spawn! 'fn?)
 (schema/register! ::run-fence-current? 'fn?)
+(schema/register! ::eval-id-order [:vector ::execution/eval-id])
 (schema/register! ::pid :int)
 (schema/register! ::ready? :boolean)
 (schema/register! ::retiring? :boolean)
@@ -125,6 +127,23 @@
                                :seon.error/data data}}
      (:seon.db/db invocation)
      (assoc :seon.db/db (:seon.db/db invocation)))))
+
+(defn- sample-host-error [sample message]
+  {::execution/message execution/value-sample-error-message
+   ::execution/protocol-version execution/protocol-version
+   ::execution/agent-id (::execution/agent-id sample)
+   ::execution/request-id (::execution/request-id sample)
+   ::execution/error {:seon.error/message message
+                      :seon.error/kind :core-bug}})
+
+(defn- sample-host-unavailable [sample message]
+  {::execution/message execution/value-sample-error-message
+   ::execution/protocol-version execution/protocol-version
+   ::execution/agent-id (::execution/agent-id sample)
+   ::execution/request-id (::execution/request-id sample)
+   ::execution/error {:seon.error/message message
+                      :seon.error/kind :seon.runtime/unavailable
+                      :seon.error/data {::execution/child-retired? true}}})
 
 (defn- canceled-error
   ([invocation] (canceled-error invocation nil))
@@ -218,6 +237,18 @@
     (and (= generation (::generation current))
          (= child-id (::child-id current)))))
 
+(defn- mark-retiring! [lane agent-id generation child-id]
+  (let [marked? (atom false)]
+    (swap! !host
+           (fn [host]
+             (let [current (get-in host [lane agent-id])]
+               (if (and (= generation (::generation current))
+                        (= child-id (::child-id current)))
+                 (do (reset! marked? true)
+                     (assoc-in host [lane agent-id ::retiring?] true))
+                 host))))
+    @marked?))
+
 (declare cancel! stop-child! settle-active!)
 
 (defn- remove-child!
@@ -237,6 +268,8 @@
       (when-let [timer (::ready-timer current)] (js/clearTimeout timer))
       (when-let [timer (::idle-timer current)] (js/clearTimeout timer))
       (when-let [timer (::kill-timer current)] (js/clearTimeout timer))
+      (when-let [timer (get-in current [::active ::timer])]
+        (js/clearTimeout timer))
       (when-not (::ready? current)
         ((get-in current [::ready ::resolve!])
          (host-error
@@ -246,13 +279,16 @@
                  ::execution/child-retired? true))))
       (when active
         ((::resolve! active)
-         (host-error
-          (::invocation active)
-          "The execution child exited before returning a result."
-          (assoc (exit-evidence current result)
-                 ::execution/child-retired? true
-                 :seon.db/db
-                 (get-in active [::invocation :seon.db/db])))))
+         (if-let [invocation (::invocation active)]
+           (host-error
+            invocation
+            "The execution child exited before returning a result."
+            (assoc (exit-evidence current result)
+                   ::execution/child-retired? true
+                   :seon.db/db (:seon.db/db invocation)))
+           (sample-host-unavailable
+            (::sample active)
+            "The execution value owner retired before returning a sample."))))
       (remove-child! lane agent-id generation child-id)
       ((::resolve! exit) (::subprocess/exit result)))))
 
@@ -274,26 +310,81 @@
                  timeout-ms)]
       (swap! !host assoc-in [lane agent-id ::idle-timer] timer))))
 
+(defn- append-owned-eval-ids [order ids]
+  (let [next-order (reduce (fn [current id]
+                             (conj (vec (remove #{id} current)) id))
+                           (or order []) ids)
+        over (max 0 (- (count next-order)
+                       render.value/retained-value-cap))]
+    (subvec next-order over)))
+
+(defn- sample-message-current? [sample message]
+  (let [result? (= execution/value-sample-result-message
+                   (::execution/message message))
+        required (if result?
+                   [::execution/message ::execution/protocol-version
+                    ::execution/agent-id ::execution/request-id
+                    :seon.render.value/result]
+                   [::execution/message ::execution/protocol-version
+                    ::execution/agent-id ::execution/request-id
+                    ::execution/error])]
+   (and (= 5 (count message))
+       (every? #(contains? message %) required)
+       (= (::execution/agent-id sample)
+          (::execution/agent-id message))
+       (= (::execution/request-id sample)
+          (::execution/request-id message))
+       (contains? #{execution/value-sample-result-message
+                    execution/value-sample-error-message}
+                  (::execution/message message))
+       (or (not result?)
+           (let [result (:seon.render.value/result message)
+                 projection (:seon.render.value/projection result)
+                 limits (:seon.render.value/effective-limits sample)]
+             (and (render.value/bounded-drill-result? result limits)
+                  (or (false? (:seon.render.value/ok? result))
+                      (and (= (:seon.render.value/path sample)
+                              (:seon.render.value/path projection))
+                           (= (:seon.render.value/offset sample)
+                              (:seon.render.value/offset projection))
+                           (= (:seon.render.value/page-size limits)
+                              (:seon.render.value/page-size projection)))))))
+       (execution/valid-child-message? message))))
+
 (defn- settle-active!
   [lane agent-id generation child-id message]
   (let [accepted (atom nil)]
     (swap! !host
            (fn [host]
              (let [current (get-in host [lane agent-id])
-                   active (::active current)]
+                   active (::active current)
+                   invocation (::invocation active)
+                   sample (::sample active)
+                   expected (if invocation
+                              (::execution/invocation-id invocation)
+                              (::execution/request-id sample))
+                   actual (if invocation
+                            (::execution/invocation-id message)
+                            (::execution/request-id message))]
                (if (and (= generation (::generation current))
                         (= child-id (::child-id current))
-                        (= (::execution/invocation-id message)
-                           (get-in active
-                                   [::invocation
-                                    ::execution/invocation-id])))
+                        (= expected actual)
+                        (or invocation (sample-message-current? sample message)))
                  (do
                    (reset! accepted
                            {::active active
                             ::retiring? (::retiring? current)})
-                   (update-in host [lane agent-id] dissoc ::active))
+                   (cond-> (update-in host [lane agent-id] dissoc ::active)
+                     (and invocation
+                          (= execution/result-message
+                             (::execution/message message)))
+                     (update-in [lane agent-id ::eval-id-order]
+                                append-owned-eval-ids
+                                (get-in message [::execution/result
+                                                 :seon.eval/ids] []))))
                  host))))
     (when-let [{::keys [active retiring?]} @accepted]
+      (when-let [timer (::timer active)] (js/clearTimeout timer))
       ((::resolve! active) message)
       (when-not retiring?
         (schedule-idle-stop! lane agent-id generation child-id))
@@ -358,7 +449,32 @@
                  (host-error (::invocation active)
                              "The execution result is no longer current.")))))
 
-          nil))
+          (:seon.execution.message/value-sample-result
+           :seon.execution.message/value-sample-error)
+          (when-let [active (::active current)]
+            (when-let [sample (::sample active)]
+              (when (= (::execution/request-id sample)
+                       (::execution/request-id message))
+                (if (sample-message-current? sample message)
+                  (settle-active! lane agent-id generation child-id message)
+                  (do
+                    (mark-retiring! lane agent-id generation child-id)
+                    (settle-active!
+                     lane agent-id generation child-id
+                     (sample-host-error
+                      sample "The value owner returned an invalid sample frame."))
+                    (kill-process! (::control current)))))))
+
+          (when-let [active (::active current)]
+            (when-let [sample (::sample active)]
+              (when (= (::execution/request-id sample)
+                       (::execution/request-id message))
+                (settle-active!
+                 lane agent-id generation child-id
+                 (do (mark-retiring! lane agent-id generation child-id)
+                     (sample-host-error
+                      sample "The value owner returned an unknown sample frame.")))
+                (kill-process! (::control current)))))))
       (catch :default _
         (when-let [control (::control (entry lane agent-id))]
           (kill-process! control))))))
@@ -535,9 +651,14 @@
        (host-error {::execution/invocation-id "startup"}
                    "The execution host configuration changed.")))
     (when-let [active (::active current)]
+      (when-let [timer (::timer active)] (js/clearTimeout timer))
       ((::resolve! active)
-       (host-error (::invocation active)
-                   "The execution host configuration changed.")))
+       (if-let [invocation (::invocation active)]
+         (host-error invocation
+                     "The execution host configuration changed.")
+         (sample-host-unavailable
+          (::sample active)
+          "The retained value owner was replaced by a new configuration."))))
     (when
      (send-message!
       control
@@ -760,6 +881,148 @@
                                      :seon.error/message])})
                (invoke-in-lane! (if coordinate host-lane child-lane)
                                 coordinate invocation))))))))
+
+(defn- unavailable-sample [request message]
+  (let [root-request (assoc request
+                            :seon.render.value/path []
+                            :seon.render.value/offset 0)
+        rendered (render.value/drill-value
+                  (schema/current-projection)
+                  {:seon.eval/ok? false :seon.error/message message}
+                  root-request)]
+    (if (:seon.render.value/ok? rendered)
+      (-> rendered
+          (assoc :seon.render.value/availability :unavailable
+                 :seon.render.value/recompute? true)
+          (assoc-in [:seon.render.value/projection :seon.render.value/path]
+                    (:seon.render.value/path request))
+          (assoc-in [:seon.render.value/projection :seon.render.value/offset]
+                    (:seon.render.value/offset request)))
+      rendered)))
+
+(defn- sample-owner [agent-id eval-id]
+  (let [owners (keep (fn [lane]
+                       (let [current (entry lane agent-id)]
+                         (when (and current
+                                    (some #{eval-id} (::eval-id-order current)))
+                           [lane current])))
+                     [child-lane host-lane])]
+    (when (= 1 (count owners)) (first owners))))
+
+(defn- sample-once! [agent-id eval-id request]
+  (if-let [[lane owner] (sample-owner agent-id eval-id)]
+    (let [completion (deferred)
+          request-id (str (random-uuid))
+          sample (merge {::execution/message execution/value-sample-message
+                         ::execution/protocol-version execution/protocol-version
+                         ::execution/agent-id agent-id
+                         ::execution/request-id request-id
+                         ::execution/eval-id eval-id}
+                        request)
+          claimed (atom nil)
+          timer (js/setTimeout
+                 (fn []
+                   (mark-retiring! lane agent-id
+                                   (::generation owner) (::child-id owner))
+                   (when (settle-active!
+                          lane agent-id (::generation owner) (::child-id owner)
+                          (sample-host-unavailable
+                           sample "The retained value sample timed out."))
+                     (when (same-child? lane agent-id
+                                        (::generation owner) (::child-id owner))
+                       (kill-process! (::control (entry lane agent-id))))))
+                 (get-in (host-configuration) [::ready-timeout-ms]))]
+      (swap! !host
+             (fn [host]
+               (let [current (get-in host [lane agent-id])]
+                 (if (and (= (::generation owner) (::generation current))
+                          (= (::child-id owner) (::child-id current))
+                          (::ready? current)
+                          (not (::retiring? current))
+                          (nil? (::active current)))
+                   (do (reset! claimed current)
+                       (assoc-in host [lane agent-id ::active]
+                                 {::sample sample
+                                  ::artifact-digest (::artifact-digest current)
+                                  ::started-at (js/Date.)
+                                  ::timer timer
+                                  ::resolve! (::resolve! completion)}))
+                   host))))
+      (if-let [current @claimed]
+        (do
+          (when-let [send-error (send-message! (::control current) sample)]
+            (mark-retiring! lane agent-id
+                            (::generation current) (::child-id current))
+            (settle-active!
+             lane agent-id (::generation current) (::child-id current)
+             (sample-host-unavailable
+              sample (or (:seon.error/message send-error)
+                         "The value sample could not be sent.")))
+            (kill-process! (::control current)))
+          (::promise completion))
+        (do
+          (js/clearTimeout timer)
+          (js/Promise.resolve
+           (sample-host-unavailable
+            sample "The retained value owner is no longer current.")))))
+    (js/Promise.resolve nil)))
+
+(defn sample-value!
+  "Sample one eval only in the retained runtime that produced it."
+  {:malli/schema [:=> [:catn [::execution/agent-id ::execution/agent-id]
+                             [::execution/eval-id ::execution/eval-id]
+                             [::request :seon.render.value/drill-request]]
+                  :any]}
+  [agent-id eval-id request]
+  (if-not (render.value/admitted-drill-request? request)
+    (js/Promise.resolve
+     {:seon.render.value/ok? false
+      :seon/error {:seon.error/message
+                   "Invalid or over-budget value drill request."
+                   :seon.error/kind :agent}})
+    (let [queued (atom nil)]
+      (swap! !invocation-tails
+             (fn [tails]
+               (let [prior (get tails agent-id)
+                     work (if prior
+                            (.then prior (fn [_]
+                                           (sample-once! agent-id eval-id request)))
+                            (sample-once! agent-id eval-id request))]
+                 (reset! queued work)
+                 (assoc tails agent-id work))))
+      (let [work @queued]
+        (-> work
+            (.then
+             (fn [frame]
+               (cond
+                 (nil? frame)
+                 (unavailable-sample
+                  request "The eval value owner is missing, retired, or evicted.")
+
+                 (= execution/value-sample-result-message
+                    (::execution/message frame))
+                 (:seon.render.value/result frame)
+
+                 (= :seon.runtime/unavailable
+                    (get-in frame [::execution/error :seon.error/kind]))
+                 (unavailable-sample
+                  request (get-in frame [::execution/error :seon.error/message]
+                                  "The retained value owner is unavailable."))
+
+                 :else
+                 {:seon.render.value/ok? false
+                  :seon/error
+                  {:seon.error/message
+                   (get-in frame [::execution/error :seon.error/message]
+                           "The retained runtime could not sample the value.")
+                   :seon.error/kind :core-bug}})))
+            (.finally
+             (fn []
+               (swap! !invocation-tails
+                      (fn [tails]
+                        (if (identical? work (get tails agent-id))
+                          (dissoc tails agent-id)
+                          tails))))))))))
 
 (defn invoke!
   "Queue one invocation in its agent's child; agents remain parallel."

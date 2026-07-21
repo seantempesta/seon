@@ -317,6 +317,119 @@
            :cljs (object? x))
         (fn? x))))
 
+(def retained-value-cap
+  "Maximum live eval-value slots retained by either serving runtime."
+  200)
+
+(def ^:private retained-node-cap 4096)
+(def ^:private retained-weight-cap (* 256 1024))
+
+(defn- retained-rejection [reason nodes weight summary]
+  {:seon.eval/retained? false
+   :seon.eval/retained-reason reason
+   :seon.eval/retained-observed-nodes nodes
+   :seon.eval/retained-observed-weight weight
+   :seon.eval/retained-node-cap retained-node-cap
+   :seon.eval/retained-weight-cap retained-weight-cap
+   :seon.eval/retained-summary summary
+   :seon.eval/retained-recovery
+   "Use a narrower seon.db/query, seon.db/pull, or seon.db/index-datoms request; persist intentional large text incrementally with my.blob/put!."})
+
+(defn- retained-byte-length [x]
+  #?(:cljs
+     (cond
+       (instance? js/ArrayBuffer x) (.-byteLength x)
+       (and (exists? js/ArrayBuffer) (.isView js/ArrayBuffer x))
+       (.-byteLength x)
+       :else nil)
+     :clj
+     (cond
+       (= (class x) (class (byte-array 0))) (alength ^bytes x)
+       (instance? java.nio.ByteBuffer x)
+       (.remaining ^java.nio.ByteBuffer x)
+       :else nil)))
+
+(defn admit-retained-value
+  "Return `v` unchanged only when bounded structural retention admits it."
+  {:malli/schema [:=> [:catn [::value ::value]] ::value]}
+  [v]
+  (try
+    (let [seen #?(:cljs (js/WeakSet.) :clj (java.util.IdentityHashMap.))
+          seen? #?(:cljs (fn [x] (.has seen x))
+                   :clj (fn [x] (.containsKey seen x)))
+          mark! #?(:cljs (fn [x] (.add seen x))
+                   :clj (fn [x] (.put seen x true)))]
+      (loop [work [v] nodes 0 weight 0]
+        (if (empty? work)
+          v
+          (let [x (peek work)
+                work (pop work)
+                bytes (retained-byte-length x)
+                reference? (or (coll? x) (some? bytes)
+                               #?(:cljs (object? x) :clj false))]
+            (if (and reference? (seen? x))
+              (recur work nodes weight)
+              (let [_ (when reference? (mark! x))
+                    nodes' (inc nodes)
+                    weight' (+ weight (cond (string? x) (count x)
+                                            (some? bytes) bytes
+                                            :else 1))]
+                (cond
+                  (> nodes' retained-node-cap)
+                  (retained-rejection
+                   :seon.eval/node-cap-exceeded nodes' weight'
+                   "result was not retained because its structure exceeds the live-result node budget")
+
+                  (> weight' retained-weight-cap)
+                  (retained-rejection
+                   :seon.eval/weight-cap-exceeded nodes' weight'
+                   "result was not retained because its shallow weight exceeds the live-result budget")
+
+                  (some? bytes) (recur work nodes' weight')
+
+                  (opaque? x)
+                  (retained-rejection
+                   :seon.eval/opaque-value nodes' weight'
+                   "result was not retained because it contains an opaque runtime handle")
+
+                  (and (coll? x) (not (counted? x)))
+                  (retained-rejection
+                   :seon.eval/unbounded-collection nodes' weight'
+                   "result was not retained because it contains a lazy or unbounded collection")
+
+                  (map? x)
+                  (let [metadata (meta x)
+                        child-count (+ (* 2 (count x)) (if (seq metadata) 1 0))]
+                    (if (> (+ nodes' (count work) child-count) retained-node-cap)
+                      (retained-rejection
+                       :seon.eval/node-cap-exceeded (inc retained-node-cap) weight'
+                       "result was not retained because its structure exceeds the live-result node budget")
+                      (recur (cond-> (reduce-kv (fn [stack k child]
+                                                 (conj stack k child))
+                                               work x)
+                               (seq metadata) (conj metadata))
+                             nodes' weight')))
+
+                  (coll? x)
+                  (let [metadata (meta x)
+                        child-count (+ (count x) (if (seq metadata) 1 0))]
+                    (if (> (+ nodes' (count work) child-count) retained-node-cap)
+                      (retained-rejection
+                       :seon.eval/node-cap-exceeded (inc retained-node-cap) weight'
+                       "result was not retained because its structure exceeds the live-result node budget")
+                      (recur (cond-> (reduce conj work x)
+                               (seq metadata) (conj metadata))
+                             nodes' weight')))
+
+                  :else (recur work nodes' weight'))))))))
+    (catch #?(:clj Throwable :cljs :default) e
+      (let [message #?(:clj (or (.getMessage ^Throwable e) (str e))
+                       :cljs (or (some-> e .-message) (str e)))]
+        (retained-rejection
+         :seon.eval/inspection-failed 0 0
+         (str "result was not retained because bounded structural inspection failed: "
+              (subs message 0 (min 160 (count message)))))))))
+
 (defn- opaque-marker
   "Reader-safe marker for one non-plain node. Never throws."
   [x project-child]
@@ -1104,7 +1217,9 @@
                       ::page-size)
                 limits))))
 
-(defn- admitted-drill-request?
+(defn admitted-drill-request?
+  "True when a decoded drill request is closed and within every work cap."
+  {:malli/schema [:=> [:catn [::request ::value]] :boolean]}
   [request]
   (and (exact-map-keys? request #{::path ::offset ::effective-limits})
        (let [{::keys [path offset effective-limits]} request]
@@ -1136,6 +1251,28 @@
                     total (+ offset page-size)]
                 (and (safe-nonnegative-int? total)
                      (<= total realized-max)))))))
+
+(defn effective-limits-within?
+  "True when requested limits equal or narrow one trusted maximum policy."
+  {:malli/schema [:=> [:catn [::requested ::value]
+                             [::trusted ::value]] :boolean]}
+  [requested trusted]
+  (let [limit-keys
+        [:seon.config.render/value-max-path-segments
+         :seon.config.render/value-max-path-bytes
+         :seon.config.render/value-max-realized-items
+         :seon.config.render/value-max-depth
+         :seon.config.render/value-max-string
+         :seon.config.render/value-shape-sample
+         ::page-size]]
+    (and (map? requested) (map? trusted)
+         (= (count limit-keys) (count requested) (count trusted))
+         (every? #(and (contains? requested %)
+                       (contains? trusted %)
+                       (safe-positive-int? (get requested %))
+                       (safe-positive-int? (get trusted %))
+                       (<= (get requested %) (get trusted %)))
+                 limit-keys))))
 
 (defn- descend-one
   [value segment]
@@ -1512,6 +1649,20 @@
 
            :else false))
     (catch #?(:clj Throwable :cljs :default) _ false)))
+
+(def sampling-policy-refusal-message
+  "The value sample exceeds its retained eval policy.")
+
+(defn sampling-policy-refusal
+  "Return the shared bounded refusal for an attempted policy widening."
+  {:malli/schema [:=> [:cat] ::drill-result]}
+  []
+  {::ok? false
+   :seon/error {:seon.error/message sampling-policy-refusal-message
+                :seon.error/kind :agent}})
+
+(def sampling-policy-unavailable-message
+  "The retained eval sampling policy is unavailable.")
 
 (defn drill-value
   "Project one admitted path and bounded page from a live value."
