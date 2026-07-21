@@ -224,6 +224,17 @@ ruled 32/4,096/1,024 defaults. Transport waits for one explicit public drill
 request/result/error schema and one effective-limit normalizer contract; route
 and child may not infer different envelopes from prose.
 
+That public boundary is frozen by
+[[research/value-drill-public-schema-ruling-2026-07-20]] (`ec86accb`): closed
+producer-neutral request, effective limits, drilled projection, schema status
+and explanation, unavailable/error result union, strict path grammar, and one
+`seon.config` normalizer shared byte-for-byte by parent and child. The map-tail
+contradiction is ruled conservatively: arbitrary map omission is honest but
+non-pageable (`offset` remains zero) unless the producer already supplies an
+ordered/indexed representation. Sequence and set paging retain the
+`offset + page-size + 1` work bound. This preserves insertion-equivalent byte
+identity and bounded work; no downstream transport or UI may relax either.
+
 Only after those contracts freeze does
 [[research/execution-child-value-sampling-boundary-2026-07-20]] (`a568deef`)
 extend the existing execution protocol with closed, correlated ordinary-data
