@@ -124,6 +124,109 @@
     (is (m/validate :seon.agent.message/message-request
                     (dissoc (request nil) :seon.agent.message/from)))))
 
+(deftest message-request-refuses-mis-keyed-and-mis-shaped-recipients
+  ;; Regression for messages p7413gax9q6j / uiga4705cvb6 (2026-07-20):
+  ;; an OPEN request map silently dropped a mis-keyed recipient, so the
+  ;; message committed to the default user and the addressed agent never
+  ;; woke. The closed request map turns every such call into a loud
+  ;; boundary error instead of a silent reroute.
+  (let [valid {:seon.agent.message/content "hello"
+               :seon.agent.message/to [[:seon.agent/id "peer"]]}]
+    (is (m/validate :seon.agent.message/message-request valid))
+    (is (not (m/validate :seon.agent.message/message-request
+                         (-> valid
+                             (dissoc :seon.agent.message/to)
+                             (assoc :to [[:seon.agent/id "peer"]]))))
+        "a bare/typo'd recipient key is refused, never defaulted")
+    (is (not (m/validate :seon.agent.message/message-request
+                         (assoc valid :seon.agent.message/to "peer")))
+        "a bare id string is not a participant ref (string = tempid)")
+    (is (not (m/validate :seon.agent.message/message-request
+                         (assoc valid :seon.agent.message/to ["peer"])))
+        "a vector of id strings is refused for the same reason")
+    (is (not (m/validate :seon.agent.message/message-request
+                         (assoc valid :seon.agent.message/from "sender")))
+        "the sender obeys the same participant-ref shape")))
+
+(deftest recipient-reaches-the-writer-as-a-verbatim-lookup-ref
+  ;; Retract-and-remint regression: acquisition resolves participants at
+  ;; the acquired basis ONLY to validate them; the transaction itself
+  ;; must carry the identity lookup ref verbatim so the sole writer
+  ;; resolves the recipient at COMMIT basis. If the id's entity was
+  ;; retracted and re-minted after acquisition, delivery follows the id
+  ;; to the CURRENT entity; a genuinely dangling ref fails the
+  ;; transaction as a loud error value instead of committing a dangling
+  ;; ref. The stale eid (111) returned by acquisition must never be
+  ;; substituted into the stored row.
+  (async done
+    (let [available? admission/available?
+          db! db/db
+          execute-many db/execute-many
+          query db/query
+          allocate! db.id/allocate!
+          built (atom nil)]
+      (set! admission/available? (constantly true))
+      (set! db/db
+            (fn
+              ([] (js/Promise.resolve database))
+              ([_request]
+               (js/Promise.reject
+                (js/Error. "unexpected named database read")))))
+      (set! db/execute-many
+            (fn [_request]
+              (js/Promise.resolve
+               {::db/results
+                [(protocol/success
+                  {::protocol/result
+                   [{:db/id 10 :seon.agent/id "sender"}
+                    {:db/id 111 :seon.agent/id "peer"}]})
+                 (protocol/success
+                  {:datahike.query/result (js/Date. 1000)})]})))
+      (set! db/query
+            (fn
+              ([_request] (js/Promise.resolve 0))
+              ([_query-form & _inputs]
+               (js/Promise.reject
+                (js/Error. "unexpected positional query")))))
+      (set! db.id/allocate!
+            (fn [request]
+              (let [transaction
+                    ((::db.id/transaction-builder request)
+                     {:seon.agent.message/id "message-id"})]
+                (reset! built transaction)
+                (js/Promise.resolve
+                 {:db-before database
+                  :db-after (assoc database :t 43)
+                  :tx-data (:seon.db/tx-data transaction)
+                  :tempids {}
+                  ::db.id/ids {:seon.agent.message/id "message-id"}}))))
+      (finish!
+       (-> (message/message!
+            {:seon.agent.message/from [:seon.agent/id "sender"]
+             :seon.agent.message/to [:seon.agent/id "peer"]
+             :seon.agent.message/content "hello"})
+           (.then
+            (fn [result]
+              (is (= "message-id" (:seon.agent.message/id result)))
+              (let [[message-row] (:seon.db/tx-data @built)]
+                (is (= [[:seon.agent/id "peer"]]
+                       (:seon.agent.message/to message-row))
+                    "the stored to is the identity lookup ref, verbatim")
+                (is (= [:seon.agent/id "sender"]
+                       (:seon.agent.message/from message-row))
+                    "the stored from is the identity lookup ref, verbatim")
+                (is (not-any? #(= 111 %)
+                              (tree-seq coll? seq (:seon.db/tx-data @built)))
+                    "the acquisition-basis eid never enters the transaction"))))
+           (.finally
+            (fn []
+              (set! admission/available? available?)
+              (set! db/db db!)
+              (set! db/execute-many execute-many)
+              (set! db/query query)
+              (set! db.id/allocate! allocate!))))
+       done))))
+
 (deftest send-data-is-acquired-on-one-database-value
   (async done
     (let [execute-many db/execute-many

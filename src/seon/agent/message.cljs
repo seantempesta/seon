@@ -200,18 +200,32 @@
 ;; message!-boundary liberty, never a storage shape.
 ;; ============================================================
 
+;; A message participant is an EXISTING entity: a positive eid or an
+;; identity lookup ref. Deliberately narrower than :seon.db/ref — a
+;; string is a Datahike string TEMPID there, which can never name a
+;; message sender or recipient, so `to "some-agent-id"` fails here at
+;; the boundary instead of surfacing a raw writer protocol error.
+(schema/register! ::participant-ref
+  [:or [:int {:min 1}] [:tuple :keyword :seon.db/lookup-ref-value]])
+
+;; CLOSED on purpose: a mis-keyed request (bare :to, a typo'd key)
+;; must fail loudly at the instrumented boundary. An open map silently
+;; dropped the intended recipient and fell through to the default user
+;; recipient — messages p7413gax9q6j/uiga4705cvb6 (2026-07-20) committed
+;; to the user while the caller addressed an agent, and the agent never
+;; woke. See docs/seon/issues/message-resolves-recipient-at-stale-basis.md.
 (schema/register! ::message-request
-  [:map
+  [:map {:closed true}
    [::db/db {:optional true} :seon.db/db]
    [:seon.agent.message/content :seon.agent.message/content]
    ;; from defaults to the calling agent's ref via the ALS scope
    ;; ((seon.db/current-agent-id)); the HTTP adapter passes the user
    ;; ref explicitly.
-   [:seon.agent.message/from {:optional true} :seon.agent.message/from]
-   ;; to accepts ONE ref or a vector of refs (fan-out); defaults to
-   ;; THE user. Storage is always the normalized vector.
+   [:seon.agent.message/from {:optional true} ::participant-ref]
+   ;; to accepts ONE ref or a vector of refs (fan-out); ABSENT defaults
+   ;; to THE user. Storage is always the normalized vector.
    [:seon.agent.message/to {:optional true}
-    [:or :seon.db/ref [:vector :seon.db/ref]]]
+    [:or ::participant-ref [:vector ::participant-ref]]]
    ;; Provenance override. Absent ⇒ DERIVED from `from` (user ⇒ :human,
    ;; else :agent). A substrate-originated nudge (canvas recovery) passes
    ;; :core explicitly so it can't wake an idle agent. The HTTP/user
@@ -393,7 +407,16 @@
      :seon.agent.message/from — defaults to [:seon.agent/id (current-agent-id)]
                           from the ALS turn scope. No scope + no explicit
                           from → direct error value.
-     :seon.agent.message/to   — single ref or vector; defaults to the user.
+     :seon.agent.message/to   — single ref or vector; ABSENT defaults to the
+                          user. The request map is CLOSED and each ref must
+                          be a positive eid or identity lookup ref, so a
+                          mis-keyed or mis-shaped recipient fails loudly
+                          instead of silently rerouting to the user.
+
+   Recipients reach the writer as identity lookup refs inside the
+   transaction itself; the sole writer resolves them at commit, so a
+   recipient is always the entity carrying that id at the message's own
+   basis — never a client-side cached eid.
      hops               — 0 when from = the user; otherwise this
                           {me,recipient}-pair's prior depth + 1 (per-peer
                           ping-pong guard, reset at each human message —
