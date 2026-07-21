@@ -101,6 +101,198 @@
         (schema/restore-state! before)
         (schema/relink-registry!)))))
 
+(deftest shape-matching-reads-only-the-activated-projection
+  (let [before (schema/snapshot-state)
+        attr :schematest.shape/value
+        shape :schematest.shape/string-map
+        string-forms {attr :string
+                      shape [:map [attr attr]]}]
+    (try
+      (let [active (schema/build-projection string-forms)]
+        (schema/activate-projection! active)
+        (schema/register! attr :int)
+        (testing "unactivated candidate declarations cannot change matching"
+          (is (= [shape]
+                 (mapv :seon.schema/key
+                       (schema/matching-shapes {attr "active"}))))
+          (is (empty? (schema/matching-shapes {attr 1}))))
+        (schema/restore! string-forms)
+        (testing "candidate restoration also leaves the active generation alone"
+          (is (= [shape]
+                 (mapv :seon.schema/key
+                       (schema/matching-shapes {attr "still-active"}))))))
+      (finally
+        (schema/restore-state! before)
+        (schema/relink-registry!)))))
+
+(deftest equal-fingerprint-projection-replacement-rotates-validator-generation
+  (let [before (schema/snapshot-state)
+        attr :schematest.rotation/value
+        shape :schematest.rotation/map
+        forms {attr :string shape [:map [attr attr]]}
+        first-projection (schema/build-projection forms)
+        second-projection (schema/build-projection forms)
+        compiled-against (atom [])]
+    (try
+      (is (= (:seon.schema.projection/fingerprint first-projection)
+             (:seon.schema.projection/fingerprint second-projection)))
+      (is (not (identical? first-projection second-projection)))
+      (with-redefs [schema/projection-validator
+                    (fn [projection _schema-key]
+                      (swap! compiled-against conj projection)
+                      (constantly true))]
+        (schema/activate-projection! first-projection)
+        (schema/matching-shapes {attr "one"})
+        (schema/activate-projection! second-projection)
+        (schema/matching-shapes {attr "two"}))
+      (is (= 2 (count @compiled-against)))
+      (is (identical? first-projection (first @compiled-against)))
+      (is (identical? second-projection (second @compiled-against)))
+      (finally
+        (schema/restore-state! before)
+        (schema/relink-registry!)))))
+
+(deftest shape-explanation-shares-the-activated-generation
+  (let [before (schema/snapshot-state)
+        attr :schematest.explanation/value
+        shape :schematest.explanation/map
+        forms {attr :string shape [:map [attr attr]]}
+        first-projection (schema/build-projection forms)
+        second-projection (schema/build-projection forms)
+        compiled-against (atom [])]
+    (try
+      (schema/activate-projection! first-projection)
+      (is (nil? (schema/explain-shape shape {attr "valid"})))
+      (is (map? (schema/explain-shape shape {attr 1})))
+      (schema/register! attr :int)
+      (testing "candidate mutation cannot change active explanation"
+        (is (nil? (schema/explain-shape shape {attr "still-valid"})))
+        (is (map? (schema/explain-shape shape {attr 2}))))
+      (with-redefs [schema/projection-explainer
+                    (fn [projection _schema-key]
+                      (swap! compiled-against conj projection)
+                      (constantly {:errors [:instrumented]}))]
+        (schema/activate-projection! second-projection)
+        (is (= {:errors [:instrumented]}
+               (schema/explain-shape shape {attr 3}))))
+      (is (= 1 (count @compiled-against)))
+      (is (identical? second-projection (first @compiled-against)))
+      (testing "a non-shape key is a caller defect, not candidate fallback"
+        (let [error (try
+                      (schema/explain-shape attr "value")
+                      nil
+                      (catch :default error error))]
+          (is (= :seon.schema/unknown-shape
+                 (:seon.schema/error (ex-data error))))
+          (is (= :core-bug (:seon.error/kind (ex-data error))))))
+      (finally
+        (schema/restore-state! before)
+        (schema/relink-registry!)))))
+
+(deftest shape-candidates-and-matches-have-distinct-honest-contracts
+  (let [before (schema/snapshot-state)
+        a :schematest.ambiguity/a
+        b :schematest.ambiguity/b
+        alpha :schematest.ambiguity/alpha
+        beta :schematest.ambiguity/beta
+        specific :schematest.ambiguity/specific
+        forms {a :string
+               b :int
+               alpha [:map [a a]]
+               beta [:map [a a]]
+               specific [:map [a a] [b b]]}]
+    (try
+      (schema/activate-projection! (schema/build-projection forms))
+      (testing "all valid open-map matches survive in specificity order"
+        (is (= [specific alpha beta]
+               (mapv :seon.schema/key
+                     (schema/matching-shapes
+                       {a "ok" b 7 :schematest.ambiguity/extra true})))))
+      (testing "wrong types remain structural candidates, never matches"
+        (is (= [specific alpha beta]
+               (mapv :seon.schema/key
+                     (schema/candidate-shapes {a 42 b "wrong"}))))
+        (is (empty? (schema/matching-shapes {a 42 b "wrong"}))))
+      (testing "a missing required key remains diagnostic only"
+        (is (= [specific alpha beta]
+               (mapv :seon.schema/key
+                     (schema/candidate-shapes {a "partial"}))))
+        (is (= [alpha beta]
+               (mapv :seon.schema/key
+                     (schema/matching-shapes {a "partial"})))))
+      (testing "no indexed-key overlap is the ordinary empty state"
+        (is (= [] (schema/candidate-shapes
+                    {:schematest.ambiguity/unrelated true})))
+        (is (= [] (schema/matching-shapes
+                    {:schematest.ambiguity/unrelated true}))))
+      (testing "structural rows cannot claim validity or explanation"
+        (let [row (first (schema/candidate-shapes
+                           {a "partial"
+                            :seon.render.value/elided true}))]
+          (is (not (contains? row :seon.schema/valid?)))
+          (is (not (contains? row :seon.schema/explanation)))))
+      (finally
+        (schema/restore-state! before)
+        (schema/relink-registry!)))))
+
+(deftest diagnostic-candidate-work-is-bounded-before-retention
+  (let [before (schema/snapshot-state)
+        shared :schematest.bound/shared
+        shapes (into {}
+                     (map (fn [i]
+                            [(keyword "schematest.bound" (str "shape-" i))
+                             [:map [shared shared]]]))
+                     (range 400))
+        forms (assoc shapes shared :string)
+        unrelated (into {}
+                        (map (fn [i]
+                               [(keyword "schematest.bound.input"
+                                         (str "unrelated-" i))
+                                i]))
+                        (range 400))
+        visits (atom [])]
+    (try
+      (schema/activate-projection! (schema/build-projection forms))
+      (let [rows (binding [schema/*candidate-visit!*
+                           (fn [schema-key]
+                             (swap! visits conj schema-key))]
+                   (schema/candidate-shapes
+                     (assoc unrelated shared "value")))]
+        (is (= schema/shape-candidate-limit (count @visits))
+            "instrumented index visits, not only retained output, are capped")
+        (is (= schema/shape-candidate-limit (count rows)))
+        (is (= (sort-by (juxt (comp - count
+                                   :seon.schema/required-attrs)
+                              (comp str :seon.schema/key))
+                       rows)
+               rows)))
+      (finally
+        (schema/restore-state! before)
+        (schema/relink-registry!)))))
+
+(deftest shape-rows-preserve-authored-render-and-derived-identity-metadata
+  (let [id :schematest.metadata/id
+        label :schematest.metadata/label
+        request :schematest.metadata/request
+        entity :schematest.metadata/entity
+        forms {id [:string {:seon.db/identity true}]
+               label :string
+               request [:map {:seon.render/html 'schematest.metadata/request-html}
+                        [label label]]
+               entity [:map {:seon.db/entity true
+                             :seon.render/ai 'schematest.metadata/entity-ai}
+                       [id id]
+                       [label label]]}
+        projection (schema/build-projection forms)
+        rows (:seon.schema.projection/shape-rows projection)]
+    (is (= 'schematest.metadata/request-html
+           (get-in rows [request :seon.render/html])))
+    (is (false? (get-in rows [request :seon.schema/entity?])))
+    (is (= 'schematest.metadata/entity-ai
+           (get-in rows [entity :seon.render/ai])))
+    (is (true? (get-in rows [entity :seon.schema/entity?])))
+    (is (= id (get-in rows [entity :seon.entity/id-attr])))))
+
 (deftest projection-derives-exact-transitive-schema-dependencies
   (let [forms {:schematest.dependency/leaf :int
                :schematest.dependency/branch

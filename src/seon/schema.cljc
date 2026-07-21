@@ -337,27 +337,74 @@
                             (m/function-schema form options)
                             (set (keys forms)))]))
               function-contracts)
-        catalog  (->> forms
-                      (keep
-                        (fn [[k raw]]
-                          (let [form (internal/with-entity-id-attr forms raw)
-                                props (when (internal/map-shape? form)
-                                        (internal/schema-properties form))
-                                id-attr (:seon.entity/id-attr props)]
-                            (when (and (:seon.db/entity props) id-attr)
-                              (cond->
-                                {:seon.schema.catalog/key k
-                                 :seon.schema.catalog/id-attr id-attr
-                                 :seon.schema.catalog/required-attrs
-                                 (set (internal/map-required-attrs form))}
-                                (:seon.render/ai props)
-                                (assoc :seon.schema.catalog/render-ai
-                                       (:seon.render/ai props))
+        shape-rows
+        (into (sorted-map)
+              (keep
+                (fn [[k raw]]
+                  (let [form (internal/with-entity-id-attr forms raw)
+                        map-shape? (internal/map-shape? form)
+                        props (when map-shape?
+                                (or (internal/schema-properties form) {}))
+                        required-attrs
+                        (when map-shape?
+                          (set (internal/map-required-attrs form)))
+                        id-attr (:seon.entity/id-attr props)]
+                    (when (seq required-attrs)
+                      [k (cond->
+                           {:seon.schema/key k
+                            :seon.schema/required-attrs required-attrs
+                            :seon.schema/entity?
+                            (boolean (:seon.db/entity props))}
+                           id-attr
+                           (assoc :seon.entity/id-attr id-attr)
 
-                                (:seon.render/html props)
-                                (assoc :seon.schema.catalog/render-html
-                                       (:seon.render/html props)))))))
-                      (sort-by :seon.schema.catalog/key)
+                           (:seon.render/ai props)
+                           (assoc :seon.render/ai (:seon.render/ai props))
+
+                           (:seon.render/html props)
+                           (assoc :seon.render/html
+                                  (:seon.render/html props)))]))))
+              forms)
+        required-by-key
+        (into (sorted-map)
+              (map (fn [[k row]]
+                     [k (:seon.schema/required-attrs row)]))
+              shape-rows)
+        raw-shape-index
+        (reduce-kv
+          (fn [index schema-key required-attrs]
+            (reduce (fn [result attr]
+                      (update result attr (fnil conj []) schema-key))
+                    index
+                    required-attrs))
+          (sorted-map)
+          required-by-key)
+        shape-rank
+        (fn [schema-key]
+          [(- (count (get required-by-key schema-key))) (str schema-key)])
+        shape-index
+        (into (sorted-map)
+              (map (fn [[attr schema-keys]]
+                     [attr (vec (sort-by shape-rank schema-keys))]))
+              raw-shape-index)
+        catalog  (->> shape-rows
+                      vals
+                      (keep
+                        (fn [{:seon.schema/keys [key required-attrs]
+                              :seon.entity/keys [id-attr]
+                              :seon.render/keys [ai html]
+                              :as row}]
+                          (when (and (:seon.schema/entity? row) id-attr)
+                            (cond->
+                              {:seon.schema.catalog/key key
+                               :seon.schema.catalog/id-attr id-attr
+                               :seon.schema.catalog/required-attrs
+                               required-attrs}
+                              ai
+                              (assoc :seon.schema.catalog/render-ai ai)
+
+                              html
+                              (assoc :seon.schema.catalog/render-html html)))))
                       vec)
         fingerprint
         (hash (pr-str {:seon.schema.projection/forms
@@ -371,6 +418,9 @@
      reverse-schema-dependencies
      :seon.schema.projection/function-contracts function-contracts
      :seon.schema.projection/function-dependencies function-dependencies
+     :seon.schema.projection/required-by-key required-by-key
+     :seon.schema.projection/shape-index shape-index
+     :seon.schema.projection/shape-rows shape-rows
      :seon.schema.projection/catalog catalog
      :seon.schema.projection/fingerprint fingerprint})))
 
@@ -533,6 +583,180 @@
   (m/explain schema-key value {:registry (candidate-registry)}))
 
 (register! ::compiled-validator 'fn?)
+
+(def ^:const shape-candidate-limit
+  "Maximum schema rows examined and returned for structural diagnostics."
+  32)
+
+(def ^:dynamic *candidate-visit!*
+  "Optional test instrumentation called once per diagnostic schema visit."
+  (fn [_schema-key] nil))
+
+(defonce ^:private !shape-generation
+  (atom {:seon.schema.shape/projection nil
+         :seon.schema.shape/candidate-forms nil
+         :seon.schema.shape/validators {}
+         :seon.schema.shape/explainers {}}))
+
+(defn projection-validator
+  "Compile a validator against exactly one immutable projection."
+  {:malli/schema [:=> [:catn [::projection :map]
+                             [::registry-key ::registry-key]]
+                  ::compiled-validator]}
+  [projection schema-key]
+  (m/validator
+    (m/deref-recursive
+      schema-key
+      {:registry (:seon.schema.projection/registry projection)})))
+
+(defn projection-explainer
+  "Compile an explainer against exactly one immutable projection."
+  {:malli/schema [:=> [:catn [::projection :map]
+                             [::registry-key ::registry-key]]
+                  ::compiled-validator]}
+  [projection schema-key]
+  (m/explainer
+    (m/deref-recursive
+      schema-key
+      {:registry (:seon.schema.projection/registry projection)})))
+
+(defn- shape-projection []
+  (or (current-projection)
+      (let [forms (candidate-forms)
+            cached @!shape-generation]
+        (if (identical? forms
+                        (:seon.schema.shape/candidate-forms cached))
+          (:seon.schema.shape/projection cached)
+          (build-projection forms)))))
+
+(defn- ensure-shape-generation! []
+  (let [projection (shape-projection)]
+    (when-not (identical? projection
+                           (:seon.schema.shape/projection @!shape-generation))
+      (reset! !shape-generation
+              {:seon.schema.shape/projection projection
+               :seon.schema.shape/candidate-forms
+               (when-not (current-projection) (candidate-forms))
+               :seon.schema.shape/validators {}
+               :seon.schema.shape/explainers {}}))
+    @!shape-generation))
+
+(defn- cached-compiler! [cache-key compiler schema-key]
+  (let [{:seon.schema.shape/keys [projection] :as generation}
+        (ensure-shape-generation!)]
+    (or (get (get generation cache-key) schema-key)
+        (let [compiled (compiler projection schema-key)]
+          (swap! !shape-generation
+                 (fn [current]
+                   (if (identical?
+                         projection
+                         (:seon.schema.shape/projection current))
+                     (assoc-in current [cache-key schema-key] compiled)
+                     current)))
+          compiled))))
+
+(defn- shape-rank [row]
+  [(- (count (:seon.schema/required-attrs row)))
+   (str (:seon.schema/key row))])
+
+(defn- present-attrs [value]
+  (when (map? value)
+    (->> (keys value) (filter keyword?) (sort-by str) vec)))
+
+(defn- diagnostic-schema-keys [projection attrs]
+  (let [index (:seon.schema.projection/shape-index projection)]
+    (loop [remaining-attrs attrs
+           remaining-keys []
+           visited 0
+           selected #{}]
+      (cond
+        (>= visited shape-candidate-limit)
+        selected
+
+        (seq remaining-keys)
+        (let [schema-key (first remaining-keys)]
+          (*candidate-visit!* schema-key)
+          (recur remaining-attrs
+                 (next remaining-keys)
+                 (inc visited)
+                 (conj selected schema-key)))
+
+        (seq remaining-attrs)
+        (recur (next remaining-attrs)
+               (get index (first remaining-attrs) [])
+               visited
+               selected)
+
+        :else
+        selected))))
+
+(defn candidate-shapes
+  "Bounded structural schema candidates from the activated projection.
+
+   At most [[shape-candidate-limit]] indexed schema references are examined.
+   Candidate declarations do not affect the result after activation."
+  {:malli/schema [:=> [:catn [::value ::value]] [:vector :map]]}
+  [value]
+  (if-let [attrs (seq (present-attrs value))]
+    (let [{:seon.schema.shape/keys [projection]}
+          (ensure-shape-generation!)
+          rows (:seon.schema.projection/shape-rows projection)]
+      (->> (diagnostic-schema-keys projection attrs)
+           (map rows)
+           (sort-by shape-rank)
+           vec))
+    []))
+
+(defn matching-shapes
+  "All schemas that validate `value` in the activated projection.
+
+   Matching is deliberately independent of the capped diagnostic result: all
+   structurally possible schemas validate and survive in deterministic order."
+  {:malli/schema [:=> [:catn [::value ::value]] [:vector :map]]}
+  [value]
+  (if-let [attrs (seq (present-attrs value))]
+    (let [{:seon.schema.shape/keys [projection]}
+          (ensure-shape-generation!)
+          index (:seon.schema.projection/shape-index projection)
+          rows (:seon.schema.projection/shape-rows projection)
+          present (set attrs)
+          possible (into #{} (mapcat #(get index % [])) attrs)]
+      (->> possible
+           (map rows)
+           (filter (fn [row]
+                     (every? present (:seon.schema/required-attrs row))))
+           (sort-by shape-rank)
+           (filter
+             (fn [{:seon.schema/keys [key]}]
+               ((cached-compiler!
+                  :seon.schema.shape/validators projection-validator key)
+                value)))
+           vec))
+    []))
+
+(defn explain-shape
+  "Explain `value` against one activated structural schema.
+
+   Returns nil when valid and Malli explanation data when invalid. The schema
+   key must name a row returned by [[candidate-shapes]]; an unknown key is a
+   caller defect and throws before compiling against any other registry."
+  {:malli/schema [:=> [:catn [::registry-key ::registry-key]
+                             [::value ::value]]
+                  [:maybe ::explanation]]}
+  [schema-key value]
+  (let [{:seon.schema.shape/keys [projection]}
+        (ensure-shape-generation!)]
+    (when-not (contains? (:seon.schema.projection/shape-rows projection)
+                         schema-key)
+      (throw
+        (ex-info
+          (str "Unknown activated map schema " schema-key ".")
+          {:seon.schema/error :seon.schema/unknown-shape
+           :seon.schema/key schema-key
+           :seon.error/kind :core-bug})))
+    ((cached-compiler!
+       :seon.schema.shape/explainers projection-explainer schema-key)
+     value)))
 
 (defn candidate-validator
   "Compile a recursively resolved validator from current declarations."
