@@ -38,9 +38,9 @@ or for a separately proven opaque path token that safely crosses IPC.
 
 ## Projection repair evidence (2026-07-20)
 
-Commit `edd0d2e7` replaces the unusable projected-key count with ascending
+Commits `edd0d2e7` and `7aebb3bc` replace the unusable projected-key count with ascending
 `:seon.render.value/non-drillable-key-indexes` in final retained-entry order.
-The focused `seon.render.value-test` gate passed 47 tests and 199 assertions,
+The focused `seon.render.value-test` gate passed 47 tests and 202 assertions,
 including bounded million-entry map work, hostile key printers, final-output
 indexing, exact original-key lookup, deterministic bytes, non-finite and
 negative-zero refusal, and shape-only schema projection.
