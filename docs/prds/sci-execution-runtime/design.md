@@ -222,3 +222,14 @@ PASS (registry rebuilt by re-registration on restart). Evidence: the
 U2 section of [[roadmap]].
 U3 graduation gate walking skeleton: fingerprint → both-tier test run →
 JVM eval install → epoch re-link, for ONE real corpus fn end-to-end.
+**DONE (2026-07-20)** — every recorded agent `defn` receives the exact
+UTF-8 source fingerprint and nursery tier; the pure gate requires a
+valid recorded schema, an inline recorded test, fingerprint equality,
+and equal green SCI/JVM outcomes. Passing source is compiled with plain
+`clojure.core/eval`, installed by altering the U2 registry's shared var,
+and persisted only as fingerprint + graduated tier. Replay-then-link
+lets a source edit rebind that same var to SCI immediately and transact
+the new fingerprint/nursery tier; host restart derives compiled roots
+from matching facts. One real function measured 1.661x faster over
+10,000 same-context calls; edit invalidation, re-graduation, fresh-host
+rebuild, both full suites, and the 20-agent zero-loss kill drill pass.

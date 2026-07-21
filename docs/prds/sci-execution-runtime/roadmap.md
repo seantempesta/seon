@@ -26,7 +26,7 @@ transition ledger.
 | U1.5 | pod dials the host: tier-as-data dispatch, one REAL turn end-to-end (pod renders, host evals) | **DONE** |
 | U4 | eval-record/receipt/corpus integration over the marked seams (subsumes register R2 — the program-row rejection diagnosis) | **DONE** |
 | U5 | toolkit port — CORRECTED SHAPE (codex probe 2026-07-20: the C1 ledger's 17 failures are private-helper dependency gaps, NOT the js shims; naive admission balloons to 91): (a) dependency-ordered context loader — topo-sort candidate blocks by their parsed requires (computed, reuse the require-edge parsing), (b) provision the full db/id + plan-internal + ctx-operation families through the U2 registry, (c) THEN the 17 shim conversions + 3 capability impls. Hold until U3 lands (context.clj collision) | corrected, after U3 |
-| U3 | graduation walking skeleton (one corpus fn: fingerprint → both-tier tests → JVM eval → epoch re-link) | after U2 |
+| U3 | graduation walking skeleton (one corpus fn: fingerprint → both-tier tests → JVM eval → epoch re-link) | **DONE** `f53f5d94`, `a50845bd` |
 | U6 | instrumentation over sci vars (B1 deferred item 5) | after U4 |
 | U7 | park/idle policy + warm spares (owner-ruled shape) | after U1.5 |
 | U8 | steering/context re-alignment: all agent-facing guidance teaches the sync idiom | before cutover |
@@ -492,6 +492,84 @@ capture (`:seon.eval/output` absent), result-edn is a capped `pr-str`
 (no render-ai skeleton or `result/<id>` binding), no repair
 sub-loop/preflight, renders stay pod-served, and `record-eval-terminal!`
 failures surface as `::record-error` on the envelope (batch continues).
+
+### U3 — graduation walking skeleton — DONE (2026-07-20)
+
+One real agent-authored corpus function now crosses the complete
+graduation pipeline. The host harness records `sum-squares` through U4
+as a strict single `defn` with a Malli schema and inline `:test`; its
+`:seon.fn` row carries the verbatim source, exact UTF-8 SHA-256
+`:seon.fn/source-fingerprint`, and `:seon.fn/execution-tier :nursery`.
+Both the Bun tee and JVM host tee write those facts, so a source edit is
+one identity upsert that changes the fingerprint and returns the row to
+nursery without a stale optional fact.
+
+Dependency ledger:
+
+- Clojure 1.12.0 supplies plain `clojure.core/eval`; Malli 0.20.0
+  validates the recorded `:seon.fn/spec` before compilation.
+- sci is the pinned `reference-code/sci` checkout at `be4021d`; the
+  relied-on mechanisms are `sci/fork`, `sci/add-namespace!`,
+  `sci/alter-var-root`, and `eval-def`'s reuse of an existing var
+  (`src/sci/core.cljc`, `src/sci/impl/evaluator.cljc`,
+  `src/sci/impl/vars.cljc`, `src/sci/lang.cljc`). U2's live-swap test
+  remains the first-party call-site template.
+- `seon.host.record` remains the source-row owner and
+  `seon.host.context/replay-defs!` remains the SCI reconstruction path.
+  `seon.content-hash` is the extracted portable owner of the exact hash
+  already used by `my.blob` and `seon.execution/source-digest`; U3 adds
+  no hasher.
+
+`seon.host.graduate/trust-gate?` is a pure predicate over facts. It is
+true iff the recorded schema parses with no schema-error, an inline test
+exists, the supplied fingerprint equals both the exact recorded-source
+hash and the row fingerprint, both SCI and JVM test thunks finish
+without throwing, and their `pr-str` results are equal. Schema/test
+preflight runs before the source reaches JVM `eval`; there is no symbol
+allowlist. A passing candidate commits the same fingerprint plus
+`:graduated`, then `register-wrappers!` changes the one shared SCI var's
+root to the dereferenced JVM function.
+
+The registry gained one link operation, not another binding path:
+`install-registered-wrappers!` merges the registry's exact cached vars
+into a context through sci's public `add-namespace!`. Restore order is
+replay first, link second. Consequently a later SCI `defn` edit reuses
+that linked var, bumps sci's var epoch, and immediately makes every
+linked caller nursery again; recording then makes the new fingerprint
+and nursery tier durable. Host startup queries those facts and derives
+all nursery/compiled roots before accepting sessions. Bytecode and vars
+remain process-local projections.
+
+Proof (`test/seon/host_graduate_writer_test.clj`):
+
+- focused U3: 2 tests / 29 assertions; U2/U4 registry focus: 6 / 43;
+- 10,000 calls through one already-required caller context, three
+  warmups and seven samples per tier: nursery ns
+  `[21647167 21473500 19854375 23703000 19521291 20139250 22290250]`,
+  compiled ns
+  `[13220459 15487875 12909458 12145500 12927375 15586958 12496375]`;
+  medians 21.474 ms vs 12.927 ms, **1.661x faster**;
+- edit proof: fingerprint
+  `e56c73843834c9cb7fabac76faa82e9869571cf0b00347ec11a6fb0c9d4d95e5`
+  became
+  `525a14c96b51ec833bfe494c7d39885849b4f944a706954a22298682c4653a57`;
+  the row and `effective-tier` were nursery and the linked caller
+  returned the edited SCI result before re-graduation;
+- fresh `host/stop!` + `host/start!` rebuilt exactly one graduated root
+  from facts and returned the edited result after replay/link;
+- full writer 263 tests / 2045 assertions and full CLJS 1349 / 6257,
+  zero failures/errors; and
+- the existing 20-agent kill drill remained PASS: 20/20 EOF notices,
+  20/20 replayed and verified, zero fact loss, 8.436 s kill-to-host-ready
+  and 26.930 s kill-to-full-fleet-ready. The focused restart assertion,
+  not the ungraduated legacy drill corpus, proves graduated-state
+  reconstruction.
+
+Honest boundary: this skeleton graduates one self-contained pure
+function with one inline test. Cross-function compiled dependency
+loading, cooling-window policy, richer test refs, and canary promotion
+remain later graduation work; JVM eval is intentionally outside the SCI
+sandbox once the gate passes.
 
 ### Decision gate
 

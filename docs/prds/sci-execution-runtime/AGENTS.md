@@ -96,6 +96,19 @@ owner and deleted spec instead of building it — that is the bar).
     the `:seon.eval/id` generator policy, and one assertion probe (see
     `test/seon/host_registry_writer_test.clj` corpus-schema-rows and
     the drill client's Phase 0).
+16. A replay-created SCI var is private to its fork. Graduation must
+    replay first, then link the U2 registry's exact cached var with
+    `sci/add-namespace!`; linking before replay lets `defn` globally
+    overwrite the compiled root, while registering without linking never
+    reaches the private call site. Once linked, a source edit safely
+    rebinds the shared var to nursery and bumps the epoch.
+17. The Malli→Datahike bridge rejects a database attribute whose stored
+    canonical form references the regex content-digest schema. Persist a
+    source fingerprint as Datahike `:string`; derive and validate its
+    64-hex content-hash shape at the graduation boundary.
+18. `my.blob` uses Node crypto for both hashing and temporary-file UUIDs.
+    Extracting the hash owner does not remove the namespace's crypto
+    dependency while `.randomUUID` remains.
 
 ## Per-unit executable briefs (U4-U12)
 
