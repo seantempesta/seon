@@ -25,7 +25,7 @@ transition ledger.
 | U2 | wrapper registry + capability op-id receipts | **DONE** |
 | U1.5 | pod dials the host: tier-as-data dispatch, one REAL turn end-to-end (pod renders, host evals) | **DONE** |
 | U4 | eval-record/receipt/corpus integration over the marked seams (subsumes register R2 — the program-row rejection diagnosis) | **DONE** |
-| U5 | toolkit port: .cljc the db-boundary 46%; capability proxies for the js-bound tail | parallel-safe |
+| U5 | toolkit port — CORRECTED SHAPE (codex probe 2026-07-20: the C1 ledger's 17 failures are private-helper dependency gaps, NOT the js shims; naive admission balloons to 91): (a) dependency-ordered context loader — topo-sort candidate blocks by their parsed requires (computed, reuse the require-edge parsing), (b) provision the full db/id + plan-internal + ctx-operation families through the U2 registry, (c) THEN the 17 shim conversions + 3 capability impls. Hold until U3 lands (context.clj collision) | corrected, after U3 |
 | U3 | graduation walking skeleton (one corpus fn: fingerprint → both-tier tests → JVM eval → epoch re-link) | after U2 |
 | U6 | instrumentation over sci vars (B1 deferred item 5) | after U4 |
 | U7 | park/idle policy + warm spares (owner-ruled shape) | after U1.5 |
