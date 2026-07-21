@@ -161,7 +161,7 @@ There are two documentation layers and no third:
   design decision changes; never put current implementation state, gaps,
   sequencing, evidence, graduation status, or a migration diary there.
 - The active program roadmap (currently
-  `docs/prds/runtime-reliability/roadmap.md`) is the high-level ledger of
+  `docs/prds/sci-execution-runtime/program-synthesis-2026-07-21.md`) is the high-level ledger of
   current state, remaining architecture deltas, dependency order, and success
   measures. It points to bounded successor PRDs; it does not absorb their
   detailed audits or implementation plans.
@@ -595,8 +595,8 @@ embeddings PRD.
 ## Key entry points
 
 - `docs/seon/architecture/architecture.md` — intended system map; read first;
-- `docs/prds/runtime-reliability/roadmap.md` — current branch work ledger;
-- `docs/prds/runtime-reliability/AGENTS.md` — current chunk runbook;
+- `docs/prds/sci-execution-runtime/program-synthesis-2026-07-21.md` — active program ledger;
+- `docs/prds/sci-execution-runtime/AGENTS.md` — current chunk runbook;
 - `docs/conventions.md` — code/schema patterns;
 - `src/seon/AGENTS.md` — one-mechanism and runtime ownership table;
 - `src/my/AGENTS.md` — agent-facing toolkit constraints;
