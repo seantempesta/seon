@@ -2,11 +2,11 @@
   "Derive trusted JVM function bindings from recorded corpus facts."
   (:require [clojure.edn :as edn]
             [malli.core :as m]
-            [sci.core :as sci]
             [seon.content-hash :as content-hash]
             [seon.host.context :as context]
             [seon.host.record :as record]
-            [seon.schema :as schema]))
+            [seon.schema :as schema])
+  (:import [sci.lang Var]))
 
 (set! *warn-on-reflection* true)
 
@@ -169,7 +169,7 @@
            (context/replay-defs!
             ctx [(str "(in-ns '" lib ")\n" source)]))]
       (if (and (:seon.eval/ok? envelope)
-               (instance? sci.lang.Var (:seon.eval/value envelope)))
+               (instance? Var (:seon.eval/value envelope)))
         (:seon.eval/value envelope)
         (throw
          (ex-info "The recorded source did not produce one SCI function var."

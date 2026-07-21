@@ -3,7 +3,6 @@
   (:require [clojure.test :refer [deftest is]]
             [sci.core :as sci]
             [seon.content-hash :as content-hash]
-            [seon.db.transport.uds :as uds]
             [seon.db.writer :as writer]
             [seon.host :as host]
             [seon.host.context :as context]
