@@ -18,9 +18,13 @@ DESIGN AUTHORITY (read both COMPLETELY, refinement wins where they differ):
    `:seon.packages/deps` verbatim coord entry) + `:seon.packages/as`
    (identity attribute, the agent-chosen boundary namespace), ecosystem =
    attribute presence, `row->host` routing, `:as` legality validation
-   (dotted symbol under `seon.packages.` — owner decision 1 pending, build
-   the validation behind one predicate so the prefix rule is a one-line
-   flip), collision steering errors. §3.1-3.4 flow semantics (upsert on
+   (OWNER DECIDED: the `:as` symbol MUST be dotted AND under the
+   `seon.packages.` prefix — required; keep it behind one named
+   predicate), collision steering errors on a duplicate `:as` or a
+   coordinate already mapped elsewhere. NOTE (owner ruling R1):
+   agent-authored boundary CODE is never auto-persisted to `src/`; WP-K
+   is pure data + accessors and writes no code — the reviewed
+   graduation-to-disk path is a later unit. §3.1-3.4 flow semantics (upsert on
    same `:as`, remove by namespace, installed as derived read) define the
    PURE planning functions this unit ships — the host wrappers and staged
    install execution are WP-W, not here.
