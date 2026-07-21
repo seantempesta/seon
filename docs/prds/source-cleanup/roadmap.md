@@ -513,6 +513,14 @@ the one identified arbitrary domain response needing its own outer union.
 The facade and all direct consumers move in one frozen owner-group cut after
 U4 releases database/host paths.
 
+The Stage-1.6 transaction-response acceptance folds into that same owner group
+via [[research/transact-response-union-boundary-2026-07-20]] (`8862b604`).
+`5e3edf01` already landed the bare fixed transaction-report/error output
+union, but only literal schema membership is tested. The shared closed-error
+cut must add an instrumented public-call writer refusal followed by a corrected
+transaction, then a frozen same-child failure/`complete` survival proof. No
+extra `:seon.result/ok?` envelope belongs around this disjoint fixed result.
+
 The unresolved-symbol owner is grounded by
 [[research/unresolved-render-symbol-boundary-2026-07-20]] (`4f4dbd95`). A
 selected symbol must resolve to a function; absence and non-function values
