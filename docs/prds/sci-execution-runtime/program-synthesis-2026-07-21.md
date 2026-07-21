@@ -750,13 +750,22 @@ decisions batch for their return.
   executor-family, codec workers/queue, and existing request-server
   options; flip only those dispositions; frame-bytes +
   max-connections stay `:carried` with unchanged decline steering.
-  **W1.5b (design pass IN FLIGHT):** session-open admission
-  exchange — a small opening frame carrying the configured frame
-  ceiling, incompatible-peer rejection, and the cap+1 steering error;
-  rides the sanctioned protocol-extension mechanism (transit tagged
-  types + new ops); expands into `db/protocol.cljc`, `db.cljs`, and
-  the host handshake. Refill after W1.5a: W1.5b design → W1.2b
-  graduation (owns q20) → W1 config-facts sweep → packages WP-B∥WP-J.
+  **W1.5b DESIGN ACCEPTED + IMPLEMENTATION IN FLIGHT** — design
+  persisted `research/w15b-session-open-admission-design-2026-07-21.md`
+  (`37e82121`): client-first Transit `session-open` under a fixed
+  4096-byte bootstrap ceiling, min agreement, exact protocol-version-13
+  match with NO dual-accept (one artifact digest ships all peers),
+  at-capacity steering naming the connections key, negotiated
+  per-session ceiling everywhere the database session frames, host
+  learns its ceiling from the session (config-path gap closes), BB
+  operator clients + readiness probes route through the one
+  session-open client. Probe-first spec
+  `specs/w1.5b-session-open-admission.md`: encoding probe (<4096 both
+  codecs) and the risk-1 at-capacity falsifier run BEFORE selector
+  work. Sol medium, sole lane, thread
+  `019f86f3-47e9-7c10-a977-a261a087786c`, logs
+  `tmp/orchestrator/w15b-*`. Refill after: W1.2b graduation (owns
+  q20) → W1 config-facts sweep → packages WP-B∥WP-J.
 - **W1.5a DONE `85cdd68e`** — 28 keys flipped :enforced (six executor
   families, transport request-server options, codec workers/queue)
   via one envelope-consumer translation into the owners' existing
