@@ -118,6 +118,17 @@ with-ctx lazy-forcing requirement; perf tax accepted at agent scale).
 
 ## Owner decision batch round 2 (2026-07-21 PM — namespaces + packages)
 
+- **Package→namespace mapping is explicit DATA (owner, evening):** at
+  install the agent supplies the ecosystem's own coordinate form
+  VERBATIM (npm `name@range`; deps.edn coord map) plus an explicit
+  boundary-namespace mapping (`:seon.packages/as`-shaped). The ledger
+  row links coordinate ↔ chosen namespace ↔ generation; namespace
+  uniqueness is a ledger identity attribute with collision steering,
+  never a munging scheme; manifests generate from the verbatim
+  coordinates. Query/add/remove/update operate on those facts
+  (update = new coordinate on the same namespace, last version wins).
+  The packages refinement doc integrates this into Q1–Q3.
+
 - **No namespace lock-in; erase-and-reset is acceptable.** Renames are
   never blocked by persisted data: update the schema-registering code,
   reset clusters at the boundary. The design's "rename-frozen" rows are
