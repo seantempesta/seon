@@ -20,6 +20,11 @@
 #
 # Exit codes: 0 = pass, 1 = fail, 2 = compile/build error
 #
+# Lock: tmp/test-cljs.lock serializes suites (one out/test bundle owner).
+# A dead owner's lock is reclaimed automatically; a live owner exits 2 unless
+# SEON_TEST_WAIT=1 (default 1800s deadline) or SEON_TEST_WAIT=<seconds> queues
+# behind it. Two suites never run concurrently.
+#
 # Output: out/test/test.js (intermediate)
 #         tmp/test-cljs-<timestamp>.log (full transcript, tmp/test-cljs-latest.log symlinked)
 #         tmp/test-cljs-<timestamp>.report.edn (structured verdict, latest symlinked)
@@ -136,35 +141,73 @@ REPORTOUT="${TMPOUT%.log}.report.edn"
 # One output bundle means one compile+run owner. Two agents compiling different
 # focused namespace sets into out/test/test.js can otherwise each run the other
 # agent's artifact. A mkdir lock is atomic and portable to macOS Bash 3.2.
-# Never wait invisibly: an active owner is reported immediately; a dead owner's
-# lock is recovered once.
+# Never wait invisibly: a live owner is reported immediately unless the caller
+# opts into queueing with SEON_TEST_WAIT (=1 for the default 1800s deadline, or
+# an explicit deadline in seconds); a dead owner's lock is reclaimed with an
+# honest log line. Two suites never actually run concurrently either way.
+test_wait_deadline() {
+  case "${SEON_TEST_WAIT:-}" in
+    ''|0) echo 0 ;;
+    1) echo 1800 ;;
+    *[!0-9]*) echo 0 ;;
+    *) echo "$SEON_TEST_WAIT" ;;
+  esac
+}
+
 acquire_test_lock() {
-  if mkdir "$TEST_LOCK" 2>/dev/null; then
-    printf '%s\n' "$$" > "$TEST_LOCK/pid"
-    LOCK_OWNED=1
-    return 0
-  fi
-
-  local owner=""
-  local owner_command=""
-  if [ -f "$TEST_LOCK/pid" ]; then
-    owner="$(sed -n '1p' "$TEST_LOCK/pid" 2>/dev/null || true)"
-  fi
-  if [ -n "$owner" ] && kill -0 "$owner" 2>/dev/null; then
-    owner_command="$(ps -p "$owner" -o command= 2>/dev/null || true)"
-    if printf '%s\n' "$owner_command" | grep -q 'test-cljs'; then
-      echo "Another pod test owns $TEST_LOCK (pid $owner); not racing its bundle."
-      exit 2
+  local deadline waited announced owner owner_command grace
+  deadline="$(test_wait_deadline)"
+  waited=0
+  announced=0
+  while :; do
+    if mkdir "$TEST_LOCK" 2>/dev/null; then
+      printf '%s\n' "$$" > "$TEST_LOCK/pid"
+      LOCK_OWNED=1
+      [ "$announced" -eq 1 ] && echo "Acquired $TEST_LOCK after ${waited}s."
+      return 0
     fi
-  fi
 
-  rm -rf -- "$TEST_LOCK"
-  if ! mkdir "$TEST_LOCK" 2>/dev/null; then
-    echo "Could not acquire $TEST_LOCK after removing a stale owner."
-    exit 2
-  fi
-  printf '%s\n' "$$" > "$TEST_LOCK/pid"
-  LOCK_OWNED=1
+    # A concurrent runner writes its pid right after mkdir; give that window a
+    # short grace before concluding the lock has no owner at all.
+    owner=""
+    for grace in 1 2 3 4 5; do
+      if [ -f "$TEST_LOCK/pid" ]; then
+        owner="$(sed -n '1p' "$TEST_LOCK/pid" 2>/dev/null || true)"
+        break
+      fi
+      [ -d "$TEST_LOCK" ] || break
+      sleep 0.2
+    done
+
+    if [ -n "$owner" ] && kill -0 "$owner" 2>/dev/null; then
+      owner_command="$(ps -p "$owner" -o command= 2>/dev/null || true)"
+      if printf '%s\n' "$owner_command" | grep -q 'test-cljs'; then
+        if [ "$deadline" -gt 0 ] && [ "$waited" -lt "$deadline" ]; then
+          if [ "$announced" -eq 0 ]; then
+            echo "Another pod test owns $TEST_LOCK (pid $owner); waiting up to ${deadline}s (SEON_TEST_WAIT)."
+            announced=1
+          fi
+          sleep 2
+          waited=$((waited + 2))
+          continue
+        fi
+        if [ "$announced" -eq 1 ]; then
+          echo "Gave up waiting for $TEST_LOCK after ${waited}s; pid $owner still running."
+        else
+          echo "Another pod test owns $TEST_LOCK (pid $owner); not racing its bundle. Set SEON_TEST_WAIT=1 to queue."
+        fi
+        exit 2
+      fi
+      echo "Reclaiming $TEST_LOCK: recorded owner pid $owner is not a test-cljs run."
+    elif [ -n "$owner" ]; then
+      echo "Reclaiming stale $TEST_LOCK: owner pid $owner is dead."
+    elif [ -d "$TEST_LOCK" ]; then
+      echo "Reclaiming $TEST_LOCK: no owner pid recorded after grace period."
+    fi
+    rm -rf -- "$TEST_LOCK"
+    # Loop retries mkdir; a concurrent runner may win the reclaimed lock, in
+    # which case the live-owner branch above decides (wait or refuse).
+  done
 }
 
 acquire_test_lock
