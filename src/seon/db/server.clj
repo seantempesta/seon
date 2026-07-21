@@ -9,11 +9,13 @@
             [clojure.string :as str]
             ;; Register the optional Proximum index before any database opens.
             [datahike.index.secondary.proximum]
+            [malli.core :as m]
             [seon.db.protocol :as protocol]
             [seon.db.restore-admin :as restore-admin]
             [seon.db.writer :as writer]
             [seon.dev.restore :as restore]
             [seon.embed :as embed]
+            [seon.launch]
             [seon.schema :as schema]
             [taoensso.timbre :as log])
   (:import [java.io BufferedWriter FileInputStream FileOutputStream
@@ -30,6 +32,7 @@
 (schema/register! ::request-socket-path :seon.db.writer/request-socket-path)
 (schema/register! ::repl-port [:int {:min 0 :max 65535}])
 (schema/register! ::repl-port-file [:string {:min 1}])
+(schema/register! ::launch-envelope-path [:string {:min 1}])
 (schema/register! ::intent-path [:string {:min 1}])
 (schema/register! ::result-path [:string {:min 1}])
 (schema/register!
@@ -45,7 +48,8 @@
   [::database-path {:optional true} ::database-path]
   [::request-socket-path ::request-socket-path]
   [::repl-port {:optional true} ::repl-port]
-  [::repl-port-file {:optional true} ::repl-port-file]])
+  [::repl-port-file {:optional true} ::repl-port-file]
+  [::launch-envelope-path ::launch-envelope-path]])
 (schema/register! ::repl-server :any)
 (schema/register!
  ::server
@@ -218,6 +222,10 @@
       (recur (assoc options ::repl-port-file (second remaining))
              (drop 2 remaining))
 
+      "--launch-envelope"
+      (recur (assoc options ::launch-envelope-path (second remaining))
+             (drop 2 remaining))
+
       nil options
 
       (throw
@@ -256,7 +264,7 @@
           byte-count (alength bytes)]
       (when (> byte-count admin-input-limit)
         (throw
-         (ex-info "Restore admin intent exceeds the bounded input size."
+         (ex-info "EDN input exceeds the bounded input size."
                   {::byte-count byte-count
                    ::byte-limit admin-input-limit})))
       (edn/read-string (String. bytes StandardCharsets/UTF_8)))))
@@ -378,9 +386,13 @@
   (configure-logging!)
   (log/info "booting pid=" (.pid (java.lang.ProcessHandle/current)))
   (let [{::keys [database-name backend database-path request-socket-path
-                 repl-port]
+                 repl-port launch-envelope-path]
          :as options}
         (parse-arguments arguments)
+        envelope (read-bounded-edn launch-envelope-path)
+        _ (when-not (m/validate :seon.launch/operational-envelope envelope)
+            (throw (ex-info "The launch envelope is invalid."
+                            {::launch-envelope-path launch-envelope-path})))
         dependencies (writer-runtime)
         writer-server
         (writer/start!
@@ -388,6 +400,8 @@
           {::writer/dependencies dependencies
            ::writer/database-name database-name
            ::writer/backend backend
+           ::writer/selected-processors
+           (:seon.config.database.executor/selected-processors envelope)
            ::writer/request-socket-path request-socket-path}
            database-path
            (assoc ::writer/database-path database-path)))
@@ -407,6 +421,8 @@
             (writer/stop! writer-server)
             (throw throwable)))]
     (log/info "request socket:" request-socket-path)
+    (log/info "launch limits:"
+              (pr-str (:seon.launch.envelope/dispositions envelope)))
     (log/info "ready")
     (cond-> {::writer-server writer-server}
       repl-server

@@ -7,6 +7,7 @@
             [clojure.string :as str]
             [my.blob.schema]
             [seon.client.schema]
+            [seon.config.resolve :as config.resolve]
             [seon.db.branch :as branch]
             [seon.db.protocol :as protocol]
             [seon.db.restore-admin.schema]
@@ -33,6 +34,26 @@
 (schema/register! ::http-port-file ::path)
 (schema/register! ::writer-repl-port-file ::path)
 (schema/register! ::request-socket-path ::socket-path)
+(schema/register! ::sha-256 [:re "^[0-9a-f]{64}$"])
+(schema/register! ::reconcile-manifest? :boolean)
+(schema/register!
+ ::resolved-manifest
+ [:map {:closed true}
+  [::path ::path]
+  [::sha-256 ::sha-256]
+  [::reconcile-manifest? ::reconcile-manifest?]])
+
+(schema/register!
+ ::operational-envelope
+ (into
+  [:map {:closed true}
+   [:seon.launch.envelope/generation :seon.launch.envelope/generation]
+   [:seon.launch.envelope/hardware-observations
+    :seon.config.resolve/hardware-observations]
+   [:seon.launch.envelope/dispositions
+    :seon.launch.envelope/dispositions]]
+  (map (fn [attribute] [attribute :seon.config/cap]))
+  config.resolve/operational-keys))
 
 (schema/register!
  ::runtime
@@ -118,6 +139,8 @@
   [::process ::process]
   [::packages-dir {:optional true} ::packages-dir]
   [::blob-storage-view ::blob-storage-view]
+  [::resolved-manifest {:optional true} ::resolved-manifest]
+  [::operational-envelope {:optional true} ::operational-envelope]
   [::restore-startup {:optional true} ::restore-startup]])
 
 (schema/register!

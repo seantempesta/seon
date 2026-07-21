@@ -17,6 +17,7 @@
     [seon.agent.message]
     [seon.agent.web]
     [seon.config :as config]
+    [seon.config.resolve :as resolve]
     [seon.db :as db]
     [seon.schema :as schema]))
 
@@ -27,6 +28,46 @@
 (defn- selected-configuration
   []
   (config/resolve-config-singleton (or (config/load-manifest) {})))
+
+(def ^:private fixed-hardware
+  {:seon.hardware/cores 8
+   :seon.hardware/system-memory-bytes (* 32 1024 1024 1024)
+   :seon.hardware/fd-soft-limit 2048})
+
+(deftest shared-resolver-is-pure-and-delegated
+  (let [manifest {:seon.config/repl-mode :batch}
+        environment {"SEON_AI_PROVIDER" "deepseek"}
+        first-value (resolve/resolve-config-singleton
+                     manifest environment fixed-hardware)
+        second-value (resolve/resolve-config-singleton
+                      manifest environment fixed-hardware)]
+    (is (= first-value second-value))
+    (is (= first-value
+           (with-redefs [config/process-environment (constantly environment)]
+             (config/resolve-config-singleton manifest fixed-hardware))))
+    (is (= 2048
+           (:seon.config.database.writer/jvm-heap-mb first-value)))
+    (is (= 8
+           (:seon.config.database.executor/selected-processors first-value)))
+    (is (= 112
+           (:seon.config.database.transport/maximum-connections first-value)))))
+
+(deftest shipped-manifest-has-a-stable-resolved-golden-value
+  (let [manifest (config/read-config-file "config/system.edn")
+        configuration
+        (resolve/resolve-config-singleton manifest {} fixed-hardware)]
+    (is (= {:seon.config/repl-mode :stream
+            :seon.config.database.writer/jvm-heap-mb 2048
+            :seon.config.database.executor/selected-processors 8
+            :seon.config.database.transport/maximum-frame-bytes (* 4 1024 1024)
+            :seon.config.database.transport/maximum-connections 112}
+           (select-keys
+            configuration
+            [:seon.config/repl-mode
+             :seon.config.database.writer/jvm-heap-mb
+             :seon.config.database.executor/selected-processors
+             :seon.config.database.transport/maximum-frame-bytes
+             :seon.config.database.transport/maximum-connections])))))
 
 (deftest manifest-schema-validity
   (testing "a representative manifest validates against :seon.config/manifest"

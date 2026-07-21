@@ -40,6 +40,7 @@
     [seon.instrument :as instrument]
     [seon.launch :as launch]
     [seon.client.schema]
+    [seon.config.resolve :as config.resolve]
     ;; Pull in the agent's required namespaces at compile time so all
     ;; schemas are registered before start-runtime! runs.
     [seon.agent :as agent]
@@ -2106,9 +2107,30 @@
 
 (defn- selected-startup-configuration
   "Resolve one explicitly selected startup manifest exactly once."
-  [selected-manifest]
-  (when (some? selected-manifest)
-    (config/resolve-config-singleton selected-manifest)))
+  ([selected-manifest]
+   (selected-startup-configuration selected-manifest nil))
+  ([selected-manifest envelope]
+   (when (some? selected-manifest)
+     (if envelope
+       (config/resolve-config-singleton
+        selected-manifest
+        (:seon.launch.envelope/hardware-observations envelope))
+       (config/resolve-config-singleton selected-manifest)))))
+
+(defn- prove-launch-configuration!
+  [envelope configuration]
+  (let [divergences (config.resolve/envelope-divergences envelope configuration)]
+    (when (seq divergences)
+      (error/with-configuration
+       configuration
+       (fn []
+         (error/record!
+          {:seon.error/raw
+           (ex-info "Launch limits diverge from committed configuration; run `bin/seon config apply`."
+                    {:seon.config/divergences divergences
+                     :seon.config/steering "bin/seon config apply"
+                     :seon.error/kind :core-bug})
+           :seon.error/fault :core}))))))
 
 (defn- initial-agent-failure?
   [result]
@@ -2140,9 +2162,19 @@
         restore-startup
         (validate-restore-launch! descriptor capability)
         startup? (and (not attached?) autonomous? (nil? restore-startup))
-        selected-manifest (when startup? (config/load-manifest))
+        resolved-manifest-reference (::launch/resolved-manifest descriptor)
+        envelope (::launch/operational-envelope descriptor)
+        selected-manifest
+        (when startup?
+          (if resolved-manifest-reference
+            (config/load-resolved-manifest resolved-manifest-reference)
+            (config/load-manifest)))
+        reconcile-manifest?
+        (if resolved-manifest-reference
+          (::launch/reconcile-manifest? resolved-manifest-reference)
+          (some? selected-manifest))
         selected-configuration
-        (selected-startup-configuration selected-manifest)
+        (selected-startup-configuration selected-manifest envelope)
         restore-completion-claim
         (when restore-startup
           (db.restore/completion-from-launch
@@ -2180,7 +2212,7 @@
             _ (await
                (validate-restore-database!
                 descriptor restore-startup restore-completion-claim))]
-        (when (some? selected-manifest)
+        (when reconcile-manifest?
           (let [reconciled
                 (await (apply-config!
                         {:seon.config/manifest selected-manifest
@@ -2209,8 +2241,9 @@
                     (count (::recovery/agent-ids recovered))
                     " agent(s) to idle")
                recovered))))
-        (let [configuration (or selected-configuration
-                                (await (acquire-configuration!)))
+        (let [configuration (await (acquire-configuration!))
+              _ (when envelope
+                  (prove-launch-configuration! envelope configuration))
               _ (db/install-configuration-context! configuration)
               initial-result
               (when (and autonomous? (nil? restore-startup))

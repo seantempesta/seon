@@ -5,8 +5,12 @@
             [clojure.edn :as edn]
             [clojure.string :as str]
             [malli.core :as m]
+            [seon.config.resolve :as config.resolve]
             [seon.dev.release :as release]
-            [seon.launch :as launch]))
+            [seon.launch :as launch])
+  (:import [java.nio.charset StandardCharsets]
+           [java.nio.file Files StandardCopyOption]
+           [java.security MessageDigest]))
 
 (def configuration-schema
   [:map
@@ -41,20 +45,20 @@
    [:seon.dev.config/artifact-manifest :string]
    [:seon.dev.config/launch-descriptor :seon.launch/descriptor]])
 
-(def default-writer-max-heap "512m")
-
 (defn writer-max-heap
   "Return the one bounded writer heap selected by the operator configuration."
   [configuration]
-  (or (:seon.dev.config/writer-max-heap configuration)
-      default-writer-max-heap))
+  (or (when-let [heap-mb (get-in configuration
+                                  [:seon.dev.config/operational-envelope
+                                   :seon.config.database.writer/jvm-heap-mb])]
+        (str heap-mb "m"))
+      (:seon.dev.config/writer-max-heap configuration)))
 
 (defn- validate-configuration! [configuration]
-  (when-not (re-matches #"[1-9][0-9]*[kKmMgG]"
-                        (writer-max-heap configuration))
-    (throw (ex-info "The writer maximum heap must be a positive JVM size."
-                    {:seon.dev.config/writer-max-heap
-                     (writer-max-heap configuration)})))
+  (when-let [heap (writer-max-heap configuration)]
+    (when-not (re-matches #"[1-9][0-9]*[kKmMgG]" heap)
+      (throw (ex-info "The writer maximum heap must be a positive JVM size."
+                      {:seon.dev.config/writer-max-heap heap}))))
   (when-not (m/validate configuration-schema configuration)
     (throw (ex-info "The derived Seon host configuration is invalid."
                     {:seon.dev.config/explanation
@@ -107,28 +111,98 @@
           (fs/directory? database-path)
           (some fs/regular-file? (fs/list-dir database-path))))))
 
+(defn- sha-256 [text]
+  (let [digest (MessageDigest/getInstance "SHA-256")]
+    (.update digest (.getBytes text StandardCharsets/UTF_8))
+    (apply str (map #(format "%02x" (bit-and 0xff %)) (.digest digest)))))
+
+(defn- atomic-write-edn! [path value]
+  (let [target (fs/path path)
+        parent (fs/parent target)
+        _ (fs/create-dirs parent)
+        temporary (Files/createTempFile parent ".seon-config-" ".edn"
+                                        (make-array java.nio.file.attribute.FileAttribute 0))]
+    (spit (str temporary) (pr-str value))
+    (Files/move temporary target
+                (into-array StandardCopyOption
+                            [StandardCopyOption/ATOMIC_MOVE
+                             StandardCopyOption/REPLACE_EXISTING]))
+    (str target)))
+
+(defn- hardware-observations []
+  (let [cores (.availableProcessors (Runtime/getRuntime))
+        system-memory-bytes
+        (if (= "Mac OS X" (System/getProperty "os.name"))
+          (parse-long (str/trim (:out (process/shell {:out :string}
+                                                     "sysctl" "-n" "hw.memsize"))))
+          (some->> (slurp "/proc/meminfo")
+                   (re-find #"(?m)^MemTotal:\s+(\d+)\s+kB$") second parse-long (* 1024)))
+        fd-soft-limit
+        (parse-long (str/trim (:out (process/shell {:out :string}
+                                                   "sh" "-c" "ulimit -n"))))]
+    {:seon.hardware/cores cores
+     :seon.hardware/system-memory-bytes system-memory-bytes
+     :seon.hardware/fd-soft-limit fd-soft-limit}))
+
 (defn select-manifest
-  "Select explicit config, or the shipped manifest only for a fresh database."
+  "Resolve the boot manifest once and attach its launch references."
   [configuration config-path]
   (let [root (:seon.dev.config/root configuration)
+        environment (:seon.dev.config/environment configuration)
+        born? (database-born? configuration)
         explicit (when config-path
                    (let [path (fs/path config-path)]
-                     (str (fs/normalize
-                           (if (fs/absolute? path)
-                             path
-                             (fs/path root path))))))
-        inherited
-        (get-in configuration [:seon.dev.config/environment "SEON_CONFIG"])
-        selected (or explicit inherited
-                     (when-not (database-born? configuration)
-                       (str (fs/path root "config/system.edn"))))]
-    (when (and selected (not (fs/regular-file? selected)))
-      (throw
-       (ex-info "The selected Seon config manifest does not exist."
-                {:seon.config/path selected})))
-    (cond-> configuration
-      selected
-      (assoc-in [:seon.dev.config/environment "SEON_CONFIG"] selected))))
+                     (str (fs/normalize (if (fs/absolute? path) path (fs/path root path))))))
+        inherited (get environment "SEON_CONFIG")
+        retained-path (str (fs/path (:seon.dev.config/cluster-dir configuration)
+                                    "config" "applied.edn"))
+        retained? (and (nil? explicit) (nil? inherited) born?
+                       (fs/regular-file? retained-path))
+        selected-path (or explicit inherited
+                          (when retained? retained-path)
+                          (str (fs/path root "config/system.edn")))
+        reconcile? (boolean (or explicit inherited (not born?)))
+        _ (when-not (fs/regular-file? selected-path)
+            (throw (ex-info "The selected Seon config manifest does not exist."
+                            {:seon.config/path selected-path})))
+        manifest (if retained?
+                   (edn/read-string (slurp selected-path))
+                   (config.resolve/read-manifest selected-path environment))
+        _ (when-not (m/validate :seon.config/manifest manifest)
+            (throw (ex-info "The resolved Seon config manifest is invalid."
+                            {:seon.config/path selected-path
+                             :seon.config/explanation
+                             (m/explain :seon.config/manifest manifest)})))
+        hardware (hardware-observations)
+        generation (System/currentTimeMillis)
+        envelope (config.resolve/resolve-envelope manifest hardware generation)
+        process-dir (or (:seon.dev.config/process-dir configuration)
+                        (str (fs/path root "tmp/seon-operator")))
+        manifest-path (str (fs/path process-dir "resolved-manifest.edn"))
+        envelope-path (str (fs/path process-dir "launch-envelope.edn"))
+        manifest-text (pr-str manifest)
+        _ (atomic-write-edn! manifest-path manifest)
+        _ (atomic-write-edn! envelope-path envelope)
+        descriptor
+        (when-let [base (:seon.dev.config/launch-descriptor configuration)]
+          (-> base
+              (assoc ::launch/resolved-manifest
+                     {::launch/path manifest-path
+                      ::launch/sha-256 (sha-256 manifest-text)
+                      ::launch/reconcile-manifest? reconcile?})
+              (assoc ::launch/operational-envelope envelope)
+              launch/validate-descriptor))]
+    (cond-> (assoc configuration
+                   :seon.dev.config/resolved-manifest manifest
+                   :seon.dev.config/resolved-manifest-path manifest-path
+                   :seon.dev.config/launch-envelope-path envelope-path
+                   :seon.dev.config/operational-envelope envelope
+                   :seon.dev.config/reconcile-manifest? reconcile?)
+      descriptor
+      (assoc :seon.dev.config/launch-descriptor descriptor)
+
+      reconcile?
+      (assoc-in [:seon.dev.config/environment "SEON_CONFIG"] selected-path))))
 
 (defn- unquote-value [value]
   (let [value (str/trim value)]
@@ -463,8 +537,6 @@
          :seon.dev.config/writer-repl-port
          (parse-long (get environment "SEON_WRITER_REPL_PORT" "0"))
          :seon.dev.config/writer-repl-port-file writer-port-file
-         :seon.dev.config/writer-max-heap
-         (get environment "SEON_WRITER_MAX_HEAP" default-writer-max-heap)
          :seon.dev.config/writer-output
          (or (:seon.dev.config/writer-output package)
              (str (fs/path root

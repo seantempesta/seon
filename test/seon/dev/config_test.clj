@@ -114,7 +114,12 @@
 (deftest writer-heap-policy-is-bounded-data
   (let [configuration (config/load! ".")
         descriptor (:seon.dev.config/launch-descriptor configuration)]
-    (is (= "512m" (config/writer-max-heap {})))
+    (is (nil? (config/writer-max-heap {}))
+        "heap selection is resolved from explicit hardware, never hidden here")
+    (is (= "512m"
+           (config/writer-max-heap
+            {:seon.dev.config/operational-envelope
+             {:seon.config.database.writer/jvm-heap-mb 512}})))
     (is (= "768m"
            (config/writer-max-heap
             {:seon.dev.config/writer-max-heap "768m"})))

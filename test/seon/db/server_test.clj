@@ -3,6 +3,7 @@
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is]]
             [datahike.api :as d]
+            [seon.config.resolve :as config.resolve]
             [seon.db.branch :as branch]
             [seon.db.protocol :as protocol]
             [seon.db.registry :as registry]
@@ -23,6 +24,22 @@
         (predicate) true
         (< (System/nanoTime) deadline) (do (Thread/sleep 25) (recur))
         :else false))))
+
+(defn- launch-envelope-file! [directory selected-processors]
+  (let [file (io/file directory "launch-envelope.edn")
+        envelope
+        (merge
+         (zipmap config.resolve/operational-keys (repeat 1))
+         {:seon.config.database.executor/selected-processors selected-processors
+          :seon.launch.envelope/generation 1
+          :seon.launch.envelope/hardware-observations
+          {:seon.hardware/cores selected-processors
+           :seon.hardware/system-memory-bytes (* 8 1024 1024 1024)
+           :seon.hardware/fd-soft-limit 1024}
+          :seon.launch.envelope/dispositions
+          (zipmap config.resolve/operational-keys (repeat :carried))})]
+    (spit file (pr-str envelope))
+    file))
 
 (deftype ThrowingPrintable [])
 
@@ -177,6 +194,7 @@
         request-socket (io/file directory "request.sock")
         result-file (io/file directory "application.edn")
         log-file (io/file directory "writer.log")
+        envelope-file (launch-envelope-file! directory 2)
         generation (str (random-uuid))
         java (io/file (System/getProperty "java.home") "bin" "java")
         command [(str java)
@@ -185,7 +203,8 @@
                  "clojure.main" "-m" "seon.db.server"
                  "--backend" "memory"
                  "--db-name" (str "terminal-process-" (random-uuid))
-                 "--req-sock" (.getPath request-socket)]
+                 "--req-sock" (.getPath request-socket)
+                 "--launch-envelope" (.getPath envelope-file)]
         builder (ProcessBuilder. ^java.util.List command)
         environment (.environment builder)]
     (.put environment "SEON_PROCESS_GENERATION" generation)
@@ -228,9 +247,11 @@
                             "seon-writer-prepl" (make-array java.nio.file.attribute.FileAttribute 0)))
         port-file (io/file directory "writer.port")
         request-socket (io/file directory "request.sock")
+        envelope-file (launch-envelope-file! directory 3)
         runtime (server/start! ["--backend" "memory"
                                 "--db-name" (str "prepl-" (random-uuid))
                                 "--req-sock" (.getPath request-socket)
+                                "--launch-envelope" (.getPath envelope-file)
                                 "--repl-port" "0"
                                 "--repl-port-file" (.getPath port-file)])]
     (try
@@ -257,10 +278,12 @@
                             "seon-writer-stop" (make-array java.nio.file.attribute.FileAttribute 0)))
         database-name (str "server-release-failure-" (random-uuid))
         request-socket (io/file directory "request.sock")
+        envelope-file (launch-envelope-file! directory 2)
         runtime
         (server/start! ["--backend" "memory"
                         "--db-name" database-name
-                        "--req-sock" (.getPath request-socket)])
+                        "--req-sock" (.getPath request-socket)
+                        "--launch-envelope" (.getPath envelope-file)])
         before
         (registry/resolve-connection
          {::registry/database-name (keyword database-name)})]

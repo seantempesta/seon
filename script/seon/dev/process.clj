@@ -18,6 +18,7 @@
             UnixDomainSocketAddress]
            [java.nio ByteBuffer]
            [java.nio.channels SocketChannel]
+           [java.nio.file Files StandardCopyOption]
            [java.time Instant]
            [java.security MessageDigest]
            [java.nio.charset StandardCharsets]))
@@ -549,16 +550,21 @@
      writer-id
      {:seon.dev.process/id writer-id
       :seon.dev.process/argv
-      [java "--add-modules" "jdk.incubator.vector"
-       "--enable-native-access=ALL-UNNAMED" "-XX:+UseG1GC"
-       (str "-Xmx" (config/writer-max-heap config))
-       "-jar" (:seon.dev.artifact/writer-output manifest)
-       "--backend" "file"
-       "--db-name" (:seon.dev.config/cluster-name config)
-       "--path" (str (fs/path (:seon.dev.config/cluster-dir config) "db"))
-       "--req-sock" (:seon.dev.config/request-socket config)
-       "--repl-port" (str (:seon.dev.config/writer-repl-port config))
-       "--repl-port-file" (:seon.dev.config/writer-repl-port-file config)]
+      (cond->
+       [java "--add-modules" "jdk.incubator.vector"
+        "--enable-native-access=ALL-UNNAMED" "-XX:+UseG1GC"
+        (str "-Xmx" (config/writer-max-heap config))
+        "-jar" (:seon.dev.artifact/writer-output manifest)
+        "--backend" "file"
+        "--db-name" (:seon.dev.config/cluster-name config)
+        "--path" (str (fs/path (:seon.dev.config/cluster-dir config) "db"))
+        "--req-sock" (:seon.dev.config/request-socket config)]
+        (:seon.dev.config/launch-envelope-path config)
+        (into ["--launch-envelope" (:seon.dev.config/launch-envelope-path config)])
+
+        true
+        (into ["--repl-port" (str (:seon.dev.config/writer-repl-port config))
+               "--repl-port-file" (:seon.dev.config/writer-repl-port-file config)]))
       :seon.dev.process/environment environment
       :seon.dev.process/dependencies []
       :seon.dev.process/readiness :seon.dev.process.readiness/writer
@@ -2070,6 +2076,21 @@
               {:seon.dev.process/id id})))
   nil)
 
+(defn- publish-applied-manifest!
+  [config]
+  (when (:seon.dev.config/reconcile-manifest? config)
+    (let [target (fs/path (:seon.dev.config/cluster-dir config)
+                          "config" "applied.edn")
+          parent (fs/parent target)
+          _ (fs/create-dirs parent)
+          temporary (Files/createTempFile parent ".seon-applied-" ".edn"
+                                          (make-array java.nio.file.attribute.FileAttribute 0))]
+      (spit (str temporary) (pr-str (:seon.dev.config/resolved-manifest config)))
+      (Files/move temporary target
+                  (into-array StandardCopyOption
+                              [StandardCopyOption/ATOMIC_MOVE
+                               StandardCopyOption/REPLACE_EXISTING])))))
+
 (defn ensure!
   "Reconcile one process to its exact argv, environment, artifact, and health."
   ([config spec] (ensure! config spec (fn [_ spawn!] (spawn!))))
@@ -2086,15 +2107,19 @@
                        :seon.dev.process/unavailable-external-processes
                        unavailable})))
          record (read-process config id)]
-     (if (converged? config spec)
-       record
-       (do
-         (require-startable-absence! config id record)
-         (clear-readiness! config id)
-         (prepare-readiness! config id)
-         (let [started
-               (start-owned! id #(spawn-detached! config spec))]
-           (wait-ready! config spec started)))))))
+     (let [ensured
+           (if (converged? config spec)
+             record
+             (do
+               (require-startable-absence! config id record)
+               (clear-readiness! config id)
+               (prepare-readiness! config id)
+               (let [started
+                     (start-owned! id #(spawn-detached! config spec))]
+                 (wait-ready! config spec started))))]
+       (when (= pod-id id)
+         (publish-applied-manifest! config))
+       ensured))))
 
 (defn prepare-watcher!
   "Start the sole client-output owner and await its first complete flush."

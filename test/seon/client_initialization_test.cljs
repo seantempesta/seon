@@ -10,9 +10,11 @@
    [seon.ai.generate-code :as generate-code]
    [seon.client :as client]
    [seon.config :as config]
+   [seon.config.resolve :as config.resolve]
    [seon.db :as db]
    [seon.db.internal :as db.internal]
    [seon.launch :as launch]
+   [seon.error :as error]
    [seon.runtime.admission :as admission]
    [seon.runtime.recovery :as recovery]
    [seon.schema :as schema]
@@ -22,6 +24,20 @@
 
 (def ^:private digest
   "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+
+(deftest doctored-launch-envelope-records-the-divergent-keys
+  (let [recorded (atom nil)
+        facts (zipmap config.resolve/operational-keys (repeat 1))
+        envelope
+        (merge facts
+               {:seon.config.database.executor/selected-processors 8})]
+    (with-redefs [error/with-configuration (fn [_ thunk] (thunk))
+                  error/record! (fn [fault] (reset! recorded fault))]
+      (#'client/prove-launch-configuration! envelope facts))
+    (is (= #{:seon.config.database.executor/selected-processors}
+           (set (keys (:seon.config/divergences
+                       (ex-data (:seon.error/raw @recorded)))))))
+    (is (= :core (:seon.error/fault @recorded)))))
 
 (deftest namespace-identities-use-the-symbol-storage-contract
   (is (m/validate :seon.ns/name 'my.orders))
@@ -266,9 +282,13 @@
           manifest {:seon.config/render
                     {:seon.config.render/eval-cap 42}}]
       (set! config/resolve-config-singleton
-            (fn [_]
-              (swap! resolve-count inc)
-              resolved))
+            (fn
+              ([_]
+               (swap! resolve-count inc)
+               resolved)
+              ([_ _]
+               (swap! resolve-count inc)
+               resolved)))
       (set! client/open-database-session!
             (fn [request]
               (reset! opened-configuration (::client/configuration request))

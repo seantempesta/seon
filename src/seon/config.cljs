@@ -45,10 +45,11 @@
    downstream where those shapes are registered (`install!` validates each block,
    `transact!` validates each skill row)."
   (:require
-    [aero.core :as aero]
+    [cljs.reader :as reader]
     [clojure.string :as str]
     [malli.core :as m]
     [malli.transform :as mt]
+    [seon.config.resolve :as resolve]
     [seon.platform :as platform]
     [seon.schema :as schema]))
 
@@ -185,7 +186,11 @@
    [:seon.config.database.pull/max-results
     {:optional true} :seon.config.database.pull/max-results]
    [:seon.config.database.pull/max-result-weight
-    {:optional true} :seon.config.database.pull/max-result-weight]])
+    {:optional true} :seon.config.database.pull/max-result-weight]
+   [:seon.config.database.writer/jvm-heap-mb {:optional true} :seon.config/cap]
+   [:seon.config.database.executor/selected-processors {:optional true} :seon.config/cap]
+   [:seon.config.database.transport/maximum-frame-bytes {:optional true} :seon.config/cap]
+   [:seon.config.database.transport/maximum-connections {:optional true} :seon.config/cap]])
 
 ;;; RENDER BOUNDS — the GLOBAL, cluster-wide render/value display caps (#46).
 ;;; These are NOT per-agent: they bound the value/eval/message renderers for
@@ -573,7 +578,39 @@
    [:seon.config/reactive-structural-settle-ms
     {:optional true} :seon.config/reactive-structural-settle-ms]
    [:seon.config/reactive-max-latency-ms
-    {:optional true} :seon.config/reactive-max-latency-ms]])
+    {:optional true} :seon.config/reactive-max-latency-ms]
+   [:seon.config.database.writer/jvm-heap-mb {:optional true} :seon.config/cap]
+   [:seon.config.database.executor/selected-processors {:optional true} :seon.config/cap]
+   [:seon.config.database.executor/maximum-queued-request-bytes {:optional true} :seon.config/cap]
+   [:seon.config.database.executor.read/maximum-active {:optional true} :seon.config/cap]
+   [:seon.config.database.executor.read/maximum-queued {:optional true} :seon.config/cap]
+   [:seon.config.database.executor.read/maximum-queued-by-database {:optional true} :seon.config/cap]
+   [:seon.config.database.executor.knn/maximum-active {:optional true} :seon.config/cap]
+   [:seon.config.database.executor.knn/maximum-queued {:optional true} :seon.config/cap]
+   [:seon.config.database.executor.knn/maximum-queued-by-database {:optional true} :seon.config/cap]
+   [:seon.config.database.executor.provider/maximum-active {:optional true} :seon.config/cap]
+   [:seon.config.database.executor.provider/maximum-queued {:optional true} :seon.config/cap]
+   [:seon.config.database.executor.provider/maximum-queued-by-database {:optional true} :seon.config/cap]
+   [:seon.config.database.executor.mutation/maximum-active {:optional true} :seon.config/cap]
+   [:seon.config.database.executor.mutation/maximum-queued {:optional true} :seon.config/cap]
+   [:seon.config.database.executor.mutation/maximum-queued-by-database {:optional true} :seon.config/cap]
+   [:seon.config.database.executor.delivery/maximum-active {:optional true} :seon.config/cap]
+   [:seon.config.database.executor.delivery/maximum-queued {:optional true} :seon.config/cap]
+   [:seon.config.database.executor.delivery/maximum-queued-by-database {:optional true} :seon.config/cap]
+   [:seon.config.database.executor.hnsw/maximum-active {:optional true} :seon.config/cap]
+   [:seon.config.database.executor.hnsw/maximum-queued {:optional true} :seon.config/cap]
+   [:seon.config.database.executor.hnsw/maximum-queued-by-database {:optional true} :seon.config/cap]
+   [:seon.config.database.transport/maximum-frame-bytes {:optional true} :seon.config/cap]
+   [:seon.config.database.transport/maximum-connections {:optional true} :seon.config/cap]
+   [:seon.config.database.transport/maximum-input-bytes {:optional true} :seon.config/cap]
+   [:seon.config.database.transport/maximum-response-slots {:optional true} :seon.config/cap]
+   [:seon.config.database.transport/maximum-session-response-slots {:optional true} :seon.config/cap]
+   [:seon.config.database.transport/maximum-output-bytes {:optional true} :seon.config/cap]
+   [:seon.config.database.transport/maximum-session-output-bytes {:optional true} :seon.config/cap]
+   [:seon.config.database.transport/shutdown-timeout-ms {:optional true} :seon.config/cap]
+   [:seon.config.database.transport/codec-workers {:optional true} :seon.config/cap]
+   [:seon.config.database.transport/codec-worker-queue-capacity {:optional true} :seon.config/cap]
+])
 
 (schema/register! :seon.config/manifest
   [:map
@@ -611,6 +648,22 @@
   [var-name]
   (platform/env-val var-name))
 
+(defn process-environment
+  "The pod environment as an explicit ordinary string map."
+  []
+  (into {}
+        (map (fn [key] [key (aget js/process.env key)]))
+        (js/Object.keys js/process.env)))
+
+(defn- process-hardware
+  "The pod's explicit hardware observations for non-launch callers."
+  []
+  (let [os (js/require "os")
+        available (max 1 (.-length (.cpus os)))]
+    {:seon.hardware/cores available
+     :seon.hardware/system-memory-bytes (.totalmem os)
+     :seon.hardware/fd-soft-limit 1024}))
+
 ;;; ── `#merge` COMPOSITION — the manifest-aware combine (config-merge trap,
 ;;; 2026-07-11) ──
 ;;; A per-cluster manifest (`config/acme.edn`, `config/minimal*.edn`) composes as
@@ -634,65 +687,19 @@
 ;;; default) is untouched. ONE merge rule, applied at the ONE composition seam.
 
 (defn- merge-home-requires
-  "Overlay additional home requires on the base vector by namespace identity.
-
-   A repeated namespace replaces its base require spec in place; a new
-   namespace appends. This keeps specialization additive while allowing a
-   deliberate alias/refer refinement without emitting duplicate requires."
+  "Overlay additional home requires on the base vector by namespace identity."
   [base additions]
   (reduce
-    (fn [requires spec]
-      (let [target (first spec)]
-        (if-let [index (first (keep-indexed
-                               (fn [i current]
-                                 (when (= target (first current)) i))
-                               requires))]
-          (assoc requires index spec)
-          (conj requires spec))))
-    (vec (or base []))
-    (or additions [])))
-
-(defn- combine-agent-context
-  "Combine a base `:seon.config/agent-context` map with an `override` map.
-
-   An `override` that declares `:seon.agent/ctx` REPLACES the whole map (the
-   documented replaces-wholesale contract the minimal.edn family relies on to
-   also drop the base `:seon.eval/home-requires`). A SPARSE `override` (no
-   `:seon.agent/ctx`) is a PATCH: scalar keys win, home requirements merge by
-   namespace identity, and every unstated key — the block tree included —
-   inherits from `base`. Matches [[resolve-agent-context]]'s
-   `explicit-ctx?` rule."
-  [base override]
-  (if (contains? override :seon.agent/ctx)
-    override
-    (cond-> (merge base override)
-      (contains? override :seon.eval/home-requires)
-      (assoc :seon.eval/home-requires
-             (merge-home-requires
-               (:seon.eval/home-requires base)
-               (:seon.eval/home-requires override))))))
-
-(defn- merge-manifest-pair
-  "Shallow-merge `override` over `base`, then re-combine the nested
-   `:seon.config/agent-context` maps via [[combine-agent-context]] so a sparse
-   override can never silently drop the base's block tree. Only that ONE key is
-   special-cased; every other top-level key keeps aero's shallow replace."
-  [base override]
-  (let [m (merge base override)]
-    (cond-> m
-      (and (map? (:seon.config/agent-context base))
-           (map? (:seon.config/agent-context override)))
-      (assoc :seon.config/agent-context
-             (combine-agent-context (:seon.config/agent-context base)
-                                    (:seon.config/agent-context override))))))
-
-;; OVERRIDE aero's built-in `#merge` (shipped `(apply merge values)`) with the
-;; manifest-aware fold. Registered at ns load — `seon.config` is the pod's ONLY
-;; aero user, so the blast radius is exactly the config-manifest composition this
-;; fixes. `values` is the vector of maps after the `#merge` tag.
-(defmethod aero/reader 'merge
-  [_opts _tag values]
-  (reduce merge-manifest-pair {} values))
+   (fn [requires spec]
+     (let [target (first spec)]
+       (if-let [index (first (keep-indexed
+                              (fn [i current]
+                                (when (= target (first current)) i))
+                              requires))]
+         (assoc requires index spec)
+         (conj requires spec))))
+   (vec (or base []))
+   (or additions [])))
 
 (defn- read-config-file
   "Read + resolve `path` via aero. The ONE reader seam — the manifest shape is
@@ -703,7 +710,7 @@
    `#merge` tag uses our manifest-aware [[merge-manifest-pair]] override above
    (a sparse agent-context override can never silently drop the block tree)."
   [path]
-  (aero/read-config path {}))
+  (resolve/read-manifest path (process-environment)))
 
 (defn load-manifest-path
   "Read and validate one explicitly selected manifest path.
@@ -737,6 +744,25 @@
   []
   (when-let [path (env "SEON_CONFIG")]
     (load-manifest-path path)))
+
+(defn load-resolved-manifest
+  "Read, digest-check, and validate one operator-resolved manifest value."
+  [{:seon.launch/keys [path sha-256]}]
+  (let [fs (js/require "fs")
+        crypto (js/require "crypto")
+        text (.readFileSync fs path "utf8")
+        actual (-> (.createHash crypto "sha256") (.update text "utf8") (.digest "hex"))
+        manifest (reader/read-string text)]
+    (when-not (= sha-256 actual)
+      (throw (ex-info "The resolved manifest digest does not match."
+                      {:seon.launch/expected-sha-256 sha-256
+                       :seon.launch/actual-sha-256 actual
+                       :seon.error/kind :core-bug})))
+    (when-not (m/validate :seon.config/manifest manifest)
+      (throw (ex-info "The resolved manifest value is invalid."
+                      {:seon.config/path path
+                       :seon.error/kind :core-bug})))
+    manifest))
 
 ;;; ============================================================
 ;;; NAMESPACES POLICY — the explicit-listing resolver (#42). The SHIPPED
@@ -848,130 +874,11 @@
    :datahike.resource/max-result-weight (* 1024 1024)})
 
 (defn resolve-config-singleton
-  "The FLAT `:seon.config` singleton entity map for `manifest`.
-
-   Every knob RESOLVED to its effective value (the default reproduces today's
-   byte-parity behavior). The one explicit pre-session resolution point seeds
-   the database. `:seon.config/system-text` is
-   OPTIONAL (no default): included ONLY when the manifest carries it; the exact
-   desired-state reconcile retracts a previously stored value when it is later
-   omitted."
-  {:malli/schema [:=> [:catn [::manifest :seon.config/manifest]] :seon.config/singleton]}
-  [manifest]
-  (let [r   (get manifest :seon.config/render {})
-        run (merge (default-run-policy) (get manifest :seon.config/run {}))
-        transport (get manifest :seon.config/model-transport {})
-        rep (get manifest :seon.config/repair {})
-        web (get manifest :seon.config/web {})
-        root (get manifest :seon.config/root {})
-        reactive (get manifest :seon.config/reactive {})
-        database (get manifest :seon.config/database {})
-        nsp (resolve-namespaces manifest)]
-    (cond-> {:seon.config/id cluster-config-id
-             :seon.config/repl-mode
-             (let [d (default-repl-mode)]
-               (coerce-enum (get manifest :seon.config/repl-mode d) #{:batch :stream} d))
-             :seon.config.run/batch-turn-limit
-             (:seon.config.run/batch-turn-limit run)
-             :seon.config.run/stream-form-limit
-             (:seon.config.run/stream-form-limit run)
-             :seon.config.run/deadline-ms
-             (:seon.config.run/deadline-ms run)
-             :seon.config/always     (:seon.config/always nsp)
-             :seon.config/on-core-error
-             (coerce-enum (get manifest :seon.config/on-core-error :gate) #{:crash :gate :log} :gate)
-             :seon.config/spawn-depth-cap
-             (let [v (get manifest :seon.config/spawn-depth-cap 1)] (if (and (int? v) (>= v 0)) v 1))
-             :seon.config.render/database-edn-cap   (get r :seon.config.render/database-edn-cap 16384)
-             :seon.config.render/eval-cap           (get r :seon.config.render/eval-cap 1500)
-             :seon.config.render/message-cap        (get r :seon.config.render/message-cap 4000)
-             :seon.config.render/result-body-cap    (get r :seon.config.render/result-body-cap 16384)
-             :seon.config.render/value-max-depth    (get r :seon.config.render/value-max-depth 3)
-             :seon.config.render/value-max-keys     (get r :seon.config.render/value-max-keys 8)
-             :seon.config.render/value-max-items    (get r :seon.config.render/value-max-items 8)
-             :seon.config.render/value-max-path-segments
-             (get r :seon.config.render/value-max-path-segments 32)
-             :seon.config.render/value-max-path-bytes
-             (get r :seon.config.render/value-max-path-bytes 4096)
-             :seon.config.render/value-max-realized-items
-             (get r :seon.config.render/value-max-realized-items 1024)
-             :seon.config.render/value-max-string   (get r :seon.config.render/value-max-string 80)
-             :seon.config.render/value-shape-sample (get r :seon.config.render/value-shape-sample 8)
-             :seon.config.render/value-verbatim-cap (get r :seon.config.render/value-verbatim-cap 1500)
-             :seon.config.render/value-width        (get r :seon.config.render/value-width 72)
-             :seon.config.render/render-fn-token-cap (get r :seon.config.render/render-fn-token-cap 2000)
-             :seon.config.render/whitespace     (get r :seon.config.render/whitespace :raw)
-             :seon.config.render/tabs           (get r :seon.config.render/tabs :literal)
-             :seon.config.render/trailing-ws    (get r :seon.config.render/trailing-ws :off)
-             :seon.config.render/content-layout (get r :seon.config.render/content-layout :structured)
-             :seon.config.render/line-numbers   (boolean (get r :seon.config.render/line-numbers false))
-             :seon.config.repair/level
-             (coerce-enum (get rep :seon.config.repair/level :symbols)
-                          #{:off :safe-syntax :symbols :aggressive} :symbols)
-             :seon.config.repair/max-fixes-per-form (get rep :seon.config.repair/max-fixes-per-form 1)
-             :seon.config.repair/budget-ms          (get rep :seon.config.repair/budget-ms 50)
-             :seon.config.repair/classes            (get rep :seon.config.repair/classes {})
-             :seon.agent.web/policy
-             (coerce-enum (get web :seon.agent.web/policy :public-only)
-                          #{:open :public-only :allowlist} :public-only)
-             :seon.agent.web/search-backend
-             (coerce-enum (get web :seon.agent.web/search-backend :gemini-grounding)
-                          #{:gemini-grounding :serper} :gemini-grounding)
-             :seon.agent.web/search-model    (get web :seon.agent.web/search-model "gemini-3.1-flash-lite")
-             :seon.agent.web/allowed-domains (vec (get web :seon.agent.web/allowed-domains []))
-             :seon.config.watchdog/stale-ms
-             (get-in manifest [:seon.config/watchdog :seon.config.watchdog/stale-ms] 1200000)
-             :seon.config.breaker/crash-count
-             (get-in manifest [:seon.config/schedule-breaker :seon.config.breaker/crash-count] 3)
-             :seon.config.breaker/window-ms
-             (get-in manifest [:seon.config/schedule-breaker :seon.config.breaker/window-ms] 1800000)
-             :seon.config.root/recent-limit
-             (get root :seon.config.root/recent-limit 12)
-             :seon.config/reactive-settle-ms
-             (get reactive :seon.config/reactive-settle-ms
-                  (:seon.config/reactive-settle-ms default-reactive-policy))
-             :seon.config/reactive-structural-settle-ms
-             (get reactive :seon.config/reactive-structural-settle-ms
-                  (:seon.config/reactive-structural-settle-ms default-reactive-policy))
-             :seon.config/reactive-max-latency-ms
-             (get reactive :seon.config/reactive-max-latency-ms
-                  (:seon.config/reactive-max-latency-ms default-reactive-policy))
-             :seon.config.database.query/max-work
-             (get database :seon.config.database.query/max-work
-                  (:seon.config.database.query/max-work default-database-query-policy))
-             :seon.config.database.query/max-results
-             (get database :seon.config.database.query/max-results
-                  (:seon.config.database.query/max-results default-database-query-policy))
-             :seon.config.database.query/max-result-weight
-             (get database :seon.config.database.query/max-result-weight
-                  (:seon.config.database.query/max-result-weight default-database-query-policy))
-             :seon.config.database.pull/max-work
-             (get database :seon.config.database.pull/max-work
-                  (:seon.config.database.pull/max-work default-database-pull-policy))
-             :seon.config.database.pull/max-results
-             (get database :seon.config.database.pull/max-results
-                  (:seon.config.database.pull/max-results default-database-pull-policy))
-             :seon.config.database.pull/max-result-weight
-             (get database :seon.config.database.pull/max-result-weight
-                  (:seon.config.database.pull/max-result-weight default-database-pull-policy))}
-      (contains? manifest :seon.config/system-text)
-      (assoc :seon.config/system-text (:seon.config/system-text manifest))
-      (contains? transport :seon.config.model-transport/response-identity-cap)
-      (assoc :seon.config.model-transport/response-identity-cap
-             (:seon.config.model-transport/response-identity-cap transport))
-      (contains? transport :seon.config.model-transport/endpoint-cap)
-      (assoc :seon.config.model-transport/endpoint-cap
-             (:seon.config.model-transport/endpoint-cap transport))
-      (contains? manifest :seon.config/context-profiles)
-      (assoc :seon.config/context-profiles (:seon.config/context-profiles manifest))
-      (contains? manifest :seon.config/model-variants)
-      (assoc :seon.config/model-variants (:seon.config/model-variants manifest))
-      (contains? manifest :seon.config/skills)
-      (assoc :seon.config/skills (:seon.config/skills manifest))
-      (contains? manifest :seon.config/agent-context)
-      (assoc :seon.config/agent-context (:seon.config/agent-context manifest))
-      (contains? manifest :seon.config/root-context)
-      (assoc :seon.config/root-context (:seon.config/root-context manifest)))))
+  "The resolved configuration singleton for one manifest."
+  ([manifest]
+   (resolve-config-singleton manifest (process-hardware)))
+  ([manifest hardware]
+   (resolve/resolve-config-singleton manifest (process-environment) hardware)))
 
 (defn reactive-policy
   "Returns the reactive-read timing policy from ordinary singleton data."
