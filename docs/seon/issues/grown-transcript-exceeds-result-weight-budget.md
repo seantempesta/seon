@@ -133,3 +133,27 @@ Datastar patch, so transport and stale hot-reload caching are not the cause.
 The current default root history has outgrown at least one maintained paged or
 grouped member bound. Re-run instrumented acquisition against this immutable
 database value and identify the exact failing member before changing any cap.
+
+The read-only diagnosis at database value `t=536875950`, commit ID
+`6a5f097b-70aa-54d3-94a5-3d1d8856222e`, identifies the exact member as the
+stage-one `(turns-query 50)`. Root had 330 turns. The production 65,536-byte
+result-weight limit failed; a diagnostic 131,072-byte limit succeeded with
+work 868, result count 862, and result weight 72,328. Limits 1, 10, and 50 all
+reported those same resource totals: Datahike orders the complete relation
+before applying the output limit.
+
+Clause isolation found the history-wide payload. The query weighed 4,413 with
+only turn time, 10,669 after run and scheduled fields, and 71,509 after adding
+`:seon.agent.turn/llm-usage`. The database contained 330 usage rows, 323
+nonempty, totaling 24,057 characters. The four-eval paging begins only after
+this query, so it cannot bound this stage. A diagnostic high-budget read warmed
+the exact-query cache without mutating the database; warm success therefore
+cannot count as proof.
+
+The correction must replace the history-wide ordered relation with bounded
+index work and then acquire payload only for the retained turn IDs. Raising the
+weight limit or asserting only returned rows/patch bytes does not close this
+issue. A cold real-writer regression must keep index visits, authority calls,
+work, result count, and result weight within fixed ceilings when old history
+grows from 50 to a large population while returning byte-identical newest
+turns in honest order.
