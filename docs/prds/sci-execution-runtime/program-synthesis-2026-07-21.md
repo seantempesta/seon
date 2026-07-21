@@ -258,6 +258,14 @@ the named boundaries.
   native code). The W0.7 hostile battery is a permanent test surface;
   every new capability ships its hostile gate.
 
+- **Key namespaces are a discoverability promise** (owner, 2026-07-21):
+  every key fully namespaced and spec'd, and the key's namespace is
+  where a reader would expect to find the functions operating on that
+  data. `:seon.handle/*` keys therefore require the handle operations
+  to live in a `seon.handle` namespace (or the keys take the real
+  owner's namespace) — decide at W6 spec time by placing the functions
+  first, then naming the keys after their owner. No vanity namespaces.
+
 ## Testing policy
 
 - **Behavior, never exact strings**: tests assert facts, transitions,
