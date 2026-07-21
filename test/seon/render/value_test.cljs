@@ -191,11 +191,28 @@
                                                    :max-map-visits 32}))
         a (into {} pairs)
         b (into {} (reverse pairs))
+        projected-pairs (mapv (fn [i]
+                                [(if (even? i)
+                                   [(keyword (str "display" i))]
+                                   (keyword (str "path" i)))
+                                 {:row/id i}])
+                              (range 24))
+        projected-a (v/sample configuration (into {} projected-pairs)
+                              {:max-keys 8 :max-map-visits 24})
+        projected-b (v/sample configuration (into {} (reverse projected-pairs))
+                              {:max-keys 8 :max-map-visits 24})
         reserved {:seon.render.value/elided-keys 99 :ordinary/value 1}
         reserved-out (v/render-ai configuration "reserved" reserved)]
     (is (= (render a) (render b))
         "ordinary persistent hash-map iteration is insertion-independent")
     (is (= 1 (count (set (repeatedly 25 #(render a))))))
+    (is (= (pr-str projected-a) (pr-str projected-b))
+        "insertion-equivalent projected keys produce identical bytes")
+    (is (= (:seon.render.value/non-drillable-key-indexes projected-a)
+           (:seon.render.value/non-drillable-key-indexes projected-b)))
+    (is (= (:seon.render.value/non-drillable-key-indexes projected-a)
+           (vec (sort (:seon.render.value/non-drillable-key-indexes
+                        projected-a)))))
     (is (= reserved (sampled-map (v/sample configuration reserved {})))
         "every user key stays inside the explicit entry collection")
     (is (= (pr-str reserved) reserved-out)
