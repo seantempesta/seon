@@ -25,7 +25,7 @@ transition ledger.
 | U2 | wrapper registry + capability op-id receipts | **DONE** |
 | U1.5 | pod dials the host: tier-as-data dispatch, one REAL turn end-to-end (pod renders, host evals) | **DONE** |
 | U4 | eval-record/receipt/corpus integration over the marked seams (subsumes register R2 — the program-row rejection diagnosis) | **DONE** |
-| U5 | toolkit port — CORRECTED SHAPE (codex probe 2026-07-20: the C1 ledger's 17 failures are private-helper dependency gaps, NOT the js shims; naive admission balloons to 91): (a) dependency-ordered context loader — topo-sort candidate blocks by their parsed requires (computed, reuse the require-edge parsing), (b) provision the full db/id + plan-internal + ctx-operation families through the U2 registry, (c) THEN the 17 shim conversions + 3 capability impls. Hold until U3 lands (context.clj collision) | corrected, after U3 |
+| U5 | toolkit port — corrected dependency loader → registry provisioning → stdlib shims shape | **DONE** `48b31f59`, `535e8c9d`, `f037cbbf`, `5ac8f0ef`, `67358be2` |
 | U3 | graduation walking skeleton (one corpus fn: fingerprint → both-tier tests → JVM eval → epoch re-link) | **DONE** `f53f5d94`, `a50845bd` |
 | U6 | instrumentation over sci vars (B1 deferred item 5) | after U4 |
 | U7 | park/idle policy + warm spares (owner-ruled shape) | after U1.5 |
@@ -570,6 +570,61 @@ function with one inline test. Cross-function compiled dependency
 loading, cooling-window policy, richer test refs, and canary promotion
 remain later graduation work; JVM eval is intentionally outside the SCI
 sandbox once the gate passes.
+
+### U5 — dependency-ordered toolkit port — DONE (2026-07-20)
+
+The corrected three-phase shape is implemented in dependency order.
+`seon.host.record` remains the one tools.reader owner for namespace forms,
+require edges, and host-feature form selection. `seon.host.context` discovers
+all `src/my` sources, topologically orders namespaces from those parsed
+requires, preserves source order within a namespace, and records one
+loaded/failed/excluded row for every discovered top-level definition. Cycles
+and parse/eval failures are values in the same ledger; no hand-ordered toolkit
+list exists.
+
+The pre-change direct-HEAD ledger was 8 files / 43 portable candidates:
+25 loaded and 18 failed. Phase (a)'s deliberately expanded, honest discovery
+ledger was 11 files / 167 portable candidates: 138 loaded, 29 failed, and 106
+excluded. After registry provisioning and shim conversion the host-selected
+ledger is 11 files / 273 total definitions: **162 portable, 162 loaded, 0
+failed, 111 excluded**. The count changes are intentional: discovery now
+includes every definition and reader-conditionals are classified from their
+`:clj` branch. An otherwise-portable caller of an excluded private helper is
+excluded with that exact dependency reason, not misreported as a portable
+failure.
+
+Registry provisioning reuses U2's live SCI vars for ordinary immutable values
+as well as functions. It supplies `seon.db.id` candidate generation and policy
+query data, database protocol operation/result vocabulary, schema definitions,
+token clipping, repair ranking, source-form reading, provider classification,
+content hashing, instant formatting, file reads/skill enumeration, and canvas
+field encoding. The portable owners are `.cljc`; the loader never eagerly
+requires the Node blob materialization family. Its remaining callers are the
+explicit JS-bound exclusions named in the ledger.
+
+The C2 “17 shims” count is 17 public functions and **18 offending forms**:
+
+| Portable conversion | Public functions/sites | Forms |
+|---|---|---:|
+| `.getTime` → `inst-ms` | `ready-leaves-from-rows`, `active-steps-from-rows`, `forest-from-rows`, `open-steps-from-rows`, `next`, `list-open`, `kb.shared/instructions` | 7 |
+| `js/Date.` → reader-selected JVM/CLJS constructor | `step!`, `plan!`, `commit-generated-terminal!`, `publish-generated-program!`, `done!`, `reconcile!`, `kb/remember` | 7 |
+| `js/parseInt` → reader-selected radix parse | `kb/remember` | 1 |
+| `.toISOString` → `seon.time/iso-string` | `plan.internal/stamp` | 1 |
+| `(.-message e)` → `ex-message` | `plan.internal/maybe-consult!` | 1 |
+| `js/Math.round` → non-negative portable rounding | `ui/progress` | 1 |
+
+Evidence on the frozen U5 source:
+
+- focused dependency/ledger proof: 2 tests / 12 assertions;
+- full writer: 265 tests / 2057 assertions, zero failures/errors;
+- kill drill PASS: both cold and rebuilt boot ledgers reported 162/162
+  portable loaded, 0 failed, 111 excluded; 20/20 EOF notices, 20/20 contexts
+  replayed and verified, 20/20 facts retained;
+- full CLJS: 1366 tests / 6497 assertions across 131 namespaces, zero
+  failures/errors (491 files compiled, zero warnings).
+
+The durable C1 and C2 reports are the available pre-change evidence. No C5
+report exists in this PRD, so U5 does not invent a C5 count.
 
 ### Decision gate
 

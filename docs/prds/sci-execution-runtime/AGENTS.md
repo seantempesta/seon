@@ -109,6 +109,18 @@ owner and deleted spec instead of building it — that is the bar).
 18. `my.blob` uses Node crypto for both hashing and temporary-file UUIDs.
     Extracting the hash owner does not remove the namespace's crypto
     dependency while `.randomUUID` remains.
+19. Reader conditionals are rejected in `.cljs` source. A toolkit owner with
+    real `:clj` and `:cljs` branches must be `.cljc`; renaming is part of the
+    portable change, not a later packaging cleanup.
+20. The corpus parser preserves reader conditionals, but the JVM loader must
+    classify and eval the tools.reader-selected `:clj` projection. Searching
+    the preserved source for `js/` falsely excludes a portable conditional;
+    selecting forms with a second parser is a duplicate mechanism.
+21. Bare SCI does not expose JVM `Date`, `Math`, `Long`, or their methods.
+    Prefer portable core operations (`inst-ms`) or a narrow registry-backed
+    `.cljc` owner (`seon.time/iso-string`) rather than widening SCI's class
+    allowlist. Registry vars may contain immutable protocol data as well as
+    functions; the closed wrapper union keeps those shapes explicit.
 
 ## Per-unit executable briefs (U4-U12)
 
@@ -123,12 +135,14 @@ path; the 27x log evidence is in
 a host-tier agent's defs appear as `:seon.fn` rows queryable next turn,
 dev evals record, full writer+cljs suites.
 
-U5 toolkit port: the 46% db-boundary `my.*` fns become `.cljc` calling
-the host's sync facade (the C1 failure ledger in
-`research/c1-jvm-host-scale-2026-07-20` names each blocked helper);
-js-bound survivors become pod-served capabilities via the registry.
-Gate: the C1 loader's failure ledger reaches zero portable failures;
-both suites.
+U5 toolkit port: first topologically order every discovered `my.*` namespace
+from `seon.host.record/ns-require-edges`, preserving source order inside it;
+then provision portable dependency families and immutable protocol values
+through the U2 registry; only then convert the C2 17-function/18-form stdlib
+table. Classify the tools.reader-selected host branch, never the preserved
+conditional source. JS-bound private helpers and their callers are exclusions
+with dependency reasons. Gate: zero portable failures, both boot ledgers in the
+kill drill, full writer + CLJS suites, and drill PASS.
 
 U3 graduation skeleton: ONE real corpus fn through fingerprint →
 both-tier differential tests → JVM `eval` compile → registry re-install
