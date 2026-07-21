@@ -106,7 +106,14 @@ and shared-tree/path-limited-commit rules.
 
 - **W0 — containment hardening** (critical path; gate: hostile-eval
   battery — each audit vector's attack form evaluated live; cluster
-  stays responsive, every other agent's turn completes):
+  stays responsive, every other agent's turn completes).
+  **W0.1 DONE `82a0c4b4`**: interrupt core/string merged at base,
+  wire-safe-value serializes under with-ctx (seam corrected by the
+  implementer's audit), graduation nursery tests run under their
+  originating context; runaways settle ~103ms on a 100ms deadline with
+  same-single-worker-host recovery; full writer gate 287/2193 green;
+  host audit found no other direct SCI invocation outside with-ctx.
+  Remaining sub-units:
   W0.1 merge interrupt core into `build-base!` + force/serialize eval
   results under `sci.ctx-store/with-ctx` (probe caveat) + pool
   fairness/queue bounds; W0.2 stamp base+registry vars `:sci/built-in`
