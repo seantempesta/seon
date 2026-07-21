@@ -865,6 +865,7 @@
              (is (= 1 (count @writes)))))
           (.finally
            (fn []
+             (set! db/query original-query)
              (set! db/pull original-pull)
              (set! message/message-transaction-for original-message)
              (set! db.id/allocate! original-allocate)))
