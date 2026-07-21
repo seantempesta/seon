@@ -177,6 +177,40 @@
         "an explicit compact pin overrides the require edge's narrow refer")
     (is (not (str/includes? out "HLP-BODY")))))
 
+(deftest narrow-refer-renders-a-marker-free-public-function-only
+  (let [current-row
+        (assoc eager-current-row
+               :seon.ns/require-edges
+               [{:seon.ns.require/target 'seon.agent
+                 :seon.ns.require/refers #{'set-purpose!}}])
+        agent-row
+        {:seon.ns/name 'seon.agent
+         :seon.db/tx 2
+         :seon.ns/source "(ns seon.agent)"
+         :seon.fn/_ns
+         [{:seon.fn/sym "seon.agent/set-purpose!"
+           :seon.fn/source "(defn set-purpose! [purpose] (SET-PURPOSE-BODY purpose))"
+           :seon.fn/fn-var? true
+           :seon.fn/private? false
+           :seon.fn/arglists "([purpose])"
+           :seon.fn/spec "[:=> [:cat :string] :boolean]"}
+          {:seon.fn/sym "seon.agent/unselected-sibling!"
+           :seon.fn/source "(defn unselected-sibling! [value] (SIBLING-BODY value))"
+           :seon.fn/fn-var? true
+           :seon.fn/private? false
+           :seon.fn/arglists "([value])"
+           :seon.fn/spec "[:=> [:cat :string] :boolean]"}]}
+        out (@#'nss/format-namespaces-block
+             (assoc (eager-input)
+                    :seon.agent.ctx.namespaces/namespace-rows
+                    [current-row agent-row]))]
+    (is (str/includes? out "seon.agent/set-purpose!")
+        "the persisted refer edge selects a public schema-complete function")
+    (is (not (str/includes? out "seon.agent/unselected-sibling!"))
+        "a narrow refer does not widen to the namespace's public surface")
+    (is (not (str/includes? out "SET-PURPOSE-BODY"))
+        "the selected function is a compact contract, not full source")))
+
 (deftest explicit-empty-compact-card-remains-visible
   (let [empty-row {:seon.ns/name 'my.empty
                    :seon.db/tx 3
