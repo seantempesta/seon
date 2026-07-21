@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, schema, rendering]
 ---
@@ -29,6 +29,23 @@ browser would otherwise need to repeat matching or expose a schema-blind tree.
 `seon.render.value/render-html-data` owns the one plain-data projection. It
 consumes the activated `seon.schema` APIs and Malli's explanation projections;
 no renderer-local registry, cache, database read, or UI mechanism belongs here.
+
+## Resolution
+
+Commit `cac9e660` extends the existing `render-html-data` projection in place.
+It samples once, reuses that identical skeleton and strict completeness fact,
+and consumes only activated `candidate-shapes`, `matching-shapes`, and
+`explain-shape`. Complete matches emit ordered `:valid` rows; a complete
+near-match emits one primary `:invalid` row with Malli `humanize` and
+`error-value` data; incomplete evidence emits only `:shape-only` rows.
+
+The focused `seon.render.value-test` gate passed 44 tests / 176 assertions.
+Its logical million-entry map bounded the sampler to 33 entry enumerations and
+the independent schema-input pass to 32, left the poisoned value beyond the
+window unrealized, visited exactly 32 indexed schema references, and retained
+an exact omitted-key count. Seven independent marker probes made validation
+and explanation counters remain zero. Existing opaque 100 MiB logical-printer
+and ordinary huge-string capped-writer falsifiers passed in the same gate.
 
 ## Acceptance
 

@@ -173,6 +173,17 @@ sampling happens once. Unit 1A must first freeze one public activated-projection
 explainer API with argument, nil, and generation tests; Unit 1B may not invent
 a second registry walk for invalid-value explanations.
 
+Unit 1B is implemented by `cac9e660`. `render-html-data` now keeps its existing
+single sampled skeleton and completeness fact while adding activated-only
+ordered `:valid`, `:invalid`, and `:shape-only` schema rows plus invalid-only
+Malli explanation projections. Its focused gate passed 44 tests / 176
+assertions: the million-entry map bounded sampler and schema-input work, left
+the poison value untouched, and visited exactly 32 schema references; every
+partial marker suppressed validation and explanation; the existing opaque and
+capped-writer poison falsifiers remained green. Downstream hiccup, dispatch,
+route, drill, and child-transport consumers remain ordered after this plain-data
+contract.
+
 Before transport, close
 [[../../seon/issues/projected-map-keys-are-not-drill-paths]] and
 [[../../seon/issues/value-drill-has-no-total-work-bounds]]: drill paths must

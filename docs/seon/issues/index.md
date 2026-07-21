@@ -10,12 +10,11 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (43)
+## Blocker (42)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Accept Datahike collections when building the execution program](database-program-query-results-can-be-sets.md) | blocker | agent |
-| [Add activated schema status to the HTML value projection](html-value-projection-omits-activated-schema-status.md) | blocker | Core |
 | [Arbitrary database results collide with the error shape](arbitrary-database-results-collide-with-error-shape.md) | blocker | Core |
 | [Arbitrary eval allocation lacks hard process memory containment](eval-process-isolation-memory-containment.md) | blocker | agent |
 | [Bind clean-or-force evidence to one exact managed generation](clean-or-force-evidence-can-cross-or-falsely-report-absence.md) | blocker | Core |
