@@ -9,6 +9,7 @@
    [malli.core :as m]
    [malli.registry :as mr]
    [seon.config :as config]
+   [seon.content-hash :as content-hash]
    [seon.db :as db]
    [seon.db.protocol :as db.protocol]
    [seon.error :as error]
@@ -478,10 +479,7 @@
   "Return the canonical SHA-256 identity of one authored source value."
   {:malli/schema [:=> [:cat :any] ::digest]}
   [value]
-  (let [crypto (js/require "node:crypto")]
-    (-> (.createHash crypto "sha256")
-        (.update (if (string? value) value (pr-str value)) "utf8")
-        (.digest "hex"))))
+  (content-hash/sha-256 (if (string? value) value (pr-str value))))
 
 (defn invocation-plan
   "Build one ordinary authored call plan."

@@ -8,7 +8,6 @@
    leave only compact hashes and projections in the database."
   (:refer-clojure :exclude [get])
   (:require
-    ["node:crypto" :as crypto]
     ["node:fs" :as nfs]
     ["node:path" :as npath]
     [clojure.string :as str]
@@ -16,6 +15,7 @@
     [seon.db :as db]
     [seon.dev.restore.schema]
     [my.blob.schema]
+    [seon.content-hash :as content-hash]
     [seon.platform :as platform]
     [seon.schema :as schema]))
 
@@ -210,9 +210,7 @@
 (defn- sha256
   "SHA-256 hex digest of `s` (utf-8 bytes) — the blob's content address."
   [s]
-  (-> (.createHash crypto "sha256")
-      (.update s "utf8")
-      (.digest "hex")))
+  (content-hash/sha-256 s))
 
 (defn- normalize-storage-view
   "Normalize one explicit storage view, or return an errors-as-data envelope."
