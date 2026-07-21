@@ -474,13 +474,25 @@
     (.append params "offset" (str offset))
     (str value-route-base "?" (.toString params))))
 
-(defn- value-identity
-  [render-request value-request path]
+(defn value-unit-id
+  "Stable DOM id for one authorized logical value subtree."
+  {:malli/schema
+   [:=> [:catn [::render-request :seon.render/section-request]
+                [::value-selector :seon.render/value-selector]
+                [::path :seon.render.value/path]]
+    :string]}
+  [render-request value-selector path]
   (str "seon-value-"
        (view-unit/identity-token
          (merge {:seon.agent/id (:seon.agent/id render-request)
                  :seon.render/path-text (pr-str path)}
-                (:seon.render/value-selector value-request)))))
+                value-selector))))
+
+(defn- value-identity
+  [render-request value-request path]
+  (value-unit-id render-request
+                 (:seon.render/value-selector value-request)
+                 path))
 
 (defn- drill-control [value-request path offset label]
   [:button {:type "button"

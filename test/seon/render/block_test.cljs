@@ -264,6 +264,9 @@
                 (get-in (render/block :html configuration
                                       {:seon.agent/id agent} request)
                         [1 :id]))]
+    (is (= (render/value-unit-id {:seon.agent/id "a"} selector [:a])
+           (id-of "a" request-a))
+        "the public consumer helper and rendered response name one root")
     (is (= (id-of "a" request-a) (id-of "a" request-b)))
     (is (= (id-of "a" request-a)
            (id-of "a" (into (array-map) (reverse (seq request-a))))))
@@ -276,6 +279,21 @@
                                     [:seon.render/value-projection
                                      :seon.render.value/path]
                                     [:b]))))))
+
+(deftest value-unit-id-is-sensitive-only-to-agent-selector-and-path
+  (let [request {:seon.agent/id "agent-a"}
+        eval-selector {:seon.render/eval-id "eval-a"}
+        id (render/value-unit-id request eval-selector [:answer])]
+    (is (= id (render/value-unit-id request eval-selector [:answer])))
+    (is (not= id (render/value-unit-id {:seon.agent/id "agent-b"}
+                                       eval-selector [:answer])))
+    (is (not= id (render/value-unit-id request
+                                       {:seon.render/eval-id "eval-b"}
+                                       [:answer])))
+    (is (not= id (render/value-unit-id request eval-selector [:other])))
+    (is (not= id (render/value-unit-id request
+                                       {:seon.render/entity-id 42}
+                                       [:answer])))))
 
 (deftest value-controls-serialize-one-inert-encoded-url
   (let [hostile-base "/agent/');globalThis.pwned=true;//value"
