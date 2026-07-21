@@ -5,7 +5,7 @@ severity: cleanup
 tags: [issue, database, architecture]
 ---
 
-# Unify the two AsyncLocalStorage stores; rename with-tx-context → with-tx-meta
+# Unify agent and operation AsyncLocalStorage
 
 ## Problem
 
@@ -37,3 +37,21 @@ mechanism for "context that rides onto a tx."
 ## Related
 
 - [[concepts/reactive-context]]
+
+## Corrected owner ruling (2026-07-20)
+
+[[../../prds/source-cleanup/research/als-tx-meta-unification-boundary-2026-07-20]]
+(`5c140e9a`) confirms the carrier duplication but rejects the literal
+`with-tx-meta` rename. The current ambient map also carries a pinned database
+value, full configuration, eval namespace, turn, branch head, commit callback,
+and test state. Datahike persists every transaction-metadata entry, so naming
+or treating that entire process-local map as tx metadata would erase a safety
+boundary.
+
+The implementation instead collapses `tx-context` and `agent-context` into one
+closed operation-context ALS, keeps the invocation-local read-evidence ALS
+separate, and derives only registered transaction metadata at submission.
+`without-agent` removes identity while preserving other operation facts. The
+source cut follows Stage-4 full-config propagation and a mandatory post-U4
+inventory, then atomically deletes all old carrier symbols and proves async
+isolation plus exact persisted provenance.

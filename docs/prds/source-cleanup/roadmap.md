@@ -346,6 +346,16 @@ begins with one per-operation pinned database-value + full-config ALS contract;
 existing Aero reconciliation, high-natural limits, managed identities, and
 additive home-requires are retained rather than rebuilt.
 
+The later carrier convergence is grounded by
+[[research/als-tx-meta-unification-boundary-2026-07-20]] (`5c140e9a`). Stage 4
+first establishes the final per-operation database/config population. Stage 5
+then collapses agent and transaction contexts into one operation-context ALS,
+keeps read-evidence collection separate, and derives only registered durable
+transaction metadata. The obsolete proposal to call the whole ambient map
+`tx-meta` is rejected because Datahike persists every metadata entry and the
+map contains process-local values. A post-U4 host/provenance inventory is an
+implementation precondition.
+
 From the config report: collapse duplicated defaults (7890, port files,
 cluster dir) to one declaration consumed by `config.clj`, `launch.cljc`,
 and `db/server.clj`; migrate runtime env gates (`SEON_WEB`, `SEON_SHELL`,
