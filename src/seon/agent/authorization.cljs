@@ -1,9 +1,9 @@
-(ns seon.agent.internal
-  "Support agent lifecycle functions with shared data transformations.
+(ns seon.agent.authorization
+  "Authorize management of agents through their parent relationships.
 
-   This internal namespace centralizes scoped-agent error values and
-   parent-graph authorization used by the public lifecycle surface. It is not
-   rendered as agent-facing source and does not own lifecycle policy.")
+   This namespace owns scoped-agent authorization error values and the
+   parent-graph authorization rule shared by the public agent surfaces. It
+   does not own lifecycle policy.")
 
 (def managed-agent-selector
   "Agent facts needed by the parent-tree authorization rule."

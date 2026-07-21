@@ -62,7 +62,7 @@
   (:require
     [clojure.string :as str]
     [seon.agent.home :as home]
-    [seon.agent.internal :as internal]
+    [seon.agent.authorization :as authorization]
     [seon.agent.message :as msg]
     [seon.agent.ctx :as ctx]
     [seon.agent.ctx.namespaces :as ctx-namespaces]
@@ -862,7 +862,7 @@
         (await
          (db/pull
           {::db/db database
-           ::db/pull-pattern internal/managed-agent-selector
+           ::db/pull-pattern authorization/managed-agent-selector
            ::db/ref [:seon.agent/id agent-id]}))]
     (if (error-value? agent)
       agent
@@ -934,7 +934,7 @@
             (await
              (db/pull-many
               {::db/db database
-               ::db/pull-pattern (into '[*] internal/managed-agent-selector)
+               ::db/pull-pattern (into '[*] authorization/managed-agent-selector)
                ::db/refs refs
                ::db/max-results agent-creation-max-results
                ::db/max-result-weight 1048576}))]
@@ -1154,7 +1154,7 @@
        (spawn-child-with-retry!
         "delegate!" parent-id model-variant purpose default-turn-limit content
         namespace false))
-      (internal/no-agent-error "delegate!"))))
+      (authorization/no-agent-error "delegate!"))))
 
 ;; ============================================================
 ;; message! lives in [[seon.agent.message]]. Re-exported here so
@@ -1218,7 +1218,7 @@
             ":seon.agent/id or call inside (seon.db/with-agent id …).")}
 
       (nil? caller-id)
-      (internal/no-agent-error "set-purpose!")
+      (authorization/no-agent-error "set-purpose!")
 
       :else
       (let [database (await (db/db))]
@@ -1228,12 +1228,12 @@
                 (await
                  (db/pull
                   {::db/db database
-                   ::db/pull-pattern internal/managed-agent-selector
+                   ::db/pull-pattern authorization/managed-agent-selector
                    ::db/ref [:seon.agent/id id]}))]
             (cond
               (error-value? target) target
-              (not (internal/manages? caller-id target))
-              (internal/unauthorized-target-error "set-purpose!" caller-id id)
+              (not (authorization/manages? caller-id target))
+              (authorization/unauthorized-target-error "set-purpose!" caller-id id)
               :else
               (let [res
                     (await
@@ -1277,7 +1277,7 @@
              (db/pull
               {::db/db database
                ::db/pull-pattern
-               (into internal/managed-agent-selector
+               (into authorization/managed-agent-selector
                      [:seon.eval/home-requires
                       {:seon.agent/namespace [:db/id :seon.ns/name]}])
                ::db/ref [:seon.agent/id target-id]
@@ -1288,8 +1288,8 @@
                      (agent-from-entity stored-target))]
         (cond
           (error-value? target) target
-          (not (internal/manages? caller-id target))
-          (internal/unauthorized-target-error
+          (not (authorization/manages? caller-id target))
+          (authorization/unauthorized-target-error
            "set-namespace!" caller-id target-id)
           (:seon.agent/terminated-at target)
           {:seon.error/message
@@ -1397,7 +1397,7 @@
        (str "set-namespace!: no agent in scope — pass "
             ":seon.agent/id or call inside (seon.db/with-agent id …).")}
       (nil? caller-id)
-      (internal/no-agent-error "set-namespace!")
+      (authorization/no-agent-error "set-namespace!")
       :else
       (loop [attempt 1]
         (let [result

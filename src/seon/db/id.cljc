@@ -19,7 +19,6 @@
              [datahike.db.utils :as dbu]
              [datahike.writer :as writer]
              [datahike.writing :as writing]])
-   #?@(:cljs [[seon.db.internal :as db.internal]])
    #?@(:cljs [["@paralleldrive/cuid2" :as cuid2]
               ["human-id" :as human-id]]))
   #?@(:bb []
@@ -1110,7 +1109,7 @@
      (defn- attach-dependent-identities!
        "Attach the builder's public candidate-key claims to the private generated
    manifest sent through the existing serialized-writer field. This keeps the
-   transaction shape unchanged: `seon.db.internal` already forwards the
+   transaction shape unchanged: `seon.db` already forwards the
    generated manifest, and the writer strips that whole manifest before
    Datahike sees the domain transaction."
        [manifest dependent-identities]
@@ -1355,7 +1354,6 @@
                          :seon.error/kind :core-bug})))
             (let [[built manifest]
                   (normalize-built-allocation! candidate-manifest raw-built)
-                  _ (db.internal/assert-invocation-shape! built)
                   transaction-request
                   (allocation-transaction-request database built manifest)
                   result (await (db/transact! transaction-request))]

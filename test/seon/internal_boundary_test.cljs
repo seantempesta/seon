@@ -13,7 +13,7 @@
         parent — one suffix rule, no per-namespace special-casing."
   (:require
     [cljs.test :refer [deftest is]]
-    [seon.agent.internal :as agent.internal]
+    [seon.agent.authorization :as authorization]
     [seon.agent.ctx.ns-name :as ns-name]
     [seon.agent.ctx.namespaces :as ns]
     [seon.config :as config]))
@@ -22,7 +22,6 @@
 ;; whose body it backs). NONE may leak to an agent.
 (def ^:private internal-nses
   '[seon.db.internal
-    seon.agent.internal
     seon.agent.search.internal
     seon.agent.fs.internal])
 
@@ -59,20 +58,20 @@
               :seon.agent/parent
               {:seon.agent/id "parent"
                :seon.agent/parent {:seon.agent/id "root"}}}]
-    (is (agent.internal/manages? "child" tree))
-    (is (agent.internal/manages? "parent" tree))
-    (is (agent.internal/manages? "root" tree))
-    (is (not (agent.internal/manages? "other" tree)))
-    (is (not (agent.internal/manages? nil tree)))
-    (is (not (agent.internal/manages? "root" nil)))
-    (is (not (agent.internal/manages?
+    (is (authorization/manages? "child" tree))
+    (is (authorization/manages? "parent" tree))
+    (is (authorization/manages? "root" tree))
+    (is (not (authorization/manages? "other" tree)))
+    (is (not (authorization/manages? nil tree)))
+    (is (not (authorization/manages? "root" nil)))
+    (is (not (authorization/manages?
               "other"
               {:seon.agent/id "cycle-a"
                :seon.agent/parent
                {:seon.agent/id "cycle-a"}})))
     (is (string?
-         (:seon.error/message (agent.internal/no-agent-error "pause"))))
+         (:seon.error/message (authorization/no-agent-error "pause"))))
     (is (string?
          (:seon.error/message
-          (agent.internal/unauthorized-target-error
+          (authorization/unauthorized-target-error
            "pause" "child" "other"))))))

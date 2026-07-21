@@ -10,7 +10,7 @@
   (:require
    [clojure.string :as str]
    [seon.agent.home :as home]
-   [seon.agent.internal :as internal]
+   [seon.agent.authorization :as authorization]
    [seon.agent.loop :as loop]
    [seon.agent.message :as message]
    [seon.agent.run :as run]
@@ -173,12 +173,12 @@
         (await
          (db/pull
           {::db/db database
-           ::db/pull-pattern internal/managed-agent-selector
+           ::db/pull-pattern authorization/managed-agent-selector
            ::db/ref [:seon.agent/id target-id]}))]
     (cond
       (error-value? target) target
-      (not (internal/manages? caller-id target))
-      (internal/unauthorized-target-error function-name caller-id target-id)
+      (not (authorization/manages? caller-id target))
+      (authorization/unauthorized-target-error function-name caller-id target-id)
       :else target)))
 
 (defn- stale-database-error?
@@ -240,7 +240,7 @@
                       agent-id (:seon.agent.run/id current) :waited
                       (js/Date.))}))]
               (if (error-value? report) report :idle))))))
-    (internal/no-agent-error "wait")))
+    (authorization/no-agent-error "wait")))
 
 (def ^:private completion-agent-selector
   '[:db/id :seon.agent/id
@@ -378,7 +378,7 @@
                           (completion-transaction-data
                            agent-id run-id result result-ref nil nil
                            (js/Date.))}))))))))))))
-    (internal/no-agent-error "complete")))
+    (authorization/no-agent-error "complete")))
 
 (defn ^:async ^:private complete*
   [result result-ref]
@@ -407,7 +407,7 @@
    (let [caller-id (db/current-agent-id)
          target-id (or target-id caller-id)]
      (if-not caller-id
-       (internal/no-agent-error "pause")
+       (authorization/no-agent-error "pause")
        (let [database (await (db/db))]
          (if (error-value? database)
            database
@@ -445,7 +445,7 @@
      (let [caller-id (db/current-agent-id)
            target-id (or target-id caller-id)]
        (if-not caller-id
-         (internal/no-agent-error "resume")
+         (authorization/no-agent-error "resume")
          (let [database (await (db/db))]
            (if (error-value? database)
              database
@@ -520,4 +520,4 @@
     (if (= "root" target-id)
       (error-value "terminate: the cluster root cannot be terminated.")
       (await (retry-stale! #(terminate-once caller-id target-id))))
-    (internal/no-agent-error "terminate")))
+    (authorization/no-agent-error "terminate")))
