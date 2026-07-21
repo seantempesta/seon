@@ -224,6 +224,14 @@ ruled 32/4,096/1,024 defaults. Transport waits for one explicit public drill
 request/result/error schema and one effective-limit normalizer contract; route
 and child may not infer different envelopes from prose.
 
+Unit 1C's projection repair is implemented by `edd0d2e7`: retained entries now
+carry ascending final-output `non-drillable-key-indexes`, admitted scalar keys
+remain the exact lookup values, and unsafe originals never enter the skeleton.
+The focused gate passed 47 tests and 199 assertions, including the instrumented
+million-entry work/poison boundary and Unit 1B shape-only propagation. The
+projected-key issue remains open for the later route and UI no-request proofs;
+those consumers may not recover a path from a display marker.
+
 That public boundary is frozen by
 [[research/value-drill-public-schema-ruling-2026-07-20]] (`ec86accb`): closed
 producer-neutral request, effective limits, drilled projection, schema status

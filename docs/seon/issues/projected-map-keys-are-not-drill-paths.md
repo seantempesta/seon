@@ -35,3 +35,17 @@ or for a separately proven opaque path token that safely crosses IPC.
   replacement value.
 - Ordinary retained scalar keys remain deterministically drillable.
 - Focused sampler, route, and UI tests cover both branches.
+
+## Projection repair evidence (2026-07-20)
+
+Commit `edd0d2e7` replaces the unusable projected-key count with ascending
+`:seon.render.value/non-drillable-key-indexes` in final retained-entry order.
+The focused `seon.render.value-test` gate passed 47 tests and 199 assertions,
+including bounded million-entry map work, hostile key printers, final-output
+indexing, exact original-key lookup, deterministic bytes, non-finite and
+negative-zero refusal, and shape-only schema projection.
+
+The issue remains open. The later route and UI units must still prove that a
+marked entry and all descendants emit no drill request, while an admitted
+original scalar key reaches the owning child value through the strict path
+codec.
