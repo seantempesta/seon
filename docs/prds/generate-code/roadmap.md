@@ -28,10 +28,47 @@ ledger for the staged implementation below.
 Stages 1–5, root-only scheduler recovery, and atomic addressed terminal
 delivery are now source-complete and live-proven. Evidence-derived namespace
 completion landed at `f457232a`; its stopped-input gate passed 44 tests/183
-assertions and the rebuilt two-namespace live proof remains the acceptance
-checkpoint. The remaining workflow is not yet public or end-to-end:
-embedding-ranked context augmentation, the public wrapper, and live graduation
-remain open.
+assertions.
+
+Embedding-ranked context augmentation and the public wrapper landed at
+`68d19cca`. `seon.ai.generate-code/ranked-namespaces!` searches the one
+`seon.embed` function-source corpus with the plan goal/description/expect,
+filters usable rows through `seon.agent.ctx.ns-name/included-ns?`, groups by
+canonical namespace symbol keeping each namespace's best distance with the
+namespace name as the deterministic tie-break, and degrades to `[]` when
+embedding is disabled, empty, or an error envelope. The exact ranked compact
+presence-set replaces (never unions) the assigned agent's existing
+`:namespaces` block through `seon.agent.ctx/install!`, preserving every other
+block dial; exact full selections win over compact; empty ranked evidence
+writes nothing. It runs at planner launch and per dispatch burst in
+`ensure-and-claim!`. `seon.ai/generate-code!` (agent-facing, errors as
+values, injected caller id) launches the `:planning`-variant planner, commits
+the generated root + its addressed planning assignment + the root claim in
+ONE `db.id/allocate!` transaction, then installs the root scheduler with the
+`:execution` variant. Focused gate: 16 tests/69 assertions plus my.plan
+44/184. The unranked fallback is the honestly proven live path (SEON_EMBED
+was off in the graduation environment); ranked proof is stub-level only.
+
+Live graduation (2026-07-21, isolated `gencode` cluster) is PARTIAL. Proven
+against real providers: the wrapper committed roots whose message/claim/
+agent/from facts satisfied the `generated-root` rule; planner agents birthed
+with copied `:planning` values (Kimi K3 and, after two live K3 timeouts, the
+Muse gateway at ~6–9 s replies); `restore-root-schedulers!` restored every
+open root across many hot reloads and cold restarts; the DAG published a
+namespace step for one root; and three roots reached the `:blocked` terminal
+whose compact addressed result envelope (status, progress, steps, error) the
+caller received as an ordinary message. Two latent defects found and fixed
+live: the parse-forms closed-options regression that failed every `:batch`
+turn ([[../../seon/issues/archive/parse-forms-closed-options-broke-batch-turns]],
+`793a8ea6`) and cause-query result-node budgets that datahike charges per
+candidate rule row rather than per projected value (`dee42356`, `882fbe1c`,
+plus the eval-evidence container fix). NOT yet closed: the A-green/B-repair
+completion checkpoint — every green-path drive was killed by concurrent-lane
+churn on the shared tree (mid-edit compile faults, artifact churn killing the
+execution child, and repeated whole-supervisor cycles), and a planner run
+that fails before publication strands its root `:open` with no re-drive
+([[../../seon/issues/generated-root-has-no-planner-retry-path]]). Stage 8
+therefore remains open; rerun the one two-namespace drive on a quiet tree.
 
 The preparatory context cleanup is complete at `e205dc9e`: namespace rendering
 has one configuration owner, the `:namespaces` block. Cluster
@@ -738,29 +775,21 @@ Exit:
 
 ## Next implementation boundary
 
-The earliest unsettled contract is embedding-ranked namespace augmentation
-through the existing namespaces block. Search the existing function-source
-corpus only, filter usable function rows, rank each namespace by its best
-distance with deterministic tie-breaking, and reconcile exact compact/full
-presence sets. Disabled, unavailable, or failed search leaves deterministic
-selection unchanged. Exact full selections still win over compact selections;
-tests stay excluded; compact `.internal` namespaces stay excluded while an
-explicit exact full `.internal` pin remains allowed; warm reassignment replaces
-rather than unions both presence sets; and every other namespaces-block dial is
-preserved.
-
-Exit for this boundary:
-
-- a goal and problem description produce deterministic ranked namespace
-  candidates from the existing function embedding corpus;
-- the ranking groups functions by canonical namespace symbol and uses the best
-  hit per namespace with stable tie-breaking;
-- embedding-disabled, empty, or failed retrieval preserves the deterministic
-  catalog and configured selections without error;
-- the existing `:namespaces` block is the only rendered and persisted source
-  selection mechanism; and
-- focused and live context proof shows the selected compact/full code without
-  clipping, stale warm-agent accumulation, or a second context block.
-
-The public wrapper remains downstream of this contract and the rebuilt live
-A-green/B-repair completion checkpoint.
+The embedding-ranked augmentation contract and the public wrapper landed at
+`68d19cca` (see Current status). The earliest unsettled contract is now the
+Stage 8 live completion checkpoint: one two-namespace goal driven on a QUIET
+tree through `seon.ai/generate-code!`, with the valid namespace accepted
+immediately, one warm repair worker fixing only the deliberately failing
+namespace, the dependent namespace starting only after its prerequisite, and
+the caller receiving the accurate compact `:done` result. The 2026-07-21
+drives proved root commit, real-provider planning turns, restore, DAG
+publication, and `:blocked` terminal delivery, but every green path was
+killed by concurrent-lane churn; the checkpoint requires a stable source
+freeze. Before or with that drive, close the planner re-drive gap
+([[../../seon/issues/generated-root-has-no-planner-retry-path]]): a planner
+run that closes `:error` with no published DAG must either re-issue the
+planning assignment through the existing message/claim mechanism or commit
+the `:blocked` terminal with its error evidence. Embedding-ranked selection
+also still needs a live SEON_EMBED-enabled context proof (compact/full
+rendering without clipping or stale warm-agent accumulation); only the
+unranked fallback is live-proven.
