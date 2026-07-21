@@ -196,6 +196,13 @@ mechanism work, `low` for mechanical/doc packages. Every spec carries
 the ruling-10 grounding preamble, exact owned paths, falsifiable gates,
 and shared-tree/path-limited-commit rules.
 
+Spec-grounding rule (owner, 2026-07-21 evening, after repeated sol
+stop-reports exposed interface guesses): a MECHANISM spec gets a
+source-grounding pass before sol sees it — the interfaces, signatures,
+and seams the spec names are verified against real source (by the
+orchestrator or a read-only refinement agent whose doc cites file:line
+or says NOT GROUNDED). Sol pushback is the safety net, not the plan.
+
 - **W0 — containment hardening** (critical path; gate: hostile-eval
   battery — each audit vector's attack form evaluated live; cluster
   stays responsive, every other agent's turn completes).
