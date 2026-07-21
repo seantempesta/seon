@@ -244,6 +244,20 @@ ordered/indexed representation. Sequence and set paging retain the
 `offset + page-size + 1` work bound. This preserves insertion-equivalent byte
 identity and bounded work; no downstream transport or UI may relax either.
 
+Implementation readiness
+[[research/value-drill-schema-normalizer-implementation-readiness-2026-07-20]]
+(`8f8ae9e9`) corrects the predicate placement without weakening the contract.
+Registered public shapes remain closed pure EDN; deep sampled-tree,
+explanation, and error-data validation runs at public producer/transport
+function boundaries with explicit visit/depth/string/collection budgets. One
+named closed `:seon.render.value/limit-normalization-request` owns the config
+singleton plus optional operation limits, and `seon.config` references it
+without a reverse require. Unit 1E lands shapes/predicates/normalizer before
+Unit 1F changes descent and paging. Map byte identity is scoped to repeated
+sampling of the same stable immutable concrete value and iteration order;
+arbitrary equal-but-differently-implemented partial maps are never claimed to
+be canonically sortable under bounded work.
+
 Unit 1D's configuration leaves are implemented in the existing config owner:
 the closed render policy and flat singleton now carry the ruled
 32-segment/4,096-byte/1,024-item defaults, the shipped manifest states the same
