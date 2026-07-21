@@ -340,10 +340,18 @@ IN FLIGHT / UNCOMMITTED:
 - **W0.4 writer pool dispatched to Codex** (medium effort) per
   `specs/w0.4-writer-pool.md`; owns `src/seon/host/context.clj`,
   `src/seon/host.clj`, new `test/seon/host_pool_writer_test.clj`.
-- **Fable W6 package-host design lane** (writes
-  `research/w6-package-host-design-2026-07-21.md`) — check for the file
-  on restart; a second Fable lane already RETURNED the error-quality
-  design (committed).
+- **W6 package-host design RETURNED and accepted**
+  (`research/w6-package-host-design-2026-07-21.md`): ledger-first
+  per-cluster packages/, two disposable `seon.packages.host` platform
+  impls over the one UDS envelope, `seon.handle` decided
+  functions-first, WP-K→(WP-B∥WP-J)→WP-H→WP-W→WP-S cut; WP-K is
+  parallel-safe NOW (no W0.x file overlap). Five owner decisions
+  batched with the error-quality design's three — awaiting the owner.
+- **Namespace-hierarchy design lane running** (owner-requested
+  refactor of all namespaces + host.clj decomposition; writes
+  `research/namespace-hierarchy-design-2026-07-21.md`). Sequencing
+  law: host-file moves land only after W0.4/WP-A/W0.6; zero effort on
+  W5 death-row bands.
 
 If a lane died mid-work: uncommitted changes sit in the shared tree on
 its owned paths — review the diff against `specs/<unit>.md`, finish or
