@@ -5,6 +5,7 @@
    bounds are respected, paths survive, opaque handles project, lazy seqs
    never over-realize, the drill hint appears iff the view is partial."
   (:require
+    [cognitect.transit :as transit]
     [cljs.test :as t :refer [deftest is testing]]
     [cljs.reader :as reader]
     [clojure.string :as str]
@@ -197,6 +198,34 @@
                         (entries (inc i))))))]
       (entries 0))))
 
+(deftype ThrowingCountMap [n visits]
+  IMap
+  (-dissoc [this _] this)
+  ICounted
+  (-count [_] (throw (js/Error. "count is hostile")))
+  ISeqable
+  (-seq [_]
+    (letfn [(entries [i]
+              (lazy-seq
+                (when (< i n)
+                  (swap! visits inc)
+                  (cons [(keyword (str "t" i)) i]
+                        (entries (inc i))))))]
+      (entries 0))))
+
+(deftype ThrowingLookupMap []
+  IMap
+  (-dissoc [this _] this)
+  ILookup
+  (-lookup [_ _] (throw (js/Error. "lookup is hostile")))
+  (-lookup [_ _ _] (throw (js/Error. "lookup is hostile"))))
+
+(deftype ThrowingSeqMap []
+  IMap
+  (-dissoc [this _] this)
+  ISeqable
+  (-seq [_] (throw (js/Error. "seq is hostile"))))
+
 (deftest shallow-bounded-data-validation-does-not-enumerate-a-container
   (let [visits (atom 0)
         poison (KeyedCountingMap.
@@ -206,6 +235,327 @@
     (is (schema/valid-candidate-value? :seon.render.value/bounded-data poison))
     (is (zero? @visits)
         "the shallow map? slot leaves deep bounded validation to its owner")))
+
+(defn- drill-request
+  [path offset page-size realized-max]
+  {:seon.render.value/path path
+   :seon.render.value/offset offset
+   :seon.render.value/effective-limits
+   {:seon.config.render/value-max-path-segments 32
+    :seon.config.render/value-max-path-bytes 4096
+    :seon.config.render/value-max-realized-items realized-max
+    :seon.render.value/page-size page-size}})
+
+(defn- exact-counting-seq
+  [visits poison-at]
+  (letfn [(step [i]
+            (lazy-seq
+              (swap! visits inc)
+              (when (= i poison-at)
+                (throw (js/Error. "touched poison beyond page budget")))
+              (cons i (step (inc i)))))]
+    (step 0)))
+
+(declare with-active-projection)
+
+(deftest drill-value-rejects-before-descent-or-realization
+  (let [visits (atom 0)
+        value (CountingMap. 1000000 visits (constantly :untouched))]
+    (doseq [request [nil
+                     :not-a-map
+                     (drill-request [] 9 8 16)
+                     (drill-request (vec (repeat 33 :x)) 0 8 1024)
+                     (assoc (drill-request [] 0 8 1024)
+                            :seon.render.value/unknown true)]]
+      (let [result (v/drill-value configuration value request)]
+        (is (false? (:seon.render.value/ok? result)))
+        (is (= :user-input (get-in result [:seon/error :seon.error/kind])))))
+    (is (zero? @visits)
+        "invalid requests never enumerate or descend into the live value")))
+
+(deftest drill-value-caps-hostile-request-map-admission
+  (let [visits (atom 0)
+        poison-touches (atom 0)
+        request (KeyedCountingMap.
+                  1000000 visits
+                  (fn [i] (keyword "hostile" (str "k" i)))
+                  (fn [i]
+                    (if (< i 4)
+                      i
+                      (do (swap! poison-touches inc)
+                          (throw (js/Error. "request admission over-walk"))))))
+        result (v/drill-value configuration :untouched request)]
+    (is (false? (:seon.render.value/ok? result)))
+    (is (= 4 @visits) "three allowed request keys plus one sentinel")
+    (is (zero? @poison-touches))))
+
+(deftest drill-value-descends-only-through-exact-map-and-vector-segments
+  (let [value {:safe [{:answer 42}]}
+        found (v/drill-value configuration value
+                             (drill-request [:safe 0 :answer] 0 4 32))
+        missing (v/drill-value configuration value
+                               (drill-request [:safe 1] 0 4 32))
+        seq-path (v/drill-value configuration '(1 2 3)
+                                (drill-request [0] 0 4 32))]
+    (is (true? (:seon.render.value/ok? found)))
+    (is (= 42 (get-in found [:seon.render.value/projection
+                             :seon.render.value/tree])))
+    (is (false? (:seon.render.value/ok? missing)))
+    (is (false? (:seon.render.value/ok? seq-path))
+        "sequences and sets never acquire positional descent semantics")))
+
+(deftest drill-value-turns-hostile-lookup-and-realization-into-closed-failures
+  (let [lookup-result (v/drill-value configuration (ThrowingLookupMap.)
+                                     (drill-request [:x] 0 4 32))
+        visits (atom 0)
+        realization-result
+        (v/drill-value configuration (exact-counting-seq visits 2)
+                       (drill-request [] 0 4 32))]
+    (is (false? (:seon.render.value/ok? lookup-result)))
+    (is (false? (:seon.render.value/ok? realization-result)))
+    (is (= 3 @visits)
+        "the throwing element is observed, but no later source item is touched")))
+
+(deftest drill-value-sequence-paging-has-an-exact-total-work-bound
+  (let [visits (atom 0)
+        value (exact-counting-seq visits 8)
+        result (v/drill-value configuration value
+                              (drill-request [] 3 4 7))
+        projection (:seon.render.value/projection result)]
+    (is (true? (:seon.render.value/ok? result)))
+    (is (= 8 @visits)
+        "offset + page-size + one sentinel are the only source touches")
+    (is (= [3 4 5 6]
+           (get-in projection [:seon.render.value/tree
+                               :seon.render.value/shown])))
+    (is (= :seq (get-in projection [:seon.render.value/tree
+                                    :seon.render.value/kind])))
+    (is (true? (:seon.render.value/more? projection)))
+    (is (true? (:seon.render.value/truncated? projection)))
+    (is (= [] (:seon.render.value/schemas projection)))))
+
+(deftest drill-value-enforces-the-ruled-1025-touch-ceiling
+  (let [visits (atom 0)
+        value (exact-counting-seq visits 1025)
+        accepted (v/drill-value configuration value
+                                (drill-request [] 1016 8 1024))]
+    (is (true? (:seon.render.value/ok? accepted)))
+    (is (= 1025 @visits))
+    (is (= (vec (range 1016 1024))
+           (get-in accepted [:seon.render.value/projection
+                             :seon.render.value/tree
+                             :seon.render.value/shown]))))
+  (let [visits (atom 0)
+        refused (v/drill-value configuration
+                               (exact-counting-seq visits 0)
+                               (drill-request [] 1017 8 1024))]
+    (is (false? (:seon.render.value/ok? refused)))
+    (is (zero? @visits))))
+
+(deftest drill-value-map-window-is-bounded-honest-and-nonpageable
+  (let [visits (atom 0)
+        poison-touches (atom 0)
+        value (CountingMap.
+                1000000 visits
+                (fn [i]
+                  (if (< i 5)
+                    i
+                    (do (swap! poison-touches inc)
+                        (throw (js/Error. "map poison beyond sentinel"))))))
+        request (drill-request [] 0 4 16)
+        first-result (v/drill-value configuration value request)
+        first-tree (get-in first-result [:seon.render.value/projection
+                                         :seon.render.value/tree])
+        visits-after-first @visits
+        second-result (v/drill-value configuration value request)
+        offset-result (v/drill-value configuration value
+                                     (drill-request [] 1 4 16))]
+    (is (= 5 visits-after-first)
+        "a million-entry map touches one bounded page plus the sentinel")
+    (is (= 10 @visits)
+        "repeating the same stable value repeats the exact bounded work")
+    (is (zero? @poison-touches))
+    (is (= 4 (count (:seon.render.value/map-entries first-tree))))
+    (is (= :more (:seon.render.value/elided-keys first-tree)))
+    (is (false? (get-in first-result [:seon.render.value/projection
+                                      :seon.render.value/more?]))
+        "map omission is honest but never advertised as pageable")
+    (is (= (pr-str first-result) (pr-str second-result))
+        "the same concrete map and iteration order produce identical bytes")
+    (is (false? (:seon.render.value/ok? offset-result)))
+    (is (= 10 @visits)
+        "nonzero map offset is refused before source entry access")))
+
+(deftest drill-value-never-trusts-or-calls-a-partial-maps-count
+  (let [visits (atom 0)
+        result (v/drill-value configuration (ThrowingCountMap. 1000000 visits)
+                              (drill-request [] 0 4 16))
+        projection (:seon.render.value/projection result)]
+    (is (true? (:seon.render.value/ok? result)))
+    (is (= 5 @visits))
+    (is (= :more (get-in projection [:seon.render.value/tree
+                                     :seon.render.value/elided-keys])))
+    (is (true? (:seon.render.value/truncated? projection)))
+    (is (= [] (:seon.render.value/schemas projection)))))
+
+(deftest bounded-deep-result-validation-rejects-marker-and-index-corruption
+  (let [limits (:seon.render.value/effective-limits
+                 (drill-request [] 0 1 32))
+        good (v/drill-value configuration {:safe 1}
+                            (drill-request [] 0 1 32))
+        projection (:seon.render.value/projection good)
+        tree (:seon.render.value/tree projection)
+        bad-index (assoc-in good
+                            [:seon.render.value/projection
+                             :seon.render.value/tree
+                             :seon.render.value/non-drillable-key-indexes]
+                            [0 0])
+        unknown-marker (assoc-in good
+                                 [:seon.render.value/projection
+                                  :seon.render.value/tree
+                                  :seon.render.value/unknown]
+                                 true)
+        poison (js-obj)
+        visited (atom [])
+        oversized-tree
+        {:seon.render.value/kind :vector
+         :seon.render.value/shown
+         (conj (vec (range 16)) poison)}]
+    (is (v/bounded-drill-result? good limits))
+    (is (not (v/bounded-drill-result? bad-index limits)))
+    (is (not (v/bounded-drill-result? unknown-marker limits)))
+    (is (not (binding [v/*bounded-tree-visit!* #(swap! visited conj %)]
+               (v/bounded-sampled-tree? oversized-tree limits))))
+    (is (not-any? #(identical? poison %) @visited)
+        "a poison child one past the collection budget is never visited")
+    (is (= tree (:seon.render.value/tree projection)))))
+
+(deftest bounded-result-validation-enforces-path-size-and-frame-fields
+  (let [request (drill-request [] 0 4 32)
+        limits (:seon.render.value/effective-limits request)
+        good (v/drill-value configuration [1 2] request)
+        huge-name (apply str (repeat 5000 "x"))
+        huge-keyword (keyword huge-name)
+        forged
+        [(assoc-in good [:seon.render.value/projection
+                         :seon.render.value/path]
+                   (vec (repeat 33 :x)))
+         (assoc-in good [:seon.render.value/projection
+                         :seon.render.value/summary]
+                   huge-name)
+         (assoc-in good [:seon.render.value/projection
+                         :seon.render.value/page-size]
+                   5)
+         (assoc-in good [:seon.render.value/projection
+                         :seon.render.value/offset]
+                   31)
+         (assoc-in good [:seon.render.value/projection
+                         :seon.render.value/tree]
+                   huge-keyword)
+         (assoc-in good [:seon.render.value/projection
+                         :seon.render.value/path]
+                   [huge-name])
+         (assoc-in good [:seon.render.value/projection
+                         :seon.render.value/schemas]
+                   [{:seon.schema/key huge-keyword
+                     :seon.schema/entity? false
+                     :seon.render.value/status :valid}])
+         {:seon.render.value/ok? false
+          :seon/error {:seon.error/message "failed"
+                       :seon.error/kind huge-keyword}}]]
+    (is (v/bounded-drill-result? good limits))
+    (doseq [result forged]
+      (is (not (v/bounded-drill-result? result limits))))))
+
+(deftest public-deep-validators-are-total-on-hostile-containers
+  (let [limits (:seon.render.value/effective-limits
+                 (drill-request [] 0 4 32))]
+    (doseq [candidate [(ThrowingSeqMap.) (ThrowingLookupMap.)]]
+      (is (false? (v/bounded-sampled-tree? candidate limits)))
+      (is (false? (v/bounded-drill-result? candidate limits))))))
+
+(deftest drill-result-union-round-trips-through-the-existing-transit-codec
+  (let [request (drill-request [] 0 4 32)
+        limits (:seon.render.value/effective-limits request)
+        available (v/drill-value configuration [1 2] request)
+        projection (:seon.render.value/projection available)
+        unavailable {:seon.render.value/ok? true
+                     :seon.render.value/availability :unavailable
+                     :seon.render.value/projection projection
+                     :seon.render.value/recompute? true}
+        failed {:seon.render.value/ok? false
+                :seon/error {:seon.error/message "retired"
+                             :seon.error/kind :unavailable}}
+        writer (transit/writer :json)
+        reader (transit/reader :json)]
+    (doseq [result [available unavailable failed]]
+      (is (v/bounded-drill-result? result limits))
+      (is (= result (transit/read reader (transit/write writer result)))))))
+
+(deftest drill-schema-validation-and-explanation-run-only-for-complete-slices
+  (let [attr :value-test.drill/value
+        shape :value-test.drill/shape
+        forms {attr :int shape [:map [attr attr]]}
+        request (drill-request [] 0 4 32)]
+    (with-active-projection
+      forms
+      (fn []
+        (let [matching-calls (atom 0)
+              explain-calls (atom 0)
+              original-matching schema/matching-shapes
+              original-explain schema/explain-shape]
+          (with-redefs [schema/matching-shapes
+                        (fn [value]
+                          (swap! matching-calls inc)
+                          (original-matching value))
+                        schema/explain-shape
+                        (fn [schema-key value]
+                          (swap! explain-calls inc)
+                          (original-explain schema-key value))]
+            (let [complete (v/drill-value configuration {attr 1} request)
+                  invalid (v/drill-value configuration {attr "wrong"} request)
+                  after-complete @matching-calls
+                  after-explain @explain-calls
+                  partial (v/drill-value configuration (range)
+                                         request)]
+              (is (true? (:seon.render.value/ok? complete)))
+              (is (= :valid
+                     (get-in complete [:seon.render.value/projection
+                                       :seon.render.value/schemas 0
+                                       :seon.render.value/status])))
+              (is (pos? after-complete))
+              (is (= 1 after-explain))
+              (is (contains? (:seon.render.value/projection invalid)
+                             :seon.render.value/explanation))
+              (is (= after-complete @matching-calls)
+                  "a sentinel-partial slice performs no schema validation")
+              (is (= after-explain @explain-calls)
+                  "a sentinel-partial slice performs no schema explanation")
+              (is (= [] (get-in partial [:seon.render.value/projection
+                                         :seon.render.value/schemas]))))))))))
+
+(deftest drill-result-admits-the-schema-owners-full-candidate-cap
+  (let [attr :value-test.drill-cap/value
+        shapes (into {}
+                     (map (fn [i]
+                            [(keyword "value-test.drill-cap" (str "shape-" i))
+                             [:map [attr attr]]]))
+                     (range schema/shape-candidate-limit))
+        forms (assoc shapes attr :int)]
+    (with-active-projection
+      forms
+      (fn []
+        (let [candidate-visits (atom 0)
+              result (binding [schema/*candidate-visit!*
+                               (fn [_] (swap! candidate-visits inc))]
+                       (v/drill-value configuration {attr 1}
+                                      (drill-request [] 0 1 32)))
+              rows (get-in result [:seon.render.value/projection
+                                   :seon.render.value/schemas])]
+          (is (true? (:seon.render.value/ok? result)))
+          (is (= schema/shape-candidate-limit (count rows)))
+          (is (<= @candidate-visits schema/shape-candidate-limit))
+          (is (every? #(= :valid (:seon.render.value/status %)) rows)))))))
 
 (deftype HugePrintedRecord [writes]
   IRecord

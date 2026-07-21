@@ -1022,6 +1022,504 @@
                       :seon.render.value/error-value error-value})))
           {:seon.render.value/schemas []})))))
 
+(defn- drill-failure
+  [message]
+  {::ok? false
+   :seon/error {:seon.error/message message
+                :seon.error/kind :user-input}})
+
+(defn- exact-map-keys?
+  [value expected]
+  (when (map? value)
+    (let [entries (into [] (take (inc (count expected))) value)]
+      (and (= (count expected) (count entries))
+           (= expected (into #{} (map first) entries))))))
+
+(defn- admitted-effective-limits?
+  [limits]
+  (and (exact-map-keys?
+         limits
+         #{:seon.config.render/value-max-path-segments
+           :seon.config.render/value-max-path-bytes
+           :seon.config.render/value-max-realized-items
+           ::page-size})
+       (every? safe-positive-int?
+               ((juxt :seon.config.render/value-max-path-segments
+                      :seon.config.render/value-max-path-bytes
+                      :seon.config.render/value-max-realized-items
+                      ::page-size)
+                limits))))
+
+(defn- admitted-drill-request?
+  [request]
+  (and (exact-map-keys? request #{::path ::offset ::effective-limits})
+       (let [{::keys [path offset effective-limits]} request]
+         (and (vector? path)
+              (admitted-effective-limits? effective-limits)
+              (safe-nonnegative-int? offset)
+              (let [max-segments
+                    (:seon.config.render/value-max-path-segments
+                      effective-limits)]
+                (and (<= (count path) max-segments)
+                     (every? drill-path-segment? path)
+                     (<= (reduce
+                           (fn [n segment]
+                             (+ n (cond
+                                    (string? segment) (count segment)
+                                    (or (keyword? segment) (symbol? segment))
+                                    (+ (count (name segment))
+                                       (if-some [ns (namespace segment)]
+                                         (inc (count ns)) 0))
+                                    :else 16)))
+                           0
+                           path)
+                         (:seon.config.render/value-max-path-bytes
+                           effective-limits))))
+              (let [page-size (::page-size effective-limits)
+                    realized-max
+                    (:seon.config.render/value-max-realized-items
+                      effective-limits)
+                    total (+ offset page-size)]
+                (and (safe-nonnegative-int? total)
+                     (<= total realized-max)))))))
+
+(defn- descend-one
+  [value segment]
+  (cond
+    (map? value)
+    (if (contains? value segment)
+      {::found? true ::value (get value segment)}
+      {::found? false})
+
+    (vector? value)
+    (if (and (safe-nonnegative-int? segment) (< segment (count value)))
+      {::found? true ::value (nth value segment)}
+      {::found? false})
+
+    :else {::found? false}))
+
+(defn- descend-path
+  [value path]
+  (reduce
+    (fn [{::keys [found? value] :as state} segment]
+      (if found?
+        (descend-one value segment)
+        (reduced state)))
+    {::found? true ::value value}
+    path))
+
+(defn- collection-kind [value]
+  (cond
+    (vector? value) :vector
+    (set? value) :set
+    :else :seq))
+
+(defn- paged-collection
+  [value offset page-size]
+  (let [head+1 (into [] (comp (drop offset) (take (inc page-size))) value)
+        more? (> (count head+1) page-size)]
+    {::page (if more? (pop head+1) head+1)
+     ::more? more?}))
+
+(defn- bounded-map-window
+  [value page-size]
+  (let [entries+1 (into [] (take (inc page-size)) value)
+        more? (> (count entries+1) page-size)
+        entries (if more? (pop entries+1) entries+1)]
+    {::page (into {} entries)
+     ::more? more?
+     ::elided-keys (when more? :more)}))
+
+(defn- drill-summary
+  [value]
+  (cond
+    (map? value) "map"
+    (vector? value) (str "vector " (count value) " items")
+    (set? value) "set"
+    (coll? value) "seq"
+    (opaque? value) "opaque"
+    :else "scalar"))
+
+(defn- ascending-distinct-indexes?
+  [indexes entry-count]
+  (and (vector? indexes)
+       (<= (count indexes) entry-count)
+       (every? safe-nonnegative-int? indexes)
+       (every? #(< % entry-count) indexes)
+       (= indexes (vec (distinct (sort indexes))))))
+
+(defn- allowed-map-keys?
+  [value allowed]
+  (when (map? value)
+    (let [entries (into [] (take (inc (count allowed))) value)]
+      (and (<= (count entries) (count allowed))
+           (every? allowed (map first entries))))))
+
+(defn- marker-map-valid?
+  [value max-collection]
+  (cond
+    (contains? value :seon.render.value/map-entries)
+    (let [entries (:seon.render.value/map-entries value)
+          indexes (:seon.render.value/non-drillable-key-indexes value)]
+      (and (allowed-map-keys?
+             value
+             #{:seon.render.value/map-entries
+               :seon.render.value/elided-keys
+               :seon.render.value/non-drillable-key-indexes})
+           (vector? entries)
+           (<= (count entries) max-collection)
+           (every? #(and (vector? %) (= 2 (count %))) entries)
+           (or (nil? indexes)
+               (ascending-distinct-indexes? indexes (count entries)))
+           (let [elided (:seon.render.value/elided-keys value)]
+             (or (nil? elided) (= :more elided)
+                 (safe-positive-int? elided)))))
+
+    (contains? value :seon.render.value/kind)
+    (and (allowed-map-keys?
+           value
+           #{:seon.render.value/kind
+             :seon.render.value/shown
+             :seon.render.value/elided
+             :seon.render.value/shape})
+         (contains? #{:vector :set :seq} (:seon.render.value/kind value))
+         (vector? (:seon.render.value/shown value))
+         (<= (count (:seon.render.value/shown value)) max-collection)
+         (let [elided (:seon.render.value/elided value)]
+           (or (nil? elided) (= :more elided) (safe-positive-int? elided)))
+         (let [shape (:seon.render.value/shape value)]
+           (or (nil? shape)
+               (and (vector? shape) (<= (count shape) max-collection)))))
+
+    (contains? value :seon.render.value/pruned)
+    (and (allowed-map-keys?
+           value #{:seon.render.value/pruned :seon.render.value/count})
+         (contains? #{:map :vector :set :seq}
+                    (:seon.render.value/pruned value))
+         (let [n (:seon.render.value/count value)]
+           (or (nil? n) (safe-nonnegative-int? n))))
+
+    (contains? value :seon.render.value/string-len)
+    (and (exact-map-keys?
+           value #{:seon.render.value/string-len :seon.render.value/head})
+         (safe-nonnegative-int? (:seon.render.value/string-len value))
+         (string? (:seon.render.value/head value)))
+
+    (contains? value :seon.eval/opaque)
+    (and (allowed-map-keys? value #{:seon.eval/opaque :seon.eval/summary})
+         (string? (:seon.eval/opaque value))
+         (let [summary (:seon.eval/summary value)]
+           (or (nil? summary) (string? summary))))
+
+    (contains? value :seon.eval/datom)
+    (and (exact-map-keys? value #{:seon.eval/datom})
+         (vector? (:seon.eval/datom value))
+         (= 3 (count (:seon.eval/datom value))))
+
+    :else false))
+
+(def ^:dynamic *bounded-tree-visit!*
+  "Optional test hook called for each deep-validator node visit."
+  nil)
+
+(defn- bounded-tree-node
+  [value remaining depth max-depth max-collection max-string]
+  (when (and (pos? remaining) (<= depth max-depth))
+    (when *bounded-tree-visit!* (*bounded-tree-visit!* value))
+    (cond
+      (string? value) (when (<= (count value) max-string) (dec remaining))
+      (or (nil? value) (boolean? value) (number? value))
+      (dec remaining)
+
+      (or (keyword? value) (symbol? value))
+      (when (<= (+ (count (name value))
+                   (if-some [ns (namespace value)] (inc (count ns)) 0))
+                max-string)
+        (dec remaining))
+
+      (vector? value)
+      (when (<= (count value) max-collection)
+        (reduce
+          (fn [left child]
+            (if-some [next-left
+                      (bounded-tree-node child left (inc depth) max-depth
+                                         max-collection max-string)]
+              next-left
+              (reduced nil)))
+          (dec remaining)
+          value))
+
+      (map? value)
+      (when (marker-map-valid? value max-collection)
+        (reduce
+          (fn [left [k child]]
+            (if-some [after-key
+                      (bounded-tree-node k left (inc depth) max-depth
+                                         max-collection max-string)]
+              (if-some [after-value
+                        (bounded-tree-node child after-key (inc depth) max-depth
+                                           max-collection max-string)]
+                after-value
+                (reduced nil))
+              (reduced nil)))
+          (dec remaining)
+          value))
+
+      :else nil)))
+
+(defn bounded-sampled-tree?
+  "True when a sampled tree obeys the effective deep work bounds."
+  {:malli/schema [:=> [:catn [::candidate ::value]
+                             [::effective-limits ::effective-limits]]
+                  :boolean]}
+  [value effective-limits]
+  (try
+    (let [max-realized
+          (:seon.config.render/value-max-realized-items effective-limits)
+          page-size (::page-size effective-limits)]
+      (boolean
+        (bounded-tree-node value
+                           (* (inc max-realized) 8)
+                           0
+                           (inc (:seon.config.render/value-max-path-segments
+                                  effective-limits))
+                           (max 16 (* 4 page-size))
+                           (:seon.config.render/value-max-path-bytes
+                             effective-limits))))
+    (catch :default _ false)))
+
+(defn- bounded-ordinary-node
+  [value remaining depth max-depth max-collection max-string]
+  (when (and (pos? remaining) (<= depth max-depth))
+    (cond
+      (string? value) (when (<= (count value) max-string) (dec remaining))
+      (or (nil? value) (boolean? value) (number? value))
+      (dec remaining)
+
+      (or (keyword? value) (symbol? value))
+      (when (<= (+ (count (name value))
+                   (if-some [ns (namespace value)] (inc (count ns)) 0))
+                max-string)
+        (dec remaining))
+
+      (or (vector? value) (set? value) (list? value))
+      (let [bounded-value (if (vector? value)
+                            value
+                            (into [] (take (inc max-collection)) value))]
+        (when (<= (count bounded-value) max-collection)
+        (reduce
+          (fn [left child]
+            (if-some [next-left
+                      (bounded-ordinary-node child left (inc depth) max-depth
+                                             max-collection max-string)]
+              next-left
+              (reduced nil)))
+          (dec remaining)
+          bounded-value)))
+
+      (map? value)
+      (let [entries (into [] (take (inc max-collection)) value)]
+        (when (<= (count entries) max-collection)
+        (reduce
+          (fn [left [k child]]
+            (if-some [after-key
+                      (bounded-ordinary-node k left (inc depth) max-depth
+                                             max-collection max-string)]
+              (if-some [after-value
+                        (bounded-ordinary-node child after-key (inc depth)
+                                               max-depth max-collection
+                                               max-string)]
+                after-value
+                (reduced nil))
+              (reduced nil)))
+          (dec remaining)
+          entries)))
+
+      :else nil)))
+
+(defn- bounded-ordinary-data?
+  [value effective-limits]
+  (boolean
+    (bounded-ordinary-node
+      value
+      (* 8 (inc (:seon.config.render/value-max-realized-items effective-limits)))
+      0
+      (inc (:seon.config.render/value-max-path-segments effective-limits))
+      (max 16 (* 4 (::page-size effective-limits)))
+      (:seon.config.render/value-max-path-bytes effective-limits))))
+
+(defn- schema-status-row-valid?
+  [row max-string]
+  (and (map? row)
+       (exact-map-keys? row #{:seon.schema/key :seon.schema/entity? ::status})
+       (keyword? (:seon.schema/key row))
+       (<= (+ (count (name (:seon.schema/key row)))
+              (if-some [ns (namespace (:seon.schema/key row))]
+                (inc (count ns)) 0))
+           max-string)
+       (boolean? (:seon.schema/entity? row))
+       (contains? #{:valid :invalid :shape-only} (::status row))))
+
+(defn- projection-result-valid?
+  [projection effective-limits]
+  (and (map? projection)
+       (allowed-map-keys?
+         projection
+         #{::path ::offset ::page-size ::summary ::truncated? ::more?
+           ::tree ::schemas ::explanation})
+       (every? #(contains? projection %)
+               [::path ::offset ::page-size ::summary ::truncated? ::more?
+                ::tree ::schemas])
+       (vector? (::path projection))
+       (<= (count (::path projection))
+           (:seon.config.render/value-max-path-segments effective-limits))
+       (every? drill-path-segment? (::path projection))
+       (<= (reduce
+             (fn [n segment]
+               (+ n (cond
+                      (string? segment) (count segment)
+                      (or (keyword? segment) (symbol? segment))
+                      (+ (count (name segment))
+                         (if-some [ns (namespace segment)]
+                           (inc (count ns)) 0))
+                      :else 16)))
+             0
+             (::path projection))
+           (:seon.config.render/value-max-path-bytes effective-limits))
+       (safe-nonnegative-int? (::offset projection))
+       (safe-positive-int? (::page-size projection))
+       (= (::page-size effective-limits) (::page-size projection))
+       (let [total (+ (::offset projection) (::page-size projection))]
+         (and (safe-nonnegative-int? total)
+              (<= total
+                  (:seon.config.render/value-max-realized-items
+                    effective-limits))))
+       (string? (::summary projection))
+       (<= (count (::summary projection))
+           (:seon.config.render/value-max-path-bytes effective-limits))
+       (boolean? (::truncated? projection))
+       (boolean? (::more? projection))
+       (vector? (::schemas projection))
+       (<= (count (::schemas projection))
+           schema/shape-candidate-limit)
+       (every? #(schema-status-row-valid?
+                  % (:seon.config.render/value-max-path-bytes effective-limits))
+               (::schemas projection))
+       (if-some [explanation (::explanation projection)]
+         (and (map? explanation)
+              (exact-map-keys? explanation #{::humanized ::error-value})
+              (bounded-ordinary-data? (::humanized explanation) effective-limits)
+              (bounded-ordinary-data? (::error-value explanation)
+                                      effective-limits))
+         true)
+       (bounded-sampled-tree? (::tree projection) effective-limits)))
+
+(defn bounded-drill-result?
+  "True when a drill result is closed and deeply work-bounded."
+  {:malli/schema [:=> [:catn [::candidate ::value]
+                             [::effective-limits ::effective-limits]]
+                  :boolean]}
+  [result effective-limits]
+  (try
+    (and (map? result)
+         (cond
+         (= false (::ok? result))
+         (and (exact-map-keys? result #{::ok? :seon/error})
+              (let [error (:seon/error result)]
+                (and (map? error)
+                     (allowed-map-keys?
+                       error
+                       #{:seon.error/message :seon.error/kind :seon.error/data})
+                     (string? (:seon.error/message error))
+                     (<= (count (:seon.error/message error))
+                         (:seon.config.render/value-max-path-bytes
+                           effective-limits))
+                     (keyword? (:seon.error/kind error))
+                     (<= (+ (count (name (:seon.error/kind error)))
+                            (if-some [ns (namespace (:seon.error/kind error))]
+                              (inc (count ns)) 0))
+                         (:seon.config.render/value-max-path-bytes
+                           effective-limits))
+                     (if-some [data (:seon.error/data error)]
+                       (bounded-ordinary-data? data effective-limits)
+                       true))))
+
+         (= :available (::availability result))
+         (and (exact-map-keys? result #{::ok? ::availability ::projection})
+              (= true (::ok? result))
+              (projection-result-valid? (::projection result) effective-limits))
+
+         (= :unavailable (::availability result))
+         (and (exact-map-keys?
+                result #{::ok? ::availability ::projection ::recompute?})
+              (= true (::ok? result))
+              (= true (::recompute? result))
+              (projection-result-valid? (::projection result) effective-limits))
+
+           :else false))
+    (catch :default _ false)))
+
+(defn drill-value
+  "Project one admitted path and bounded page from a live value."
+  {:malli/schema [:=> [:catn [:seon.config/configuration
+                              :seon.config/singleton]
+                             [::value ::value]
+                             [::request ::value]]
+                  ::drill-result]}
+  [configuration value request]
+  (try
+    (if-not (admitted-drill-request? request)
+      (drill-failure "Invalid or over-budget value drill request.")
+      (let [{::keys [path offset effective-limits]} request
+            {::keys [found? value]} (descend-path value path)]
+        (if-not found?
+          (drill-failure "Value drill path is unavailable.")
+          (if (and (map? value) (pos? offset))
+            (drill-failure "Maps do not support offset paging.")
+            (let [page-size (::page-size effective-limits)
+                  map-result (when (map? value)
+                               (bounded-map-window value page-size))
+                  pageable? (and (coll? value) (not (map? value)))
+                  page-result (when pageable?
+                                (paged-collection value offset page-size))
+                  page (cond
+                         (map? value) (::page map-result)
+                         pageable? (::page page-result)
+                         :else value)
+                  more? (boolean (and pageable? (::more? page-result)))
+                  opts (if (map? value)
+                         {:max-keys page-size :max-map-visits page-size}
+                         {:max-items page-size})
+                  sampled (sample configuration page opts)
+                  sampled (if-some [elided (::elided-keys map-result)]
+                            (assoc sampled
+                                   :seon.render.value/elided-keys elided)
+                            sampled)
+                  sampled (if pageable?
+                            (assoc sampled :seon.render.value/kind
+                                   (collection-kind value))
+                            sampled)
+                  incomplete? (or (pos? offset) more? (truncated? sampled))
+                  projection
+                  (merge
+                    {::path path
+                     ::offset offset
+                     ::page-size page-size
+                     ::summary (drill-summary value)
+                     ::truncated? incomplete?
+                     ::more? more?
+                     ::tree sampled}
+                    (schema-projection page incomplete?))]
+              (let [result {::ok? true
+                            ::availability :available
+                            ::projection projection}]
+                (if (bounded-drill-result? result effective-limits)
+                  result
+                  (drill-failure
+                    "Value drill projection exceeded its bounds."))))))))
+    (catch :default _
+      (drill-failure "Value drill failed while reading the selected value."))))
+
 (defn render-html-data
   "DATA CONTRACT the interactive HTML value-browser consumes.
 
