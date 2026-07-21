@@ -48,6 +48,7 @@
             [cljs.reader :as reader]
             ["node:crypto" :as node-crypto]
             [seon.agent.ctx :as ctx]
+            [seon.ai.generate-code :as generate-code]
             [seon.ai.provider :as provider]
             [seon.config :as config]
             [seon.db :as db]
@@ -870,6 +871,37 @@
           agent-id (assoc :seon.log/agent agent-id))))
     (catch :default _ nil))
   nil)
+
+;; ============================================================
+;; generate-code! — the explicit agent-facing generation operation.
+;; ============================================================
+
+(defn ^{:async true :seon.fn/agent-facing? true} generate-code!
+  "Hand one difficult goal to a stronger planning agent.
+
+   An explicit, side-effecting operation — never an automatic stage of a
+   turn. You state the existing `my.plan` contract (`:my.plan/goal`, plus
+   optional `:my.plan/description` and falsifiable `:my.plan/expect`); a
+   specialized planning agent answers through the ordinary REPL, namespace
+   units evaluate in dependency order, and failed units delegate to
+   namespace-focused repair agents. Resolves to
+   `{:my.plan/ok? true :my.plan/id root :seon.agent/id planner}` — the
+   durable generation root you can inspect with `my.plan` functions. The
+   COMPACT derived result (namespace statuses, progress, error evidence)
+   arrives later as an ordinary addressed message when the root reaches
+   `:done` or `:blocked`. Failures are values:
+   `{:my.plan/ok? false :my.plan/error …}`.
+
+     (seon.ai/generate-code!
+       {:my.plan/goal \"Add order validation.\"
+        :my.plan/description
+        \"Reject invalid orders before inventory changes.\"
+        :my.plan/expect
+        \"Behavioral tests prove invalid orders never reserve inventory.\"})"
+  {:malli/schema [:=> [:cat :seon.ai.generate-code/generate-request]
+                  :seon.ai.generate-code/generate-response]}
+  [request]
+  (await (generate-code/start-generation! request)))
 
 ;; ============================================================
 ;; Boot sync — env owns the row (same contract as seon.web.brand).

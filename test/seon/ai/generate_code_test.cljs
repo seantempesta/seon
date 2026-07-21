@@ -5,10 +5,12 @@
     [cljs.test :refer [async deftest is]]
     [my.plan :as plan]
     [seon.agent :as agent]
+    [seon.agent.ctx :as ctx]
     [seon.agent.message :as message]
     [seon.ai.generate-code :as generate]
     [seon.db :as db]
     [seon.db.id :as db.id]
+    [seon.embed :as embed]
     [seon.reactive :as reactive]))
 
 (defn- finish-root-promise [request]
@@ -505,5 +507,302 @@
              (set! plan/commit-generated-terminal! original-commit)
              (set! generate/dispatch-root-state! original-dispatch)
              (set! generate/unobserve-root! original-unobserve)))
+          (.then (fn [_] (done)))
+          (.catch (fn [error] (is false (str error)) (done)))))))
+
+;;; ───────────────────────────────────────────────────────────────────────
+;;; Embedding-ranked namespace augmentation.
+;;; ───────────────────────────────────────────────────────────────────────
+
+(deftest ranked-namespaces-degrade-to-empty-outside-the-embed-gate
+  (async done
+    (let [original-enabled embed/enabled?
+          original-search embed/search-pull
+          searched (atom 0)]
+      (set! embed/enabled? (fn [] false))
+      (set! embed/search-pull
+            (fn [_] (swap! searched inc) (js/Promise.resolve {:seon.embed/hits []})))
+      (-> (generate/ranked-namespaces! {:my.plan/goal "Add order validation."})
+          (.then
+           (fn [ranked]
+             (is (= [] ranked))
+             (is (zero? @searched))))
+          (.finally
+           (fn []
+             (set! embed/enabled? original-enabled)
+             (set! embed/search-pull original-search)))
+          (.then (fn [_] (done)))
+          (.catch (fn [error] (is false (str error)) (done)))))))
+
+(deftest ranked-namespaces-degrade-to-empty-on-a-search-error-envelope
+  (async done
+    (let [original-enabled embed/enabled?
+          original-search embed/search-pull]
+      (set! embed/enabled? (fn [] true))
+      (set! embed/search-pull
+            (fn [_]
+              (js/Promise.resolve
+               {:seon.embed/hits []
+                :seon/error {:seon.error/message "writer offline"}})))
+      (-> (generate/ranked-namespaces! {:my.plan/goal "Add order validation."})
+          (.then (fn [ranked] (is (= [] ranked))))
+          (.finally
+           (fn []
+             (set! embed/enabled? original-enabled)
+             (set! embed/search-pull original-search)))
+          (.then (fn [_] (done)))
+          (.catch (fn [error] (is false (str error)) (done)))))))
+
+(deftest ranked-namespaces-group-by-best-hit-with-deterministic-tie-break
+  (async done
+    (let [original-enabled embed/enabled?
+          original-search embed/search-pull
+          search-request (atom nil)
+          hit (fn [eid distance ns-symbol]
+                (cond-> {:seon.embed/eid eid
+                         :seon.embed/distance distance}
+                  ns-symbol
+                  (assoc :seon.embed/entity
+                         {:seon.fn/ns {:seon.ns/name ns-symbol}})))]
+      (set! embed/enabled? (fn [] true))
+      (set! embed/search-pull
+            (fn [request]
+              (reset! search-request request)
+              (js/Promise.resolve
+               {:seon.embed/hits
+                [(hit 5 0.05 'my.order.model-test)   ; tests stay excluded
+                 (hit 6 0.05 'my.plan.internal)      ; compact .internal excluded
+                 (hit 7 0.05 nil)                    ; unusable row — no namespace
+                 (hit 1 0.1 'my.order.model)
+                 (hit 4 0.1 'my.aaa)                 ; distance tie → name order
+                 (hit 3 0.2 'seon.db)
+                 (hit 2 0.3 'my.order.model)]}))) ; worse duplicate ignored
+      (-> (generate/ranked-namespaces!
+           {:my.plan/goal "Add order validation."
+            :my.plan/description "Reject invalid orders."
+            :my.plan/expect "Tests prove rejection."})
+          (.then
+           (fn [ranked]
+             (is (= [{:seon.ns/name 'my.aaa :seon.embed/distance 0.1}
+                     {:seon.ns/name 'my.order.model :seon.embed/distance 0.1}
+                     {:seon.ns/name 'seon.db :seon.embed/distance 0.2}]
+                    ranked))
+             (is (= (str "Add order validation.\n"
+                         "Reject invalid orders.\n"
+                         "Tests prove rejection.")
+                    (:seon.embed/query @search-request)))))
+          (.finally
+           (fn []
+             (set! embed/enabled? original-enabled)
+             (set! embed/search-pull original-search)))
+          (.then (fn [_] (done)))
+          (.catch (fn [error] (is false (str error)) (done)))))))
+
+(deftest ranked-compact-selection-lets-exact-full-selections-win
+  (is (= ['my.ranked.one 'seon.db]
+         (generate/ranked-compact-selection
+          {:seon.ai.generate-code/ranked
+           [{:seon.ns/name 'my.keep.full :seon.embed/distance 0.1}
+            {:seon.ns/name 'my.ranked.one :seon.embed/distance 0.2}
+            {:seon.ns/name 'seon.db :seon.embed/distance 0.3}]
+           :seon.agent.ctx.namespaces/full-source ['my.keep.full]}))))
+
+(deftest reconcile-replaces-exact-compact-and-preserves-other-dials
+  (async done
+    (let [original-pull db/pull
+          original-install ctx/install!
+          installed (atom nil)]
+      (set! db/pull
+            (fn
+              ([_request]
+               (js/Promise.resolve
+                {:seon.agent/ctx
+                 [{:db/id 9
+                   :seon.agent.ctx/name :namespaces
+                   :seon.agent.ctx/priority 20
+                   :seon.agent.ctx.namespaces/compact ['my.stale.old]
+                   :seon.agent.ctx.namespaces/full-source ['my.keep.full]
+                   :seon.agent.ctx.namespaces/with-tests ['my.keep.tests]
+                   :seon.agent.ctx.namespaces/current-full? false}]}))
+              ([_ _]
+               (js/Promise.reject (js/Error. "unexpected pull arity")))))
+      (set! ctx/install!
+            (fn [block]
+              (reset! installed block)
+              (js/Promise.resolve
+               {:seon.agent.ctx/ok? true
+                :seon.agent.ctx/names [:namespaces]})))
+      (-> (generate/reconcile-ranked-namespaces!
+           {:seon.agent/id "worker-1"
+            :seon.ai.generate-code/ranked
+            [{:seon.ns/name 'my.keep.full :seon.embed/distance 0.1}
+             {:seon.ns/name 'my.ranked.one :seon.embed/distance 0.2}]})
+          (.then
+           (fn [result]
+             (is (true? result))
+             (is (= ['my.ranked.one]
+                    (:seon.agent.ctx.namespaces/compact @installed)))
+             (is (= ['my.keep.full]
+                    (:seon.agent.ctx.namespaces/full-source @installed)))
+             (is (= ['my.keep.tests]
+                    (:seon.agent.ctx.namespaces/with-tests @installed)))
+             (is (false? (:seon.agent.ctx.namespaces/current-full? @installed)))
+             (is (= 20 (:seon.agent.ctx/priority @installed)))
+             (is (not (contains? @installed :db/id)))))
+          (.finally
+           (fn []
+             (set! db/pull original-pull)
+             (set! ctx/install! original-install)))
+          (.then (fn [_] (done)))
+          (.catch (fn [error] (is false (str error)) (done)))))))
+
+(deftest reconcile-writes-nothing-without-ranked-evidence
+  (async done
+    (let [original-pull db/pull
+          original-install ctx/install!
+          touched (atom 0)]
+      (set! db/pull (fn [_] (swap! touched inc) (js/Promise.resolve {})))
+      (set! ctx/install! (fn [_] (swap! touched inc) (js/Promise.resolve {})))
+      (-> (generate/reconcile-ranked-namespaces!
+           {:seon.agent/id "worker-1" :seon.ai.generate-code/ranked []})
+          (.then
+           (fn [result]
+             (is (false? result))
+             (is (zero? @touched))))
+          (.finally
+           (fn []
+             (set! db/pull original-pull)
+             (set! ctx/install! original-install)))
+          (.then (fn [_] (done)))
+          (.catch (fn [error] (is false (str error)) (done)))))))
+
+;;; ───────────────────────────────────────────────────────────────────────
+;;; start-generation! — the composition behind seon.ai/generate-code!.
+;;; ───────────────────────────────────────────────────────────────────────
+
+(deftest start-generation-refuses-blank-goal-and-unknown-keys
+  (async done
+    (-> (generate/start-generation!
+         {:my.plan/goal "   " :seon.agent/id "caller-1"})
+        (.then
+         (fn [result]
+           (is (false? (:my.plan/ok? result)))
+           (is (re-find #"blank :my.plan/goal" (:my.plan/error result)))))
+        (.then
+         (fn [_]
+           (generate/start-generation!
+            {:my.plan/goals "typo" :seon.agent/id "caller-1"})))
+        (.then
+         (fn [result]
+           (is (false? (:my.plan/ok? result)))
+           (is (re-find #"unknown key :my.plan/goals"
+                        (:my.plan/error result)))))
+        (.then (fn [_] (done)))
+        (.catch (fn [error] (is false (str error)) (done))))))
+
+(deftest start-generation-commits-root-message-and-claim-in-one-transaction
+  (async done
+    (let [original-start agent/start!
+          original-enabled embed/enabled?
+          original-db db/db
+          original-message message/message-transaction-for
+          original-allocate db.id/allocate!
+          original-scheduler generate/start-root-scheduler!
+          start-request (atom nil)
+          message-request (atom nil)
+          allocation-request (atom nil)
+          scheduler-request (atom nil)]
+      (set! agent/start!
+            (fn [request]
+              (reset! start-request request)
+              (js/Promise.resolve {:seon.agent/id "planner-1"})))
+      (set! embed/enabled? (fn [] false))
+      (set! db/db
+            (fn
+              ([] (js/Promise.resolve database))
+              ([_] (js/Promise.resolve database))))
+      (set! message/message-transaction-for
+            (fn [_database request]
+              (reset! message-request request)
+              (js/Promise.resolve
+               {:seon.agent.message/allocations
+                [{::db.id/key :seon.agent.message/id
+                  ::db.id/identity-attr :seon.agent.message/id}]
+                :seon.agent.message/transaction-builder
+                (fn [ids]
+                  {::db/expected-db database
+                   ::db/tx-data
+                   [{:seon.agent.message/id
+                     (get ids :seon.agent.message/id)
+                     :seon.agent.message/content
+                     (:seon.agent.message/content request)}]})})))
+      (set! db.id/allocate!
+            (fn [request]
+              (reset! allocation-request request)
+              (let [ids {:seon.agent.message/id "assignment-1"
+                         :my.plan/id "root-1"}
+                    build (get request ::db.id/transaction-builder)]
+                (js/Promise.resolve
+                 {::db.id/ids ids ::db.id/transaction (build ids)}))))
+      (set! generate/start-root-scheduler!
+            (fn [request]
+              (reset! scheduler-request request)
+              (js/Promise.resolve "root-1")))
+      (-> (generate/start-generation!
+           {:my.plan/goal "Add order validation."
+            :my.plan/description "Reject invalid orders."
+            :my.plan/expect "Tests prove rejection."
+            :seon.agent/id "caller-1"})
+          (.then
+           (fn [result]
+             (is (= {:my.plan/ok? true
+                     :my.plan/id "root-1"
+                     :seon.agent/id "planner-1"}
+                    result))
+             (is (= :planning (:seon.config/model-variant @start-request)))
+             (is (= [:seon.agent/id "caller-1"]
+                    (:seon.agent.message/from @message-request)))
+             (is (= [[:seon.agent/id "planner-1"]]
+                    (:seon.agent.message/to @message-request)))
+             (is (re-find #"Add order validation\."
+                          (:seon.agent.message/content @message-request)))
+             (is (= [{::db.id/key :seon.agent.message/id
+                      ::db.id/identity-attr :seon.agent.message/id}
+                     {::db.id/key :my.plan/id
+                      ::db.id/identity-attr :my.plan/id}]
+                    (get @allocation-request ::db.id/allocations)))
+             (let [built ((get @allocation-request
+                               ::db.id/transaction-builder)
+                          {:seon.agent.message/id "assignment-1"
+                           :my.plan/id "root-1"})
+                   tx-data (::db/tx-data built)
+                   root (last tx-data)]
+               (is (= 2 (count tx-data)))
+               (is (= "assignment-1"
+                      (:seon.agent.message/id (first tx-data))))
+               (is (= {:my.plan/id "root-1"
+                       :my.plan/title "Add order validation."
+                       :my.plan/goal "Add order validation."
+                       :my.plan/description "Reject invalid orders."
+                       :my.plan/expect "Tests prove rejection."
+                       :my.plan/status :open
+                       :my.plan/agent [:seon.agent/id "planner-1"]
+                       :my.plan/from [:seon.agent/id "caller-1"]
+                       :my.plan/message [:seon.agent.message/id "assignment-1"]
+                       :my.plan/claim "assignment-1"}
+                      (dissoc root :my.plan/created-at)))
+               (is (some? (:my.plan/created-at root))))
+             (is (= "root-1" (:my.plan/id @scheduler-request)))
+             (is (= "planner-1" (:seon.agent/id @scheduler-request)))
+             (is (= :execution
+                    (:seon.config/model-variant @scheduler-request)))))
+          (.finally
+           (fn []
+             (set! agent/start! original-start)
+             (set! embed/enabled? original-enabled)
+             (set! db/db original-db)
+             (set! message/message-transaction-for original-message)
+             (set! db.id/allocate! original-allocate)
+             (set! generate/start-root-scheduler! original-scheduler)))
           (.then (fn [_] (done)))
           (.catch (fn [error] (is false (str error)) (done)))))))
