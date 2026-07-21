@@ -255,6 +255,13 @@ mechanism work, `low` for mechanical/doc packages. Every spec carries
 the ruling-10 grounding preamble, exact owned paths, falsifiable gates,
 and shared-tree/path-limited-commit rules.
 
+Model constraint (2026-07-21): Codex `gpt-5.6-sol` trips its own
+cybersecurity content filter on hostile/containment test code (the W0.7
+attack vectors) and refuses to continue — even though this is
+authorized defensive testing of our own system. Security/containment
+test lanes (W0.7 battery, per-capability hostile gates) go to a Claude
+Fable agent, NOT sol. sol keeps the mechanism/refactor/data lanes.
+
 Spec-grounding rule (owner, 2026-07-21 evening, after repeated sol
 stop-reports exposed interface guesses): a MECHANISM spec gets a
 source-grounding pass before sol sees it — the interfaces, signatures,
