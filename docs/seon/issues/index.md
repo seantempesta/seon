@@ -10,7 +10,7 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (46)
+## Blocker (47)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -35,6 +35,7 @@ See `README.md` for the convention.
 | [Keep a running target's bootstrap artifact immutable](shared-bootstrap-output-mutates-running-artifact.md) | blocker | Core |
 | [Keep a stable owner until the pod execution subtree drains](dead-process-group-leader-blocks-safe-subtree-drain.md) | blocker | Core |
 | [Keep database control entry independent of occupied handlers](uds-codec-capacity-can-delay-control-entry.md) | blocker | Core |
+| [Keep grown transcripts renderable within database result bounds](grown-transcript-exceeds-result-weight-budget.md) | blocker | UI |
 | [Keep restore publication closed through completion](restore-completion-cannot-precede-admission.md) | blocker | Core |
 | [Key multi-source query sharing by every database value](multi-source-query-cache-retains-foreign-database-values.md) | blocker | Core |
 | [Let the common Inspect pod solver address an existing agent](inspect-pod-solver-cannot-address-existing-agent.md) | blocker | agent |
@@ -57,13 +58,11 @@ See `README.md` for the convention.
 | [Skip the receipt reread branch after a successful eval write](successful-eval-receipt-called-state-on-nil.md) | blocker | agent |
 | [Supply the execution artifact to the production container launch](container-launch-omits-execution-artifact.md) | blocker | agent |
 | [Toolkit current-ns wedges the agent since the cljc packaging window](toolkit-current-ns-wedges-agent-after-cljc-packaging.md) | blocker | agent |
-| [Configured plan surface is absent from the live database program](configured-plan-surface-absent-from-live-program.md) | blocker | plan, rendering |
-| [Keep grown transcripts renderable within database result bounds](grown-transcript-exceeds-result-weight-budget.md) | blocker | agent, database, web, cljs |
 | [Value drill has no total work bounds](value-drill-has-no-total-work-bounds.md) | blocker | UI |
 | [Value-drill result literals failed boot schema admission](value-drill-result-literals-failed-boot-schema-admission.md) | blocker | Core |
 | [ensure-database silently creates a fresh store at any requested path](ensure-database-creates-fresh-store-at-any-path.md) | blocker | Core |
 
-## Friction (74)
+## Friction (76)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -114,6 +113,8 @@ See `README.md` for the convention.
 | [Plan allocation builder set database value](plan-allocation-builder-set-database-value.md) | friction | agent |
 | [Plan completion has no checkable verification evidence](plan-completion-verification-evidence.md) | friction | agent |
 | [Plan reconcile scope can delete unseen work](plan-reconcile-scope-can-delete-unseen-work.md) | friction | agent |
+| [Planner home-ns step blocks the root on a self-recipient refusal](planner-home-ns-step-blocks-on-self-recipient.md) | friction | agent |
+| [Planner self-done bypasses generated terminal delivery](planner-self-done-bypasses-generated-terminal-delivery.md) | friction | agent |
 | [Preflight repair consumed referred macros](preflight-repair-consumed-referred-macros.md) | friction | agent |
 | [Prepare selected git dependencies before test compilation](test-runner-does-not-prepare-selected-git-dependencies.md) | friction | Core |
 | [Preserve distinct large BigInts in cardinality-many attributes](datahike-cljs-cardinality-many-collapses-large-bigints.md) | friction | Core |

@@ -472,19 +472,25 @@ found that it preselected by entity ID instead of the prior `:at` order, lost
 omission state across run pages, and could still fail the whole transcript on
 one over-weight usage string. Its million-history fixture also marked a full
 limit-sized page complete, so it did not model real index continuation.
+Commits `2c74f7d2` and `88a379f8` supersede that draft: a fixed four-page
+reverse-AVET scan yields exact `:at desc, eid desc` order, carries honest
+incompletion, and explicitly caps both shallow pulls. Usage is excluded from
+the critical payload and acquired through fixed per-turn members whose failure
+sets an AI/HTML omission marker; future writes retain only the finite numeric
+provider fields consumed by the existing derived projection. Vendored Datahike
+grounding and independent review accept the generic-cursor remap and the real
+lookahead envelope of 65 visits per page / 260 total. The focused transcript
+and retry gate passes 25 tests / 92 assertions.
 
-The **earliest unsettled contract** is therefore the corrected bounded
-transcript acquisition. Its active owner is replacing run/eid preselection with
-a fixed global time-index scan that returns only certified matching newest
-turns and marks an exhausted scan honestly; omission must accumulate across
-every page, and usage acquisition must be non-critical and bounded independently.
-Its **integrated proof** uses divergent entity IDs and timestamps, a real
-incomplete page, and one hostile scalar while keeping authority calls and
-visited index members fixed as old history grows, followed by a cold real-writer
-comparison and the exact root feed. The independent review lane refills when
-that correction commits. The **next refill** after acceptance is one coordinated
-frozen-source restart plus explicit config apply, database readback, direct
-child render, identity-encoded server-side SSE, and browser proof. The
+The **earliest unsettled contract** is now the frozen live integration proof
+for both corrections. Its **integrated proof** uses divergent entity IDs and
+timestamps, a real incomplete AVET page/cursor, and one hostile historical
+usage scalar while measuring the fixed scan envelope, followed by explicit
+plan migration/readback, a no-write second apply, the direct child render, and
+the exact root feed. The first occupied lane owns the isolated retained-branch
+adversary; the top level owns frozen default restart, config apply, server-side
+SSE, and browser proof. The **next refill** after those facts integrate is the
+remaining Stage 1.5 live sampler/retirement/route/UI matrix. The
 **final graduation gate** remains the complete Stage 1.5 live
 sampler/retirement/route/UI matrix and then the ordered A-H program gates;
 neither live defect displaces the later ledger.
