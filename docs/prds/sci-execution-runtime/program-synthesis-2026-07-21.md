@@ -259,6 +259,7 @@ an explicit "when" — never chat-only.
 | q11 | `pkgs/` vs `packages/` spelling drift in U13 + package-capabilities roadmaps | W8 doc hygiene | next W8 slot; one-line fixes |
 | q12 | `uds.cljc` is JVM-only despite `.cljc`; extension/consumer mismatches generally | namespace-hierarchy design (extension sanity sweep) | with q1's design |
 | q13 | `seon.execution.host` (pod client) vs `seon.host` (JVM host) naming collision | namespace-hierarchy design | with q1; pairs must be renamed atomically |
+| q14 | pool size derives from HOST cores and can exceed a writer started with a smaller selected-processor count; large machines share the writer's global 256-connection budget across all clients | W1 (both become config facts with one coherent derivation) | with W1 implementation; W0.4 residual report |
 
 Then **U10** (integration kill/restart tests with live agents) and
 **U12** (the graduation gate: 100-agent cluster, real work, host kill +
@@ -402,10 +403,21 @@ platform-neutral development-teaching; `runtime_test.cljs:164` updated
 for the added member (`[65536 4096 256 8]`); full gate 1462/7062 green
 (shell-test env noise cleared — machine quiet).
 
+Also accepted: **W0.4 writer pool `efbce79e`** — lazy retained pool
+with exclusive member leasing, bounded waits, per-call deadlines
+(120s default), member eviction/replacement, same-request-id write
+recovery with active-conflict re-poll, typed `::uds/eof` transport
+condition (authorized round-2 seam; mismatch throw untouched), four
+named W1-relocation defaults; focused 7/41 + full writer gate
+308/2303 green (implementer), focused rerun verified by orchestrator.
+Two-round stop-and-report worked exactly as designed.
+
 IN FLIGHT / UNCOMMITTED:
-- **W0.4 writer pool dispatched to Codex** (medium effort) per
-  `specs/w0.4-writer-pool.md`; owns `src/seon/host/context.clj`,
-  `src/seon/host.clj`, new `test/seon/host_pool_writer_test.clj`.
+- **WP-A dispatched to Codex** (medium effort) per
+  `specs/wp-a-sci-error-classify.md`; owns `reference-code/sci` (fork
+  `seon` branch), new `src/seon/error/sci.clj`, `src/seon/host.clj`,
+  `src/seon/host/context.clj`, writer-gate tests. W0.6 queues behind
+  it (host.clj overlap).
 - **W6 package-host design RETURNED and accepted**
   (`research/w6-package-host-design-2026-07-21.md`): ledger-first
   per-cluster packages/, two disposable `seon.packages.host` platform
