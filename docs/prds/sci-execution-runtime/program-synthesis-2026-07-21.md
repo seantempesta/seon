@@ -322,7 +322,8 @@ an explicit "when" — never chat-only.
 |---|---|---|---|
 | q1 | `host.clj` god-file; lane contention proves it | namespace-hierarchy design → its WP cut | after W0.4/WP-A/W0.6 land (same file); design lane running |
 | q2 | `seon.host` has no supervisor spec (launched by tests/manual `-main`) | W6 WP-S (one recorded-child mechanism for sci host + package hosts) | with WP-S; must precede U10 kill/restart drills |
-| q3 | `wire-safe-value`/`bounded-result` realize O(value) before bounding | W0.6 notes it; fix lands W10 unless the implementer finds the ≤10-line seam | after W0.6 reports; before U12 (100-agent heap pressure) |
+| q3 | `wire-safe-value`/`bounded-result` realize O(value) before bounding | PARTIAL: W0.6 fixed terminal `pr-str` (capped JVM writer); `wire-safe-value`/`bounded-result` transit probes STILL realize | remaining half → W10; before U12 (100-agent heap pressure) |
+| q16 | 16 duplicate-limit bugs | W1.3a | DONE `593b4a89` — unified under one owner each |
 | q4 | no derived fleet-health view (faults exist, no "is the cluster healthy" query/render) | new W10 row; derived render per reactive-context law | design at W0.7 (battery needs the same observations); land before U10 |
 | q5 | executor head-of-line: unbounded per-agent queueing, no fairness/busy answer (audit §1b.1, gap 3 tail) | W0 family — W0.8 if W0.4's pool doesn't subsume it | decide when W0.4 returns (its bounded-wait may cover the client side; server side re-audit) |
 | q6 | global schema snapshot/restore race across concurrent sessions (audit gap 7) | W0 family — W0.8 | before W0.7 battery (battery should include the concurrent-register vector) |
@@ -507,18 +508,31 @@ immutable data, platform edges acquire/resolve/wait/publish/transport.
 Wave 1 = leaf bundle + eval/internal + toolkit `.cljc` repairs,
 replacing the host's regex-selected portable slice.
 
+Also accepted: **W1.3a duplicate limits `593b4a89`** — the 16
+duplicate-limit bugs (q16) unified under one owner each: LLM deadline,
+source inline threshold, subprocess kill grace, shell stream bytes,
+canvas AI-twin cap (now reads its accessor), recovery tail, generated-ID
+attempts (schema owns), invocation deadline (host.clj dup deferred),
+read-profiles split into agent-entity/config-singleton/ai-singleton
+profiles. Two spec-gap catches corrected (require cycle, distinct read
+shapes). Full cljs 1469/7076 + writer 326/2399 green (implementer);
+orchestrator reran both on the settled tree.
+
 IN FLIGHT / UNCOMMITTED:
-- **W0.6 round 2** (expanded ownership: host.clj, record.clj,
-  context.clj, tokens.cljc, portable seon.error extraction) — its
-  round-1 stop found the JVM has NO seon.error/record! path.
-- **W1.3a round 2** (duplicate limits; cycle + read-profile-split
-  rulings authorized; owns config.cljs and agent/toolkit files).
-- **Packages naming/flows refinement agent** (mapping-is-data ruling
-  integrated mid-flight).
-- **W1.1 boot-contract spec READY** (`specs/w1.1-boot-contract.md`),
-  dispatch blocked on W1.3a (config.cljs). NS-0.5 + W0.7 blocked on
-  W0.6. Autonomous loop active with the owner away; task list carries
-  the refill order.
+- **W0.6 round 2 COMPLETE, commit pending settled-tree gates** —
+  expanded ownership landed: `seon.error` promoted `.cljs`→`.cljc`
+  (JVM host now shares the one record! mechanism — first CLJC-direction
+  win), bounded frames, immortal acceptor + startup-read timeout,
+  per-form sci/out+sci/err capture into `::output`, interrupt hygiene,
+  capped JVM pr-str. Named defaults for W1: startup-read 10000ms,
+  error-frame 120tok, per-form/persisted output 2048tok. q3 partially
+  closed. Orchestrator running bin/test-cljs + bin/test-writer on the
+  now-settled tree before the path-limited commit.
+- **W1.1 boot-contract spec READY** (`specs/w1.1-boot-contract.md`) —
+  config.cljs now free (W1.3a committed); dispatch after W0.6 commits.
+- **WP-K spec READY** (`specs/wp-k-package-roots.md`). NS-0.5 + W0.7
+  (draft reviewed) unblock when W0.6 commits (frees host test paths).
+  Autonomous loop active; task list carries the refill order.
 - **W6 package-host design RETURNED and accepted**
   (`research/w6-package-host-design-2026-07-21.md`): ledger-first
   per-cluster packages/, two disposable `seon.packages.host` platform
