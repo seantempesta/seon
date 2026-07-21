@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 tags: [issue, test, rendering]
 severity: blocker
 ---
@@ -27,3 +27,11 @@ host drives predate the Unit 1G fail-closed acquisition contract.
 - The runtime remains fail-closed when any policy attribute is absent.
 - The two focused host integration tests pass.
 - The complete writer gate passes without sampling-policy failures.
+
+## Resolution
+
+Commit `49dcc009` adds one shared cluster sampling-policy fixture with exactly
+the seven production attributes and seeds it in both fresh host databases.
+Each fixture asserts the real writer returns `[32 4096 1024 3 80 8 12]` in the
+maintained query order. Focused proof passed 29 tests / 185 assertions and the
+complete writer gate passed 281 tests / 2,143 assertions.

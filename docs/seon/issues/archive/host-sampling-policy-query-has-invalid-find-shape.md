@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 tags: [issue, database, rendering]
 severity: blocker
 ---
@@ -25,3 +25,10 @@ policy from any real database, even when all seven required facts exist.
 - A real writer query returns the seven values in the declared order.
 - Existing missing/incomplete policy cases remain fail-closed.
 - The focused host conformance and integration writer tests pass.
+
+## Resolution
+
+Commit `49dcc009` replaces the invalid tuple-plus-scalar find with Datahike's
+tuple find form and adds a parser regression over the maintained query. Missing,
+multiple, malformed, and wrong-typed policies remain fail-closed. Independent
+review accepted the integrated query and fixture with no P0/P1 findings.
