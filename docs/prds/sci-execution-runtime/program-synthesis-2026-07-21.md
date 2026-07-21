@@ -79,6 +79,33 @@ with-ctx lazy-forcing requirement; perf tax accepted at agent scale).
     explicitly and encourage it; three seam corrections in two days
     (W0.1, W0.4 ×2) prove the loop works.
 
+## Owner decision batch (2026-07-21 PM — error-quality + W6 designs)
+
+1. **Error detail: blob it.** Full detail persists via `my.blob` with a
+   `:seon.eval/error-detail` ref (blobs are cheap). The DATOM side stays
+   bounded and must not blow the database: the abridged head is enough
+   to investigate further and ideally tells the important parts of the
+   story outright — head quality is a gate concern, not just a size cap.
+2. **Repair aggressively and SHOW the repaired form.** Auto-apply every
+   provable fix; the transcript renders the corrected behavior, not the
+   error spray — the agent should see good behavior modeled (tokens are
+   expensive; seeing errors teaches errors). Same philosophy as guided
+   diffusion generation, less elegant: guide the generation by showing
+   the proper way. Prose→`;;` thinking-comment repair is explicitly
+   desired — encourage thinking. (`:seon.repair/fixes` provenance stays
+   on the envelope; honesty lives in the data, pedagogy in the render.)
+3. Config keys `:seon.config.instrument/enabled?` +
+   `:seon.config.render/error-head-token-cap` land as accessors. YES.
+4. `my.packages` (not `my.pkg`). YES.
+5. Ledger-first package authority, manifests derived. YES.
+6. Client-driven lazy respawn; `bin/seon` reaps recorded children. YES.
+7. Eval-free package hosts — PENDING (owner asked for a fuller
+   explanation before deciding).
+8. Lifecycle scripts: allowlist machinery ships, but for NOW agents can
+   do whatever they want — default policy is OPEN (install policy
+   `:open`, lifecycle scripts trusted by default). Tighten to the
+   allowlist later; the config keys make that a one-fact flip.
+
 ## Strong / weak / PoC map
 
 **STRONG (keep, build on):** writer multi-class dispatcher (parallel
