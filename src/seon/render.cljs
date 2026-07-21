@@ -675,19 +675,28 @@
         txt (if (str/ends-with? txt "\n") txt (str txt "\n"))]
     (str "```" (name (:seon.code/lang x)) "\n" txt "```")))
 
-(defn- custom-render-selection [view render-request x]
-  (when (map? x)
-    (let [property (case view :html :seon.render/html :ai :seon.render/ai)
-          override (when-some [raw (get x property)]
-                     (db/decode-edn-value property raw))]
+(defn- custom-render-selection [view render-request prepared override]
+  ;; A custom fn sees the original value, so it may run only when the bounded
+  ;; sampler proved that value complete. Schema validity is already present in
+  ;; `prepared`; consulting it avoids a second recursive Malli validation.
+  (when-not (:seon.render.value/truncated? prepared)
+    (let [property (case view :html :seon.render/html :ai :seon.render/ai)]
       (if override
         {:seon.render/custom-symbol override}
         (when-let [projection (:seon.schema/projection render-request)]
-          (when-let [matched-row
-                     (some #(when (get % property) %)
-                           (schema/matching-shapes-in projection x))]
-            {:seon.render/custom-symbol (get matched-row property)
-             :seon.render/schema-key (:seon.schema/key matched-row)}))))))
+          (when-let [schema-key
+                     (some (fn [{:seon.schema/keys [key]
+                                 :seon.render.value/keys [status]}]
+                             (when (and (= :valid status)
+                                        (get-in projection
+                                                [:seon.schema.projection/shape-rows
+                                                 key property]))
+                               key))
+                           (:seon.render.value/schemas prepared))]
+            {:seon.render/custom-symbol
+             (get-in projection [:seon.schema.projection/shape-rows
+                                 schema-key property])
+             :seon.render/schema-key schema-key}))))))
 
 (defn- invoke-custom-render
   [view configuration render-request x
@@ -726,14 +735,42 @@
                              [::x :any]] :any]}
   [view configuration render-request x]
   (try
-    (let [custom (when-not (or (code/block? x)
-                               (message-block? x)
-                               (source-block? x)
-                               (value-request? x)
-                               (data-projection? x)
-                               (error-value? x)
-                               (canvas/valid-hiccup? x))
-                   (custom-render-selection view render-request x))]
+    (let [built-in? (or (code/block? x)
+                        (message-block? x)
+                        (source-block? x)
+                        (value-request? x)
+                        (data-projection? x)
+                        (error-value? x)
+                        (canvas/valid-hiccup? x))
+          projection (:seon.schema/projection render-request)
+          custom-candidate? (and (not built-in?)
+                                 (map? x)
+                                 (or projection
+                                     (contains? x
+                                                (case view
+                                                  :html :seon.render/html
+                                                  :ai :seon.render/ai))))
+          property (case view :html :seon.render/html :ai :seon.render/ai)
+          sample (when custom-candidate? (value/sample configuration x {}))
+          complete? (and sample (value/complete-sample? sample))
+          override (when (and complete? (contains? x property))
+                     (db/decode-edn-value property (get x property)))
+          ;; An explicit override preserves its matcher short-circuit after
+          ;; completeness is proven. Schema projection is needed only for an
+          ;; incomplete honest fallback or schema-property selection.
+          prepared (when (and sample (or (not complete?) (not override)))
+                     (let [projection (or projection
+                                          (schema/current-projection)
+                                          (schema/build-projection
+                                            (schema/snapshot)))]
+                       (value/render-html-sample-data-in
+                         "inline" projection x sample)))
+          selected-custom (when prepared
+                            (custom-render-selection
+                              view render-request prepared override))
+          custom (or selected-custom
+                     (when (and complete? override)
+                       {:seon.render/custom-symbol override}))]
       (case view
         :html
         (cond
@@ -749,6 +786,7 @@
           (error-value? x)   (canvas/error-card x)
           (canvas/valid-hiccup? x) x
           custom             (invoke-custom-render view configuration render-request x custom)
+          prepared           (data-panel configuration render-request nil prepared)
           :else              (data-panel
                                configuration render-request nil
                                (value/render-html-data configuration "inline" x)))
@@ -770,6 +808,7 @@
           (error-value? x)   (:seon.error/message x)
           (canvas/valid-hiccup? x) (hiccup-text x)
           custom             (invoke-custom-render view configuration render-request x custom)
+          prepared           (value/render-ai-data configuration "inline" prepared)
           :else              (value/render-ai configuration "inline" x))))
     (catch :default e
       ;; `block` dispatches to CORE renderers (md->hiccup, clj->hiccup, the

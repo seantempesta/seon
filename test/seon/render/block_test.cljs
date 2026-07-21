@@ -12,6 +12,7 @@
     [seon.agent.ctx.render-fns]
     [seon.agent.run]
     [seon.config :as config]
+    [seon.db :as db]
     [seon.error :as error]
     [seon.render :as render]
     [seon.render.value :as rv]
@@ -378,6 +379,113 @@
                              {:seon.schema/projection {}} value))
             "Ada")))))
 
+(deftest incomplete-explicit-overrides-never-run-custom-code
+  (doseq [[view property custom]
+          [[:html :seon.render/html
+            'seon.render.block-test/custom-html]
+           [:ai :seon.render/ai
+            'seon.render.block-test/custom-ai]]]
+    (let [visits (atom 0)
+          sample-calls (atom 0)
+          custom-calls (atom 0)
+          original-sample rv/sample
+          value {property custom
+                 :demo/roots (map (fn [i] (swap! visits inc) {:demo/name i})
+                                  (range 1000000))}]
+      (with-redefs [rv/sample (fn [configuration value opts]
+                               (swap! sample-calls inc)
+                               (original-sample configuration value opts))
+                    custom-html (fn [_]
+                                  (swap! custom-calls inc)
+                                  [:div "must not run"])
+                    custom-ai (fn [_]
+                                (swap! custom-calls inc)
+                                "must not run")
+                    schema/matching-shapes-in
+                    (fn [& _]
+                      (throw (js/Error. "incomplete value must not validate")))]
+        (let [first-render (render/block view configuration render-request value)
+              second-render (render/block view configuration render-request value)]
+          (is (= first-render second-render) "fallback bytes are deterministic")
+          (is (= 2 @sample-calls) "one bounded sample per block attempt")
+          (is (<= @visits 40) "million roots stay inside the breadth budget")
+          (is (zero? @custom-calls)))))))
+
+(deftest incomplete-override-text-is-never-decoded
+  (let [decode-calls (atom 0)
+        value {:seon.render/html (apply str (repeat 100000 "x"))
+               :demo/roots (range 1000000)}]
+    (with-redefs [db/decode-edn-value
+                  (fn [& _]
+                    (swap! decode-calls inc)
+                    (throw (js/Error. "override decode must not run")))]
+      (is (vector? (render/block :html configuration render-request value)))
+      (is (zero? @decode-calls)))))
+
+(deftest incomplete-recursive-schema-values-never-validate-or-dispatch
+  (let [projection
+        (schema/build-projection
+          {:demo/recursive-root
+           [:map {:seon.render/html 'seon.render.block-test/custom-html}
+            [:my.plan/roots [:vector :map]]]})
+        request {:seon.schema/projection projection}
+        custom-calls (atom 0)
+        original-sample rv/sample]
+    (doseq [[label value visits]
+            (let [root-visits (atom 0)
+                  child-visits (atom 0)]
+              [["million roots"
+                {:my.plan/roots
+                 (map (fn [i] (swap! root-visits inc) {:my.plan/id i})
+                      (range 1000000))}
+                root-visits]
+               ["million children"
+                {:my.plan/roots
+                 [{:my.plan/id 0
+                   :my.plan/_parent
+                   (map (fn [i]
+                          (swap! child-visits inc)
+                          {:my.plan/id i})
+                        (range 1000000))}]}
+                child-visits]
+               ["deep unary chain"
+                {:my.plan/roots
+                 [(reduce (fn [child i]
+                            {:my.plan/id i :my.plan/_parent [child]})
+                          {:my.plan/id 10000}
+                          (range 10000))]}
+                (atom 0)]])]
+      (let [sample-calls (atom 0)
+            prepared (atom nil)
+            original-preparer rv/render-html-sample-data-in]
+        (with-redefs [rv/sample (fn [configuration value opts]
+                                 (swap! sample-calls inc)
+                                 (original-sample configuration value opts))
+                      rv/render-html-sample-data-in
+                      (fn [eval-id projection value tree]
+                        (let [data (original-preparer eval-id projection value tree)]
+                          (reset! prepared data)
+                          data))
+                      custom-html (fn [_]
+                                    (swap! custom-calls inc)
+                                    [:div "must not run"])
+                      schema/matching-shapes-in
+                      (fn [& _]
+                        (throw (js/Error. "incomplete value must not validate")))]
+          (let [rendered (render/block :html configuration request value)]
+            (is (vector? rendered) label)
+            (is (= 1 @sample-calls) (str label " samples once"))
+            (is (true? (:seon.render.value/truncated? @prepared))
+                (str label " is honestly partial"))
+            (is (<= @visits 40) (str label " work stays bounded"))
+            (when (= label "deep unary chain")
+              (is (some #(and (map? %)
+                              (contains? % :seon.render.value/pruned))
+                        (tree-seq coll? seq
+                                  (:seon.render.value/tree @prepared)))
+                  "deep traversal stops at an explicit pruned marker"))))))
+    (is (zero? @custom-calls))))
+
 (deftest invalid-candidate-and-no-match-use-generic-data-without-custom-dispatch
   (let [calls (atom 0)
         projection (schema/build-projection
@@ -386,7 +494,7 @@
                        [:demo/name :string]]})
         generic (drilled-projection {:generic true})]
     (with-redefs [custom-html (fn [_] (swap! calls inc) [:div "wrong"])
-                  rv/render-html-data (fn [& _] generic)]
+                  rv/render-html-sample-data-in (fn [& _] generic)]
       (doseq [value [{:demo/name 42} {:other/value true}]]
         (is (str/includes?
               (s (render/block :html configuration

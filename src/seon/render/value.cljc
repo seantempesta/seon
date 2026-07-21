@@ -800,6 +800,14 @@
                     (contains? % :seon.render.value/string-len)))
           (tree-seq coll? #(if (map? %) (vals %) (seq %)) skel))))
 
+#?(:cljs
+   (defn complete-sample?
+  "True when a bounded sample proves that it contains the whole value."
+  {:malli/schema [:=> [:catn [:seon.render.value/tree ::bounded-data]]
+                  :boolean]}
+  [tree]
+  (not (truncated? tree))))
+
 (defn- ind [depth] (apply str (repeat depth "  ")))
 
 (declare emit-inline)
@@ -1175,13 +1183,6 @@
                      {:seon.render.value/humanized humanized
                       :seon.render.value/error-value error-value})))
           {:seon.render.value/schemas []})))))
-
-#?(:cljs
-   (defn- schema-projection [value incomplete?]
-     (schema-projection-in
-       (or (schema/current-projection)
-           (schema/build-projection (schema/snapshot)))
-       value incomplete?)))
 
 (defn- drill-failure
   [message]
@@ -1731,6 +1732,42 @@
       (drill-failure "Value drill failed while reading the selected value."))))
 
 #?(:cljs
+   (defn render-html-sample-data-in
+  "Build HTML data from one already prepared tree and schema projection."
+  {:malli/schema [:=> [:catn [:seon.render.value/eval-id :string]
+                             [:seon.schema/projection :seon.schema/projection]
+                             [:seon.render.value/value :any]
+                             [:seon.render.value/tree ::bounded-data]]
+                  :map]}
+  [eval-id projection value skel]
+  (let [incomplete? (truncated? skel)]
+    (merge
+      {:seon.render.value/eval-id    eval-id
+       :seon.render.value/summary    (or (top-type+size value)
+                                         (some-> (:seon.eval/opaque skel))
+                                         "scalar")
+       :seon.render.value/truncated? incomplete?
+       :seon.render.value/tree       skel}
+      (schema-projection-in projection value incomplete?)))))
+
+#?(:cljs
+   (defn render-html-data-in
+  "Build bounded HTML data against one immutable schema projection.
+
+   This is the prepared universal projection used at dispatch boundaries:
+   callers may inspect `::truncated?` without touching the raw value again,
+   then reuse these exact bytes for the generic fallback."
+  {:malli/schema [:=> [:catn [:seon.config/configuration
+                              :seon.config/singleton]
+                             [:seon.render.value/eval-id :string]
+                             [:seon.schema/projection :seon.schema/projection]
+                             [:seon.render.value/value :any]]
+                  :map]}
+  [configuration eval-id projection value]
+  (render-html-sample-data-in eval-id projection value
+                              (sample configuration value {}))))
+
+#?(:cljs
    (defn render-html-data
   "DATA CONTRACT the interactive HTML value-browser consumes.
 
@@ -1754,16 +1791,34 @@
                              [:seon.render.value/value :any]]
                   :map]}
   [configuration eval-id value]
-  (let [skel (sample configuration value {})
-        incomplete? (truncated? skel)]
-    (merge
-      {:seon.render.value/eval-id    eval-id
-       :seon.render.value/summary    (or (top-type+size value)
-                                         (some-> (:seon.eval/opaque skel))
-                                         "scalar")
-       :seon.render.value/truncated? incomplete?
-       :seon.render.value/tree       skel}
-      (schema-projection value incomplete?)))))
+  (render-html-data-in
+    configuration eval-id
+    (or (schema/current-projection)
+        (schema/build-projection (schema/snapshot)))
+    value)))
+
+#?(:cljs
+   (defn render-ai-data
+  "Render agent text from an already prepared bounded data projection.
+
+   The raw value is deliberately absent: an incomplete custom-dispatch
+   candidate falls back through the identical sampled tree without a second
+   realization or validation pass."
+  {:malli/schema [:=> [:catn [:seon.config/configuration
+                              :seon.config/singleton]
+                             [:seon.render.value/eval-id :string]
+                             [:seon.render.value/projection :map]]
+                  :string]}
+  [configuration eval-id projection]
+  (let [partial? (:seon.render.value/truncated? projection)
+        prepared (cond->
+                   {::body (emit (:seon.render.value/tree projection)
+                                 0 (config/value-width configuration))}
+                   partial?
+                   (assoc ::drill-hint
+                          {::top-type-size
+                           (:seon.render.value/summary projection)}))]
+    (format-ai {::eval-id eval-id ::prepared prepared}))))
 
 ;; ============================================================
 ;; Live integration:
