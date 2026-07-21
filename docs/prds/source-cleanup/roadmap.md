@@ -358,7 +358,14 @@ diff subsequently disappeared before review; independent audit
 as an incomplete SCI U5 fragment, not a source-cleanup unit. U5 waits for its
 own U3 handoff and must land a dependency-ordered source loader, complete
 registry provisioning, shims, and host restart proof rather than bare renames.
-It is no longer a current dirty-tree blocker. Ports 7980/7981 belong
+It is no longer a current dirty-tree blocker. The exact ten-worktree ledger is
+[[research/stage2-worktree-disposition-ledger-2026-07-20]] (`2226c8cd`): the
+primary checkout is merge-before-rename, seven legacy lanes are preserved
+out-of-scope, and `plan-fix` needs an owner decision only if removal is desired.
+`seon-stable` is the serious remaining ambiguity because its dirty ACME client
+overlaps the terminology cut while its live processes and unique evidence stay
+owner-controlled; explicit sequencing, quiescence, and preservation handoff
+are mandatory. Ports 7980/7981 belong
 to `/Users/sean/src/seon-stable`; that owner—not this checkout—must hand off and
 stop them. Ten worktrees still need explicit dispositions, restore intent needs
 database proof, and the terminology manifest is recomputed only at the final
