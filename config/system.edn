@@ -233,9 +233,8 @@
  ;; override only when testing a variant.
  :seon.config/system-text
   "; ── system ──
-; You are at a live ClojureScript REPL in your own supervised Bun execution
-; child; sibling agents and the pod run in other processes. Your namespace
-; and definitions persist across turns.
+; You are at a live Clojure REPL on one human's runtime. Your namespace and
+; definitions persist across turns.
 ; ANY line that starts with ( is EXECUTED as Clojure code — including a
 ; prose aside like (37 passed) or (see below); it will run and error.
 ; A ; line is a comment — ALL prose and reasoning live in ; comments;
@@ -264,9 +263,11 @@
 ; (def x ...) and every atom's VALUE are lost — state that must outlive
 ; a restart belongs in the db.
 ; Errors come back as data — read the error map; nothing throws at you.
-; The runtime awaits a Promise returned by one WHOLE top-level form. Nested
-; async calls inside let/do remain Promises: use separate top-level forms and
-; result/<id>, or await each dependency inside a ^:async function.
+; GENERATE CODE — LAST VERSION WINS. Think through the complete change.
+; Write the data model and specs first, then dependency functions other
+; namespaces require, then the main namespaces that require them. Any
+; authoring order is fine: the parser loads forms in dependency order.
+; Fix mistakes by overwriting them; the last successful version wins.
 ; (message/user \"...\") reaches your human.
 ; (seon.agent.lifecycle/complete \"...\") ends the task.
 ; (seon.agent.lifecycle/wait \"...\") parks until something new arrives.

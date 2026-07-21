@@ -233,7 +233,20 @@
     ::protocol/entity-id [:seon.ai/id "config"]
     :datahike.resource/max-work 100000
     :datahike.resource/max-results 256
-    :datahike.resource/max-result-weight 1048576}])
+    :datahike.resource/max-result-weight 1048576}
+   ;; Presence query, not pull: the optional tier attribute may not be
+   ;; installed yet in a database whose agents all remain on the child tier.
+   {::protocol/operation protocol/query-operation
+    ::protocol/query-form
+    '[:find ?socket-path .
+      :in $ ?agent-id
+      :where
+      [?agent :seon.agent/id ?agent-id]
+      [?agent :seon.execution.host/eval-socket-path ?socket-path]]
+    ::protocol/arguments [nil]
+    :datahike.resource/max-work 10000
+    :datahike.resource/max-results 8
+    :datahike.resource/max-result-weight 1024}])
 
 (defn- acquired-member [member]
   (when (true? (::protocol/success? member))
@@ -269,28 +282,39 @@
   [{:seon.agent/keys [id]
     run-id :seon.agent.run/id
     profile :seon.agent.ctx/profile} invoke-selected!]
-  (let [members (assoc-in prompt-acquisition-members
-                          [0 ::protocol/entity-id]
-                          [:seon.agent/id id])
+  (let [members (-> prompt-acquisition-members
+                    (assoc-in [0 ::protocol/entity-id] [:seon.agent/id id])
+                    (assoc-in [3 ::protocol/arguments] [id]))
         acquired (await (db/execute-many {::db/members members
                                           ::db/max-result-weight 8388608}))
-        [agent-member cluster-config-member ai-config-member]
+        [agent-member cluster-config-member ai-config-member tier-member]
         (::db/results acquired)
+        required-members (cond-> [agent-member cluster-config-member
+                                  ai-config-member]
+                           (some? tier-member) (conj tier-member))
         member-failure?
-        (not (every? #(true? (::protocol/success? %))
-                     [agent-member cluster-config-member ai-config-member]))]
+        (not (every? #(true? (::protocol/success? %)) required-members))]
     (if member-failure?
-      (prompt-acquisition-error acquired
-                                [agent-member cluster-config-member
-                                 ai-config-member])
+      (prompt-acquisition-error acquired required-members)
       (let [entity (or (acquired-member agent-member) {})
             cluster-config-row
             (db/decode-edn-values
               (or (acquired-member cluster-config-member) {}))
             config-row (merge (or (acquired-member ai-config-member) {})
                               cluster-config-row)
-            system-prompt (or (:seon.config/system-text cluster-config-row)
-                              ctx/system-text)
+            shared-system-text
+            (or (:seon.config/system-text cluster-config-row)
+                ctx/system-text-shared)
+            host-tier? (and (some? tier-member)
+                            (string? (acquired-member tier-member)))
+            ;; Three-member acquisition is retained only for older direct test
+            ;; stubs. Real prompt acquisition always carries the tier member
+            ;; and therefore always uses the one tier-aware renderer.
+            system-prompt (if (some? tier-member)
+                            (ctx/render-system-text host-tier?
+                                                    shared-system-text)
+                            (or (:seon.config/system-text cluster-config-row)
+                                ctx/system-text))
             config-resolution (ai/resolved-config-from-rows config-row entity)
             whole-prompt (when-not (seq profile)
                            (some->> (:seon.render/ai entity)

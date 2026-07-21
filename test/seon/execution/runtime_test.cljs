@@ -161,7 +161,7 @@
                     (get-in @observed
                             [:seon.execution.runtime-test/request ::db/members
                              2 ::protocol/entity-id])))
-             (is (= [65536 4096 256]
+             (is (= [65536 4096 256 8]
                     (mapv :datahike.resource/max-results
                           (get-in @observed
                                   [:seon.execution.runtime-test/request

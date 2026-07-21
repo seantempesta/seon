@@ -754,30 +754,73 @@
 ;; are owned by seon.execution.runtime; this namespace formats their values.
 ;; ------------------------------------------------------------
 
-(def system-text
+(defn- child-platform-contract-section []
+  (str "; ── platform contract: child ──\n"
+       "; It is ClojureScript in a long-running Bun process: you have full js/\n"
+       "; interop (js/fetch, js/Date, (js/require \"node:fs\") and any installed\n"
+       "; npm package) but NO JVM — no java.*, no Java class. Reach for an npm\n"
+       "; package or a js/ builtin, never a java.* import.\n"
+       ";\n"
+       "; STATE ACROSS TURNS. A (defn ...) and an atom def like (def !x (atom\n"
+       "; 0)) persist in your namespace — define a helper now, call it next\n"
+       "; turn. A bare (def x 42) does NOT survive being read back on a later\n"
+       "; turn (a self-host limitation); hold mutable values in an atom, not a\n"
+       "; bare def.\n"
+       ";\n"
+       "; ASYNC FORMS. The runtime awaits a Promise returned by the WHOLE\n"
+       "; top-level form, so one top-level (db/query …) or (plan/tree …) returns\n"
+       "; DATA on the next turn. It does NOT make nested calls synchronous:\n"
+       "; (let [x (plan/tree {})] …) binds x to a Promise. Put dependent calls\n"
+       "; in separate top-level forms and reuse result/<id>, or define a ^:async\n"
+       "; function and (await …) each dependency inside it. A bare top-level\n"
+       "; (await x) throws because await is valid only inside an ^:async fn.\n"
+       "; ── end system ──"))
+
+(defn- host-platform-contract-section []
+  (str "; ── platform contract: host ──\n"
+       "; This host tier runs Clojure on the JVM. Calls are synchronous: write\n"
+       "; plain straight-line forms; no ^:async or await ceremony is needed.\n"
+       "; Definitions remain available across turns in this context; durable\n"
+       "; state that must survive host reconstruction belongs in the database.\n"
+       "; JVM interop such as java.util.Date works. Prefer portable CLJC forms\n"
+       "; such as inst-ms, and reach platform capabilities through my.* functions\n"
+       "; so ordinary data crosses runtime boundaries. Values that cannot cross\n"
+       "; are handles: act on them through their channel functions and prefer\n"
+       "; extracting ordinary data over retaining handles.\n"
+       "; ── end system ──"))
+
+(defn- platform-contract-section [host-tier?]
+  (if host-tier?
+    (host-platform-contract-section)
+    (child-platform-contract-section)))
+
+(defn render-system-text
+  "Compose shared system teaching with one tier-derived platform contract."
+  {:malli/schema [:=> [:catn [::host-tier? :boolean]
+                       [::shared-text :string]]
+                  :string]}
+  [host-tier? shared-text]
+  (str shared-text "\n;\n" (platform-contract-section host-tier?)))
+
+(def system-text-shared
   "The ONE always-on instruction floor — the concept paragraphs, the
    REPL/eval mechanics, and the universal load-bearing rules every agent
-   needs EVERY turn (async-reads-as-synchronous, register!-before-transact,
+   needs EVERY turn (database access, register!-before-transact,
    every-map-key-namespaced, :malli/schema-is-enforced, entities-are-
    attributes-not-kinds). Per-FUNCTION usage examples live in the rendered
    namespace sources (docstrings + `;;` comments); DEEP reference lives in
    the skill bodies, reachable by (my.skills/load :name). This block is the
    floor, not the depth — a skill only DEEPENS a floor rule.
 
-   BYTE-IDENTICAL for every agent and every turn — a `def`, not a fn of
-   the agent: the agent id lives in the transcript readline at the very
-   END of the prompt, so this block is one shared cacheable artifact
-   across the whole cluster. CACHE-PREFIX invariant: no timestamps, no
-   ids, no counts. PROVIDER-NEUTRAL: no model or vendor words, ever."
+   Shared by every agent and every turn. The tier-derived platform contract
+   is composed by [[render-system-text]] from the agent's database facts.
+   CACHE-PREFIX invariant: no timestamps, ids, or counts. PROVIDER-NEUTRAL:
+   no model or vendor words, ever."
   (str
     "; ── system ──\n"
     "; You are at a live Clojure REPL on one human's runtime. The REPL is\n"
     "; your only tool: everything you do — read, compute, store, reply,\n"
-    "; render — is a Clojure form evaluated here. It is ClojureScript in a\n"
-    "; long-running Bun process: you have full js/ interop (js/fetch,\n"
-    "; js/Date, (js/require \"node:fs\") and any installed npm package) but\n"
-    "; NO JVM — no java.*, no Java class. Reach for an npm package or a js/\n"
-    "; builtin, never a java.* import.\n"
+    "; render — is a Clojure form evaluated here.\n"
     ";\n"
     "; THE LIVE CONTEXT SYSTEM. This whole prompt re-derives from the\n"
     "; shared database every turn: every section is a view of NOW, not an\n"
@@ -871,20 +914,11 @@
     "; or {:seon.eval/datom [...]}) — the real handle lives in result/<id>.\n"
     "; Reach for the result/<id> var when you want the value again.\n"
     ";\n"
-    "; STATE ACROSS TURNS. A (defn ...) and an atom def like (def !x (atom\n"
-    "; 0)) persist in your namespace — define a helper now, call it next\n"
-    "; turn. A bare (def x 42) does NOT survive being read back on a later\n"
-    "; turn (a self-host limitation); hold mutable values in an atom, not a\n"
-    "; bare def.\n"
-    ";\n"
-    "; ASYNC FORMS. The runtime awaits a Promise returned by the WHOLE\n"
-    "; top-level form, so one top-level (db/query …) or (plan/tree …) returns\n"
-    "; DATA on the next turn. It does NOT make nested calls synchronous:\n"
-    "; (let [x (plan/tree {})] …) binds x to a Promise. Put dependent calls\n"
-    "; in separate top-level forms and reuse result/<id>, or define a ^:async\n"
-    "; function and (await …) each dependency inside it. A bare top-level\n"
-    "; (await x) throws because await is valid only inside an ^:async fn.\n"
-    "; directly.\n"
+    "; GENERATE CODE — LAST VERSION WINS. Think through the complete change.\n"
+    "; Write the data model and specs first, then dependency functions other\n"
+    "; namespaces require, then the main namespaces that require them. Any\n"
+    "; authoring order is fine: the parser loads forms in dependency order.\n"
+    "; Fix mistakes by overwriting them; the last successful version wins.\n"
     ";\n"
     "; ERRORS ARE VALUES. Core calls never throw at you — a failure\n"
     "; comes back directly as data, e.g. {:seon.error/message \"...\"\n"
@@ -1111,8 +1145,11 @@
     "; - When you store a my.kb.* fact, grade it: record HOW you know it\n"
     ";   (a :my.kb/source) and HOW SURE you are (a :my.kb/confidence). A\n"
     ";   guess stored as fact is worse than no fact — the next agent\n"
-    ";   cannot read your certainty from your phrasing.\n"
-    "; ── end system ──"))
+    ";   cannot read your certainty from your phrasing."))
+
+(def system-text
+  "The shipped child-tier system text used when no agent facts are available."
+  (render-system-text false system-text-shared))
 
 
 ;; ============================================================
