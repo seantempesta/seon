@@ -736,13 +736,27 @@ decisions batch for their return.
   request-unavailability window (curl `000`, no 503) before recovery.
   Owner package: W1.2b graduation (decide accept-and-document vs
   request-parking during the swap). Observed in the W1.2a live drive.
-- **W1.5 in flight** — sol medium, sole lane (live drives granted),
-  codex thread `019f86d4-5237-7bb0-80ca-04e55db05cf0`, spec
-  `specs/w1.5-enforcement-surfaces.md` (`e92385f9`): connection
-  cap/UDS options, frame ceiling both peers (host-side path may force
-  a stop — database-free host), executor families, codec settings,
-  dispositions flip key-by-key. Refill after: W1.2b graduation → W1
-  config-facts sweep → packages WP-B∥WP-J.
+- **W1.5 SPLIT at its stop (accepted)** — thread
+  `019f86d4-5237-7bb0-80ca-04e55db05cf0`, spec
+  `specs/w1.5-enforcement-surfaces.md` (`e92385f9`). Sol proved the
+  spec's flagged risk real and found two more: (i) the host lacks a
+  CONFIG path, not a database path (it transacts through its host
+  writer session — correct the "database-free" shorthand); (ii) frame
+  agreement is impossible at session open today (both peers frame on
+  private constants before any semantic exchange; writer advertises
+  the protocol constant, writer.clj:3701); (iii) the connection-cap
+  steering error is impossible at the transport (accept-then-close,
+  uds.cljc:979). **W1.5a (resumed, in flight):** enforce
+  executor-family, codec workers/queue, and existing request-server
+  options; flip only those dispositions; frame-bytes +
+  max-connections stay `:carried` with unchanged decline steering.
+  **W1.5b (queued, needs a design pass):** session-open admission
+  exchange — a small opening frame carrying the configured frame
+  ceiling, incompatible-peer rejection, and the cap+1 steering error;
+  rides the sanctioned protocol-extension mechanism (transit tagged
+  types + new ops); expands into `db/protocol.cljc`, `db.cljs`, and
+  the host handshake. Refill after W1.5a: W1.5b design → W1.2b
+  graduation (owns q20) → W1 config-facts sweep → packages WP-B∥WP-J.
 - **sol W1.2 grounding research (read-only, live-probe enabled)** in
   flight — logs `tmp/orchestrator/w12-grounding-*`; interface ledger
   for the live-writer-reconstruction spec (W0.4 pool member lifecycle,
