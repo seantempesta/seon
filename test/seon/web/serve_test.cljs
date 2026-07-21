@@ -30,7 +30,8 @@
     [seon.schema :as schema]
     [seon.web.debug :as debug]
     [seon.web.router :as router]
-    [seon.web.serve :as serve]))
+    [seon.web.serve :as serve]
+    [seon.web.value :as web-value]))
 
 (def ^:private database
   {:db-name "test"
@@ -645,18 +646,49 @@
 (deftest database-view-uses-the-public-index-page-fields
   (async done
     (let [original db/index-page
+          original-entity db/entity
+          original-query db/query
           original-fleet system/acquire-fleet-summary
-          request (atom nil)]
+          original-sample execution-host/sample-value!
+          request (atom nil)
+          entity-reads (atom [])
+          query-reads (atom [])
+          child-sends (atom 0)]
       (set! db/index-page
             (fn index-page-stub
               ([value]
                (reset! request value)
                (js/Promise.resolve
                 {:datahike.index-page/datoms
-                 [[1 :seon.agent/id "root" 2 true]]}))
+                 [[2 :demo/name "two" 2 true]
+                  [1 :demo/name "one" 2 true]
+                  [2 :demo/enabled true 2 true]]}))
               ([_database _options]
                (js/Promise.reject
                 (js/Error. "database view must use the map request")))))
+      (set! db/entity
+            (fn entity-stub
+              ([entity-request]
+               (entity-stub (::db/db entity-request) (::db/ref entity-request)))
+              ([value entity-id]
+                (swap! entity-reads conj [value entity-id])
+                (js/Promise.resolve
+                 (case entity-id
+                   [:seon.config/id "cluster"]
+                   (assoc value-limits :seon.config/id "cluster")
+                   2 {:db/id 2 :demo/name "two"
+                      :demo/items (nth (iterate vector (vec (range 20))) 8)}
+                   1 {:db/id 1 :demo/name "one"
+                      :demo/items (nth (iterate vector (vec (range 20))) 8)})))))
+      (set! db/query
+            (fn [query-request]
+              (swap! query-reads conj query-request)
+              (js/Promise.resolve [])))
+      (set! execution-host/sample-value!
+            (fn [& _]
+              (swap! child-sends inc)
+              (js/Promise.reject
+               (js/Error. "entity values must remain parent-owned"))))
       (set! system/acquire-fleet-summary
             (fn [value]
               (is (identical? database value))
@@ -672,14 +704,47 @@
                      ::db/direction :forward
                      ::db/limit 50}
                     @request))
-             (is (str/includes? (pr-str element) ":seon.agent/id")
-                 "the view consumes Datahike's index-page datoms field")
-             (is (str/includes? (pr-str element) ":data-agent-count 2"))
-             (is (str/includes? (pr-str element) ":data-running-agents 1"))))
+             (is (= [[database [:seon.config/id "cluster"]]
+                     [database 2]
+                     [database 1]]
+                    @entity-reads)
+                 "the bounded page selects two stable distinct entity reads")
+             (is (= 2 (count @query-reads)))
+             (is (every? #(identical? database (::db/db %)) @query-reads)
+                 "schema projection uses the feed-supplied immutable db")
+             (is (zero? @child-sends))
+             (let [markup (pr-str element)
+                   root-ids
+                   (mapv #(get-in % [3 1 :id])
+                         (drop 2 (last element)))]
+               (is (< (str/index-of markup "entity 2")
+                      (str/index-of markup "entity 1"))
+                   "first-seen entity order is stable")
+               (is (= 2 (count root-ids)))
+               (is (= 2 (count (set root-ids)))
+                   "each honest entity selector owns a distinct root")
+               (is (str/includes? markup "entity=2"))
+               (is (str/includes? markup "entity=1"))
+               (is (not (str/includes? markup "[:pre")))
+               (is (str/includes? markup ":data-agent-count 2"))
+               (is (str/includes? markup ":data-running-agents 1"))
+               (reset! entity-reads [])
+               (reset! query-reads [])
+               (-> ((deref #'debug/render-data!) database nil)
+                   (.then
+                    (fn [rerendered]
+                      (is (= root-ids
+                             (mapv #(get-in % [3 1 :id])
+                                   (drop 2 (last rerendered))))
+                          "logical request roots survive feed rerenders")
+                      (is (zero? @child-sends))))))))
           (.catch (fn [error] (is false (str error))))
           (.finally
            (fn []
              (set! db/index-page original)
+             (set! db/entity original-entity)
+             (set! db/query original-query)
+             (set! execution-host/sample-value! original-sample)
              (set! system/acquire-fleet-summary original-fleet)
              (done)))))))
 
@@ -687,6 +752,38 @@
   (let [markup ((deref #'debug/page-html) "data" "/data/feed" "loading")]
     (is (= 1 (count (re-seq #"id=\"app-view\"" markup))))
     (is (not (str/includes? markup "id=\"system-header\"")))))
+
+(deftest value-render-input-acquisition-refuses-database-errors
+  (async done
+    (let [original-entity db/entity
+          original-query db/query]
+      (set! db/entity
+            (fn entity-failure
+              ([_request]
+               (js/Promise.resolve
+                {:seon.error/message "configuration read failed"}))
+              ([_database _entity-id]
+               (js/Promise.resolve
+                {:seon.error/message "configuration read failed"}))))
+      (-> (web-value/policy! database)
+          (.then (fn [_] (is false "policy failure must reject")))
+          (.catch
+           (fn [error]
+             (is (= "configuration unavailable" (.-message error)))
+             (set! db/query
+                   (fn [_]
+                     (js/Promise.resolve
+                      {:seon.error/message "program read failed"})))
+             (web-value/program-projection! database)))
+          (.then (fn [_] (is false "projection failure must reject")))
+          (.catch
+           (fn [error]
+             (is (= "program projection unavailable" (.-message error)))))
+          (.finally
+           (fn []
+             (set! db/entity original-entity)
+             (set! db/query original-query)
+             (done)))))))
 
 (deftest agent-run-timeout-uses-explicit-value-or-run-policy
   (async done

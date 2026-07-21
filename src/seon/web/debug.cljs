@@ -6,13 +6,17 @@
   (:require
    [clojure.string :as str]
    [seon.agent.debug :as agent-debug]
+   [seon.config :as config]
    [seon.db :as db]
+   [seon.render :as render]
+   [seon.render.value :as render.value]
    [seon.render.system :as system]
    [seon.schema :as schema]
    [seon.ui.header :as header]
    [seon.ui.html :as html]
    [seon.web.brand :as brand]
-   [seon.web.datastar :as datastar]))
+   [seon.web.datastar :as datastar]
+   [seon.web.value :as web-value]))
 
 (schema/register! ::ring-request :map)
 (schema/register! ::data-attribute [:or :nil :keyword])
@@ -154,7 +158,7 @@
 (defn- data-attribute [^js request]
   (some-> (query-value request "attr") not-empty keyword))
 
-(defn- data-element [page agents]
+(defn- data-element [page agents entity-panels]
   [:main {:id "app-view" :class "flex flex-col gap-2 p-3"}
    (header/system-header (header-projection agents))
    header/header-spacer
@@ -164,8 +168,62 @@
      "← agents"]]
    (if-let [message (:seon.error/message page)]
      [:div {:class "text-error"} message]
-     [:pre {:class "whitespace-pre-wrap text-xs"}
-      (pr-str (:datahike.index-page/datoms page))])])
+     (into [:div {:class "flex flex-col gap-3"}] entity-panels))])
+
+(defn- db-error? [value]
+  (and (map? value) (string? (:seon.error/message value))))
+
+(defn- stable-entity-ids [page]
+  (second
+   (reduce (fn [[seen ids] datom]
+             (let [entity-id (nth datom 0 nil)]
+               (if (or (nil? entity-id) (contains? seen entity-id))
+                 [seen ids]
+                 [(conj seen entity-id) (conj ids entity-id)])))
+           [#{} []]
+           (:datahike.index-page/datoms page))))
+
+(defn- entity-panel [configuration projection entity-id entity]
+  (let [effective-limits
+        (config/effective-value-drill-limits
+         {:seon.config/configuration configuration})
+        drill-result
+        (render.value/drill-value
+         projection entity
+         {:seon.render.value/path []
+          :seon.render.value/offset 0
+          :seon.render.value/effective-limits effective-limits})
+        value-request
+        {:seon.render/value-route-base "/agent/root/value"
+         :seon.render/value-selector {:seon.render/entity-id entity-id}
+         :seon.render/value-projection
+         (:seon.render.value/projection drill-result)}]
+    [:section {:class "flex flex-col gap-1"
+               :data-entity-id (str entity-id)}
+     [:h2 {:class "text-amber-500 font-mono"} (str "entity " entity-id)]
+     (render/block :html configuration
+                   {:seon.agent/id "root"
+                    :seon.schema/projection projection}
+                   value-request)]))
+
+(defn- ^:async data-projection [database page]
+  (let [entity-ids (stable-entity-ids page)
+        results
+        (await
+         (js/Promise.all
+          (into-array
+           (concat
+            [(web-value/policy! database)
+             (web-value/program-projection! database)]
+            (map #(db/entity {::db/db database ::db/ref %}) entity-ids)))))
+        [configuration projection & entities]
+        (array-seq results)]
+    (if-let [failure (some #(when (db-error? %) %) results)]
+      failure
+      {:seon.web.debug/entity-panels
+       (mapv (fn [entity-id entity]
+               (entity-panel configuration projection entity-id entity))
+             entity-ids entities)})))
 
 (defn- render-data! [database attribute]
   (-> (js/Promise.all
@@ -176,7 +234,18 @@
                       ::db/limit 50}
                attribute (assoc ::db/components [attribute])))
             (system/acquire-fleet-summary database)])
-      (.then (fn [[page agents]] (data-element page agents)))))
+      (.then
+       (fn [[page agents]]
+         (if (db-error? page)
+           (data-element page agents [])
+           (-> (data-projection database page)
+               (.then
+                (fn [projection]
+                  (if (db-error? projection)
+                    (data-element projection agents [])
+                    (data-element
+                     page agents
+                     (:seon.web.debug/entity-panels projection)))))))))))
 
 (defn- data-feed-definition [attribute view-id]
   {:seon.web.feed/key [:seon.web.feed/data attribute]

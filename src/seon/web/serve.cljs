@@ -53,7 +53,8 @@
     [seon.schema :as schema]
     [seon.ui.html :as html]
     [seon.web.datastar :as datastar]
-    [seon.web.router :as router]))
+    [seon.web.router :as router]
+    [seon.web.value :as web-value]))
 
 ;; ============================================================
 ;; Process-lifetime state
@@ -223,18 +224,6 @@
 (def ^:private value-path-framing-max-bytes 8192)
 (def ^:private value-query-fields #{"eval" "entity" "path" "offset"})
 (def ^:private value-eof (js-obj))
-
-(def ^:private value-schema-query
-  '[:find ?key ?form
-    :where
-    [?schema :seon.schema/key ?key]
-    [?schema :seon.schema/form ?form]])
-
-(def ^:private value-function-contract-query
-  '[:find ?sym ?form
-    :where
-    [?function :seon.fn/sym ?sym]
-    [?function :seon.fn/spec ?form]])
 
 (def ^:private value-eval-owner-query
   '[:find ?eval .
@@ -417,27 +406,6 @@
 (defn- db-result-error? [value]
   (and (map? value) (string? (:seon.error/message value))))
 
-(defn- ^:async value-policy [database]
-  (let [stored (await (db/entity database
-                                 [:seon.config/id config/cluster-config-id]))]
-    (when (or (db-result-error? stored) (nil? stored))
-      (throw (js/Error. "configuration unavailable")))
-    (db/decode-edn-values stored)))
-
-(defn- ^:async value-program-projection [database]
-  (let [results
-        (await
-          (js/Promise.all
-            #js [(db/query {::db/db database ::db/query value-schema-query})
-                 (db/query {::db/db database
-                            ::db/query value-function-contract-query})]))
-        [schema-rows function-contract-rows] (array-seq results)]
-    (when (some db-result-error? [schema-rows function-contract-rows])
-      (throw (js/Error. "program projection unavailable")))
-    (schema/projection-from-rows
-      {:seon.schema/schema-rows schema-rows
-       :seon.schema/function-contract-rows function-contract-rows})))
-
 (defn ^:async value!
   "Serve one authorized, bounded value projection."
   [ring-request]
@@ -448,7 +416,7 @@
         (let [database (await (db/db))
               _ (when (db-result-error? database)
                   (throw (js/Error. "database unavailable")))
-              configuration (await (value-policy database))
+              configuration (await (web-value/policy! database))
               effective-limits
               (config/effective-value-drill-limits
                 {:seon.config/configuration configuration})
@@ -488,7 +456,7 @@
                       (if (db-result-error? entity)
                         (throw (js/Error. "entity unavailable"))
                         (value-error-response 404 (value-absent-error)))
-                      (let [projection (await (value-program-projection database))
+                      (let [projection (await (web-value/program-projection! database))
                             result (render.value/drill-value
                                      projection entity drill-request)]
                         (value-result-response

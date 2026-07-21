@@ -43,6 +43,10 @@ note the browser 503s long-lived SSE; verify feeds with a server-side client).
 - **`debug.cljs`** — `/agent/{id}/debug` renders real per-block prompt text,
   HTML twins, token breakdown, and historical `turn`/`turn-diff` projections;
   `/data` is the live indexed database browser with its own shared feed.
+- **`value.cljs`** — the one database-pinned acquisition owner for decoded
+  value-render policy and the complete committed schema/function projection.
+  The value route and `/data` pass one explicit immutable database value; this
+  namespace owns no cache, route, feed, or rendering.
 
 ## Rules that bite
 
