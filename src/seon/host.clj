@@ -461,7 +461,7 @@
   (get-in @(::live-values session) [::values eval-id ::value]))
 
 (def ^:private sampling-policy-query
-  '[:find [?path-segments ?path-bytes ?realized ?depth ?string ?shape ?items] .
+  '[:find [?path-segments ?path-bytes ?realized ?depth ?string ?shape ?items]
     :in $ ?id
     :where
     [?config :seon.config/id ?id]

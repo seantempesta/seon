@@ -8,6 +8,7 @@
    handler (the same self-contained pattern as `seon.db.transport-uds-test`)
    so the suite needs no live cluster."
   (:require [clojure.test :refer [deftest is use-fixtures]]
+            [datalog.parser :as datalog.parser]
             [seon.db.id :as db.id]
             [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds]
@@ -230,6 +231,9 @@
                                            :seon.error/message]))
 
 (deftest sampling-policy-is-read-at-the-invocation-basis-and-fails-closed
+  (is (some? (datalog.parser/parse
+              (var-get #'host/sampling-policy-query)))
+      "the maintained seven-value tuple query parses at the writer boundary")
   (let [seen (atom [])
         acquire (var-get #'host/acquire-sampling-policy!)
         invalid [nil

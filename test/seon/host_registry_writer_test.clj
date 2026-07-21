@@ -314,7 +314,48 @@
    {:seon.schema/key :seon.ns.require/refer-all?
     :seon.schema/form ":boolean"}
    {:seon.schema/key :seon.ns.require/as-alias?
-    :seon.schema/form ":boolean"}])
+    :seon.schema/form ":boolean"}
+   {:seon.schema/key :seon.config/id
+    :seon.schema/form "[:string {:seon.db/identity true}]"}
+   {:seon.schema/key :seon.config/cap
+    :seon.schema/form "[:int {:min 1}]"}
+   {:seon.schema/key :seon.config.render/value-max-path-segments
+    :seon.schema/form ":seon.config/cap"}
+   {:seon.schema/key :seon.config.render/value-max-path-bytes
+    :seon.schema/form ":seon.config/cap"}
+   {:seon.schema/key :seon.config.render/value-max-realized-items
+    :seon.schema/form ":seon.config/cap"}
+   {:seon.schema/key :seon.config.render/value-max-depth
+    :seon.schema/form ":seon.config/cap"}
+   {:seon.schema/key :seon.config.render/value-max-string
+    :seon.schema/form ":seon.config/cap"}
+   {:seon.schema/key :seon.config.render/value-shape-sample
+    :seon.schema/form ":seon.config/cap"}
+   {:seon.schema/key :seon.config.render/value-max-items
+    :seon.schema/form ":seon.config/cap"}])
+
+(def ^:private value-sampling-policy
+  {:seon.config/id "cluster"
+   :seon.config.render/value-max-path-segments 32
+   :seon.config.render/value-max-path-bytes 4096
+   :seon.config.render/value-max-realized-items 1024
+   :seon.config.render/value-max-depth 3
+   :seon.config.render/value-max-string 80
+   :seon.config.render/value-shape-sample 8
+   :seon.config.render/value-max-items 12})
+
+(def ^:private value-sampling-policy-query
+  '[:find [?path-segments ?path-bytes ?realized ?depth ?string ?shape ?items]
+    :in $ ?id
+    :where
+    [?config :seon.config/id ?id]
+    [?config :seon.config.render/value-max-path-segments ?path-segments]
+    [?config :seon.config.render/value-max-path-bytes ?path-bytes]
+    [?config :seon.config.render/value-max-realized-items ?realized]
+    [?config :seon.config.render/value-max-depth ?depth]
+    [?config :seon.config.render/value-max-string ?string]
+    [?config :seon.config.render/value-shape-sample ?shape]
+    [?config :seon.config.render/value-max-items ?items]])
 
 (def ^:private parity-digest (apply str (repeat 64 "b")))
 
@@ -383,12 +424,16 @@
                     (str "(require 'seon.db)"
                          "(seon.db/transact! {:seon.db/tx-data "
                          (pr-str (into corpus-schema-rows
-                                       [{:seon.agent/id agent-id}
+                                       [value-sampling-policy
+                                        {:seon.agent/id agent-id}
                                         {:seon.db.process/id
                                          :seon.db.process/repl}
                                         {:seon.agent.turn/id "turn-parity"}]))
                          "})"))]
         (is (true? (:seon.db/ok? seeded)) (pr-str seeded)))
+      (is (= [32 4096 1024 3 80 8 12]
+             (context/query-writer! session value-sampling-policy-query
+                                    ["cluster"])))
       ;; Attributes install on first tx-data ASSERTION; the live database
       ;; installs these at genesis, and the recorder's exact-set
       ;; retractAttribute ops name optional attrs that must already be

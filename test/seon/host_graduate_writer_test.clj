@@ -13,6 +13,10 @@
 
 (def ^:private corpus-schema-rows
   (var-get #'registry-test/corpus-schema-rows))
+(def ^:private value-sampling-policy
+  (var-get #'registry-test/value-sampling-policy))
+(def ^:private value-sampling-policy-query
+  (var-get #'registry-test/value-sampling-policy-query))
 (def ^:private dependencies
   (var-get #'registry-test/dependencies))
 (def ^:private host-session!
@@ -127,12 +131,16 @@
              (str "(require 'seon.db)"
                   "(seon.db/transact! {:seon.db/tx-data "
                   (pr-str (into corpus-schema-rows
-                                [{:seon.agent/id agent-id}
+                                [value-sampling-policy
+                                 {:seon.agent/id agent-id}
                                  {:seon.db.process/id
                                   :seon.db.process/repl}
                                  {:seon.agent.turn/id "turn-parity"}]))
                   "})"))]
         (is (true? (:seon.db/ok? seeded)) (pr-str seeded)))
+      (is (= [32 4096 1024 3 80 8 12]
+             (context/query-writer! session value-sampling-policy-query
+                                    ["cluster"])))
       ;; Install provenance and exact-set optional attrs before U4 recording.
       (let [probe
             (sci/eval-string*
