@@ -434,6 +434,23 @@ tests / 444 assertions; independent review accepted it with no findings. The
 recursive plan schema may now resume. Exact-source restart, integrated browser
 proof, and closure of the retained value issues remain after that handoff.
 
+The plan source/focused-proof boundary is implemented by `2c5c1f31` and
+`9efaabaa`. The normal HTML configuration now calls one `my.plan/plan-surface`
+acquisition/composition owner; the specialized AI block is unchanged. The
+HTML-only query, selector, row conversion, forest builder, and DB-acquiring
+renderer are deleted. One enriched walk feeds the exact legacy `tree` shapes
+and the ordinary recursive value; pure renderers derive the prior UI signals,
+and AI uses the capped writer with the token cap in its native unit. Exact
+migration selectors pass 8 tests / 47 assertions and render-block proof passes
+28 tests / 130 assertions. The hostile plan proof visits at most 257 nodes for
+a lazy million-node value containing a 100 MB scalar. Independent review
+accepts generic HTML/AI dispatch, malformed fallback, no recursion, exact
+compatibility, zero-write reconciliation, signal parity, and work bounds. The
+full plan suite's two current failures belong to a separately owned
+uncommitted generated-terminal repair and do not count as a frozen checkpoint.
+Frozen live eval, browser, and server-side SSE proof remain before Stage 1.5
+graduates.
+
 The final consumer cut is grounded by
 [[research/universal-data-browser-ui-migration-boundary-2026-07-20]]
 (`e7cc6f94`). It extends the existing render dispatcher, migrates `/data` and
