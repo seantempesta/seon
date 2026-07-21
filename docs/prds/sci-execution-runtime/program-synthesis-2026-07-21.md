@@ -632,6 +632,18 @@ decisions batch for their return.
 - Dispatch gotcha learned: specs start with `---` frontmatter, so pass
   them via stdin with the bare `-` sentinel — a quoted argv spec makes
   clap parse `---` as a flag (exit 2 usage error).
+- Design-doc drift found by grounding + sol stops (the namespace design
+  is a same-day snapshot, not truth): NS-2 — `:seon.agent.runtime/wake?`
+  IS a persisted agent attribute (design claimed 0 entity-marked), so
+  the lifecycle merge renames it to `:seon.agent.lifecycle/wake?` under
+  the no-lock-in ruling and NS-2/NS-3 together form ONE rename+reset
+  boundary (orchestrator resets + live-proves after integration).
+  NS-3 — blast radius is 9 src referencers incl. quoted render-slot
+  symbols (`agent.cljs:222` etc.), not the design's 3; spec supersedes.
+  NS-1a — `:lora-audit` is orphaned in this checkout (tracked in
+  `docs/seon/issues/lora-audit-runner-drift.md`, W9 owns).
+- NS-3 spec written + grounded: `specs/ns-3-render-subtree.md` —
+  dispatch AFTER NS-2 integrates (shared `client.cljs`).
 
 ### NO PENDING OWNER DECISIONS
 
