@@ -737,20 +737,23 @@
                 (recur (rest entries) current-ns ids
                        (conj results {:seon.eval/ok? false
                                       :seon/error (:seon/error started)}))
-                (let [schemas-before (schema/snapshot)
+                (let [schema-delta (schema/begin-registration-delta)
                       raw-envelope
-                      (if (= :form kind)
-                        (eval-form! session ctx (agent-home-ns agent-id)
-                                    (str "(in-ns '" current-ns ")\n"
-                                         source))
-                        (read-error-envelope entry))
+                      (schema/call-with-registration-delta
+                        schema-delta
+                        #(if (= :form kind)
+                           (eval-form! session ctx (agent-home-ns agent-id)
+                                       (str "(in-ns '" current-ns ")\n"
+                                            source))
+                           (read-error-envelope entry)))
                       ok? (boolean (:seon.eval/ok? raw-envelope))
                       ;; A failed eval must not leave half a registration:
-                      ;; restore the exact prior registry, as the child does.
+                      ;; discard only this form's isolated registration delta.
                       _ (when (and (= :form kind) (not ok?))
-                          (schema/restore! schemas-before))
+                          (schema/restore! schema-delta))
                       new-schema-keys (if ok?
-                                        (schema/changed-keys schemas-before)
+                                        (schema/commit-registration-delta!
+                                          schema-delta)
                                         #{})
                       forms (if (= :form kind)
                               (record/read-forms

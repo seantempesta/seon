@@ -139,8 +139,12 @@
   (atom {:seon.schema.state/candidate-forms {}
          :seon.schema.state/projection nil}))
 
+(def ^:dynamic ^:private *candidate-forms-overlay* nil)
+
 (defn- candidate-forms []
-  (:seon.schema.state/candidate-forms @!schema-state))
+  (if *candidate-forms-overlay*
+    @*candidate-forms-overlay*
+    (:seon.schema.state/candidate-forms @!schema-state)))
 
 (defn- active-projection []
   (:seon.schema.state/projection @!schema-state))
@@ -150,8 +154,10 @@
       (candidate-forms)))
 
 (defn- update-candidate-forms! [f & args]
-  (apply swap! !schema-state update
-         :seon.schema.state/candidate-forms f args))
+  (if *candidate-forms-overlay*
+    (apply swap! *candidate-forms-overlay* f args)
+    (apply swap! !schema-state update
+           :seon.schema.state/candidate-forms f args)))
 
 (defn- candidate-registry []
   (mr/composite-registry
@@ -613,23 +619,80 @@
   []
   (candidate-forms))
 
+(defn begin-registration-delta
+  "Create an isolated schema delta for one synchronous eval."
+  {:malli/schema [:=> [:cat] :map]}
+  []
+  (let [before (:seon.schema.state/candidate-forms @!schema-state)]
+    {:seon.schema.delta/before before
+     :seon.schema.delta/candidate-forms (atom before)}))
+
+(defn call-with-registration-delta
+  "Call `f` with registrations staged in `delta`."
+  {:malli/schema
+   [:=>
+    [:catn [:seon.schema/registration-delta :map]
+           [:seon.schema/body 'ifn?]]
+    :any]}
+  [delta f]
+  (binding [*candidate-forms-overlay*
+            (:seon.schema.delta/candidate-forms delta)]
+    (f)))
+
+(defn- changed-candidate-keys [before after]
+  (into #{}
+        (keep (fn [[k form]]
+                (when (not= form (get before k ::absent)) k)))
+        after))
+
 (defn changed-keys
   "Schema keys whose canonical form differs from `before`, including new keys."
   {:malli/schema [:=> [:catn [::before :map]] [:set :keyword]]}
   [before]
-  (into #{}
-        (keep (fn [[k form]]
-                (when (not= form (get before k ::absent)) k)))
-        (candidate-forms)))
+  (if-let [candidate (:seon.schema.delta/candidate-forms before)]
+    (changed-candidate-keys (:seon.schema.delta/before before) @candidate)
+    (changed-candidate-keys before (candidate-forms))))
+
+(defn commit-registration-delta!
+  "Atomically merge one successful eval's schema delta."
+  {:malli/schema
+   [:=> [:catn [:seon.schema/registration-delta :map]] [:set :keyword]]}
+  [delta]
+  (let [after @(:seon.schema.delta/candidate-forms delta)
+        changed (changed-keys delta)]
+    (when (seq changed)
+      (swap! !schema-state update :seon.schema.state/candidate-forms
+             (fn [current]
+               (reduce (fn [forms k]
+                         (if (contains? after k)
+                           (assoc forms k (get after k))
+                           (dissoc forms k)))
+                       current
+                       changed))))
+    changed))
 
 (defn restore!
-  "Restore an exact registry snapshot after a failed eval.
+  "Revert only the schema delta represented by `before`.
 
-   This restores redefinitions as well as removing new keys; the previous
-   key-set-only rollback left failed redefinitions live."
+   Eval-owned deltas are isolated overlays, so failure only discards that
+   overlay. Plain snapshots retain the single-threaded compatibility behavior;
+   exact test-state capture remains [[snapshot-state]] / [[restore-state!]]."
   {:malli/schema [:=> [:catn [::before :map]] :nil]}
   [before]
-  (update-candidate-forms! (constantly before))
+  (if-let [candidate (:seon.schema.delta/candidate-forms before)]
+    (reset! candidate (:seon.schema.delta/before before))
+    (let [after (candidate-forms)
+          changed (into (changed-candidate-keys before after)
+                        (remove #(contains? after %))
+                        (keys before))]
+      (update-candidate-forms!
+        (fn [current]
+          (reduce (fn [forms k]
+                    (if (contains? before k)
+                      (assoc forms k (get before k))
+                      (dissoc forms k)))
+                  current
+                  changed)))))
   nil)
 
 (defn ^:no-doc snapshot-state
