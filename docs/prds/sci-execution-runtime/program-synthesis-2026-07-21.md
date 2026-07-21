@@ -50,9 +50,17 @@ with-ctx lazy-forcing requirement; perf tax accepted at agent scale).
 6. cljs.js bootstrap KEPT as a quarantined experimental artifact for
    the diffusion oracle (real CLJS analyzer is irreplaceable for form
    analysis; separate build, so size is moot). U11 deletes every
-   production reference; rg-enforced zero `src/` requires; rot waits
-   for the diffusion lane. Diffusion is experimental, not program
-   scope.
+   production reference; rg-enforced zero `src/` requires. Diffusion is
+   experimental, not program scope. AMENDED (owner, 2026-07-21 PM):
+   diffusion is PRESERVED, never rot-until-deletion — it moves to a
+   clearly separated namespace tree with its own build(s) if it burdens
+   the main system; its builds keep compiling and its tests keep
+   running in their own gate. The namespace-hierarchy design owns the
+   relocation plan (boundary rule: main `src/` never requires the
+   diffusion tree; diffusion may require main; providers stay
+   explicit-config opt-in). `seon.ai.typeahead` needs a require-graph
+   verdict first — it serves the active repl-autosuggest program and
+   may be core, not diffusion.
 7. Config: no magic numbers in source. Every operational limit is a
    named aero key → database fact at boot; agent-relevant limits render
    into context; defaults computed from hardware where sensible; caps
