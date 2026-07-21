@@ -10,40 +10,14 @@ set -euo pipefail
 cd "$(dirname "$0")/../../.."
 
 mkdir -p tmp/host-drill
-
-# A previous failed run may have left an orphan host owning the socket —
-# the drill must kill ITS host, not talk to a stale one.
-pkill -f '\-m seon.host' 2>/dev/null || true
-rm -f tmp/host-drill/host.sock
-
-writer_pid=""
+source tmp/sci-probe/jvm/drill-lifecycle.sh
+DRILL_WRITER_PID=""
 cleanup() {
-  if [[ -n "$writer_pid" ]] && kill -0 "$writer_pid" 2>/dev/null; then
-    kill "$writer_pid" 2>/dev/null || true
-    wait "$writer_pid" 2>/dev/null || true
-  fi
+  drill_stop_owned_writer
 }
 trap cleanup EXIT
 
-# A socket FILE can outlive its writer process (kill/reboot); reusing it
-# skips the writer start and every connect fails. Only a socket with a
-# live drill writer behind it counts as running.
-if [[ -S tmp/host-drill/writer.sock ]] \
-   && ! pgrep -f 'seon.db.server.*host-drill' >/dev/null 2>&1; then
-  rm -f tmp/host-drill/writer.sock
-fi
-
-if [[ ! -S tmp/host-drill/writer.sock ]]; then
-  clojure -M:writer -m seon.db.server \
-    --db-name u1-drill --backend file \
-    --path tmp/host-drill/store \
-    --req-sock tmp/host-drill/writer.sock \
-    > tmp/host-drill/writer.log 2>&1 &
-  writer_pid=$!
-  for _ in $(seq 1 120); do
-    [[ -S tmp/host-drill/writer.sock ]] && break
-    sleep 0.5
-  done
-fi
+drill_clean_private_runtime
+drill_start_writer tmp/host-drill/writer.log
 
 clojure -M:writer:host -i tmp/sci-probe/jvm/drill_client.clj
