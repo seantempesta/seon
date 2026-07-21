@@ -321,15 +321,18 @@ recomputed only at the recorded freeze HEAD. Skill sources are edited first,
 then adapters regenerated with `bin/seon skills sync`/`skills check`; the MCP
 client restarts before its renamed round-trip can count as proof.
 
-The current delta is
-[[research/stage2-freeze-readiness-delta-2026-07-20]] (`4fb2aa53`). U4 still
-owns database/JVM-host edits and `u15`; four pre-rename `pod.edn` records remain
-across default, `u15`, `kimi-k3-test`, and `reactive-proof`; and ten worktrees
-still need explicit dispositions. More seriously, `bin/acme status` reports
-down while ports 7980/7981 are bound by an unidentified Node/JVM pair. Stage 2
-must obtain that owner's handoff and prove both ports absent; it must not kill,
-adopt, or infer ownership from those PIDs. B2 caches remain protected through
-U11 and are neither proof nor a clean-tree blocker.
+The original delta is
+[[research/stage2-freeze-readiness-delta-2026-07-20]] (`4fb2aa53`), refreshed
+by [[research/stage2-freeze-readiness-refresh-2026-07-20]]
+(`b455ce7e` + ownership correction `a5821c8f`). U4 and `u15` are resolved, and
+the record count is now three: default, `kimi-k3-test`, and `reactive-proof`.
+The active `.cljs`→`.cljc` plus host-portability source owner remains
+unidentified and must commit/release before any freeze. Ports 7980/7981 belong
+to `/Users/sean/src/seon-stable`; that owner—not this checkout—must hand off and
+stop them. Ten worktrees still need explicit dispositions, restore intent needs
+database proof, and the terminology manifest is recomputed only at the final
+stable HEAD. B2 caches remain protected through U11 and are neither proof nor
+a clean-tree blocker.
 
 ### Stage 3 — one logging convention
 
