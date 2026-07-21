@@ -596,7 +596,10 @@
                          ::db/args [generated-eval-selector run-id turn-id
                                     eval-ids]
                          ::db/max-work 1000000
-                         ::db/max-results (max 1 (count eval-ids))
+                         ;; One result node per matched eval row PLUS the
+                         ;; relation container (live-measured 2026-07-21:
+                         ;; five eval ids observed 6 nodes).
+                         ::db/max-results (+ 2 (count eval-ids))
                          ::db/max-result-weight 1048576}))
                       [])]
                 (if (:seon.error/message evidence)
