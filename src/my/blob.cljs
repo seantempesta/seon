@@ -8,6 +8,7 @@
    leave only compact hashes and projections in the database."
   (:refer-clojure :exclude [get])
   (:require
+    ["node:crypto" :as crypto]
     ["node:fs" :as nfs]
     ["node:path" :as npath]
     [clojure.string :as str]
