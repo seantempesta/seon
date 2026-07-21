@@ -213,7 +213,7 @@
                         (js/Promise.resolve
                          (if (= operation protocol/index-page-operation)
                            (do
-                             (swap! index-visits + 64)
+                             (swap! index-visits + 65)
                              {::db/results
                               [(protocol/success
                                 {:datahike.index-page/datoms
@@ -261,7 +261,7 @@
                                 (is (= [4 4]
                                        [(:authority-calls small)
                                         (:authority-calls large)]))
-                                (is (= [64 64]
+                                (is (= [65 65]
                                        [(:index-visits small)
                                         (:index-visits large)]))
                                 (is (every? true? [(:omitted? small)
@@ -291,7 +291,7 @@
                  {::db/results
                   (mapv
                    (fn [_member]
-                     (swap! index-visits + 64)
+                     (swap! index-visits + 65)
                      (protocol/success
                       {:datahike.index-page/datoms
                        (mapv (fn [offset]
@@ -323,7 +323,7 @@
                    (is (= [] (:seon.agent.ctx.transcript/turn-rows result)))
                    (is (= 8 @calls)
                        "four index pages and four bounded candidate pulls")
-                   (is (= 256 @index-visits))))
+                   (is (= 260 @index-visits))))
           (.catch (fn [error] (is false (str error))))
           (.finally (fn []
                       (set! db/execute-many original-execute-many)

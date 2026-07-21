@@ -941,7 +941,7 @@
            (db/execute-many
             {::db/db database
              ::db/members
-             [(index-member database :aevt [:seon.agent.turn/at]
+             [(index-member database :avet [:seon.agent.turn/at]
                             turn-scan-page-size cursor)]
              ::db/max-result-weight 196608}))]
       (if-not (successful-members? index-response 1)
@@ -955,6 +955,8 @@
                                    {::db/db database
                                     ::db/pull-pattern turn-candidate-pattern
                                     ::db/refs candidate-ids
+                                    ::db/max-work 100000
+                                    ::db/max-results 4096
                                     ::db/max-result-weight 262144}))
                            [])]
           (if (and (map? candidates) (:seon.error/message candidates))
@@ -980,6 +982,8 @@
                                       {::db/db database
                                        ::db/pull-pattern turn-pull-pattern
                                        ::db/refs refs
+                                       ::db/max-work 100000
+                                       ::db/max-results 4096
                                        ::db/max-result-weight 262144}))
                               [])
                       usage-response

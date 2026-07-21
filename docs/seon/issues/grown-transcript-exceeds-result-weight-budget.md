@@ -189,15 +189,15 @@ page fact could be lost across recursion, and the final bulk pull still carried
 an arbitrarily large `:seon.agent.turn/llm-usage` scalar.
 
 The corrected acquisition reverse-pages the global
-`:seon.agent.turn/at` AEVT range through at most four 64-datom pages. Each page
+`:seon.agent.turn/at` AVET range through at most four 64-datom pages. Each page
 uses a bounded minimal pull to test the existing turn → run → agent connection.
 Finding the configured number of matches certifies the global newest window;
 exhausting the fixed scan first returns only the certified prefix and marks the
 older/incomplete history honestly. The regression intentionally makes entity
 IDs disagree with timestamps across 50 distinct runs and proves the result is
-ordered by timestamp, with the same four authority calls and 64 index visits
+ordered by timestamp, with the same four authority calls and 65 index visits
 for histories labeled 50 and 1,000,000. Four full pages containing no matching
-agent turn stop at eight authority calls and 256 index visits with omission
+agent turn stop at eight authority calls and 260 index visits with omission
 preserved.
 
 Usage is absent from both bulk pull patterns. Each retained turn receives one
@@ -208,4 +208,4 @@ or Anthropic fields consumed by `seon.agent.ctx.usage`. A lazy 100,000,000-item
 unknown value proves the writer projection never walks arbitrary provider
 payloads. The corrected transcript and retry gates pass 25 tests and 92
 assertions; the retained report is
-`tmp/test-cljs-20260721-023519-9718.report.edn`.
+`tmp/test-cljs-20260721-024026-12848.report.edn`.
