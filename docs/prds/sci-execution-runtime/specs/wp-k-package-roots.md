@@ -69,3 +69,42 @@ COMMIT: one path-limited commit
 
 SUMMARY: schema/key shapes as registered, generator round-trip evidence,
 skipped/deferred items, gate counts, unresolved items.
+
+## Addendum — round 2 (six contract gaps resolved)
+
+1. **Reset materialization**: authorized a NARROW edit to
+   `script/seon/dev/cli.clj` (reset path, ~:688) so cluster reset
+   re-materializes the empty `packages/` skeleton after wiping `db/`
+   (packages are ledger-derived; an empty ledger → empty manifests).
+   Owned paths extended to include cli.clj for this one call.
+2. **Per-branch package roots**: OMIT. Packages are per-CLUSTER
+   (`data/clusters/<name>/packages/`); db branches within a cluster
+   share its one installed package set. `::launch/packages-dir` is a
+   cluster coordinate, not per-branch — no private/read-only branch root.
+3. **Concrete defaults** (constants now, docstring-marked for the W1
+   hardware-derivation sweep): install-deadline-ms 120000; max-rows 256;
+   host/sessions 3; host/call-deadline-ms 120000; host/ready-timeout-ms
+   30000; host/respawn-backoff-ms 1000; host/swap-queue-deadline-ms 5000;
+   host/jvm-heap-mb 512; handle/per-channel-cap 64;
+   handle/summary-token-cap 40. (Tune later; these are safe throughput
+   defaults.)
+4. **"Trusted by default" representation**: the config value
+   `:seon.config.packages/trusted-lifecycle-scripts` is `:all` (sentinel,
+   the DEFAULT under the open posture) | a set of npm names. The manifest
+   generator expands `:all` to every installed npm name in bun's
+   `trustedDependencies` (which replaces-not-extends), and writes the
+   explicit set verbatim otherwise. One-fact flip to a restricted set
+   later.
+5. **`:seon.capability/op-id`**: NOT in WP-K. WP-K ships PURE planning
+   (request → planned tx-data / steering error); the op-id receipt
+   idempotency belongs to the install EXECUTION in WP-W (which owns the
+   host/context.clj seam). Do not reference or re-register op-id here.
+6. **`:seon.packages/deps` logical vs storage**: the request map carries
+   the VERBATIM deps entry (a one-entry map, e.g.
+   `{org.clojure/data.csv {:mvn/version "1.1.0"}}`); the planner splits
+   it into ledger attributes `:seon.packages.deps/lib` (the qualified
+   symbol) + `:seon.packages.deps/coord` (the coord map as canonical EDN
+   string) per W6 design §1.2. Input = map; storage = lib + coord-EDN.
+   The npm side is analogous: request `"name@range"` string → planner →
+   `:seon.packages.npm/name` + `/range` (+ `/resolved` + `/integrity`
+   after WP-W's staged install; WP-K only sets name+range).
