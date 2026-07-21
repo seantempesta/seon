@@ -27,7 +27,7 @@ nothing-caught-without-becoming-data contract.
 ## Evidence
 
 Audit inventory:
-`docs/prds/database-authority-mesh/research/cleanup-audit-logging-errors-2026-07-20.md`
+`docs/prds/archive/database-authority-mesh/research/cleanup-audit-logging-errors-2026-07-20.md`
 (residue table, 84-hit sweep on branch `codex/runtime-reliability-refactor`).
 
 ## Owner

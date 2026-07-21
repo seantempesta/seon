@@ -48,7 +48,7 @@ which lineage produced a value or frame.
   the complete writer checkpoint passes 68/388.
 
 The source and dependency evidence is in
-[[../../prds/database-lifecycle-recovery/research/database-lifecycle-source-audit-2026-07-14]].
+[[../../prds/archive/database-lifecycle-recovery/research/database-lifecycle-source-audit-2026-07-14]].
 
 ## Owner
 

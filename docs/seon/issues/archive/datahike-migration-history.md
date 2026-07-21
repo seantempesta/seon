@@ -25,4 +25,4 @@ We migrated to embedded Datahike (in-process LMDB). The bridge, flow topology, a
 
 - `docs/prds/datahike-migration/prd.md` — full migration scope
 - `docs/prds/datahike-migration/phase-3-harness-migration.md` — current in-flight work
-- [[../prds/runtime-reliability/roadmap]] — phase status
+- [[../prds/archive/runtime-reliability/roadmap]] — phase status

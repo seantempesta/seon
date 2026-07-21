@@ -8,7 +8,7 @@ tags: [issue, agent, flow]
 # Test-suite audit — fragile/stale/wrong tests + bug-finding (2026-06-25)
 
 Read-only audit of `test/seon/**` against the canonical current targets
-(`docs/prds/agent-fsm/agent-loop.md`, `context-render.md`) and the LIVE pod
+(`docs/prds/archive/agent-fsm/agent-loop.md`, `context-render.md`) and the LIVE pod
 runtime. Goal: find tests that hide bugs (divergent setup vs real wiring),
 plus fragile/stale/dead tests. **Audit only — no test/source edits.**
 

@@ -72,14 +72,14 @@ development flavor map.
   writer/manifest proof remain in progress.
 
 Full evidence and the proposed artifact boundary are in
-[[../../prds/independent-downstream-distribution/research/independent-acme-distribution-audit-2026-07-14]].
+[[../../prds/archive/independent-downstream-distribution/research/independent-acme-distribution-audit-2026-07-14]].
 Current-head reconciliation and parallel implementation order are in
-[[../../prds/independent-downstream-distribution/research/acme-artifact-boundary-reconciliation-2026-07-14]].
+[[../../prds/archive/independent-downstream-distribution/research/acme-artifact-boundary-reconciliation-2026-07-14]].
 The refreshed source ledger and next offline executable slice are in
-[[../../prds/independent-downstream-distribution/research/no-source-package-inventory-slice-2026-07-15]].
+[[../../prds/archive/independent-downstream-distribution/research/no-source-package-inventory-slice-2026-07-15]].
 The exact Proximum/Datahike public-Git cutover, upstream divergence, cold-prep
 contract, and source-absent writer/SDK proof are in
-[[../../prds/independent-downstream-distribution/research/proximum-datahike-publication-path-2026-07-15]].
+[[../../prds/archive/independent-downstream-distribution/research/proximum-datahike-publication-path-2026-07-15]].
 
 ## Owner
 

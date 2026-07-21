@@ -50,7 +50,7 @@ default"). Two divergent paths exist because one trusts storage, one re-derives.
 
 ## Refs
 
-- PRD: `docs/prds/agent-runtime/v2-context-render-prd-2026-06-08.md`
+- PRD: `docs/prds/archive/agent-runtime/v2-context-render-prd-2026-06-08.md`
 - `src/seon/agent.cljs:1298` (`assemble-ctx`), `:1330` (`substrate-default-ctx`),
   `:628` (`render-prompt`)
 - `src/seon/render.cljs` (`assemble-ai-context`)

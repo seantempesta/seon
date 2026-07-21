@@ -47,7 +47,7 @@ cutover and file-backed restore fixture prove those selected public artifacts.
 
 Proximum native versioning first, then Datahike
 `datahike.versioning/force-branch!`, grounded in
-[[../../prds/database-lifecycle-recovery/research/datahike-force-secondary-falsifier-2026-07-15]].
+[[../../prds/archive/database-lifecycle-recovery/research/datahike-force-secondary-falsifier-2026-07-15]].
 Do not change the protected `reference-code/datahike` checkout or gitlink from
 the Seon lane.
 

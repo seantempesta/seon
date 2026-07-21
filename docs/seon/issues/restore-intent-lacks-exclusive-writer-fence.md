@@ -30,7 +30,7 @@ handler threads; observing on a fresh connection is not evidence that an older
 accepted transaction has finished.
 
 The exact transition contract in
-`docs/prds/database-lifecycle-recovery/research/datahike-as-of-fork-and-restore-2026-07-12.md`
+`docs/prds/archive/database-lifecycle-recovery/research/datahike-as-of-fork-and-restore-2026-07-12.md`
 requires closing write admission, draining accepted work, and re-reading the
 confirmed main head before either reserved branch is created. The guarded
 branch-create and force operations correctly reject a moved expected head, so

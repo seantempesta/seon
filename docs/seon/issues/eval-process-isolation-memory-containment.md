@@ -35,7 +35,7 @@ process RSS or external/native allocation, so worker thread versus child process
 must be selected from measured hostile-allocation evidence rather than assumed.
 
 The 2026-07-15 exact-source decision is now recorded in
-[[docs/prds/agent-runtime-correctness/research/process-death-containment-audit-2026-07-15]].
+[[docs/prds/archive/agent-runtime-correctness/research/process-death-containment-audit-2026-07-15]].
 Node `v26.4.0` explicitly excludes `ArrayBuffer`/external data from worker
 `resourceLimits` and allows a global OOM to abort the process, so worker threads
 are rejected. The selected contract is a pod-owned, non-multiplexed disposable
@@ -45,7 +45,7 @@ reconstruction. A child alone is not the hard numeric ceiling: Darwin rejected
 per-child OS/container limit rather than V8 old-space flags or RSS polling.
 
 The retained synthetic-gate audit at
-[[docs/prds/agent-runtime-correctness/research/synthetic-disposable-child-hostile-gate-2026-07-15]]
+[[docs/prds/archive/agent-runtime-correctness/research/synthetic-disposable-child-hostile-gate-2026-07-15]]
 adds measured preflight evidence. Five host Node `26.4.0` children with a 24
 MiB old-space cap all ended by `SIGABRT` at roughly 78–79 MiB sampled peak RSS,
 showing that the heap flag is not a total-memory bound. A non-root

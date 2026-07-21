@@ -26,7 +26,7 @@ The current source is `src/my/blob.cljs` `publish!`. The selected Konserve
 filestore demonstrates the complete durability idiom: synchronize written
 content, atomically move the published name, and synchronize the containing
 directory/store. Exact grounding and the restore failure cuts are in
-`docs/prds/database-lifecycle-recovery/research/restore-blob-and-cold-reconstruction-contract-2026-07-15.md`.
+`docs/prds/archive/database-lifecycle-recovery/research/restore-blob-and-cold-reconstruction-contract-2026-07-15.md`.
 
 ## Owner
 

@@ -8,7 +8,7 @@ tags: [component, agent]
 
 How a downstream consumer extends the pod without forking seon. Two
 paths, different jobs (research:
-`docs/prds/agent-runtime/research/extra-src-research-2026-06-12.md`).
+`docs/prds/archive/agent-runtime/research/extra-src-research-2026-06-12.md`).
 
 ## When to use which
 

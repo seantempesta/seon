@@ -1,0 +1,741 @@
+---
+type: prd
+status: archived
+tags: [prd, database, capability, flow]
+---
+
+Archived 2026-07-21; superseded by [[../../sci-execution-runtime/program-synthesis-2026-07-21]].
+
+# Datahike reactive reads
+
+## Outcome
+
+Datahike is Seon's reactive computation authority. An eager read returns its
+value and a Datahike-owned dependency plan derived from the parsed operation,
+its inputs, and its database sources. Cached results remain immutable at exact
+database values and are created only on demand. A registered reactive read
+becomes dirty after a matching committed transaction, converges at bounded
+latency on the newest database value, and notifies its consumer only when
+Clojure value equality says the result changed. Page rendering and Datastar
+delivery consume this protocol; they do not define it.
+
+## Current state
+
+The cache, transaction feed, and web subscription lifecycle provide strong
+parts of the target:
+
+- one JVM database authority owns committed reports and attribute-indexed
+  interests;
+- one Bun session multiplexes database-value-pinned reads and demanded
+  normalized reactive registrations;
+- equivalent sockets share a normalized subscription, render, and serialized
+  event;
+- reactive commits settle using ordinary, structural, and maximum-latency
+  values resolved from database configuration, with manifest environment
+  overrides;
+- each subscription owns one active render plus the newest pending value;
+- independent subscriptions and page reads already overlap through bounded
+  async boundaries;
+- identical query misses join Datahike single-flight and exact query results
+  inherit across safe immutable database values; and
+- complete Datastar snapshots use stable-ID outer morphs and latest-wins
+  backpressure.
+
+Page invalidation has sustained-import, newest-value convergence, browser
+morph, reconnect, slow-consumer socket convergence, and resource-release
+proof. Failed-render repair and exact current-artifact browser/test graduation
+are also live-proven below. The execution child
+captures the Datahike-owned read evidence from successful query, pull,
+pull-many, entity, schema, index, and mixed `execute-many` operations in one
+fiber-local scope and returns it on the ordinary invocation result. The writer
+can interpret and union that source-positioned evidence directly when
+installing a committed-report interest. Datastar now consumes that evidence;
+analyzer-derived `:seon.fn/read-attrs` is no longer an invalidation authority.
+
+The original source-frozen five-feed fanout falsifier at Seon `623f4650`
+committed all 65 transactions and converged reactive work, but filled the pod
+session's 64 shared response-slot admissions with one-way interest events and
+closed the session. Reconnect hid the loss behind eventual convergence. The
+bounded event-delivery correction at `c75efad8` removed that response-slot
+fiction without increasing capacity. Its rebuilt acceptance run kept five
+feeds and five stable execution children live through 65 distinct commits,
+completed all 325 expected reactive evaluations, and converged every feed to
+the newest basis transaction. Writer and pod logs contained no session-full,
+session-close, socket, or core-fault marker; reactive and Datastar ownership
+returned to zero after canonical cluster close.
+
+The implemented boundary keeps two independently owned data states rather than
+two coupled retry machines. UDS owns one opaque physical event through encode,
+bounded output wait, and full write; ordinary response output is always chosen
+first and keeps its existing response-slot accounting. The writer owns one
+in-flight semantic event plus one newest pending event per interest or acquired
+database. Repeated interest reports become the existing resynchronization
+event, and repeated database-advanced events retain the newest database value.
+Full-write completion alone advances writer delivery. Codec-executor rejection
+runs that one encode task inline on the bounded `:delivery` worker; the caller
+is not Datahike's transaction commit thread.
+
+The opt-in deterministic paused-reader stress gate at `2f42b339` uses the real
+SocketChannel writer boundary. A listener acknowledged its interest and then
+stopped reading while a healthy peer completed 10,000 transactions and 100
+queries. Committed-report accounting was offered=delivered=10,000 with no
+queued or overflowed report; the delivery executor converged with no queued,
+running, or rejected work; semantic pending high-water was one. Transaction
+p50/p95/p99/max latency was 1.352/2.708/6.485/14.372 ms and query latency was
+1.202/1.981/6.351/8.607 ms. After reading resumed, the listener received the
+newest resynchronization at exact basis transaction 536880915; writer pending
+order, UDS event phase, queued output, request connections, and installed
+interests all returned to zero. The stress gate passed 14 tests / 10,326
+assertions in 26.18 seconds; the ordinary non-stress gate remained 14 / 84.
+The transport-capacity contract is settled. The exact current-artifact browser
+and complete relevant suite graduation also passed at Seon `15acdaf9`: the full
+CLJS gate reported 1,251 tests / 5,635 assertions, the canonical restart made
+watcher, writer, and pod ready, two independent/reconnecting root feeds emitted
+byte-identical 8,704-byte frames, and the real browser retained one app view and
+feed opener with no console or page error. The maintained Datahike aggregate at
+`6611de27` passes 2,602 tests / 13,678 assertions across its three JVM profiles
+plus 138 / 951 in Node CLJS; the current Seon writer gate passes 231 / 1,891.
+The later exact-artifact root delegation proof exposed one correctness gap in
+materialized database values: their attached cache context retained generation
+identity but lost the selected commit's revision boundary, allowing two absent
+attribute revisions to compare unchanged. Maintained Datahike `6f256908` gives
+a materialized commit with unavailable exact revision history a conservative
+revision equal to its own commit ID, while preserving full head revisions and
+exact same-snapshot hits. The red ordered/limited plus aggregate regression is
+green in PSS, HHT, and specs; full query-cache plus versioning proof is 156
+tests / 1,107 assertions and Node CLJS remains 138 / 951. The earliest
+rebuild reused a stale canonical writer jar because its input digest did not
+include the Git identity behind the stable Datahike local-root path. The
+artifact owner now includes every writer local root's exact clean Git identity;
+its focused gate is 29 tests / 141 assertions and proves revision-only
+invalidation while preserving cross-flavor reuse. The verified rebuild loaded
+Datahike `6f256908`, and live source inspection confirmed the conservative
+revision branch. The exact root request then completed in 50.036 seconds over
+eight turns/evals: current position, active step, child delegation, report,
+plan completion, message read, child result `42`, and lifecycle completion.
+This closes the materialized-value cache and writer artifact invalidation
+contract. The earliest unsettled contract is the final requirement audit.
+
+`seon.reactive` now implements the general registered-read lifecycle. Each
+registration owns one Datahike writer interest, one active computation, and at
+most one newest pending database value. Independent registrations start
+without awaiting one another; configured settle and maximum latency bound
+progress; plan replacement uses the listener acknowledgement database value
+to close the evaluation race; Clojure `=` suppresses established-consumer
+notifications; a fresh consumer receives the current value; and the final
+consumer releases its timer, value, database reachability, and writer
+interest. Sustained live/import proof is closed below.
+
+The first 260-transaction capacity probe exposed one lower transport boundary:
+the exact-request retry already recognized local `:busy`, but the public
+instrumented UDS request rejected before that owner could consume it, recording
+ordinary flow control as a core fault. Capacity refusal now resolves as
+transport failure data, which `seon.db` adapts to its existing error value and
+retries without reconnecting. The full CLJS gate passed 1,209 tests / 5,420
+assertions; focused transport and remote-contract gates passed 17 / 66 and
+21 / 97.
+
+The rebuilt live retries on the disposable `pressure-sse` database completed
+all 260 concurrent transactions in 25,123 ms and then 22,077 ms with zero error
+values. Pod, watcher, and writer readiness remained green through each isolated
+run, `/` remained HTTP 200, and the pod logs contained no capacity, `:busy`, or
+core-fault marker. The bounded 256-request window therefore throttles excess
+work without dropping, duplicating, reconnecting, or degrading the runtime.
+
+The current-source slow-consumer retry used the supported isolated named-cluster
+operator coordinates. Independent fast and paused root feeds first delivered
+byte-identical 2,105,848-byte INITIAL frames. With the slow client unread,
+twenty separately completed one-MiB page mutations produced six native socket
+backpressure events and eighteen newest-pending replacements; active and
+pending reactive high-water marks remained one. Both clients then converged to
+the exact same 2,105,844-byte FINAL frame, SHA-256
+`4ea2824865b8bf3e33baf40ae6a3bef461d64950e630feead871b52dde0c27f5`,
+at basis transaction 536871201. Final cancellation returned Datastar view,
+subscription, active-render, and pending-render counts and reactive
+registration, consumer, active, pending, and timer counts to zero. The writer
+committed-report queue was zero before close, and active sources fell from two
+to the default baseline of one after a canonical clean cluster close. This
+closes real slow-socket/fast-socket independence, newest-event replacement,
+byte convergence, and pressure resource cleanup.
+
+Datastar now delegates live page demand to `seon.reactive`. The page computation
+captures parent-process reads, unions execution-child evidence from the ordinary
+result message, serializes one complete morph event, and compares that event as
+the reactive value. The former Datastar attribute declarations, synthetic
+dependency plan, global listener, coalescer, active/pending render queue, and
+serialized-event cache are removed. Each socket remains an independent
+latest-wins transport consumer keyed by its feed ID; equivalent sockets share
+the normalized reactive computation and a fresh socket receives its established
+value. Historical feeds still render once without installing an interest.
+
+Live root-feed probes exposed and fixed two lifecycle defects: the live
+observer sent an
+invalid explicit nil database value, and the pre-registry socket descriptor
+lacked the normalized registration key needed by final-consumer release. The
+source-frozen rebuild at commit `b6961bac` then kept the actual Bun workload
+alive and port 7890 bound across a three-second server-side root feed. External
+readiness remained HTTP 200 after close; the final reactive registration,
+consumer, active, pending, timer, Datastar view, and subscription counts were
+all zero. The feed sent 31,722 bytes. Its cold render took 1,568.3 ms and the
+later render took 39.6 ms; those diagnostic samples establish lifecycle truth,
+not final latency graduation.
+
+Bounded diagnostics now expose cumulative evaluation starts/completions,
+delivered and equality-suppressed notifications, newest-pending replacements,
+active/pending high-water marks, and only the numeric last completed/installed
+basis transactions. They retain no event history, database values, results,
+functions, or sockets. The reactive gate drives 100 newer transactions while
+one computation is blocked and proves active/pending high-water marks of one,
+99 obsolete pending replacements, and next computation only at the newest
+basis transaction. That blocked-burst characterization remains part of the
+focused gate.
+
+Those process-local reactive diagnostics are deliberately not attributed to an
+agent turn. A representative current-artifact agent run showed why attribution
+must instead follow the existing execution-child read-evidence and durable turn
+boundary: it timed out after 211,126 ms with 37 turns, 36 evals, roughly 28k
+context tokens per turn, and 27 repeated `my.plan/active!` evals. Explicit eval
+source undercounts composed database work. The source-grounded follow-on
+contract and falsifier are recorded in
+[[research/agent-read-cost-live-measurement-2026-07-19]] and
+[[../../seon/issues/agent-turns-lack-database-read-cost-attribution]]. This is
+an observability/optimization unit; it does not weaken the already-proven
+reactive invalidation or transport graduation.
+
+The representative run also exposed a dependency-critical loop defect before
+the attribution overlay can be trusted: every successful eval reset the
+no-progress streak. The corrected boundary persists positive eval progress only
+for a transaction committed during the raw user-form span or an accepted
+program/schema declaration. Derived namespace-edge receipt operations do not
+count. Focused eval, database-session, and loop tests prove read-only
+`my.plan/active!`, `my.plan/status`, and pure computation remain non-progress,
+while `message/user` is progress and three repeated read-only turns close via
+the existing `:no-forms` bound. The next integrated exit is a rebuilt Inspect
+namespace run that parks the root without polling and waits for existing child
+message/eval facts between driver phases.
+
+The exact `0879d756` rebuild proved boundedness but falsified the coarse
+read-only rule. One request replaced the prior 37-turn timeout with a bounded
+five-turn closure, but a second HTTP-200 namespace request closed after three
+distinct useful reads (`plan/position`, whole tree, root subtree) before acting.
+The reopened contract folds the ordered stable source/result/error/namespace
+projection already stored on eval rows: durable writes reset repetition,
+distinct observations remain knowledge, and only an identical observation
+increments the existing three-turn bound. Focused loop regressions cover both
+branches without parsing source or changing the watchdog/work budget.
+
+The replacement graduated live at `6e3b741d`. A fresh agent repeated the exact
+`(my.plan/position {})` read three times and closed `:no-forms` in 18,244 ms
+with three turns and three evals. The prior-style root scenario then ran six
+turns and five evals in 36,456 ms without premature `:no-forms`; its ordered
+sources included position, full-tree, active-plan status, and another position
+read, proving distinct stable observations survive the existing three-turn
+bound. That root timed out without delegating because its rendered plan context
+marked the current request next-ready while agent-facing `plan/position` and
+`plan/tree` returned an older active step. This separate plan-projection
+consistency defect must make both interfaces derive the same current-run cause
+step without demoting unrelated active work; it is not a reason to weaken the
+one repetition mechanism. Child completion remains a separate driver-phase
+contract because `delegate!` resolves the child ID rather than synchronously
+awaiting its report.
+
+The gate now also exercises the real timer rather than only the `due-at`
+arithmetic. With a 1,000 ms moving settle edge and 20 ms maximum latency, a
+120 ms continuous event stream completes repeatedly before the producer stops,
+collapses obsolete database values, converges to the newest basis transaction,
+and releases its registration. The focused reactive gate passes 7 tests and 42
+assertions. Its repair regression begins with a visible failed value and
+conservative `:all` interest, then proves a later transaction reruns the
+computation, delivers the repaired value, replaces `:all` with exact read
+evidence, converges at the repair basis transaction, and releases the
+registration.
+
+A disposable live `reactive-latency` cluster then resolved its policy from
+database configuration seeded through environment overrides: 1,000 ms ordinary
+and structural settle, 500 ms maximum latency. With a real root SSE feed open,
+100 separately committed transactions ran for 7.3 seconds. Fourteen page
+evaluations advanced at approximately the configured 500 ms deadline while the
+producer remained active, 88 obsolete pending database values were replaced,
+active and pending high-water marks stayed at one, and the final completed basis
+transaction exactly equaled the newest committed `t`. After the feed closed,
+reactive registration, consumer, active, pending, and timer counts; Datastar
+view, subscription, active-render, and pending-render counts; and writer
+interest references and committed-report queue depth all returned to zero.
+This closes sustained-import, configured maximum-latency, newest convergence,
+and pressure cleanup.
+
+A live `reactive-owner-repair` probe then exercised the general owner without
+an execution or Datastar retry channel. Its first computation delivered a
+visible error value with conservative `:all` evidence at basis transaction
+536870917. A committed transaction at 536870918 reran the computation exactly
+once; the repair delivered `OWNER-REPAIR:REPAIR-FINAL`, captured Datahike's
+exact plan for `:seon.agent/id` and `:seon.agent/purpose`, and atomically
+replaced the `:all` interest. Last completed and installed-interest basis
+transactions both advanced to 536870918, active and pending high-water marks
+remained one, final unobserve returned every reactive owner count to zero, the
+writer queue was empty, and cluster close was clean. The strengthened focused
+regression now starts from a successful narrow plan, fails and widens to
+`:all`, accepts a disjoint repair event, then narrows to exact evidence; the
+focused reactive gate passes 7 tests and 45 assertions.
+
+At source commit `9ab86700`, a disposable cluster rebuilt from the current
+artifact and a real headless Google Chrome page opened the root view. A
+supported `POST /agents` committed a child whose unique purpose marker then
+appeared through the existing Datastar feed. The morph preserved the identical
+`#app-view` DOM node, retained focus and the typed value in the namespace input
+outside the morph, left exactly one `#app-view`, and produced no browser console
+or page errors. A full reload opened a fresh feed and painted the newest marker
+without an intermediate stale view. This closes current-source browser morph
+and sole-connection reconnect correctness.
+
+The integrated Datastar/reactive gate now attaches two equivalent sockets to
+one normalized computation. An equal later event performs one demanded render
+and serialization but increments equality suppression and performs zero socket
+writes; a changed event computes once and reaches both sockets byte-identically;
+a fresh third socket receives the established event without recomputation; and
+final release returns reactive registration/consumer counts to zero. The
+focused Datastar gate passes 14 tests and 67 assertions. Datastar reload and
+pod shutdown now use the same awaited close path: every socket closure releases
+its exact reactive consumer before reload completes, so a surviving registration
+cannot retain an obsolete renderer closure. The lifecycle regression raises the
+focused Datastar gate to 15 tests and 72 assertions; the focused web-server gate
+passes 24 tests and 93 assertions.
+
+At the combined reactive/cache boundary, the complete Seon CLJS gate passes
+1,203 tests and 5,379 assertions, and the complete JVM writer gate passes 227
+tests and 1,849 assertions. The writer aggregation exposed two stale fixtures
+that still redefined `datahike.api/pull`; both now exercise the maintained
+`pull-with-evidence` result and dependency-plan shape.
+
+Maintained Datahike revision `d59f76bb` passes the focused weighted-LRU and
+query-cache suites in all persistent-set, spec-instrumented, and
+hitchhiker-tree profiles: 162 tests and 990 assertions. This directly covers
+count/weight eviction, overlarge-result rejection, exact immutable database
+identities, safe inheritance, schema widening, generation close, stale-owner
+fencing, cancellation, and single-flight ownership/waiter cleanup. The CLJS
+gate passes 138 tests and 951 assertions.
+
+Maintained revision `6611de27` additionally closes a query correctness gap for
+schema-valid symbol values. Parsing and scalar `:in` substitution were already
+correct, but planned and relational execution used broad `symbol?` checks and
+could treat an ordinary `:db.type/symbol` value as an unconstrained variable.
+The analyzer now owns free, blank, and ground pattern classification, and each
+query stage consumes that classification according to its grammar role. The
+indexed and non-indexed regression proves known, missing, repeated, planned,
+and relational results agree in persistent-set and hitchhiker-tree profiles.
+The focused query-cache plus planner gate passes 148 tests and 868 assertions;
+the complete CLJS Node gate remains green at 138 tests and 951 assertions.
+[[datahike-query-symbol-values-were-treated-as-variables]] records the live
+failure and correction. The full JVM aggregation and rebuilt Seon live proof
+remain the graduation checks for this revision.
+
+Those revision-wide checks are now complete. The full maintained JVM
+aggregation at `6611de27` passes 2,602 tests and 13,678 assertions across
+`clj-pss`, `clj-hht`, and `specs`. After rebuilding Seon, the original missing
+namespace symbol query returns `nil` within the unchanged 64-result budget,
+and `POST /agents` creates the requested symbol-named namespace with one
+addressed initial message rather than reusing an unrelated agent.
+
+The rebuilt browser proof exposed a separate failure feedback loop: a failed
+render widens correctly to `:all`, but its persisted fault transaction could
+then schedule the same failed render repeatedly. The existing error projection
+is now the recursion fence—no classifier fact or transaction metadata is
+added. Its first transaction may install the error projection's own Datahike
+schema; those schema datoms count only when their same-report `:db/ident`
+belongs to the closed persisted-error attribute set. While a registration is
+failed, that error-projection-only transaction is suppressed; any mixed or
+ordinary relevant transaction still schedules repair.
+The upgraded failure test begins with exact evidence containing both error and
+domain attributes, uses real five-field transaction-report datoms, covers the
+report arriving before and after failure completion, and proves an ordinary
+schema declaration plus relevant domain datom does recompute. Exact plan
+narrowing and zero ownership follow. The focused reactive gate passes 7 tests /
+49 assertions and Datastar passes 16 / 75; the earlier combined reactive,
+Datastar, and remote database gate passed 44 / 220.
+
+The rebuilt live proof at Seon `aa9970c1` stored and delivered one unique fault
+once. Through a 1.5-second quiet interval the registration performed exactly
+one evaluation and suppressed its own persistence report once. A relevant
+ordinary transaction at basis transaction 536870928 performed exactly one
+repair evaluation, delivered the new value, and installed exact evidence for
+`:seon.agent/id` and `:seon.agent/purpose` at that same basis transaction.
+Active and pending high-water marks remained one. Final unobserve returned all
+reactive owners to zero; the writer readiness queue was empty with only the
+normal default committed-report source; watcher, writer, and pod remained
+ready. The unique fault and domain marker were retracted. This closes
+[[reactive-failed-render-recorded-fault-feedback-loop]].
+
+Cache inheritance is demand-driven. A commit updates only attribute revision
+facts and a conservative revision in its cache context; it never walks or
+copies cached result rows. A later demanded read scans the bounded weighted
+cache, accepts an older entry only when its source-scoped dependency plan is
+unchanged since that entry's commit, and promotes the value under the exact
+demanded database identity. A 100-transaction unrelated-write regression keeps
+the cache at one row and constant retained weight, records one revised
+attribute rather than one fact per transaction, and creates only the single
+demanded child snapshot. An affected transaction misses and recomputes while a
+held parent database value remains immutable and exact.
+
+Datahike `main` now exposes an execution-aware, source-scoped query dependency
+plan at maintained revision `d59f76bb`. It folds the typed parsed query and
+PullSpec representations, resolves scalar `:in` bindings and supplied rules,
+canonicalizes reverse pull attributes, and widens unknown behavior to `:all`.
+The query cache stores and reuses that same plan; propagation selects only the
+attributes for the database source that advanced, and schema transactions do
+not inherit cached results. The former flat attribute helper remains only as a
+projection of this plan for compatibility.
+
+This closes the characterized query and pull false negatives, including nested
+and reverse pulls, `missing?`, input-bound attributes, supplied rules, multiple
+database sources, direct pull, and pull-many. Query, pull, pull-many, schema,
+entity, and index protocol responses now carry ordinary dependency evidence;
+unknown full-entity/schema/index behavior widens to `:all`. Query results retain
+the maintained immutable weighted cache and single-flight owner. Direct pull
+reuse has not been generalized without measurement. A sole socket reconnect
+also normally rerenders because the last event is released with the final
+subscription consumer; current HTML reuse applies to equivalent active
+sockets, not a general reconnect cache.
+
+The exact source audit, dependency ledger, parser probes, Datastar protocol
+review, concurrency analysis, and proof matrix are in
+[[research/datahike-reactive-page-protocol-2026-07-19]].
+
+The formerly failing named aggregation surfaces are now green in both
+persistent-set and hitchhiker-tree profiles: Stratum valid-time, Java bindings,
+documentation transactions, HTTP transit/EDN/JSON, purge, secondary-index purge
+propagation, and the planner probes. The 14-test named integration gate passes
+196 assertions. The rerun exposed one reactive correctness defect: purge changed
+current and temporal indexes without including those attribute retractions in
+the committed transaction report, so lazy cache inheritance could return a
+purged entity. Revision `d59f76bb` records purge retractions in `:tx-data`,
+repairs finite-window Stratum predecessor inheritance, and closes the Java/HTTP
+test connection leaks. The first unfiltered rerun reached 2,599 tests / 13,527
+assertions and exposed only independent shared-fixture and HTTP remote-decoding
+failures. Those owners now use unique released stores, preserve remote database
+values through the remote mapper, and release the history fixture. Two later
+runs exposed and closed the final database-hash and schema-persistence
+reconnect leaks. The complete maintained aggregation at `d59f76bb` passes
+2,599 tests / 13,651 assertions with zero failures or errors across `clj-pss`,
+`clj-hht`, and `specs`; [[datahike-full-aggregation-integration-drift]] is
+closed.
+
+## Settled decisions
+
+1. **Datahike owns read semantics.** Seon never parses Datalog, pull selectors,
+   entity references, index ranges, rules, predicates, or transaction datoms.
+2. **One source-scoped dependency plan.** A plan is `:all` or canonical stored
+   attributes associated with each parsed database source. Datahike derives it
+   from its typed representation plus actual inputs. Dynamic behavior that
+   cannot be proved widens to `:all`; the single-database Seon path consumes
+   the natural one-source projection.
+3. **Reads return value plus evidence.** Evidence is referentially transparent
+   ordinary data and crosses the existing response protocol.
+4. **Composition is union.** A computation unions evidence from reads that
+   actually ran; `:all` absorbs. There is no semantic parser in Bun.
+5. **One plan, three consumers.** Datahike result inheritance, committed-report
+   interests, and reactive-read invalidation share one interpretation.
+6. **Cache entries are immutable and lazy.** A cache entry belongs to the exact
+   immutable database source identities in its key. A transaction does not
+   update cached rows. A demanded later read may inherit a proven-unaffected
+   result or compute a new entry. Bounded weighted retention drops entries no
+   active owner or recent demand justifies.
+7. **Only registered reactive reads recompute.** Ordinary cached reads can
+   become irrelevant without scheduling work. A registered consumer owns one
+   active evaluation and at most one newest pending database value.
+8. **Clojure equality is notification authority.** `=` decides whether an
+   established consumer receives a new value. Identity and persistent
+   structural sharing may short-circuit it; cached hashes may accelerate it
+   but never decide it. A new consumer always receives its first current value.
+9. **Transaction truth is never dropped; obsolete computation work is.** A
+   burst accumulates the union of changed attributes and advances to its newest
+   `db-after`. Once a subscription is dirty it owns at most one active render
+   and one newest pending database value. Completing a render reconciles its
+   newly observed dependency plan from that render's basis transaction through
+   the current branch head before declaring the subscription clean. This
+   closes the race where a render discovers a dependency after a matching
+   transaction has already committed.
+10. **Bounded progress is configuration.** Sustained writes may produce
+    periodic newest-value progress after
+    `:seon.config/reactive-max-latency-ms`. The selected manifest owns the
+    value, `SEON_REACTIVE_MAX_LATENCY_MS` is its launch-time override, and the
+    resolved value becomes database configuration. There is no scheduler
+    literal.
+11. **Parallelism follows the dataflow.** Every dependency-ready read or render
+    proceeds independently; data-dependent branches and one-subscription
+    publication remain ordered.
+
+## Target protocol
+
+```mermaid
+flowchart LR
+  R["Datahike eager read"] --> E["Value + source-scoped dependency plan"]
+  E --> K["Bounded immutable result cache"]
+  E --> U["Registered reactive computation"]
+  U --> I["Datahike committed-report interest"]
+  T["Committed transaction report"] --> I
+  I --> C["Dirty + newest database value"]
+  C --> B["Evaluate once after settle or max latency"]
+  B --> Q["Datahike cache + single-flight"]
+  Q --> X{"Clojure = previous value?"}
+  X -->|yes| S["Suppress notification"]
+  X -->|no| D["Notify consumer"]
+  D --> P["Page projection / agent view / other consumer"]
+  P --> H["Datastar complete morph when applicable"]
+
+```
+
+## Ordered implementation
+
+### 1. Freeze the defects as failing characterization tests
+
+Before implementation, add tests at the maintained Datahike boundary for the
+known false negatives and conservative fallbacks:
+
+- `missing?`, `get-else`, `get-some`, predicates, functions, rules supplied at
+  `%`, recursive rules, attribute variables bound through `:in`, and multiple
+  database sources;
+- nested pulls, reverse references using their canonical forward attribute,
+  recursion, wildcard, alias, default, limit, dynamic patterns, direct pull,
+  and pull-many;
+- schema-changing transactions, retractions, and inserts across cache
+  inheritance;
+- exact database-value keys, bounded weighted eviction, generation close,
+  single-flight, and cancellation; and
+- reactive burst collapse, maximum-latency progress, plan-replacement replay,
+  first delivery, equal-result suppression, and consumer release.
+
+Keep upstream Datahike conformance tests unchanged. Seon integration tests prove
+only the protocol boundary and consumer behavior; they do not duplicate the
+dependency's query semantics.
+
+The fork's full JVM aggregation is the dependency conformance gate. Its CLJS
+Node runner is intentionally smaller, and `bin/test-writer` runs Seon tests
+rather than the fork's entire suite. Graduation records all three separately so
+a green Seon gate cannot conceal a missing Datahike regression.
+
+Current evidence for maintained Datahike `main` revision `2e6c7bcf`:
+
+- focused JVM query and specification gate: 96 tests, 531 assertions, zero
+  failures;
+- full Datahike CLJS Node gate: 138 tests, 951 assertions, zero failures;
+- Seon writer protocol and committed-interest gate: 25 tests, 128 assertions,
+  zero failures; and
+- Seon remote database plus execution-child capture gates: 51 tests, 225
+  assertions, zero failures;
+- general reactive lifecycle gate: 5 tests, 22 assertions, zero failures; and
+- writer branch-relative evidence gate: 11 tests, 67 assertions, zero
+  failures.
+
+Exit: each known stale-result case fails for the intended reason before its
+implementation changes, while the imported upstream suite still establishes
+the ordinary Datahike contract.
+
+### 2. Settle Datahike dependency semantics
+
+Strengthen the maintained fork in place:
+
+- fold the typed parsed query representation rather than maintaining a second
+  raw-clause grammar;
+- define explicit dependency semantics for Datahike database functions such as
+  `missing?`, `get-else`, and `get-some`;
+- recursively fold parsed PullSpec values using canonical option `:attr` fields;
+- include every nested subpattern; a wildcard at any depth widens to `:all`;
+- expose the same pull projection for query find-pull, direct pull, and
+  pull-many;
+- make schema-affecting transactions conservatively prevent cache inheritance;
+  and
+- add generated soundness tests comparing dependency selection with actual
+  result changes.
+
+Exit: every supported query/pull produces a sound concrete plan or `:all`, and
+query cache inheritance has no nested/reverse-pull, database-function, rule,
+variable-attribute, wildcard, or schema false negative.
+
+### 3. Return evidence for eager reads
+
+Expose one Datahike-owned read-evidence contract through the existing database
+protocol:
+
+- query returns its existing cache/dependency evidence;
+- pull and pull-many return the recursive PullSpec dependency plan;
+- entity access that can read arbitrary later attributes and schema reads
+  return `:all`; an eager requested attribute set may remain concrete;
+- exact safe attribute index prefixes may return their canonical attribute;
+- unknown, malformed, temporal, or incomplete reads return `:all`; and
+- execute-many preserves each member's evidence and positional result.
+
+Do not create a server-side render session. Evidence belongs to each immutable
+read result and requires no lifecycle cleanup.
+
+Exit: one mixed execute-many response proves query, pull, pull-many, schema, and
+index evidence at one database value, with cancellation/release leaving no
+retained capture state.
+
+### 4. Add the general reactive-read owner
+
+Register an ordinary read function, its arguments/database sources, its last
+delivered value, and its dependency plan. The owner:
+
+- consumes the writer's existing committed transaction reports and reverse
+  attribute interest index;
+- marks a matching registration dirty without computing a result;
+- advances one pending target to the newest database value while unioning
+  changed attributes;
+- evaluates at settle time or the configured maximum latency;
+- uses Datahike cache inheritance and single-flight during that demanded read;
+- compares the completed Clojure value with the last delivered value using
+  `=` and suppresses an equal notification;
+- delivers the current value unconditionally to a newly attached consumer;
+- reconciles a new dependency plan from the evaluation's basis transaction to
+  the current branch head before becoming clean; and
+- releases registrations, retained results, and database-value reachability
+  when the final consumer detaches.
+
+Do not update cache entries during writes and do not enqueue one evaluation per
+transaction.
+
+Exit: a sustained import has bounded state, periodic configured progress, and
+one final newest-value result; an unused cached read performs no work.
+
+### 5. Make page rendering one reactive computation
+
+Use the existing async-local accumulator around every parent page computation.
+Every successful `seon.db` read unions the Datahike response plan. Nested and
+concurrent operations compose safely; failed or incomplete operations widen the
+render to `:all`.
+
+Return the execution-child evidence on its ordinary result message and union it
+with parent-process evidence after the completed page projection is serialized.
+The normalized `seon.reactive` registration owns the computation and immutable
+database value. Keep `:seon.fn/read-attrs` for discovery/focus hints, but delete
+it from the correctness gate.
+
+Exit: helper-indirected and conditional reads update an already-open page;
+renderer source/configuration changes cannot be skipped; a branch change
+atomically replaces the subscription's dependency union.
+
+### 6. Send the dependency plan directly to Datahike interests
+
+Send captured evidence directly through the existing listen request and delete
+Datastar's synthetic dependency query. The writer retains one reverse scope /
+attribute index and exact match filter. Bun retains no dependency parser or
+page-wide interest union: each demanded normalized reactive computation owns
+one writer interest.
+
+Subscribe before initial read and use the acknowledgement database value so
+interest replacement has no commit gap. The general owner serializes replacement
+for one registration and schedules a newest-value evaluation when the accepted
+branch head advanced during replacement.
+
+Exit: unrelated commits produce no Bun event or page work; every relevant
+commit is covered by the acknowledgement value or a later report.
+
+### 7. Close failure and scheduling correctness
+
+- A failed, canceled, timed-out, or malformed render installs `:all` rather
+  than retaining stale narrow dependencies.
+- One subscription retains one active render and only its newest pending value.
+- Import pressure does not create one queued render per transaction: changed
+  attributes are unioned, the pending target advances to the newest database
+  value, and the maximum coalescing deadline still permits periodic progress
+  during a sustained stream.
+- Listener-plan replacement replays or checks commits from the completed
+  render's basis transaction through the branch head; a transaction cannot be
+  lost merely because the dependency was discovered during that render.
+- Different subscriptions begin without awaiting one another.
+- Independent page members continue through execute-many; selected functions
+  continue through `Promise.all`; dependent reads remain ordered.
+- Equivalent sockets receive one render's byte-identical event and maintain
+  independent latest-wins pressure.
+
+Exit: an error page repairs on a transaction outside its prior dependency set;
+one slow page/socket does not block independent work; stale completions cannot
+publish.
+
+### 8. Measure before extending reuse or patch granularity
+
+Profile the integrated protocol with current and grown databases. Record:
+
+- writer interest candidates and delivered reports;
+- query/pull operation time and cache/single-flight outcomes;
+- execution-child queue wait and surface body time;
+- page Hiccup/serialization time;
+- event bytes, gzip/drain time, and socket fanout;
+- browser parse/morph time; and
+- final-consumer cleanup.
+
+Only measured bottlenecks may admit these follow-ons:
+
+- generalize Datahike's existing weighted query cache/single-flight owner to
+  direct pull and other eager referentially transparent reads;
+- correct cache propagation's survivor walk before adding a reverse cache
+  dependency index;
+- retain serialized output briefly with zero consumers;
+- cancel superseded page work rather than merely fencing its completion;
+- isolate pure page projection from a long same-agent turn; or
+- split a page into independently addressable Datastar elements.
+
+None is required for correctness.
+
+## Acceptance matrix
+
+The final 2026-07-19 requirement audit closes every boundary:
+
+| Boundary | Status | Graduation evidence |
+|---|---|---|
+| Parsed query | Complete | Maintained PSS, HHT, specs, and Node gates cover literals, sources, boolean/join/predicate forms, database functions, rules, variable attributes, multiple sources, and conservative `:all`. |
+| Parsed pull | Complete | Direct pull, pull-many, query find-pull, nested/reverse/options/recursion/wildcard/dynamic/malformed regressions consume Datahike's parsed PullSpec projection. |
+| Cache inheritance | Complete | Affected/schema-changing values do not promote; unaffected immutable values inherit; materialized commits use their commit ID when exact attribute revisions are unavailable. |
+| Cache demand | Complete | Commits create no eager result entry; weighted eviction, held immutable values, recomputation, generation release, and single-flight gates pass. |
+| Remote reads | Complete | Query, pull, pull-many, schema, entity, index, and mixed `execute-many` responses carry ordinary Datahike-owned read evidence. |
+| Page capture | Complete | Parent and execution-child reads union actual evidence; conditional/helper-indirected reads drive invalidation and analyzer metadata is only a hint. |
+| Interest lifecycle | Complete | Subscribe-before-read acknowledgement, replacement reconciliation, reconnect/resynchronization, and final unlisten are unit- and live-proven. |
+| Unrelated commit | Complete | Reverse attribute selection produces no acquisition, render, serialization, or SSE work for an unaffected registration. |
+| Affected commit | Complete | A matching report schedules one normalized computation at the newest exact `db-after`; cache outcome and basis evidence remain truthful. |
+| Error recovery | Complete | Failed work widens to `:all`, its own pure error-evidence transaction cannot self-trigger, and an ordinary relevant transaction repairs and narrows it. |
+| Output | Complete | Clojure `=` suppresses equal reactive values; unequal complete events fan out byte-identically to equivalent sockets. |
+| Scheduling | Complete | Independent subscriptions and sockets overlap; response traffic is prioritized; one registration retains one coherent active evaluation. |
+| Sustained import | Complete | The 260-transaction live probes and 10,000-transaction paused-reader stress retain one active plus newest pending value and converge at configured maximum latency. |
+| Equality | Complete | Established consumers suppress equal values while advancing basis/dependencies; every fresh consumer receives the established current value once. |
+| Cleanup | Complete | Reactive, Datastar, writer-interest, UDS, timer, consumer, pending, and retained database-value ownership all return to zero. |
+| Live UI | Complete | Exact-artifact browser and server clients agree through initial paint, mutation, reconnect, continuous writes, slow/fast pressure, and canonical close. |
+
+## Explicit non-goals
+
+- A Seon query/pull parser or dependency taxonomy.
+- Declared source keywords as invalidation authority.
+- A second query, pull, HTML, listener, or event cache.
+- Local replay of captured database reads.
+- Per-surface render units before profiling.
+- Browser transaction replay or delta patches.
+- Database values, entities, functions, sockets, or Promises in cache data.
+- Parallel execution of genuinely dependent branches.
+
+## Graduation
+
+This PRD graduates when Datahike produces and interprets one sound dependency
+plan for every page read; actual page reads drive the one selective interest;
+query/read reuse and independent scheduling are proven; unrelated transactions
+do zero page work; affected and repair transactions converge through one full
+Datastar morph; equivalent sockets share work; and live/browser/resource proof
+shows no stale page, false-negative cache inheritance, unbounded queue, or
+retained database owner.
+
+Graduated on 2026-07-19. Maintained Datahike `6f256908` passes the complete
+query-cache/versioning and Node compatibility gates; the selected Seon artifact
+loads that exact source. Seon's full CLJS, writer, focused reactive/transport,
+10,000-transaction stress, browser, reconnect, fault-repair, and exact live
+agent-delegation proofs satisfy the matrix above. No acceptance boundary
+requires a Seon parser, page-specific cache, global render listener, event
+replay queue, capacity increase, or second reactive mechanism.
+
+The final read-only stability audit against exact source `3a3a9e94` found no
+open run, running turn/eval, retained reactive registration/consumer/timer,
+Datastar view/subscription, or post-rebuild persisted core fault. Watcher,
+writer, pod, containment descriptors, HTTP readiness, and advertised artifact
+identities agreed. One execution child disappeared from the OS immediately
+before its parent snapshot cleared; the next observation returned no child,
+with no open work or retained owner. This is bounded asynchronous cleanup, not
+a readiness or graduation defect. The existing safe query-planner heuristic
+warning for an old database without subtree counts remains previously recorded
+performance evidence, not a correctness failure.

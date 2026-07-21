@@ -34,7 +34,7 @@ publication.
   expose the coordinate change.
 
 The implementation plan and failure proof are in
-[[../../prds/database-lifecycle-recovery/research/native-branch-create-delete-implementation-plan-2026-07-14]].
+[[../../prds/archive/database-lifecycle-recovery/research/native-branch-create-delete-implementation-plan-2026-07-14]].
 
 ## Owner
 

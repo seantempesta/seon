@@ -157,9 +157,9 @@ view, like the analyzer state.
   for the rendering surface. Code-as-data is to the program graph
   what reactive-context is to the warnings surface: derive from DB,
   no separate path.
-- `docs/prds/agent-runtime/v1.md` §2.2 — the schemas
-- `docs/prds/agent-runtime/v1.md` §7.3 — core seed from source
-- `docs/prds/agent-runtime/v1.md` §7.4 — bulk-load resume
-- `docs/prds/agent-runtime/research/analyzer-driven-extraction-and-resume-2026-05-24.md`
-- `docs/prds/agent-runtime/research/resume-as-bulk-file-load-2026-05-24.md`
-- `docs/prds/agent-runtime/research/schema-registry-unification-and-resume-2026-05-24.md`
+- `docs/prds/archive/agent-runtime/v1.md` §2.2 — the schemas
+- `docs/prds/archive/agent-runtime/v1.md` §7.3 — core seed from source
+- `docs/prds/archive/agent-runtime/v1.md` §7.4 — bulk-load resume
+- `docs/prds/archive/agent-runtime/research/analyzer-driven-extraction-and-resume-2026-05-24.md`
+- `docs/prds/archive/agent-runtime/research/resume-as-bulk-file-load-2026-05-24.md`
+- `docs/prds/archive/agent-runtime/research/schema-registry-unification-and-resume-2026-05-24.md`

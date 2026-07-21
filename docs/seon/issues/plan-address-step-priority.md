@@ -42,4 +42,4 @@ message-linked step facts from `seon.agent.message`.
   maintained schema'd verifier rather than bypassing completion evidence.
 
 The grounded address/reconcile laws are in
-[[docs/prds/agent-runtime-correctness/research/plan-transition-authority-audit-2026-07-15]].
+[[docs/prds/archive/agent-runtime-correctness/research/plan-transition-authority-audit-2026-07-15]].

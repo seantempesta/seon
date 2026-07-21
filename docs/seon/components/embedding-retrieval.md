@@ -62,4 +62,4 @@ established.
 - `src/seon/db/server.clj`
 - `src/seon/db/writer.clj`
 - `src/seon/diffusion/retrieval.cljs`
-- [[../../prds/embeddings/vertex-usage-reference-2026-06-25]]
+- [[../../prds/archive/embeddings/vertex-usage-reference-2026-06-25]]

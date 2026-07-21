@@ -482,7 +482,7 @@ one active derivation and at most the newest pending database value. Independent
 frontiers proceed independently, while the configured settle and maximum-latency
 bounds collapse imports without starving progress. Release the registration when
 the coordinator has no consumer. The exact dependency, cache, equality, and
-cleanup contract is maintained in [[../../prds/reactive-render-units/roadmap]].
+cleanup contract is maintained in [[../../prds/archive/reactive-render-units/roadmap]].
 
 ## The one ticker — schedules + overdue runs
 
@@ -714,7 +714,7 @@ Promises, handles, sockets, and external effects are never re-executed to mimic
 a prior runtime; a database value's `:as-of` means database state at that
 temporal cut inside its containing retained commit only.
 The complete transition contract is
-[[docs/prds/runtime-reliability/provenance-and-lifecycle-design]].
+[[docs/prds/archive/runtime-reliability/provenance-and-lifecycle-design]].
 
 The parent execution host performs child-process recovery; the in-child agent
 cannot recover its own blocked JavaScript thread. A clean planned restart first

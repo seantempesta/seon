@@ -33,4 +33,4 @@ The implementation is grounded in ClojureScript `1.12.145` at
 `bd23d9a2475d822ea8dfd65deaa6732428b9ed25`, Shadow `3.4.10` at
 `d3c04691952aa9ea33f7287ffe9a2b3109c1e510`, and Malli `0.20.0` at
 `4c054bd7d042e70d60b83b9f07fb765bc103037f`. See
-[[../../prds/agent-runtime-correctness/research/async-contract-exact-source-implementation-audit-2026-07-15]].
+[[../../prds/archive/agent-runtime-correctness/research/async-contract-exact-source-implementation-audit-2026-07-15]].

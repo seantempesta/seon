@@ -29,7 +29,7 @@ The first live row passed construction and `POST /agents/run` recorded
 the admitted ACME target while the model was still running, so Inspect retained
 the attempt as interrupted/rejected rather than fabricating the remaining
 acceptance proof. The exact root trajectory and shared-mechanism decision are in
-[[../../prds/agentic-tool-refinement/research/tool-reachability-falsifiers-2026-07-15]].
+[[../../prds/archive/agentic-tool-refinement/research/tool-reachability-falsifiers-2026-07-15]].
 
 The source boundary is complete. This issue remains open only until a coherent
 ACME source freeze permits one finalized native log to retain

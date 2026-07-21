@@ -30,7 +30,7 @@ schema projections across hot reload, but there is no open issue owning this
 observed partial-import/readiness behavior.
 
 The exact dependency path is now grounded in
-`docs/prds/runtime-reliability/research/schema-generation-lifecycle-audit-2026-07-15.md`.
+`docs/prds/archive/runtime-reliability/research/schema-generation-lifecycle-audit-2026-07-15.md`.
 Shadow's Node client catches an exception while synchronously importing the
 selected JavaScript files, logs `JS reload failed`, returns from
 `handle-build-complete`, and still invokes Seon's custom `:build-complete`

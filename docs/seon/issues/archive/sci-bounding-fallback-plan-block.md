@@ -81,4 +81,4 @@ fell off the bounded path. (`*conn*` itself enumerates fine off the live
   `acme.widget/broken-tile` demo.
 
 Related: [[tx-feed-pump-timeouts]] (same smoke). Channel entry:
-`docs/prds/agent-ctx/coordination.md` 2026-07-02.
+`docs/prds/archive/agent-ctx/coordination.md` 2026-07-02.

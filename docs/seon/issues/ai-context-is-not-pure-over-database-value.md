@@ -7,7 +7,7 @@ tags: [issue, agent, architecture, database]
 
 # AI context is not pure over its database value
 
-Owned by the [[../../prds/frozen-turn-inputs/roadmap]] chunk (impurity rows
+Owned by the [[../../prds/archive/frozen-turn-inputs/roadmap]] chunk (impurity rows
 I1-I5; closes at its stage 5 byte-identity gate). Stays open until that
 chunk lands commit plus live proof. The sibling turn-spine rows I6-I8
 landed 2026-07-20 (stage 1, see

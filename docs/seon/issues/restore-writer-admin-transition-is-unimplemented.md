@@ -64,7 +64,7 @@ old main, already-forced main, and divergence after result loss.
   value, roster, and release contract around it.
 
 Full grounding and the failure matrix are in
-[[../../prds/database-lifecycle-recovery/research/restore-writer-admin-transition-audit-2026-07-15]].
+[[../../prds/archive/database-lifecycle-recovery/research/restore-writer-admin-transition-audit-2026-07-15]].
 
 ## Owner
 

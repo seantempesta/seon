@@ -20,7 +20,7 @@ an exact immutable identity.
 - `datahike.db/AsOfDB` deliberately has no committed cache context.
 - `datahike.query/acquire-direct!` is selected for temporal wrappers, so an
   identical historical query never joins the existing Datahike flight.
-- [[../../prds/database-authority-mesh/research/strict-temporal-coordinate-seam-2026-07-16]]
+- [[../../prds/archive/database-authority-mesh/research/strict-temporal-coordinate-seam-2026-07-16]]
   proves that Seon resolves one containing commit and exact `t`; no second
   coordinate or Seon cache is required.
 

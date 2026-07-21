@@ -167,7 +167,7 @@ the duplication and add a test pinning the two to agree.
   one `cond`, the sliding cap (`effective-cap = base + inbounds-this-wake`),
   the read-then-write-with-recheck wake (no atom), the hop guard at wake,
   and the `finally` reset stamping the implicit-exit `stop-reason` all match
-  `docs/prds/agent-fsm/agent-loop.md`. No drift found.
+  `docs/prds/archive/agent-fsm/agent-loop.md`. No drift found.
 - **Lifecycle** (`agent/lifecycle.cljs`): `wait`/`complete` both park to the
   single `:idle` (difference is `:seon.agent.loop/stop-reason` tx-meta, not a
   distinct state); `terminate` → `:terminated`; each errors-as-values, none

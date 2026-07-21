@@ -46,7 +46,7 @@ issue's data gate is satisfied.
   reports refer to 213-row v2 artifacts and transformations that drop or alter
   rows. The split has contamination checks, but no canonical immutable row-id
   manifest that makes membership changes explicit and reviewable.
-- `docs/prds/repl-autosuggest/research/fair-scoring-2026-07-12.md` depends on
+- `docs/prds/archive/repl-autosuggest/research/fair-scoring-2026-07-12.md` depends on
   `src-needle` parsers, a pinned worktree, and an isolated audit harness.
   `research/inspect-harness-integration-2026-07-14.md` records its useful
   measured conclusion but explicitly rejects importing that implementation;

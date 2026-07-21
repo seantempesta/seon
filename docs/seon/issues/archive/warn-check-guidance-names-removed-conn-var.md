@@ -25,7 +25,7 @@ Related, same owner: every `seon.warn` check still consumed the async
 `seon.db/query`/`installed-schema` Promises synchronously through its
 direct-query fallback branches (`(or (::data ...) (db/query ...))`); the
 pre-acquired `::data` injection path is the surviving mechanism. Full site
-list: [[../../../prds/database-authority-mesh/research/cleanup-audit-duplicate-interfaces-2026-07-20]]
+list: [[../../../prds/archive/database-authority-mesh/research/cleanup-audit-duplicate-interfaces-2026-07-20]]
 section 2.
 
 ## Resolution — commit `0887b1ea` (2026-07-20)

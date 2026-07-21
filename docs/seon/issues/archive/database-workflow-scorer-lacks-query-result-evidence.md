@@ -18,7 +18,7 @@ process-local observer and blob publication.
 ## Evidence
 
 The accepted source audit in
-[[../../prds/database-authority-mesh/research/eval-native-result-database-value-cut-2026-07-16]]
+[[../../prds/archive/database-authority-mesh/research/eval-native-result-database-value-cut-2026-07-16]]
 found that the operation-capture path obscured the native `seon.db` contract:
 successful writes already return transaction reports, failed database calls
 already return direct error values, and eval result data already records what

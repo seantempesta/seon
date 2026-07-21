@@ -11,7 +11,7 @@ severity: friction
 
 Writer commit `fed32bb8` settled canonical same-transaction schema admission.
 The client replacement plan in
-[[../../prds/database-authority-mesh/research/atomic-client-cold-start-replacement-plan-2026-07-16]]
+[[../../prds/archive/database-authority-mesh/research/atomic-client-cold-start-replacement-plan-2026-07-16]]
 requires provenance, schema preparation, bootstrap acquisition, program
 reconstruction, runtime owners, readiness, quiescence, and stop to cross the
 authority boundary before the client changes its open path.

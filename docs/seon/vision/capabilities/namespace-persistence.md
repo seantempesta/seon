@@ -21,4 +21,4 @@ None.
 ## Related
 
 - Components: [[components/namespace-lifecycle]]
-- PRDs: [[prds/namespace-ui/archive/prd]]
+- PRDs: [[prds/archive/namespace-ui/archive/prd]]

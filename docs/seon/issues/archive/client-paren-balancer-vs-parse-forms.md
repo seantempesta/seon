@@ -83,7 +83,7 @@ silently corrupt a captured form.
 
 ## Links
 
-- [[docs/prds/agent-fsm/research/eval-segmenter-2026-06-28]] (flagged the smell)
+- [[docs/prds/archive/agent-fsm/research/eval-segmenter-2026-06-28]] (flagged the smell)
 - `seon.repl.internal/parse-forms` (the segmenter; now carries `:span`/`:error-kind` on `:read`)
 
 ## Resolution (2026-06-28 audit)

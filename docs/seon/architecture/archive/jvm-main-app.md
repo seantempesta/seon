@@ -22,4 +22,4 @@ The active system is one Node ClojureScript pod plus the JVM
 the web UI; the JVM serializes Datahike writes, publishes committed
 transactions, and performs explicitly selected heavy database work. Start with
 [[../architecture]] for the canonical design and
-[[../../../prds/runtime-reliability/roadmap]] for current implementation status.
+[[../../../prds/archive/runtime-reliability/roadmap]] for current implementation status.

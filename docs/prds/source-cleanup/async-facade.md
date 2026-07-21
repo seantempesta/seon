@@ -15,7 +15,7 @@ always-true predicates to Promise objects rendered into agent context —
 the transcript already renders `[<Promise>]` labels because
 `handlers/message.cljs:43`'s `(or (db/pull ...) ref)` is always the truthy
 Promise. Evidence:
-[[../database-authority-mesh/research/cleanup-audit-duplicate-interfaces-2026-07-20]].
+[[../archive/database-authority-mesh/research/cleanup-audit-duplicate-interfaces-2026-07-20]].
 
 Closed already: `seon.runtime.recovery` (commit `a2b0c815`; `later-run?` was
 `(boolean <Promise>)`, unconditionally true).

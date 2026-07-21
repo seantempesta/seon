@@ -22,9 +22,9 @@ were removed and are identified only by
 ## Start here
 
 - [[architecture/architecture]] — canonical target architecture and vocabulary
-- [[../prds/runtime-reliability/roadmap]] — current implementation state and
+- [[../prds/archive/runtime-reliability/roadmap]] — current implementation state and
   ordered work
-- [[../prds/runtime-reliability/AGENTS]] — active runbook and settled decisions
+- [[../prds/archive/runtime-reliability/AGENTS]] — active runbook and settled decisions
 - [[process-management]] — process operations
 - [[components/testing]] — focused test doors
 

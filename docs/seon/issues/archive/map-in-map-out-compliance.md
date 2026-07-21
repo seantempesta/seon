@@ -16,7 +16,7 @@ specced via Malli `:catn`**. The goal is no longer "all map-in" — it is "every
 public fn fully specs and validates its args and return." Many functions
 previously flagged here are already compliant under the new rule.
 
-See `docs/prds/agent-runtime/research/map-in-rule-audit-2026-06-08.md` (the
+See `docs/prds/archive/agent-runtime/research/map-in-rule-audit-2026-06-08.md` (the
 authoritative spec) and the updated `docs/conventions.md` "Public Function
 Pattern" section.
 

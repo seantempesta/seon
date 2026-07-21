@@ -19,9 +19,9 @@ generations.
 ## Evidence
 
 The exact call paths and dependency behavior are recorded in
-[[../../prds/database-lifecycle-recovery/research/database-lifecycle-source-audit-2026-07-14]]
+[[../../prds/archive/database-lifecycle-recovery/research/database-lifecycle-source-audit-2026-07-14]]
 and
-[[../../prds/database-lifecycle-recovery/research/malli-runtime-schema-authority-audit-2026-07-13]].
+[[../../prds/archive/database-lifecycle-recovery/research/malli-runtime-schema-authority-audit-2026-07-13]].
 Candidate construction is complete and pre-commit validation rejects invalid
 dependent contracts. The remaining post-commit catch path records the fault but
 does not close agent, eval, schedule, or web-command admission and does not

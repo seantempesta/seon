@@ -22,7 +22,7 @@ yet correct for the DEFAULT provider: Muse (`muse-spark-1.1`, the
 openai-compat Meta gateway) reports cache hits under
 `prompt_tokens_details.cached_tokens`, not DeepSeek's
 `prompt_cache_hit_tokens` (verified live,
-`docs/prds/agent-ctx/research/meta-model-api-muse-spark-2026-07-10.md:176-179`),
+`docs/prds/archive/agent-ctx/research/meta-model-api-muse-spark-2026-07-10.md:176-179`),
 and `extract` (usage.cljs:52) reads only `(:prompt_cache_hit_tokens m)` —
 every warm-cache Muse turn would render a plausible-looking 0% cache rate,
 exactly the failure the wiring must forbid. Fixes REQUIRED in the same
@@ -75,7 +75,7 @@ No new block family unless the owner wants usage as its own block.
 
 **`src/seon/ui/components.cljc` (278 lines) — delete, do not wire.**
 Readable but built for the removed "future adapter" era: it references the
-superseded `docs/prds/namespace-ui/archive/design-system.md`, duplicates styling
+superseded `docs/prds/archive/namespace-ui/archive/design-system.md`, duplicates styling
 the live `seon.ui.*`/render fns evolved independently (its `card`,
 `page-header`, `status-styles` have zero consumers while live equivalents
 exist), and its `type-colors` keys ("LAUNCH"/"MESSAGE"/...) belong to a log

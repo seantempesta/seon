@@ -20,7 +20,7 @@ objects instead of rows.
 
 ## Evidence
 
-Audit: `docs/prds/database-authority-mesh/research/cleanup-audit-duplicate-interfaces-2026-07-20.md`
+Audit: `docs/prds/archive/database-authority-mesh/research/cleanup-audit-duplicate-interfaces-2026-07-20.md`
 §seon.runtime.recovery (former lines 553, 563, 578, 595, 640).
 Regression test
 `later-run-presence-is-awaited-not-a-truthy-promise` in

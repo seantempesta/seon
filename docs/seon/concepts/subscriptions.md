@@ -19,7 +19,7 @@ The transport mechanism is direct `flow/inject` into the subscriber's `:subscrip
 
 ## Current Implementation
 
-Subscriptions are not yet implemented as a first-class feature. The pattern exists conceptually in the [[components/flow-topology]] design docs (`docs/prds/unified-flow/design.md`) and is part of the unified model vision. Today, cross-namespace data sharing happens via direct `topology/request!` calls (synchronous pull) or SSE push from `seon.ctx` (which pushes all state changes to connected browser clients, not to other namespaces).
+Subscriptions are not yet implemented as a first-class feature. The pattern exists conceptually in the [[components/flow-topology]] design docs (`docs/prds/archive/unified-flow/design.md`) and is part of the unified model vision. Today, cross-namespace data sharing happens via direct `topology/request!` calls (synchronous pull) or SSE push from `seon.ctx` (which pushes all state changes to connected browser clients, not to other namespaces).
 
 The building blocks are in place: flow processes can have arbitrary named inputs (`:subscription-update` would be one), `flow/inject` can target any process input, and the [[concepts/request-reply]] pattern provides the messaging envelope.
 

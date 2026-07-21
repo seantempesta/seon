@@ -64,7 +64,7 @@ can preserve the original ambition.
   PRD itself; the rest are operational findings, not vision.
 - [x] Surface F: `docs/seon/architecture/overview.md` read in full; ADRs 001-007 read
   (headers + rationale). `CLAUDE.md` consumed as system context.
-- [x] Surface G: `docs/prds/agent-runtime/v1.md` read across ranges 1–400, 400–900,
+- [x] Surface G: `docs/prds/archive/agent-runtime/v1.md` read across ranges 1–400, 400–900,
   1100–1635 (the deferred-to-v2/v3 sections and the implementation protocol §11). v2.md
   read 1–200. Platform.md read 1–200 + 400–571.
 
@@ -114,7 +114,7 @@ that can do anything."
 > no line numbers, no `clojure_replace`. The `*ctx*` atom is the agent's entire
 > world."
 
-`docs/prds/agent-runtime/v1.md:90-99`:
+`docs/prds/archive/agent-runtime/v1.md:90-99`:
 
 > "**Context is `fn(DB)`, not an accumulated log.** The rendered prompt the LLM
 > sees each turn is derived freshly from current DB state by running the section
@@ -180,7 +180,7 @@ AI-for-code-land works this way today.
 > 'What changed between working and broken?' Most databases can't answer these
 > questions. **For agents learning from experience, they're essential.**"
 
-Current core: `docs/prds/agent-runtime/v1.md:1107-1115`:
+Current core: `docs/prds/archive/agent-runtime/v1.md:1107-1115`:
 
 > "`:keep-history? true` on the agent conn. Tx-meta datoms only persist when
 > history is on. ... Pulling `[:seon.eval/id "K9p…"]` returns the eval entity
@@ -188,7 +188,7 @@ Current core: `docs/prds/agent-runtime/v1.md:1107-1115`:
 > [?e ?a ?v ?tx ?op]] (d/history db) [:seon.eval/id "K9p…"])` returns the
 > datoms that eval wrote."
 
-`docs/prds/agent-runtime/v1.md:442-446`:
+`docs/prds/archive/agent-runtime/v1.md:442-446`:
 
 > "**The eval-IS-tx mechanic.** ... `(d/history db) [:seon.eval/id "K9p…"]`
 > returns the datoms that eval wrote."
@@ -209,7 +209,7 @@ of the database choice.
 > (sandboxed, TCP/Nippy). **The agent never knows or cares which mode it's
 > in.** It requires namespaces, calls functions, gets results."
 
-`docs/prds/agent-runtime/platform.md:18-24`:
+`docs/prds/archive/agent-runtime/platform.md:18-24`:
 
 > "**Self-hosted CLJS eval inside WASM.** Agent emits any valid CLJS; it runs
 > under wasmtime + wasm-rquickjs with the analyzer fully populated, error
@@ -222,13 +222,13 @@ the user-facing pitch, not just deployment plumbing.
 
 ### #7 Capability surface as a WIT-typed boundary. Every external action — HTTP, fs, npm install, MCP — flows through a host-decided interface. No ambient authority.
 
-`docs/prds/agent-runtime/platform.md:42-50`:
+`docs/prds/archive/agent-runtime/platform.md:42-50`:
 
 > "**Capabilities are explicit.** Every external action (HTTP, fs, npm install,
 > package fetch) flows through a WIT import the agent can see and the host can
 > deny. No ambient authority."
 
-`docs/prds/agent-runtime/platform.md:464-472` (Phase 7):
+`docs/prds/archive/agent-runtime/platform.md:464-472` (Phase 7):
 
 > "The agent has explicitly bounded access. Every external action — HTTP, fs
 > read, fs write, npm install, package fetch — flows through a WIT import. The
@@ -246,14 +246,14 @@ makes "personal AI that can do anything" safe to deploy on the user's machine.
 
 ### #8 The agent can install dependencies live, from inside the sandbox, with capability-prompted approval.
 
-`docs/prds/agent-runtime/platform.md:30-34`:
+`docs/prds/archive/agent-runtime/platform.md:30-34`:
 
 > "**Dynamic deps.** Agent runs `(seon.deps/install ...)` from the REPL and
 > acquires new CLJS or npm packages without a core rebuild.
 > Capability-bounded: fs cache + HTTP + (eventually) a curated registry, all
 > via WIT imports."
 
-`docs/prds/agent-runtime/platform.md:480-502` (end-state vignette):
+`docs/prds/archive/agent-runtime/platform.md:480-502` (end-state vignette):
 
 > "Agent decides it needs a new dep. `(seon.deps/install '[reagent/reagent
 > "1.2.0"])`. Pod fetches, caches, makes analyzer-visible. Returns `:installed`.
@@ -318,12 +318,12 @@ Hunting for any mention of Python, multi-language, polyglot, language-agnostic,
 WASM-as-packaging, runtime portability.
 
 **WASM as the multi-language envelope (current direction).**
-`docs/prds/agent-runtime/platform.md:18-23`:
+`docs/prds/archive/agent-runtime/platform.md:18-23`:
 
 > "**Self-hosted CLJS eval inside WASM.** Agent emits any valid CLJS; it runs
 > under wasmtime + wasm-rquickjs with the analyzer fully populated."
 
-`docs/prds/agent-runtime/platform.md:454-463` (Phase 6 — WASM pod, dynamic
+`docs/prds/archive/agent-runtime/platform.md:454-463` (Phase 6 — WASM pod, dynamic
 npm deps):
 
 > "**Pre-bundle a 'universal' npm set** — pick 50 common packages, bundle once.
@@ -725,7 +725,7 @@ it up.
 namespace; idle until woken; wakes on notification; "long-term ownership")
 versus `docs/seon/vision/capabilities/agent-isolation.md` (agents are
 JVM-pool-acquired, instrumentation deferred to claim-time, dispose on death)
-versus `docs/prds/agent-runtime/v1.md` (sessions span pod runs; agents
+versus `docs/prds/archive/agent-runtime/v1.md` (sessions span pod runs; agents
 have IDs and stable home-ns; resume re-evals the program-graph on boot).
 
 The reconciliation: the *agent identity* is persistent (Datahike entity with
@@ -736,7 +736,7 @@ needs to say this clearly — without it the M8 framing reads as
 
 ### 7.6 :keep-history? true (forever) vs blob GC / forget!
 
-`docs/prds/agent-runtime/v1.md` ships with `:keep-history? true` and no
+`docs/prds/archive/agent-runtime/v1.md` ships with `:keep-history? true` and no
 GC. `v2.md` adds `:db/noHistory` opt-outs on high-churn scalars and `forget!`
 / `forget-ns!` curation functions. `v3.md` adds blob GC and per-blob TTL.
 

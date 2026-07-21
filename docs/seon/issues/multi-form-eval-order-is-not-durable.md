@@ -131,7 +131,7 @@ second ordering scheme.
 
 ## Scheduling
 
-This belongs to P4 of [[../../prds/agentic-tool-refinement/roadmap]] after the
+This belongs to P4 of [[../../prds/archive/agentic-tool-refinement/roadmap]] after the
 first accepted P0b serial slice. It must not displace the current clean-artifact
 and admitted-sample gate unless that sample is directly invalidated by missing
 order evidence.

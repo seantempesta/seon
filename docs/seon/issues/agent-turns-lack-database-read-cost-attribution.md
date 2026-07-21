@@ -20,7 +20,7 @@ A current-artifact live run at Seon `15acdaf9` took 211,126 ms, rendered about
 times. Its three explicit database eval forms are not the actual read count:
 the execution child performs composed reads that are invisible in eval source.
 See
-[[../../prds/reactive-render-units/research/agent-read-cost-live-measurement-2026-07-19]].
+[[../../prds/archive/reactive-render-units/research/agent-read-cost-live-measurement-2026-07-19]].
 
 ## Owner
 

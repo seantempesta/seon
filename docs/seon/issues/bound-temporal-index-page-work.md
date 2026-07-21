@@ -35,7 +35,7 @@ public page shape or the correctness repair in `f0ee54c2`.
   (`reference-code/datahike/src/datahike/index_page.cljc:45-53,130-154`).
 - The complete complexity analysis, PSS/HHT distinction, bounded dependency
   seam, and grown-database falsifier are in
-  [[../../prds/database-authority-mesh/research/datahike-temporal-index-page-cost-2026-07-16]].
+  [[../../prds/archive/database-authority-mesh/research/datahike-temporal-index-page-cost-2026-07-16]].
 
 ## Owner
 

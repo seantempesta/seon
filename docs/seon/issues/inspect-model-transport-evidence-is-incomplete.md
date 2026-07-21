@@ -62,7 +62,7 @@ Native logs retained under `src-inspect-ai/logs/` prove the progression:
   that reach the capability scorer.
 
 The complete live audit is
-[[../../prds/runtime-reliability/research/live-inspect-contract-audit-2026-07-19]].
+[[../../prds/archive/runtime-reliability/research/live-inspect-contract-audit-2026-07-19]].
 
 ## Remaining owner
 

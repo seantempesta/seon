@@ -24,7 +24,7 @@ admission, and its ordinary wrapper composes both synchronously.
 `src/seon/client.cljs` calls that wrapper during cold start and only afterward
 resumes hosts and starts runtime surfaces. The exact restore-aware order and
 predecessor inputs are grounded in
-`docs/prds/database-lifecycle-recovery/research/restore-blob-and-cold-reconstruction-contract-2026-07-15.md`.
+`docs/prds/archive/database-lifecycle-recovery/research/restore-blob-and-cold-reconstruction-contract-2026-07-15.md`.
 
 ## Owner
 
@@ -62,7 +62,7 @@ existing replica RPC owner carries the request; `seon.db` preserves typed
 writer failures as a structured error value. An equal completion retry after a
 later transaction now returns the original completion coordinate without a
 write or a shadow commit attribute. Exact grounding is in
-[[../../prds/database-lifecycle-recovery/research/restore-completion-transaction-coordinate-2026-07-15]].
+[[../../prds/archive/database-lifecycle-recovery/research/restore-completion-transaction-coordinate-2026-07-15]].
 
 The retained lifecycle observation now consumes that same resolver directly.
 Its closed response exposes

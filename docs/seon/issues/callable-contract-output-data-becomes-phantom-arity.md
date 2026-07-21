@@ -22,7 +22,7 @@ callable-projection defect, not a canvas-specific prompt problem.
 ## Evidence
 
 The complete database-derived inventory and immutable coordinate are preserved
-in [[../../prds/agentic-tool-refinement/research/tool-namespace-colocation-audit-2026-07-15]].
+in [[../../prds/archive/agentic-tool-refinement/research/tool-namespace-colocation-audit-2026-07-15]].
 The four affected functions are ordinary one-argument functions whose source
 schemas are `[:=> [:cat ::request] ::control]`. Their returned Hiccup bodies
 are data, never callable input.

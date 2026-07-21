@@ -86,7 +86,7 @@ shape compiled by shadow (the `bin/test-cljs` `:node-test` build) runs its
 
 ## Cross-references
 
-- `docs/prds/agent-runtime/db-is-the-running-system-2026-06-17.md` §"Usage-example tests (B9)"
+- `docs/prds/archive/agent-runtime/db-is-the-running-system-2026-06-17.md` §"Usage-example tests (B9)"
 - `src/seon/test/runner.cljs` — `resolve-test-fn`
 - `src/seon/eval.cljs` — `ensure-analyzer-ns!`, `raw-eval`
 - `test/seon/test/runner_test.cljs` — the green standard-compiled proofs

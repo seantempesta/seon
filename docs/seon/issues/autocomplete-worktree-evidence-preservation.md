@@ -38,7 +38,7 @@ removed merely to reclaim space before this preservation gate is complete.
   44 MB cluster, a dirty completed fair scorer/report, an untracked
   continuation-drive design and probe, and 404 KB of ignored prediction/example
   outputs. The design, probe, scorer, and report SHA-256 values are recorded in
-  [[docs/prds/inspect-autocomplete-evidence/research/inspect-autocomplete-lane-integration-audit-2026-07-14]].
+  [[docs/prds/archive/inspect-autocomplete-evidence/research/inspect-autocomplete-lane-integration-audit-2026-07-14]].
   Removing the worktree from Git status alone would lose this evidence.
 - The root-cause runbook says to inspect display-v3 and plan/reconcile work
   before removing worktrees and to preserve the held-out export first. It does
@@ -66,7 +66,7 @@ tracked-code merge question, but it does not classify the ignored databases or
 dirty experiment evidence above.
 
 The read-only preservation inventory is now durable in
-[[docs/prds/runtime-reliability/research/worktree-evidence-preservation-manifest-2026-07-14]].
+[[docs/prds/archive/runtime-reliability/research/worktree-evidence-preservation-manifest-2026-07-14]].
 It covers all nine registered worktrees, exact HEAD/branch and dirty-state
 counts, cluster/blob paths and allocated sizes, four live legacy ACME PIDs and
 ports, stable continuation/scorer/probe hashes, all 14 continuation raw-output
@@ -84,7 +84,7 @@ hash-backed duplicate or supported reproducibility decision. Worktree removal
 therefore remains blocked.
 
 The final read-only retirement classification is recorded in
-[[docs/prds/runtime-reliability/research/legacy-lane-retirement-audit-2026-07-14]].
+[[docs/prds/archive/runtime-reliability/research/legacy-lane-retirement-audit-2026-07-14]].
 It revalidated all registered refs, dirty patches, allocated cluster sizes,
 and live process/port owners. `seon-plan-fix` is the sole old checkout eligible
 for later user-authorized removal now: it is detached, has no patch-unique
@@ -104,7 +104,7 @@ reproducible-discard, or archive/read-back disposition before the worktree is
 removed; the remaining gate is database evidence, not source integration.
 
 The follow-up read-only audit
-[[docs/prds/runtime-reliability/research/legacy-acme-archive-readback-runbook-2026-07-14]]
+[[docs/prds/archive/runtime-reliability/research/legacy-acme-archive-readback-runbook-2026-07-14]]
 captured live database checkpoints through the owning writers without opening a
 second connection. Stable is at basis `536870984` with 202 schema attributes;
 display-v3 is at basis `536877667` with 269 schema attributes and 29 installed

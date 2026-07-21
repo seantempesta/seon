@@ -27,7 +27,7 @@ final immutable coordinate while the active projection is valid, then detach
 the projection, release the connection, and return generation-bound evidence.
 
 The source audit in
-`docs/prds/runtime-reliability/research/schema-generation-lifecycle-audit-2026-07-15.md`
+`docs/prds/archive/runtime-reliability/research/schema-generation-lifecycle-audit-2026-07-15.md`
 rules out a broader already-executing-wrapper race. Malli `0.20.0` compiles and
 closes over the function schema validators when it installs a wrapper; it does
 not resolve the symbolic schema through the active registry again during output

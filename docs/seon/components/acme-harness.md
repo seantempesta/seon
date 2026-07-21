@@ -210,5 +210,5 @@ bin/acme restart pod          # acme pod picks it up
 
 - `bin/acme`, `bin/seon` (env-parametrized supervisor)
 - `shadow-cljs.edn` (`:acme-client` build → `out-acme/`)
-- `acme/**`, `docs/prds/agent-runtime/acme-thirdparty-harness-2026-06-22.md`
+- `acme/**`, `docs/prds/archive/agent-runtime/acme-thirdparty-harness-2026-06-22.md`
   (the root-cause + acceptance-check PRD), [[extra-src]]

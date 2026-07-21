@@ -31,7 +31,7 @@ opaque input, not a reason to sign cursors, add a token registry, or create a
 second paging path.
 
 Full reconciliation is in
-[[../../prds/database-browser/research/entity-reference-projection-reconciliation-2026-07-15]].
+[[../../prds/archive/database-browser/research/entity-reference-projection-reconciliation-2026-07-15]].
 
 ## Owner
 

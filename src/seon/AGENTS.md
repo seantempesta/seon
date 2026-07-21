@@ -5,7 +5,7 @@
 domain doc for your area (`data-model.md`, `agent-runtime.md`, `ui.md`,
 `toolkit.md`, `observability.md`). They are TARGET-written (present tense);
 the only we-are-here doc on this branch is
-`docs/prds/runtime-reliability/roadmap.md`. Conventions:
+`docs/prds/archive/runtime-reliability/roadmap.md`. Conventions:
 `docs/conventions.md`.
 
 ## The ONE-mechanism table — never build a second

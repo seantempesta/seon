@@ -230,7 +230,7 @@ heap; the blast radius is the whole writer, i.e., every cluster on it
 the config-database ceiling triple applied by `seon.db` to every read
 plus the protocol's `datahike.resource/*` options and `index-page`
 limit/cursor paging (`writer.clj:921-955`); Stage 1.5's bounded transcript
-event selection (`docs/prds/runtime-reliability/roadmap.md:1537,1293`) is
+event selection (`docs/prds/archive/runtime-reliability/roadmap.md:1537,1293`) is
 call-site pagination *on top of* that general mechanism, not a parallel
 one-off bounding system.
 

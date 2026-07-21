@@ -21,4 +21,4 @@ None.
 ## Related
 
 - Components: [[components/runtime]]
-- PRDs: [[prds/refinement/prd]]
+- PRDs: [[prds/archive/refinement/prd]]

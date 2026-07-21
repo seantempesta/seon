@@ -115,7 +115,7 @@ When writing a new section function, ask:
 
 ## Cross-references
 
-- `docs/prds/agent-runtime/v1.md §5` — section composer + the six default sections
-- `docs/prds/agent-runtime/research/derive-not-store-2026-05-23.md` — the audit + REPL evidence that produced this principle
+- `docs/prds/archive/agent-runtime/v1.md §5` — section composer + the six default sections
+- `docs/prds/archive/agent-runtime/research/derive-not-store-2026-05-23.md` — the audit + REPL evidence that produced this principle
 - `CLAUDE.md` "Data Rules" — the broader data-shape principles this builds on
 - `src/seon/agent.cljs` — `assemble-ctx` composer + the six default section functions

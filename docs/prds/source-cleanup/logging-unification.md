@@ -12,7 +12,7 @@ JVM writer adopts the client's log line FORMAT only (no writer event file).
 
 ## Problems
 
-Evidence: [[../database-authority-mesh/research/cleanup-audit-logging-errors-2026-07-20]].
+Evidence: [[../archive/database-authority-mesh/research/cleanup-audit-logging-errors-2026-07-20]].
 
 1. **Agent-readable log blind to loop faults**: ~30 of 84 call sites print
    via `js/console.*` directly, so `seon.log/tail` and the rotated

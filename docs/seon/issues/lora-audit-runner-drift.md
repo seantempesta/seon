@@ -21,7 +21,7 @@ migrate, not a reason to revive the pinned runtime or add another test path.
 
 - `shadow-cljs.edn` still declares `:lora-audit`, whose namespace lives under
   `src-needle/audit/` rather than the ordinary test source roots.
-- `docs/prds/repl-autosuggest/research/lora-data-audit-2026-07-12.md` instructs
+- `docs/prds/archive/repl-autosuggest/research/lora-data-audit-2026-07-12.md` instructs
   operators to copy that test into `/Users/sean/src/seon-pin/test/seon/`, run
   `clojure -M:cljs compile lora-audit` from the pin, then invoke
   `node out/lora-audit/test.js` with scratch manifest/output variables.

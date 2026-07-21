@@ -20,7 +20,7 @@ The live ACME projection for `metal-hairs-lose` advertises 36 `seon.db`
 functions and 24 `seon.schema` functions, including boot, provenance, listener,
 ambient-scope, schema-projection, registry-reset, snapshot, and rollback
 operations. The complete measurement is in
-`docs/prds/agentic-tool-refinement/research/namespace-surface-audit-2026-07-15.md`.
+`docs/prds/archive/agentic-tool-refinement/research/namespace-surface-audit-2026-07-15.md`.
 
 ## Owner
 

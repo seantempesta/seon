@@ -49,4 +49,4 @@ verifier, committed evidence refs, and one completion receipt.
   nothing.
 
 The grounded authority and evidence shape are specified in
-[[docs/prds/agent-runtime-correctness/research/plan-transition-authority-audit-2026-07-15]].
+[[docs/prds/archive/agent-runtime-correctness/research/plan-transition-authority-audit-2026-07-15]].

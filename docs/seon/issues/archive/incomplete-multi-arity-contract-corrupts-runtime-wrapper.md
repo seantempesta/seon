@@ -33,7 +33,7 @@ contract but did not compare those schema arities with the live function's
 `cljs$lang$maxFixedArity`, `cljs$core$IFn$_invoke$arity$N`, and variadic
 accessors. The prerequisite and missing
 regression were already specified in
-[[../../prds/agent-runtime-correctness/research/incremental-instrumentation-2026-07-12]]
+[[../../prds/archive/agent-runtime-correctness/research/incremental-instrumentation-2026-07-12]]
 but were not implemented.
 
 A live default-pod probe on 2026-07-14 supplied one `:=>` contract for an

@@ -5,12 +5,19 @@ tags: [prd, reference, database]
 ---
 # PRD System
 
-Feature specifications for agent-based development. Each feature gets its own directory.
+The active program is split across four PRD directories. Superseded PRDs live
+under `archive/`.
+
+- `sci-execution-runtime/` — active program ledger and sci transition
+- `source-cleanup/` — source cleanup stages
+- `generate-code/` — code-generation completion
+- `package-capabilities/` — package capability work
+- `archive/` — superseded PRDs retained as historical evidence
 
 ## Creating a New PRD
 
 ```bash
-cp -r docs/prds/_example-feature docs/prds/your-feature-name
+cp -r docs/prds/archive/_example-feature docs/prds/your-feature-name
 rm docs/prds/your-feature-name/README.md
 
 ```
@@ -26,13 +33,12 @@ touch docs/prds/your-feature-name/{prd,decisions,notes}.md
 ## Directory Structure
 
 ```
-docs/prds/{feature-name}/
-+-- prd.md          # Main spec: goals, constraints, acceptance criteria
-+-- decisions.md    # Why decisions were made (optional)
-+-- notes.md        # Implementation learnings, gotchas (optional)
-+-- research/       # Exploration findings (optional)
-    +-- spike-*.md
-    +-- findings-*.md
+docs/prds/
++-- sci-execution-runtime/
++-- source-cleanup/
++-- generate-code/
++-- package-capabilities/
++-- archive/
 
 ```
 

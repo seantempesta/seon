@@ -35,7 +35,7 @@ membership transaction happened to refresh it.
   already derive selective dependencies from the query form.
 
 The complete source-grounded cut is
-[[../../../prds/database-authority-mesh/research/membership-quiescence-single-owner-audit-2026-07-17]].
+[[../../../prds/archive/database-authority-mesh/research/membership-quiescence-single-owner-audit-2026-07-17]].
 
 ## Owner
 

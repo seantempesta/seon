@@ -30,7 +30,7 @@ The intended mechanism half-exists and is the one to strengthen:
 
 ## Problems
 
-Evidence: [[../runtime-reliability/research/cleanup-audit-config-startup-2026-07-20]].
+Evidence: [[../archive/runtime-reliability/research/cleanup-audit-config-startup-2026-07-20]].
 
 1. **Runtime env gates bypass the mechanism**: `SEON_WEB`, `SEON_SHELL`,
    `SEON_RENDER_STRICT`, `SEON_BRAND_*` are read from process env at runtime

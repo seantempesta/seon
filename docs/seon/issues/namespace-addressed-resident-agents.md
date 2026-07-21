@@ -23,7 +23,7 @@ The database shape uses a unique cardinality-one ref:
 ```
 
 Datahike source and executable proof are retained in
-`docs/prds/database-authority-mesh/research/agent-id-rename-datahike-audit-2026-07-18.md`.
+`docs/prds/archive/database-authority-mesh/research/agent-id-rename-datahike-audit-2026-07-18.md`.
 The agent's numeric eid and every durable ref remain stable when its namespace
 changes.
 

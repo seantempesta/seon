@@ -31,12 +31,12 @@ rather than creating another value transport.
 
 Evidence base (all dated 2026-07-20, committed):
 
-- [[../database-authority-mesh/research/cleanup-audit-jvm-residue-2026-07-20]]
-- [[../database-authority-mesh/research/cleanup-audit-duplicate-interfaces-2026-07-20]]
-- [[../database-authority-mesh/research/cleanup-audit-logging-errors-2026-07-20]]
-- [[../database-authority-mesh/research/cleanup-audit-vocabulary-2026-07-20]]
-- [[../runtime-reliability/research/cleanup-audit-config-startup-2026-07-20]]
-- [[../database-authority-mesh/research/pod-term-retirement-plan-2026-07-20]]
+- [[../archive/database-authority-mesh/research/cleanup-audit-jvm-residue-2026-07-20]]
+- [[../archive/database-authority-mesh/research/cleanup-audit-duplicate-interfaces-2026-07-20]]
+- [[../archive/database-authority-mesh/research/cleanup-audit-logging-errors-2026-07-20]]
+- [[../archive/database-authority-mesh/research/cleanup-audit-vocabulary-2026-07-20]]
+- [[../archive/runtime-reliability/research/cleanup-audit-config-startup-2026-07-20]]
+- [[../archive/database-authority-mesh/research/pod-term-retirement-plan-2026-07-20]]
 - [[research/fresh-source-cleanup-gaps-2026-07-20]]
 
 ## Live bug ledger
@@ -670,7 +670,7 @@ pure-render, single execution, byte-identity safe):
 
 ### Stage 2 — pod-term retirement (atomic rename)
 
-Execute [[../database-authority-mesh/research/pod-term-retirement-plan-2026-07-20]]
+Execute [[../archive/database-authority-mesh/research/pod-term-retirement-plan-2026-07-20]]
 steps 1-4 as one orchestrator-owned unit during a lane freeze: code
 identities (`client`/`cluster` mapping, `pod.js` -> `client.js`,
 `pod-events.log` -> `client-events.log`, `:seon.dev.process/pod` ->
@@ -843,7 +843,7 @@ the Babashka gates passed 74 assertions and the CLJS consumers passed 265
 assertions with zero warnings.
 
 Outcome (2026-07-20): `5ea16b14` archives all 18 superseded namespace-UI
-documents under `docs/prds/namespace-ui/archive/`, marks their frontmatter
+documents under `docs/prds/archive/namespace-ui/archive/`, marks their frontmatter
 archived, and repairs incoming links; `8dcf64c5` had already removed the
 storage shootout and Integrant submodule. Markdown proof passed 22 tests / 341
 assertions. The integration correction keeps maintained web/CSS authorities
@@ -1072,7 +1072,7 @@ strings; resolve
 false deprecation claims from canonical live render functions and deleting any
 actually retired function after caller migration; delete
 `dev/storage-shootout.js`, remove the `reference-code/integrant`
-submodule and its `.gitmodules` entry, and archive `docs/prds/namespace-ui/` as
+submodule and its `.gitmodules` entry, and archive `docs/prds/archive/namespace-ui/` as
 already ruled; downstream `bin/acme` gym naming remains downstream-owned. Gate:
 three suites; require-graph re-scan shows no orphan regressions, and no
 deprecated function remains eligible for the callable program index.

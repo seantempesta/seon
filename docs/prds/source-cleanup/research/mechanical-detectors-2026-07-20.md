@@ -133,10 +133,10 @@ Structural subset (requested focus):
   links (memory-file names referenced from docs, e.g.
   `[[feedback_test_behavior_not_exact_strings]]`,
   `[[reference_mlx_metal_cache_limit]]` in
-  `docs/prds/repl-autosuggest/root-cause-fixes-2026-07-13.md:225` — the
+  `docs/prds/archive/repl-autosuggest/root-cause-fixes-2026-07-13.md:225` — the
   active lane's anchor doc; `[[seon.agent.loop]]`;
   `[[ctx-install-canvas-symbol-roundtrip]]` ×2 in
-  `docs/prds/agent-ctx/feels-stateful-remaining-work-spec.md`). The other
+  `docs/prds/archive/agent-ctx/feels-stateful-remaining-work-spec.md`). The other
   half are false positives: EDN/Datalog snippets like `[[?e :seon.fn/source]]`
   or `[[nm _tx]]` inside prose being parsed as wikilinks — a linter
   limitation worth a fence-awareness fix.

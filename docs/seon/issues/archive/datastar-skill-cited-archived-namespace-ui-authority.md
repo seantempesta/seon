@@ -16,7 +16,7 @@ now-broken pre-archive path.
 ## Evidence
 
 `.agents/skills/datastar-web-ui/SKILL.md` names
-`docs/prds/namespace-ui/design-system.md` in its theme guidance and key
+`docs/prds/archive/namespace-ui/design-system.md` in its theme guidance and key
 references. Hidden `.agents/` content was not covered by the archive lane's
 ordinary repository sweep.
 

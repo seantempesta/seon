@@ -216,7 +216,7 @@ prices. The remaining values below are dated Seon transport evidence.
 | ✔ `muse-spark-1.1` | $1.25 / $4.25, secondary-source estimate | Seon discovered the slug and endpoint live and measured ~900–1,060 tok/s, 3.9s TTFT, and 7.7s wall time at `minimal`. Two of three driven runs still ended with no forms, so this remains an experimental fast specialist rather than a proven daily executor. |
 
 Full recipe, measured tables, gotchas:
-`docs/prds/agent-ctx/research/meta-model-api-muse-spark-2026-07-10.md`.
+`docs/prds/archive/agent-ctx/research/meta-model-api-muse-spark-2026-07-10.md`.
 
 ### Moonshot AI (`:openai-compat`) — Kimi K3
 

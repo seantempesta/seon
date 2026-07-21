@@ -11,7 +11,7 @@ severity: friction
 
 Every changed-test hook run of the operator suite recreated `locks/stack.lock`
 at the repository root. Reproduced and root-caused in
-[[../../prds/runtime-reliability/research/cleanup-audit-config-startup-2026-07-20]]:
+[[../../prds/archive/runtime-reliability/research/cleanup-audit-config-startup-2026-07-20]]:
 `test/seon/dev/cli_test.clj` `branch-commands-call-only-the-retained-lifecycle-owner`
 used a fixture config without `:seon.dev.config/process-dir` and, unlike its
 sibling lifecycle tests, did not redef `state/with-lock`. `cli/branch!` then ran

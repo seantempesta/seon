@@ -31,7 +31,7 @@ example special-cased to those functions.
 - Program facts: stored source arglists and function Malli schemas remain the
   one database-derived authority; no second registry is needed.
 - Preserved evidence:
-  `docs/prds/agentic-tool-refinement/research/qwen25-coder-05b-database-diagnostic-2026-07-15.md`.
+  `docs/prds/archive/agentic-tool-refinement/research/qwen25-coder-05b-database-diagnostic-2026-07-15.md`.
 
 ## Evidence
 

@@ -28,7 +28,7 @@ fact's `undo-branch`, `from-commit-id`, and `from-t`.
 only `operation` and `plan-digest`. No public restore/undo planner currently
 owns the missing completion-to-target resolution. Exact dependency and state
 transition grounding is in
-[[../../prds/database-lifecycle-recovery/research/retained-head-restore-undo-contract-audit-2026-07-15]].
+[[../../prds/archive/database-lifecycle-recovery/research/retained-head-restore-undo-contract-audit-2026-07-15]].
 
 ## Owner
 
