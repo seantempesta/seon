@@ -20,6 +20,7 @@
   {:seon.route/root        ["/" :get]
    :seon.route/agents-create ["/agents" :post]
    :seon.route/agent       ["/agent/{id}" :get]
+   :seon.route/agent-value ["/agent/{id}/value" :get]
    :seon.route/agent-feed  ["/agent/{id}/feed" :get]
    :seon.route/agent-debug ["/agent/{id}/debug" :get]
    :seon.route/agent-debug-feed ["/agent/{id}/debug/feed" :get]
@@ -38,6 +39,10 @@
     (testing "the per-agent feeds stay on separate GET paths"
       (is (contains? by-nm :seon.route/agent-feed))
       (is (contains? by-nm :seon.route/agent-debug-feed)))
+    (testing "value reads are ordinary ungated database routes"
+      (let [value-route (by-nm :seon.route/agent-value)]
+        (is (= 'seon.web.serve/value! (:seon.route/handler value-route)))
+        (is (not (contains? value-route :seon.route/middleware)))))
     (testing "both state-changing doors are database routes and same-origin gated"
       (is (= #{:seon.route/agents-create :seon.route/agent-call}
              (into #{} (map :seon.route/name)

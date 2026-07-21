@@ -24,6 +24,8 @@
     ["node:fs" :as fs]
     ["node:path" :as path]
     [cljs.reader :as reader]
+    [cljs.tools.reader.edn :as tools-edn]
+    [cljs.tools.reader.reader-types :as reader-types]
     [clojure.string :as str]
     [goog.object :as gobj]
     [my.blob :as blob]
@@ -44,9 +46,12 @@
     [seon.log :as log]
     [seon.platform :as platform]
     [seon.reactive :as reactive]
+    [seon.render :as render]
+    [seon.render.value :as render.value]
     [seon.repl :as repl]
     [seon.runtime.admission :as admission]
     [seon.schema :as schema]
+    [seon.ui.html :as html]
     [seon.web.datastar :as datastar]
     [seon.web.router :as router]))
 
@@ -209,6 +214,295 @@
     (let [u (js/URL. (.-url req))]
       (.get (.-searchParams u) k))
     (catch :default _ nil)))
+
+;; ============================================================
+;; GET /agent/{id}/value — one bounded, authorized value slice.
+;; ============================================================
+
+(def ^:private value-query-framing-max-bytes 32768)
+(def ^:private value-path-framing-max-bytes 8192)
+(def ^:private value-query-fields #{"eval" "entity" "path" "offset"})
+(def ^:private value-eof (js-obj))
+
+(def ^:private value-schema-query
+  '[:find ?key ?form
+    :where
+    [?schema :seon.schema/key ?key]
+    [?schema :seon.schema/form ?form]])
+
+(def ^:private value-function-contract-query
+  '[:find ?sym ?form
+    :where
+    [?function :seon.fn/sym ?sym]
+    [?function :seon.fn/spec ?form]])
+
+(def ^:private value-eval-owner-query
+  '[:find ?eval .
+    :in $ ?eval-id ?agent-id
+    :where
+    [?eval :seon.eval/id ?eval-id]
+    [?eval :seon.eval/agent ?agent]
+    [?agent :seon.agent/id ?agent-id]])
+
+(defn- utf8-bytes [s]
+  (.-length (.encode (js/TextEncoder.) s)))
+
+(defn- valid-percent-framing? [s]
+  (loop [index 0]
+    (if (= index (count s))
+      true
+      (if (= "%" (subs s index (inc index)))
+        (and (< (+ index 2) (count s))
+             (boolean (re-matches #"[0-9A-Fa-f]{2}"
+                                  (subs s (inc index) (+ index 3))))
+             (recur (+ index 3)))
+        (recur (inc index))))))
+
+(defn- value-input-error []
+  {:seon.error/message "Invalid or over-budget value request."
+   :seon.error/kind :user-input})
+
+(defn- value-core-error []
+  {:seon.error/message "Value sampling is temporarily unavailable."
+   :seon.error/kind :core-bug})
+
+(defn- value-absent-error []
+  {:seon.error/message "Value not found."
+   :seon.error/kind :not-found})
+
+(defn- raw-value-query
+  "Validate fixed query framing before acquiring database policy."
+  [ring-request]
+  (try
+    (let [raw (or (:query-string ring-request) "")]
+      (when (or (> (utf8-bytes raw) value-query-framing-max-bytes)
+                (not (valid-percent-framing? raw)))
+        (throw (js/Error. "invalid framing")))
+      (let [components (if (str/blank? raw) [] (str/split raw #"&" -1))
+            url (js/URL. (.-url (:seon.http/request ring-request)))
+            decoded (vec (es6-iterator-seq (.entries (.-searchParams url))))]
+        (when-not (= (count components) (count decoded))
+          (throw (js/Error. "ambiguous framing")))
+        (let [fields
+              (reduce
+                (fn [fields [component [decoded-name decoded-value]]]
+                  (let [equals (.indexOf component "=")
+                        raw-name (if (neg? equals)
+                                   component
+                                   (subs component 0 equals))
+                        raw-value (if (neg? equals)
+                                    ""
+                                    (subs component (inc equals)))]
+                    (when (or (not= raw-name decoded-name)
+                              (not (contains? value-query-fields decoded-name))
+                              (contains? fields decoded-name)
+                              (and (= "path" decoded-name)
+                                   (> (utf8-bytes raw-value)
+                                      value-path-framing-max-bytes)))
+                      (throw (js/Error. "invalid query field")))
+                    (assoc fields decoded-name
+                           {:seon.web.serve/decoded decoded-value
+                            :seon.web.serve/raw raw-value})))
+                {}
+                (map vector components decoded))
+              selectors (filter #(contains? fields %) ["eval" "entity"])]
+          (when-not (and (= 1 (count selectors))
+                         (seq (get-in fields [(first selectors)
+                                              :seon.web.serve/decoded])))
+            (throw (js/Error. "invalid selector framing")))
+          fields)))
+    (catch :default _ (value-input-error))))
+
+(defn- strict-path [text]
+  (try
+    (let [source (reader-types/string-push-back-reader text)
+          value (tools-edn/read {:eof value-eof :readers {}} source)
+          trailing (tools-edn/read {:eof value-eof :readers {}} source)]
+      (when (and (vector? value)
+                 (identical? value-eof trailing)
+                 (= text (pr-str value))
+                 (every? render.value/drill-path-segment? value)
+                 (not-any? #(and (number? %)
+                                 (or (not (js/Number.isFinite %))
+                                     (js/Object.is % (js/Number "-0"))))
+                           value))
+        value))
+    (catch :default _ nil)))
+
+(defn- canonical-nonnegative-integer [text]
+  (when (and (string? text) (re-matches #"(?:0|[1-9][0-9]*)" text))
+    (let [value (js/Number text)]
+      (when (js/Number.isSafeInteger value) value))))
+
+(defn- configured-value-request
+  "Decode one framed query under the acquired database policy."
+  [fields effective-limits]
+  (try
+    (when (:seon.error/message fields)
+      (throw (js/Error. "invalid framing")))
+    (let [selectors (filter #(contains? fields %) ["eval" "entity"])
+          selector (first selectors)
+          selector-value (get-in fields [selector :seon.web.serve/decoded])
+          path-text (get-in fields ["path" :seon.web.serve/decoded] "[]")
+          raw-path (get-in fields ["path" :seon.web.serve/raw] "[]")
+          offset-text (get-in fields ["offset" :seon.web.serve/decoded] "0")
+          path (strict-path path-text)
+          offset (canonical-nonnegative-integer offset-text)
+          page-size (:seon.render.value/page-size effective-limits)
+          realized-max (:seon.config.render/value-max-realized-items
+                        effective-limits)
+          entity-id (when (= selector "entity")
+                      (canonical-nonnegative-integer selector-value))]
+      (when-not (and (= 1 (count selectors))
+                     (seq selector-value)
+                     path
+                     (<= (count path)
+                         (:seon.config.render/value-max-path-segments
+                          effective-limits))
+                     (<= (utf8-bytes raw-path)
+                         (:seon.config.render/value-max-path-bytes
+                          effective-limits))
+                     (some? offset)
+                     (<= offset (- js/Number.MAX_SAFE_INTEGER page-size))
+                     (<= (+ offset page-size) realized-max)
+                     (or (= selector "eval")
+                         (and (some? entity-id) (pos? entity-id))))
+        (throw (js/Error. "invalid configured request")))
+      {:seon.web.serve/selector selector
+       :seon.web.serve/selector-value (if entity-id entity-id selector-value)
+       :seon.render.value/path path
+       :seon.render.value/offset offset
+       :seon.render.value/effective-limits effective-limits})
+    (catch :default _ (value-input-error))))
+
+(defn- value-response [status mime body]
+  (js/Response.
+    body
+    #js {:status status
+         :headers #js {"Content-Type" mime "Cache-Control" "no-store"}}))
+
+(defn- value-error-response [status error]
+  (value-response status "application/edn; charset=utf-8" (pr-str error)))
+
+(defn- value-html-response
+  [configuration render-request value-route-base value-selector result]
+  (let [value-request
+        {:seon.render/value-route-base value-route-base
+         :seon.render/value-selector value-selector
+         :seon.render/value-projection
+         (:seon.render.value/projection result)}]
+    (value-response
+      200
+      "text/html; charset=utf-8"
+      (html/->string
+        (render/block :html configuration render-request value-request)))))
+
+(defn- value-result-response
+  [configuration render-request value-route-base value-selector result]
+  (let [availability (:seon.render.value/availability result)
+        kind (get-in result [:seon/error :seon.error/kind])]
+    (cond
+      (and (true? (:seon.render.value/ok? result))
+           (contains? #{:available :unavailable} availability)
+           (map? (:seon.render.value/projection result)))
+      (value-html-response configuration render-request value-route-base
+                           value-selector result)
+
+      (contains? #{:agent :user-input} kind)
+      (value-error-response 400 (value-input-error))
+
+      :else
+      (value-error-response 503 (value-core-error)))))
+
+(defn- db-result-error? [value]
+  (and (map? value) (string? (:seon.error/message value))))
+
+(defn- ^:async value-policy [database]
+  (let [stored (await (db/entity database
+                                 [:seon.config/id config/cluster-config-id]))]
+    (when (or (db-result-error? stored) (nil? stored))
+      (throw (js/Error. "configuration unavailable")))
+    (db/decode-edn-values stored)))
+
+(defn- ^:async value-program-projection [database]
+  (let [results
+        (await
+          (js/Promise.all
+            #js [(db/query {::db/db database ::db/query value-schema-query})
+                 (db/query {::db/db database
+                            ::db/query value-function-contract-query})]))
+        [schema-rows function-contract-rows] (array-seq results)]
+    (when (some db-result-error? [schema-rows function-contract-rows])
+      (throw (js/Error. "program projection unavailable")))
+    (schema/projection-from-rows
+      {:seon.schema/schema-rows schema-rows
+       :seon.schema/function-contract-rows function-contract-rows})))
+
+(defn ^:async value!
+  "Serve one authorized, bounded value projection."
+  [ring-request]
+  (let [framed (raw-value-query ring-request)]
+    (if (:seon.error/message framed)
+      (value-error-response 400 framed)
+      (try
+        (let [database (await (db/db))
+              _ (when (db-result-error? database)
+                  (throw (js/Error. "database unavailable")))
+              configuration (await (value-policy database))
+              effective-limits
+              (config/effective-value-drill-limits
+                {:seon.config/configuration configuration})
+              request (configured-value-request framed effective-limits)]
+          (if (:seon.error/message request)
+            (value-error-response 400 request)
+            (let [agent-id (get-in ring-request [:path-params :id])
+                  selector (:seon.web.serve/selector request)
+                  selector-value (:seon.web.serve/selector-value request)
+                  value-route-base
+                  (str "/agent/" (js/encodeURIComponent agent-id) "/value")
+                  drill-request (dissoc request
+                                        :seon.web.serve/selector
+                                        :seon.web.serve/selector-value)]
+              (if (= selector "eval")
+                (let [authorized
+                      (await (db/query {::db/db database
+                                       ::db/query value-eval-owner-query
+                                       ::db/args [selector-value agent-id]}))]
+                  (if (or (db-result-error? authorized) (nil? authorized))
+                    (if (db-result-error? authorized)
+                      (throw (js/Error. "authorization unavailable"))
+                      (value-error-response 404 (value-absent-error)))
+                    (let [result
+                          (await (execution-host/sample-value!
+                                   agent-id selector-value drill-request))]
+                      (value-result-response
+                        configuration
+                        {:seon.agent/id agent-id}
+                        value-route-base
+                        {:seon.render/eval-id selector-value}
+                        result))))
+                (if (not= "root" agent-id)
+                  (value-error-response 404 (value-absent-error))
+                  (let [entity (await (db/entity database selector-value))]
+                    (if (or (db-result-error? entity) (nil? entity))
+                      (if (db-result-error? entity)
+                        (throw (js/Error. "entity unavailable"))
+                        (value-error-response 404 (value-absent-error)))
+                      (let [projection (await (value-program-projection database))
+                            result (render.value/drill-value
+                                     projection entity drill-request)]
+                        (value-result-response
+                          configuration
+                          {:seon.agent/id agent-id
+                           :seon.schema/projection projection}
+                          value-route-base
+                          {:seon.render/entity-id selector-value}
+                          result)))))))))
+        (catch :default error
+          (log/error-console! "seon.web.serve" "value route failed"
+                              {:seon.error/message (or (.-message error)
+                                                       (str error))})
+          (value-error-response 503 (value-core-error)))))))
 
 (defn- handle-log! [req res]
   ;; Receives WebView console.log/warn/error forwards. Body is JSON

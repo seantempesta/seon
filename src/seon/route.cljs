@@ -102,6 +102,8 @@
     ::middleware ::same-origin}
    {::pattern "/agent/{id}"      ::method :get  ::name ::agent
     ::handler 'seon.web.datastar/serve-agent-page!}
+   {::pattern "/agent/{id}/value" ::method :get ::name ::agent-value
+    ::handler 'seon.web.serve/value!}
    {::pattern "/agent/{id}/feed" ::method :get  ::name ::agent-feed
     ::handler 'seon.web.datastar/open-agent-feed!}
    {::pattern "/agent/{id}/debug" ::method :get ::name ::agent-debug
