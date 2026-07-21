@@ -10,11 +10,12 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (42)
+## Blocker (43)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Accept Datahike collections when building the execution program](database-program-query-results-can-be-sets.md) | blocker | agent |
+| [Agent-run settlement used wrong reactive database key](agents-run-settlement-used-wrong-reactive-database-key.md) | blocker | UI |
 | [Arbitrary database results collide with the error shape](arbitrary-database-results-collide-with-error-shape.md) | blocker | Core |
 | [Arbitrary eval allocation lacks hard process memory containment](eval-process-isolation-memory-containment.md) | blocker | agent |
 | [Bind clean-or-force evidence to one exact managed generation](clean-or-force-evidence-can-cross-or-falsely-report-absence.md) | blocker | Core |
