@@ -45,8 +45,9 @@ checkpoint `286180f7` contains that implementation and passes 1,331 tests /
 
 [[../../prds/source-cleanup/research/g2-nilable-registration-closure-audit-2026-07-20]]
 (`f72d7384`) finds no remaining semantic-owner registration gap. The issue
-stays open because `test/seon/execution/integration_driver.cljs` still filters
-every top-level `:maybe` form before seeding the two-child proof. That no-op
-escape hatch must be deleted, the submitted row count must equal the complete
-keyword-keyed compiled population, and the frozen process proof plus fresh
-agent reject/corrected-call probe must pass before archive.
+stays open for behavioral proof. Commit `748410dd` deletes the driver's
+top-level `:maybe` filter, submits every keyword-keyed registered schema,
+asserts submitted-row parity with the complete population, and emits the row
+count as durable process evidence. Static lint has zero errors. The frozen
+two-real-child process proof plus fresh-agent reject/corrected-call probe must
+still pass before archive.

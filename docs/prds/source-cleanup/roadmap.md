@@ -205,12 +205,15 @@ proof and the G8-G11 extensions remain before Stage 1.6 graduates.
 
 The G2 closure audit
 [[research/g2-nilable-registration-closure-audit-2026-07-20]] (`f72d7384`)
-confirms the three registrations and registration gate are complete, but the
-two-real-child integration driver still filters top-level `:maybe` forms before
-seeding. The remaining proof unit deletes that filter, asserts submitted rows
-equal the complete keyword-keyed compiled population, runs the frozen process
-proof, and performs the fresh-agent reject/corrected-call probe. No semantic
-registration owner is reopened.
+confirms the three registrations and registration gate are complete and found
+the two-real-child integration driver still filtering top-level `:maybe` forms
+before seeding. No semantic registration owner is reopened.
+
+Commit `748410dd` now implements the harness half: the filter is gone, complete
+population parity is asserted, and the schema-row count is emitted for the
+process evidence. Static lint reports zero errors. The issue remains open only
+for the coordinated frozen two-child run and fresh-agent rejection/correction
+probe after U4 releases the artifact.
 
 G8's non-canvas checkpoint is `d883bb05` with issue evidence in `f14219a3`:
 the registry-derived audit covers 25 request maps across `my.blob`, `my.data`,
