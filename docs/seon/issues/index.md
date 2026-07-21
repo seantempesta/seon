@@ -133,7 +133,7 @@ See `README.md` for the convention.
 | [`my.ns/compact!` can hide the selected namespace](my-ns-compact-can-hide-namespace.md) | friction | agent |
 | [try in expression position inside a compiled ^:async fn auto-awaits](async-try-expression-iife-auto-awaits.md) | friction | agent |
 
-## Cleanup (9)
+## Cleanup (8)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -145,4 +145,3 @@ See `README.md` for the convention.
 | [Subagents block is implemented but not installed](subagents-block-is-implemented-but-not-installed.md) | cleanup | agent |
 | [Surface recency may be recomputed globally](surface-recency-recomputed.md) | cleanup | UI |
 | [Unify the two AsyncLocalStorage stores; rename with-tx-context → with-tx-meta](als-unify-tx-meta.md) | cleanup | Core |
-| [parse-forms option map uses a bare key](parse-forms-option-map-uses-bare-key.md) | cleanup | agent |

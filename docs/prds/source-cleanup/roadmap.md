@@ -426,10 +426,12 @@ The current re-audit
 [[research/parse-forms-entry-boundary-2026-07-20]] (`84b35090`) confirms the
 original entry-envelope issue is fully implemented and archives it with the
 same current green counts plus frozen CLJS checkpoint `286180f7`. The adjacent
-public options map still uses bare `:strip-fences?`; that different defect is
-now isolated in [[../../seon/issues/parse-forms-option-map-uses-bare-key]] and
-will migrate atomically to `:seon.repl/strip-fences?` without a compatibility
-branch.
+public options-map defect is subsequently closed by `f49268cd` + `f797a8ef`:
+the parser schema/destructuring, every maintained source/portable caller, and
+focused tests use only `:seon.repl/strip-fences?`, with no compatibility
+branch. `bin/test-parser` independently reran 46 tests / 369 assertions green;
+the implementation lane also passed focused CLJS parser 46 / 370, diffusion
+consumers 21 / 149, and both worker-validator and portable-oracle smokes.
 
 Fragile-index H2's safe consumer portion is implemented by `3ebc9e9b`:
 stored eval guidance is no longer reparsed as a serialized error envelope and
