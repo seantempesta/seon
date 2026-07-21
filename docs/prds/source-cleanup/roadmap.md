@@ -296,6 +296,21 @@ there. No raw value crosses to the parent, no persisted result is reparsed, and
 retirement or tier mismatch returns honest unavailability. The later route
 unit continues to own canonical EDN and exact raw percent-encoded byte checks.
 
+Unit 1G source and focused proof are implemented by `bc0a3b11`. One closed
+correlated transport now serves both retained Bun and JVM values through the
+portable bounded producer. Each bounded slot atomically retains the original
+value, the trusted seven-field maximum policy, and the immutable database basis
+that produced it; both peers reject widening and corrupt metadata before raw
+lookup, and distinct basis generations keep distinct policy. The parent uses
+the recorded owner and one per-agent FIFO, never a fresh tier; timeout,
+malformed response, exit, retirement, and replacement settle once and release
+the queue. Independent root proof passed 72 CLJS tests / 332 assertions and 29
+writer tests / 153 assertions with zero failures or errors. The retained-value
+issue remains open only for the coordinated frozen live proof: page one large
+Bun value and one large JVM value, retire each real owner, and observe honest
+unavailable/recompute results. The frozen public sampler releases the route and
+authorization unit as the earliest dependency-ready source contract.
+
 Cross-tier review then exposed two prerequisites that prevent a Bun-only or
 load-order-dependent implementation from claiming that boundary. First,
 [[research/value-drill-portable-owner-boundary-2026-07-20]] (`64e19c31`)
@@ -323,7 +338,7 @@ drill during pending or faulted refreshes. Independent proof passed 110 CLJS
 tests / 706 assertions and 47 writer tests / 188 assertions. A fresh live query
 confirmed the four projection schemas and new projection API contracts are
 committed with their final source forms. The issue is archived by `e11243b4`;
-Unit 1G is now the earliest unsettled contract.
+Unit 1G consumed this prerequisite in `bc0a3b11`.
 
 Unit 1D's configuration leaves are implemented in the existing config owner:
 the closed render policy and flat singleton now carry the ruled
@@ -346,6 +361,20 @@ ownership to the route agent before any host send; unauthorized and unknown
 selectors are uniformly absent; retired results remain ordinary honest
 unavailable projections. UI/custom dispatch and integrated browser proof are
 consumers of that frozen chain, not alternate authorities.
+
+Route implementation readiness is frozen by
+[[research/value-route-implementation-readiness-2026-07-20]] (`9388d6aa`) and
+[[research/value-route-crossing-rulings-2026-07-20]] (`eb61af33`). Syntax and
+one fixed framing ceiling precede the single policy database acquisition;
+configured refusal then performs zero selector, schema, host, or value work.
+Parent entity reads derive configuration, entity data, and the committed schema
+projection from that same immutable database value, while eval reads call only
+Unit 1G's recorded-owner sampler. Successful and honestly unavailable reads
+return one server-rendered `text/html` subtree through Datastar's existing
+non-SSE patch path; bounded 400/404/503 errors remain EDN. No ambient config,
+ambient projection, browser EDN parser, new feed, or fresh runtime selection is
+authorized. This route/auth unit is the earliest unsettled source contract.
+
 The final consumer cut is grounded by
 [[research/universal-data-browser-ui-migration-boundary-2026-07-20]]
 (`e7cc6f94`). It extends the existing render dispatcher, migrates `/data` and
