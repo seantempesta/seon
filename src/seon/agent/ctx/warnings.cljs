@@ -133,7 +133,12 @@
               (query-member schema-provenance-query [] 3000000 65536 2097152)
               (query-member schema-forms-query [] 3000000 65536 2097152)
               (query-member attribute-counts-query [] 5000000 65536 2097152)
-              (query-member database-instant-query [] 100000 1 1024)]
+              ;; The (max ?instant) scalar still counts its SCANNED relation
+              ;; against the results budget — one row per transaction — so the
+              ;; budget must cover the transaction count, not the scalar output
+              ;; (a 1-row budget failed closed on any grown database and took
+              ;; the whole warnings block down with it).
+              (query-member database-instant-query [] 2000000 65536 1048576)]
              ::db/max-result-weight 3670016}))
         first-members (::db/results first-result)]
     (if-not (and (not (:seon.error/message first-result))
