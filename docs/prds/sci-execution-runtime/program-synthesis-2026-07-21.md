@@ -136,10 +136,12 @@ with-ctx lazy-forcing requirement; perf tax accepted at agent scale).
   its ready exchange and the sci host transacts them gated on installed
   facts, call-time `requiring-resolve` constraint for boundary nses,
   the author-boundary ladder, and all six probe amendments as WP-B
-  contract. PENDING OWNER (batched): (i) require the `seon.packages.`
-  prefix for `:as` (rec: yes); (ii) exploration-ops default `:enabled`
-  (rec: yes); (iii) boundary graduation = reviewed source commit, not
-  runtime self-modification (rec: confirm).
+  contract. OWNER DECIDED (all as recommended, 2026-07-21): (i) `:as`
+  MUST start `seon.packages.` (prefix required); (ii) exploration-ops
+  default `:enabled`; (iii) boundary graduation = a reviewed source
+  commit then host rebuild — the ONE graduation mechanism, no
+  corpus-tier self-modify for compiled boundaries. Packages design
+  fully settled; WP-K/WP-B/WP-W specs encode these.
 
 - **No namespace lock-in; erase-and-reset is acceptable.** Renames are
   never blocked by persisted data: update the schema-registering code,
