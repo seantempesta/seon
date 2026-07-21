@@ -351,6 +351,14 @@
        (nil? (:db/index installed))
        (true? (:db/index declaration))))
 
+(defn- compatible-schema-declaration?
+  [installed declaration]
+  (and (= (select-keys installed fixed-schema-properties)
+          (select-keys declaration fixed-schema-properties))
+       (or (not (true? (:db/index declaration)))
+           (true? (:db/index installed))
+           (additive-index-declaration? installed declaration))))
+
 (defn- compile-schema-declarations
   [db-value transaction-data candidates]
   (let [installed (:schema db-value)
@@ -384,9 +392,8 @@
                      (when-let [actual (get installed ident)]
                        (let [expected (schema-shape declaration)
                              actual-shape (schema-shape actual)]
-                         (when-not (or (= expected actual-shape)
-                                       (additive-index-declaration?
-                                        actual declaration))
+                         (when-not (compatible-schema-declaration?
+                                    actual declaration)
                            {::attribute ident
                             ::expected-schema expected
                             ::actual-schema actual-shape})))))

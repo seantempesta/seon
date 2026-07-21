@@ -239,6 +239,43 @@
         (writer/stop! server)
         (.delete socket-file)))))
 
+(deftest installed-implicit-indexes-do-not-request-schema-removal
+  (let [database-name (str "writer-implicit-index-" (random-uuid))
+        socket-file (File. "tmp" (str database-name ".sock"))
+        server
+        (writer/start!
+         {::writer/dependencies (dependencies)
+          ::writer/database-name database-name
+          ::writer/backend :memory
+          ::writer/request-socket-path (.getAbsolutePath socket-file)})
+        runtime (::writer/runtime server)]
+    (try
+      (let [admitted
+            (writer/handle-request
+             runtime
+             (protocol/ensure-database-request
+              {::protocol/request-id "implicit-index/initialization"
+               ::protocol/database-name database-name
+               ::protocol/backend :memory
+               :seon.db/initialization initialization}))
+            connection
+            (::registry/conn
+             (registry/lookup-connection
+              {::registry/database-name (keyword database-name)}))
+            db-value (d/db connection)
+            declarations
+            (#'writer/compile-schema-declarations
+             db-value (:seon.db/program initialization)
+             #{:seon.agent/id :seon.db/user})]
+        (is (::protocol/success? admitted) (pr-str admitted))
+        (is (seq (d/datoms db-value :avet :seon.agent/id))
+            "identity values are implicitly indexed")
+        (is (empty? declarations)
+            "canonical identity and ref forms never request index removal"))
+      (finally
+        (writer/stop! server)
+        (.delete socket-file)))))
+
 (deftest failed-or-branch-initialization-never-publishes-a-writing-route
   (let [database-name (str "writer-initialization-main-" (random-uuid))
         failed-name (str "writer-initialization-failed-" (random-uuid))
