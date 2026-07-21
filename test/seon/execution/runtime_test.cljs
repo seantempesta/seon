@@ -675,7 +675,9 @@
                  "the batch still runs after a setup failure (no wedge)")
              (is (= ["eval-1"] (:seon.eval/ids result)))
              (is (some? @recorded) "the setup failure is recorded as a fault")
-             (is (= :core (::error/fault @recorded)))
+             (is (= :agent (::error/fault @recorded))
+                 "agent-writable home-requires data faults as :agent — a
+                  :core record would crash the child under the :crash dial")
              (let [raw (::error/raw @recorded)]
                (is (= "setup-agent-ns! failed — probe" (ex-message raw)))
                (is (= {:seon.error/message "underlying"}

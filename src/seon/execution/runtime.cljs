@@ -596,13 +596,19 @@
         setup-ns (if agent-id (home/home-ns agent-id) starting-ns)
         setup (await (eval/setup-agent-ns! configuration compile-state
                                            setup-ns agent-id))
+        ;; :agent, not :core — the resolved home require vector is agent-
+        ;; writable data (`:seon.eval/home-requires` is the documented re-arm
+        ;; dial), so a declaration that no longer analyzes is recorded fault
+        ;; data, never an escalation: under the `:crash` dial a :core record
+        ;; here would kill the child and re-wedge the agent (proven live,
+        ;; 2026-07-21). The batch below still runs.
         _ (when (and (map? setup) (string? (:seon.error/message setup)))
             (error/with-configuration
              configuration
              #(error/record!
                {::error/raw (ex-info (:seon.error/message setup)
                                      (or (:seon.error/data setup) {}))
-                ::error/fault :core})))]
+                ::error/fault :agent})))]
     (error/with-configuration
       configuration
       #(db/with-agent

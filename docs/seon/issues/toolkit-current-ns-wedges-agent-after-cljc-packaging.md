@@ -66,9 +66,42 @@ not permanently disable an agent.
 `9f826df1` targets setup at the agent's home namespace, preserves the batch's
 derived current namespace for evaluation, returns setup failures as values,
 records their underlying data, and still runs the batch. Focused plan, eval,
-and runtime proof passes 87 tests / 382 assertions. Keep this issue open until
-a frozen default-cluster run proves that an agent starting in a toolkit
-namespace reaches the LLM again and a forced setup failure remains recoverable.
+and runtime proof passes 87 tests / 382 assertions.
+
+## Live proof (default cluster, 2026-07-21)
+
+- Pre-fix reproduction on then-current artifacts: fresh agent
+  yummy-wolves-dress, `set-namespace!` → `my.kb`, user message → run 14677
+  closed `:error` at 04:45:39Z, turn `vcld3havi54s` `:error` with the generic
+  swallowed message, zero `llm-attempts`, fault data only `{:agent-ns my.kb}`.
+- Post-fix (same agent, still resident in `my.kb`): run 16649 opened at
+  05:03:06Z and closed `:waited`; turn `crned0osxzic` completed with eval
+  datom `["crned0osxzic" my.kb true "(+ 20 22)"]` — the LLM ran, the form
+  evaluated IN `my.kb`, and follow-on turns kept completing. The wedge class
+  is gone.
+- Forced setup failure (transacted
+  `:seon.eval/home-requires [[seon.agent.lifecycle :refer
+  [not-a-real-lifecycle-var]]]`, then a wake): the fault now PRESERVES the
+  complete underlying analyzer chain — "Could not parse ns form
+  my.agent.yummy-wolves-dress" ← "Invalid :refer, var
+  seon.agent.lifecycle/not-a-real-lifecycle-var does not exist" (fault at
+  basis-t 536875852). Acceptance line 2 satisfied.
+- That forced run also exposed a residual: recording the setup failure as
+  `:core` under the cluster's `on-core-error :crash` dial exits the child →
+  run `:crashed` (16714) — a second wedge shape for a broken home
+  declaration. Since `:seon.eval/home-requires` is agent-writable re-arm
+  data, the follow-up commit reclassifies the record as fault `:agent`
+  (recorded, never escalates, batch proceeds); unit-proven in
+  `seon.execution.runtime-test/ns-setup-failure-records-a-fault-and-still-runs-the-batch`
+  (17 tests / 88 assertions green). Its live artifact publish was pending on
+  an unrelated concurrent `my.plan` refactor holding the watcher not-ready;
+  re-verify live after the next clean publish, then close.
+
+Root cause note: the manifest's default `:seon.eval/home-requires` carries
+`[my.kb :as kb]` (and the other toolkit nses), so re-declaring a toolkit
+current-ns self-required it; the durable fix removes the re-declaration class
+entirely rather than special-casing the analyzer behavior change in the cljc
+window.
 
 ## Workaround used (battery lane, 2026-07-21)
 
