@@ -116,6 +116,40 @@ with-ctx lazy-forcing requirement; perf tax accepted at agent scale).
    `:open`, lifecycle scripts trusted by default). Tighten to the
    allowlist later; the config keys make that a one-fact flip.
 
+## Owner ruling — no auto-persist of agent-authored code (2026-07-21 PM)
+
+Agent-authored code (graduated fns, package boundary wrappers, generated
+namespaces) does NOT automatically persist to the `src/` tree on disk.
+It lives in the database corpus / a staging surface. BUILD the
+review-and-integrate mechanism: authored code is captured → a human
+reviews → integration produces the disk commit. Design it so it can
+LATER be flipped to auto-persist (a gate, not a rewrite). This makes the
+"reviewed source commit" boundary-graduation decision concrete and
+extends the standing aspiration that REPL-edit-to-disk is future, not
+current. Shapes WP-W (boundary graduation routes through this path, no
+direct disk write) and the generate-code/corpus persistence line.
+New work item **R1 — code review-and-integrate mechanism** (queue below).
+NOTE: the orchestrator's own sol-refactor loop already embodies
+review-then-integrate (diff-vs-spec → rerun gates → path-limited commit);
+this ruling governs the RUNTIME agents' code path, not that loop.
+
+## Owner rulings — W1 boot contract (2026-07-21 PM)
+
+- **There is NO config-free boot.** Config is always resolved at boot;
+  the writer gets its boot-critical limits (heap/frame/connection/
+  executor) from that always-present resolution — "put what you need in
+  the configs." This DISSOLVES the W1.1 circularity (no pre-writer
+  envelope, no two-stage restart, no hardware-defaults-must-equal-facts
+  problem). The existing "absent SEON_CONFIG = preserve database facts"
+  is about not RE-RECONCILING desired state, not about lacking limits.
+- **`config apply` with a boot-critical change = live writer
+  reconstruction** (owner picked the seamless option): tear down and
+  rebuild the writer onto the new limits, no manual restart. This is a
+  real writer-lifecycle mechanism (its own design/unit).
+- Consequence: W1.1 becomes a grounded design pass (settles the
+  operator-side config-resolution seam given bb/aero, the hardware
+  formulas, and the live-reconstruction mechanism), then a tight spec.
+
 ## Owner decision batch round 2 (2026-07-21 PM — namespaces + packages)
 
 - **Package→namespace mapping is explicit DATA (owner, evening):** at
@@ -326,6 +360,8 @@ an explicit "when" — never chat-only.
 | q2 | `seon.host` has no supervisor spec (launched by tests/manual `-main`) | W6 WP-S (one recorded-child mechanism for sci host + package hosts) | with WP-S; must precede U10 kill/restart drills |
 | q3 | `wire-safe-value`/`bounded-result` realize O(value) before bounding | PARTIAL: W0.6 fixed terminal `pr-str` (capped JVM writer); `wire-safe-value`/`bounded-result` transit probes STILL realize | remaining half → W10; before U12 (100-agent heap pressure) |
 | q16 | 16 duplicate-limit bugs | W1.3a | DONE `593b4a89` — unified under one owner each |
+| q18 | real process-contained OOME recovery can't run in-process (would kill the test runner) | supervised-process drill under the q2 host-supervisor work | with q2 / WP-S; W0.7 covers only bounded allocation pressure |
+| R1 | agent-authored code must not auto-persist to disk; needs a review-and-integrate mechanism (staging → human review → commit, later gate-flippable to auto-persist) | new design pass → its own unit; shapes WP-W graduation | design after the packages line settles; no runtime auto-persist exists today, so not urgent, but WP-W must not add one |
 | q4 | no derived fleet-health view (faults exist, no "is the cluster healthy" query/render) | new W10 row; derived render per reactive-context law | design at W0.7 (battery needs the same observations); land before U10 |
 | q5 | executor head-of-line: unbounded per-agent queueing, no fairness/busy answer (audit §1b.1, gap 3 tail) | W0 family — W0.8 if W0.4's pool doesn't subsume it | decide when W0.4 returns (its bounded-wait may cover the client side; server side re-audit) |
 | q6 | global schema snapshot/restore race across concurrent sessions (audit gap 7) | W0 family — W0.8 | before W0.7 battery (battery should include the concurrent-register vector) |
