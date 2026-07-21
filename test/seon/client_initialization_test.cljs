@@ -316,6 +316,82 @@
           (is false (str "selected startup threw synchronously: " error))
           (cleanup!))))))
 
+(deftest config-apply-sequences-and-folds-plan-default-migration
+  (async done
+    (let [original-skills skills/seed-skills-tx-data
+          original-reconcile state/reconcile!
+          original-migrate ctx/migrate-plan-surface-default!
+          effects (atom [])
+          reconcile-result (atom nil)
+          migration-result (atom nil)
+          migration-calls (atom 0)
+          cleanup!
+          (fn []
+            (set! skills/seed-skills-tx-data original-skills)
+            (set! state/reconcile! original-reconcile)
+            (set! ctx/migrate-plan-surface-default! original-migrate)
+            (done))
+          apply! (fn []
+                   (client/apply-config!
+                    {:seon.config/manifest {}
+                     ::client/configuration configuration}))]
+      (set! skills/seed-skills-tx-data
+            (fn
+              ([] [])
+              ([_directory] [])))
+      (set! state/reconcile!
+            (fn [_request]
+              (swap! effects conj :reconcile)
+              (js/Promise.resolve @reconcile-result)))
+      (set! ctx/migrate-plan-surface-default!
+            (fn []
+              (swap! effects conj :migrate)
+              (swap! migration-calls inc)
+              (js/Promise.resolve @migration-result)))
+      (reset! reconcile-result
+              {:seon.state/ok? false
+               :seon.state/error "reconcile failed"
+               :seon.state/attempts 1})
+      (-> (apply!)
+          (.then
+           (fn [failed-reconcile]
+             (is (= @reconcile-result failed-reconcile))
+             (is (= [:reconcile] @effects)
+                 "a failed managed reconciliation never runs the migration")
+             (is (zero? @migration-calls))
+             (reset! effects [])
+             (reset! reconcile-result
+                     {:seon.state/ok? true
+                      :seon.state/changed? false
+                      :seon.state/operations 2
+                      :seon.state/attempts 1})
+             (reset! migration-result
+                     {::ctx/ok? false ::ctx/error "migration failed"})
+             (apply!)))
+          (.then
+           (fn [failed-migration]
+             (is (= {:seon.error/message "migration failed"
+                     :seon.error/kind :core-bug}
+                    failed-migration))
+             (is (= [:reconcile :migrate] @effects))
+             (reset! effects [])
+             (reset! migration-result
+                     {::ctx/ok? true
+                      ::ctx/changed? true
+                      ::ctx/operations 3})
+             (apply!)))
+          (.then
+           (fn [combined]
+             (is (= {:seon.state/ok? true
+                     :seon.state/changed? true
+                     :seon.state/operations 5
+                     :seon.state/attempts 1}
+                    combined))
+             (is (= [:reconcile :migrate] @effects)
+                 "migration follows reconciliation inside config apply")))
+          (.catch (fn [error] (is false (str error))))
+          (.finally cleanup!)))))
+
 (deftest invalid-complete-program-fails-before-session-open
   (async done
     (let [original-descriptor launch/process-launch-descriptor
