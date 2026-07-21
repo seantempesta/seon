@@ -177,6 +177,33 @@
    [::db/db         {:optional true} :seon.db/db]
    [:seon.agent/id {:optional true} :seon.agent/id]])  ; injected: you (omit)
 
+(schema/register! ::plan-value-need
+  [:map {:closed true} [::id ::id]])
+(schema/register! ::plan-value-node
+  [:schema
+   {:registry
+    {::value-node
+     [:map {:closed true}
+      [::id ::id]
+      [::title ::title]
+      [::status ::status]
+      [::created-at ::created-at]
+      [::goal {:optional true} ::goal]
+      [::expect {:optional true} ::expect]
+      [::pace {:optional true} ::pace]
+      [::description {:optional true} ::description]
+      [::completed-at {:optional true} ::completed-at]
+      [::message {:optional true} ::message]
+      [::needs {:optional true} [:vector ::plan-value-need]]
+      [::_parent {:optional true} [:vector [:ref ::value-node]]]]}}
+   [:ref ::value-node]])
+(schema/register! ::plan-value-roots [:vector ::plan-value-node])
+(schema/register! ::plan-value
+  [:map {:closed true
+         :seon.render/html 'my.plan.internal/plan-html
+         :seon.render/ai 'my.plan.internal/plan-ai}
+   [::roots ::plan-value-roots]])
+
 ;; ::root → one subtree map; else → a vector of root subtrees; nil when nothing.
 (schema/register! ::tree-result [:or :map [:vector :map]])
 
@@ -1677,12 +1704,29 @@
     (cond
       (acquisition-error "tree" acquired)
       (acquisition-error "tree" acquired)
-      root  (internal/subtree-from-rows rows root)
-      all?  (internal/forest-from-rows rows)
+      root  (some-> (internal/subtree-from-rows rows root)
+                    internal/compatibility-tree)
+      all?  (-> rows internal/forest-from-rows internal/compatibility-tree)
       :else (if-let [agent (internal/agent-ref agent-id)]
               (-> rows (internal/rows-for-agent agent)
-                  internal/forest-from-rows)
+                  internal/forest-from-rows
+                  internal/compatibility-tree)
               []))))
+
+(defn ^:async ^:no-doc plan-surface
+  "Acquire and render the calling agent's ordinary plan value once."
+  {:malli/schema [:=> [:cat :seon.render/section-request :any]
+                  :seon.render.canvas/hiccup]}
+  [{agent-id :seon.agent/id :as input} _invoke-selected!]
+  (let [acquired (await (acquire-agent-plan-rows input))]
+    (if (:seon.error/message acquired)
+      [:div {:class "text-danger text-2xs font-mono py-1"}
+       "plan unavailable"]
+      (internal/plan-html
+       (assoc input :seon.render/node
+              (-> (::rows acquired)
+                  (internal/rows-for-agent (internal/agent-ref agent-id))
+                  internal/plan-value-from-rows))))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} document
   "Get your open plan as one document to edit and `reconcile!`.
