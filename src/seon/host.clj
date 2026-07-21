@@ -404,6 +404,36 @@
   [agent-id]
   (symbol (str "my.agent." agent-id)))
 
+(defn- built-in-var-refusal?
+  "True when SCI refused an eval-side root mutation of a shared var."
+  [^Throwable throwable]
+  (let [causes (take-while some? (iterate ex-cause throwable))
+        structural-data (some (fn [cause]
+                                (let [data (ex-data cause)]
+                                  (when (contains? data :var) data)))
+                              causes)]
+    (if structural-data
+      (let [shared-var (:var structural-data)]
+        (boolean
+         (and (instance? sci.lang.Var shared-var)
+              (:sci/built-in (meta shared-var)))))
+      (boolean
+       (some #(re-find #"^Built-in var #'[^ ]+ is read-only\.$"
+                       (or (.getMessage ^Throwable %) ""))
+             causes)))))
+
+(defn- eval-error-value
+  "Classify one SCI eval throwable into the standard agent error value."
+  [^Throwable throwable home-ns]
+  (let [message (str (first (str/split-lines
+                             (str (.getMessage throwable)))))]
+    (if (built-in-var-refusal? throwable)
+      (error-value
+       (str "That name is a shared built-in and is read-only. Define your "
+            "own function in your home namespace `" home-ns "` instead.")
+       :agent)
+      (error-value message :agent))))
+
 (defn- entry-source [entry]
   (or (:seon.repl/eval-source entry) (:seon.repl/source entry)))
 
@@ -498,7 +528,7 @@
    `::var-meta` (a returned sci var's metadata, the tee's projection
    input) is host-internal and stripped before the envelope crosses the
    protocol."
-  [ctx source]
+  [ctx home-ns source]
   (try
     (let [value (sci/eval-string* ctx source)]
       (cond-> (assoc (sci.ctx-store/with-ctx ctx
@@ -514,7 +544,7 @@
                                            message))]
         {:seon.eval/ok? false
          :seon.eval/interrupted? interrupted?
-         :seon/error (error-value message :agent)}))))
+         :seon/error (eval-error-value throwable home-ns)}))))
 
 (defn- read-error-envelope [entry]
   {:seon.eval/ok? false
@@ -609,8 +639,9 @@
                 (let [schemas-before (schema/snapshot)
                       raw-envelope
                       (if (= :form kind)
-                        (eval-form! ctx (str "(in-ns '" current-ns ")\n"
-                                             source))
+                        (eval-form! ctx (agent-home-ns agent-id)
+                                    (str "(in-ns '" current-ns ")\n"
+                                         source))
                         (read-error-envelope entry))
                       ok? (boolean (:seon.eval/ok? raw-envelope))
                       ;; A failed eval must not leave half a registration:

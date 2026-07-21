@@ -39,6 +39,7 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [sci.core :as sci]
+            [sci.ctx-store]
             [sci.interrupt :as interrupt]
             [seon.ai.provider :as ai.provider]
             [seon.ai.tokens :as tokens]
@@ -429,18 +430,29 @@
   []
   (atom {}))
 
-(defn register-wrappers!
-  "Register or upgrade one capability namespace's wrapper vars.
+(defn- shared-var-meta
+  "Mark host-authored metadata as read-only in every agent fork."
+  [host-authored? var-meta]
+  (cond-> var-meta host-authored? (assoc :sci/built-in true)))
 
-   Registering a namespace makes it lazily require-able in EVERY live
-   context: the registry backs the shared `:load-fn` closure, so first
-   require injects the cached wrapper vars with `:arglists`/`:doc` live
-   on real sci vars. Re-registering a function alters the shared var's
-   root in place, so every context that already required the namespace
-   uses the new implementation on its next call (the var-epoch upgrade
-   property; plain var alteration on the JVM interpreter)."
-  {:malli/schema [:=> [:cat ::register-request] :nil]}
-  [{::keys [registry lib wrappers]}]
+(defn- stamp-shared-base-vars!
+  "Stamp every var SCI or the portable loader installed in the base.
+
+   The base is still host-owned here. SCI's write guard therefore runs in
+   its privileged context while this one walk marks every interned Var;
+   agent forks never receive that privilege."
+  [ctx]
+  (sci.ctx-store/with-ctx (assoc ctx :unrestricted true)
+    (doseq [shared-var
+            (sci/eval-string*
+             ctx "(vec (mapcat (comp vals ns-interns) (all-ns)))")
+            :when (and (instance? sci.lang.Var shared-var)
+                       (not (:sci/built-in (meta shared-var))))]
+      (alter-meta! shared-var (partial shared-var-meta true))))
+  nil)
+
+(defn- register-wrapper-vars!
+  [host-authored? {::keys [registry lib wrappers]}]
   (swap! registry
          (fn [entries]
            (let [entry (get entries lib)
@@ -451,19 +463,42 @@
                                   :as wrapper}]
                     (let [value (if (contains? wrapper ::wrapper-fn)
                                   wrapper-fn wrapper-value)]
-                    (if-let [live (get acc fn-sym)]
-                      (do (sci/alter-var-root live (constantly value))
-                          acc)
-                      (assoc acc fn-sym
-                             (sci/new-var
-                              fn-sym value
-                              (cond-> {:ns sci-ns :name fn-sym}
-                                arglists (assoc :arglists arglists)
-                                doc (assoc :doc doc)))))))
+                      (if-let [live (get acc fn-sym)]
+                        (do (sci/alter-var-root live (constantly value))
+                            acc)
+                        (assoc acc fn-sym
+                               (sci/new-var
+                                fn-sym value
+                                (shared-var-meta
+                                 host-authored?
+                                 (cond-> {:ns sci-ns :name fn-sym}
+                                   arglists (assoc :arglists arglists)
+                                   doc (assoc :doc doc))))))))
                   (or (::vars entry) {})
                   wrappers)]
              (assoc entries lib {::sci-ns sci-ns ::vars vars}))))
   nil)
+
+(defn register-wrappers!
+  "Register or upgrade agent-authored corpus function vars.
+
+   Registering a namespace makes it lazily require-able in EVERY live
+   context: the registry backs the shared `:load-fn` closure, so first
+   require injects the cached wrapper vars with `:arglists`/`:doc` live
+   on real sci vars. Corpus vars remain writable because eval-side `defn`
+   is their deliberate recorded edit path. Re-registering alters the
+   shared var's root through SCI's privileged host API, so every context
+   that already required it sees the upgrade. A registry `(lib, symbol)`
+   keeps its ownership class for its lifetime."
+  {:malli/schema [:=> [:cat ::register-request] :nil]}
+  [request]
+  (register-wrapper-vars! false request))
+
+(defn register-host-wrappers!
+  "Register or upgrade host-authored read-only SCI built-in vars."
+  {:malli/schema [:=> [:cat ::register-request] :nil]}
+  [request]
+  (register-wrapper-vars! true request))
 
 (defn install-registered-wrappers!
   "Link one context to a namespace's exact shared registry vars."
@@ -495,14 +530,14 @@
    the compiled host functions. Restart re-registers from configuration;
    nothing here persists."
   [registry writer]
-  (register-wrappers!
+  (register-host-wrappers!
    {::registry registry
     ::lib 'seon.ai.provider
     ::wrappers
     {'provider-locality {::wrapper-value ai.provider/provider-locality}
      'frontier-provider? {::wrapper-fn ai.provider/frontier-provider?
                           ::arglists '([provider])}}})
-  (register-wrappers!
+  (register-host-wrappers!
    {::registry registry
     ::lib 'seon.db
     ::wrappers
@@ -522,7 +557,7 @@
      'head {::wrapper-fn (partial resolve-head! writer)
             ::arglists '([])
             ::doc "Resolve the writer's current database value."}}})
-  (register-wrappers!
+  (register-host-wrappers!
    {::registry registry
     ::lib 'seon.db.id
     ::wrappers
@@ -531,7 +566,7 @@
                           ::doc "Generate one validated identity-candidate manifest."}
      'generator-policy-query {::wrapper-value db.id/generator-policy-query
                               ::doc "Query for stored generated-identity policies."}}})
-  (register-wrappers!
+  (register-host-wrappers!
    {::registry registry
     ::lib 'seon.db.protocol
     ::wrappers
@@ -539,7 +574,7 @@
      'pull-operation {::wrapper-value protocol/pull-operation}
      'success? {::wrapper-value ::protocol/success?}
      'result {::wrapper-value ::protocol/result}}})
-  (register-wrappers!
+  (register-host-wrappers!
    {::registry registry
     ::lib 'seon.schema
     ::wrappers
@@ -568,7 +603,7 @@
      'schema-definition {::wrapper-fn schema/schema-definition
                          ::arglists '([schema-key])
                          ::doc "Return one registered schema's canonical definition."}}})
-  (register-wrappers!
+  (register-host-wrappers!
    {::registry registry
     ::lib 'seon.ai.tokens
     ::wrappers
@@ -581,25 +616,25 @@
      'clip-str {::wrapper-fn tokens/clip-str
                 ::arglists '([value budget] [value budget marker])
                 ::doc "Clip text to an estimated token budget."}}})
-  (register-wrappers!
+  (register-host-wrappers!
    {::registry registry
     ::lib 'seon.content-hash
     ::wrappers
     {'sha-256 {::wrapper-fn content-hash/sha-256
                ::arglists '([content])}}})
-  (register-wrappers!
+  (register-host-wrappers!
    {::registry registry
     ::lib 'seon.time
     ::wrappers
     {'iso-string {::wrapper-fn time/iso-string
                   ::arglists '([instant])}}})
-  (register-wrappers!
+  (register-host-wrappers!
    {::registry registry
     ::lib 'seon.repair.candidates
     ::wrappers
     {'rank-candidates {::wrapper-fn candidates/rank-candidates
                        ::arglists '([from names])}}})
-  (register-wrappers!
+  (register-host-wrappers!
    {::registry registry
     ::lib 'seon.repl.internal
     ::wrappers
@@ -613,7 +648,7 @@
                        ::record/ns-sym (:seon.repl/current-ns options)
                        ::record/aliases (:seon.repl/aliases options)})))
                   ::arglists '([source])}}})
-  (register-wrappers!
+  (register-host-wrappers!
    {::registry registry
     ::lib 'seon.agent.ctx
     ::wrappers
@@ -648,7 +683,7 @@
           (catch Throwable _ [])))
       ::arglists '([dir])
       ::doc "List the readable skill markdown files under one corpus directory."}}})
-  (register-wrappers!
+  (register-host-wrappers!
    {::registry registry
     ::lib 'seon.render.canvas
     ::wrappers
@@ -931,7 +966,8 @@
               (fn []
                 (when (.isInterrupted (Thread/currentThread))
                   (interrupt/interrupt! "eval deadline exceeded")))})
-        report (load-portable-slice! ctx wrapper-registry)]
+        report (load-portable-slice! ctx wrapper-registry)
+        _ (stamp-shared-base-vars! ctx)]
     {::ctx ctx ::report report ::registry wrapper-registry}))
 
 (defn fork-context
