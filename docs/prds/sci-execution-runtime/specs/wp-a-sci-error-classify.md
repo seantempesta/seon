@@ -98,3 +98,18 @@ path-limited repo commit
 SUMMARY: grounding confirmations, seam findings, whether the refusal regex
 fallback could be dropped, chosen named defaults + W1 notes, gate counts,
 unresolved items.
+
+## Addendum — round 2 authorization (dispatched on resume)
+
+The implementer stopped with a verified spec gap: a Throwable-only
+`classify` cannot produce `:resolution` candidates — agent definitions
+live in the SCI context, so ranking requires the live ctx (design §2.3
+already said so; the spec's signature was the gap). Authorized:
+`classify` takes one namespaced request map
+`{:seon.error.sci/throwable t, :seon.error.sci/context ctx,
+:seon.error.sci/home-ns ns}`; `detail` takes the same map or the
+classified value (implementer's seam call, reported); `steering-head`
+unchanged. Also accepted from grounding: the resolve wrapper adds a
+data-carrying arity while preserving two-argument callers, and
+`:runtime` frames build from public `sci/stacktrace` normalized
+`:ns`/`:name`/location maps (sci's own shape), not internal `f-meta`.
