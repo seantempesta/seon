@@ -17,7 +17,7 @@ every claim is proven by database facts + rendered context, not logs.
 
 | # | Circumstance | Proof |
 |---|---|---|
-| L1 | Fresh agent, simple task (eval + reply) | turn :done; reply message datom; wall time recorded |
+| L1 | Fresh agent, simple task | **PASS 2026-07-21T02:59Z** — live Muse, run opened, 3 turns, reply "done 42" (messages onke1lqp2puv/qifokquqmxiu); closing found+fixed a real class: open message-request map silently defaulted missing `to` to the USER (`4c5e288a`) — the night's three L1 blockers were all real defects (settlement key, gateway variant drift, silent recipient default) |
 | L2 | Toolkit db write (my.kb/remember) then recall NEXT turn | note datom; second turn's recall returns it (cross-turn memory) |
 | L3 | Capability call (my.fs read of an allowlisted file) | envelope in eval row; gating honored |
 | L4 | Error steering: task designed to provoke one wrong call | :seon/error with directive text in transcript; agent self-corrects in the SAME run |
