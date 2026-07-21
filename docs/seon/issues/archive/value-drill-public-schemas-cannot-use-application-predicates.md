@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 tags: [rendering, schema, issue]
 severity: blocker
 ---
@@ -37,3 +37,15 @@ that consumes the named renderer request without a reverse namespace require.
 - Safe integers and path scalars are checked by public pure predicates at the
   function boundaries that consume hostile input.
 - Effective limits only narrow host policy and normalize idempotently.
+
+## Resolution
+
+Resolved by `c1618e22`. The registered request, limit, projection, status,
+explanation, error, and result shapes are pure readable EDN; the three scalar
+predicates reuse the pre-existing raw-value boundary and carry no new inline
+`:any`. The focused renderer/config gate passed 78 tests and 492 assertions,
+including negative-zero, unsafe-integer, closed-map, monotone clamp,
+idempotence, same-policy parent/child, and narrower-child handoff proofs. Deep
+sampled-tree and error-data validators remain dependency-ordered with their
+public producer/transport boundaries; the shallow schemas do not claim that
+semantic admission has already occurred.

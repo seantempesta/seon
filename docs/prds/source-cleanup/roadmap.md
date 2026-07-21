@@ -258,6 +258,16 @@ sampling of the same stable immutable concrete value and iteration order;
 arbitrary equal-but-differently-implemented partial maps are never claimed to
 be canonically sortable under bounded work.
 
+Unit 1E is implemented by `c1618e22`: one pure-EDN public drill population,
+three scalar admission predicates over the existing raw-value boundary, and
+the single `seon.config/effective-value-drill-limits` normalizer. The focused
+renderer/config gate passes 78 tests and 492 assertions. The proof covers
+negative zero and unsafe integers, closed request/result maps, independent
+monotone clamping, idempotence, same-policy parent/child byte identity, and an
+honest narrower-child result reserved for the later frame-consistency refusal.
+No descent, paging, lookup, transport, route, or UI behavior lands in this
+unit; deep bounded validators remain owned by those public boundaries.
+
 Unit 1D's configuration leaves are implemented in the existing config owner:
 the closed render policy and flat singleton now carry the ruled
 32-segment/4,096-byte/1,024-item defaults, the shipped manifest states the same
