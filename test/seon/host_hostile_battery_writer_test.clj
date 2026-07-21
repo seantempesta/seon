@@ -587,7 +587,7 @@
         (close-session! garbage)
         (close-session! truncated)))))
 
-(deftest concurrent-failed-form-stale-restore-reproduces-audit-gap-7
+(deftest concurrent-failed-form-does-not-drop-anothers-schema
   ;; audit-host-robustness-2026-07-21.md §2c / ranked gap 7.
   ;; This known failure is the W0.8 trigger: A's failed form restores its
   ;; pre-form process-global snapshot and drops B's successful registration.
@@ -627,8 +627,8 @@
               (eval-value
                (assert-success! survivor survivor-id
                                 "(schema/schema-definition :battery.schema/b)"))]
-          (is (nil? definition)
-              "W0.8 trigger: stale restore drops B's successful schema")))
+          (is (= :string definition)
+              "W0.8: a concurrent failed eval reverts only its own delta, so B's registration survives")))
       (assert-survivor! survivor survivor-id)
       (finally
         (deliver release true)
