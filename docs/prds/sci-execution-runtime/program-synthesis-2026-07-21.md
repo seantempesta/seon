@@ -179,6 +179,76 @@ pod restart, zero fact loss, no operator intervention) close the
 program, with source-cleanup stages 2–5 completing in their own PRD at
 the named boundaries.
 
+## Design addenda (owner session, 2026-07-21 evening)
+
+- **Package layout**: `data/clusters/<name>/packages/` holding each
+  ecosystem's own manifests — `package.json`/`bun.lock`/`node_modules`
+  (npm) and `deps.edn` (JVM). Shared downloads are the native caches
+  (bun global cache, `~/.m2/repository`, `~/.gitlibs`). JVM adds are
+  live via Clojure 1.12 `add-lib` (grounded: add-only via
+  `DynamicClassLoader.addURL`; the resolution result is a **basis**);
+  change/remove = terminate + rebuild basis + relaunch the stateless
+  package host, with registry wrappers queueing calls bounded-with-
+  deadline across the swap.
+- **Remote values are handles** (playwright-grounded): what cannot
+  cross the wire becomes a `:seon.handle/*` fact — guid id, typed
+  **channel**, host coordinate + session generation, bounded printed
+  summary — bound through the existing `result/{id}` symbol, rendered
+  as remote by derivation. Calls act on handles through their channel's
+  capability functions, which execute where the value lives; only
+  ordinary transit data travels (new `seon/handle` tagged type).
+  Lifecycle: create/adopt/dispose + per-channel gc caps that collect
+  oldest handles with a steering error. Handles are runtime state:
+  host restart invalidates them honestly; facts persist. Teaching
+  rules (W4): data crosses; handles for the rest; act via channel
+  functions; prefer extracting data over holding handles.
+- **Agent-facing `seon.db` is synchronous and Datomic-shaped** on the
+  host tier (`q`/`pull`/`entity`/`transact` familiar arities), ambient
+  latest-db as the smart default with explicit db-value override. The
+  async facade remains pod-internal only.
+- **ns merge, canonical CLJC**: an agent ns re-declaration merges
+  requires — never silently drops edges the stored namespace or later
+  forms need (strengthens the existing augment-ns-source seam). Stored
+  source is canonical CLJC, evaluable on either host.
+- **Analysis ownership after cutover**: tools.reader +
+  sci var metadata (+ real Clojure for graduated code) in
+  `seon.host.record`, the ONE corpus graph owner; clj-kondo vendored
+  as the deeper-static-analysis option. The CLJS analyzer survives
+  only inside the quarantined diffusion oracle.
+- **Runtime is lazily materialized from facts**: sci `:load-fn` serves
+  namespaces from the corpus on require; registered/graduated fns are
+  shared vars (instant fleet-wide); context renders are derived and
+  paged, so thousand-turn agents render bounded prompts. Cross-agent
+  live require of a session-authored namespace is a W3 gate item.
+- **Protocol**: UDS + length-prefixed transit frames, the one codec,
+  versioned contracts (database protocol + execution contract) —
+  validated against Bun IPC/gRPC/nREPL and kept. Extension mechanism
+  is transit tagged types + new ops, not a protocol swap.
+- **Robustness DNA**: `:seon.config/on-core-error` stays the dev
+  fast-loud dial; production layering = errors-as-values (exceptions),
+  interrupt merge + watchdog + pool fairness (runaways), disposable
+  package hosts (native crashes — core sci host runs zero third-party
+  native code). The W0.7 hostile battery is a permanent test surface;
+  every new capability ships its hostile gate.
+
+## Testing policy
+
+- **Behavior, never exact strings**: tests assert facts, transitions,
+  envelopes, DOM identity, omission, idempotency, structure. LLM/context
+  tests assert presence and shape of rendered blocks, never wording —
+  context prose is tuned continuously and must not break tests.
+- **Delete obsolete tests in the same refactor** as their mechanism
+  (W5 removes ~2,800 test LOC with the child fleet; simplification
+  legitimately shrinks the suite).
+- **Edge-case and hostile-first**: each unit gate is one happy path
+  plus its hostile entries (malformed, oversized, hanging, crashing);
+  the W0.7 battery and per-capability hostile gates accumulate.
+- **Generative tier**: `malli.generator` + `test.check` derive property
+  tests from a function's own schema — also the graduation gate tier
+  for agent-authored code.
+- **Three surfaces only**: `bin/test-cljs`, `bin/test-writer` +
+  `bin/seon test operator`, and `src-inspect-ai/`. No new runners.
+
 ## Sequencing and parallel portfolio
 
 **Earliest unsettled contract:** W0 (containment) — everything fleet-
