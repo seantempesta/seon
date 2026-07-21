@@ -355,6 +355,88 @@
           (.then (fn [_] (done)))
           (.catch (fn [error] (is false (str error)) (done)))))))
 
+(deftest generated-root-terminal-transitions-are-evidence-owned
+  (async done
+    (let [original-pull db/pull
+          original-transact db/transact!
+          transacts (atom [])
+          root
+          {:my.plan/id "generated-root"
+           :my.plan/title "Generate code"
+           :my.plan/status :open
+           :my.plan/goal "Working generated program"
+           :my.plan/from {:seon.agent/id "caller"}
+           :my.plan/message {:db/id 101}
+           :my.plan/claim "planning-message"
+           :my.plan/created-at (js/Date. 1)
+           :my.plan/agent {:seon.agent/id agent-id}}
+          namespace-leaf
+          (assoc root
+                 :my.plan/id "generated-leaf"
+                 :my.plan/title "my.generated.model"
+                 :my.plan/parent {:my.plan/id "generated-root"}
+                 :my.plan/namespace {:seon.ns/name 'my.generated.model})
+          rows-by-id {"generated-root" root
+                      "generated-leaf" namespace-leaf}
+          pull-stub
+          (fn [_database _selector lookup-ref]
+            (js/Promise.resolve (get rows-by-id (second lookup-ref))))]
+      (set! (.-cljs$core$IFn$_invoke$arity$3 pull-stub) pull-stub)
+      (set! db/pull pull-stub)
+      (set! db/transact!
+            (fn [& values]
+              (let [request (first values)]
+                (swap! transacts conj request)
+              (js/Promise.resolve
+               {:db-before database :db-after database
+                :tx-data (::db/tx-data request) :tempids {} :tx-meta {}}))))
+      (-> (js/Promise.all
+           #js [(plan/done! {:my.plan/id "generated-root" ::db/db database})
+                (plan/blocked! {:my.plan/id "generated-root" ::db/db database})
+                (plan/reopen! {:my.plan/id "generated-root" ::db/db database})])
+          (.then
+           (fn [results]
+             (doseq [result (array-seq results)]
+               (is (false? (:my.plan/ok? result)))
+               (is (str/includes? (:my.plan/error result)
+                                  "eval evidence owns terminal status")))
+             (is (empty? @transacts))
+             (plan/done!
+              {:my.plan/id "generated-leaf" ::db/db database})))
+          (.then
+           (fn [result]
+             (is (true? (:my.plan/ok? result))
+                 "the exact namespace leaf remains ordinarily closeable")
+             (is (= :done
+                    (get-in @transacts [0 ::db/tx-data 0 :my.plan/status])))))
+          (.finally
+           (fn []
+             (set! db/pull original-pull)
+             (set! db/transact! original-transact)))
+          (.then (fn [_] (done)))
+          (.catch (fn [error] (is false (str error)) (done)))))))
+
+(deftest planner-home-namespace-is-not-a-generated-work-unit
+  (let [home-ns 'my.agent.planner-one
+        program
+        {:seon.repl/namespaces
+         [{:seon.ns/name home-ns :seon.ns/require-edges []}
+          {:seon.ns/name 'my.generated.model :seon.ns/require-edges []}]
+         :seon.repl/namespace-order [home-ns 'my.generated.model]
+         :seon.repl/errors []}
+        root-row
+        {:my.plan/id "root"
+         :my.plan/agent {:seon.agent/id "planner-one"}}
+        filtered
+        (@#'plan/program-without-coordinator-home program [root-row] "root")]
+    (is (= ['my.generated.model]
+           (:seon.repl/namespace-order filtered)))
+    (is (= ['my.generated.model]
+           (mapv :seon.ns/name (:seon.repl/namespaces filtered))))
+    (is (= program
+           (@#'plan/program-without-coordinator-home program [] "root"))
+        "an unrelated program is unchanged without an owning coordinator")))
+
 (deftest reconcile-compiler-is-pure-over-ordinary-rows
   (let [document [{:my.plan/id "root" :my.plan/title "Ship"
                    :my.plan/goal "working release"
@@ -1347,6 +1429,7 @@
     (is (str/includes? repair "namespaces section"))
     (is (str/includes? planner "generated-code development")
         "the specialized plan renderer marks the initial planner root")
+    (is (str/includes? planner "eval evidence owns terminal status"))
     (is (every? #(or (str/blank? %) (str/starts-with? % ";"))
                 (str/split-lines internal/development-teaching))
         "developer teaching is valid inert Clojure commentary")))

@@ -1779,6 +1779,8 @@
        "; independent namespaces when another fails. A successful redefinition\n"
        "; replaces the prior function; a failed one restores the last working\n"
        "; definition. Write behavioral tests and satisfy the plan expectation.\n"
+       "; Never close the generated root with my.plan/done!, blocked!, or\n"
+       "; reopen!; eval evidence owns terminal status and caller delivery.\n"
        "; Repair subagents can localize honest residual failures, but the first\n"
        "; pass must still be complete—never leave placeholders or knowingly bad\n"
        "; examples. Put explanations in single-semicolon comments."))

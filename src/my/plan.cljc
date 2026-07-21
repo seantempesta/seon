@@ -10,6 +10,7 @@
     [clojure.string :as str]
     [my.plan.internal :as internal]
     [seon.agent]   ; load-order: request schemas reference :seon.agent/id
+    [seon.agent.home :as home]
     [seon.agent.message :as message]
     [seon.db :as db]
     [seon.db.id :as db.id]
@@ -1116,6 +1117,32 @@
                (get-in allocation [::db.id/ids
                                    :seon.agent.message/id])})))))))
 
+(defn- ^:no-doc program-without-coordinator-home
+  "Drop the coordinator's home namespace from one parsed-program projection.
+
+   A planner's `(ns my.agent.<id> …)` reply forms are planning scratch work
+   already evaluated by its own turn. They never become a dispatchable
+   namespace step, whose unique resident would be the coordinator itself and
+   whose assignment would fail on the self-recipient refusal."
+  [program rows root-id]
+  (let [coordinator-id
+        (some #(when (= root-id (::id %))
+                 (get-in % [::agent :seon.agent/id]))
+              rows)
+        home-namespace (some-> coordinator-id home/home-ns)]
+    (if (and home-namespace
+             (some #(= home-namespace (:seon.ns/name %))
+                   (:seon.repl/namespaces program)))
+      (-> program
+          (update :seon.repl/namespaces
+                  (fn [namespaces]
+                    (filterv #(not= home-namespace (:seon.ns/name %))
+                             namespaces)))
+          (update :seon.repl/namespace-order
+                  (fn [order]
+                    (filterv #(not= home-namespace %) order))))
+      program)))
+
 (defn ^:async ^:private block-generated-root!
   [database root-id error-message]
   (let [blocked
@@ -1221,7 +1248,9 @@
                      (:seon.error/message written)))
                ::root root-id)
               (incomplete-response)))
-          (let [preview
+          (let [program (program-without-coordinator-home
+                         program (::rows acquired) root-id)
+                preview
                 (internal/compile-namespace-dag
                  (::rows acquired) root-id program {} now
                  completed-namespaces)
@@ -1327,6 +1356,23 @@
                              (remove #{id} others)))))
                  (internal/write-result "active!" id)))))))))
 
+(defn- generated-root-row?
+  "True when `row` is the generated-code root, never one namespace leaf."
+  [row]
+  (and (some? (::from row))
+       (some? (::message row))
+       (some? (::claim row))
+       (some? (::goal row))
+       (nil? (::parent row))))
+
+(defn- generated-terminal-transition-error
+  [operation id]
+  (internal/fail
+   (str operation ": generated root " (pr-str id)
+        " cannot use an ordinary plan transition; generated eval evidence "
+        "owns terminal status. Work its namespace steps; the generated-code "
+        "terminal owner will close the root and address its caller.")))
+
 (defn ^{:async true :seon.fn/agent-facing? true} done!
   "Record that a plan step is finished and complete.
 
@@ -1343,17 +1389,19 @@
           row (::row acquired)]
       (or
         read-error
-        (case (::status row)
-          nil (internal/fail (str "done!: no step " (pr-str id)
-                                  " — (my.plan/list-open {}) shows the open ids."))
-          :done {::ok? true ::id id}
-          (->> (await
-                 (db/transact!
-                   (expected-write
-                     acquired
-                     [{::id id ::status :done
-                       ::completed-at #?(:clj (java.util.Date.) :cljs (js/Date.))}])))
-               (internal/write-result "done!" id)))))))
+        (if (generated-root-row? row)
+          (generated-terminal-transition-error "done!" id)
+          (case (::status row)
+            nil (internal/fail (str "done!: no step " (pr-str id)
+                                    " — (my.plan/list-open {}) shows the open ids."))
+            :done {::ok? true ::id id}
+            (->> (await
+                   (db/transact!
+                     (expected-write
+                       acquired
+                       [{::id id ::status :done
+                         ::completed-at #?(:clj (java.util.Date.) :cljs (js/Date.))}])))
+                 (internal/write-result "done!" id))))))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} blocked!
   "Mark a plan step blocked while retaining its assignment evidence.
@@ -1371,16 +1419,18 @@
          row (::row acquired)]
      (or
       read-error
-      (case (::status row)
-        nil (internal/fail (str "blocked!: no step " (pr-str id)
-                                " — (my.plan/tree {}) lists every step id."))
-        :done (internal/fail (str "blocked!: " (pr-str id)
-                                  " is :done — reopen! it first."))
-        :blocked {::ok? true ::id id}
-        (->> (await
-              (db/transact!
-               (expected-write acquired [{::id id ::status :blocked}])))
-             (internal/write-result "blocked!" id)))))))
+      (if (generated-root-row? row)
+        (generated-terminal-transition-error "blocked!" id)
+        (case (::status row)
+          nil (internal/fail (str "blocked!: no step " (pr-str id)
+                                  " — (my.plan/tree {}) lists every step id."))
+          :done (internal/fail (str "blocked!: " (pr-str id)
+                                    " is :done — reopen! it first."))
+          :blocked {::ok? true ::id id}
+          (->> (await
+                (db/transact!
+                 (expected-write acquired [{::id id ::status :blocked}])))
+               (internal/write-result "blocked!" id))))))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} reopen!
   "Flip a done/blocked step back to open; retract its `::completed-at`.
@@ -1396,19 +1446,21 @@
           row (::row acquired)]
       (or
         read-error
-        (case (::status row)
-          nil (internal/fail (str "reopen!: no step " (pr-str id)
-                                  " — (my.plan/tree {}) lists every step id; "
-                                  "reopen! flips a :done/:blocked step back to :open."))
-          :open {::ok? true ::id id}
-          (->> (await
-                 (db/transact!
-                   (expected-write
-                     acquired
-                     [{::id id ::status :open}
-                      [:db/retract [::id id] ::completed-at]
-                      [:db/retract [::id id] ::claim]])))
-               (internal/write-result "reopen!" id)))))))
+        (if (generated-root-row? row)
+          (generated-terminal-transition-error "reopen!" id)
+          (case (::status row)
+            nil (internal/fail (str "reopen!: no step " (pr-str id)
+                                    " — (my.plan/tree {}) lists every step id; "
+                                    "reopen! flips a :done/:blocked step back to :open."))
+            :open {::ok? true ::id id}
+            (->> (await
+                   (db/transact!
+                     (expected-write
+                       acquired
+                       [{::id id ::status :open}
+                        [:db/retract [::id id] ::completed-at]
+                        [:db/retract [::id id] ::claim]])))
+                 (internal/write-result "reopen!" id))))))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} needs!
   "Add dependency edges; a step is ready only when its needs are done.
