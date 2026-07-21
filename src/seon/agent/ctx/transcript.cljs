@@ -1322,7 +1322,7 @@
          [:span {:class "text-xs font-mono text-text-500"}
           (str "→ " to-labels)])]
       [:div {:class "markdown mt-0.5 min-w-0"}
-       (render/block :html configuration
+       (render/block :html configuration {:seon.agent/id agent-id}
                      {:seon.render/markdown (str/trim body)})]]]))
 
 (defn- html-events

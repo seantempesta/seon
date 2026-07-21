@@ -195,10 +195,10 @@
        [:div {:class "text-2xs font-mono text-text-600 mb-1"} (str "eval " eid)]
        (when (and narration (not (str/blank? narration)))
          [:div {:class "markdown mb-1 text-xs"}
-          (render/block :html configuration
+          (render/block :html configuration input
                         {:seon.render/markdown (str/trim narration)})])
        [:div {:class "text-2xs font-mono text-text-500 mb-0.5"} "code"]
-       (render/block :html configuration
+       (render/block :html configuration input
                      {:seon.render/source (str/trim src)})
        (cond
          ok?
@@ -207,7 +207,7 @@
             [:summary {:class "text-xs font-mono text-amber-300/70 cursor-pointer"}
              (str "result · " r)]
             [:div {:class "mt-1 min-w-0 overflow-hidden"}
-             (render/block :html configuration
+             (render/block :html configuration input
                            {:seon.render/source (str res-edn)})]])
 
          (string? err-str)

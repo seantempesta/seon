@@ -106,5 +106,5 @@
        (when (instance? js/Date at)
          [:span {:class "text-xs text-text-500"} (hh-mm-ss at)])]
       [:div {:class "markdown mt-0.5 min-w-0"}
-       (render/block :html configuration
+       (render/block :html configuration input
                      {:seon.render/markdown (str/trim body)})]]]))

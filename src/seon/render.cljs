@@ -37,7 +37,8 @@
     [seon.schema :as schema]
     [seon.ui.clojure :as cljhl]
     [seon.ui.html :as html]
-    [seon.ui.markdown :as md]))
+    [seon.ui.markdown :as md]
+    [seon.web.view-unit :as view-unit]))
 
 ;; ============================================================
 ;; Schemas — every shape this surface reads or writes (spec-05 §15.1).
@@ -131,7 +132,8 @@
    [:seon.db/db     {:optional true} :seon.db/db]
    [:seon.agent/id  {:optional true} :seon.agent/id]
    [:seon.agent.run/id {:optional true} :seon.agent.run/id]
-   [:seon.render/at {:optional true} :seon.render/at]])
+   [:seon.render/at {:optional true} :seon.render/at]
+   [:seon.schema/projection {:optional true} :seon.schema/projection]])
 
 (schema/register! :seon.render/children
   [:vector {:seon.db/component true} :seon.db/ref])      ;; OPTIONAL authored nesting; derived sections query instead
@@ -398,6 +400,21 @@
 (schema/register! :seon.render/source-block  [:map [:seon.render/source   :seon.render/source]])
 (schema/register! :seon.render/view [:enum :html :ai])
 (schema/register! :seon.render/formats [:set :seon.render/view])
+(schema/register! :seon.render/schema-key :keyword)
+(schema/register! :seon.render/eval-id :string)
+(schema/register! :seon.render/entity-id :int)
+(schema/register! :seon.render/value-selector
+  [:or
+   [:map {:closed true}
+    [:seon.render/eval-id :seon.render/eval-id]]
+   [:map {:closed true}
+    [:seon.render/entity-id :seon.render/entity-id]]])
+(schema/register! :seon.render/value-route-base :string)
+(schema/register! :seon.render/value-request
+  [:map {:closed true}
+   [:seon.render/value-route-base :seon.render/value-route-base]
+   [:seon.render/value-selector :seon.render/value-selector]
+   [:seon.render/value-projection :seon.render.value/drilled-projection]])
 
 (defn- message-block? [x]
   (and (map? x) (contains? x :seon.render/markdown)))
@@ -407,6 +424,9 @@
 
 (defn- data-projection? [x]
   (and (map? x) (contains? x :seon.render.value/tree)))
+
+(defn- value-request? [x]
+  (and (map? x) (contains? x :seon.render/value-projection)))
 
 (defn- error-value? [x]
   (and (map? x) (string? (:seon.error/message x))))
@@ -440,6 +460,37 @@
                               :else        "text-text-200"))}
      (pr-str x)]))
 
+(defn- selector-query-entry [selector]
+  (if-let [eval-id (:seon.render/eval-id selector)]
+    ["eval" eval-id]
+    ["entity" (:seon.render/entity-id selector)]))
+
+(defn- value-url
+  [{:seon.render/keys [value-route-base value-selector]} path offset]
+  (let [[selector-name selector-value] (selector-query-entry value-selector)
+        params (js/URLSearchParams.)]
+    (.append params selector-name (str selector-value))
+    (.append params "path" (pr-str path))
+    (.append params "offset" (str offset))
+    (str value-route-base "?" (.toString params))))
+
+(defn- value-identity
+  [render-request value-request path]
+  (str "seon-value-"
+       (view-unit/identity-token
+         (merge {:seon.agent/id (:seon.agent/id render-request)
+                 :seon.render/path-text (pr-str path)}
+                (:seon.render/value-selector value-request)))))
+
+(defn- drill-control [value-request path offset label]
+  [:button {:type "button"
+            :class (str "text-2xs font-mono text-amber-400/80 "
+                        "hover:text-amber-300 underline underline-offset-2")
+            (keyword "data-on:click")
+            (str "@get(" (js/JSON.stringify
+                            (value-url value-request path offset)) ")")}
+   label])
+
 (declare value-node)
 
 (defn- value-details
@@ -453,29 +504,38 @@
    (into [:div {:class "pl-3 ml-0.5 border-l border-base-700 mt-1 flex flex-col gap-1 min-w-0"}]
          child-rows)])
 
-(defn- map-node [m depth]
+(defn- map-node [m depth render-request value-request path drillable?]
   (let [wrapped? (contains? m :seon.render.value/map-entries)
         elided (when wrapped? (:seon.render.value/elided-keys m))
-        projected (when wrapped? (:seon.render.value/projected-keys m))
+        non-drillable (when wrapped?
+                        (set (:seon.render.value/non-drillable-key-indexes m)))
         pairs  (if wrapped?
                  (:seon.render.value/map-entries m)
                  (seq m))
         n      (count pairs)
-        rows   (cond-> (vec (for [[k v] pairs]
-                              [:div {:class "flex items-start gap-1.5 text-xs min-w-0"}
-                               [:span {:class "text-keyword shrink-0 font-mono"}
-                                (tokens/bounded-pr-str k 20)]
-                               (value-node v (inc depth))]))
+        rows   (cond-> (vec (map-indexed
+                              (fn [index [k v]]
+                                (let [child-drillable?
+                                      (and drillable?
+                                           (not (contains? non-drillable index)))
+                                      child-path (when child-drillable?
+                                                   (conj path k))]
+                                  [:div {:class "flex items-start gap-1.5 text-xs min-w-0"}
+                                   [:span {:class "text-keyword shrink-0 font-mono"}
+                                    (tokens/bounded-pr-str k 20)]
+                                   (value-node v (inc depth) render-request value-request
+                                               child-path child-drillable? true)]))
+                              pairs))
                  elided
                  (conj [:div {:class "text-2xs text-text-600 font-mono"}
                         (if (= :more elided)
                           "… +more keys"
                           (str "… +" elided " more key"
                                (when (not= 1 elided) "s")))])
-                 projected
+                 (seq non-drillable)
                  (conj [:div {:class "text-2xs text-text-600 font-mono"}
-                        (str projected " non-scalar key"
-                             (when (not= 1 projected) "s")
+                        (str (count non-drillable) " non-drillable key"
+                             (when (not= 1 (count non-drillable)) "s")
                              " shown safely")]))]
     (value-details
       [:span {:class "text-text-400 font-mono"}
@@ -483,19 +543,23 @@
             (when elided (if (= :more elided)
                            " +more hidden"
                            (str " +" elided " hidden")))
-            (when projected (str " · " projected " safe key label"
-                                 (when (not= 1 projected) "s"))))]
+            (when (seq non-drillable)
+              (str " · " (count non-drillable) " safe key label"
+                   (when (not= 1 (count non-drillable)) "s"))))]
       rows depth)))
 
-(defn- seqish-node [m depth]
+(defn- seqish-node [m depth render-request value-request path drillable?]
   (let [{:seon.render.value/keys [kind shown elided shape]} m
         [open close] (case kind :vector ["[" "]"] :set ["#{" "}"] ["(" ")"])
         n     (count shown)
         rows  (cond-> (vec (map-indexed
                              (fn [i v]
-                               [:div {:class "flex items-start gap-1.5 text-xs min-w-0"}
-                                [:span {:class "text-text-600 shrink-0 font-mono"} (str i)]
-                                (value-node v (inc depth))])
+                               (let [child-drillable? (and drillable? (= :vector kind))
+                                     child-path (when child-drillable? (conj path i))]
+                                 [:div {:class "flex items-start gap-1.5 text-xs min-w-0"}
+                                  [:span {:class "text-text-600 shrink-0 font-mono"} (str i)]
+                                  (value-node v (inc depth) render-request value-request
+                                              child-path child-drillable? true)]))
                              shown))
                 (and elided (not= 0 elided))
                 (conj [:div {:class "text-2xs text-text-600 font-mono"}
@@ -512,38 +576,72 @@
 (defn- pruned-marker
   "A depth/breadth boundary the sampler stopped at — the deeper value is NOT
    in the tree. Rendered as a passive 'deeper' hint."
-  [x]
+  [x value-request path drillable?]
   [:span {:class "inline-flex items-center gap-1 text-2xs text-text-500 font-mono"
           :title "deeper than the bounded view — drill the live result/<id> var"}
    [:span {:class "text-text-600"} (value/pruned-token x)]
-   [:span {:class "text-text-700"} "▸ deeper"]])
+   (if drillable?
+     (drill-control value-request path 0 "▸ inspect")
+     [:span {:class "text-text-700"} "▸ deeper"])])
 
 (defn- value-node
   "Recursively render one `render-html-data` `:tree` node to hiccup. Containers
    (map / seqish) become `<details>`; everything else is an inline token."
-  [x depth]
-  (cond
-    (and (map? x) (contains? x :seon.render.value/pruned)) (pruned-marker x)
-    (and (map? x) (contains? x :seon.render.value/kind))   (seqish-node x depth)
-    (and (map? x)
-         (not (contains? x :seon.eval/datom))
-         (not (contains? x :seon.eval/opaque))
-         (not (contains? x :seon.render.value/string-len)))
-    (map-node x depth)
-    :else (value-leaf x)))
+  [x depth render-request value-request path drillable? wrap?]
+  (let [node (cond
+               (and (map? x) (contains? x :seon.render.value/pruned))
+               (pruned-marker x value-request path drillable?)
+
+               (and (map? x) (contains? x :seon.render.value/kind))
+               (seqish-node x depth render-request value-request path drillable?)
+
+               (and (map? x)
+                    (not (contains? x :seon.eval/datom))
+                    (not (contains? x :seon.eval/opaque))
+                    (not (contains? x :seon.render.value/string-len)))
+               (map-node x depth render-request value-request path drillable?)
+
+               :else (value-leaf x))]
+    (if (and wrap? drillable?)
+      [:div {:id (value-identity render-request value-request path)
+             :class "min-w-0"}
+       node]
+      node)))
+
+(defn- schema-statuses [{:seon.render.value/keys [schemas explanation]}]
+  (when (seq schemas)
+    (into
+      [:div {:class "flex flex-wrap items-center gap-1 text-2xs font-mono"}]
+      (map (fn [{:seon.schema/keys [key]
+                 :seon.render.value/keys [status]}]
+             [:span (cond-> {:class (str "rounded border px-1 py-0.5 "
+                                         (case status
+                                           :valid "border-success/50 text-success"
+                                           :invalid "border-error/50 text-error"
+                                           "border-base-600 text-text-500"))}
+                      (and (= :invalid status) explanation)
+                      (assoc :title (tokens/bounded-pr-str explanation 240)))
+              (str key)]))
+      schemas)))
 
 (defn- data-panel
-  "The DATA-kind html render — a collapsible drill-down over a
-   `seon.render.value/render-html-data` projection (`:tree`/`:summary`/
-   `:truncated?`). The whole bounded tree ships in one render; expand/collapse
-   is a client CSS toggle (`<details>`), no round-trip."
-  [{:seon.render.value/keys [tree summary truncated? eval-id]}]
-  [:div {:class "flex flex-col gap-1"}
-   [:div {:class "text-2xs text-text-500 font-mono mb-0.5"}
-    (str summary
-         (when eval-id (str " · result/" eval-id))
-         (when truncated? " · partial"))]
-   (value-node tree 0)])
+  "Render one bounded value projection, optionally with trusted drill UI."
+  [configuration render-request value-request projection]
+  (let [{:seon.render.value/keys [tree summary truncated? path offset
+                                  page-size more?]} projection
+        interactive? (some? value-request)
+        root-id (when interactive?
+                  (value-identity render-request value-request path))]
+    [:div (cond-> {:class "flex flex-col gap-1"}
+            root-id (assoc :id root-id))
+     [:div {:class "flex flex-wrap items-center gap-2 text-2xs text-text-500 font-mono mb-0.5"}
+      [:span (str summary (when truncated? " · partial"))]
+      (schema-statuses projection)
+      (when (and interactive? more?
+                 (<= (+ offset page-size page-size)
+                     (config/value-max-realized-items configuration)))
+        (drill-control value-request path (+ offset page-size) "next page"))]
+     (value-node tree 0 render-request value-request path interactive? false)]))
 
 (defn- hiccup-text
   "Best-effort prompt TEXT for the `:ai` view of a literal hiccup value —
@@ -565,10 +663,43 @@
         txt (if (str/ends-with? txt "\n") txt (str txt "\n"))]
     (str "```" (name (:seon.code/lang x)) "\n" txt "```")))
 
+(defn- custom-render-selection [view render-request x]
+  (when (map? x)
+    (let [property (case view :html :seon.render/html :ai :seon.render/ai)
+          override (when-some [raw (get x property)]
+                     (db/decode-edn-value property raw))]
+      (if override
+        {:seon.render/custom-symbol override}
+        (when-let [projection (:seon.schema/projection render-request)]
+          (when-let [matched-row
+                     (some #(when (get % property) %)
+                           (schema/matching-shapes-in projection x))]
+            {:seon.render/custom-symbol (get matched-row property)
+             :seon.render/schema-key (:seon.schema/key matched-row)}))))))
+
+(defn- invoke-custom-render
+  [view configuration render-request x
+   {:seon.render/keys [custom-symbol schema-key]}]
+  (let [f (eval/lookup-value custom-symbol)]
+    (when-not f
+      (throw (ex-info (str "Missing custom renderer " custom-symbol ".")
+                      {:seon.render/custom-symbol custom-symbol})))
+    (try
+      (unwrap-response
+        (case view :html :seon.render/html :ai :seon.render/ai)
+        (f (cond-> (assoc render-request
+                          :seon.config/configuration configuration
+                          :seon.render/node x)
+             schema-key (assoc :seon.render/schema-key schema-key))))
+      (catch :default e
+        (throw (ex-info (str custom-symbol " threw: " (err/->message e))
+                        {:seon.render/custom-symbol custom-symbol}
+                        e))))))
+
 (defn block
   "THE typed-block renderer for a tagged value in `:html` or `:ai`.
 
-   `(block view x)` — `view` is `:html` (→ hiccup)
+   `(block view configuration render-request x)` — `view` is `:html` (→ hiccup)
    or `:ai` (→ prompt String). Dispatches on the value-KIND of `x` via the
    namespaced key the value carries (the tagged-value contract above) and
    delegates to the renderer that already owns that kind. GUARDED like
@@ -579,37 +710,65 @@
   {:malli/schema [:=> [:catn [::view :seon.render/view]
                              [:seon.config/configuration
                               :seon.config/singleton]
+                             [::render-request :seon.render/section-request]
                              [::x :any]] :any]}
-  [view configuration x]
+  [view configuration render-request x]
   (try
-    (case view
-      :html
-      (cond
-        (code/block? x)    (md/md->hiccup (code-fenced x))
-        (message-block? x) (md/md->hiccup (:seon.render/markdown x))
-        (source-block? x)  (cljhl/clj->hiccup (:seon.render/source x))
-        (data-projection? x) (data-panel x)
-        (error-value? x)   (canvas/error-card x)
-        (canvas/valid-hiccup? x) x
-        :else              (data-panel
-                             (value/render-html-data configuration "inline" x)))
+    (let [custom (when-not (or (code/block? x)
+                               (message-block? x)
+                               (source-block? x)
+                               (value-request? x)
+                               (data-projection? x)
+                               (error-value? x)
+                               (canvas/valid-hiccup? x))
+                   (custom-render-selection view render-request x))]
+      (case view
+        :html
+        (cond
+          (code/block? x)    (md/md->hiccup (code-fenced x))
+          (message-block? x) (md/md->hiccup (:seon.render/markdown x))
+          (source-block? x)  (cljhl/clj->hiccup (:seon.render/source x))
+          (value-request? x)
+          (if (schema/valid-candidate-value? :seon.render/value-request x)
+            (data-panel configuration render-request x (:seon.render/value-projection x))
+            (throw (ex-info "Malformed value render request."
+                            {:seon.render/value-request x})))
+          (data-projection? x) (data-panel configuration render-request nil x)
+          (error-value? x)   (canvas/error-card x)
+          (canvas/valid-hiccup? x) x
+          custom             (invoke-custom-render view configuration render-request x custom)
+          :else              (data-panel
+                               configuration render-request nil
+                               (value/render-html-data configuration "inline" x)))
 
-      :ai
-      (cond
-        (code/block? x)    (code-fenced x)
-        (message-block? x) (:seon.render/markdown x)
-        (source-block? x)  (:seon.render/source x)
-        (data-projection? x) (str (:seon.render.value/summary x)
-                                   (when (:seon.render.value/truncated? x) " (partial)"))
-        (error-value? x)   (:seon.error/message x)
-        (canvas/valid-hiccup? x) (hiccup-text x)
-        :else              (value/render-ai configuration "inline" x)))
+        :ai
+        (cond
+          (code/block? x)    (code-fenced x)
+          (message-block? x) (:seon.render/markdown x)
+          (source-block? x)  (:seon.render/source x)
+          (value-request? x)
+          (if (schema/valid-candidate-value? :seon.render/value-request x)
+            (let [projection (:seon.render/value-projection x)]
+              (str (:seon.render.value/summary projection)
+                   (when (:seon.render.value/truncated? projection) " (partial)")))
+            (throw (ex-info "Malformed value render request."
+                            {:seon.render/value-request x})))
+          (data-projection? x) (str (:seon.render.value/summary x)
+                                     (when (:seon.render.value/truncated? x) " (partial)"))
+          (error-value? x)   (:seon.error/message x)
+          (canvas/valid-hiccup? x) (hiccup-text x)
+          custom             (invoke-custom-render view configuration render-request x custom)
+          :else              (value/render-ai configuration "inline" x))))
     (catch :default e
       ;; `block` dispatches to CORE renderers (md->hiccup, clj->hiccup, the
       ;; value panels) — a throw is our machinery (:core). Record BEFORE
       ;; strict-fail! (re-throws in strict mode); recorded? skips a funnel dup.
       (when-not (err/recorded? e)
-        (err/record! {:seon.error/raw e :seon.error/fault :core}))
+        (err/record! {:seon.error/raw e
+                      :seon.error/fault
+                      (if-let [sym (:seon.render/custom-symbol (ex-data e))]
+                        (err/fault-for sym)
+                        :core)}))
       ;; STRICT dial: dev/test/benchmark → re-throw LOUD; prod → graceful guard.
       (strict-fail! :block e)
       (let [msg (str "block render failed: " (err/->message e))]
