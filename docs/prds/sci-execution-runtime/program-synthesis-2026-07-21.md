@@ -682,21 +682,15 @@ decisions batch for their return.
 - NS-3 spec written + grounded: `specs/ns-3-render-subtree.md` —
   dispatch AFTER NS-2 integrates (shared `client.cljs`).
 
-### OWNER DECISION BATCH (2026-07-21 night — D12 release door)
+### D12 RESOLVED (owner, 2026-07-21 night): diffusion is DEV-ONLY
 
-NS-1b's implementer proved the shadow `:devtools {:preloads …}` door is
-DEVELOPMENT-ONLY (release builds clear preloads). So the D12 opt-in for
-the diffusion provider splits: dev builds get the preload door now
-(`--config-merge '{:devtools {:preloads [seon.diffusion.gemma]}}'`,
-additively preserving `seon.demo`); a diffusion-enabled RELEASE artifact
-needs a real seam. Options for the owner: (i) a diffusion artifact
-flavor with its own build entry (matches the "own build(s) if it
-burdens the main system" language — RECOMMENDED); (ii) one sanctioned
-entry require in the default client build, config-gated (weaker
-separation, D12's recorded alternative). No release diffusion artifact
-exists today, so nothing is blocked; NS-1b ships the dev door.
+Owner ruling: diffusion can be dev-only — it is still experimental. The
+shadow `--config-merge '{:devtools {:preloads [seon.diffusion.gemma]}}'`
+door (additive with `seon.demo`) is the COMPLETE answer; no release
+artifact seam is designed or built. Revisit only if diffusion ever
+graduates from experimental.
 
-### NO PENDING OWNER DECISIONS (other than the batch above)
+### NO PENDING OWNER DECISIONS
 
 The 4 W1-boot decisions were folded as recommendations into the shipped
 W1.1. The packages/naming decisions are all settled. Nothing is
