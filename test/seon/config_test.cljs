@@ -52,6 +52,28 @@
     (is (= 112
            (:seon.config.database.transport/maximum-connections first-value)))))
 
+(deftest selected-processors-is-manifest-selected-and-hardware-bounded
+  (is (= 3
+         (:seon.config.database.executor/selected-processors
+          (resolve/resolve-config-singleton
+           {:seon.config/database
+            {:seon.config.database.executor/selected-processors 3}}
+           {}
+           fixed-hardware))))
+  (is (= 8
+         (:seon.config.database.executor/selected-processors
+          (resolve/resolve-config-singleton
+           {:seon.config/database
+            {:seon.config.database.executor/selected-processors 64}}
+           {}
+           fixed-hardware))))
+  (is (thrown-with-msg?
+       js/Error #"positive integer"
+       (resolve/resolve-operational-values
+        {:seon.config/database
+         {:seon.config.database.executor/selected-processors 0}}
+        fixed-hardware))))
+
 (deftest shipped-manifest-has-a-stable-resolved-golden-value
   (let [manifest (config/read-config-file "config/system.edn")
         configuration

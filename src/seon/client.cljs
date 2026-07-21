@@ -237,6 +237,7 @@
 (schema/register! ::runtime-phase
   [:enum :seon.client.runtime/starting
    :seon.client.runtime/running
+   :seon.client.runtime/writer-replacement
    :seon.client.runtime/quiescing
    :seon.client.runtime/quiesced
    :seon.client.runtime/stopping
@@ -1919,11 +1920,6 @@
             ids))))
     []))
 
-(schema/register! ::apply-config-request
-  [:map {:closed true}
-   [:seon.config/manifest :seon.config/manifest]
-   [::configuration {:optional true} ::configuration]])
-
 (defn- desired-identity-attrs
   "Registered entity identity attrs present in the desired population."
   [desired]
@@ -1934,7 +1930,7 @@
                     (some #(contains? % identity-attr) desired))))
         (schema/entity-catalog)))
 
-(defn ^:async apply-config!
+(defn ^:async ^:private reconcile-config!
   "Reconcile one resolved manifest into the config-managed database subset.
 
    This is the single declarative operation used by cold boot and the live
@@ -1942,12 +1938,8 @@
    land through one provenance-scoped `seon.runtime.state/reconcile!`; a converged
    apply submits no transaction. The manifest is already resolved data, never
    ambient process state."
-  {:malli/schema [:=> [:cat ::apply-config-request]
-                  :seon.runtime.state/reconcile-response]}
-  [{manifest :seon.config/manifest configuration ::configuration}]
-  (let [singleton    (or configuration
-                         (config/resolve-config-singleton manifest))
-        desired      (-> (vec (config/resolve-routes
+  [manifest singleton]
+  (let [desired      (-> (vec (config/resolve-routes
                                 (route/core-routes-tx)
                                 manifest))
                          (into (my.skills/seed-skills-tx-data
@@ -1981,6 +1973,23 @@
                                   #(or % (::agent.ctx/changed? migrated)))
                           (update :seon.runtime.state/operations +
                                   (::agent.ctx/operations migrated))))))))))))))
+
+(defn ^:async apply-config!
+  "Apply one operator-resolved config payload without rereading its manifest."
+  {:malli/schema [:=> [:cat :seon.launch/config-apply-payload]
+                  :seon.runtime.state/reconcile-response]}
+  [{manifest :seon.config/manifest
+    singleton :seon.config/singleton
+    envelope ::launch/operational-envelope
+    generation ::launch/config-apply-generation}]
+  (when-not (= generation (:seon.launch.envelope/generation envelope))
+    (throw
+     (ex-info "Config apply generation does not match its launch envelope."
+              {::launch/config-apply-generation generation
+               :seon.launch.envelope/generation
+               (:seon.launch.envelope/generation envelope)
+               :seon.error/kind :core-bug})))
+  (await (reconcile-config! manifest singleton)))
 
 (schema/register! ::start-runtime-request
   [:map {:closed true}
@@ -2121,20 +2130,24 @@
         (:seon.launch.envelope/hardware-observations envelope))
        (config/resolve-config-singleton selected-manifest)))))
 
-(defn- prove-launch-configuration!
+(defn ^:async ^:private prove-launch-configuration!
   [envelope configuration]
   (let [divergences (config.resolve/envelope-divergences envelope configuration)]
     (when (seq divergences)
-      (error/with-configuration
-       configuration
-       (fn []
-         (error/record!
-          {:seon.error/raw
-           (ex-info "Launch limits diverge from committed configuration; run `bin/seon config apply`."
-                    {:seon.config/divergences divergences
-                     :seon.config/steering "bin/seon config apply"
-                     :seon.error/kind :core-bug})
-           :seon.error/fault :core}))))))
+      (let [failure
+            (ex-info
+             "Launch limits diverge from committed configuration; run `bin/seon config apply`."
+             {:seon.config/divergences divergences
+              :seon.config/steering "bin/seon config apply"
+              :seon.error/kind :core-bug})]
+        (await
+         (error/with-configuration
+          configuration
+          (fn []
+            (error/record!
+             {:seon.error/raw failure
+              :seon.error/fault :core}))))
+        (throw failure)))))
 
 (defn- initial-agent-failure?
   [result]
@@ -2218,9 +2231,8 @@
                 descriptor restore-startup restore-completion-claim))]
         (when reconcile-manifest?
           (let [reconciled
-                (await (apply-config!
-                        {:seon.config/manifest selected-manifest
-                         ::configuration selected-configuration}))]
+                (await (reconcile-config! selected-manifest
+                                          selected-configuration))]
             (when (or (string? (:seon.error/message reconciled))
                       (false? (:seon.runtime.state/ok? reconciled)))
               (throw
@@ -2247,7 +2259,7 @@
                recovered))))
         (let [configuration (await (acquire-configuration!))
               _ (when envelope
-                  (prove-launch-configuration! envelope configuration))
+                  (await (prove-launch-configuration! envelope configuration)))
               _ (db/install-configuration-context! configuration)
               initial-result
               (when (and autonomous? (nil? restore-startup))
@@ -2572,6 +2584,123 @@
            (do
              (await (next-quiescence-observation!))
              (recur quiesced-run-ids observed-turn-ids))))))))
+
+(schema/register! ::writer-replacement-entered? :boolean)
+(schema/register! ::writer-replacement-resumed? :boolean)
+(schema/register! ::writer-replacement-error :string)
+(schema/register! ::writer-replacement-drain :map)
+(schema/register! ::config-result :seon.runtime.state/reconcile-response)
+(schema/register!
+ ::writer-replacement-response
+ [:or
+  :seon.runtime.state/reconcile-response
+  [:map {:closed true}
+   [::writer-replacement-entered? [:= true]]
+   [::launch/config-apply-generation ::launch/config-apply-generation]
+   [::writer-replacement-drain ::writer-replacement-drain]]
+  [:map {:closed true}
+   [::writer-replacement-entered? [:= false]]
+   [::writer-replacement-error ::writer-replacement-error]]
+  [:map {:closed true}
+   [::writer-replacement-resumed? [:= true]]
+   [::launch/config-apply-generation ::launch/config-apply-generation]
+   [::config-result ::config-result]]
+  [:map {:closed true}
+   [::writer-replacement-resumed? [:= false]]
+   [::writer-replacement-error ::writer-replacement-error]]])
+
+(defn- replacement-error
+  [key error]
+  {key false
+   ::writer-replacement-error (or (.-message error) (str error))})
+
+(defn ^:async ^:private enter-writer-replacement!
+  [payload]
+  (if-not (= :seon.client.runtime/running (runtime-phase))
+    {::writer-replacement-entered? false
+     ::writer-replacement-error
+     "The runtime is not in its running lifecycle phase."}
+    (if-not (admission/begin-publication!)
+      {::writer-replacement-entered? false
+       ::writer-replacement-error
+       "Executable admission could not begin writer replacement."}
+      (do
+        (swap! !state assoc
+               ::runtime-phase :seon.client.runtime/writer-replacement
+               ::writer-replacement-payload payload)
+        (try
+          (let [drained (await (drain-agent-work! (quiescence-deadline)))]
+            (swap! !state assoc ::writer-replacement-drain drained)
+            {::writer-replacement-entered? true
+             ::launch/config-apply-generation
+             (::launch/config-apply-generation payload)
+             ::writer-replacement-drain drained})
+          (catch :default error
+            (let [published (await (admission/publish-committed!))]
+              (swap! !state
+                     (fn [state]
+                       (-> state
+                           (assoc ::runtime-phase
+                                  (if (::admission/published? published)
+                                    :seon.client.runtime/running
+                                    :seon.client.runtime/cleanup-required))
+                           (dissoc ::writer-replacement-payload
+                                   ::writer-replacement-drain))))
+              (replacement-error ::writer-replacement-entered? error))))))))
+
+(defn ^:async ^:private apply-resolved-config!
+  [payload]
+  (let [result (await (apply-config! payload))]
+    (when-not (true? (:seon.runtime.state/ok? result))
+      (throw (ex-info "Resolved config reconciliation failed." result)))
+    (let [configuration (await (acquire-configuration!))]
+      (await
+       (prove-launch-configuration!
+        (::launch/operational-envelope payload)
+        configuration))
+      (db/install-configuration-context! configuration))
+    result))
+
+(defn ^:async ^:private resume-writer-replacement!
+  [payload]
+  (let [retained (::writer-replacement-payload @!state)]
+    (if-not (and (= :seon.client.runtime/writer-replacement (runtime-phase))
+                 (= (::launch/config-apply-generation retained)
+                    (::launch/config-apply-generation payload)))
+      {::writer-replacement-resumed? false
+       ::writer-replacement-error
+       "The config generation does not own the active writer replacement."}
+      (try
+        (await (open-database-session! {::initialize? false}))
+        (let [result (await (apply-resolved-config! retained))
+              published (await (admission/publish-committed!))]
+          (when-not (::admission/published? published)
+            (throw
+             (ex-info "Writer replacement could not reopen executable admission."
+                      published)))
+          (swap! !state
+                 (fn [state]
+                   (-> state
+                       (assoc ::runtime-phase :seon.client.runtime/running)
+                       (dissoc ::writer-replacement-payload
+                               ::writer-replacement-drain))))
+          {::writer-replacement-resumed? true
+           ::launch/config-apply-generation
+           (::launch/config-apply-generation payload)
+           ::config-result result})
+        (catch :default error
+          (replacement-error ::writer-replacement-resumed? error))))))
+
+(defn ^:async config-apply-control!
+  "Apply resolved config or control its live writer replacement phase."
+  {:malli/schema [:=> [:cat :seon.launch/config-apply-request]
+                  ::writer-replacement-response]}
+  [{operation ::launch/config-apply-operation
+    payload ::launch/config-apply-payload}]
+  (case operation
+    :apply (await (apply-resolved-config! payload))
+    :enter-writer-replacement (await (enter-writer-replacement! payload))
+    :resume-writer-replacement (await (resume-writer-replacement! payload))))
 
 (defn- merge-quiesce-progress
   "Union retry-safe lifecycle evidence accumulated by completed inverses."

@@ -129,6 +129,14 @@
                              StandardCopyOption/REPLACE_EXISTING]))
     (str target)))
 
+(defn- next-launch-generation
+  [process-dir]
+  (loop [generation (System/currentTimeMillis)]
+    (if (fs/exists? (fs/path process-dir
+                             (str "launch-envelope-" generation ".edn")))
+      (recur (inc generation))
+      generation)))
+
 (defn- hardware-observations []
   (let [cores (.availableProcessors (Runtime/getRuntime))
         system-memory-bytes
@@ -174,12 +182,15 @@
                              :seon.config/explanation
                              (m/explain :seon.config/manifest manifest)})))
         hardware (hardware-observations)
-        generation (System/currentTimeMillis)
-        envelope (config.resolve/resolve-envelope manifest hardware generation)
         process-dir (or (:seon.dev.config/process-dir configuration)
                         (str (fs/path root "tmp/seon-operator")))
+        generation (next-launch-generation process-dir)
+        envelope (config.resolve/resolve-envelope manifest hardware generation)
+        singleton
+        (config.resolve/resolve-config-singleton manifest environment hardware)
         manifest-path (str (fs/path process-dir "resolved-manifest.edn"))
-        envelope-path (str (fs/path process-dir "launch-envelope.edn"))
+        envelope-path
+        (str (fs/path process-dir (str "launch-envelope-" generation ".edn")))
         manifest-text (pr-str manifest)
         _ (atomic-write-edn! manifest-path manifest)
         _ (atomic-write-edn! envelope-path envelope)
@@ -197,12 +208,23 @@
                    :seon.dev.config/resolved-manifest-path manifest-path
                    :seon.dev.config/launch-envelope-path envelope-path
                    :seon.dev.config/operational-envelope envelope
+                   :seon.dev.config/resolved-configuration singleton
                    :seon.dev.config/reconcile-manifest? reconcile?)
       descriptor
       (assoc :seon.dev.config/launch-descriptor descriptor)
 
       reconcile?
       (assoc-in [:seon.dev.config/environment "SEON_CONFIG"] selected-path))))
+
+(defn publish-applied-manifest!
+  "Publish the resolved manifest after its live operation proves complete."
+  [configuration]
+  (when (:seon.dev.config/reconcile-manifest? configuration)
+    (let [target (fs/path (:seon.dev.config/cluster-dir configuration)
+                          "config" "applied.edn")]
+      (atomic-write-edn! target
+                         (:seon.dev.config/resolved-manifest configuration))))
+  configuration)
 
 (defn- unquote-value [value]
   (let [value (str/trim value)]

@@ -116,7 +116,7 @@
     {:seon.web.router/config-apply
      (fn [_request _response]
        (js/Response. "{:seon.runtime.state/ok? true}" #js {:status 200}))
-     :seon.web.router/same-origin? (constantly true)})
+     :seon.web.router/loopback-peer? (constantly true)})
   (let [response (request! "POST" "/_seon/operator/config")]
     (is (= 200 (.-status response)))))
 
@@ -225,7 +225,7 @@
                 (request! "GET" "/_seon/operator/processes"))))
     (is (= 1 @!invocations))))
 
-(deftest closed-admission-refuses-post-before-the-domain-handler
+(deftest closed-admission-keeps-operator-config-control-reachable
   (let [!invocations (atom 0)
         prior (admission/state)]
     (try
@@ -234,14 +234,14 @@
          (fn [_request _response]
            (swap! !invocations inc)
            (js/Response. "{:seon.runtime.state/ok? true}" #js {:status 200}))
-         :seon.web.router/same-origin? (constantly true)})
+         :seon.web.router/loopback-peer? (constantly true)})
       (reset! @#'admission/!state
               {::admission/status :unavailable
                ::admission/reason "injected publication failure"})
       (let [response (request! "POST" "/_seon/operator/config")]
-        (is (= 503 (.-status response)))
-        (is (zero? @!invocations)
-            "closed admission reaches neither parsing nor domain work"))
+        (is (= 200 (.-status response)))
+        (is (= 1 @!invocations)
+            "writer replacement control remains reachable"))
       (finally
         (reset! @#'admission/!state prior)))))
 

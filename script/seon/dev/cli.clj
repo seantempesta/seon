@@ -4,10 +4,12 @@
             [babashka.process :as shell]
             [clojure.edn :as edn]
             [clojure.string :as str]
+            [malli.core :as m]
             [seon.dev.artifact :as artifact]
             [seon.dev.branch :as branch]
             [seon.dev.cluster :as cluster]
             [seon.dev.config :as config]
+            [seon.config.resolve :as config.resolve]
             [seon.dev.changed-test :as changed-test]
             [seon.dev.process :as process]
             [seon.dev.release :as release]
@@ -322,47 +324,140 @@
                (reconcile-development! configuration [stopped]))))]
     (print-ready! target open?)))
 
-(defn- apply-live-config!
-  "Send one explicit manifest operation to an already-ready compatible pod."
+(defn- ready-config-target!
   [configuration]
   (let [manifest (selected-manifest configuration)
-        target   (when manifest (process/status configuration manifest))
-        path     (get-in configuration
-                         [:seon.dev.config/environment "SEON_CONFIG"])]
+        target (when manifest (process/status configuration manifest))]
     (when-not (= :seon.dev.target.status/ready
                  (:seon.dev.target/status target))
       (throw (ex-info "Config apply requires a ready Seon target."
                       {:seon.dev.target/status
                        (:seon.dev.target/status target)})))
-    (when-not path
-      (throw (ex-info "Config apply requires an explicit manifest path." {})))
-    (let [request (pr-str {:seon.config/path path})
-          result  (shell/sh
+    target))
+
+(defn- post-config-control!
+  [target request]
+  (let [result  (shell/sh
                     {:continue true :out :string :err :string
                      :cmd ["curl" "--fail-with-body" "--silent" "--show-error"
                            "--request" "POST"
                            "--header" "Content-Type: application/edn"
-                           "--data-binary" request
+                           "--data-binary" (pr-str request)
                            (str (:seon.dev.target/url target)
                                 "/_seon/operator/config")]})
-          response (when-not (str/blank? (:out result))
-                     (try (edn/read-string (:out result))
-                          (catch Exception _ nil)))]
-      (when-not (and (zero? (:exit result))
-                     (true? (:seon.state/ok? response)))
+        response (when-not (str/blank? (:out result))
+                   (try (edn/read-string (:out result))
+                        (catch Exception _ nil)))]
+    (when-not (zero? (:exit result))
+      (throw (ex-info "Live config control failed."
+                      {:seon.dev.config/exit (:exit result)
+                       :seon.dev.config/response response
+                       :seon.dev.config/error (str/trim (:err result))})))
+    response))
+
+(defn- argv-option
+  [argv option]
+  (some (fn [[left right]] (when (= option left) right))
+        (partition 2 1 argv)))
+
+(defn- loaded-writer-envelope
+  [configuration]
+  (let [record (process/read-process configuration process/writer-id)
+        path (some-> record :seon.dev.process/argv
+                     (argv-option "--launch-envelope"))
+        envelope (when path (edn/read-string (slurp path)))]
+    (when-not (and path (m/validate :seon.launch/operational-envelope envelope))
+      (throw
+       (ex-info "The running writer has no valid pinned launch envelope."
+                {:seon.dev.config/launch-envelope-path path
+                 :seon.dev.process/record record})))
+    envelope))
+
+(defn- config-apply-payload
+  [configuration]
+  (let [envelope (:seon.dev.config/operational-envelope configuration)]
+    {:seon.config/manifest (:seon.dev.config/resolved-manifest configuration)
+     :seon.config/singleton
+     (:seon.dev.config/resolved-configuration configuration)
+     ::launch/operational-envelope envelope
+     ::launch/config-apply-generation
+     (:seon.launch.envelope/generation envelope)}))
+
+(defn- operational-changes
+  [loaded candidate]
+  (into {}
+        (keep (fn [attribute]
+                (when (not= (get loaded attribute) (get candidate attribute))
+                  [attribute {:seon.launch.envelope/loaded (get loaded attribute)
+                              :seon.launch.envelope/candidate
+                              (get candidate attribute)}])))
+        config.resolve/operational-keys))
+
+(defn- apply-live-config!
+  "Apply one resolved candidate through the ready pod and writer lifecycle."
+  [configuration]
+  (let [target (ready-config-target! configuration)
+        loaded (loaded-writer-envelope configuration)
+        candidate (:seon.dev.config/operational-envelope configuration)
+        changes (operational-changes loaded candidate)
+        carried
+        (into #{}
+              (filter #(= :carried
+                          (get-in candidate
+                                  [:seon.launch.envelope/dispositions %])))
+              (keys changes))
+        payload (config-apply-payload configuration)]
+    (when (seq carried)
+      (throw
+       (ex-info
+        "Config apply declined boot-critical keys that remain carried; W1.5 must enforce them before live writer reconstruction."
+        {:seon.config/changed-carried-keys carried
+         :seon.config/steering "W1.5"})))
+    (let [result
+          (if (seq changes)
+            (let [entered
+                  (post-config-control!
+                   target
+                   {::launch/config-apply-operation :enter-writer-replacement
+                    ::launch/config-apply-payload payload})
+                  _ (when-not
+                      (true? (:seon.client/writer-replacement-entered? entered))
+                      (throw (ex-info "The pod declined writer replacement."
+                                      {:seon.dev.config/response entered})))
+                  _ (stop-processes!
+                     configuration
+                     :seon.dev.process.operation/config-apply
+                     #{process/writer-id})
+                  artifact-manifest (selected-manifest configuration)
+                  writer-spec (get (process/specs configuration artifact-manifest)
+                                   process/writer-id)
+                  _ (process/ensure! configuration writer-spec)
+                  resumed
+                  (post-config-control!
+                   target
+                   {::launch/config-apply-operation :resume-writer-replacement
+                    ::launch/config-apply-payload payload})]
+              (when-not
+               (true? (:seon.client/writer-replacement-resumed? resumed))
+                (throw (ex-info "The pod did not complete writer replacement."
+                                {:seon.dev.config/response resumed})))
+              (:seon.client/config-result resumed))
+            (post-config-control!
+             target
+             {::launch/config-apply-operation :apply
+              ::launch/config-apply-payload payload}))]
+      (when-not (true? (:seon.runtime.state/ok? result))
         (throw (ex-info "Live config apply failed."
-                        {:seon.dev.config/path path
-                         :seon.dev.config/exit (:exit result)
-                         :seon.dev.config/response response
-                         :seon.dev.config/error (str/trim (:err result))})))
-      response)))
+                        {:seon.dev.config/response result})))
+      (config/publish-applied-manifest! configuration)
+      result)))
 
 (defn- print-config-result! [result]
   (println "")
   (println "◆ Config applied")
-  (println (str "  changed: " (:seon.state/changed? result)))
-  (println (str "  operations: " (:seon.state/operations result)))
-  (println (str "  basis-t: " (:seon.state/basis-t result))))
+  (println (str "  changed: " (:seon.runtime.state/changed? result)))
+  (println (str "  operations: " (:seon.runtime.state/operations result)))
+  (println (str "  basis-t: " (:seon.runtime.state/basis-t result))))
 
 (defn- config! [configuration arguments]
   (when-not (and (= "apply" (first arguments))
@@ -370,13 +465,13 @@
                  (nil? (nth arguments 2 nil)))
     (throw (ex-info "Use `config apply <manifest-path>`."
                     {:seon.dev.cli/arguments (vec arguments)})))
-  (let [configuration (select-config configuration (second arguments))
-        result
+  (let [result
         (state/with-lock
          configuration :stack 300000
          #(do
             (require-no-retained-restore! configuration :config-apply)
-            (apply-live-config! configuration)))]
+            (let [selected (select-config configuration (second arguments))]
+              (apply-live-config! selected))))]
     (print-config-result! result)))
 
 (defn- status-value [configuration]

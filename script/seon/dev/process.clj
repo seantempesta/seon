@@ -18,7 +18,6 @@
             UnixDomainSocketAddress]
            [java.nio ByteBuffer]
            [java.nio.channels SocketChannel]
-           [java.nio.file Files StandardCopyOption]
            [java.time Instant]
            [java.security MessageDigest]
            [java.nio.charset StandardCharsets]))
@@ -1493,6 +1492,7 @@
     :seon.dev.process.operation/restart
     :seon.dev.process.operation/rebuild-readers
     :seon.dev.process.operation/rebuild-writer
+    :seon.dev.process.operation/config-apply
     :seon.dev.process.operation/reset
     :seon.dev.process.operation/restore
     :seon.dev.process.operation/restore-admin
@@ -2076,21 +2076,6 @@
               {:seon.dev.process/id id})))
   nil)
 
-(defn- publish-applied-manifest!
-  [config]
-  (when (:seon.dev.config/reconcile-manifest? config)
-    (let [target (fs/path (:seon.dev.config/cluster-dir config)
-                          "config" "applied.edn")
-          parent (fs/parent target)
-          _ (fs/create-dirs parent)
-          temporary (Files/createTempFile parent ".seon-applied-" ".edn"
-                                          (make-array java.nio.file.attribute.FileAttribute 0))]
-      (spit (str temporary) (pr-str (:seon.dev.config/resolved-manifest config)))
-      (Files/move temporary target
-                  (into-array StandardCopyOption
-                              [StandardCopyOption/ATOMIC_MOVE
-                               StandardCopyOption/REPLACE_EXISTING])))))
-
 (defn ensure!
   "Reconcile one process to its exact argv, environment, artifact, and health."
   ([config spec] (ensure! config spec (fn [_ spawn!] (spawn!))))
@@ -2118,7 +2103,7 @@
                      (start-owned! id #(spawn-detached! config spec))]
                  (wait-ready! config spec started))))]
        (when (= pod-id id)
-         (publish-applied-manifest! config))
+         (config/publish-applied-manifest! config))
        ensured))))
 
 (defn prepare-watcher!

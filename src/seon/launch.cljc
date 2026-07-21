@@ -55,6 +55,23 @@
   (map (fn [attribute] [attribute :seon.config/cap]))
   config.resolve/operational-keys))
 
+(schema/register! ::config-apply-generation :seon.launch.envelope/generation)
+(schema/register!
+ ::config-apply-payload
+ [:map {:closed true}
+  [:seon.config/manifest :seon.config/manifest]
+  [:seon.config/singleton :seon.config/singleton]
+  [::operational-envelope ::operational-envelope]
+  [::config-apply-generation ::config-apply-generation]])
+(schema/register! ::config-apply-operation
+                  [:enum :apply :enter-writer-replacement
+                   :resume-writer-replacement])
+(schema/register!
+ ::config-apply-request
+ [:map {:closed true}
+  [::config-apply-operation ::config-apply-operation]
+  [::config-apply-payload ::config-apply-payload]])
+
 (schema/register!
  ::runtime
  [:map {:closed true}

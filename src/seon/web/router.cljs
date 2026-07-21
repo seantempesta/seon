@@ -280,8 +280,8 @@
      ;; FSM to idle, return the truthful reply + turn/eval metadata as JSON.
      ;; same-origin-gated like the others.
      ["/agents/run"  {:post {:middleware [:seon.route/same-origin] :handler (admitted-post-handler agent-run)}}]
-     ["/_seon/operator/config" {:post {:middleware [:seon.route/same-origin]
-                                        :handler (admitted-post-handler config-apply)}}]
+     ["/_seon/operator/config" {:post {:middleware [:seon.route/loopback-peer]
+                                        :handler (post-handler config-apply)}}]
      ["/agent/{id}/complete" {:post {:middleware [:seon.route/same-origin]
                                      :handler (fn [r] (complete (:seon.http/request r) nil
                                                                 (get-in r [:path-params :id])))}}]]

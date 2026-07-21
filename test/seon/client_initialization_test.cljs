@@ -26,18 +26,32 @@
   "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
 
 (deftest doctored-launch-envelope-records-the-divergent-keys
-  (let [recorded (atom nil)
-        facts (zipmap config.resolve/operational-keys (repeat 1))
-        envelope
-        (merge facts
-               {:seon.config.database.executor/selected-processors 8})]
-    (with-redefs [error/with-configuration (fn [_ thunk] (thunk))
-                  error/record! (fn [fault] (reset! recorded fault))]
-      (#'client/prove-launch-configuration! envelope facts))
-    (is (= #{:seon.config.database.executor/selected-processors}
-           (set (keys (:seon.config/divergences
-                       (ex-data (:seon.error/raw @recorded)))))))
-    (is (= :core (:seon.error/fault @recorded)))))
+  (async done
+    (let [recorded (atom nil)
+          facts (zipmap config.resolve/operational-keys (repeat 1))
+          envelope
+          (merge facts
+                 {:seon.config.database.executor/selected-processors 8})
+          original-with-configuration error/with-configuration
+          original-record error/record!
+          cleanup! (fn []
+                     (set! error/with-configuration original-with-configuration)
+                     (set! error/record! original-record)
+                     (done))]
+      (set! error/with-configuration (fn [_ thunk] (thunk)))
+      (set! error/record! (fn [fault] (reset! recorded fault)))
+      (-> (js/Promise.resolve nil)
+          (.then (fn []
+                   (#'client/prove-launch-configuration! envelope facts)))
+          (.then (fn [_]
+                   (is false "a divergent launch envelope was accepted")))
+          (.catch
+           (fn [_]
+             (is (= #{:seon.config.database.executor/selected-processors}
+                    (set (keys (:seon.config/divergences
+                                (ex-data (:seon.error/raw @recorded)))))))
+             (is (= :core (:seon.error/fault @recorded)))))
+          (.finally cleanup!)))))
 
 (deftest namespace-identities-use-the-symbol-storage-contract
   (is (m/validate :seon.ns/name 'my.orders))
@@ -331,9 +345,7 @@
           (-> (open-startup! true selected)
               (.then
                (fn [_]
-                 (client/apply-config!
-                  {:seon.config/manifest manifest
-                   ::client/configuration selected})))
+                 (#'client/reconcile-config! manifest selected)))
               (.then
                (fn [_]
                  (is (= 1 @resolve-count))
@@ -367,9 +379,7 @@
             (set! ctx/migrate-plan-surface-default! original-migrate)
             (done))
           apply! (fn []
-                   (client/apply-config!
-                    {:seon.config/manifest {}
-                     ::client/configuration configuration}))]
+                   (#'client/reconcile-config! {} configuration))]
       (set! skills/seed-skills-tx-data
             (fn
               ([] [])

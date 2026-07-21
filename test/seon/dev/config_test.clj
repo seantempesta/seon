@@ -127,7 +127,37 @@
          Exception #"positive JVM size"
          (config/select-launch-descriptor
           (assoc configuration :seon.dev.config/writer-max-heap "unbounded")
-          descriptor)))))
+         descriptor)))))
+
+(deftest manifest-selection-publishes-immutable-generation-named-envelopes
+  (let [root (fs/create-temp-dir {:prefix "seon-config-envelope-"})
+        manifest-path (fs/path root "selected.edn")
+        process-dir (fs/path root "processes")
+        configuration {:seon.dev.config/root (str root)
+                       :seon.dev.config/cluster-dir (str (fs/path root "cluster"))
+                       :seon.dev.config/process-dir (str process-dir)
+                       :seon.dev.config/environment {"SEON_CONFIG"
+                                                     (str manifest-path)}}
+        hardware {:seon.hardware/cores 8
+                  :seon.hardware/system-memory-bytes (* 32 1024 1024 1024)
+                  :seon.hardware/fd-soft-limit 2048}]
+    (try
+      (spit (str manifest-path) "{}\n")
+      (with-redefs-fn
+        {#'config/hardware-observations (constantly hardware)}
+        (fn []
+          (let [first-selection (config/select-manifest configuration nil)
+                first-path (:seon.dev.config/launch-envelope-path first-selection)
+                first-value (slurp first-path)
+                second-selection (config/select-manifest configuration nil)
+                second-path (:seon.dev.config/launch-envelope-path second-selection)]
+            (is (not= first-path second-path))
+            (is (re-find #"launch-envelope-[0-9]+\.edn$" first-path))
+            (is (= first-value (slurp first-path)))
+            (is (fs/regular-file? second-path))
+            (is (not (fs/exists? (fs/path process-dir "launch-envelope.edn")))))))
+      (finally
+        (fs/delete-tree root {:force true})))))
 
 (deftest artifact-descriptors-own-cache-build-output-and-manifest-identities
   (let [root (str (fs/normalize (fs/absolutize ".")))

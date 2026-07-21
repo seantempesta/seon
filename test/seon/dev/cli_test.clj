@@ -3,6 +3,8 @@
             [babashka.process :as shell]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [seon.config.resolve :as config.resolve]
+            [seon.dev.config :as config]
             [seon.dev.artifact :as artifact]
             [seon.dev.branch :as branch]
             [seon.dev.cli :as cli]
@@ -11,7 +13,8 @@
             [seon.dev.release :as release]
             [seon.dev.restore :as restore]
             [seon.dev.restore-state :as restore-state]
-            [seon.dev.state :as state]))
+            [seon.dev.state :as state]
+            [seon.launch :as launch]))
 
 (defn- stop-result
   ([operation targets]
@@ -840,14 +843,90 @@
        #'cli/reconcile-development!
        (fn [_] (throw (ex-info "config apply widened into up" {})))}
       (fn [] (#'cli/config! configuration ["apply" "config/system.edn"])))
-    (is (= [[:select configuration "config/system.edn"]
-            [:lock selected :stack 300000]
+    (is (= [[:lock configuration :stack 300000]
+            [:select configuration "config/system.edn"]
             [:apply selected]
             [:print {:seon.runtime.state/ok? true
                      :seon.runtime.state/changed? false
                      :seon.runtime.state/operations 0
                      :seon.runtime.state/basis-t 42}]]
            @calls))))
+
+(def ^:private config-apply-hardware
+  {:seon.hardware/cores 8
+   :seon.hardware/system-memory-bytes (* 32 1024 1024 1024)
+   :seon.hardware/fd-soft-limit 2048})
+
+(defn- config-apply-configuration
+  [manifest generation]
+  {:seon.dev.config/resolved-manifest manifest
+   :seon.dev.config/resolved-configuration
+   (config.resolve/resolve-config-singleton manifest {} config-apply-hardware)
+   :seon.dev.config/operational-envelope
+   (config.resolve/resolve-envelope manifest config-apply-hardware generation)
+   :seon.dev.config/reconcile-manifest? true})
+
+(deftest boot-critical-config-apply-replaces-only-the-writer-before-publication
+  (let [loaded (:seon.dev.config/operational-envelope
+                (config-apply-configuration {} 1))
+        candidate (config-apply-configuration
+                   {:seon.config/database
+                    {:seon.config.database.writer/jvm-heap-mb 1024}}
+                   2)
+        effects (atom [])
+        result {:seon.runtime.state/ok? true
+                :seon.runtime.state/changed? true
+                :seon.runtime.state/operations 1
+                :seon.runtime.state/attempts 1}]
+    (with-redefs-fn
+      {#'cli/ready-config-target! (constantly {:seon.dev.target/url "http://pod"})
+       #'cli/loaded-writer-envelope (constantly loaded)
+       #'cli/post-config-control!
+       (fn [_ request]
+         (let [operation (::launch/config-apply-operation request)]
+           (swap! effects conj operation)
+           (case operation
+             :enter-writer-replacement
+             {:seon.client/writer-replacement-entered? true}
+             :resume-writer-replacement
+             {:seon.client/writer-replacement-resumed? true
+              :seon.client/config-result result})))
+       #'cli/stop-processes!
+       (fn [_ operation targets]
+         (swap! effects conj [operation targets])
+         (stop-result operation targets))
+       #'cli/selected-manifest (constantly {:seon.dev.artifact/id "artifact"})
+       #'process/specs
+       (fn [_ _] {process/writer-id {:seon.dev.process/id process/writer-id}})
+       #'process/ensure!
+       (fn [_ specification]
+         (swap! effects conj [:ensure (:seon.dev.process/id specification)]))
+       #'config/publish-applied-manifest!
+       (fn [_] (swap! effects conj :publish))}
+      (fn []
+        (is (= result (#'cli/apply-live-config! candidate)))))
+    (is (= [:enter-writer-replacement
+            [:seon.dev.process.operation/config-apply #{process/writer-id}]
+            [:ensure process/writer-id]
+            :resume-writer-replacement
+            :publish]
+           @effects))))
+
+(deftest carried-config-change-declines-with-w1-5-steering
+  (let [loaded (:seon.dev.config/operational-envelope
+                (config-apply-configuration {} 1))
+        candidate (config-apply-configuration
+                   {:seon.config/database
+                    {:seon.config.database.transport/maximum-connections 12}}
+                   2)]
+    (with-redefs-fn
+      {#'cli/ready-config-target! (constantly {:seon.dev.target/url "http://pod"})
+       #'cli/loaded-writer-envelope (constantly loaded)
+       #'cli/post-config-control!
+       (fn [& _] (throw (ex-info "pod control was reached" {})))}
+      (fn []
+        (is (thrown-with-msg? Exception #"W1.5"
+                              (#'cli/apply-live-config! candidate)))))))
 
 (deftest legacy-database-layout-is-never-silently-replaced
   (let [root (fs/create-temp-dir {:prefix "seon-cli-legacy-db-"})

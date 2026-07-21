@@ -632,11 +632,16 @@ cannot reopen the writer while its database is being replaced.
 `SEON_CONFIG` is an operation-scoped boot input, not managed-process identity.
 An explicit config operation requires an already-ready compatible pod and sends
 one immutable resolved candidate through its normal database reconciliation
-boundary. It does not rebuild artifacts or replace watcher, writer, or pod
-processes. A supervisor intent preserves that candidate across recovery until
-the operation reaches a terminal database result; later config-free health
-checks and boots compare only durable runtime environment. The database facts
-remain the authority after the operation completes.
+boundary. A candidate that changes no boot-critical value reconciles database
+facts without replacing a process. A boot-critical change enters the pod's
+narrow writer-replacement phase: executable admission closes, already-admitted
+agent work drains, and the operator stops and relaunches only the writer from
+the candidate launch envelope. The pod then reopens its database session through
+the existing reconnect path, restores listeners and current-value
+resynchronization, proves the running launch values equal the committed config,
+and reopens admission. The watcher and pod remain in their current process
+generations. The applied manifest publishes only after that proof succeeds, and
+the database facts remain the authority after the operation completes.
 
 The cluster runtime has one boot entry and a strict durable/runtime split:
 

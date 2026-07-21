@@ -863,7 +863,20 @@
   "Resolve every boot-critical limit from manifest and hardware data."
   [manifest hardware]
   (let [database (get manifest :seon.config/database {})
-        processors (max 1 (:seon.hardware/cores hardware))
+        observed-processors (max 1 (:seon.hardware/cores hardware))
+        selected-processors
+        (get database :seon.config.database.executor/selected-processors
+             observed-processors)
+        _ (when-not (pos-int? selected-processors)
+            (throw
+             (ex-info
+              "Selected processors must be a positive integer."
+              {:seon.config.database.executor/selected-processors
+               selected-processors
+               :seon.hardware/cores observed-processors
+               :seon.config/steering
+               "Set :seon.config.database.executor/selected-processors to a positive integer."})))
+        processors (min observed-processors selected-processors)
         cpu-workers (max 1 (dec processors))
         knn (max 1 (min 2 (quot cpu-workers 2)))
         mutation (max 1 (min 4 (quot (inc processors) 2)))

@@ -495,35 +495,36 @@
                 (write-status! res 500 "text/plain; charset=utf-8" (str err))))))
 
 (defn- handle-config-apply!
-  "Apply one operator-selected config manifest through the live pod.
+  "Apply one operator-resolved config payload through the live pod.
 
-   The request body is the exact EDN operation input
-   `{:seon.config/path <absolute-path>}`. The pod owns Aero resolution and the
-   one `seon.client/apply-config!` database operation; this HTTP boundary only
-   transports the request and its structured result."
+   The operator resolves the manifest and hardware-dependent values once under
+   its stack lock. This boundary validates and transports that immutable value;
+   it never rereads Aero or observes hardware."
   [req res]
   (-> (read-body req)
       (.then
         (fn [body]
-          (let [request  (reader/read-string body)
-                path     (:seon.config/path request)
-                apply-fn (seval/lookup-value 'seon.client/apply-config!)]
-            (when-not (and (= #{:seon.config/path} (set (keys request)))
-                           (string? path)
-                           (not (str/blank? path)))
+          (let [request (reader/read-string body)
+                apply-fn
+                (seval/lookup-value 'seon.client/config-apply-control!)]
+            (when-not
+             (schema/valid-candidate-value?
+              :seon.launch/config-apply-request request)
               (throw (ex-info "invalid config apply request"
                               {:seon.error/kind :user-input})))
             (when-not apply-fn
               (throw (ex-info "live config operation is unavailable"
                               {:seon.error/kind :core})))
-            (apply-fn {:seon.config/manifest
-                       (config/load-manifest-path path)}))))
+            (apply-fn request))))
       (.then
         (fn [result]
+          (let [ok? (or (true? (:seon.runtime.state/ok? result))
+                        (true? (:seon.client/writer-replacement-entered? result))
+                        (true? (:seon.client/writer-replacement-resumed? result)))]
           (write-status! res
-                         (if (:seon.runtime.state/ok? result) 200 422)
+                         (if ok? 200 422)
                          "application/edn; charset=utf-8"
-                         (pr-str result))))
+                         (pr-str result)))))
       (.catch
         (fn [error]
           (let [message (or (.-message error) (str error))]
