@@ -161,9 +161,36 @@
   (schema/register! attribute :seon.config/cap))
 
 (def enforced-keys
-  "Operational attributes enforced by existing W1.1 constructor surfaces."
+  "Operational attributes enforced by launch constructor surfaces."
   #{:seon.config.database.writer/jvm-heap-mb
-    :seon.config.database.executor/selected-processors})
+    :seon.config.database.executor/selected-processors
+    :seon.config.database.executor/maximum-queued-request-bytes
+    :seon.config.database.executor.read/maximum-active
+    :seon.config.database.executor.read/maximum-queued
+    :seon.config.database.executor.read/maximum-queued-by-database
+    :seon.config.database.executor.knn/maximum-active
+    :seon.config.database.executor.knn/maximum-queued
+    :seon.config.database.executor.knn/maximum-queued-by-database
+    :seon.config.database.executor.provider/maximum-active
+    :seon.config.database.executor.provider/maximum-queued
+    :seon.config.database.executor.provider/maximum-queued-by-database
+    :seon.config.database.executor.mutation/maximum-active
+    :seon.config.database.executor.mutation/maximum-queued
+    :seon.config.database.executor.mutation/maximum-queued-by-database
+    :seon.config.database.executor.delivery/maximum-active
+    :seon.config.database.executor.delivery/maximum-queued
+    :seon.config.database.executor.delivery/maximum-queued-by-database
+    :seon.config.database.executor.hnsw/maximum-active
+    :seon.config.database.executor.hnsw/maximum-queued
+    :seon.config.database.executor.hnsw/maximum-queued-by-database
+    :seon.config.database.transport/maximum-input-bytes
+    :seon.config.database.transport/maximum-response-slots
+    :seon.config.database.transport/maximum-session-response-slots
+    :seon.config.database.transport/maximum-output-bytes
+    :seon.config.database.transport/maximum-session-output-bytes
+    :seon.config.database.transport/shutdown-timeout-ms
+    :seon.config.database.transport/codec-workers
+    :seon.config.database.transport/codec-worker-queue-capacity})
 
 (schema/register! :seon.hardware/cores :seon.config/cap)
 (schema/register! :seon.hardware/system-memory-bytes :seon.config/cap)
@@ -902,39 +929,74 @@
     {:seon.config.database.writer/jvm-heap-mb heap-mb
      :seon.config.database.executor/selected-processors processors
      :seon.config.database.executor/maximum-queued-request-bytes
-     (-> (quot heap-bytes 16) (max (* 8 1024 1024)) (min (* 64 1024 1024)))
-     :seon.config.database.executor.read/maximum-active cpu-workers
-     :seon.config.database.executor.read/maximum-queued read-queue
-     :seon.config.database.executor.read/maximum-queued-by-database read-database-queue
-     :seon.config.database.executor.knn/maximum-active knn
-     :seon.config.database.executor.knn/maximum-queued (max 4 (* 2 knn))
-     :seon.config.database.executor.knn/maximum-queued-by-database 2
-     :seon.config.database.executor.provider/maximum-active provider
-     :seon.config.database.executor.provider/maximum-queued (* 2 provider)
-     :seon.config.database.executor.provider/maximum-queued-by-database 2
-     :seon.config.database.executor.mutation/maximum-active mutation
-     :seon.config.database.executor.mutation/maximum-queued mutation-queue
-     :seon.config.database.executor.mutation/maximum-queued-by-database mutation-queue
-     :seon.config.database.executor.delivery/maximum-active cpu-workers
-     :seon.config.database.executor.delivery/maximum-queued (max 16 (* 4 cpu-workers))
-     :seon.config.database.executor.delivery/maximum-queued-by-database 1
-     :seon.config.database.executor.hnsw/maximum-active 1
-     :seon.config.database.executor.hnsw/maximum-queued 1
-     :seon.config.database.executor.hnsw/maximum-queued-by-database 1
+     (get database :seon.config.database.executor/maximum-queued-request-bytes
+          (-> (quot heap-bytes 16) (max (* 8 1024 1024))
+              (min (* 64 1024 1024))))
+     :seon.config.database.executor.read/maximum-active
+     (get database :seon.config.database.executor.read/maximum-active cpu-workers)
+     :seon.config.database.executor.read/maximum-queued
+     (get database :seon.config.database.executor.read/maximum-queued read-queue)
+     :seon.config.database.executor.read/maximum-queued-by-database
+     (get database :seon.config.database.executor.read/maximum-queued-by-database
+          read-database-queue)
+     :seon.config.database.executor.knn/maximum-active
+     (get database :seon.config.database.executor.knn/maximum-active knn)
+     :seon.config.database.executor.knn/maximum-queued
+     (get database :seon.config.database.executor.knn/maximum-queued
+          (max 4 (* 2 knn)))
+     :seon.config.database.executor.knn/maximum-queued-by-database
+     (get database :seon.config.database.executor.knn/maximum-queued-by-database 2)
+     :seon.config.database.executor.provider/maximum-active
+     (get database :seon.config.database.executor.provider/maximum-active provider)
+     :seon.config.database.executor.provider/maximum-queued
+     (get database :seon.config.database.executor.provider/maximum-queued
+          (* 2 provider))
+     :seon.config.database.executor.provider/maximum-queued-by-database
+     (get database :seon.config.database.executor.provider/maximum-queued-by-database 2)
+     :seon.config.database.executor.mutation/maximum-active
+     (get database :seon.config.database.executor.mutation/maximum-active mutation)
+     :seon.config.database.executor.mutation/maximum-queued
+     (get database :seon.config.database.executor.mutation/maximum-queued mutation-queue)
+     :seon.config.database.executor.mutation/maximum-queued-by-database
+     (get database :seon.config.database.executor.mutation/maximum-queued-by-database
+          mutation-queue)
+     :seon.config.database.executor.delivery/maximum-active
+     (get database :seon.config.database.executor.delivery/maximum-active cpu-workers)
+     :seon.config.database.executor.delivery/maximum-queued
+     (get database :seon.config.database.executor.delivery/maximum-queued
+          (max 16 (* 4 cpu-workers)))
+     :seon.config.database.executor.delivery/maximum-queued-by-database
+     (get database :seon.config.database.executor.delivery/maximum-queued-by-database 1)
+     :seon.config.database.executor.hnsw/maximum-active
+     (get database :seon.config.database.executor.hnsw/maximum-active 1)
+     :seon.config.database.executor.hnsw/maximum-queued
+     (get database :seon.config.database.executor.hnsw/maximum-queued 1)
+     :seon.config.database.executor.hnsw/maximum-queued-by-database
+     (get database :seon.config.database.executor.hnsw/maximum-queued-by-database 1)
      :seon.config.database.transport/maximum-frame-bytes maximum-frame-bytes
      :seon.config.database.transport/maximum-connections maximum-connections
      :seon.config.database.transport/maximum-input-bytes
-     (min (* 32 1024 1024) (quot heap-bytes 16))
-     :seon.config.database.transport/maximum-response-slots maximum-connections
+     (get database :seon.config.database.transport/maximum-input-bytes
+          (min (* 32 1024 1024) (quot heap-bytes 16)))
+     :seon.config.database.transport/maximum-response-slots
+     (get database :seon.config.database.transport/maximum-response-slots
+          maximum-connections)
      :seon.config.database.transport/maximum-session-response-slots
-     (max 1 (quot maximum-connections 4))
+     (get database :seon.config.database.transport/maximum-session-response-slots
+          (max 1 (quot maximum-connections 4)))
      :seon.config.database.transport/maximum-output-bytes
-     (min (* 256 1024 1024) (quot heap-bytes 2))
+     (get database :seon.config.database.transport/maximum-output-bytes
+          (min (* 256 1024 1024) (quot heap-bytes 2)))
      :seon.config.database.transport/maximum-session-output-bytes
-     (min (* 128 1024 1024) (quot heap-bytes 4))
-     :seon.config.database.transport/shutdown-timeout-ms 5000
-     :seon.config.database.transport/codec-workers (max 2 (min 8 processors))
-     :seon.config.database.transport/codec-worker-queue-capacity 256}))
+     (get database :seon.config.database.transport/maximum-session-output-bytes
+          (min (* 128 1024 1024) (quot heap-bytes 4)))
+     :seon.config.database.transport/shutdown-timeout-ms
+     (get database :seon.config.database.transport/shutdown-timeout-ms 5000)
+     :seon.config.database.transport/codec-workers
+     (get database :seon.config.database.transport/codec-workers
+          (max 2 (min 8 processors)))
+     :seon.config.database.transport/codec-worker-queue-capacity
+     (get database :seon.config.database.transport/codec-worker-queue-capacity 256)}))
 
 (defn resolve-config-singleton
   "The FLAT `:seon.config` singleton entity map for `manifest`.

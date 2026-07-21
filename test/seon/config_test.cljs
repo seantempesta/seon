@@ -34,6 +34,26 @@
    :seon.hardware/system-memory-bytes (* 32 1024 1024 1024)
    :seon.hardware/fd-soft-limit 2048})
 
+(deftest operational-envelope-records-the-w1-5a-enforcement-boundary
+  (let [dispositions
+        (:seon.launch.envelope/dispositions
+         (resolve/resolve-envelope {} fixed-hardware 1))
+        carried-keys
+        #{:seon.config.database.transport/maximum-frame-bytes
+          :seon.config.database.transport/maximum-connections}]
+    (is (= carried-keys
+           (into #{}
+                 (keep (fn [[attribute disposition]]
+                         (when (= :carried disposition) attribute)))
+                 dispositions))
+        "only the two W1.5b transport attributes remain carried")
+    (is (= (set (remove carried-keys resolve/operational-keys))
+           (into #{}
+                 (keep (fn [[attribute disposition]]
+                         (when (= :enforced disposition) attribute)))
+                 dispositions))
+        "every constructor-backed operational attribute is enforced")))
+
 (deftest shared-resolver-is-pure-and-delegated
   (let [manifest {:seon.config/repl-mode :batch}
         environment {"SEON_AI_PROVIDER" "deepseek"}

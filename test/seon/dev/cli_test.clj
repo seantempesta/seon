@@ -866,12 +866,12 @@
    (config.resolve/resolve-envelope manifest config-apply-hardware generation)
    :seon.dev.config/reconcile-manifest? true})
 
-(deftest boot-critical-config-apply-replaces-only-the-writer-before-publication
+(deftest enforced-config-apply-replaces-only-the-writer-before-publication
   (let [loaded (:seon.dev.config/operational-envelope
                 (config-apply-configuration {} 1))
         candidate (config-apply-configuration
                    {:seon.config/database
-                    {:seon.config.database.writer/jvm-heap-mb 1024}}
+                    {:seon.config.database.transport/codec-workers 3}}
                    2)
         effects (atom [])
         result {:seon.runtime.state/ok? true
@@ -912,21 +912,26 @@
             :publish]
            @effects))))
 
-(deftest carried-config-change-declines-with-w1-5-steering
+(deftest carried-config-changes-decline-with-w1-5-steering
   (let [loaded (:seon.dev.config/operational-envelope
-                (config-apply-configuration {} 1))
-        candidate (config-apply-configuration
-                   {:seon.config/database
-                    {:seon.config.database.transport/maximum-connections 12}}
-                   2)]
-    (with-redefs-fn
-      {#'cli/ready-config-target! (constantly {:seon.dev.target/url "http://pod"})
-       #'cli/loaded-writer-envelope (constantly loaded)
-       #'cli/post-config-control!
-       (fn [& _] (throw (ex-info "pod control was reached" {})))}
-      (fn []
-        (is (thrown-with-msg? Exception #"W1.5"
-                              (#'cli/apply-live-config! candidate)))))))
+                (config-apply-configuration {} 1))]
+    (doseq [[attribute value]
+            [[:seon.config.database.transport/maximum-frame-bytes 1048576]
+             [:seon.config.database.transport/maximum-connections 12]]]
+      (testing (str attribute " remains carried")
+        (let [candidate
+              (config-apply-configuration
+               {:seon.config/database {attribute value}}
+               2)]
+          (with-redefs-fn
+            {#'cli/ready-config-target!
+             (constantly {:seon.dev.target/url "http://pod"})
+             #'cli/loaded-writer-envelope (constantly loaded)
+             #'cli/post-config-control!
+             (fn [& _] (throw (ex-info "pod control was reached" {})))}
+            (fn []
+              (is (thrown-with-msg? Exception #"W1.5"
+                                    (#'cli/apply-live-config! candidate))))))))))
 
 (deftest legacy-database-layout-is-never-silently-replaced
   (let [root (fs/create-temp-dir {:prefix "seon-cli-legacy-db-"})

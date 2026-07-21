@@ -10,8 +10,11 @@
             ;; Register the optional Proximum index before any database opens.
             [datahike.index.secondary.proximum]
             [malli.core :as m]
+            [seon.config.resolve :as config.resolve]
+            [seon.db.executor :as executor]
             [seon.db.protocol :as protocol]
             [seon.db.restore-admin :as restore-admin]
+            [seon.db.transport.uds :as uds]
             [seon.db.writer :as writer]
             [seon.dev.restore :as restore]
             [seon.embed :as embed]
@@ -24,6 +27,81 @@
            [java.nio.channels FileChannel]
            [java.nio.file CopyOption Files OpenOption StandardCopyOption]
            [java.nio.file.attribute FileAttribute]))
+
+(def ^:private executor-capacity-attributes
+  {:seon.config.database.executor/maximum-queued-request-bytes
+   [::executor/maximum-queued-request-bytes]
+   :seon.config.database.executor.read/maximum-active
+   [::executor/classes :read ::executor/maximum-active]
+   :seon.config.database.executor.read/maximum-queued
+   [::executor/classes :read ::executor/maximum-queued]
+   :seon.config.database.executor.read/maximum-queued-by-database
+   [::executor/classes :read ::executor/maximum-queued-by-database]
+   :seon.config.database.executor.knn/maximum-active
+   [::executor/classes :knn ::executor/maximum-active]
+   :seon.config.database.executor.knn/maximum-queued
+   [::executor/classes :knn ::executor/maximum-queued]
+   :seon.config.database.executor.knn/maximum-queued-by-database
+   [::executor/classes :knn ::executor/maximum-queued-by-database]
+   :seon.config.database.executor.provider/maximum-active
+   [::executor/classes :provider ::executor/maximum-active]
+   :seon.config.database.executor.provider/maximum-queued
+   [::executor/classes :provider ::executor/maximum-queued]
+   :seon.config.database.executor.provider/maximum-queued-by-database
+   [::executor/classes :provider ::executor/maximum-queued-by-database]
+   :seon.config.database.executor.mutation/maximum-active
+   [::executor/classes :mutation ::executor/maximum-active]
+   :seon.config.database.executor.mutation/maximum-queued
+   [::executor/classes :mutation ::executor/maximum-queued]
+   :seon.config.database.executor.mutation/maximum-queued-by-database
+   [::executor/classes :mutation ::executor/maximum-queued-by-database]
+   :seon.config.database.executor.delivery/maximum-active
+   [::executor/classes :delivery ::executor/maximum-active]
+   :seon.config.database.executor.delivery/maximum-queued
+   [::executor/classes :delivery ::executor/maximum-queued]
+   :seon.config.database.executor.delivery/maximum-queued-by-database
+   [::executor/classes :delivery ::executor/maximum-queued-by-database]
+   :seon.config.database.executor.hnsw/maximum-active
+   [::executor/classes :hnsw ::executor/maximum-active]
+   :seon.config.database.executor.hnsw/maximum-queued
+   [::executor/classes :hnsw ::executor/maximum-queued]
+   :seon.config.database.executor.hnsw/maximum-queued-by-database
+   [::executor/classes :hnsw ::executor/maximum-queued-by-database]})
+
+(def ^:private request-server-option-attributes
+  {:seon.config.database.transport/maximum-input-bytes
+   ::uds/maximum-input-bytes
+   :seon.config.database.transport/maximum-response-slots
+   ::uds/maximum-response-slots
+   :seon.config.database.transport/maximum-session-response-slots
+   ::uds/maximum-session-response-slots
+   :seon.config.database.transport/maximum-output-bytes
+   ::uds/maximum-output-bytes
+   :seon.config.database.transport/maximum-session-output-bytes
+   ::uds/maximum-session-output-bytes
+   :seon.config.database.transport/shutdown-timeout-ms
+   ::uds/shutdown-timeout-ms
+   :seon.config.database.transport/codec-workers
+   ::uds/codec-workers
+   :seon.config.database.transport/codec-worker-queue-capacity
+   ::uds/codec-worker-queue-capacity})
+
+(defn- executor-capacity
+  [envelope]
+  (reduce-kv
+   (fn [capacity attribute path]
+     (assoc-in capacity path (get envelope attribute)))
+   (executor/capacity
+    (:seon.config.database.executor/selected-processors envelope))
+   executor-capacity-attributes))
+
+(defn- request-server-options
+  [envelope]
+  (reduce-kv
+   (fn [options attribute option]
+     (assoc options option (get envelope attribute)))
+   {}
+   request-server-option-attributes))
 
 (schema/register! ::arguments [:sequential :string])
 (schema/register! ::database-name :seon.db.writer/database-name)
@@ -402,6 +480,8 @@
            ::writer/backend backend
            ::writer/selected-processors
            (:seon.config.database.executor/selected-processors envelope)
+           ::executor/capacity (executor-capacity envelope)
+           ::writer/request-server-options (request-server-options envelope)
            ::writer/request-socket-path request-socket-path}
            database-path
            (assoc ::writer/database-path database-path)))
@@ -423,6 +503,8 @@
     (log/info "request socket:" request-socket-path)
     (log/info "launch limits:"
               (pr-str (:seon.launch.envelope/dispositions envelope)))
+    (log/info "enforced launch capacity:"
+              (pr-str (select-keys envelope config.resolve/enforced-keys)))
     (log/info "ready")
     (cond-> {::writer-server writer-server}
       repl-server

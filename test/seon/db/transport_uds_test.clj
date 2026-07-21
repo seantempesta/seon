@@ -1206,6 +1206,27 @@
         (uds/close-request-server! server)
         (.delete (File. path))))))
 
+(deftest request-server-constructs-the-configured-codec-worker-pool
+  (let [path (socket-path "configured-codec-workers")
+        worker-count 3
+        queue-capacity 7
+        server
+        (uds/start-request-server!
+         {::uds/socket-path path
+          ::uds/open-connection! (fn [_control] (Object.))
+          ::uds/close-connection! (constantly nil)
+          ::uds/handler (fn [_owner _request _frame-bytes _complete!] nil)
+          ::uds/codec-workers worker-count
+          ::uds/codec-worker-queue-capacity queue-capacity})
+        workers ^java.util.concurrent.ThreadPoolExecutor (::uds/workers server)]
+    (try
+      (is (= worker-count (.getCorePoolSize workers)))
+      (is (= worker-count (.getMaximumPoolSize workers)))
+      (is (= queue-capacity (.remainingCapacity (.getQueue workers))))
+      (finally
+        (uds/close-request-server! server)
+        (.delete (File. path))))))
+
 (deftest request-server-retains-large-response-suffix-until-writable
   (let [path (socket-path "transport-partial-write")
         response {::large-payload (apply str (repeat (* 3 1024 1024) "x"))}

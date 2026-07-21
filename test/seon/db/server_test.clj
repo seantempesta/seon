@@ -5,9 +5,12 @@
             [datahike.api :as d]
             [seon.config.resolve :as config.resolve]
             [seon.db.branch :as branch]
+            [seon.db.executor :as executor]
             [seon.db.protocol :as protocol]
             [seon.db.registry :as registry]
             [seon.db.server :as server]
+            [seon.db.transport.uds :as uds]
+            [seon.db.writer :as writer]
             [seon.schema :as schema]
             [taoensso.timbre :as log])
   (:import [java.io PushbackReader]
@@ -25,21 +28,124 @@
         (< (System/nanoTime) deadline) (do (Thread/sleep 25) (recur))
         :else false))))
 
-(defn- launch-envelope-file! [directory selected-processors]
-  (let [file (io/file directory "launch-envelope.edn")
+(defn- launch-envelope-file!
+  ([directory selected-processors]
+   (launch-envelope-file! directory selected-processors {}))
+  ([directory selected-processors operational-overrides]
+   (let [file (io/file directory "launch-envelope.edn")
         envelope
-        (merge
-         (zipmap config.resolve/operational-keys (repeat 1))
-         {:seon.config.database.executor/selected-processors selected-processors
-          :seon.launch.envelope/generation 1
-          :seon.launch.envelope/hardware-observations
-          {:seon.hardware/cores selected-processors
-           :seon.hardware/system-memory-bytes (* 8 1024 1024 1024)
+         (merge
+          (zipmap config.resolve/operational-keys (repeat 1))
+          {:seon.config.database.executor/selected-processors selected-processors
+           :seon.launch.envelope/generation 1
+           :seon.launch.envelope/hardware-observations
+           {:seon.hardware/cores selected-processors
+            :seon.hardware/system-memory-bytes (* 8 1024 1024 1024)
            :seon.hardware/fd-soft-limit 1024}
-          :seon.launch.envelope/dispositions
-          (zipmap config.resolve/operational-keys (repeat :carried))})]
-    (spit file (pr-str envelope))
-    file))
+           :seon.launch.envelope/dispositions
+           (into {}
+                 (map (fn [attribute]
+                        [attribute
+                         (if (contains? config.resolve/enforced-keys attribute)
+                           :enforced
+                           :carried)]))
+                 config.resolve/operational-keys)}
+          operational-overrides)]
+     (spit file (pr-str envelope))
+     file)))
+
+(deftest launch-envelope-capacities-reach-the-writer-constructor
+  (let [directory (.toFile (java.nio.file.Files/createTempDirectory
+                            "seon-writer-envelope" (make-array java.nio.file.attribute.FileAttribute 0)))
+        request-socket (io/file directory "request.sock")
+        selected-processors 7
+        executor-overrides
+        {:seon.config.database.executor/maximum-queued-request-bytes 101
+         :seon.config.database.executor.read/maximum-active 102
+         :seon.config.database.executor.read/maximum-queued 103
+         :seon.config.database.executor.read/maximum-queued-by-database 104
+         :seon.config.database.executor.knn/maximum-active 105
+         :seon.config.database.executor.knn/maximum-queued 106
+         :seon.config.database.executor.knn/maximum-queued-by-database 107
+         :seon.config.database.executor.provider/maximum-active 108
+         :seon.config.database.executor.provider/maximum-queued 109
+         :seon.config.database.executor.provider/maximum-queued-by-database 110
+         :seon.config.database.executor.mutation/maximum-active 111
+         :seon.config.database.executor.mutation/maximum-queued 112
+         :seon.config.database.executor.mutation/maximum-queued-by-database 113
+         :seon.config.database.executor.delivery/maximum-active 114
+         :seon.config.database.executor.delivery/maximum-queued 115
+         :seon.config.database.executor.delivery/maximum-queued-by-database 116
+         :seon.config.database.executor.hnsw/maximum-active 117
+         :seon.config.database.executor.hnsw/maximum-queued 118
+         :seon.config.database.executor.hnsw/maximum-queued-by-database 119}
+        transport-overrides
+        {:seon.config.database.transport/maximum-input-bytes 201
+         :seon.config.database.transport/maximum-response-slots 202
+         :seon.config.database.transport/maximum-session-response-slots 203
+         :seon.config.database.transport/maximum-output-bytes 204
+         :seon.config.database.transport/maximum-session-output-bytes 205
+         :seon.config.database.transport/shutdown-timeout-ms 206
+         :seon.config.database.transport/codec-workers 207
+         :seon.config.database.transport/codec-worker-queue-capacity 208
+         :seon.config.database.transport/maximum-frame-bytes 209
+         :seon.config.database.transport/maximum-connections 210}
+        envelope-file (launch-envelope-file!
+                       directory selected-processors
+                       (merge executor-overrides transport-overrides))
+        captured (atom nil)
+        expected-capacity
+        (-> (executor/capacity selected-processors)
+            (assoc ::executor/maximum-queued-request-bytes 101)
+            (assoc ::executor/classes
+                   {:read {::executor/maximum-active 102
+                           ::executor/maximum-queued 103
+                           ::executor/maximum-queued-by-database 104}
+                    :knn {::executor/maximum-active 105
+                          ::executor/maximum-queued 106
+                          ::executor/maximum-queued-by-database 107}
+                    :provider {::executor/maximum-active 108
+                               ::executor/maximum-queued 109
+                               ::executor/maximum-queued-by-database 110}
+                    :mutation {::executor/maximum-active 111
+                               ::executor/maximum-queued 112
+                               ::executor/maximum-queued-by-database 113}
+                    :delivery {::executor/maximum-active 114
+                               ::executor/maximum-queued 115
+                               ::executor/maximum-queued-by-database 116}
+                    :hnsw {::executor/maximum-active 117
+                           ::executor/maximum-queued 118
+                           ::executor/maximum-queued-by-database 119}}))
+        expected-request-server-options
+        {::uds/maximum-input-bytes 201
+         ::uds/maximum-response-slots 202
+         ::uds/maximum-session-response-slots 203
+         ::uds/maximum-output-bytes 204
+         ::uds/maximum-session-output-bytes 205
+         ::uds/shutdown-timeout-ms 206
+         ::uds/codec-workers 207
+         ::uds/codec-worker-queue-capacity 208}]
+    (try
+      (with-redefs-fn
+        {#'server/writer-runtime (constantly {})
+         #'writer/start! (fn [request]
+                           (reset! captured request)
+                           {})}
+        #(server/start! ["--backend" "memory"
+                         "--db-name" "envelope-constructor-test"
+                         "--req-sock" (.getPath request-socket)
+                         "--launch-envelope" (.getPath envelope-file)]))
+      (is (= expected-capacity (::executor/capacity @captured)))
+      (is (= expected-request-server-options
+             (::writer/request-server-options @captured)))
+      (is (not (contains? (::writer/request-server-options @captured)
+                          ::uds/maximum-connections))
+          "maximum connections remains carried")
+      (is (not (contains? (::writer/request-server-options @captured)
+                          ::uds/maximum-frame-bytes))
+          "maximum frame bytes remains carried")
+      (finally
+        (delete-tree! directory)))))
 
 (deftype ThrowingPrintable [])
 

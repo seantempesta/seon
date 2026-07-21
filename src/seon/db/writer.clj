@@ -114,6 +114,17 @@
 (schema/register! ::request-socket-path :seon.db.transport.uds/socket-path)
 (schema/register! ::selected-processors [:int {:min 1}])
 (schema/register!
+ ::request-server-options
+ [:map {:closed true}
+  [::uds/shutdown-timeout-ms ::uds/shutdown-timeout-ms]
+  [::uds/maximum-input-bytes ::uds/maximum-input-bytes]
+  [::uds/maximum-response-slots ::uds/maximum-response-slots]
+  [::uds/maximum-session-response-slots ::uds/maximum-session-response-slots]
+  [::uds/maximum-output-bytes ::uds/maximum-output-bytes]
+  [::uds/maximum-session-output-bytes ::uds/maximum-session-output-bytes]
+  [::uds/codec-workers ::uds/codec-workers]
+  [::uds/codec-worker-queue-capacity ::uds/codec-worker-queue-capacity]])
+(schema/register!
  ::start-request
  [:map
   [::dependencies ::dependencies]
@@ -121,6 +132,8 @@
   [::backend ::backend]
   [::database-path {:optional true} ::database-path]
   [::selected-processors {:optional true} ::selected-processors]
+  [::executor/capacity {:optional true} ::executor/capacity]
+  [::request-server-options {:optional true} ::request-server-options]
   [::request-socket-path ::request-socket-path]])
 (schema/register!
  ::server
@@ -4183,7 +4196,8 @@
   "Start the addressed request server for one writer runtime."
   {:malli/schema [:=> [:cat ::start-request] ::server]}
   [{::keys [dependencies database-name backend database-path selected-processors
-            request-socket-path]}]
+            request-socket-path request-server-options]
+    executor-capacity ::executor/capacity}]
   (let [active-requests (atom {})
         interest-state (atom (empty-interest-state))
         interest-lock (Object.)
@@ -4196,9 +4210,10 @@
                (.setDaemon true)))))
         dispatcher
         (executor/start!
-         {::executor/capacity (if selected-processors
-                                (executor/capacity selected-processors)
-                                (executor/capacity))
+         {::executor/capacity (or executor-capacity
+                                  (if selected-processors
+                                    (executor/capacity selected-processors)
+                                    (executor/capacity)))
           ::executor/execute
           {:read (fn [request] (execute-read! @runtime-ref request))
            :provider (partial execute-provider! dependencies)
@@ -4238,11 +4253,13 @@
                     {::ensure-response ensure-response})))
         {::request-server
          (uds/start-request-server!
-          {::uds/socket-path request-socket-path
-           ::uds/open-connection! transport-connection
-           ::uds/close-connection!
-           (partial close-transport-connection! runtime)
-           ::uds/handler (partial handle-request! runtime)})
+          (merge
+           request-server-options
+           {::uds/socket-path request-socket-path
+            ::uds/open-connection! transport-connection
+            ::uds/close-connection!
+            (partial close-transport-connection! runtime)
+            ::uds/handler (partial handle-request! runtime)}))
          ::executor dispatcher
          ::runtime runtime
          ::database-name database-name})

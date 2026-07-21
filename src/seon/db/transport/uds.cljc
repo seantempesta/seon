@@ -112,6 +112,8 @@
 (schema/register! ::maximum-output-bytes [:int {:min 1}])
 (schema/register! ::maximum-session-output-bytes [:int {:min 1}])
 (schema/register! ::maximum-connections [:int {:min 1}])
+(schema/register! ::codec-workers [:int {:min 1}])
+(schema/register! ::codec-worker-queue-capacity [:int {:min 1}])
 (schema/register! ::graceful? :boolean)
 (schema/register! ::forced-connections [:int {:min 0}])
 (schema/register! ::selector-stopped? :boolean)
@@ -158,13 +160,16 @@
   [::maximum-output-bytes {:optional true} ::maximum-output-bytes]
   [::maximum-session-output-bytes {:optional true}
    ::maximum-session-output-bytes]
-  [::maximum-connections {:optional true} ::maximum-connections]])
+  [::maximum-connections {:optional true} ::maximum-connections]
+  [::codec-workers {:optional true} ::codec-workers]
+  [::codec-worker-queue-capacity {:optional true}
+   ::codec-worker-queue-capacity]])
 (schema/register!
  ::call-input
  [:map [::channel ::channel] [::message ::message]])
 
 (def ^:private maximum-frame-bytes protocol/maximum-frame-bytes)
-(def ^:private codec-worker-queue-capacity 256)
+(def ^:private default-codec-worker-queue-capacity 256)
 (def ^:private default-shutdown-timeout-ms 5000)
 (def ^:private default-maximum-input-bytes (* 32 1024 1024))
 (def ^:private default-maximum-response-slots 256)
@@ -298,7 +303,7 @@
 
 (defn- codec-workers
   "Create the bounded off-selector codec and admission executor."
-  ^ThreadPoolExecutor []
+  ^ThreadPoolExecutor [worker-count worker-queue-capacity]
   (let [thread-number (atom 0)
         thread-factory
         (reify ThreadFactory
@@ -307,11 +312,12 @@
                            (str "database-request-codec-"
                                 (swap! thread-number inc)))
               (.setDaemon true))))
-        worker-count (max 2 (min 8 (.availableProcessors
-                                    (Runtime/getRuntime))))]
+        worker-count (or worker-count
+                         (max 2 (min 8 (.availableProcessors
+                                       (Runtime/getRuntime)))))]
     (ThreadPoolExecutor.
      worker-count worker-count 0 TimeUnit/MILLISECONDS
-     (ArrayBlockingQueue. codec-worker-queue-capacity)
+     (ArrayBlockingQueue. worker-queue-capacity)
      thread-factory
      (ThreadPoolExecutor$AbortPolicy.))))
 
@@ -1145,6 +1151,8 @@
             shutdown-timeout-ms maximum-input-bytes maximum-response-slots
             maximum-session-response-slots maximum-output-bytes
             maximum-session-output-bytes maximum-connections]
+    codec-worker-count ::codec-workers
+    worker-queue-capacity ::codec-worker-queue-capacity
     :or {shutdown-timeout-ms default-shutdown-timeout-ms
          maximum-input-bytes default-maximum-input-bytes
          maximum-response-slots default-maximum-response-slots
@@ -1152,7 +1160,8 @@
          default-maximum-session-response-slots
          maximum-output-bytes default-maximum-output-bytes
          maximum-session-output-bytes default-maximum-session-output-bytes
-         maximum-connections default-maximum-connections}}]
+         maximum-connections default-maximum-connections
+         worker-queue-capacity default-codec-worker-queue-capacity}}]
   (try (.delete (java.io.File. ^String socket-path)) (catch Throwable _))
   (let [^UnixDomainSocketAddress address
         (UnixDomainSocketAddress/of ^String socket-path)
@@ -1160,7 +1169,7 @@
         (ServerSocketChannel/open StandardProtocolFamily/UNIX)
         selector (.openSelector (.provider server))
         commands (LinkedBlockingQueue.)
-        workers (codec-workers)
+        workers (codec-workers codec-worker-count worker-queue-capacity)
         cleanup-pool (cleanup-workers maximum-connections)
         connections (atom {})
         closed? (AtomicReference. false)
