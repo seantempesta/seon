@@ -131,6 +131,58 @@
       (is (= :structured (config/render-content-layout configuration)))
       (is (false?        (config/render-line-numbers? configuration))))))
 
+(deftest effective-value-drill-limits-only-narrow-host-policy
+  (let [configuration
+        (merge (config/resolve-config-singleton {})
+               {:seon.config.render/value-max-path-segments 20
+                :seon.config.render/value-max-path-bytes 2000
+                :seon.config.render/value-max-realized-items 200
+                :seon.config.render/value-max-items 10})
+        normalize (fn [operation-limits]
+                    (config/effective-value-drill-limits
+                      (cond-> {:seon.config/configuration configuration}
+                        operation-limits
+                        (assoc :seon.render.value/operation-limits
+                               operation-limits))))
+        host {:seon.config.render/value-max-path-segments 20
+              :seon.config.render/value-max-path-bytes 2000
+              :seon.config.render/value-max-realized-items 200
+              :seon.render.value/page-size 10}
+        narrowed {:seon.config.render/value-max-path-segments 8
+                  :seon.config.render/value-max-path-bytes 500
+                  :seon.config.render/value-max-realized-items 100
+                  :seon.render.value/page-size 4}]
+    (is (= host (normalize nil)) "absence resolves exactly to host policy")
+    (is (= narrowed (normalize narrowed)) "every smaller field narrows")
+    (is (= host
+           (normalize {:seon.config.render/value-max-path-segments 200
+                       :seon.config.render/value-max-path-bytes 20000
+                       :seon.config.render/value-max-realized-items 2000
+                       :seon.render.value/page-size 100})))
+    (is (= {:seon.config.render/value-max-path-segments 8
+            :seon.config.render/value-max-path-bytes 2000
+            :seon.config.render/value-max-realized-items 200
+            :seon.render.value/page-size 10}
+           (normalize {:seon.config.render/value-max-path-segments 8}))
+        "fields normalize independently")
+    (is (= narrowed (normalize (normalize narrowed)))
+        "normalization is idempotent")
+    (is (= narrowed
+           (config/effective-value-drill-limits
+             {:seon.config/configuration configuration
+              :seon.render.value/operation-limits narrowed}))
+        "same-policy parent and child bytes are identical")
+    (let [narrow-child
+          (assoc configuration
+                 :seon.config.render/value-max-realized-items 50)
+          child-effective
+          (config/effective-value-drill-limits
+            {:seon.config/configuration narrow-child
+             :seon.render.value/operation-limits narrowed})]
+      (is (= 50 (:seon.config.render/value-max-realized-items child-effective)))
+      (is (not= narrowed child-effective)
+          "a narrower child is visible for later frame-consistency refusal"))))
+
 (defn- ctx-block-names [id override]
   (into #{} (map :seon.agent.ctx/name)
         (:seon.agent/ctx

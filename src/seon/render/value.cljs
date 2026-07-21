@@ -109,6 +109,126 @@
                    [::eval-id ::eval-id]
                    [::prepared ::prepared-ai]])
 
+;; Value-drill wire contracts stay producer-neutral and pure EDN. Recursive
+;; sampler invariants are checked by bounded public validators at the later
+;; producer/transport boundaries; registered forms deliberately carry only a
+;; shallow data shape, never an application predicate or executable object.
+(schema/register! ::path-segment
+                  [:or :nil :boolean :int :double :string :keyword :symbol])
+(schema/register! ::path [:vector ::path-segment])
+(schema/register! ::offset [:int {:min 0 :max 9007199254740991}])
+(schema/register! ::page-size [:int {:min 1 :max 9007199254740991}])
+(schema/register! ::bounded-data
+                  [:or :nil :boolean :int :double :string :keyword :symbol
+                   :vector :map])
+(schema/register! ::operation-limits
+                  [:map {:closed true}
+                   [:seon.config.render/value-max-path-segments
+                    {:optional true} :seon.config/cap]
+                   [:seon.config.render/value-max-path-bytes
+                    {:optional true} :seon.config/cap]
+                   [:seon.config.render/value-max-realized-items
+                    {:optional true} :seon.config/cap]
+                   [::page-size {:optional true} ::page-size]])
+(schema/register! ::effective-limits
+                  [:map {:closed true}
+                   [:seon.config.render/value-max-path-segments :seon.config/cap]
+                   [:seon.config.render/value-max-path-bytes :seon.config/cap]
+                   [:seon.config.render/value-max-realized-items :seon.config/cap]
+                   [::page-size ::page-size]])
+(schema/register! ::limit-normalization-request
+                  [:map {:closed true}
+                   [:seon.config/configuration :seon.config/singleton]
+                   [::operation-limits {:optional true} ::operation-limits]])
+(schema/register! ::drill-request
+                  [:map {:closed true}
+                   [::path ::path]
+                   [::offset ::offset]
+                   [::effective-limits ::effective-limits]])
+(schema/register! ::schema-status [:enum :valid :invalid :shape-only])
+(schema/register! ::status ::schema-status)
+(schema/register! ::schema-status-row
+                  [:map {:closed true}
+                   [:seon.schema/key :keyword]
+                   [:seon.schema/entity? :boolean]
+                   [::status ::schema-status]])
+(schema/register! ::schema-statuses [:vector ::schema-status-row])
+(schema/register! ::humanized ::bounded-data)
+(schema/register! ::error-value ::bounded-data)
+(schema/register! ::explanation
+                  [:map {:closed true}
+                   [::humanized ::humanized]
+                   [::error-value ::error-value]])
+(schema/register! ::summary [:string {:min 1}])
+(schema/register! ::truncated? :boolean)
+(schema/register! ::more? :boolean)
+(schema/register! ::tree ::bounded-data)
+(schema/register! ::schemas ::schema-statuses)
+(schema/register! ::drilled-projection
+                  [:map {:closed true}
+                   [::path ::path]
+                   [::offset ::offset]
+                   [::page-size ::page-size]
+                   [::summary ::summary]
+                   [::truncated? ::truncated?]
+                   [::more? ::more?]
+                   [::tree ::tree]
+                   [::schemas ::schemas]
+                   [::explanation {:optional true} ::explanation]])
+(schema/register! ::ok? :boolean)
+(schema/register! ::availability [:enum :available :unavailable])
+(schema/register! ::recompute? :boolean)
+(schema/register! ::drill-error
+                  [:map {:closed true}
+                   [:seon.error/message [:string {:min 1}]]
+                   [:seon.error/kind :keyword]
+                   [:seon.error/data {:optional true} ::bounded-data]])
+(schema/register! ::available-result
+                  [:map {:closed true}
+                   [::ok? [:= true]]
+                   [::availability [:= :available]]
+                   [::projection ::drilled-projection]])
+(schema/register! ::unavailable-result
+                  [:map {:closed true}
+                   [::ok? [:= true]]
+                   [::availability [:= :unavailable]]
+                   [::projection ::drilled-projection]
+                   [::recompute? [:= true]]])
+(schema/register! ::failed-result
+                  [:map {:closed true}
+                   [::ok? [:= false]]
+                   [:seon/error ::drill-error]])
+(schema/register! ::drill-result
+                  [:or ::available-result ::unavailable-result ::failed-result])
+
+(defn safe-nonnegative-int?
+  "True when `x` is a non-negative safe integer."
+  {:malli/schema [:=> [:catn [::candidate ::value]] :boolean]}
+  [x]
+  (and (number? x)
+       (js/Number.isSafeInteger x)
+       (not (js/Object.is x (js/Number "-0")))
+       (<= 0 x)))
+
+(defn safe-positive-int?
+  "True when `x` is a positive safe integer."
+  {:malli/schema [:=> [:catn [::candidate ::value]] :boolean]}
+  [x]
+  (and (safe-nonnegative-int? x) (pos? x)))
+
+(defn drill-path-segment?
+  "True when `x` is an identity-stable scalar drill-path segment."
+  {:malli/schema [:=> [:catn [::candidate ::value]] :boolean]}
+  [x]
+  (or (nil? x)
+      (boolean? x)
+      (string? x)
+      (keyword? x)
+      (symbol? x)
+      (and (number? x)
+           (js/Number.isFinite x)
+           (not (js/Object.is x (js/Number "-0"))))))
+
 ;; ============================================================
 ;; Sampling bounds — every one overridable by env (the `SEON_RENDER_VALUE_*`
 ;; sub-family) for token economy, read through `seon.config`.

@@ -6,6 +6,7 @@
    never over-realize, the drill hint appears iff the view is partial."
   (:require
     [cljs.test :as t :refer [deftest is testing]]
+    [cljs.reader :as reader]
     [clojure.string :as str]
     [seon.ai.tokens :as tokens]
     [seon.config :as config]
@@ -13,6 +14,83 @@
     [seon.schema :as schema]))
 
 (def configuration (config/resolve-config-singleton {}))
+
+(def drill-schema-keys
+  [:seon.render.value/path-segment
+   :seon.render.value/path
+   :seon.render.value/offset
+   :seon.render.value/page-size
+   :seon.render.value/bounded-data
+   :seon.render.value/operation-limits
+   :seon.render.value/effective-limits
+   :seon.render.value/limit-normalization-request
+   :seon.render.value/drill-request
+   :seon.render.value/schema-status
+   :seon.render.value/schema-status-row
+   :seon.render.value/schema-statuses
+   :seon.render.value/explanation
+   :seon.render.value/drilled-projection
+   :seon.render.value/drill-error
+   :seon.render.value/available-result
+   :seon.render.value/unavailable-result
+   :seon.render.value/failed-result
+   :seon.render.value/drill-result])
+
+(deftest public-drill-scalar-predicates
+  (let [negative-zero (/ -1 js/Infinity)]
+    (testing "safe integer boundaries"
+      (doseq [x [0 1 js/Number.MAX_SAFE_INTEGER]]
+        (is (v/safe-nonnegative-int? x)))
+      (doseq [x [-1 1.5 js/Infinity js/NaN
+                 (inc js/Number.MAX_SAFE_INTEGER) negative-zero]]
+        (is (not (v/safe-nonnegative-int? x)) (pr-str x)))
+      (is (not (v/safe-positive-int? 0)))
+      (is (v/safe-positive-int? 1)))
+    (testing "the closed scalar path grammar"
+      (doseq [x [nil false true 0 1.5 "x" :x 'x]]
+        (is (v/drill-path-segment? x) (pr-str x)))
+      (doseq [x [negative-zero js/NaN js/Infinity [] '() {} #{}
+                 (random-uuid) (js/Date.) (js-obj)]]
+        (is (not (v/drill-path-segment? x)) (pr-str x))))))
+
+(deftest public-drill-schema-population-is-pure-closed-data
+  (let [forms (select-keys (schema/snapshot) drill-schema-keys)]
+    (is (= (set drill-schema-keys) (set (keys forms))))
+    (doseq [[k form] forms]
+      (is (= form (reader/read-string (pr-str form))) (str k " round trips"))
+      (is (not-any? #{:any} (tree-seq coll? seq form)) (str k " has no :any"))
+      (is (not-any? #(and (vector? %) (= :maybe (first %)))
+                    (tree-seq coll? seq form))
+          (str k " has no maybe schema"))
+      (is (not-any? fn? (tree-seq coll? seq form))
+          (str k " has no function object"))
+      (is (not-any? #(and (symbol? %) (namespace %))
+                    (tree-seq coll? seq form))
+          (str k " has no unresolved application predicate")))
+    (is (not (schema/valid-candidate-value?
+               :seon.render.value/drill-request
+               {:seon.render.value/path []
+                :seon.render.value/offset 0
+                :seon.render.value/effective-limits
+                {:seon.config.render/value-max-path-segments 32
+                 :seon.config.render/value-max-path-bytes 4096
+                 :seon.config.render/value-max-realized-items 1024
+                 :seon.render.value/page-size 8}
+                :seon.render.value/unknown true})))
+    (is (not (schema/valid-candidate-value?
+               :seon.render.value/operation-limits
+               {:seon.render.value/page-size nil}))
+        "optional means absent, never stored nil")))
+
+(deftest drill-predicate-contracts-reuse-the-existing-raw-value-boundary
+  (doseq [v [#'v/safe-nonnegative-int?
+             #'v/safe-positive-int?
+             #'v/drill-path-segment?]]
+    (let [form (:malli/schema (meta v))]
+      (is (not-any? #{:any} (tree-seq coll? seq form)))
+      (is (some #{:seon.render.value/value}
+                (tree-seq coll? seq form))
+          "hostile scalar input reuses the one proven polymorphic boundary"))))
 
 ;; Stand-ins for opaque runtime handles (the real ones are datahike's).
 (defrecord FakeDB [max-tx max-eid])

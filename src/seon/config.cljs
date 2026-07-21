@@ -1210,6 +1210,29 @@
   [configuration]
   (get configuration :seon.config.render/value-max-realized-items 1024))
 
+(defn effective-value-drill-limits
+  "Effective value-drill limits under host and operation policy."
+  {:malli/schema
+   [:=> [:cat :seon.render.value/limit-normalization-request]
+    :seon.render.value/effective-limits]}
+  [{:seon.config/keys [configuration]
+    :seon.render.value/keys [operation-limits]}]
+  (let [operation-limits (or operation-limits {})
+        narrowed (fn [k host]
+                   (min host (get operation-limits k host)))]
+    {:seon.config.render/value-max-path-segments
+     (narrowed :seon.config.render/value-max-path-segments
+               (value-max-path-segments configuration))
+     :seon.config.render/value-max-path-bytes
+     (narrowed :seon.config.render/value-max-path-bytes
+               (value-max-path-bytes configuration))
+     :seon.config.render/value-max-realized-items
+     (narrowed :seon.config.render/value-max-realized-items
+               (value-max-realized-items configuration))
+     :seon.render.value/page-size
+     (narrowed :seon.render.value/page-size
+               (value-max-items configuration))}))
+
 (defn value-max-string
   "Max chars of a string leaf before it is clipped to a marker.
 
