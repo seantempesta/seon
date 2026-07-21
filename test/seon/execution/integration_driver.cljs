@@ -104,19 +104,31 @@
       ::host/idle-timeout-ms 120000
       ::host/cancel-grace-ms 1000})
     (try
-      (let [schema-report
+      (let [registered-schemas (schema/registered-schemas)
+            keyword-schema-count
+            (count (filter (comp keyword? key) registered-schemas))
+            schema-rows
+            (into []
+                  (comp
+                   (filter (fn [[schema-key _form]] (keyword? schema-key)))
+                   (map (fn [[schema-key _form]]
+                          {:seon.schema/key schema-key
+                           :seon.schema/form
+                           (schema/form-string schema-key)})))
+                  registered-schemas)
+            _ (when-not (= keyword-schema-count (count schema-rows))
+                (throw
+                 (ex-info
+                  "The schema transaction must contain every keyword-keyed registered schema."
+                  {:seon.execution-proof/keyword-schema-count
+                   keyword-schema-count
+                   :seon.execution-proof/submitted-schema-row-count
+                   (count schema-rows)})))
+            schema-report
             (await
              (db/transact!
               {:seon.db/db initial-database
-               :seon.db/tx-data
-               (into []
-                     (keep (fn [[key form]]
-                             (when (and (keyword? key)
-                                        (not (and (vector? form)
-                                                  (= :maybe (first form)))))
-                               {:seon.schema/key key
-                                :seon.schema/form (schema/form-string key)})))
-                     (schema/registered-schemas))
+               :seon.db/tx-data schema-rows
                :seon.db/tx-meta
                {:seon.db/user [:seon.agent/id "agent-a"]
                 :seon.db/process
@@ -172,7 +184,8 @@
             agent-a-replacement
             (await (invoke! current-database "agent-a" current-symbol []))
             evidence
-            {:seon.execution-proof/initial-database initial-database
+            {:seon.execution-proof/schema-row-count (count schema-rows)
+             :seon.execution-proof/initial-database initial-database
              :seon.execution-proof/current-database current-database
              :seon.execution-proof/before before
              :seon.execution-proof/after [agent-b-after agent-a-after]
