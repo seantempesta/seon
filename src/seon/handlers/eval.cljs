@@ -121,6 +121,42 @@
                       "worked"))]
     (tokens/clip-str label activity-label-truncate)))
 
+(defn- live-result-address
+  "Trusted route address and stable root id for an eval's live result."
+  [agent-id eval-id]
+  (when (and (string? agent-id) (not (str/blank? agent-id))
+             (string? eval-id) (not (str/blank? eval-id)))
+    (let [selector {:seon.render/eval-id eval-id}
+          params (js/URLSearchParams.)]
+      (.append params "eval" eval-id)
+      (.append params "path" "[]")
+      (.append params "offset" "0")
+      {:seon.handlers.eval/url
+       (str "/agent/" (js/encodeURIComponent agent-id) "/value?"
+            (.toString params))
+       :seon.handlers.eval/root-id
+       (render/value-unit-id {:seon.agent/id agent-id} selector [])})))
+
+(defn- live-result-disclosure
+  "A lazy authorized live result with one short stored fallback."
+  [agent-id eval-id result-edn]
+  (let [fallback (short-result result-edn)]
+    (if-let [{::keys [url root-id]} (live-result-address agent-id eval-id)]
+      [:details {:class "mt-1"
+                 (keyword "data-on:toggle")
+                 (str "$event.currentTarget.open && @get("
+                      (js/JSON.stringify url) ")")}
+       [:summary {:class "text-xs font-mono text-amber-300/70 cursor-pointer"}
+        (str "live result" (when fallback (str " · " fallback)))]
+       [:div {:id root-id
+              :class "mt-1 min-w-0 overflow-hidden text-xs font-mono text-text-500"}
+        (if fallback
+          (str "stored fallback · " fallback)
+          "stored fallback unavailable")]]
+      (when fallback
+        [:div {:class "mt-1 text-xs font-mono text-text-500"}
+         (str "stored fallback · " fallback)]))))
+
 (defn render-activity-html
   "The fixed-size eval activity row used by the normal agent transcript.
 
@@ -174,6 +210,7 @@
   (let [configuration (:seon.config/configuration input)
         entity    (or node entity)
         eid       (:seon.eval/id entity)
+        agent-id  (:seon.agent/id input)
         narration (:seon.eval/narration entity)
         src       (or (:seon.eval/source entity) "")
         ok?       (boolean (:seon.eval/ok? entity))
@@ -202,13 +239,7 @@
                      {:seon.render/source (str/trim src)})
        (cond
          ok?
-         (when-let [r (short-result res-edn)]
-           [:details {:class "mt-1"}
-            [:summary {:class "text-xs font-mono text-amber-300/70 cursor-pointer"}
-             (str "result · " r)]
-            [:div {:class "mt-1 min-w-0 overflow-hidden"}
-             (render/block :html configuration input
-                           {:seon.render/source (str res-edn)})]])
+         (live-result-disclosure agent-id eid res-edn)
 
          (string? err-str)
          [:details {:class "mt-1"}
