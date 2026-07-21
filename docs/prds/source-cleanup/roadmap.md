@@ -131,6 +131,20 @@ required-attribute index plus `candidate-shapes`/`matching-shapes` APIs, keyed
 by projection object identity. Render/value/web/execution consumers wait until
 that two-file contract and its ambiguity/open-map/elision falsifiers pass.
 
+Unit 1A is implemented by `284cbabf`. The activated projection now owns every
+required-key row, its inverse index, deterministic `candidate-shapes` and
+complete `matching-shapes`, plus the public activated `explain-shape` handoff.
+The diagnostic cap is 32 actual index visits: a 400-schema common-key fixture
+recorded exactly 32 visits rather than merely asserting output length, while
+matching remains independent of that cap and returns every valid ambiguity.
+Projection-object replacement rotates validator and explainer generations even
+at an equal 32-bit fingerprint; unactivated registration/restoration remains
+invisible. The focused gate passed 16 tests / 123 assertions with zero failures
+or errors (one unrelated pre-existing `my.blob/crypto` compile warning). The
+issue is archived; Unit 1B is dependency-ready, while Stage 1.5 graduation still
+requires its projection/drill/transport/UI units and the integrated pure,
+server, child-retirement, and real-browser gates.
+
 The remaining Stage 1.5 dependency spine is now grounded rather than left to
 consumer inference. Unit 1B's plain-data projection contract is
 [[research/schema-aware-value-projection-boundary-2026-07-20]] (`817a821f`):
