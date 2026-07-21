@@ -487,11 +487,26 @@ frames in public `sci/stacktrace` terms; head cap named for W1.
 Focused 9/86 rerun by orchestrator; full writer gate 313/2351 green.
 Round-1 stop caught the classify-needs-ctx spec gap (authorized).
 
+Also accepted: **CLJC portability audit**
+(`research/cljc-portability-audit-2026-07-21.md`) — 62% of 83.7K LOC
+can join the portable canon; 11 falsely-portable `.cljc` files; the
+program rule: portable namespaces synchronously transform ordinary
+immutable data, platform edges acquire/resolve/wait/publish/transport.
+Wave 1 = leaf bundle + eval/internal + toolkit `.cljc` repairs,
+replacing the host's regex-selected portable slice.
+
 IN FLIGHT / UNCOMMITTED:
-- **W0.6 dispatched** per `specs/w0.6-host-escape-hardening.md`
-  (host.clj + record.clj); NS-0.5 internals extraction queued next
-  (no W0.6 overlap, held for lane-count cap); CLJC portability audit
-  running read-only.
+- **W0.6 round 2** (expanded ownership: host.clj, record.clj,
+  context.clj, tokens.cljc, portable seon.error extraction) — its
+  round-1 stop found the JVM has NO seon.error/record! path.
+- **W1.3a round 2** (duplicate limits; cycle + read-profile-split
+  rulings authorized; owns config.cljs and agent/toolkit files).
+- **Packages naming/flows refinement agent** (mapping-is-data ruling
+  integrated mid-flight).
+- **W1.1 boot-contract spec READY** (`specs/w1.1-boot-contract.md`),
+  dispatch blocked on W1.3a (config.cljs). NS-0.5 + W0.7 blocked on
+  W0.6. Autonomous loop active with the owner away; task list carries
+  the refill order.
 - **W6 package-host design RETURNED and accepted**
   (`research/w6-package-host-design-2026-07-21.md`): ledger-first
   per-cluster packages/, two disposable `seon.packages.host` platform
