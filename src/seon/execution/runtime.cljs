@@ -573,6 +573,38 @@
                       :seon.ui.header/running-count
                       (if (= :running (page-state entity)) 1 0)}}))))))))))
 
+(def ^:private setup-home-requires-origin-query
+  '[:find ?requires ?process-id
+    :in $ ?agent-id
+    :where
+    [?agent :seon.agent/id ?agent-id]
+    [?agent :seon.eval/home-requires ?requires ?tx]
+    [?tx :seon.db/process ?process]
+    [?process :seon.db.process/id ?process-id]])
+
+(defn- ^:async setup-fault-kind!
+  "Classify namespace setup failure from its persisted input provenance."
+  [database agent-id]
+  (let [origin
+        (when agent-id
+          (await
+           (db/query
+            {::db/db database
+             ::db/query setup-home-requires-origin-query
+             ::db/args [agent-id]
+             ::db/max-work 100000
+             ::db/max-results 8
+             ::db/max-result-weight 4096})))
+        agent-override?
+        (and (set? origin)
+             (= 1 (count origin))
+             (let [[requires process-id] (first origin)]
+               (and (= :seon.db.process/repl process-id)
+                    (not= home/home-ns-require-specs
+                          (db/decode-edn-value
+                           :seon.eval/home-requires requires)))))]
+    (if agent-override? :agent :core)))
+
 (defn ^:async eval-batch!
   "Evaluate one parsed batch in this agent's retained child compiler.
 
@@ -596,19 +628,16 @@
         setup-ns (if agent-id (home/home-ns agent-id) starting-ns)
         setup (await (eval/setup-agent-ns! configuration compile-state
                                            setup-ns agent-id))
-        ;; :agent, not :core — the resolved home require vector is agent-
-        ;; writable data (`:seon.eval/home-requires` is the documented re-arm
-        ;; dial), so a declaration that no longer analyzes is recorded fault
-        ;; data, never an escalation: under the `:crash` dial a :core record
-        ;; here would kill the child and re-wedge the agent (proven live,
-        ;; 2026-07-21). The batch below still runs.
+        setup-fault
+        (when (and (map? setup) (string? (:seon.error/message setup)))
+          (await (setup-fault-kind! database agent-id)))
         _ (when (and (map? setup) (string? (:seon.error/message setup)))
             (error/with-configuration
              configuration
              #(error/record!
                {::error/raw (ex-info (:seon.error/message setup)
                                      (or (:seon.error/data setup) {}))
-                ::error/fault :agent})))]
+                ::error/fault setup-fault})))]
     (error/with-configuration
       configuration
       #(db/with-agent

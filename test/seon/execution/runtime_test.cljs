@@ -2,6 +2,7 @@
   (:require
    [cljs.test :refer [async deftest is testing]]
    [clojure.string :as str]
+   [seon.agent.home :as home]
    [seon.agent.ctx :as ctx]
    [seon.agent.message :as message]
    [seon.config :as config]
@@ -627,7 +628,7 @@
              (set! db/current-agent-id original-agent)
              (done)))))))
 
-(deftest ns-setup-failure-records-a-fault-and-still-runs-the-batch
+(deftest agent-home-requires-setup-failure-survives-the-crash-policy
   ;; The runtime contract: a ns-setup failure becomes a recorded :seon/error
   ;; fault value carrying the underlying eval error — the batch still runs,
   ;; so the agent is never permanently wedged by its stored current ns.
@@ -635,10 +636,15 @@
     (let [original-eval eval/eval-batch!
           original-setup eval/setup-agent-ns!
           original-agent db/current-agent-id
+          original-query db/query
           original-record error/record!
           compile-state (atom {})
           recorded (atom nil)
+          query-request (atom nil)
           batch-ran (atom false)
+          crash-configuration
+          (assoc configuration :seon.config/on-core-error :crash)
+          invalid-requires '[[agent.missing-toolkit :as missing]]
           setup-failure
           {:seon.error/message "setup-agent-ns! failed — probe"
            :seon.error/data {:seon.eval/agent-ns 'my.agent.agent-1
@@ -650,6 +656,11 @@
            :seon.agent.turn/id-of-turn "turn-1"
            :seon.agent.run/id-of-run "run-1"}]
       (set! db/current-agent-id (fn [] "agent-1"))
+      (set! db/query
+            (fn [request]
+              (reset! query-request request)
+              (js/Promise.resolve
+               #{[(pr-str invalid-requires) :seon.db.process/repl]})))
       (set! error/record!
             (fn [envelope] (reset! recorded envelope) envelope))
       (set! eval/setup-agent-ns!
@@ -668,7 +679,7 @@
                (js/Promise.resolve
                 {::execution/compile-state compile-state
                  ::execution/program {}
-                 ::execution/configuration configuration}))))
+                 ::execution/configuration crash-configuration}))))
           (.then
            (fn [result]
              (is (true? @batch-ran)
@@ -676,8 +687,9 @@
              (is (= ["eval-1"] (:seon.eval/ids result)))
              (is (some? @recorded) "the setup failure is recorded as a fault")
              (is (= :agent (::error/fault @recorded))
-                 "agent-writable home-requires data faults as :agent — a
-                  :core record would crash the child under the :crash dial")
+                 "the persisted REPL-authored override cannot take :crash")
+             (is (= database (::db/db @query-request)))
+             (is (= ["agent-1"] (::db/args @query-request)))
              (let [raw (::error/raw @recorded)]
                (is (= "setup-agent-ns! failed — probe" (ex-message raw)))
                (is (= {:seon.error/message "underlying"}
@@ -691,7 +703,28 @@
              (set! eval/eval-batch! original-eval)
              (set! eval/setup-agent-ns! original-setup)
              (set! db/current-agent-id original-agent)
+             (set! db/query original-query)
              (set! error/record! original-record)
+             (done)))))))
+
+(deftest canonical-home-setup-failure-remains-a-core-fault
+  (async done
+    (let [original-query db/query
+          classify! (deref #'runtime/setup-fault-kind!)]
+      (set! db/query
+            (fn [_]
+              (js/Promise.resolve
+               #{[(pr-str home/home-ns-require-specs)
+                  :seon.db.process/boot]})))
+      (-> (classify! database "agent-1")
+          (.then
+           (fn [fault]
+             (is (= :core fault)
+                 "canonical/host setup failures retain configured escalation")))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! db/query original-query)
              (done)))))))
 
 (deftest agent-view-projection-resolves-literal-and-async-authored-surfaces
