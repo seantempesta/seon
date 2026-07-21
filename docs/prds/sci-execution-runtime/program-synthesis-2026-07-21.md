@@ -113,6 +113,17 @@ and shared-tree/path-limited-commit rules.
   originating context; runaways settle ~103ms on a 100ms deadline with
   same-single-worker-host recovery; full writer gate 287/2193 green;
   host audit found no other direct SCI invocation outside with-ctx.
+  **W0.2 DONE `3346e54f`**: host-authored base/portable/capability/
+  post-boot wrapper vars stamped `:sci/built-in` via the new
+  `register-host-wrappers!` entry; agent corpus vars stay writable
+  through the recorded graduation/edit path (ownership-class ruling);
+  structural ex-data classification with message fallback; steering
+  names the agent's home ns; full gate 297/2232 green incl. graduation
+  and read-ceiling suites.
+  **W0.5 DONE `7cab9119`** (writer lane): capless reads get server
+  defaults, supplied caps clamped, Datahike's own
+  `:datahike.resource/*` vocabulary, one defaults map documented for
+  the W1 relocation; focused 5/14 + adjacent 20/158 green.
   Remaining sub-units:
   W0.1 merge interrupt core into `build-base!` + force/serialize eval
   results under `sci.ctx-store/with-ctx` (probe caveat) + pool
