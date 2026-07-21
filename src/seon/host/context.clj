@@ -925,6 +925,8 @@
         _ (register-host-capabilities! wrapper-registry writer)
         ctx (sci/init
              {:load-fn (registry-load-fn wrapper-registry)
+              :namespaces {'clojure.core interrupt/clojure-core
+                           'clojure.string interrupt/clojure-string}
               :interrupt-fn
               (fn []
                 (when (.isInterrupted (Thread/currentThread))

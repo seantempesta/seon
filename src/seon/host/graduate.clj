@@ -2,6 +2,7 @@
   "Derive trusted JVM function bindings from recorded corpus facts."
   (:require [clojure.edn :as edn]
             [malli.core :as m]
+            [sci.ctx-store]
             [seon.content-hash :as content-hash]
             [seon.host.context :as context]
             [seon.host.record :as record]
@@ -159,7 +160,7 @@
           true
           (catch Throwable _ false)))))
 
-(defn- nursery-var [base function-row]
+(defn- nursery-context+var [base function-row]
   (let [ctx (context/fork-context base)
         lib (row-lib function-row)
         source (:seon.fn/source function-row)]
@@ -170,7 +171,7 @@
             ctx [(str "(in-ns '" lib ")\n" source)]))]
       (if (and (:seon.eval/ok? envelope)
                (instance? Var (:seon.eval/value envelope)))
-        (:seon.eval/value envelope)
+        [ctx (:seon.eval/value envelope)]
         (throw
          (ex-info "The recorded source did not produce one SCI function var."
                   {:seon.host.graduate/envelope envelope}))))))
@@ -186,13 +187,20 @@
       (clojure.core/refer 'clojure.core)
       (clojure.core/eval form))))
 
-(defn- test-outcome [function-var]
-  (if-let [test-fn (:test (meta function-var))]
-    (try
-      {::ok? true ::result-edn (pr-str (test-fn))}
-      (catch Throwable throwable
-        (error-result (or (.getMessage throwable) (str throwable)))))
-    (error-result "The recorded function has no inline :test example.")))
+(defn- test-outcome
+  ([function-var]
+   (test-outcome nil function-var))
+  ([ctx function-var]
+   (if-let [test-fn (:test (meta function-var))]
+     (try
+       {::ok? true
+        ::result-edn
+        (pr-str (if ctx
+                  (sci.ctx-store/with-ctx ctx (test-fn))
+                  (test-fn)))}
+       (catch Throwable throwable
+         (error-result (or (.getMessage throwable) (str throwable)))))
+     (error-result "The recorded function has no inline :test example."))))
 
 (defn- wrapper [function-row implementation]
   {(row-name function-row)
@@ -222,7 +230,7 @@
     function-row ::function-row
     contexts ::contexts}]
   (try
-    (let [function-var (nursery-var base function-row)]
+    (let [[_ctx function-var] (nursery-context+var base function-row)]
       (install-implementation! registry contexts function-row @function-var)
       {::ok? true
        ::tier :nursery
@@ -241,8 +249,8 @@
   (try
     (let [source (:seon.fn/source function-row)
           current-fingerprint (fingerprint source)
-          interpreted (nursery-var base function-row)
-          nursery-test (test-outcome interpreted)
+          [interpreted-ctx interpreted] (nursery-context+var base function-row)
+          nursery-test (test-outcome interpreted-ctx interpreted)
           schema-valid (schema-valid? function-row)
           test-covered (boolean (:test (meta interpreted)))
           preflight? (and schema-valid test-covered (::ok? nursery-test))
@@ -286,7 +294,7 @@
     (let [tier (effective-tier function-row)
           function-var (if (= :graduated tier)
                          (compiled-var function-row)
-                         (nursery-var base function-row))]
+                         (second (nursery-context+var base function-row)))]
       (install-implementation! registry [] function-row @function-var)
       {::ok? true ::tier tier})
     (catch Throwable throwable

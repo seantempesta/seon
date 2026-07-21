@@ -208,6 +208,10 @@
               (is (::graduate/ok? graduated) (pr-str graduated))
               (is (graduate/trust-gate?
                    (::graduate/gate-facts graduated)))
+              (is (= "nil"
+                     (get-in graduated [::graduate/gate-facts
+                                        ::graduate/nursery-test
+                                        ::graduate/result-edn])))
               (is (= :graduated
                      (:seon.fn/execution-tier row-graduated)))
               (is (> speedup 1.0)

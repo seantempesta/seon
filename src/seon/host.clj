@@ -70,6 +70,7 @@
             [clojure.string :as str]
             [seon.db.protocol :as db.protocol]
             [sci.core :as sci]
+            [sci.ctx-store]
             [seon.db.transport.uds :as uds]
             [seon.host.context :as context]
             [seon.host.graduate :as graduate]
@@ -500,8 +501,9 @@
   [ctx source]
   (try
     (let [value (sci/eval-string* ctx source)]
-      (cond-> (assoc (wire-safe-value {:seon.eval/ok? true
-                                       :seon.eval/value value})
+      (cond-> (assoc (sci.ctx-store/with-ctx ctx
+                       (wire-safe-value {:seon.eval/ok? true
+                                         :seon.eval/value value}))
                      ::live-value value)
         (instance? sci.lang.Var value)
         (assoc ::var-meta (meta value))))
