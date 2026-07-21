@@ -195,10 +195,27 @@
                                              :my.plan/status :my.plan/goal
                                              :my.plan/expect :my.plan/pace
                                              :my.plan/description
+                                             :my.plan/created-at
+                                             :my.plan/completed-at
+                                             :my.plan/message
                                              :my.plan/needs])]
                   (cond-> node (seq children)
                     (assoc :my.plan/_parent children)))))]
       (build id #{}))))
+
+(defn compatibility-tree
+  "Project an enriched plan tree onto the established public tree shape."
+  [tree]
+  (letfn [(project [node]
+            (cond-> (dissoc node :my.plan/created-at
+                            :my.plan/completed-at :my.plan/message)
+              (seq (:my.plan/_parent node))
+              (assoc :my.plan/_parent
+                     (mapv project (:my.plan/_parent node)))))]
+    (cond
+      (map? tree) (project tree)
+      (vector? tree) (mapv project tree)
+      :else tree)))
 
 (defn forest-from-rows
   [rows]
@@ -207,6 +224,11 @@
        (sort-by #(inst-ms (:my.plan/created-at %)))
        (keep #(subtree-from-rows rows (row-id %)))
        vec))
+
+(defn plan-value-from-rows
+  "Build the property-bearing plan value from one ordinary row set."
+  [rows]
+  {:my.plan/roots (forest-from-rows rows)})
 
 (defn open-steps-from-rows
   [rows]
@@ -1807,8 +1829,8 @@
 ;; --- Windows (anchor + capped frontier + recent-done tail), the surface shows
 ;; --- the WHOLE forest — the human explores what the prompt windows away.
 ;; ---
-;; --- STRUCTURE vs SIGNAL (2026-07-11): [[build-forest]] assembles ONLY the
-;; --- renderable nested TREE (parent→children layout, waiters from the
+;; --- STRUCTURE vs SIGNAL: the ordinary plan value carries ONLY the nested
+;; --- TREE (parent→children layout, source timestamps/message/needs), while
 ;; --- inverted `needs` edges, timestamps + message-origin, oldest-first) —
 ;; --- a projection the windowing :ai block never needs and the flat shared
 ;; --- fns cannot give (they answer counts/positions, not a tree). Every
@@ -1848,78 +1870,25 @@
                     (:my.plan/id r)])
            rows))
 
-(def ^:private html-plan-selector
-  [:db/id :my.plan/id :my.plan/title :my.plan/status :my.plan/goal
-   :my.plan/pace :my.plan/expect :my.plan/description :my.plan/created-at
-   :my.plan/completed-at :my.plan/message
-   {:my.plan/agent [:seon.agent/id]}
-   {:my.plan/parent [:my.plan/id]}
-   {:my.plan/needs [:my.plan/id]}])
+(defn- plan-value-rows
+  "Flatten a plan value into ordinary rows with derived parent refs."
+  [{:my.plan/keys [roots]}]
+  (letfn [(walk [parent-id node]
+            (into [(cond-> (dissoc node :my.plan/_parent)
+                     parent-id
+                     (assoc :my.plan/parent {:my.plan/id parent-id}))]
+                  (mapcat #(walk (:my.plan/id node) %))
+                  (:my.plan/_parent node)))]
+    (into [] (mapcat #(walk nil %)) roots)))
 
-(defn- ^:async acquire-html-plan-rows
-  [database agent-id]
-  (await
-   (db/query
-    {::db/db database
-     ::db/query
-     '[:find [(pull ?step ?selector) ...]
-       :in $ ?selector ?agent-id
-       :where
-       [?agent :seon.agent/id ?agent-id]
-       [?step :my.plan/agent ?agent]]
-     ::db/args [html-plan-selector agent-id]
-     ::db/max-work 5000000
-     ::db/max-results 200000
-     ::db/max-result-weight 2097152})))
-
-(defn- row->node
-  "Plan row `r` to one walked node map with caller-supplied children."
-  [by-id waiters r children]
-  (let [needs (->> (:my.plan/needs r)
-                   (keep (fn [need] (by-id (:my.plan/id need))))
-                   (mapv (fn [nr] {:my.plan/id    (:my.plan/id nr)
-                                   :my.plan/title (:my.plan/title nr)})))]
-    (cond-> {:my.plan/id       (:my.plan/id r)
-             :my.plan/title    (:my.plan/title r)
-             :my.plan/status   (:my.plan/status r)
-             :my.plan/children children}
-      (:my.plan/goal r)         (assoc :my.plan/goal (:my.plan/goal r))
-      (:my.plan/pace r)         (assoc :my.plan/pace (:my.plan/pace r))
-      (:my.plan/expect r)       (assoc :my.plan/expect (:my.plan/expect r))
-      (:my.plan/description r)  (assoc :my.plan/description
-                                       (:my.plan/description r))
-      (:my.plan/message r)      (assoc :my.plan/message? true)
-      (:my.plan/created-at r)   (assoc :my.plan/created-at
-                                       (:my.plan/created-at r))
-      (:my.plan/completed-at r) (assoc :my.plan/completed-at
-                                       (:my.plan/completed-at r))
-      (seq needs)               (assoc :my.plan/needs needs)
-      (seq (waiters (:my.plan/id r))) (assoc :my.plan/waiters
-                                             (waiters (:my.plan/id r))))))
-
-(defn- build-forest
-  "Build one cycle-safe, oldest-first forest from ordinary plan rows."
-  [rows]
-  (let [by-id (rows-by-id rows)
-        kids (group-by row-parent-id rows)
-        waiters  (reduce (fn [m r]
-                           (reduce (fn [m need]
-                                     (update m (:my.plan/id need) (fnil conj [])
-                                             (:my.plan/title r)))
-                                   m (:my.plan/needs r)))
-                         {} rows)
-        node     (fn node [r seen]
-                   (let [seen (conj seen (:my.plan/id r))
-                         children
-                         (->> (kids (:db/id r))
-                              step-order
-                              (remove #(seen (:my.plan/id %)))
-                              (mapv #(node % seen)))]
-                     (row->node by-id waiters r children)))]
-    (->> rows
-         (remove row-parent-id)
-         step-order
-         (mapv #(node % #{})))))
+(defn- waiter-titles
+  "Titles of steps whose needs point at `id`, derived from the same rows."
+  [rows id]
+  (->> rows
+       (filter #(some (fn [need] (= id (:my.plan/id need)))
+                      (:my.plan/needs %)))
+       step-order
+       (mapv :my.plan/title)))
 
 ;; --- Per-node SIGNALS delegate to the shared rule-backed db fns
 ;; --- ([[rollup]] / [[ready?]] / [[blocked?]]) — the SAME derivations the
@@ -1932,11 +1901,12 @@
   "One `waits on` line for need `n` — done-glyph + title + id (done-ness of
    the target derived via the shared [[rollup]] over db value `db`)."
   [rows n]
-  (let [done? (:my.plan/done? (plan-rollup-from-rows rows (:my.plan/id n)))]
+  (let [need (get (rows-by-id rows) (:my.plan/id n))
+        done? (:my.plan/done? (plan-rollup-from-rows rows (:my.plan/id n)))]
     [:li {:class "flex items-center gap-1"}
      [:span {:class (str "shrink-0 " (if done? "text-success" "text-warning"))}
       (if done? "✓" "○")]
-     [:span {:class "text-text-200 truncate"} (:my.plan/title n)]
+     [:span {:class "text-text-200 truncate"} (:my.plan/title need)]
      [:span {:class "text-text-500 shrink-0"} (:my.plan/id n)]]))
 
 (defn- step-detail-html
@@ -1964,9 +1934,9 @@
             (into [:ul {:class "flex flex-col gap-1"}]
                   (map #(need-line-html rows %))
                   needs)))
-     (when-let [ws (seq (:my.plan/waiters node))]
+     (when-let [ws (seq (waiter-titles rows id))]
        (row "blocks" (str/join ", " ws)))
-     (when (:my.plan/message? node)
+     (when (:my.plan/message node)
        (row "origin" "✉ auto-minted from a message"))]))
 
 (defn- step-row-html
@@ -1979,7 +1949,7 @@
    the shared [[rollup]]/[[ready?]]/[[blocked?]] over db value `db`."
   [rows node next-id depth]
   (let [id       (:my.plan/id node)
-        children (:my.plan/children node)
+        children (:my.plan/_parent node)
         leaf?    (empty? children)
         ru       (plan-rollup-from-rows rows id)
         done?    (:my.plan/done? ru)
@@ -2011,7 +1981,7 @@
                 :data-text (str "$planclosed.includes(' " id " ') ? '▸' : '▾'")}
          "▾"])
       [:span {:class (str "shrink-0 " gcls)} glyph]
-      (when (:my.plan/message? node) [:span {:class "text-info shrink-0"} "✉"])
+      (when (:my.plan/message node) [:span {:class "text-info shrink-0"} "✉"])
       [:span {:class (str "truncate " tcls)} (:my.plan/title node)]
       (when active? [:span {:class "text-2xs text-signal shrink-0"} "NOW"])
       (when (and next? (not active?))
@@ -2059,10 +2029,10 @@
      [:div {:class "plan-tree px-2 py-1 border-t border-base-800"}
       (into
        [:ul {:class "flex flex-col"}]
-       (map #(step-row-html rows % next-id 0) (:my.plan/children root)))]]))
+       (map #(step-row-html rows % next-id 0) (:my.plan/_parent root)))]]))
 
-(defn ^:async plan-block-html
-  "Live, explorable HTML twin of [[plan-block]] — a `/agent/{id}` surface.
+(defn plan-html
+  "Render an ordinary plan value as the live explorable plan surface.
 
    Renders the agent's WHOLE plan forest behind bounded root disclosures (the
    :ai block windows by content). The focused root starts open; other roots are
@@ -2070,7 +2040,7 @@
    a done/total roll-up and a thin amber progress bar, then the step tree — `●` active (NOW,
    highlighted), `○` open (`ready`-tagged), `◌` blocked, `✓` done (hidden
    until the show-completed toggle), `✉` message-minted. STRUCTURE comes
-   from [[build-forest]] (the renderable nested tree); every SIGNAL —
+   from the ordinary plan value's nested tree; every SIGNAL —
    roll-up, done, ready, blocked, and the you-are-here position — derives
    from the SAME shared db fns the :ai block uses ([[rollup]]/[[ready?]]/
    [[blocked?]]/[[anchor]], see the derivation note above); the
@@ -2083,18 +2053,12 @@
    completed tail expands on click. No plan → a quiet one-liner (the
    teaching text in [[empty-plan-teaching]] is for the model, not the
    human)."
-  {:malli/schema [:=> [:cat :seon.render/section-request :any]
+  {:malli/schema [:=> [:cat :seon.render/section-request]
                   :seon.render.canvas/hiccup]}
-  [{database :seon.db/db agent-id :seon.agent/id} _invoke-selected!]
-  (let [database (or database (await (db/db)))
-        rows (if (:seon.error/message database)
-               database
-               (await (acquire-html-plan-rows database agent-id)))]
-    (if (:seon.error/message rows)
-      [:div {:class "text-danger text-2xs font-mono py-1"}
-       "plan unavailable"]
-      (let [forest (build-forest rows)]
-        (if (empty? forest)
+  [{value :seon.render/node}]
+  (let [forest (:my.plan/roots value)
+        rows (plan-value-rows value)]
+    (if (empty? forest)
       [:div {:class "text-text-500 italic text-2xs font-mono py-1"}
        "no plan yet"]
       (let [a (anchor-from-rows rows)
@@ -2142,4 +2106,15 @@
              (map (fn [{:my.plan/keys [title completed-at]}]
                     [:li {:class "text-2xs text-text-500 truncate"}
                      (str "✓ [" (stamp completed-at) "] " title)])
-                  dones))]))))))))
+                  dones))]))))))
+
+(defn plan-ai
+  "Render a deterministic bounded text view of an ordinary plan value."
+  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
+  [{value :seon.render/node configuration :seon.config/configuration :as input}]
+  (tokens/bounded-pr-str
+   value
+   (or (:seon.agent.ctx/token-cap input)
+       (some-> (:seon.config.render/result-body-cap configuration)
+               tokens/chars->tokens)
+       512)))

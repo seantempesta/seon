@@ -67,20 +67,63 @@
            :db/cardinality :db.cardinality/one}]
          (db/malli->datahike-schema [:my.plan/namespace :my.plan/claim]))))
 
-(deftest html-renderer-matches-the-dynamic-render-interface
+(deftest plan-value-schema-is-closed-and-recursive
+  (let [ids {"root" "rootaaaaaaaa" "done" "doneaaaaaaaa"
+             "ready" "readyaaaaaaa"}
+        schema-rows
+        (mapv (fn [row]
+                (cond-> (update row :my.plan/id ids)
+                  (:my.plan/parent row)
+                  (update-in [:my.plan/parent :my.plan/id] ids)
+                  (:my.plan/needs row)
+                  (update :my.plan/needs
+                          #(mapv (fn [need]
+                                   (update need :my.plan/id ids)) %))))
+              rows)
+        valid? #(schema/valid-candidate-value? :my.plan/plan-value %)
+        value (internal/plan-value-from-rows schema-rows)
+        nested (get-in value [:my.plan/roots 0 :my.plan/_parent 0])]
+    (is (valid? {:my.plan/roots []}))
+    (is (valid? value))
+    (is (not (valid? (assoc value :my.plan/extra true))))
+    (is (not (valid? (assoc-in value
+                                [:my.plan/roots 0 :my.plan/_parent 0]
+                                (dissoc nested :my.plan/title)))))
+    (is (not (valid? (assoc-in value
+                                [:my.plan/roots 0 :my.plan/needs]
+                                [{:my.plan/id "done" :my.plan/extra true}]))))))
+
+(deftest plan-renderers-are-pure-bounded-and-wire-safe
+  (let [value (internal/plan-value-from-rows rows)
+        request {:seon.render/node value :seon.agent.ctx/token-cap 8}
+        hiccup (internal/plan-html request)
+        ai-a (internal/plan-ai request)
+        ai-b (internal/plan-ai request)]
+    (is (vector? hiccup))
+    (is (str/includes? (pr-str hiccup) "Ship"))
+    (is (protocol/ordinary-wire-value? hiccup))
+    (is (= ai-a ai-b))
+    (is (<= (count ai-a) (inc (* 8 4))))))
+
+(deftest plan-surface-acquires-rows-once
   (async done
-    (let [original-query db/query]
-      (set! db/query (fn [_] (js/Promise.resolve rows)))
-      (-> (internal/plan-block-html
+    (let [calls (atom 0)
+          original-execute-many db/execute-many]
+      (set! db/execute-many
+            (fn [_]
+              (swap! calls inc)
+              (js/Promise.resolve
+               {::db/results
+                [{::protocol/success? true ::protocol/result rows}
+                 {::protocol/success? true ::protocol/result true}]})))
+      (-> (plan/plan-surface
            {:seon.db/db database :seon.agent/id agent-id}
            (fn [_] (js/Promise.resolve [])))
           (.then
            (fn [hiccup]
-             (is (vector? hiccup))
-             (is (str/includes? (pr-str hiccup) "Ship"))
-             (is (protocol/ordinary-wire-value? hiccup)
-                 "complete nested plan hiccup crosses the child boundary")))
-          (.finally (fn [] (set! db/query original-query)))
+             (is (= 1 @calls))
+             (is (str/includes? (pr-str hiccup) "Ship"))))
+          (.finally (fn [] (set! db/execute-many original-execute-many)))
           (.then (fn [_] (done)))
           (.catch (fn [error] (is false (str error)) (done)))))))
 
