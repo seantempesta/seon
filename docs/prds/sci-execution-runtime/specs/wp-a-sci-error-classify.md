@@ -7,7 +7,9 @@ src/seon/host/context.clj, and new/updated tests under the writer gate
 (test/seon/host_*_writer_test.clj family). Path-limited commit only. Never
 edit any CLAUDE.md.
 
-ROLE: principal engineer. Better seam → STOP and report with evidence.
+ROLE: principal engineer. Better seam or spec gap → STOP and report with
+evidence. Stopping early is FREE — your session resumes with full context,
+so never push through a doubtful seam to avoid "wasting" the run.
 
 DESIGN AUTHORITY: docs/prds/sci-execution-runtime/research/
 error-quality-u6-w3-design-2026-07-21.md — read it COMPLETELY first. This

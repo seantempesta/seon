@@ -66,7 +66,10 @@ with-ctx lazy-forcing requirement; perf tax accepted at agent scale).
 10. Implementer preamble (mandatory in every spec): read the
     `reference-code/` source you interface with; report (a) whether a
     better seam exists now that the source is understood and (b) what
-    upstream calls each thing — use their terms.
+    upstream calls each thing — use their terms. Stopping early to
+    report is FREE (session resume keeps full context) — specs say so
+    explicitly and encourage it; three seam corrections in two days
+    (W0.1, W0.4 ×2) prove the loop works.
 
 ## Strong / weak / PoC map
 

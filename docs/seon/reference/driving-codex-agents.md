@@ -94,7 +94,11 @@ did with `git status` / `git diff` before accepting; that review is the safeguar
 
 Resume lets you iterate: correct or extend a run while Codex keeps the full context
 of what it already did (verified — a resumed run remembered and edited the file its
-first turn created). But `codex exec resume` is NOT `codex exec` with an id bolted
+first turn created). This makes stop-and-report **free**: an implementer that halts
+to flag a better seam or a spec gap loses nothing — the resumed session picks up
+with all its grounding intact. Owner ruling (2026-07-21): every spec should say
+this explicitly and encourage early stops; the seam corrections they produce are
+exactly what we want to learn from. But `codex exec resume` is NOT `codex exec` with an id bolted
 on, and this is exactly where "resume doesn't work" comes from. Three rules:
 
 **1. Capture the session id on the first run.** Add `--json` to the fresh `exec`
