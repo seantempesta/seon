@@ -118,9 +118,11 @@
 (schema/register! ::path [:vector ::path-segment])
 (schema/register! ::offset [:int {:min 0 :max 9007199254740991}])
 (schema/register! ::page-size [:int {:min 1 :max 9007199254740991}])
+(schema/register! ::bounded-vector 'vector?)
+(schema/register! ::bounded-map 'map?)
 (schema/register! ::bounded-data
                   [:or :nil :boolean :int :double :string :keyword :symbol
-                   :vector :map])
+                   ::bounded-vector ::bounded-map])
 (schema/register! ::operation-limits
                   [:map {:closed true}
                    [:seon.config.render/value-max-path-segments

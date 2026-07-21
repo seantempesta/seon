@@ -8,7 +8,10 @@
     [cljs.test :as t :refer [deftest is testing]]
     [cljs.reader :as reader]
     [clojure.string :as str]
+    [malli.core :as m]
+    [malli.registry :as mr]
     [seon.ai.tokens :as tokens]
+    [seon.client :as client]
     [seon.config :as config]
     [seon.render.value :as v]
     [seon.schema :as schema]))
@@ -20,6 +23,8 @@
    :seon.render.value/path
    :seon.render.value/offset
    :seon.render.value/page-size
+   :seon.render.value/bounded-vector
+   :seon.render.value/bounded-map
    :seon.render.value/bounded-data
    :seon.render.value/operation-limits
    :seon.render.value/effective-limits
@@ -82,6 +87,56 @@
                {:seon.render.value/page-size nil}))
         "optional means absent, never stored nil")))
 
+(deftest boot-indexed-complete-population-admits-result-literals
+  (let [rows (client/index-schemas)
+        forms (into {}
+                    (map (fn [row]
+                           [(:seon.schema/key row)
+                            (reader/read-string (:seon.schema/form row))]))
+                    rows)
+        projection (schema/build-projection forms)]
+    (is (= (count rows) (count forms))
+        "the exact boot index contains one canonical row per schema")
+    (is (every? #(contains? forms %) drill-schema-keys))
+    (is (some? projection)
+        "the indexed EDN round trip admits as one complete population")
+    (doseq [[schema-key value]
+            [[:seon.render.value/available-result
+              {:seon.render.value/ok? true
+               :seon.render.value/availability :available
+               :seon.render.value/projection
+               {:seon.render.value/path []
+                :seon.render.value/offset 0
+                :seon.render.value/page-size 1
+                :seon.render.value/summary "nil"
+                :seon.render.value/truncated? false
+                :seon.render.value/more? false
+                :seon.render.value/tree nil
+                :seon.render.value/schemas []}}]
+             [:seon.render.value/unavailable-result
+              {:seon.render.value/ok? true
+               :seon.render.value/availability :unavailable
+               :seon.render.value/projection
+               {:seon.render.value/path []
+                :seon.render.value/offset 0
+                :seon.render.value/page-size 1
+                :seon.render.value/summary "unavailable"
+                :seon.render.value/truncated? false
+                :seon.render.value/more? false
+                :seon.render.value/tree nil
+                :seon.render.value/schemas []}
+               :seon.render.value/recompute? true}]
+             [:seon.render.value/failed-result
+              {:seon.render.value/ok? false
+               :seon/error {:seon.error/message "failed"
+                            :seon.error/kind :user-input}}]]]
+      (is (true? (m/validate schema-key value
+                             {:registry
+                              (mr/composite-registry
+                                (m/default-schemas)
+                                (mr/fast-registry forms))}))
+          (str schema-key " exact branch admits")))))
+
 (deftest drill-predicate-contracts-reuse-the-existing-raw-value-boundary
   (doseq [v [#'v/safe-nonnegative-int?
              #'v/safe-positive-int?
@@ -141,6 +196,16 @@
                   (cons [(key-at i) (value-at i)]
                         (entries (inc i))))))]
       (entries 0))))
+
+(deftest shallow-bounded-data-validation-does-not-enumerate-a-container
+  (let [visits (atom 0)
+        poison (KeyedCountingMap.
+                 1000000 visits
+                 (fn [_] (throw (js/Error. "shallow validation read a key")))
+                 (fn [_] (throw (js/Error. "shallow validation read a value"))))]
+    (is (schema/valid-candidate-value? :seon.render.value/bounded-data poison))
+    (is (zero? @visits)
+        "the shallow map? slot leaves deep bounded validation to its owner")))
 
 (deftype HugePrintedRecord [writes]
   IRecord
