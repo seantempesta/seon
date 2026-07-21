@@ -40,6 +40,31 @@
 
 ;;; Runtime and server resources
 
+(def read-defaults
+  "Writer-enforced ceilings for every database read.
+
+   W1's config-facts sweep will relocate these values into the
+   aero-to-database configuration pipeline. The deadline includes one
+   30-second allowance for each full read-queue wave exposed by the existing
+   executor capacity map, so queued work is bounded without shortening any
+   current client deadline."
+  (let [capacity (executor/capacity)
+        maximum-active (get-in capacity [::executor/classes :read
+                                         ::executor/maximum-active])
+        maximum-queued (get-in capacity [::executor/classes :read
+                                         ::executor/maximum-queued])
+        queue-waves (max 1 (quot (+ maximum-queued (dec maximum-active))
+                                 maximum-active))]
+    {:datahike.resource/max-work 100000000
+     :datahike.resource/max-results 1000000
+     :datahike.resource/max-result-weight 3000000
+     ::read-deadline-ms (* 30000 queue-waves)}))
+
+(def ^:private read-resource-keys
+  [:datahike.resource/max-work
+   :datahike.resource/max-results
+   :datahike.resource/max-result-weight])
+
 (schema/register! ::connection :any)
 (schema/register! ::database-initializer 'fn?)
 (schema/register! ::embedding-enabled? :boolean)
@@ -826,6 +851,41 @@
     (assoc :max-result-weight
            (:datahike.resource/max-result-weight request))))
 
+(defn- clamp-read-resources
+  [request]
+  (reduce (fn [bounded key]
+            (assoc bounded key (min (long (get request key Long/MAX_VALUE))
+                                    (long (get read-defaults key)))))
+          request
+          read-resource-keys))
+
+(defn- bounded-read-request
+  [request]
+  (if (= protocol/execute-many-operation (::protocol/operation request))
+    (-> request
+        clamp-read-resources
+        (update ::protocol/members #(mapv clamp-read-resources %)))
+    (clamp-read-resources request)))
+
+(defn- budget-error-body
+  [throwable]
+  (let [data (ex-data throwable)]
+    (when (true? (:datahike/budget-exceeded data))
+      (select-keys data [:datahike/budget-exceeded
+                         :datahike.budget/name
+                         :datahike.budget/observed
+                         :datahike.budget/allowed]))))
+
+(defn- budget-failure
+  [budget-name allowed]
+  (protocol/failure
+   {::protocol/error-kind protocol/database-error
+    ::protocol/error "The database read exceeded its resource budget."
+    ::protocol/body
+    {:datahike/budget-exceeded true
+     :datahike.budget/name budget-name
+     :datahike.budget/allowed allowed}}))
+
 (defn- read-response-base
   [request]
   {::protocol/request-id (::protocol/request-id request)})
@@ -992,8 +1052,17 @@
          (:datahike.read/dependency-plan evidence)})
 
       :seon.db.protocol.operation/schema
-      {::protocol/schema (materialize-result (d/schema db-value))
-       :datahike.read/dependency-plan :all}
+      (let [result (materialize-result (d/schema db-value))
+            allowed (:datahike.resource/max-result-weight request)]
+        (when-not (d/shallow-weight-within result allowed)
+          (throw
+           (ex-info "datahike result-weight budget exceeded"
+                    {:datahike/budget-exceeded true
+                     :datahike.budget/name :result-weight
+                     :datahike.budget/observed (inc allowed)
+                     :datahike.budget/allowed allowed})))
+        {::protocol/schema result
+         :datahike.read/dependency-plan :all})
 
       :seon.db.protocol.operation/index-page
       (assoc (materialize-result (index-page db-value request))
@@ -1061,13 +1130,15 @@
 
 (defn- member-failure
   [throwable]
-  (let [kind (:seon.error/kind (ex-data throwable))]
+  (let [kind (:seon.error/kind (ex-data throwable))
+        body (budget-error-body throwable)]
     (protocol/failure
      (cond->
       {::protocol/error-kind
        (or (::failure-kind (ex-data throwable)) protocol/database-error)
        ::protocol/error (or (.getMessage ^Throwable throwable)
                             "The database read failed.")}
+       body (assoc ::protocol/body body)
        kind (assoc :seon.error/kind kind)))))
 
 (declare cancel-query-caller!)
@@ -2206,7 +2277,8 @@
 
 (defn- request-failure-response
   [^Throwable throwable]
-  (let [kind (:seon.error/kind (ex-data throwable))]
+  (let [kind (:seon.error/kind (ex-data throwable))
+        body (budget-error-body throwable)]
     (protocol/failure
      (cond->
       {::protocol/error-kind
@@ -2224,6 +2296,7 @@
          :else protocol/database-error)
        ::protocol/error
        (str (.getMessage throwable) " " (pr-str (ex-data throwable)))}
+       body (assoc ::protocol/body body)
        kind (assoc :seon.error/kind kind)))))
 
 (declare claim-request!)
@@ -2852,10 +2925,14 @@
   [runtime request-id owner]
   (let [active (::active-requests runtime)]
     (locking active
-      (when (identical? owner (get-in @active [request-id ::owner]))
-        (swap! active dissoc request-id)
-        (.notifyAll ^Object active)
-        true))))
+      (when-let [entry (get @active request-id)]
+        (when (identical? owner (::owner entry))
+          (when-let [^java.util.concurrent.ScheduledFuture task
+                     (::deadline-task entry)]
+            (.cancel task false))
+          (swap! active dissoc request-id)
+          (.notifyAll ^Object active)
+          true)))))
 
 (defn- deliver-active-request!
   [runtime request-id owner response]
@@ -2863,6 +2940,9 @@
         entry (locking active
                 (let [entry (get @active request-id)]
                   (when (and entry (identical? owner (::owner entry)))
+                    (when-let [^java.util.concurrent.ScheduledFuture task
+                               (::deadline-task entry)]
+                      (.cancel task false))
                     (swap! active dissoc request-id)
                     (.notifyAll ^Object active)
                     entry)))]
@@ -2964,8 +3044,13 @@
   (if execute-many?
     (complete-execute-many-query! runtime request-id owner job-id completion)
     (try
-      (deliver-active-request! runtime request-id owner
-                               (query-response request completion))
+      (let [limit-response
+            (locking (::active-requests runtime)
+              (get-in @(::active-requests runtime)
+                      [request-id ::limit-response]))]
+        (deliver-active-request! runtime request-id owner
+                                 (or limit-response
+                                     (query-response request completion))))
       (finally
         (when release-on-callback?
           (release-resolved-database-values! resolved-values))))))
@@ -3105,24 +3190,26 @@
 (defn- single-outcome-response
   [entry [outcome value]]
   (let [request (::request entry)]
-    (if (= ::executor/throwable outcome)
-      (if (and (::canceled? entry)
-               (= protocol/transact-operation (::protocol/operation request)))
-        (if-let [recovered
-                 (recover-current (::connection entry)
-                                  (::database-name entry)
-                                  (::protocol/request-id request)
-                                  (protocol/logical-transaction-hash request)
-                                  (::protocol/generated-candidates request))]
-          (protocol/success recovered)
-          (protocol/failure
-           {::protocol/error-kind protocol/database-error
-            ::protocol/error "The database transaction was canceled."
-            ::protocol/body {::protocol/canceled? true}}))
-        (request-failure-response value))
-      (if (read-operations (::protocol/operation request))
-        (protocol/success value)
-        value))))
+    (or
+     (::limit-response entry)
+     (if (= ::executor/throwable outcome)
+       (if (and (::canceled? entry)
+                (= protocol/transact-operation (::protocol/operation request)))
+         (if-let [recovered
+                  (recover-current (::connection entry)
+                                   (::database-name entry)
+                                   (::protocol/request-id request)
+                                   (protocol/logical-transaction-hash request)
+                                   (::protocol/generated-candidates request))]
+           (protocol/success recovered)
+           (protocol/failure
+            {::protocol/error-kind protocol/database-error
+             ::protocol/error "The database transaction was canceled."
+             ::protocol/body {::protocol/canceled? true}}))
+         (request-failure-response value))
+       (if (read-operations (::protocol/operation request))
+         (protocol/success value)
+         value)))))
 
 (defn- reserve-single-job!
   [runtime request-id owner scope scopes job-id entry-data]
@@ -3439,9 +3526,10 @@
                       entry)
                     results (::results entry)
                     response
-                    (protocol/success
-                     (assoc (read-response-base request)
-                            ::protocol/results results))]
+                    (or (::limit-response entry)
+                        (protocol/success
+                         (assoc (read-response-base request)
+                                ::protocol/results results)))]
                 (swap! active assoc-in [request-id ::finishing?] true)
                 [entry response]))))]
     (when final
@@ -3525,7 +3613,8 @@
        (::resolved-database-values (second outcome))))
     (if (and resolution? (= ::executor/throwable (first outcome)))
       (let [entry (locking active (get @active request-id))
-            response (::failure-response entry)]
+            response (or (::limit-response entry)
+                         (::failure-response entry))]
         (when response
           (deliver-active-request! runtime request-id owner response)))
       (drive-execute-many! runtime request-id owner))))
@@ -3878,6 +3967,44 @@
       (drive-execute-many! runtime target-request-id (::owner target)))
     response))
 
+(defn- expire-read-request!
+  [runtime request-id owner deadline-ms]
+  (let [active (::active-requests runtime)
+        response (budget-failure :deadline deadline-ms)
+        target
+        (locking active
+          (when-let [entry (get @active request-id)]
+            (when (identical? owner (::owner entry))
+              (swap! active update request-id assoc
+                     ::canceled? true
+                     ::limit-response response)
+              (assoc entry ::canceled? true ::limit-response response))))]
+    (when target
+      (handle-cancel runtime
+                     {::protocol/request-id request-id
+                      ::protocol/target-request-id request-id}
+                     target)
+      (if (::execute-many? target)
+        (drive-execute-many! runtime request-id owner)
+        (deliver-active-request! runtime request-id owner response)))))
+
+(defn- arm-read-deadline!
+  [runtime request-id owner]
+  (let [deadline-ms (::read-deadline-ms read-defaults)
+        ^java.util.concurrent.ScheduledExecutorService scheduler
+        (::deadline-executor runtime)
+        ^java.util.concurrent.ScheduledFuture task
+        (.schedule scheduler
+                   ^Runnable #(expire-read-request! runtime request-id owner
+                                                    deadline-ms)
+                   (long deadline-ms)
+                   java.util.concurrent.TimeUnit/MILLISECONDS)
+        active (::active-requests runtime)]
+    (locking active
+      (if (identical? owner (get-in @active [request-id ::owner]))
+        (swap! active assoc-in [request-id ::deadline-task] task)
+        (.cancel task false)))))
+
 (defn- close-transport-connection!
   [runtime transport-connection]
   (let [{:keys [requests acquisitions]}
@@ -3957,11 +4084,17 @@
        (complete! (handle-request-sync runtime transport-connection request))
        (catch Throwable throwable
          (log/error throwable "invalid database request delivery failed")))
-     (let [request-id (::protocol/request-id request)]
+     (let [read-request? (or (read-operations (::protocol/operation request))
+                             (= protocol/execute-many-operation
+                                (::protocol/operation request)))
+           request (if read-request? (bounded-read-request request) request)
+           request-id (::protocol/request-id request)]
        (if-let [owner
                 (claim-connection-request!
                  runtime transport-connection request frame-bytes complete!)]
          (try
+           (when read-request?
+             (arm-read-deadline! runtime request-id owner))
            (case (::protocol/operation request)
              :seon.db.protocol.operation/acquire-database
              (deliver-active-request!
@@ -4055,6 +4188,12 @@
         interest-state (atom (empty-interest-state))
         interest-lock (Object.)
         runtime-ref (atom nil)
+        deadline-executor
+        (java.util.concurrent.Executors/newSingleThreadScheduledExecutor
+         (reify java.util.concurrent.ThreadFactory
+           (newThread [_ runnable]
+             (doto (Thread. ^Runnable runnable "seon-database-read-deadline")
+               (.setDaemon true)))))
         dispatcher
         (executor/start!
          {::executor/capacity (if selected-processors
@@ -4078,6 +4217,7 @@
                        ::query-jobs query-jobs
                        ::interest-state interest-state
                        ::interest-lock interest-lock
+                       ::deadline-executor deadline-executor
                        ::readiness-owner (Object.))
         _ (reset! runtime-ref runtime)
         _ (register-readiness! runtime)]
@@ -4111,6 +4251,8 @@
               (registry/release-database!
                {::registry/database-name (keyword database-name)})]
           (unregister-readiness! runtime)
+          (.shutdownNow ^java.util.concurrent.ScheduledExecutorService
+                        deadline-executor)
           (executor/stop! {::executor/executor dispatcher})
           (if (::registry/release-error release)
             (throw
@@ -4148,6 +4290,8 @@
             {::stopped? false ::release-results []})
           (do
             (executor/stop! {::executor/executor (::executor server)})
+            (.shutdownNow ^java.util.concurrent.ScheduledExecutorService
+                          (::deadline-executor (::runtime server)))
             (let [{::registry/keys [databases]} (registry/list-databases {})
                   release-results
                   (mapv
