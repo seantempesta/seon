@@ -729,6 +729,11 @@ decisions batch for their return.
   selected-processors override fix folded in). Logs
   `tmp/orchestrator/w12a-*`. Refill after: W1.5 enforcement surfaces,
   then W1.2b graduation, then the W1 config-facts sweep.
+  STOP 1 resolved: `agent-runtime.md:652` ("config apply does not
+  replace … processes") predates the owner's live-reconstruction
+  ruling — the lane was granted that file to reconcile the target
+  passage in the same unit (architecture updates ride the design
+  change; the ruling is authoritative).
 - **sol W1.2 grounding research (read-only, live-probe enabled)** in
   flight — logs `tmp/orchestrator/w12-grounding-*`; interface ledger
   for the live-writer-reconstruction spec (W0.4 pool member lifecycle,
