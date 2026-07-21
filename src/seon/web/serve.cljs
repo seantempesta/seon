@@ -583,7 +583,7 @@
               ::reactive/compute
               #(agent-task-observation % agent-id injected-at)
               ::reactive/notify notify
-              ::db/db database})]
+              ::reactive/db database})]
         (.then observing
                (fn [value]
                  (when (:seon.error/message value)

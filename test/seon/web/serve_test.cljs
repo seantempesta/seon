@@ -347,6 +347,8 @@
              (is (true? (:seon.web.serve/turns-settled? result)))
              (is (= [::serve/agent-task-settlement "agent-1" injected-at]
                     (::reactive/key @observed)))
+             (is (identical? database (::reactive/db @observed))
+                 "settlement observes the exact acquired database value")
              (is (= (select-keys @observed
                                  [::reactive/key ::reactive/consumer-key])
                     @released)
