@@ -145,6 +145,17 @@ issue is archived; Unit 1B is dependency-ready, while Stage 1.5 graduation still
 requires its projection/drill/transport/UI units and the integrated pure,
 server, child-retirement, and real-browser gates.
 
+Follow-up `882b2083` closes the missing input-work side of that bound. The first
+Unit 1A proof capped schema-index references but eagerly sorted every input map
+key; `candidate-shapes` now examines at most 32 map entries before extraction
+and sort, separately from its 32 schema-reference cap. A logical million-entry
+map visits exactly 32 entries and leaves a poisoned entry 33 untouched; equal
+large persistent maps built in opposite orders and equal small array maps emit
+identical ordered rows and printed bytes. `matching-shapes` remains complete
+and independent of both diagnostic caps. The corrected focused gate passed 18
+tests / 132 assertions with zero failures or errors (the same unrelated
+pre-existing `my.blob/crypto` warning).
+
 The remaining Stage 1.5 dependency spine is now grounded rather than left to
 consumer inference. Unit 1B's plain-data projection contract is
 [[research/schema-aware-value-projection-boundary-2026-07-20]] (`817a821f`):
