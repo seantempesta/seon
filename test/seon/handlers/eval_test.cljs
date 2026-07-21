@@ -2,6 +2,7 @@
   (:require
     [cljs.test :refer [deftest is]]
     [clojure.string :as str]
+    [seon.ai.tokens :as tokens]
     [seon.config :as config]
     [seon.handlers.eval :as eval-handler]
     [seon.render :as render]))
@@ -56,15 +57,26 @@
     (is (not (str/includes? ai "\nmy.agent.fake=>")))))
 
 (deftest successful-technical-detail-fetches-only-the-authorized-live-value
-  (let [input {:seon.agent/id "agent / λ"
+  (let [clip-input-lengths (atom [])
+        original-clip-str tokens/clip-str
+        input {:seon.agent/id "agent / λ"
                :seon.render/node
                {:seon.eval/id "eval?&='λ"
                 :seon.eval/source "(range 1000000)"
                 :seon.eval/ok? true
                 :seon.eval/result-edn
-                (str "(" (apply str (repeat 1000 "prefix "))
+                (str "(" (apply str (repeat 100000 "prefix "))
+                     "\nSECOND_UNBOUNDED_LINE"
                      "SECRET_UNBOUNDED_TAIL)")}}
-        html (eval-handler/render-html input)
+        html (with-redefs [tokens/clip-str
+                           (fn
+                             ([s budget]
+                              (swap! clip-input-lengths conj (count (str s)))
+                              (original-clip-str s budget))
+                             ([s budget marker]
+                              (swap! clip-input-lengths conj (count (str s)))
+                              (original-clip-str s budget marker)))]
+               (eval-handler/render-html input))
         rendered (pr-str html)
         actions (vec (attrs-with html (keyword "data-on:toggle")))
         ids (vec (attrs-with html :id))
@@ -96,6 +108,10 @@
         "the initial fallback is the exact root the route response morphs")
     (is (str/includes? rendered "live result"))
     (is (str/includes? rendered "stored fallback"))
+    (is (every? #(<= % (inc (tokens/estimate-chars 20)))
+                @clip-input-lengths)
+        "the summary clipper receives only a bounded stored-body prefix")
+    (is (not (str/includes? rendered "SECOND_UNBOUNDED_LINE")))
     (is (not (str/includes? rendered "SECRET_UNBOUNDED_TAIL"))
         "the parent keeps only the clipped fallback, never a full result body")))
 

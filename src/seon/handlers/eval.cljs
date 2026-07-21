@@ -41,6 +41,16 @@
 (def ^:private error-summary-truncate 30)
 (def ^:private activity-label-truncate 40)
 
+(defn- bounded-first-line
+  "Return a prefix-bounded first line without scanning or splitting the tail."
+  [s token-budget]
+  (let [character-budget (tokens/estimate-chars token-budget)
+        prefix (subs s 0 (min (count s) (inc character-budget)))
+        newline-at (str/index-of prefix "\n")]
+    (if (some? newline-at)
+      (subs prefix 0 newline-at)
+      prefix)))
+
 (defn- short-result
   "One-line summary of a successful eval's `:seon.eval/result-edn`. The
    stored value is already a `pr-str` string. For vars / fn-vars
@@ -49,7 +59,7 @@
   [result-edn]
   (when result-edn
     (let [s (str result-edn)
-          first-line (or (first (str/split-lines s)) "")]
+          first-line (bounded-first-line s result-summary-truncate)]
       (tokens/clip-str first-line result-summary-truncate))))
 
 (defn- short-error
