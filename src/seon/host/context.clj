@@ -40,12 +40,16 @@
             [clojure.string :as str]
             [sci.core :as sci]
             [sci.interrupt :as interrupt]
+            [seon.ai.provider :as ai.provider]
             [seon.ai.tokens :as tokens]
+            [seon.content-hash :as content-hash]
             [seon.db.id :as db.id]
             [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds]
             [seon.host.record :as record]
-            [seon.schema :as schema]))
+            [seon.repair.candidates :as candidates]
+            [seon.schema :as schema]
+            [seon.time :as time]))
 
 (set! *warn-on-reflection* true)
 
@@ -92,14 +96,23 @@
 (schema/register! ::registry 'some?)
 (schema/register! ::lib :symbol)
 (schema/register! ::wrapper-fn 'fn?)
+;; An SCI var may hold ordinary immutable data as well as a function. This is
+;; the genuinely polymorphic interpreter-binding boundary; callers still use
+;; the closed `::wrapper` union so a registration cannot supply both shapes.
+(schema/register! ::wrapper-value :any)
 (schema/register! ::arglists [:sequential [:vector :symbol]])
 (schema/register! ::doc [:string {:min 1}])
 (schema/register!
  ::wrapper
- [:map {:closed true}
-  [::wrapper-fn ::wrapper-fn]
+ [:or
+  [:map {:closed true}
+   [::wrapper-fn ::wrapper-fn]
+   [::arglists {:optional true} ::arglists]
+   [::doc {:optional true} ::doc]]
+  [:map {:closed true}
+   [::wrapper-value ::wrapper-value]
   [::arglists {:optional true} ::arglists]
-  [::doc {:optional true} ::doc]])
+   [::doc {:optional true} ::doc]]])
 (schema/register! ::wrappers [:map-of :symbol ::wrapper])
 (schema/register!
  ::register-request
@@ -432,16 +445,19 @@
                  sci-ns (or (::sci-ns entry) (sci/create-ns lib))
                  vars
                  (reduce-kv
-                  (fn [acc fn-sym {::keys [wrapper-fn arglists doc]}]
+                  (fn [acc fn-sym {::keys [wrapper-fn wrapper-value arglists doc]
+                                  :as wrapper}]
+                    (let [value (if (contains? wrapper ::wrapper-fn)
+                                  wrapper-fn wrapper-value)]
                     (if-let [live (get acc fn-sym)]
-                      (do (sci/alter-var-root live (constantly wrapper-fn))
+                      (do (sci/alter-var-root live (constantly value))
                           acc)
                       (assoc acc fn-sym
                              (sci/new-var
-                              fn-sym wrapper-fn
+                              fn-sym value
                               (cond-> {:ns sci-ns :name fn-sym}
                                 arglists (assoc :arglists arglists)
-                                doc (assoc :doc doc))))))
+                                doc (assoc :doc doc)))))))
                   (or (::vars entry) {})
                   wrappers)]
              (assoc entries lib {::sci-ns sci-ns ::vars vars}))))
@@ -479,6 +495,13 @@
   [registry writer]
   (register-wrappers!
    {::registry registry
+    ::lib 'seon.ai.provider
+    ::wrappers
+    {'provider-locality {::wrapper-value ai.provider/provider-locality}
+     'frontier-provider? {::wrapper-fn ai.provider/frontier-provider?
+                          ::arglists '([provider])}}})
+  (register-wrappers!
+   {::registry registry
     ::lib 'seon.db
     ::wrappers
     {'query {::wrapper-fn (partial db-query writer)
@@ -497,6 +520,23 @@
      'head {::wrapper-fn (partial resolve-head! writer)
             ::arglists '([])
             ::doc "Resolve the writer's current database value."}}})
+  (register-wrappers!
+   {::registry registry
+    ::lib 'seon.db.id
+    ::wrappers
+    {'candidate-manifest {::wrapper-fn db.id/candidate-manifest
+                          ::arglists '([generator-policies allocations])
+                          ::doc "Generate one validated identity-candidate manifest."}
+     'generator-policy-query {::wrapper-value db.id/generator-policy-query
+                              ::doc "Query for stored generated-identity policies."}}})
+  (register-wrappers!
+   {::registry registry
+    ::lib 'seon.db.protocol
+    ::wrappers
+    {'query-operation {::wrapper-value protocol/query-operation}
+     'pull-operation {::wrapper-value protocol/pull-operation}
+     'success? {::wrapper-value ::protocol/success?}
+     'result {::wrapper-value ::protocol/result}}})
   (register-wrappers!
    {::registry registry
     ::lib 'seon.schema
@@ -522,7 +562,10 @@
                          (str (.getMessage throwable))
                          :seon.error/kind :user-input}})))
                  ::arglists '([schema-key schema])
-                 ::doc "Register one schema; the eval tee persists the canonical row."}}})
+                 ::doc "Register one schema; the eval tee persists the canonical row."}
+     'schema-definition {::wrapper-fn schema/schema-definition
+                         ::arglists '([schema-key])
+                         ::doc "Return one registered schema's canonical definition."}}})
   (register-wrappers!
    {::registry registry
     ::lib 'seon.ai.tokens
@@ -532,7 +575,91 @@
                 ::doc "Estimated token size of one value."}
      'estimate-chars {::wrapper-fn tokens/estimate-chars
                       ::arglists '([character-count])
-                      ::doc "Estimated token size of a character count."}}}))
+                      ::doc "Estimated token size of a character count."}
+     'clip-str {::wrapper-fn tokens/clip-str
+                ::arglists '([value budget] [value budget marker])
+                ::doc "Clip text to an estimated token budget."}}})
+  (register-wrappers!
+   {::registry registry
+    ::lib 'seon.content-hash
+    ::wrappers
+    {'sha-256 {::wrapper-fn content-hash/sha-256
+               ::arglists '([content])}}})
+  (register-wrappers!
+   {::registry registry
+    ::lib 'seon.time
+    ::wrappers
+    {'iso-string {::wrapper-fn time/iso-string
+                  ::arglists '([instant])}}})
+  (register-wrappers!
+   {::registry registry
+    ::lib 'seon.repair.candidates
+    ::wrappers
+    {'rank-candidates {::wrapper-fn candidates/rank-candidates
+                       ::arglists '([from names])}}})
+  (register-wrappers!
+   {::registry registry
+    ::lib 'seon.repl.internal
+    ::wrappers
+    {'read-forms {::wrapper-fn
+                  (fn
+                    ([source]
+                     (record/read-forms {::record/source (or source "")}))
+                    ([source options]
+                     (record/read-forms
+                      {::record/source (or source "")
+                       ::record/ns-sym (:seon.repl/current-ns options)
+                       ::record/aliases (:seon.repl/aliases options)})))
+                  ::arglists '([source])}}})
+  (register-wrappers!
+   {::registry registry
+    ::lib 'seon.agent.ctx
+    ::wrappers
+    {'read-file-text
+     {::wrapper-fn (fn [path]
+                     (try
+                       (let [file (io/file path)]
+                         (when (and (.isFile file) (.canRead file))
+                           (slurp file)))
+                       (catch Throwable _ nil)))
+      ::arglists '([path])
+      ::doc "Read one repo-relative UTF-8 text file, or nil when unreadable."}
+     'list-skill-files
+     {::wrapper-fn
+      (fn [dir]
+        (try
+          (let [root (io/file dir)]
+            (if-not (.isDirectory root)
+              []
+              (into []
+                    (mapcat
+                     (fn [name]
+                       (let [path (io/file root name)]
+                         (cond
+                           (.isDirectory path)
+                           (let [skill (io/file path "SKILL.md")]
+                             (when (.isFile skill) [(.getPath skill)]))
+
+                           (and (.isFile path) (str/ends-with? name ".md"))
+                           [(.getPath path)]))))
+                    (or (seq (.list root)) []))))
+          (catch Throwable _ [])))
+      ::arglists '([dir])
+      ::doc "List the readable skill markdown files under one corpus directory."}}})
+  (register-wrappers!
+   {::registry registry
+    ::lib 'seon.render.canvas
+    ::wrappers
+    {'field-signal
+     {::wrapper-fn
+      (fn [field]
+        (str "seon_"
+             (.encodeToString
+              (.withoutPadding (java.util.Base64/getUrlEncoder))
+              (.getBytes ^String (str field)
+                         java.nio.charset.StandardCharsets/UTF_8))))
+      ::arglists '([field])
+      ::doc "Encode a qualified field keyword as a Datastar-safe signal identifier."}}}))
 
 ;;; Portable `my.*` slice, loaded from the real sources.
 
@@ -558,8 +685,11 @@
   (into []
         (comp (filter definition-form?)
               (map (fn [form]
-                     {::block-name (str (second form))
-                      ::source (or (:source (meta form)) (pr-str form))})))
+                     (let [source (or (:source (meta form)) (pr-str form))]
+                       {::block-name (str (second form))
+                        ::source source
+                        ::host-source (some-> (record/read-host-form source)
+                                              pr-str)}))))
         (record/read-forms {::record/source source
                             ::record/ns-sym ns-sym
                             ::record/aliases aliases})))
@@ -567,8 +697,9 @@
 (defn- pure-block?
   "True when a defn block has no async, js-interop, or db-boundary marker."
   [block]
-  (not (re-find #"\^:async|\(await |js/|#js|\(\.\-|\(\. |\(\.[a-zA-Z]|db/transact!|db/query|db/pull|db/entity|db/db\b|blob/"
-                block)))
+  (and (string? block)
+       (not (re-find #"\^:async|\(await |js/|#js|\(\.\-|\(\. |\(\.[a-zA-Z]|db/transact!|db/query|db/pull|db/entity|db/db\b|blob/"
+                     block))))
 
 (defn- edge-aliases
   [edges]
@@ -696,8 +827,8 @@
         (into []
               (mapcat
                (fn [{::keys [namespace require-edges blocks] :as unit}]
-                 (let [portable (filterv (comp pure-block? ::source) blocks)
-                       excluded-blocks (remove (comp pure-block? ::source) blocks)
+                 (let [portable (filterv (comp pure-block? ::host-source) blocks)
+                       excluded-blocks (remove (comp pure-block? ::host-source) blocks)
                        excluded-rows
                        (mapv #(block-row unit % :excluded
                                          "The block is outside the portable C1 class (async, JS, database, or blob capability evidence).")
@@ -714,10 +845,10 @@
                    (into excluded-rows
                          (if ns-error
                            (map #(block-row unit % :failed ns-error) portable)
-                           (map (fn [{::keys [source] :as block}]
+                           (map (fn [{::keys [host-source] :as block}]
                                   (try
                                     (sci/eval-string*
-                                     ctx (str "(in-ns '" namespace ")\n" source))
+                                     ctx (str "(in-ns '" namespace ")\n" host-source))
                                     (block-row unit block :loaded nil)
                                     (catch Throwable throwable
                                       (block-row
@@ -734,9 +865,33 @@
                    (map #(block-row unit % :failed
                                     (str "Namespace require cycle: "
                                          (str/join ", " cycle)))
-                        (filter (comp pure-block? ::source) (::blocks unit)))))
+                        (filter (comp pure-block? ::host-source) (::blocks unit)))))
                cycle))
-        rows (into loaded-rows cycle-rows)
+        initial-rows (into loaded-rows cycle-rows)
+        excluded-names
+        (reduce (fn [by-ns row]
+                  (if (= :excluded (::status row))
+                    (update by-ns (::namespace row) (fnil conj #{})
+                            (::block-name row))
+                    by-ns))
+                {}
+                initial-rows)
+        rows
+        (mapv
+         (fn [row]
+           (if-let [[_ dependency]
+                    (and (= :failed (::status row))
+                         (re-matches #"Unable to resolve symbol: (.+)"
+                                     (::reason row)))]
+             (if (contains? (get excluded-names (::namespace row) #{})
+                            dependency)
+               (assoc row
+                      ::status :excluded
+                      ::reason (str "Depends on excluded non-portable helper `"
+                                    dependency "`."))
+               row)
+             row))
+         initial-rows)
         failures (into []
                        (comp (filter #(= :failed (::status %)))
                              (map (fn [row]

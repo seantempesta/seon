@@ -107,22 +107,24 @@
    `.isDirectory? = false` on its Dirent and would otherwise be silently
    dropped."
   [dir]
-  (let [fs (js/require "fs")
-        stat (fn [p] (try (.statSync fs p) (catch :default _ nil)))]
-    (if-not (try (.existsSync fs dir) (catch :default _ false))
-      []
-      (into []
-            (mapcat (fn [nm]
-                      (let [p  (str dir "/" nm)
-                            st (stat p)]
-                        (cond
-                          (nil? st) nil
-                          (.isDirectory st)
-                          (let [sp (str p "/SKILL.md")]
-                            (when (.existsSync fs sp) [sp]))
-                          (and (.isFile st) (str/ends-with? nm ".md"))
-                          [p]))))
-            (.readdirSync fs dir)))))
+  #?(:clj (ctx/list-skill-files dir)
+     :cljs
+     (let [fs (js/require "fs")
+           stat (fn [p] (try (.statSync fs p) (catch :default _ nil)))]
+       (if-not (try (.existsSync fs dir) (catch :default _ false))
+         []
+         (into []
+               (mapcat (fn [nm]
+                         (let [p  (str dir "/" nm)
+                               st (stat p)]
+                           (cond
+                             (nil? st) nil
+                             (.isDirectory st)
+                             (let [sp (str p "/SKILL.md")]
+                               (when (.existsSync fs sp) [sp]))
+                             (and (.isFile st) (str/ends-with? nm ".md"))
+                             [p]))))
+               (.readdirSync fs dir))))))
 
 (defn seed-skills-tx-data
   "Tx-data seeding one `:my.skills` row per `SKILL.md` found.

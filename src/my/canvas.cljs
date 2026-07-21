@@ -39,8 +39,11 @@
   "Encode a qualified field keyword as a Datastar-safe signal identifier.
    `/call` decodes this exact prefix back to the original keyword."
   [field]
-  (str signal-prefix
-       (.toString (.from js/Buffer (str field) "utf8") "base64url")))
+  #?(:clj
+     (render-canvas/field-signal field)
+     :cljs
+     (str signal-prefix
+          (.toString (.from js/Buffer (str field) "utf8") "base64url"))))
 
 (schema/register! ::view-request
   [:map {:closed true}

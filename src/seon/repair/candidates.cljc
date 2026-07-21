@@ -81,7 +81,7 @@
   "The fix band for a broken name: ⌈n/3⌉ edits, floor 1."
   {:malli/schema [:=> [:catn [::from :string]] :int]}
   [from]
-  (max 1 (js/Math.ceil (/ (count from) 3))))
+  (max 1 (quot (+ (count from) 2) 3)))
 
 (defn rank-candidates
   "Ranked fix candidates for the unresolved NAME `from` over `names`.

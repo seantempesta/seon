@@ -76,6 +76,18 @@
           form)))
     (catch Throwable _ nil)))
 
+(defn read-host-form
+  "Read one recorded form for the JVM feature set, or nil on failure.
+
+   Reader conditionals stay in the persisted source; this projection gives
+   SCI exactly the portable `:clj` branch through the same tools.reader
+   mechanism that parsed the block."
+  {:malli/schema [:=> [:cat ::source] :any]}
+  [source]
+  (try
+    (tools.reader/read-string {:read-cond :allow :features #{:clj}} source)
+    (catch Throwable _ nil)))
+
 (defn- single-defn?
   "True iff `forms` is exactly one top-level `defn`/`defn-` form.
 
