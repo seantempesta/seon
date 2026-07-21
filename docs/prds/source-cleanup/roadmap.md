@@ -137,7 +137,18 @@ consumer inference. Unit 1B's plain-data projection contract is
 `render.value` samples exactly once, preserves the existing strict
 `:truncated?` completeness signal, validates every deterministically ordered
 match only when complete, and emits bounded `:shape-only` candidates when
-incomplete. Before transport, close
+incomplete.
+
+Implementation readiness is sharpened by
+[[research/schema-aware-value-projection-implementation-readiness-2026-07-20]]
+(`aa441dfe`): the projection visits at most 32 instrumented schema candidates,
+million-entry traversal and capped-writer tests assert work rather than output
+length, ordering and every omission marker are deterministic and honest, and
+sampling happens once. Unit 1A must first freeze one public activated-projection
+explainer API with argument, nil, and generation tests; Unit 1B may not invent
+a second registry walk for invalid-value explanations.
+
+Before transport, close
 [[../../seon/issues/projected-map-keys-are-not-drill-paths]] and
 [[../../seon/issues/value-drill-has-no-total-work-bounds]]: drill paths must
 retain original keys, and separate configured maxima must bound path segments,
@@ -326,8 +337,14 @@ The original delta is
 by [[research/stage2-freeze-readiness-refresh-2026-07-20]]
 (`b455ce7e` + ownership correction `a5821c8f`). U4 and `u15` are resolved, and
 the record count is now three: default, `kimi-k3-test`, and `reactive-proof`.
-The active `.cljs`→`.cljc` plus host-portability source owner remains
-unidentified and must commit/release before any freeze. Ports 7980/7981 belong
+The observed `.cljs`→`.cljc` plus host-portability source owner was
+unidentified, so the initial refresh correctly refused a freeze. That transient
+diff subsequently disappeared before review; independent audit
+[[research/portable-cljc-host-boundary-2026-07-20]] (`06e06a9f`) classifies it
+as an incomplete SCI U5 fragment, not a source-cleanup unit. U5 waits for its
+own U3 handoff and must land a dependency-ordered source loader, complete
+registry provisioning, shims, and host restart proof rather than bare renames.
+It is no longer a current dirty-tree blocker. Ports 7980/7981 belong
 to `/Users/sean/src/seon-stable`; that owner—not this checkout—must hand off and
 stop them. Ten worktrees still need explicit dispositions, restore intent needs
 database proof, and the terminology manifest is recomputed only at the final
