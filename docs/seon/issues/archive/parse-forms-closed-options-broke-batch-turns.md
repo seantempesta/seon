@@ -1,7 +1,7 @@
 ---
 type: issue
-status: closed
-severity: blocking
+status: resolved
+severity: blocker
 tags: [issue, agent, cljs]
 ---
 
