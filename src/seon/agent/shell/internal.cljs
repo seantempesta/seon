@@ -28,7 +28,11 @@
    captured whole (and, when it exceeds the preview cap, persisted to
    my.blob so nothing is discarded at the boundary); beyond it Bun stops
    the child and ::shell/truncated? is set with the honest byte overflow.
-   Long/high-volume output belongs in a background job."
+   Long/high-volume output belongs in a background job.
+
+   W1 owner for foreground and background shell stream limits; the
+   aero-to-fact sweep should relocate this named value rather than introduce
+   another cap."
   2000000)
 
 (def killed-exit
@@ -152,7 +156,7 @@
   "Per-stream RAM ceiling for a background job (same ~2MB guard as run's
    capture ceiling). Output past this is dropped, keeping the HEAD so
    ::shell/since offsets stay stable, and the stream is flagged truncated."
-  2000000)
+  max-output-bytes)
 
 (def max-exited-jobs
   "Cap on retained finished (:exited/:stopped) job records — the oldest are

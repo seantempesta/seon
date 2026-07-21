@@ -24,6 +24,12 @@
 ;; Durable recovery fact — one small anchor, never a materialized report.
 ;; ---------------------------------------------------------------------------
 
+(def maximum-tail-characters
+  "Character cap shared by recovery schemas and evidence projection.
+
+   W1 relocates this named recovery policy into an aero-backed database fact."
+  2048)
+
 (schema/register!
   :seon.runtime.recovery/id
   [:and {:seon.db/identity true
@@ -31,7 +37,8 @@
    ::db.id/compact-value])
 (schema/register! :seon.runtime.recovery/reason
                   [:enum :unexpected-exit])
-(schema/register! :seon.runtime.recovery/detail [:string {:max 2048}])
+(schema/register! :seon.runtime.recovery/detail
+                  [:string {:max maximum-tail-characters}])
 (schema/register! :seon.runtime.recovery/diagnostic-blob :seon.db/ref)
 (schema/register! :seon.runtime.recovery/pid :int)
 (schema/register! :seon.runtime.recovery/exit-code :int)
@@ -42,8 +49,10 @@
 (schema/register! :seon.runtime.recovery/rss-bytes :int)
 (schema/register! :seon.runtime.recovery/max-rss-bytes :int)
 (schema/register! :seon.runtime.recovery/elapsed-ms :int)
-(schema/register! :seon.runtime.recovery/stdout-tail [:string {:max 2048}])
-(schema/register! :seon.runtime.recovery/stderr-tail [:string {:max 2048}])
+(schema/register! :seon.runtime.recovery/stdout-tail
+                  [:string {:max maximum-tail-characters}])
+(schema/register! :seon.runtime.recovery/stderr-tail
+                  [:string {:max maximum-tail-characters}])
 (schema/register! :seon.runtime.recovery/eval :seon.db/ref)
 (schema/register! :seon.runtime.recovery/execution-digest
                   [:string {:min 64 :max 64}])
@@ -240,8 +249,6 @@
                       (sort-by (juxt first second #(nth % 2)))
                       vec)
          ::generator (member-value! "generator-policy acquisition" policy)}))))
-
-(def ^:private maximum-tail-characters 2048)
 
 (defn- tail [value]
   (when (string? value)

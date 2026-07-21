@@ -198,10 +198,9 @@
 
 (deftest retry-attempts-share-one-frozen-attempt-cap
   ;; I6 falsifier (frozen-turn-inputs): the retry loop must consume the
-  ;; turn's frozen resolution, never re-read SEON_LLM_ATTEMPT_TIMEOUT_MS
-  ;; per attempt. The env moves between attempt one and attempt two; both
-  ;; attempt rows must still carry the identical outer-timeout-ms and
-  ;; neither may equal either env value.
+  ;; turn's frozen resolution reads the config owner once, never re-reading
+  ;; SEON_LLM_ATTEMPT_TIMEOUT_MS per attempt. The env moves between attempt
+  ;; one and attempt two; both rows retain the first resolved value.
   (async done
     (let [env (.-env js/process)
           saved (aget env "SEON_LLM_ATTEMPT_TIMEOUT_MS")
@@ -225,8 +224,8 @@
                (is (= 2 (count caps)))
                (is (= 1 (count (distinct caps)))
                    "every attempt of one turn carries the identical cap")
-               (is (not-any? #{30 60} caps)
-                   "the retry loop never re-reads the env attempt cap"))))
+               (is (= [30 30] caps)
+                   "the retry loop freezes the config owner's first value"))))
           (.finally
            (fn []
              (if (some? saved)

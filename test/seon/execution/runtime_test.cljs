@@ -5,6 +5,7 @@
    [seon.agent.home :as home]
    [seon.agent.ctx :as ctx]
    [seon.agent.message :as message]
+   [seon.ai :as ai]
    [seon.config :as config]
    [seon.db :as db]
    [seon.db.branch :as branch]
@@ -30,6 +31,25 @@
    :datahike/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"})
 
 (def configuration (config/resolve-config-singleton {}))
+
+(deftest prompt-and-agent-view-acquisitions-share-owned-read-profiles
+  (let [prompt-members @#'runtime/prompt-acquisition-members
+        view-members @#'runtime/agent-view-members]
+    (is (= runtime/agent-entity-read-profile
+           (select-keys (first prompt-members)
+                        (keys runtime/agent-entity-read-profile))))
+    (is (= runtime/agent-entity-read-profile
+           (select-keys (first view-members)
+                        (keys runtime/agent-entity-read-profile))))
+    (is (= config/configuration-read-profile
+           (select-keys (second prompt-members)
+                        (keys config/configuration-read-profile))))
+    (is (= config/configuration-read-profile
+           (select-keys (nth view-members 2)
+                        (keys config/configuration-read-profile))))
+    (is (= ai/configuration-read-profile
+           (select-keys (nth prompt-members 2)
+                        (keys ai/configuration-read-profile))))))
 
 (defn- handler-action [hiccup event]
   (some (fn [value]

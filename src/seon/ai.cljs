@@ -467,9 +467,13 @@
    ::thinking ::timeout-ms
    ::base-url ::api-key-env ::dg-backend ::extra-body-edn])
 
-(def ^:private config-pull-max-work 100000)
-(def ^:private config-pull-max-results 256)
-(def ^:private config-pull-max-result-weight (* 1024 1024))
+(def configuration-read-profile
+  "Datahike ceilings for acquiring the distinct `:seon.ai` singleton.
+
+   W1 relocates this named AI policy into aero-backed database facts."
+  {:datahike.resource/max-work 100000
+   :datahike.resource/max-results 256
+   :datahike.resource/max-result-weight (* 1024 1024)})
 
 ;; ============================================================
 ;; Env reads — SEON_AI_*, parsed to the attr's concrete type.
@@ -978,13 +982,11 @@
           (await
             (db/execute-many
               {::db/members
-               [{::protocol/operation protocol/pull-operation
-                 ::protocol/selector (into [::id] config-attrs)
-                 ::protocol/entity-id [::id "config"]
-                 :datahike.resource/max-work config-pull-max-work
-                 :datahike.resource/max-results config-pull-max-results
-                 :datahike.resource/max-result-weight
-                 config-pull-max-result-weight}]}))
+               [(merge
+                 {::protocol/operation protocol/pull-operation
+                  ::protocol/selector (into [::id] config-attrs)
+                  ::protocol/entity-id [::id "config"]}
+                 configuration-read-profile)]}))
           member (first (::db/results acquired))
           _ (when (:seon.error/message acquired)
               (throw (ex-info "LLM config acquisition failed."

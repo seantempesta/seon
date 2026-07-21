@@ -31,7 +31,6 @@
 
 (def ^:private default-ready-timeout-ms 10000)
 (def ^:private default-idle-timeout-ms 300000)
-(def ^:private default-cancel-grace-ms 1000)
 (def ^:private maximum-tail-characters (* 16 1024))
 
 ;; Tier assignment as data: an agent entity carrying this host coordinate
@@ -699,7 +698,7 @@
                        :seon.error/kind :core-bug})))
     (let [previous @!host
           grace-ms (or (get-in previous [::configuration ::cancel-grace-ms])
-                       default-cancel-grace-ms)]
+                       subprocess/default-kill-grace-ms)]
       (doseq [current (concat (vals (::children previous))
                               (vals (::host-sessions previous)))]
         (retire-child! current grace-ms)))
@@ -712,7 +711,8 @@
                ::ready-timeout-ms (or ready-timeout-ms
                                       default-ready-timeout-ms)
                ::idle-timeout-ms (or idle-timeout-ms default-idle-timeout-ms)
-               ::cancel-grace-ms (or cancel-grace-ms default-cancel-grace-ms)
+               ::cancel-grace-ms (or cancel-grace-ms
+                                     subprocess/default-kill-grace-ms)
                ::spawn! spawn!
                ::run-fence-current? (or run-fence-current? (constantly true))
                ::eval-host-coordinate! eval-host-coordinate!}

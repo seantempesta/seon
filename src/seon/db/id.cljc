@@ -1041,8 +1041,6 @@
 ;;; Schema-driven candidate rounds
 ;;; ---------------------------------------------------------------------------
 
-     (def ^:private max-attempts 16)
-
      (defn- failure
        [message kind data]
        {:seon.error/message message
@@ -1374,7 +1372,7 @@
                       ::eids eids})))
 
                 (exact-generated-conflict? result manifest)
-                (if (< attempt max-attempts)
+                (if (< attempt id.schema/maximum-attempts)
                   (await (allocate-attempt! request (inc attempt)))
                   (failure
                    "Generated identity allocation exhausted its bounded collision retries."
@@ -1433,7 +1431,7 @@
                         ::eids eids})))
 
                   (exact-generated-conflict? result manifest)
-                  (if (< attempt max-attempts)
+                  (if (< attempt id.schema/maximum-attempts)
                     (allocate-jvm-attempt! request (inc attempt))
                     (failure
                      "Generated identity allocation exhausted its collision retries."

@@ -15,7 +15,12 @@
   (:require
     [clojure.string :as str]))
 
-(def ^:private source-inline-threshold 200)
+(def source-inline-threshold
+  "Character threshold shared by source-bearing render handlers.
+
+   W1 relocates this named render-family policy into an aero-backed database
+   fact."
+  200)
 
 (defn- arglists-str
   "Render `:seon.fn/arglists` (a string like `\"([x y])\"`) into the

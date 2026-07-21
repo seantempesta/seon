@@ -31,6 +31,7 @@
     [seon.agent.fs :as fs]
     [seon.agent.fs.internal :as fs-int]
     [seon.agent.shell :as shell]
+    [seon.agent.shell.internal :as shell.internal]
     [seon.ai.tokens :as tokens]
     [seon.db :as db]
     [seon.test.async :refer [settle!]]))
@@ -43,6 +44,10 @@
   (.resolve npath (str "tmp/shell-test-" (.-pid js/process))))
 
 (def ^:private node-bin (.-execPath js/process))
+
+(deftest foreground-and-background-streams-share-one-byte-ceiling
+  (is (= shell.internal/max-output-bytes
+         shell.internal/bg-max-stream-bytes)))
 
 (defonce ^:private !saved-fs-config (atom nil))
 (defonce ^:private !saved-shell-env (atom nil))

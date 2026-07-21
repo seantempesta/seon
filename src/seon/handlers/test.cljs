@@ -12,9 +12,8 @@
      pill, collapsible source."
   (:require
     [clojure.string :as str]
+    [seon.handlers.fn :as h-fn]
     [seon.schema :as schema]))
-
-(def ^:private source-inline-threshold 200)
 
 ;; The status request — the `:seon.test` entity fields the three status
 ;; fns (`test-status`/`status-glyph`/`status-line`) read. ONE shared
@@ -133,7 +132,7 @@
   (let [entity (or node entity)
         sym    (or (:seon.test/sym entity) "?")
         src    (or (:seon.test/source entity) "")
-        long?  (> (count src) source-inline-threshold)
+        long?  (> (count src) h-fn/source-inline-threshold)
         anchor (str "seon-test-" (str/replace (str sym) #"[^A-Za-z0-9_-]" "_"))
         {:keys [ran? passing? failure-summary]} (test-status entity)
         {:keys [label kind]} (cond

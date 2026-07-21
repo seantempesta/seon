@@ -212,28 +212,31 @@
      {:seon.agent/ctx [*]}]
    (ai/agent-config-pull-pattern)))
 
+(def agent-entity-read-profile
+  "Datahike ceilings for complete prompt and agent-view entity pulls.
+
+   W1 relocates this named execution-runtime policy into aero-backed database
+   facts."
+  {:datahike.resource/max-work 5000000
+   :datahike.resource/max-results 65536
+   :datahike.resource/max-result-weight (* 3 1024 1024)})
+
 (def ^:private prompt-acquisition-members
-  [{::protocol/operation protocol/pull-operation
-    ::protocol/selector prompt-pull-pattern
-    ::protocol/entity-id nil
-    :datahike.resource/max-work 5000000
-    :datahike.resource/max-results 65536
-   :datahike.resource/max-result-weight 3145728}
-   {::protocol/operation protocol/pull-operation
-    ::protocol/selector '[*]
-    ::protocol/entity-id [:seon.config/id config/cluster-config-id]
-    :datahike.resource/max-work 100000
-    ;; Datahike charges pull results per retained result-tree node, not per
-    ;; top-level entity. A wildcard cluster configuration is intentionally
-    ;; bounded like the existing agent-view configuration pull.
-    :datahike.resource/max-results 4096
-    :datahike.resource/max-result-weight 1048576}
-   {::protocol/operation protocol/pull-operation
-    ::protocol/selector (ai/config-pull-pattern)
-    ::protocol/entity-id [:seon.ai/id "config"]
-    :datahike.resource/max-work 100000
-    :datahike.resource/max-results 256
-    :datahike.resource/max-result-weight 1048576}
+  [(merge
+    {::protocol/operation protocol/pull-operation
+     ::protocol/selector prompt-pull-pattern
+     ::protocol/entity-id nil}
+    agent-entity-read-profile)
+   (merge
+    {::protocol/operation protocol/pull-operation
+     ::protocol/selector '[*]
+     ::protocol/entity-id [:seon.config/id config/cluster-config-id]}
+    config/configuration-read-profile)
+   (merge
+    {::protocol/operation protocol/pull-operation
+     ::protocol/selector (ai/config-pull-pattern)
+     ::protocol/entity-id [:seon.ai/id "config"]}
+    ai/configuration-read-profile)
    ;; Presence query, not pull: the optional tier attribute may not be
    ;; installed yet in a database whose agents all remain on the child tier.
    {::protocol/operation protocol/query-operation
@@ -374,18 +377,17 @@
                  (symbol (str "my.agent." id)))))))))
 
 (def ^:private agent-view-members
-  [{::protocol/operation protocol/pull-operation
-    ::protocol/selector
-    '[:db/id :seon.agent/id :seon.agent/terminated-at
-      :seon.render.canvas/content
-      {:seon.agent/run
-       [:seon.agent.run/id :seon.agent.run/status :seon.agent.run/paused-at
-        {:seon.agent.run/cause [:db/id :seon.agent.message/id]}]}
-      {:seon.agent/ctx [*]}]
-    ::protocol/entity-id nil
-    :datahike.resource/max-work 5000000
-    :datahike.resource/max-results 65536
-    :datahike.resource/max-result-weight 3145728}
+  [(merge
+    {::protocol/operation protocol/pull-operation
+     ::protocol/selector
+     '[:db/id :seon.agent/id :seon.agent/terminated-at
+       :seon.render.canvas/content
+       {:seon.agent/run
+        [:seon.agent.run/id :seon.agent.run/status :seon.agent.run/paused-at
+         {:seon.agent.run/cause [:db/id :seon.agent.message/id]}]}
+       {:seon.agent/ctx [*]}]
+     ::protocol/entity-id nil}
+    agent-entity-read-profile)
    {::protocol/operation protocol/query-operation
     ::protocol/query-form '[:find (count ?a) . :where [?a :seon.agent/id]]
     ::protocol/arguments []
@@ -394,12 +396,11 @@
     ;; nodes it retains while computing that aggregate.
     :datahike.resource/max-results 65536
     :datahike.resource/max-result-weight 1024}
-   {::protocol/operation protocol/pull-operation
-    ::protocol/selector '[*]
-   ::protocol/entity-id [:seon.config/id config/cluster-config-id]
-    :datahike.resource/max-work 100000
-    :datahike.resource/max-results 4096
-    :datahike.resource/max-result-weight 65536}])
+   (merge
+    {::protocol/operation protocol/pull-operation
+     ::protocol/selector '[*]
+     ::protocol/entity-id [:seon.config/id config/cluster-config-id]}
+    config/configuration-read-profile)])
 
 (def ^:private agent-view-fixed-dependencies
   #{:seon.agent/id

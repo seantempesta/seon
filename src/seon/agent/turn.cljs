@@ -10,6 +10,7 @@
     [my.plan :as plan]
     [seon.ai :as ai]
     [seon.ai.tokens :as tokens]
+    [seon.config :as config]
     [seon.retry :as retry]
     [seon.agent.home :as home]
     [my.blob :as blob]
@@ -844,11 +845,6 @@
       (seq usage)
       (assoc :seon.ai.attempt/usage (pr-str usage)))))
 
-;; Mirror of the [[seon.config/llm-attempt-timeout-ms]] default for a
-;; resolution that predates the builder guarantee (hand-built test
-;; resolutions). Production resolutions always carry the cap.
-(def ^:private llm-attempt-timeout-default-ms 120000)
-
 (defn- effective-llm-attempt-timeout-ms
   "The turn's FROZEN per-attempt fence from its config resolution.
 
@@ -858,7 +854,7 @@
    attempt row of one turn carries the identical `outer-timeout-ms`."
   [resolution]
   (or (:seon.ai/agent-attempt-timeout-ms resolution)
-      llm-attempt-timeout-default-ms))
+      (config/llm-attempt-timeout-ms)))
 
 (defn ^:async ^:private bounded-llm-attempt!
   "ONE adapter attempt under the per-attempt wall-clock cap.
@@ -880,8 +876,8 @@
    the adapter to consume the SDK stream and stop it at the first complete
    form. Every retry gets a fresh controller."
   [id ordinal fallback-variant resolution llm-fn prompt-text system-prompt
-   stream?]
-  (let [ms         (effective-llm-attempt-timeout-ms resolution)
+   stream? attempt-timeout-ms]
+  (let [ms         attempt-timeout-ms
         controller (js/AbortController.)
         signal     (.-signal controller)
         arg        (cond-> {:seon.ai/ctx          prompt-text
@@ -924,31 +920,34 @@
         run-resolution!
         (fn ^:async run-resolution!
           [fallback-variant active-resolution retry-reduction]
-          (await
-           (retry/with-retry!
-            {:seon.retry/thunk
-             (fn ^:async run-attempt! []
-               (let [ordinal (count @!attempts)
-                     response
-                     (await
-                      (bounded-llm-attempt!
-                       id ordinal fallback-variant active-resolution llm-fn
-                       prompt-text system-prompt stream?))]
-                 (swap! !attempts conj (::attempt-row response))
-                 (dissoc response ::attempt-row)))
-             :seon.retry/strategy
-             (llm-retry-strategy active-resolution retry-reduction)
-             :seon.retry/retry? llm-retryable?
-             :seon.retry/override
-             (fn [resp]
-               (some-> (get-in resp [:seon.ai/error
-                                     :seon.ai/retry-after-ms])
-                       (min llm-retry-max-delay-ms)))
-             :seon.retry/on-retry
-             (fn [{:seon.retry/keys [attempt delay-ms result]}]
-               (log id "llm transient error — retry"
-                    (str attempt " in " delay-ms "ms — "
-                         (get-in result [:seon.ai/error :seon.ai/msg]))))})))
+          (let [attempt-timeout-ms
+                (effective-llm-attempt-timeout-ms active-resolution)]
+            (await
+             (retry/with-retry!
+              {:seon.retry/thunk
+               (fn ^:async run-attempt! []
+                 (let [ordinal (count @!attempts)
+                       response
+                       (await
+                        (bounded-llm-attempt!
+                         id ordinal fallback-variant active-resolution llm-fn
+                         prompt-text system-prompt stream?
+                         attempt-timeout-ms))]
+                   (swap! !attempts conj (::attempt-row response))
+                   (dissoc response ::attempt-row)))
+               :seon.retry/strategy
+               (llm-retry-strategy active-resolution retry-reduction)
+               :seon.retry/retry? llm-retryable?
+               :seon.retry/override
+               (fn [resp]
+                 (some-> (get-in resp [:seon.ai/error
+                                       :seon.ai/retry-after-ms])
+                         (min llm-retry-max-delay-ms)))
+               :seon.retry/on-retry
+               (fn [{:seon.retry/keys [attempt delay-ms result]}]
+                 (log id "llm transient error — retry"
+                      (str attempt " in " delay-ms "ms — "
+                           (get-in result [:seon.ai/error :seon.ai/msg]))))}))))
         primary (await (run-resolution! nil resolution 0))
         fallback-variant (:seon.ai/fallback-variant resolution)
         fallback-resolution (:seon.ai/fallback-config-resolution resolution)

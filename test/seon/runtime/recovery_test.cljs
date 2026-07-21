@@ -7,7 +7,8 @@
     [seon.db :as db]
     [seon.db.id :as db.id]
     [seon.db.protocol :as protocol]
-    [seon.runtime.recovery :as recovery]))
+    [seon.runtime.recovery :as recovery]
+    [seon.schema :as schema]))
 
 (def ^:private database
   {:db-name "default"
@@ -59,9 +60,17 @@
            (set! db.id/allocate! original-allocate))))))
 
 (deftest recovery-schemas-compile-and-bound-the-optional-detail
+  (is (= recovery/maximum-tail-characters
+         (get-in (schema/schema-definition :seon.runtime.recovery/detail)
+                 [1 :max])))
+  (is (= (apply str (repeat recovery/maximum-tail-characters "x"))
+         (#'recovery/tail
+          (apply str (repeat (inc recovery/maximum-tail-characters) "x")))))
   (is (m/validate :seon.runtime.recovery/detail "pod exited unexpectedly"))
   (is (not (m/validate :seon.runtime.recovery/detail
-                       (apply str (repeat 2049 "x")))))
+                       (apply str
+                              (repeat (inc recovery/maximum-tail-characters)
+                                      "x")))))
   (is (m/validate ::recovery/recover-request {}))
   (is (m/validate ::recovery/recover-request
                   {:seon.runtime.recovery/detail "signal 9"}))

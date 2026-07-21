@@ -4,6 +4,7 @@
     [clojure.string :as str]
     [cljs.test :refer [deftest is]]
     [seon.agent.ctx.render-fns]
+    [seon.handlers.fn :as h-fn]
     [seon.handlers.test :as h-test]
     [seon.render :as render]
     [seon.render.canvas :as canvas]
@@ -42,6 +43,27 @@
 (def ^:private ent-none
   {:seon.test/sym "demo.ns/t-none"
    :seon.test/source "(deftest t-none (is true))"})
+
+(deftest source-renderers-share-one-inline-threshold
+  (let [threshold h-fn/source-inline-threshold
+        short-source (apply str (repeat threshold "x"))
+        long-source (str short-source "x")
+        test-short (h-test/render-html {:seon.render/node
+                                        {:seon.test/sym "demo/short"
+                                         :seon.test/source short-source}})
+        test-long (h-test/render-html {:seon.render/node
+                                       {:seon.test/sym "demo/long"
+                                        :seon.test/source long-source}})
+        fn-short (h-fn/render-html {:seon.render/node
+                                    {:seon.fn/sym "demo/short"
+                                     :seon.fn/source short-source}})
+        fn-long (h-fn/render-html {:seon.render/node
+                                   {:seon.fn/sym "demo/long"
+                                    :seon.fn/source long-source}})]
+    (is (str/includes? (pr-str test-short) ":open true"))
+    (is (not (str/includes? (pr-str test-long) ":open true")))
+    (is (str/includes? (pr-str fn-short) ":open true"))
+    (is (not (str/includes? (pr-str fn-long) ":open true")))))
 
 (deftest render-ai-shows-sym-source-and-status
   ;; The handler is a CONVERTER now — render-ai returns a BARE String

@@ -21,7 +21,12 @@
 ;;; Data contract
 
 (def protocol-version 3)
-(def maximum-invocation-ms (* 10 60 1000))
+(def maximum-invocation-ms
+  "Maximum duration of one execution-protocol invocation.
+
+   This is the contract owner for the W1 aero-to-fact relocation. The JVM host
+   duplicate remains until its protected follow-up unit consumes this owner."
+  (* 10 60 1000))
 (def maximum-result-bytes
   ;; Reserve room for the terminal envelope inside the database protocol's
   ;; already-agreed host-wide frame ceiling.
@@ -397,13 +402,12 @@
    :datahike.resource/max-result-weight maximum-program-bytes})
 
 (defn- config-member [database]
-  {::db.protocol/operation db.protocol/pull-operation
-   ::db/db database
-   ::db.protocol/selector '[*]
-   ::db.protocol/entity-id [:seon.config/id config/cluster-config-id]
-   :datahike.resource/max-work 100000
-   :datahike.resource/max-results 256
-   :datahike.resource/max-result-weight 65536})
+  (merge
+   {::db.protocol/operation db.protocol/pull-operation
+    ::db/db database
+    ::db.protocol/selector '[*]
+    ::db.protocol/entity-id [:seon.config/id config/cluster-config-id]}
+   config/configuration-read-profile))
 
 (defn- query-result [member]
   (if (::db.protocol/success? member)

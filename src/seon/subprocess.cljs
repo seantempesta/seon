@@ -6,7 +6,12 @@
    capture and time bounds, closes stdin, and samples post-exit resources."
   (:refer-clojure :exclude [run!]))
 
-(def default-kill-grace-ms 1000)
+(def default-kill-grace-ms
+  "Default grace period between cooperative and forced subprocess termination.
+
+  W1 owner for the subprocess kill-grace limit; the aero-to-fact sweep should
+  relocate this named value rather than introduce another default."
+  1000)
 
 (defonce ^:private text-encoder (js/TextEncoder.))
 

@@ -4,6 +4,7 @@
    [my.blob :as blob]
    [my.plan :as plan]
    [seon.agent.turn :as turn]
+   [seon.config :as config]
    [seon.db :as db]
    [seon.db.id :as db.id]
    [seon.execution :as execution]
@@ -33,6 +34,14 @@
 (defn- ask-and-eval-reply-promise
   [& arguments]
   (apply (deref #'turn/ask-and-eval-reply!) arguments))
+
+(deftest llm-attempt-fallback-reads-the-config-owner
+  (with-redefs [config/llm-attempt-timeout-ms (constantly 3210)]
+    (is (= 3210
+           (@#'turn/effective-llm-attempt-timeout-ms {})))
+    (is (= 99
+           (@#'turn/effective-llm-attempt-timeout-ms
+            {:seon.ai/agent-attempt-timeout-ms 99})))))
 
 (deftest batch-replies-use-the-shared-ordered-program-projection
   (let [program

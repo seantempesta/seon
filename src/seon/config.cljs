@@ -837,6 +837,16 @@
    :seon.config.database.pull/max-results 1000000
    :seon.config.database.pull/max-result-weight 3000000})
 
+(def configuration-read-profile
+  "Datahike ceilings for acquiring the complete config singleton.
+
+   W1 relocates this named policy into aero-backed database facts. The current
+   values cover the largest retained singleton tree used by prompt, agent-view,
+   and execution-child acquisition."
+  {:datahike.resource/max-work 100000
+   :datahike.resource/max-results 4096
+   :datahike.resource/max-result-weight (* 1024 1024)})
+
 (defn resolve-config-singleton
   "The FLAT `:seon.config` singleton entity map for `manifest`.
 

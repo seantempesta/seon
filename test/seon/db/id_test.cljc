@@ -10,6 +10,7 @@
    [malli.core :as m]
    #?@(:cljs [[seon.db :as db]])
    [seon.db.id :as id]
+   [seon.db.id.schema :as id.schema]
    [seon.schema :as schema]))
 
 (def ^:private generate-candidate #'id/generate-candidate)
@@ -21,6 +22,10 @@
 (def ^:private dependent-identity-attr :idtest.namespace/name)
 (def ^:private dependent-source-attr :idtest.namespace/source)
 (def ^:private compact-generator :seon.db.id.generator/compact)
+
+(deftest generated-id-attempt-schema-uses-the-portable-owner
+  (is (= id.schema/maximum-attempts
+         (get-in (schema/schema-definition :seon.db.id/attempts) [1 :max]))))
 
 (defn- error-value? [value]
   (string? (:seon.error/message value)))

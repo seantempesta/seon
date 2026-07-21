@@ -10,6 +10,7 @@
     [seon.ai.tokens :as tokens]
     [seon.agent.ctx :as ctx]
     [seon.agent.ctx.render-fns :as render-fns]
+    [seon.config :as config]
     [seon.db :as db]
     [seon.db.protocol :as protocol]
     [seon.error :as err]
@@ -357,7 +358,10 @@
                             ::canvas/wired wired})
           source (when (and result (err/agent-authored-sym? value))
                    (:seon.execution/source result))]
-      {:seon.render/ai (rendered-canvas-text response source 2000)
+      {:seon.render/ai
+       (rendered-canvas-text
+        response source
+        (config/render-fn-token-cap (:seon.config/configuration input)))
        ::render-fns/pinned-syms
        (cond-> #{} (symbol? value) (conj value))})
     ;; CONTRACT: this section NEVER vanishes and NEVER surfaces a bare

@@ -38,10 +38,19 @@
    :seon.render.value/offset 0
    :seon.render.value/effective-limits sample-limits})
 
-(declare configure fake-process)
+(declare configure descriptor fake-process)
 
 (deftest default-idle-retention-covers-ordinary-interactive-work
   (is (= 300000 @#'host/default-idle-timeout-ms)))
+
+(deftest default-cancel-grace-comes-from-the-subprocess-owner
+  (host/configure!
+   {::host/launch-descriptor (descriptor)
+    ::host/javascript-runtime "bun"
+    ::host/spawn! (constantly nil)})
+  (is (= subprocess/default-kill-grace-ms
+         (get-in (deref (deref #'host/!host))
+                 [::host/configuration ::host/cancel-grace-ms]))))
 
 (deftest retained-eval-ownership-is-oldest-first-and-bounded
   (let [cap render.value/retained-value-cap

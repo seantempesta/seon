@@ -5,6 +5,7 @@
     [clojure.string :as str]
     [seon.agent]
     [seon.agent.ctx.canvas :as canvas-ctx]
+    [seon.config :as config]
     [seon.db :as db]
     [seon.db.protocol :as protocol]
     [seon.eval]
@@ -15,6 +16,38 @@
 (def ^:private database
   {:datahike/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
    :max-tx 42})
+
+(deftest canvas-ai-twin-reads-the-render-fn-cap-owner
+  (async done
+    (let [observed-cap (atom nil)
+          wired {::canvas/source ::canvas/derived
+                 ::canvas/value [:div "canvas"]}
+          original-acquire @#'canvas-ctx/acquire-canvas!
+          original-render @#'canvas-ctx/rendered-canvas-text]
+      (set! canvas-ctx/acquire-canvas!
+            (fn [& _]
+              (js/Promise.resolve
+               {::canvas/wired wired :seon.render/entity {}})))
+      (set! canvas-ctx/rendered-canvas-text
+            (fn [_ _ cap]
+              (reset! observed-cap cap)
+              "canvas"))
+      (-> (canvas-ctx/canvas-block
+           {::db/db database
+            :seon.agent/id agent-id
+            :seon.agent/entity {}
+            :seon.config/configuration
+            {:seon.config/id config/cluster-config-id
+             :seon.config.render/render-fn-token-cap 73}}
+           (constantly (js/Promise.resolve [])))
+          (.then (fn [_]
+                   (is (= 73 @observed-cap))))
+          (.catch (fn [error]
+                    (is false (str error))))
+          (.finally (fn []
+                      (set! canvas-ctx/acquire-canvas! original-acquire)
+                      (set! canvas-ctx/rendered-canvas-text original-render)
+                      (done)))))))
 
 (deftest ordinary-formatting-tail-preserves-the-current-caller-bytes
   (let [response

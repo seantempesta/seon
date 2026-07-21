@@ -10,6 +10,13 @@
 (def word-pattern (re-pattern word-pattern-source))
 (def compact-pattern (re-pattern compact-pattern-source))
 
+(def maximum-attempts
+  "Maximum generated-ID collision rounds before allocation refuses.
+
+   W1 relocates this named allocation policy into an aero-backed database
+   fact."
+  16)
+
 ;; The old schema accepted every 14-character string. Existing values remain
 ;; readable, but the generators only publish the current narrower syntax.
 (schema/register! :seon.db.id/legacy-value [:string {:min 14 :max 14}])
@@ -81,7 +88,8 @@
  [:map-of :seon.db.id/key :seon.db.id/value])
 (schema/register! :seon.db.id/eids [:map-of :seon.db.id/key :int])
 (schema/register! :seon.db.id/recovered-commit? :boolean)
-(schema/register! :seon.db.id/attempts [:int {:min 1 :max 16}])
+(schema/register! :seon.db.id/attempts
+                  [:int {:min 1 :max maximum-attempts}])
 (schema/register!
  :seon.db.id/allocate-request
  [:map
