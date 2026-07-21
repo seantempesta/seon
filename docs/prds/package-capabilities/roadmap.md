@@ -13,7 +13,7 @@ tags: [prd, agent, architecture]
   package, and the shared tree is an artifact-digest build input. Every
   cluster boots from the same compiled base artifact, then diverges — its own
   database, authored code corpus, and package tree under
-  `data/clusters/<name>/pkgs/`. Bun's global content-addressed cache stays
+  `data/clusters/<name>/packages/`. Bun's global content-addressed cache stays
   shared (download/disk dedupe is safe; resolution trees are not).
 - **Agents do the implementations.** Each capability is delivered by a Seon
   agent given a goal-shaped task ("we need browser testing to achieve this

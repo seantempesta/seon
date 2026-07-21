@@ -38,7 +38,7 @@ with-ctx lazy-forcing requirement; perf tax accepted at agent scale).
 2. Planning fallback = Muse; DeepSeek is the implementer model.
    Experiment: DeepSeek thinking for planning vs no-thinking for
    implementation.
-3. npm: per-cluster installs under `data/clusters/<name>/pkgs/`, shared
+3. npm: per-cluster installs under `data/clusters/<name>/packages/`, shared
    downloads (bun global cache); package/metadata areas clearly separate
    per cluster on BOTH JS and JVM sides.
 4. Maven/CLJ third-party code runs in a separate disposable JVM package

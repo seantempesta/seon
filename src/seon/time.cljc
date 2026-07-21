@@ -1,6 +1,5 @@
 (ns seon.time
-  "Portable instant formatting shared by the pod and JVM execution host."
-  (:require [seon.schema :as schema]))
+  "Portable instant formatting shared by the pod and JVM execution host.")
 
 (defn iso-string
   "UTC ISO-8601 text for one instant."
