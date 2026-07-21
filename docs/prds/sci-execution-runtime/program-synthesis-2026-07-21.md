@@ -194,6 +194,27 @@ and shared-tree/path-limited-commit rules.
   intermittents, branch-qualified eval-cljs hang, two-orderers
   convergence, remaining audit WEAKs not covered above.
 
+### Weakness queue
+
+Owner rule (2026-07-21): every identified weakness is queued here with
+an explicit "when" — never chat-only.
+
+| # | Weakness | Owner package | When / why then |
+|---|---|---|---|
+| q1 | `host.clj` god-file; lane contention proves it | namespace-hierarchy design → its WP cut | after W0.4/WP-A/W0.6 land (same file); design lane running |
+| q2 | `seon.host` has no supervisor spec (launched by tests/manual `-main`) | W6 WP-S (one recorded-child mechanism for sci host + package hosts) | with WP-S; must precede U10 kill/restart drills |
+| q3 | `wire-safe-value`/`bounded-result` realize O(value) before bounding | W0.6 notes it; fix lands W10 unless the implementer finds the ≤10-line seam | after W0.6 reports; before U12 (100-agent heap pressure) |
+| q4 | no derived fleet-health view (faults exist, no "is the cluster healthy" query/render) | new W10 row; derived render per reactive-context law | design at W0.7 (battery needs the same observations); land before U10 |
+| q5 | executor head-of-line: unbounded per-agent queueing, no fairness/busy answer (audit §1b.1, gap 3 tail) | W0 family — W0.8 if W0.4's pool doesn't subsume it | decide when W0.4 returns (its bounded-wait may cover the client side; server side re-audit) |
+| q6 | global schema snapshot/restore race across concurrent sessions (audit gap 7) | W0 family — W0.8 | before W0.7 battery (battery should include the concurrent-register vector) |
+| q7 | `read-file-text` wrapper slurps unbounded paths (audit §1d) | W1 (cap = config fact) + one-line guard | with W1 sweep; trivial |
+| q8 | W1 config-fact IOUs accumulating (every W0.x adds named-var notes) | W1 | dispatch W1 inventory audit NOW (read-only, no lane conflict); implement after W0.6 frees host files |
+| q9 | W10 starvation risk (intermittents never win a slot) | scheduling rule | standing: any quiet slot with no dependency-ready spine work takes the OLDEST W10 row |
+| q10 | live-proof cadence slipped (recent units accepted on gate evidence only) | review protocol | W0.7 restores live falsification; until then any unit touching agent-visible behavior adds one live REPL/page proof to acceptance |
+| q11 | `pkgs/` vs `packages/` spelling drift in U13 + package-capabilities roadmaps | W8 doc hygiene | next W8 slot; one-line fixes |
+| q12 | `uds.cljc` is JVM-only despite `.cljc`; extension/consumer mismatches generally | namespace-hierarchy design (extension sanity sweep) | with q1's design |
+| q13 | `seon.execution.host` (pod client) vs `seon.host` (JVM host) naming collision | namespace-hierarchy design | with q1; pairs must be renamed atomically |
+
 Then **U10** (integration kill/restart tests with live agents) and
 **U12** (the graduation gate: 100-agent cluster, real work, host kill +
 pod restart, zero fact loss, no operator intervention) close the
