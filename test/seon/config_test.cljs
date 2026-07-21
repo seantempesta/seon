@@ -110,6 +110,57 @@
   (testing "the {} manifest leaves the route seed untouched"
     (is (= routes (config/resolve-routes routes {})))))
 
+(deftest package-accessors-use-the-open-wp-k-posture
+  (let [configuration (config/resolve-config-singleton {})]
+    (is (= :open (config/packages-policy configuration)))
+    (is (= #{} (config/packages-allowlist configuration)))
+    (is (= :all (config/packages-trusted-lifecycle-scripts configuration)))
+    (is (= 120000 (config/packages-install-deadline-ms configuration)))
+    (is (= 256 (config/packages-max-rows configuration)))
+    (is (= 3 (config/packages-host-sessions configuration)))
+    (is (= 120000 (config/packages-host-call-deadline-ms configuration)))
+    (is (= 30000 (config/packages-host-ready-timeout-ms configuration)))
+    (is (= 1000 (config/packages-host-respawn-backoff-ms configuration)))
+    (is (= 5000 (config/packages-host-swap-queue-deadline-ms configuration)))
+    (is (= 512 (config/packages-host-jvm-heap-mb configuration)))
+    (is (= 64 (config/handle-per-channel-cap configuration)))
+    (is (= 40 (config/handle-summary-token-cap configuration)))
+    (is (= :enabled (config/packages-exploration-ops configuration)))))
+
+(deftest package-accessors-read-explicit-future-facts
+  (let [configuration
+        (merge (config/resolve-config-singleton {})
+               {:seon.config.packages/policy :closed
+                :seon.config.packages/allowlist #{"cheerio" 'org.clojure/data.csv}
+                :seon.config.packages/trusted-lifecycle-scripts #{"sharp"}
+                :seon.config.packages/install-deadline-ms 1
+                :seon.config.packages/max-rows 2
+                :seon.config.packages.host/sessions 4
+                :seon.config.packages.host/call-deadline-ms 5
+                :seon.config.packages.host/ready-timeout-ms 6
+                :seon.config.packages.host/respawn-backoff-ms 7
+                :seon.config.packages.host/swap-queue-deadline-ms 8
+                :seon.config.packages.host/jvm-heap-mb 9
+                :seon.config.handle/per-channel-cap 10
+                :seon.config.handle/summary-token-cap 11
+                :seon.config.packages/exploration-ops :disabled})]
+    (is (= :closed (config/packages-policy configuration)))
+    (is (= #{"cheerio" 'org.clojure/data.csv}
+           (config/packages-allowlist configuration)))
+    (is (= #{"sharp"}
+           (config/packages-trusted-lifecycle-scripts configuration)))
+    (is (= 1 (config/packages-install-deadline-ms configuration)))
+    (is (= 2 (config/packages-max-rows configuration)))
+    (is (= 4 (config/packages-host-sessions configuration)))
+    (is (= 5 (config/packages-host-call-deadline-ms configuration)))
+    (is (= 6 (config/packages-host-ready-timeout-ms configuration)))
+    (is (= 7 (config/packages-host-respawn-backoff-ms configuration)))
+    (is (= 8 (config/packages-host-swap-queue-deadline-ms configuration)))
+    (is (= 9 (config/packages-host-jvm-heap-mb configuration)))
+    (is (= 10 (config/handle-per-channel-cap configuration)))
+    (is (= 11 (config/handle-summary-token-cap configuration)))
+    (is (= :disabled (config/packages-exploration-ops configuration)))))
+
 (deftest render-explicit-char-knobs-validate-and-default
   ;; transcript-render redesign: the new whitespace/tabs/trailing-ws/layout/
   ;; line-number knobs validate, and an ABSENT section reproduces today's

@@ -26,6 +26,7 @@
 (schema/register! ::execution-output ::path)
 (schema/register! ::execution-digest [:re "^[0-9a-f]{64}$"])
 (schema/register! ::cluster-dir ::path)
+(schema/register! ::packages-dir ::path)
 (schema/register! ::process-dir ::path)
 (schema/register! ::log-dir ::path)
 (schema/register! ::http-port [:int {:min 0 :max 65535}])
@@ -115,6 +116,7 @@
   [::watcher-owner {:optional true} ::watcher-owner]
   [::writer-owner ::writer-owner]
   [::process ::process]
+  [::packages-dir {:optional true} ::packages-dir]
   [::blob-storage-view ::blob-storage-view]
   [::restore-startup {:optional true} ::restore-startup]])
 
@@ -156,6 +158,7 @@
   [::runtime-cluster ::runtime-cluster]
   [::target-database-name ::target-database-name]
   [::protocol/database-path ::protocol/database-path]
+  [::packages-dir {:optional true} ::packages-dir]
   [::process-dir ::process-dir]
   [::log-dir ::log-dir]
   [::http-port ::http-port]
@@ -165,6 +168,10 @@
 (defn- basename
   [path]
   (last (remove str/blank? (str/split path #"/"))))
+
+(defn- parent-path
+  [path]
+  (str/join "/" (butlast (str/split path #"/"))))
 
 (defn- normalize-path
   [path]
@@ -282,6 +289,7 @@
        ::log-dir (normalize-path log-dir)
        ::http-port http-port
        ::http-port-file (normalize-path http-port-file)}
+      ::packages-dir (str cluster-dir "/packages")
       ::blob-storage-view
       {:my.blob/writable-dir
        (str cluster-dir "/blobs")
@@ -358,6 +366,10 @@
         source-bases (conj read-only-dirs
                            (normalize-path
                             (::protocol/database-path source-database)))
+        source-bases (cond-> source-bases
+                       (::packages-dir source-descriptor)
+                       (conj (normalize-path
+                              (::packages-dir source-descriptor))))
         target-private
         (mapv normalize-path
               [process-dir log-dir http-port-file writable-blob-dir])]
@@ -412,22 +424,28 @@
   {:malli/schema
    [:=> [:cat ::shared-writer-cluster-descriptor-request] ::descriptor]}
   [{::keys [source-descriptor runtime-cluster target-database-name
-            process-dir log-dir http-port http-port-file writable-blob-dir]
+            packages-dir process-dir log-dir http-port http-port-file
+            writable-blob-dir]
     database-path ::protocol/database-path}]
-  (let [source-runtime (::runtime source-descriptor)
+  (let [packages-dir (or packages-dir
+                         (str (parent-path (normalize-path database-path))
+                              "/packages"))
+        source-runtime (::runtime source-descriptor)
         source-database (::database source-descriptor)
         source-blobs (::blob-storage-view source-descriptor)
         source-process (::process source-descriptor)
         source-private
-        (mapv normalize-path
+        (into []
+              (keep #(when % (normalize-path %)))
               [(::protocol/database-path source-database)
                (:my.blob/writable-dir source-blobs)
+               (::packages-dir source-descriptor)
                (::process-dir source-process)
                (::log-dir source-process)
                (::http-port-file source-process)])
         target-private
         (mapv normalize-path
-              [database-path process-dir log-dir http-port-file
+              [database-path packages-dir process-dir log-dir http-port-file
                writable-blob-dir])]
     (invariant! (not= (::protocol/database-name source-database)
                       target-database-name)
@@ -456,6 +474,7 @@
       {::protocol/database-name target-database-name
        ::protocol/backend (::protocol/backend source-database)
        ::protocol/database-path (normalize-path database-path)}
+      ::packages-dir (normalize-path packages-dir)
       ::watcher-owner (::watcher-owner source-descriptor)
       ::writer-owner (::writer-owner source-descriptor)
       ::process

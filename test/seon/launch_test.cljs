@@ -92,6 +92,8 @@
       (is (= (str (str/replace cluster-dir #"/$" "") "/db")
              (get-in descriptor
                      [::launch/database ::protocol/database-path])))
+      (is (= (str (str/replace cluster-dir #"/$" "") "/packages")
+             (::launch/packages-dir descriptor)))
       (is (= {:seon.client/autonomous? true}
              (get-in descriptor
                      [::launch/runtime :seon.client/launch-capability])))
@@ -174,7 +176,8 @@
            (get-in branch [::launch/database ::protocol/database-path])))
     (is (= {:my.blob/writable-dir "data/branches/acme-trial/blobs"
             :my.blob/read-only-dirs ["data/clusters/acme/blobs"]}
-           (::launch/blob-storage-view branch)))))
+           (::launch/blob-storage-view branch)))
+    (is (not (contains? branch ::launch/packages-dir)))))
 
 (deftest shared-writer-cluster-is-autonomous-with-private-database-and-processes
   (let [source (ordinary "data/clusters/default"
@@ -185,6 +188,7 @@
           ::launch/runtime-cluster "experiment"
           ::launch/target-database-name "experiment"
           ::protocol/database-path "data/clusters/experiment/db"
+          ::launch/packages-dir "data/clusters/experiment/packages"
           ::launch/process-dir "tmp/seon-experiment"
           ::launch/log-dir "logs/experiment"
           ::launch/http-port 0
@@ -200,7 +204,9 @@
            (::launch/database cluster)))
     (is (= {:my.blob/writable-dir "data/clusters/experiment/blobs"
             :my.blob/read-only-dirs []}
-           (::launch/blob-storage-view cluster)))))
+           (::launch/blob-storage-view cluster)))
+    (is (= "data/clusters/experiment/packages"
+           (::launch/packages-dir cluster)))))
 
 (deftest shared-writer-cluster-rejects-source-name-and-path-overlap
   (let [source (ordinary "data/clusters/default"
@@ -210,6 +216,7 @@
          ::launch/runtime-cluster "experiment"
          ::launch/target-database-name "experiment"
          ::protocol/database-path "data/clusters/experiment/db"
+         ::launch/packages-dir "data/clusters/experiment/packages"
          ::launch/process-dir "tmp/seon-experiment"
          ::launch/log-dir "logs/experiment"
          ::launch/http-port 0
@@ -222,6 +229,8 @@
             [(assoc request ::protocol/database-path
                     "data/clusters/default/db/experiment")
              (assoc request ::launch/process-dir "tmp/source-process/child")
+             (assoc request ::launch/packages-dir
+                    "data/clusters/default/packages/experiment")
              (assoc request ::launch/writable-blob-dir
                     "data/clusters/default/blobs/experiment")]]
       (is (thrown? js/Error

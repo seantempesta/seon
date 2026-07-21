@@ -8,6 +8,7 @@
             [seon.dev.process :as process]
             [seon.dev.state :as state]
             [seon.launch :as launch]
+            [seon.packages :as packages]
             [seon.schema :as schema]))
 
 (schema/register!
@@ -50,6 +51,7 @@
           ::launch/runtime-cluster name
           ::launch/target-database-name name
           ::protocol/database-path (str (fs/path cluster-dir "db"))
+          ::launch/packages-dir (str (fs/path cluster-dir "packages"))
           ::launch/process-dir process-dir
           ::launch/log-dir (str (fs/path root "logs" "clusters" name))
           ::launch/http-port 0
@@ -69,6 +71,40 @@
        (ex-info "The shared writer artifact manifest is absent."
                 {:seon.dev.cluster/artifact-manifest
                  (:seon.dev.config/artifact-manifest configuration)}))))
+
+(defn ensure-package-skeleton!
+  "Materialize missing manifests for one cluster package root."
+  {:malli/schema [:=> [:cat ::launch/descriptor] ::launch/packages-dir]}
+  [descriptor]
+  (let [packages-dir
+        (or (::launch/packages-dir descriptor)
+            (throw (ex-info "A cluster descriptor requires a packages root."
+                            {::launch/descriptor descriptor})))
+        npm-dir (fs/path packages-dir "npm")
+        package-json (fs/path npm-dir "package.json")
+        deps-edn (fs/path packages-dir "deps.edn")]
+    (fs/create-dirs npm-dir)
+    (when-not (fs/exists? package-json)
+      (spit (str package-json)
+            (packages/npm-manifest
+             {::packages/rows []
+              :seon.config.packages/trusted-lifecycle-scripts :all})))
+    (when-not (fs/exists? deps-edn)
+      (spit (str deps-edn)
+            (packages/deps-manifest {::packages/rows []})))
+    packages-dir))
+
+(defn reset-package-skeleton!
+  "Replace one cluster package root with empty generated manifests."
+  {:malli/schema [:=> [:cat ::launch/descriptor] ::launch/packages-dir]}
+  [descriptor]
+  (let [packages-dir
+        (or (::launch/packages-dir descriptor)
+            (throw (ex-info "A cluster descriptor requires a packages root."
+                            {::launch/descriptor descriptor})))]
+    (when (fs/exists? packages-dir)
+      (fs/delete-tree packages-dir))
+    (ensure-package-skeleton! descriptor)))
 
 (defn- ensure-under-lock!
   [target-configuration manifest acquire-owned!]
@@ -91,7 +127,11 @@
      (fn [acquire-owned!]
        (state/with-lock
         configuration :cluster 30000
-        #(ensure-under-lock! target-configuration manifest acquire-owned!))))))
+        #(do
+           (ensure-package-skeleton!
+            (:seon.dev.config/launch-descriptor target-configuration))
+           (ensure-under-lock! target-configuration manifest
+                               acquire-owned!)))))))
 
 (defn- stop-under-lock!
   [target-configuration operation]

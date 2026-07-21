@@ -881,8 +881,12 @@
         configuration {:seon.dev.config/root (str root)
                        :seon.dev.config/cluster-dir (str cluster)
                        :seon.dev.config/cluster-name "default"
+                       :seon.dev.config/launch-descriptor
+                       {:seon.launch/packages-dir
+                        (str (fs/path cluster "packages"))}
                        :seon.dev.config/environment {}}
         requests (atom [])
+        reset-packages (atom [])
         reconciled (atom [])]
     (try
       (fs/create-dirs database)
@@ -898,6 +902,10 @@
          #'process/target-process-ids
          (constantly process/all-process-ids)
          #'cli/select-config (fn [selected _path] selected)
+         #'cluster/reset-package-skeleton!
+         (fn [descriptor]
+           (swap! reset-packages conj descriptor)
+           (:seon.launch/packages-dir descriptor))
          #'cli/reconcile-development!
          (fn [selected stop-results]
            (is (not (fs/exists? database)))
@@ -916,6 +924,8 @@
                :seon.dev.process/targets #{process/pod-id process/writer-id}}]
              @requests))
       (is (= configuration (ffirst @reconciled)))
+      (is (= [(:seon.dev.config/launch-descriptor configuration)]
+             @reset-packages))
       (is (= :seon.dev.process.operation/reset
              (-> @reconciled first second first
                  :seon.dev.process/operation)))

@@ -1006,6 +1006,138 @@
   [configuration]
   {:seon.config/always (or (:seon.config/always configuration) #{})})
 
+;;; --- Package policy accessors. WP-K intentionally lands only this pure read
+;;; surface. W1 owns the later aero -> singleton-fact sweep; until then these
+;;; fallbacks are the owner-approved open exploration posture.
+
+(defn packages-policy
+  "The package-install policy: `:closed`, `:allowlist`, or `:open`.
+
+   W1 will sweep this accessor into database facts and later tighten the
+   default from `:open` to `:allowlist`."
+  {:malli/schema [:=> [:cat :seon.config/singleton] :keyword]}
+  [configuration]
+  (get configuration :seon.config.packages/policy :open))
+
+(defn packages-allowlist
+  "The npm names and deps libs admitted by package allowlist policy.
+
+   W1 will sweep this accessor into database facts and later tighten the
+   package posture from open exploration to this allowlist."
+  {:malli/schema [:=> [:cat :seon.config/singleton]
+                  [:set [:or :string :qualified-symbol]]]}
+  [configuration]
+  (get configuration :seon.config.packages/allowlist #{}))
+
+(defn packages-trusted-lifecycle-scripts
+  "The npm lifecycle-script trust policy, `:all` or explicit names.
+
+   W1 will sweep this accessor into database facts and later tighten the
+   default from trust-all exploration to an explicit allowlist."
+  {:malli/schema [:=> [:cat :seon.config/singleton]
+                  [:or [:= :all] [:set :string]]]}
+  [configuration]
+  (get configuration :seon.config.packages/trusted-lifecycle-scripts :all))
+
+(defn packages-install-deadline-ms
+  "The wall-clock bound for one staged package install.
+
+   W1 will sweep this accessor into database facts and hardware-derived
+   defaults while tightening the package posture to allowlist."
+  {:malli/schema [:=> [:cat :seon.config/singleton] :int]}
+  [configuration]
+  (get configuration :seon.config.packages/install-deadline-ms 120000))
+
+(defn packages-max-rows
+  "The maximum package-ledger rows admitted in one cluster.
+
+   W1 will sweep this accessor into database facts and hardware-derived
+   defaults while tightening the package posture to allowlist."
+  {:malli/schema [:=> [:cat :seon.config/singleton] :int]}
+  [configuration]
+  (get configuration :seon.config.packages/max-rows 256))
+
+(defn packages-host-sessions
+  "The client session-pool size for each package host.
+
+   W1 will sweep this accessor into database facts and hardware-derived
+   defaults while tightening the package posture to allowlist."
+  {:malli/schema [:=> [:cat :seon.config/singleton] :int]}
+  [configuration]
+  (get configuration :seon.config.packages.host/sessions 3))
+
+(defn packages-host-call-deadline-ms
+  "The default deadline for one package-host call.
+
+   W1 will sweep this accessor into database facts and hardware-derived
+   defaults while tightening the package posture to allowlist."
+  {:malli/schema [:=> [:cat :seon.config/singleton] :int]}
+  [configuration]
+  (get configuration :seon.config.packages.host/call-deadline-ms 120000))
+
+(defn packages-host-ready-timeout-ms
+  "The package-host spawn-to-ready timeout.
+
+   W1 will sweep this accessor into database facts and hardware-derived
+   defaults while tightening the package posture to allowlist."
+  {:malli/schema [:=> [:cat :seon.config/singleton] :int]}
+  [configuration]
+  (get configuration :seon.config.packages.host/ready-timeout-ms 30000))
+
+(defn packages-host-respawn-backoff-ms
+  "The minimum delay between package-host respawn attempts.
+
+   W1 will sweep this accessor into database facts and hardware-derived
+   defaults while tightening the package posture to allowlist."
+  {:malli/schema [:=> [:cat :seon.config/singleton] :int]}
+  [configuration]
+  (get configuration :seon.config.packages.host/respawn-backoff-ms 1000))
+
+(defn packages-host-swap-queue-deadline-ms
+  "The deadline for package calls queued across a host swap.
+
+   W1 will sweep this accessor into database facts and hardware-derived
+   defaults while tightening the package posture to allowlist."
+  {:malli/schema [:=> [:cat :seon.config/singleton] :int]}
+  [configuration]
+  (get configuration :seon.config.packages.host/swap-queue-deadline-ms 5000))
+
+(defn packages-host-jvm-heap-mb
+  "The maximum JVM package-host heap in megabytes.
+
+   W1 will sweep this accessor into database facts and hardware-derived
+   defaults while tightening the package posture to allowlist."
+  {:malli/schema [:=> [:cat :seon.config/singleton] :int]}
+  [configuration]
+  (get configuration :seon.config.packages.host/jvm-heap-mb 512))
+
+(defn handle-per-channel-cap
+  "The maximum live handles retained per package-host channel.
+
+   W1 will sweep this accessor into database facts and hardware-derived
+   defaults while tightening the package posture to allowlist."
+  {:malli/schema [:=> [:cat :seon.config/singleton] :int]}
+  [configuration]
+  (get configuration :seon.config.handle/per-channel-cap 64))
+
+(defn handle-summary-token-cap
+  "The token budget for one package-handle summary.
+
+   W1 will sweep this accessor into database facts and hardware-derived
+   defaults while tightening the package posture to allowlist."
+  {:malli/schema [:=> [:cat :seon.config/singleton] :int]}
+  [configuration]
+  (get configuration :seon.config.handle/summary-token-cap 40))
+
+(defn packages-exploration-ops
+  "Whether exploratory package operations are `:enabled` or `:disabled`.
+
+   W1 will sweep this accessor into database facts and later tighten the
+   default alongside the package-policy flip to allowlist."
+  {:malli/schema [:=> [:cat :seon.config/singleton] :keyword]}
+  [configuration]
+  (get configuration :seon.config.packages/exploration-ops :enabled))
+
 ;;; ============================================================
 ;;; ENV KNOBS — the ONE typed env surface for the FEW knobs that stay env-only
 ;;; (launch-wiring + process-level flags). `platform/env-val` is the single

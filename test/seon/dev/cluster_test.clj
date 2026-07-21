@@ -1,5 +1,7 @@
 (ns seon.dev.cluster-test
   (:require [babashka.fs :as fs]
+            [cheshire.core :as json]
+            [clojure.edn :as edn]
             [clojure.test :refer [deftest is run-tests]]
             [seon.dev.artifact :as artifact]
             [seon.dev.cluster :as cluster]
@@ -33,18 +35,48 @@
     (is (= (str (fs/path root "data/clusters/experiment/blobs"))
            (get-in descriptor [::launch/blob-storage-view
                                :my.blob/writable-dir])))
+    (is (= (str (fs/path root "data/clusters/experiment/packages"))
+           (::launch/packages-dir descriptor)))
     (doseq [invalid ["" "../experiment" "Experiment" "a/b" "-a" "a-"]]
       (is (thrown? Exception
                    (cluster/request {::cluster/configuration configuration
                                      ::cluster/name invalid}))))))
+
+(deftest package-skeleton-is-generated-and-reset-from-the-cluster-coordinate
+  (let [root (fs/create-temp-dir {:prefix "seon-cluster-packages-"})
+        packages-dir (fs/path root "packages")
+        descriptor (assoc (:seon.dev.config/launch-descriptor
+                           (::cluster/target-configuration (target-request)))
+                          ::launch/packages-dir (str packages-dir))
+        package-json (fs/path packages-dir "npm/package.json")
+        deps-edn (fs/path packages-dir "deps.edn")]
+    (try
+      (is (= (str packages-dir)
+             (cluster/ensure-package-skeleton! descriptor)))
+      (is (= {:dependencies {} :trustedDependencies []}
+             (json/parse-string (slurp (str package-json)) true)))
+      (is (= {:deps {}} (edn/read-string (slurp (str deps-edn)))))
+      (spit (str (fs/path packages-dir "npm/stale")) "stale")
+      (spit (str deps-edn) "{:deps {stale/lib {:mvn/version \"1\"}}}\n")
+      (is (= (str packages-dir)
+             (cluster/reset-package-skeleton! descriptor)))
+      (is (not (fs/exists? (fs/path packages-dir "npm/stale"))))
+      (is (= {:dependencies {} :trustedDependencies []}
+             (json/parse-string (slurp (str package-json)) true)))
+      (is (= {:deps {}} (edn/read-string (slurp (str deps-edn)))))
+      (finally (fs/delete-tree root {:force true})))))
 
 (deftest open-and-restart-use-the-one-pod-supervisor-path
   (let [{::cluster/keys [target-configuration] :as request} (target-request)
         manifest {:seon.dev.artifact/application-digest "application"}
         pod {:seon.dev.process/id process/pod-id}
         calls (atom [])
+        package-roots (atom [])
         status-value {:seon.dev.target/status :seon.dev.target.status/ready}]
     (with-redefs [artifact/read-manifest (fn [_] manifest)
+                  cluster/ensure-package-skeleton!
+                  (fn [descriptor]
+                    (swap! package-roots conj (::launch/packages-dir descriptor)))
                   process/specs (fn [_ _] {process/pod-id pod})
                   process/with-startup-ownership (fn [_ transition]
                                                    (transition
@@ -76,7 +108,11 @@
       (is (= status-value (cluster/restart! request)))
       (is (= [[:seon.dev.process.operation/restart #{process/pod-id}]
               :ensure]
-             @calls)))))
+             @calls))
+      (is (= [(::launch/packages-dir
+               (:seon.dev.config/launch-descriptor
+                target-configuration))]
+             @package-roots)))))
 
 (deftest close-stops-only-the-pod-and-does-not-delete-cluster-data
   (let [{::cluster/keys [target-configuration] :as request} (target-request)
