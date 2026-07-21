@@ -308,6 +308,36 @@ the named boundaries.
 - **Three surfaces only**: `bin/test-cljs`, `bin/test-writer` +
   `bin/seon test operator`, and `src-inspect-ai/`. No new runners.
 
+## Execution state (2026-07-21, restart anchor)
+
+Accepted and committed: W8a (PRD archival, `607147a6`+`fa81d07c`),
+W0.1 (`82a0c4b4`), W0.2 (`3346e54f`), W0.5 (`7cab9119`),
+**W2 (`bd357aa5`)** — fallback `:seon.ai/agent-fallback-variant`
+keyword, `:muse` variant with minimal thinking, fallback inside
+`call-llm!`, full CLJS gate 1458/7035 green. sci forked to
+seantempesta/sci at `be4021d`, submodule repointed (`3c11679c`).
+Error-quality design accepted:
+[[research/error-quality-u6-w3-design-2026-07-21]] with WP-A..WP-D cut.
+
+IN FLIGHT (Codex `codex exec` sessions; resume by id with
+`codex exec resume <id> --dangerously-bypass-approvals-and-sandbox`):
+W0.3 cancel-ghost (spec `specs/w0.3-cancel-ghost.md`); W4a tier-aware
+teaching round 2, session `019f84e1-f0c6-7702-8985-c512e76173ec`,
+authorized seam = `runtime.cljs` system-text resolution + one pure
+tier-selecting renderer. A Fable design lane for W6 package hosts is
+also out. If a lane died mid-work: uncommitted changes sit in the
+shared tree on its owned paths — review the diff against its spec,
+then re-dispatch the spec fresh.
+
+Work-order specs are durable under `specs/` (one file per unit, the
+exact text dispatched). Driving protocol:
+`docs/seon/reference/driving-codex-agents.md` + implementer preamble
+(ruling 10). Review loop: read summary → diff vs spec → rerun the
+focused gate → accept (path-limited commit stands) or resume with
+corrections. Next after in-flight lanes: W0.4 pool (probe recipe),
+WP-A (sci fork error patch), W0.6, W0.7 battery, then W3 authored
+invocation; W6 packages await the Fable design.
+
 ## Sequencing and parallel portfolio
 
 **Earliest unsettled contract:** W0 (containment) — everything fleet-
