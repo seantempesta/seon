@@ -107,6 +107,12 @@
   [::registry ::registry]
   [::lib ::lib]
   [::wrappers ::wrappers]])
+(schema/register!
+ ::install-request
+ [:map {:closed true}
+  [::registry ::registry]
+  [::ctx ::ctx]
+  [::lib ::lib]])
 (schema/register! :seon.capability/op-id [:string {:min 1}])
 (schema/register! :seon.capability/replayed? :boolean)
 (schema/register! ::files [:int {:min 0}])
@@ -423,6 +429,14 @@
              (assoc entries lib {::sci-ns sci-ns ::vars vars}))))
   nil)
 
+(defn install-registered-wrappers!
+  "Link one context to a namespace's exact shared registry vars."
+  {:malli/schema [:=> [:cat ::install-request] :nil]}
+  [{::keys [registry ctx lib]}]
+  (when-let [vars (get-in @registry [lib ::vars])]
+    (sci/add-namespace! ctx lib vars))
+  nil)
+
 (defn- registry-load-fn
   "Shared sci `:load-fn` over the registry; injects wrappers on require.
 
@@ -432,8 +446,9 @@
    (no source) leaves the `:as`/`:refer` wiring to sci itself."
   [registry]
   (fn [{:keys [libname ctx]}]
-    (when-let [vars (get-in @registry [libname ::vars])]
-      (swap! (:env ctx) assoc-in [:namespaces libname] vars)
+    (when (get-in @registry [libname ::vars])
+      (install-registered-wrappers!
+       {::registry registry ::ctx ctx ::lib libname})
       {})))
 
 (defn- register-host-capabilities!
@@ -715,6 +730,18 @@
         (if (::protocol/success? response)
           {:seon.db/ok? true}
           (protocol-error-value response))))))
+
+(defn query-writer!
+  "Run one host-internal query through the retained writer session."
+  {:malli/schema [:=> [:cat ::writer :any [:sequential :any]] :any]}
+  [writer query-form arguments]
+  (apply db-query writer query-form arguments))
+
+(defn transact-writer!
+  "Commit host-derived transaction data through the retained writer."
+  {:malli/schema [:=> [:cat ::writer [:vector :any]] :map]}
+  [writer tx-data]
+  (record-transact! writer {::tx-data tx-data}))
 
 (def ^:private eval-allocation-key ::eval-allocation)
 (def ^:private max-allocation-attempts 16)

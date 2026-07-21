@@ -55,6 +55,7 @@
             [seon.ai.tokens :as tokens]
             [seon.analyzer-info :as analyzer-info]
             [seon.config :as config]
+            [seon.content-hash :as content-hash]
             [seon.db :as db]
             [seon.db.id :as db.id]
             [seon.db.protocol :as db.protocol]
@@ -2509,6 +2510,9 @@
                                ;; entity throws and sinks the whole tx.
                                :seon.fn/ns         {:seon.ns/name ns}
                                :seon.fn/source     source
+                               :seon.fn/source-fingerprint
+                               (content-hash/sha-256 source)
+                               :seon.fn/execution-tier :nursery
                                :seon.fn/fn-var?    fn-var?
                                :seon.fn/arglists   arglists
                                :seon.fn/doc        doc

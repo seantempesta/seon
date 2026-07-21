@@ -71,6 +71,7 @@
             [sci.core :as sci]
             [seon.db.transport.uds :as uds]
             [seon.host.context :as context]
+            [seon.host.graduate :as graduate]
             [seon.host.record :as record]
             [seon.schema :as schema])
   (:import [java.io File OutputStream]
@@ -652,7 +653,11 @@
             (when-not existing?
               (binding [context/*agent-id* agent-id]
                 (context/restore-context-defs!
-                 (::writer host) ctx (agent-home-ns agent-id))))
+                 (::writer host) ctx (agent-home-ns agent-id)))
+              (context/install-registered-wrappers!
+               {::context/registry (get-in host [::base ::context/registry])
+                ::context/ctx ctx
+                ::context/lib (agent-home-ns agent-id)}))
             (reset! (::startup session) startup)
             (send-frame!
              session
@@ -733,6 +738,11 @@
                                       ::context/backend
                                       ::context/database-path]))
         base (context/build-base! writer)
+        graduation-report
+        (graduate/rebuild!
+         {::context/base base
+          ::context/registry (::context/registry base)
+          ::context/writer writer})
         contexts (atom {})
         eval-pool (Executors/newFixedThreadPool
                    (int (or eval-threads default-eval-threads)))
@@ -744,6 +754,7 @@
                     {::writer writer
                      ::server server
                      ::base base
+                     ::graduation-report graduation-report
                      ::contexts contexts
                      ::eval-pool eval-pool
                      ::watchdog watchdog

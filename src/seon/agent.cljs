@@ -156,6 +156,8 @@
 (schema/register! :seon.fn/sym        [:string {:seon.db/identity true}])
 (schema/register! :seon.fn/ns         :seon.db/ref)
 (schema/register! :seon.fn/source     :string)
+(schema/register! :seon.fn/source-fingerprint :string)
+(schema/register! :seon.fn/execution-tier [:enum :nursery :graduated])
 ;; Projections from the analyzer's var-map. Re-derived on every
 ;; detect-and-tee + on bulk-load resume.
 (schema/register! :seon.fn/fn-var?    :boolean)
@@ -240,6 +242,9 @@
    [:seon.fn/sym    :seon.fn/sym]
    [:seon.fn/ns     :seon.fn/ns]
    [:seon.fn/source :seon.fn/source]
+   [:seon.fn/source-fingerprint {:optional true}
+    :seon.fn/source-fingerprint]
+   [:seon.fn/execution-tier {:optional true} :seon.fn/execution-tier]
    ;; analyzer projections — the tee stamps all four on every row it
    ;; mints (strict persistence: only literal `(defn …)` sources get a
    ;; :seon.fn row). Optional because boot-indexed and legacy rows may

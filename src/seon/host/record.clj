@@ -20,6 +20,7 @@
             [clojure.tools.reader.reader-types :as reader-types]
             [malli.core :as m]
             [seon.ai.tokens :as tokens]
+            [seon.content-hash :as content-hash]
             [seon.schema :as schema]
             [seon.schema.internal :as schema.internal]))
 
@@ -118,6 +119,8 @@
     (cond-> {:seon.fn/sym (str ns-sym "/" fn-name)
              :seon.fn/ns {:seon.ns/name ns-sym}
              :seon.fn/source source
+             :seon.fn/source-fingerprint (content-hash/sha-256 source)
+             :seon.fn/execution-tier :nursery
              :seon.fn/fn-var? true
              :seon.fn/arglists (pr-str arglists)
              :seon.fn/doc (or (:doc var-meta) doc "")
