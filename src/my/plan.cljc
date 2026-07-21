@@ -548,9 +548,12 @@
            ::db/query generated-root-for-run-query
            ::db/args [generated-root-rules run-id]
            ::db/max-work 250000
-           ;; A scalar Datalog result consumes two result nodes: the relation
-           ;; container plus its value. One fails closed before applicability.
-           ::db/max-results 2
+           ;; A rule-derived scalar result consumes three result nodes — the
+           ;; relation container, its value, and one rule-relation node
+           ;; (live-measured on a cluster with several generated roots,
+           ;; 2026-07-21). Constant headroom keeps one match fail-closed
+           ;; before applicability.
+           ::db/max-results 4
            ::db/max-result-weight 4096}))
         namespace-match
         (when-not (or (:seon.error/message root-id) root-id)
@@ -560,9 +563,11 @@
              ::db/query generated-namespace-for-run-query
              ::db/args [generated-root-rules run-id]
              ::db/max-work 250000
-             ;; A find-tuple result consumes the relation container plus one
-             ;; node per tuple element (three here).
-             ::db/max-results 4
+             ;; A rule-derived find-tuple result consumes the relation
+             ;; container, one node per tuple element (three here), and one
+             ;; rule-relation node — the same counting the scalar query
+             ;; measured live. Constant headroom keeps one match fail-closed.
+             ::db/max-results 6
              ::db/max-result-weight 4096})))
         [namespace-root-id namespace-step namespace-name]
         (when (vector? namespace-match) namespace-match)

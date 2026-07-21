@@ -456,8 +456,9 @@
              (is (= {:my.plan/ok? true} result))
              (is (false? @downstream?))
              (is (= 2 (count @cause-queries)))
-             (is (= [2 4] (mapv ::db/max-results @cause-queries))
-                 "scalar root and tuple namespace queries use measured nodes")
+             (is (= [4 6] (mapv ::db/max-results @cause-queries))
+                 "scalar root and tuple namespace queries use measured nodes
+                  (rule-derived scalar = 3 live, plus constant headroom)")
              (is (some #{'generated-root}
                        (tree-seq coll? seq
                                  (::db/args (second @cause-queries)))))))
