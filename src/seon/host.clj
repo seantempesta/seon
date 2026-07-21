@@ -735,25 +735,29 @@
 (defn- run-invocation!
   "Execute one claimed invocation on the calling pool thread."
   [session token invocation]
-  (let [{invocation-id :seon.execution/invocation-id
-         database :seon.db/db
-         identity-value :seon.execution/function-identity
-         arguments :seon.execution/arguments
-         result-limit :seon.execution/result-limit-bytes} invocation
-        function-symbol (:seon.execution/function-symbol identity-value)
-        compiled? (contains? identity-value
-                             :seon.execution/artifact-digest)
-        worker (Thread/currentThread)
-        remaining (min maximum-invocation-ms
-                       (max 1 (- (:seon.execution/deadline-ms invocation)
-                                 (now-ms))))
-        watchdog ^ScheduledExecutorService (::watchdog session)
-        deadline-task (.schedule watchdog
-                                 ^Runnable #(.interrupt worker)
-                                 (long remaining) TimeUnit/MILLISECONDS)
-        outcome
-        (try
-          (cond
+  ;; Cancellation revokes this exact invocation generation before touching
+  ;; its Future. If the pool won the FutureTask start race, it still cannot
+  ;; acquire policy, create receipts, evaluate, or record after settlement.
+  (when (identical? token @(::active session))
+    (let [{invocation-id :seon.execution/invocation-id
+           database :seon.db/db
+           identity-value :seon.execution/function-identity
+           arguments :seon.execution/arguments
+           result-limit :seon.execution/result-limit-bytes} invocation
+          function-symbol (:seon.execution/function-symbol identity-value)
+          compiled? (contains? identity-value
+                               :seon.execution/artifact-digest)
+          worker (Thread/currentThread)
+          remaining (min maximum-invocation-ms
+                         (max 1 (- (:seon.execution/deadline-ms invocation)
+                                   (now-ms))))
+          watchdog ^ScheduledExecutorService (::watchdog session)
+          deadline-task (.schedule watchdog
+                                   ^Runnable #(.interrupt worker)
+                                   (long remaining) TimeUnit/MILLISECONDS)
+          outcome
+          (try
+            (cond
             (and compiled?
                  (not= (:seon.execution/artifact-digest identity-value)
                        (get-in @(::startup session)
@@ -793,23 +797,23 @@
                       (str "The JVM host does not serve " function-symbol
                            "; prompt and view rendering stay on the pod.")
                       :core-bug)})
-          (catch Throwable throwable
-            {::error (error-value
-                      (str (first (str/split-lines
-                                   (str (.getMessage throwable)))))
-                      (or (:seon.error/kind (ex-data throwable)) :agent))})
-          (finally
-            (.cancel deadline-task false)
-            (Thread/interrupted)))]
-    (settle!
-     session token
-     (if-let [error (::error outcome)]
-       (error-frame invocation-id error database)
-       (let [bounded (bounded-result (::value outcome) result-limit)]
-         (if (::ok? bounded)
-           (result-frame invocation-id database (::value bounded)
-                         (::result-bytes bounded))
-           (error-frame invocation-id (::error bounded) database)))))))
+            (catch Throwable throwable
+              {::error (error-value
+                        (str (first (str/split-lines
+                                     (str (.getMessage throwable)))))
+                        (or (:seon.error/kind (ex-data throwable)) :agent))})
+            (finally
+              (.cancel deadline-task false)
+              (Thread/interrupted)))]
+      (settle!
+       session token
+       (if-let [error (::error outcome)]
+         (error-frame invocation-id error database)
+         (let [bounded (bounded-result (::value outcome) result-limit)]
+           (if (::ok? bounded)
+             (result-frame invocation-id database (::value bounded)
+                           (::result-bytes bounded))
+             (error-frame invocation-id (::error bounded) database))))))))
 
 (defn- begin-invocation!
   [session invocation]
@@ -865,18 +869,19 @@
     (when (= invocation-id
              (get-in token [::invocation :seon.execution/invocation-id]))
       (reset! (::cancel-requested? session) true)
-      (when-let [{::keys [worker future]} @(::active-run session)]
-        (when (realized? worker) (.interrupt ^Thread @worker))
-        ;; The worker settles the canceled error itself; bound the wait so
-        ;; a wedged native call cannot wedge the reader.
-        (try (.get ^java.util.concurrent.Future future
-                   2000 TimeUnit/MILLISECONDS)
-             (catch Throwable _ nil)))
-      (settle! session token
-               (error-frame invocation-id
-                            (error-value "The invocation was canceled."
-                                         :agent)
-                            (get-in token [::invocation :seon.db/db])))
+      (when (settle! session token
+                     (error-frame
+                      invocation-id
+                      (error-value "The invocation was canceled." :agent)
+                      (get-in token [::invocation :seon.db/db])))
+        (when-let [{::keys [worker future]} @(::active-run session)]
+          (if (realized? worker)
+            (.interrupt ^Thread @worker)
+            (.cancel ^java.util.concurrent.Future future false))
+          ;; Bound the wait so a wedged native call cannot wedge the reader.
+          (try (.get ^java.util.concurrent.Future future
+                     2000 TimeUnit/MILLISECONDS)
+               (catch Throwable _ nil))))
       true)))
 
 (defn- shutdown-session!
