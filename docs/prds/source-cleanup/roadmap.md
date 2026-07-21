@@ -240,12 +240,12 @@ Stage-1.6 integrated code gate only. A status check immediately after readiness
 observed all default processes absent because a second explicit lifecycle
 reconciliation had entered its clean stop phase before publishing replacement
 generations; logs falsify workload crash, control EOF, and record loss. The
-frozen-turn-inputs I6/I7 lane now owns active `turn.cljs`/`ai.cljs` plus tests;
-U4 owns active `db/id.cljc` work and the retained `u15` branch. Their current
-replacement default generation is intentionally not a source-clean checkpoint.
-Fresh directive/narration/query-shape and G11 browser proof remain uncounted
-until both owners commit and release their paths and U4 closes `u15` in its
-integration pass. The independent full writer gate also passes 259 tests /
+frozen-turn-inputs I6/I7 later committed as `df78bb8d`; U4 source and lifecycle
+later committed and released as `b7808e35` and `2821bb87`, with `u15` closed.
+The replacement generation observed during those edits was intentionally not a
+source-clean checkpoint. Fresh directive/narration/query-shape and G11 browser
+proof remain uncounted until every current source owner releases the artifact.
+The independent full writer gate also passes 259 tests /
 1,997 assertions with zero failures and errors while the then-active dirty
 paths were CLJS-only. This is useful
 integration evidence, not the final twice-frozen graduation run.
@@ -257,10 +257,14 @@ two-child count, then uses one fresh real agent for G1/G2 correction, exact-byte
 G3/G9 narration, four native G10 shapes plus behavioral reuse, and the
 agent-authored G11 canvas lifecycle. Narrow/wide browser observations are
 paired with a server-side identity-encoded SSE feed, usage and rendered-turn
-readback, explicit abort conditions, and issue-by-issue dispositions. U4 source
-and `u15` are released; the checkpoint still waits for its three owned drill
-scripts to be committed and handed off. Stage 1.5 generic rendering and Stage
-5 debug/result-union work remain explicitly outside this proof.
+readback, explicit abort conditions, and issue-by-issue dispositions. U4 source,
+drills, and `u15` are released. Independent verification
+[[research/u4-integration-verification-2026-07-20]] (`f28863ea`) accepts the
+receipt-before-run, terminal CAS/tee, managed allocation, replay, admission,
+and host-provenance contracts; its retained-log and message-fixture caveats are
+non-blocking and superseded by the final frozen writer/live gates. Stage 1.5
+generic rendering and Stage 5 debug/result-union work remain explicitly outside
+this proof.
 
 Corrective-steering G10's record-time half is implemented by `418a3844`:
 successful `db/query` results carry a deterministic readable-EDN comment that
@@ -556,8 +560,9 @@ disjoint vector, and installed schema remains bare after its concrete map-of
 schema is registered. One closed database error and one schema-derived
 `db/error?` predicate own fixed-result discrimination. `my.canvas/state` is
 the one identified arbitrary domain response needing its own outer union.
-The facade and all direct consumers move in one frozen owner-group cut after
-U4 releases database/host paths.
+The facade and all direct consumers move in one frozen owner-group cut; U4's
+database/host paths are released, while any new overlapping owner still
+requires an explicit handoff.
 
 The Stage-1.6 transaction-response acceptance folds into that same owner group
 via [[research/transact-response-union-boundary-2026-07-20]] (`8862b604`).
@@ -686,8 +691,9 @@ The requirement-by-requirement proof ledger is
 cap-ruling reconciliation now branch-visible in `e27ada04`). It projects the
 authorized A-H spine, inherited open issues, successor dispositions, and exact
 freeze order without narrowing this roadmap. Its earlier shared-tree snapshot
-is superseded only for ownership: frozen-turn-inputs committed `df78bb8d`; U4
-currently retains the remaining database/execution-host edits and `u15`.
+is superseded for ownership: frozen-turn-inputs committed `df78bb8d`; U4
+committed/released its database/execution-host work and drills as
+`b7808e35`/`2821bb87`, and closed `u15`.
 
 All ledger rows closed with proof; every evidence report's fix plan either
 executed or explicitly moved to a successor PRD; three suites green
