@@ -287,6 +287,10 @@
     :seon.schema/form "[:string {:seon.db/identity true}]"}
    {:seon.schema/key :seon.fn/ns :seon.schema/form ":seon.db/ref"}
    {:seon.schema/key :seon.fn/source :seon.schema/form ":string"}
+   {:seon.schema/key :seon.fn/source-fingerprint
+    :seon.schema/form ":string"}
+   {:seon.schema/key :seon.fn/execution-tier
+    :seon.schema/form "[:enum :nursery :graduated]"}
    {:seon.schema/key :seon.fn/fn-var? :seon.schema/form ":boolean"}
    {:seon.schema/key :seon.fn/arglists :seon.schema/form ":string"}
    {:seon.schema/key :seon.fn/doc :seon.schema/form ":string"}
