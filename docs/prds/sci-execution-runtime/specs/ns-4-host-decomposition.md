@@ -84,6 +84,20 @@ their new owner with their existing names and a correct
 `:malli/schema`; do not rename them while moving (one change class per
 unit — renames beyond the namespace itself are out of scope).
 
+## Amendment (2026-07-21 night, after the implementer's DAG stop)
+
+Band A's constants are consumed by the leaf bands, so "band A stays in
+`seon.host`" breaks the require DAG. Resolution: band A (the
+wire-contract projection — protocol-version, message vocabulary,
+registrations) moves WHOLESALE into `seon.host.session` as its marked
+wire-contract section, unchanged, still carrying the W5-deletion
+comment. One owner, no duplication; W5's deletion targets session.clj.
+The implementer's `.cljc`-promotion alternative is recorded as W5
+evidence, not done now (it entangles death-row CLJS bands).
+`seon.host` may require `seon.host.eval` directly (`agent-home-ns`);
+the DAG constraint is acyclicity, not chain-only. Pre-split baseline:
+342/2584 green.
+
 ## Owned paths (touch nothing else)
 
 - `src/seon/host.clj`

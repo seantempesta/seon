@@ -647,7 +647,13 @@ decisions batch for their return.
   is free.
 - **NS-4 host decomposition** — sol medium, codex thread
   `019f868c-da14-7012-834c-28f0ef00c0a1`, spec
-  `specs/ns-4-host-decomposition.md`, logs `tmp/orchestrator/ns-4-*`.
+  `specs/ns-4-host-decomposition.md` (see its Amendment section), logs
+  `tmp/orchestrator/ns-4-*`. Stopped on a real DAG flaw (band-A wire
+  constants feed the leaf bands); resumed with band A moving wholesale
+  into `seon.host.session`, one owner, W5-deletion comment intact.
+  W5 EVIDENCE: the implementer independently concluded the honest seam
+  is promoting the `seon.execution` wire contract to `.cljc` — exactly
+  the planned W5 promotion; strengthens that unit's rationale.
   (First dispatch `019f868c-5d79-…` died instantly — a shell-`&`
   background does not survive the orchestrator's tool-call exit; use
   the harness background mechanism for every codex run.)
