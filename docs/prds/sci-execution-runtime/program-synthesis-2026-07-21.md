@@ -710,11 +710,25 @@ decisions batch for their return.
   (config.clj:177-185). Also: selected-processors manifest override
   NOT GROUNDED (resolve.cljc:865-870) — fold into W1.2a; q-row:
   admission gate closes the config route itself (router.cljs:273-284).
-- **NS-0.5b in flight** — sol low, spec
-  `specs/ns-0.5b-schema-form-receipt-storage.md`, logs
-  `tmp/orchestrator/ns-05b-*` (schema.form extraction, eval.receipt
-  `.cljc` promotion, db.storage). NEXT after it lands: write + dispatch
-  the W1.2a spec (waits on NS-0.5b only for the shared client.cljs).
+- **NS-0.5b DONE `32ea3b3b`** — `seon.schema.form` (seven inspection
+  terms), `seon.eval.receipt` `.cljc` (CAS terminal as plain tx-data),
+  and the db.storage CANCELLATION: `seon.db` gained the one public
+  `encode-edn-slot-values` instead (sole-database-API repair; the
+  implementer's stop proved the extraction would have split the
+  mechanism). Internal-boundary law now holds in production — every
+  `.internal` required only by its parent. Full gates: cljs 1486/7171,
+  writer 342/2584. Remaining NS-0.5c (repl.parse rename + my.plan seam
+  repairs) still waits for the repl-lane handoff.
+- **W1.2a in flight** — sol medium, SOLE lane (live drive granted on
+  the default cluster), codex thread
+  `019f86b8-e932-74b2-ba6b-fdc7541157ca`, spec
+  `specs/w1.2a-writer-reconstruction.md` (`27f59bdb` — the three
+  critical gaps settled: immutable generation-named envelopes,
+  single-resolution typed handoff, narrow writer-replacement phase in
+  the one lifecycle owner; carried keys decline naming W1.5;
+  selected-processors override fix folded in). Logs
+  `tmp/orchestrator/w12a-*`. Refill after: W1.5 enforcement surfaces,
+  then W1.2b graduation, then the W1 config-facts sweep.
 - **sol W1.2 grounding research (read-only, live-probe enabled)** in
   flight — logs `tmp/orchestrator/w12-grounding-*`; interface ledger
   for the live-writer-reconstruction spec (W0.4 pool member lifecycle,
