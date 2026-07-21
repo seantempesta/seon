@@ -7,9 +7,11 @@
     [my.plan :as plan]
     [my.plan.internal :as internal]
     [seon.agent.message :as message]
+    [seon.config :as config]
     [seon.db :as db]
     [seon.db.id :as db.id]
     [seon.db.protocol :as protocol]
+    [seon.render :as render]
     [seon.schema :as schema]))
 
 (def ^:private database
@@ -126,6 +128,153 @@
           (.finally (fn [] (set! db/execute-many original-execute-many)))
           (.then (fn [_] (done)))
           (.catch (fn [error] (is false (str error)) (done)))))))
+
+(def ^:private render-configuration (config/resolve-config-singleton {}))
+
+(defn- plan-projection []
+  (let [forms (schema/snapshot)]
+    (schema/build-projection
+     (loop [pending [:my.plan/plan-value] selected {}]
+       (if-let [schema-key (first pending)]
+         (if (contains? selected schema-key)
+           (recur (next pending) selected)
+           (let [form (get forms schema-key)
+                 dependencies (->> (tree-seq coll? seq form)
+                                   (filter keyword?)
+                                   (filter forms))]
+             (recur (into (vec (next pending)) dependencies)
+                    (assoc selected schema-key form))))
+         selected)))))
+
+(deftest plan-value-dispatch-is-generic-valid-only-and-non-recursive
+  (let [value {:my.plan/roots
+               [{:my.plan/id "rootaaaaaaaa" :my.plan/title "Ship"
+                 :my.plan/status :open :my.plan/created-at (js/Date. 1)}]}
+        request {:seon.schema/projection (plan-projection)
+                 :seon.agent.ctx/token-cap 16}
+        html-calls (atom 0)
+        ai-calls (atom 0)]
+    (with-redefs [internal/plan-html
+                  (fn [input]
+                    (swap! html-calls inc)
+                    [:div (get-in input [:seon.render/node
+                                         :my.plan/roots 0 :my.plan/title])])
+                  internal/plan-ai
+                  (fn [_] (swap! ai-calls inc) "plan-ai")]
+      (is (str/includes? (pr-str (render/block :html render-configuration
+                                               request value)) "Ship"))
+      (is (= "plan-ai" (render/block :ai render-configuration request value)))
+      (is (= [1 1] [@html-calls @ai-calls]))
+      (let [malformed (update-in value [:my.plan/roots 0]
+                                 dissoc :my.plan/title)]
+        (is (vector? (render/block :html render-configuration
+                                   request malformed)))
+        (is (= [1 1] [@html-calls @ai-calls]))))
+    (let [projected {:seon.render.value/path []
+                     :seon.render.value/offset 0
+                     :seon.render.value/page-size 8
+                     :seon.render.value/summary "plan as data"
+                     :seon.render.value/truncated? false
+                     :seon.render.value/more? false
+                     :seon.render.value/tree {:already "projected"}
+                     :seon.render.value/schemas []}]
+      (is (str/includes? (pr-str (render/block :html render-configuration
+                                               request projected))
+                         "projected")))))
+
+(deftest enriched-tree-has-exact-compatibility-projections
+  (let [enriched (internal/forest-from-rows rows)
+        expected [{:my.plan/id "root" :my.plan/title "Ship"
+                   :my.plan/status :open :my.plan/goal "working release"
+                   :my.plan/_parent
+                   [{:my.plan/id "done" :my.plan/title "Prepare"
+                     :my.plan/status :done}
+                    {:my.plan/id "ready" :my.plan/title "Verify"
+                     :my.plan/status :open
+                     :my.plan/needs [{:my.plan/id "done"}]}]}]]
+    (is (= expected (internal/compatibility-tree enriched)))
+    (is (= (first expected)
+           (internal/compatibility-tree
+            (internal/subtree-from-rows rows "root"))))
+    (is (= [] (internal/compatibility-tree
+               (internal/forest-from-rows []))))))
+
+(deftest document-round-trips-through-reconcile-with-zero-writes
+  (async done
+    (let [transacts (atom 0)
+          original-execute-many db/execute-many
+          original-transact db/transact!]
+      (set! db/execute-many
+            (fn [_]
+              (js/Promise.resolve
+               {::db/results
+                [{::protocol/success? true ::protocol/result rows}
+                 {::protocol/success? true ::protocol/result true}]})))
+      (set! db/transact!
+            (fn [_]
+              (swap! transacts inc)
+              (js/Promise.resolve {:db-before database :db-after database})))
+      (-> (plan/document {:seon.db/db database :seon.agent/id agent-id})
+          (.then (fn [document]
+                   (plan/reconcile! {:seon.db/db database
+                                     :seon.agent/id agent-id
+                                     :my.plan/tree document})))
+          (.then (fn [result]
+                   (is (true? (:my.plan/ok? result)))
+                   (is (= 0 @transacts))))
+          (.finally (fn []
+                      (set! db/execute-many original-execute-many)
+                      (set! db/transact! original-transact)))
+          (.then (fn [_] (done)))
+          (.catch (fn [error] (is false (str error)) (done)))))))
+
+(deftest plan-ai-bounds-writer-work-and-huge-scalars
+  (let [visits (atom 0)
+        hostile {:my.plan/roots
+                 (map (fn [i]
+                        (swap! visits inc)
+                        {:my.plan/id (str i)
+                         :my.plan/title (.repeat "x" 100000000)
+                         :my.plan/status :open
+                         :my.plan/created-at (js/Date. i)})
+                      (range 1000000))}
+        output (internal/plan-ai {:seon.render/node hostile
+                                  :seon.agent.ctx/token-cap 8})]
+    (is (<= @visits 257))
+    (is (< (count output) 100))
+    (is (str/ends-with? output "…"))))
+
+(deftest plan-html-preserves-derived-signals-and-datastar-controls
+  (let [value {:my.plan/roots
+               [{:my.plan/id "root" :my.plan/title "Ship"
+                 :my.plan/status :open :my.plan/goal "release"
+                 :my.plan/pace :fast :my.plan/created-at (js/Date. 1)
+                 :my.plan/_parent
+                 [{:my.plan/id "done" :my.plan/title "Prepare"
+                   :my.plan/status :done :my.plan/created-at (js/Date. 2)
+                   :my.plan/completed-at (js/Date. 20)}
+                  {:my.plan/id "active" :my.plan/title "Build"
+                   :my.plan/status :active :my.plan/created-at (js/Date. 3)
+                   :my.plan/message [:seon.agent.message/id "message"]}
+                  {:my.plan/id "ready" :my.plan/title "Verify"
+                   :my.plan/status :open :my.plan/created-at (js/Date. 4)}
+                  {:my.plan/id "blocked" :my.plan/title "Publish"
+                   :my.plan/status :blocked :my.plan/created-at (js/Date. 5)
+                   :my.plan/needs [{:my.plan/id "ready"}]}]}]}
+        hiccup (internal/plan-html {:seon.render/node value})
+        rendered (pr-str hiccup)
+        no-active (update-in value [:my.plan/roots 0 :my.plan/_parent 1
+                                    :my.plan/status] (constantly :open))
+        next-rendered (pr-str (internal/plan-html
+                               {:seon.render/node no-active}))]
+    (doseq [text ["Ship" "Prepare" "Build" "Verify" "Publish"
+                  "1/4 done" "NOW" "blocked" "ready" "blocks"
+                  "origin" "created" "done" "recently completed"
+                  "planstep" "planclosed" "planfull" "plandone"
+                  "data-on:click"]]
+      (is (str/includes? rendered text) text))
+    (is (str/includes? rendered ":open true") "active root starts focused")
+    (is (str/includes? next-rendered "next") "no active step derives next")))
 
 (deftest mutation-is-fenced-by-the-read-snapshot
   (async done
@@ -546,12 +695,18 @@
 (deftest generated-terminal-commits-status-and-addressed-message-once
   (async done
     (let [original-pull db/pull
+          original-query db/query
           original-message message/message-transaction-for
           original-allocate db.id/allocate!
           status (atom :open)
           allocations (atom 0)
           writes (atom [])
+          delivered-queries (atom [])
           message-request (atom nil)]
+      (set! db/query
+            (fn [request]
+              (swap! delivered-queries conj request)
+              (js/Promise.resolve "terminal-message")))
       (set! db/pull
             (fn
               ([request]

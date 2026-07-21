@@ -2115,6 +2115,5 @@
   (tokens/bounded-pr-str
    value
    (or (:seon.agent.ctx/token-cap input)
-       (some-> (:seon.config.render/result-body-cap configuration)
-               tokens/chars->tokens)
+       (:seon.config.render/result-body-cap configuration)
        512)))
