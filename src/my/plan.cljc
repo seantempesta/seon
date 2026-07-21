@@ -548,12 +548,13 @@
            ::db/query generated-root-for-run-query
            ::db/args [generated-root-rules run-id]
            ::db/max-work 250000
-           ;; A rule-derived scalar result consumes three result nodes — the
-           ;; relation container, its value, and one rule-relation node
-           ;; (live-measured on a cluster with several generated roots,
-           ;; 2026-07-21). Constant headroom keeps one match fail-closed
-           ;; before applicability.
-           ::db/max-results 4
+           ;; Datahike charges this rule-derived scalar per CANDIDATE rule
+           ;; row, not per projected value: live measurement (2026-07-21)
+           ;; observed 3 nodes with four open generated roots and 5 with
+           ;; five, so the cost grows with concurrently open roots. The
+           ;; bound therefore tolerates a small fleet of open roots while
+           ;; still failing closed on a runaway relation.
+           ::db/max-results 256
            ::db/max-result-weight 4096}))
         namespace-match
         (when-not (or (:seon.error/message root-id) root-id)
@@ -563,11 +564,11 @@
              ::db/query generated-namespace-for-run-query
              ::db/args [generated-root-rules run-id]
              ::db/max-work 250000
-             ;; A rule-derived find-tuple result consumes the relation
-             ;; container, one node per tuple element (three here), and one
-             ;; rule-relation node — the same counting the scalar query
-             ;; measured live. Constant headroom keeps one match fail-closed.
-             ::db/max-results 6
+             ;; The same per-candidate rule-row counting the scalar query
+             ;; measured live, times three tuple elements. The bound
+             ;; tolerates a small fleet of open generated roots while still
+             ;; failing closed on a runaway relation.
+             ::db/max-results 256
              ::db/max-result-weight 4096})))
         [namespace-root-id namespace-step namespace-name]
         (when (vector? namespace-match) namespace-match)
