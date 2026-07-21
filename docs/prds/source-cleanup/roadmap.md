@@ -453,6 +453,14 @@ branch. `bin/test-parser` independently reran 46 tests / 369 assertions green;
 the implementation lane also passed focused CLJS parser 46 / 370, diffusion
 consumers 21 / 149, and both worker-validator and portable-oracle smokes.
 
+The two triaged test-hygiene FOLD rows are also reconciled by
+[[research/triage-test-fixes-boundary-2026-07-20]] (`7086947d`). Their defective
+pod-wide/embedded fixtures were deleted with superseded mechanisms by
+`2884c41b` and `97654066`; both notes were already archived by `3a0dbd31`.
+Current receipt and repair-batch tests prove the surviving exact transaction
+and pure preflight seams without assuming an empty global schema corpus. No
+test harness is restored; their next evidence is the ordinary frozen CLJS gate.
+
 Fragile-index H2's safe consumer portion is implemented by `3ebc9e9b`:
 stored eval guidance is no longer reparsed as a serialized error envelope and
 debug reproduction reads EDN before selecting the qualified function symbol.
