@@ -203,6 +203,16 @@ spellings, and malformed encoding refuse before any database or host work.
 Numeric map keys retain their value, while vector descent separately requires
 a non-negative safe integer.
 
+The post-Unit1A implementation boundary is refreshed by
+[[research/value-drill-projection-budget-implementation-readiness-2026-07-20]]
+(`a31bcb8f`). After Unit 1B releases `render/value.cljs`, Unit 1C owns that same
+source/test pair and replaces the projected-key aggregate with ascending
+output-local non-drillable indexes plus original-key, shape-only, and poisoned
+tail proof. Unit 1D then owns only config source, manifest, and tests for the
+ruled 32/4,096/1,024 defaults. Transport waits for one explicit public drill
+request/result/error schema and one effective-limit normalizer contract; route
+and child may not infer different envelopes from prose.
+
 Only after those contracts freeze does
 [[research/execution-child-value-sampling-boundary-2026-07-20]] (`a568deef`)
 extend the existing execution protocol with closed, correlated ordinary-data
