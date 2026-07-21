@@ -351,9 +351,10 @@ Home-requires readiness is grounded by
 manifest/root merge is already implemented by `3c08c176`, and `e187284f`
 already makes persisted require edges the compact-card selector. The owner
 ruling distinguishes that projection from `:seon.fn/agent-facing?`, which
-remains the function-menu/export selector. Remaining work is one explicit
-marker-free referred-function regression plus the frozen ACME persisted-edge,
-prompt, and idempotent-apply proof; configuration merge is not rebuilt.
+remains the function-menu/export selector; configuration merge is not rebuilt.
+Commit `469c0f5b` closes the focused regression with namespaces 16 tests / 79
+assertions, config 27 / 127, home 9 / 18, and auto-refer 7 / 31 green with zero
+warnings. Only the frozen ACME proof remains for this row.
 
 The later carrier convergence is grounded by
 [[research/als-tx-meta-unification-boundary-2026-07-20]] (`5c140e9a`). Stage 4

@@ -52,9 +52,12 @@ after the runtime lane releases the source checkpoint.
 
 The compact-card source gap was subsequently closed by `e187284f`: required
 namespace cards derive selection from persisted require edges rather than the
-`:seon.fn/agent-facing?` marker. One explicit marker-free `set-purpose!`
-regression and the frozen ACME proof remain before closure. Do not add markers
-to patch referred functions.
+`:seon.fn/agent-facing?` marker. Commit `469c0f5b` adds the explicit marker-free
+`set-purpose!` regression: the persisted narrow refer selects that public
+schema-complete function, excludes an unselected public sibling, and renders a
+compact contract rather than its body. Namespaces, config, home, and auto-refer
+focused gates pass with zero warnings. The frozen ACME proof remains before
+closure. Do not add markers to patch referred functions.
 
 The persisted require edge already carries the required selection data through
 `:seon.ns.require/alias` and `:seon.ns.require/refers`. The globally consistent
