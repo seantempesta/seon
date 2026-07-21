@@ -41,7 +41,8 @@
   [:and {:seon.db/identity true
          :seon.db.id/generator :seon.db.id.generator/compact}
    ::db.id/compact-value])
-(schema/register! :seon.agent.turn/at           :inst)
+(schema/register! :seon.agent.turn/at
+                  [:inst {:seon.db/index true}])
 ;; A turn is running/done/error/interrupted — DISTINCT from the agent FSM state
 ;; (idle/running/…): a turn is a single completion, the agent is the actor.
 ;; `:interrupted` is asserted only by unexpected-exit recovery when no runtime

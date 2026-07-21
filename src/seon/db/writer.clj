@@ -124,6 +124,9 @@
 ;;; Datahike values and transaction shapes
 
 (def ^:private schema-properties
+  [:db/valueType :db/cardinality :db/unique :db/isComponent :db/index])
+
+(def ^:private fixed-schema-properties
   [:db/valueType :db/cardinality :db/unique :db/isComponent])
 
 (def ^:private maximum-schema-reference-count 64)
@@ -341,6 +344,13 @@
   [declaration]
   (select-keys declaration schema-properties))
 
+(defn- additive-index-declaration?
+  [installed declaration]
+  (and (= (select-keys installed fixed-schema-properties)
+          (select-keys declaration fixed-schema-properties))
+       (nil? (:db/index installed))
+       (true? (:db/index declaration))))
+
 (defn- compile-schema-declarations
   [db-value transaction-data candidates]
   (let [installed (:schema db-value)
@@ -373,11 +383,13 @@
                    (fn [{:db/keys [ident] :as declaration}]
                      (when-let [actual (get installed ident)]
                        (let [expected (schema-shape declaration)
-                             actual (schema-shape actual)]
-                         (when (not= expected actual)
+                             actual-shape (schema-shape actual)]
+                         (when-not (or (= expected actual-shape)
+                                       (additive-index-declaration?
+                                        actual declaration))
                            {::attribute ident
                             ::expected-schema expected
-                            ::actual-schema actual})))))
+                            ::actual-schema actual-shape})))))
                   declarations)]
         (when (seq incompatible)
           (throw
@@ -385,7 +397,11 @@
                     {::incompatible-schema incompatible
                      :seon.error/kind :user-input})))
         (into []
-              (remove #(contains? installed (:db/ident %)))
+              (filter
+               (fn [{:db/keys [ident] :as declaration}]
+                 (or (not (contains? installed ident))
+                     (additive-index-declaration?
+                      (get installed ident) declaration))))
               declarations)))
 
 (defn- derive-transaction-schema

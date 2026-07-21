@@ -168,6 +168,77 @@
         (writer/stop! server)
         (.delete socket-file)))))
 
+(deftest ensure-migrates-only-an-additive-index-and-then-converges
+  (let [database-name (str "writer-additive-index-" (random-uuid))
+        socket-file (File. "tmp" (str database-name ".sock"))
+        server
+        (writer/start!
+         {::writer/dependencies (dependencies)
+          ::writer/database-name database-name
+          ::writer/backend :memory
+          ::writer/request-socket-path (.getAbsolutePath socket-file)})
+        runtime (::writer/runtime server)
+        ensure
+        (fn [request-id initialization]
+          (writer/handle-request
+           runtime
+           (protocol/ensure-database-request
+            {::protocol/request-id request-id
+             ::protocol/database-name database-name
+             ::protocol/backend :memory
+             :seon.db/initialization initialization})))
+        with-event-schema
+        (fn [initialization at-form]
+          (-> initialization
+              (update :seon.db/attributes into [:example.event/id
+                                                :example.event/at])
+              (update :seon.db/program into
+                      [{:seon.schema/key :example.event/id
+                        :seon.schema/form
+                        "[:string {:seon.db/identity true}]"}
+                       {:seon.schema/key :example.event/at
+                        :seon.schema/form at-form}])
+              (update :seon.db/initial-data conj
+                      {:example.event/id "first"
+                       :example.event/at (java.util.Date. 1000)})))
+        initial (with-event-schema initialization ":inst")
+        indexed (with-event-schema initialization
+                                   "[:inst {:seon.db/index true}]")
+        incompatible
+        [(with-event-schema initialization ":string")
+         (with-event-schema initialization "[:vector :inst]")]]
+    (try
+      (let [admitted (ensure "additive-index/initial" initial)
+            before-index (:t (:seon.db/db admitted))
+            migrated (ensure "additive-index/migrate" indexed)
+            after-index (:t (:seon.db/db migrated))
+            converged (ensure "additive-index/converged" indexed)
+            connection
+            (::registry/conn
+             (registry/lookup-connection
+              {::registry/database-name (keyword database-name)}))
+            db-value (d/db connection)
+            before-rejection (:max-tx db-value)]
+        (is (::protocol/success? admitted) (pr-str admitted))
+        (is (= (inc before-index) after-index)
+            "the additive index migration commits exactly once")
+        (is (true? (get-in db-value
+                           [:schema :example.event/at :db/index])))
+        (is (= [(java.util.Date. 1000)]
+               (mapv :v (d/datoms db-value :avet :example.event/at)))
+            "the existing value is backfilled into AVET")
+        (is (= after-index (:t (:seon.db/db converged)))
+            "converged writer admission emits no transaction")
+        (doseq [[index candidate] (map-indexed vector incompatible)]
+          (let [rejected
+                (ensure (str "additive-index/incompatible-" index) candidate)]
+            (is (false? (::protocol/success? rejected)) (pr-str rejected))))
+        (is (= before-rejection (:max-tx (d/db connection)))
+            "incompatible type and cardinality changes cannot advance the database"))
+      (finally
+        (writer/stop! server)
+        (.delete socket-file)))))
+
 (deftest failed-or-branch-initialization-never-publishes-a-writing-route
   (let [database-name (str "writer-initialization-main-" (random-uuid))
         failed-name (str "writer-initialization-failed-" (random-uuid))
