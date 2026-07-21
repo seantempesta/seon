@@ -9,10 +9,10 @@ The require fence is directional: the main system never requires
 may require main-system namespaces. Diffusion-backed providers are
 explicit-configuration opt-in only and never activate as a side effect.
 
-Logical membership is `seon.diffusion.grammar`, `.retrieval`, `.oracle`, and
-`.scaffold`, plus the `seon.worker-eval` and `seon.worker-validator` entry
-namespaces. At NS-1b, `seon.ai.diffusiongemma` joins this tree as
-`seon.diffusion.gemma`.
+Logical membership is `seon.diffusion.gemma`, `.grammar`, `.retrieval`,
+`.oracle`, and `.scaffold`, plus the `seon.worker-eval` and
+`seon.worker-validator` entry namespaces. Gemma self-registers its provider
+descriptor and the typeahead step backing when explicitly loaded.
 
 The subsystem owns the `:worker-validator` and `:worker-oracle-eval` builds.
 It shares `:bootstrap` until the W5 decision 12. Its focused tests and worker

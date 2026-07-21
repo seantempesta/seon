@@ -1,4 +1,4 @@
-(ns seon.ai.diffusiongemma
+(ns seon.diffusion.gemma
   "Drive the DiffusionGemma control backend through RunPod jobs.
 
    The transformers worker retains the per-step LogitsProcessor/accept_canvas
@@ -42,6 +42,9 @@
    temp 0.8→0.4, 48-step cap)."
   (:require [clojure.string :as str]
             [seon.ai :as ai]
+            [seon.ai.dispatch :as dispatch]
+            [seon.ai.openai-compat :as openai]
+            [seon.ai.typeahead :as typeahead]
             [seon.config :as config]
             [seon.error :as error]
             [seon.log :as seon-log]
@@ -645,7 +648,7 @@
    A100-proven fast knobs (entropy_bound 0.5, temp 0.8→0.4, 48-step cap)
    and returns a Promise of `{:text … :seon.ai/raw <response>}` — plus a
    top-level `:seon.ai/error` when the call failed. Optional `opts`
-   override the gen defaults (e.g. `{:seon.ai.diffusiongemma/entropy-bound
+   override the gen defaults (e.g. `{:seon.diffusion.gemma/entropy-bound
    0.3}`)."
   {:malli/schema
    [:function
@@ -654,3 +657,51 @@
   ([] (agent-adapter {}))
   ;; This adapter buffers, so it ignores `:seon.ai/stream?`.
   ([opts] (fn [request] (complete+wrap opts request))))
+
+(defn- provider-configured?
+  [resolution]
+  (if (= :vllm (get-in resolution [:seon.ai/resolved-config
+                                    :seon.ai/dg-backend]))
+    (openai/api-key-configured? resolution)
+    (api-configured? resolution)))
+
+(defn- provider-agent-adapter
+  []
+  (fn [request]
+    (if (= :vllm (get-in request [:seon.ai/config-resolution
+                                  :seon.ai/resolved-config
+                                  :seon.ai/dg-backend]))
+      ((openai/agent-adapter) request)
+      ((agent-adapter) request))))
+
+(def ^:private typeahead-request-keys
+  {::typeahead/mode ::mode
+   ::typeahead/prompt ::prompt
+   ::typeahead/committed ::committed
+   ::typeahead/draft ::draft
+   ::typeahead/offers ::offers
+   ::typeahead/prefills ::prefills
+   ::typeahead/policy ::policy
+   ::typeahead/null-render ::null-render})
+
+(defn- typeahead-step
+  [request]
+  (-> (reduce-kv (fn [translated k v]
+                   (assoc translated (get typeahead-request-keys k k) v))
+                 {}
+                 request)
+      complete
+      (.then (fn [response]
+               (cond-> response
+                 (::worker-output response)
+                 (-> (assoc ::typeahead/worker-output
+                            (::worker-output response))
+                     (dissoc ::worker-output)))))))
+
+(dispatch/register-providers!
+ {:diffusiongemma {::dispatch/configured? provider-configured?
+                   ::dispatch/agent-adapter provider-agent-adapter}})
+
+(typeahead/register-step-backing!
+ {::typeahead/configured? api-configured?
+  ::typeahead/complete typeahead-step})

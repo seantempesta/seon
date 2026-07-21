@@ -51,6 +51,7 @@
   (:require [clojure.string :as str]
             ["openai" :as OpenAI]
             [seon.ai :as ai]
+            [seon.ai.dispatch :as dispatch]
             [seon.ai.tokens :as tokens]
             [seon.error :as error]
             [seon.log :as seon-log]
@@ -606,3 +607,9 @@
   ([] (agent-adapter {}))
   ([opts]
    (fn [request] (complete+wrap opts request))))
+
+(dispatch/register-providers!
+ {:deepseek {::dispatch/configured? api-key-configured?
+             ::dispatch/agent-adapter agent-adapter}
+  :openai-compat {::dispatch/configured? api-key-configured?
+                  ::dispatch/agent-adapter agent-adapter}})

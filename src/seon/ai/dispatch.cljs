@@ -1,20 +1,60 @@
 (ns seon.ai.dispatch
   "Effective-provider dispatch for the agent LLM boundary.
 
-   Provider and DiffusionGemma backend selection come from the immutable
+   Provider selection comes from the immutable
    `:seon.ai/config-resolution` captured at the prompt database value. Missing
    credentials select the deterministic stub; missing resolution is an
    explicit error value."
   (:require
     [seon.ai :as ai]
-    [seon.ai.anthropic :as anthropic]
-    [seon.ai.diffusiongemma :as diffusiongemma]
-    [seon.ai.openai-compat :as openai]
+    [seon.ai.provider :as provider]
     [seon.ai.tokens :as tokens]
-    [seon.ai.typeahead :as typeahead]
     [seon.schema :as schema]))
 
 (schema/register! ::llm-fn 'fn?)
+(schema/register! ::configured? 'fn?)
+(schema/register! ::agent-adapter 'fn?)
+(schema/register! ::provider-descriptor
+  [:map
+   [::configured? ::configured?]
+   [::agent-adapter ::agent-adapter]])
+(schema/register! ::provider-descriptors
+  [:map-of :seon.ai/provider ::provider-descriptor])
+(schema/register! ::provider-registration
+  [:map-of :keyword ::provider-descriptor])
+(schema/register! ::registration-error
+  [:map
+   [:seon/error
+    [:map
+     [:seon.error/kind [:= :user-input]]
+     [:seon.error/message :string]
+     [:seon.error/data :map]]]])
+(schema/register! ::registration-result
+  [:or ::provider-descriptors ::registration-error])
+
+(defonce ^:private !providers (atom {}))
+
+(defn registered-providers
+  "The descriptors registered by namespaces loaded in this process."
+  {:malli/schema [:=> [:cat] ::provider-descriptors]}
+  []
+  @!providers)
+
+(defn register-providers!
+  "Register loaded provider descriptors, rejecting unknown provider ids."
+  {:malli/schema
+   [:=> [:catn [::descriptors ::provider-registration]] ::registration-result]}
+  [descriptors]
+  (let [unknown (into #{} (remove #(contains? provider/provider-locality %))
+                      (keys descriptors))]
+    (if (seq unknown)
+      {:seon/error
+       {:seon.error/kind :user-input
+        :seon.error/message
+        (str "Provider registration rejected; declare provider locality first: "
+             (pr-str unknown))
+        :seon.error/data {::unknown-providers unknown}}}
+      (swap! !providers merge descriptors))))
 
 ;; `:text` is the established turn-loop adapter result key. Provider adapters
 ;; may add raw/error fields; the deterministic stub returns only this minimum.
@@ -25,9 +65,16 @@
   "Return the deterministic no-credentials LLM reply."
   {:malli/schema [:=> [:catn [::request :seon.ai/request]] ::stub-response]}
   [request]
-  (let [ctx  (:seon.ai/ctx request)
+  (let [ctx      (:seon.ai/ctx request)
+        selected (get-in request [:seon.ai/config-resolution
+                                  :seon.ai/resolved-config
+                                  :seon.ai/provider])
+        missing? (and selected (nil? (get (registered-providers) selected)))
         text (str
-               ";; stub LLM here — the real one needs DEEPSEEK_API_KEY\n"
+               (if missing?
+                 (str ";; stub LLM here — provider " (pr-str selected)
+                      " is not registered in this build\n")
+                 ";; stub LLM here — the real one needs DEEPSEEK_API_KEY\n")
                ";; say hello to your human via the message/user function\n"
                "(message/user\n"
                "  "
@@ -41,30 +88,12 @@
   "The agent adapter selected by one authority config resolution."
   {:malli/schema [:=> [:cat :seon.ai/config-resolution] ::llm-fn]}
   [resolution]
-  (let [config (:seon.ai/resolved-config resolution)]
-    (case (:seon.ai/provider config)
-      :anthropic
-      (if (anthropic/api-key-configured? resolution)
-        (anthropic/agent-adapter)
-        stub)
-
-      :diffusiongemma
-      (case (:seon.ai/dg-backend config)
-        :control (if (diffusiongemma/api-configured? resolution)
-                   (diffusiongemma/agent-adapter)
-                   stub)
-        (if (openai/api-key-configured? resolution)
-          (openai/agent-adapter)
-          stub))
-
-      :typeahead
-      (if (diffusiongemma/api-configured? resolution)
-        (typeahead/agent-adapter)
-        stub)
-
-      (if (openai/api-key-configured? resolution)
-        (openai/agent-adapter)
-        stub))))
+  (let [provider (get-in resolution [:seon.ai/resolved-config
+                                     :seon.ai/provider])
+        descriptor (get @!providers provider)]
+    (if (and descriptor ((::configured? descriptor) resolution))
+      ((::agent-adapter descriptor))
+      stub)))
 
 (defn- invalid-request
   []

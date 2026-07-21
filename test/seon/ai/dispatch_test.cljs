@@ -3,10 +3,9 @@
   (:require
     [cljs.test :refer [async deftest is]]
     [seon.ai.anthropic :as anthropic]
-    [seon.ai.diffusiongemma :as diffusiongemma]
     [seon.ai.dispatch :as dispatch]
     [seon.ai.openai-compat :as openai]
-    [seon.ai.typeahead :as typeahead]))
+    [seon.diffusion.gemma :as diffusiongemma]))
 
 (defn- resolution
   ([provider] (resolution provider nil))
@@ -17,45 +16,91 @@
     :seon.ai/provenance {:seon.ai/provider :default}}))
 
 (defn- tagged-adapter [tag] (fn [_] {:selected tag}))
-(defn- constructor [adapter] (fn ([] adapter) ([_] adapter)))
+(defn- descriptor [configured? adapter]
+  {::dispatch/configured? configured?
+   ::dispatch/agent-adapter (fn [] adapter)})
 
 (deftest authority-resolution-selects-the-wire-adapter
   (let [anthropic-adapter (tagged-adapter :anthropic)
         openai-adapter (tagged-adapter :openai)
         control-adapter (tagged-adapter :control)
-        typeahead-adapter (tagged-adapter :typeahead)]
-    (with-redefs [anthropic/api-key-configured? (constantly true)
-                  openai/api-key-configured? (constantly true)
-                  diffusiongemma/api-configured? (constantly true)
-                  anthropic/agent-adapter (constructor anthropic-adapter)
-                  openai/agent-adapter (constructor openai-adapter)
-                  diffusiongemma/agent-adapter (constructor control-adapter)
-                  typeahead/agent-adapter (constructor typeahead-adapter)]
+        typeahead-adapter (tagged-adapter :typeahead)
+        originals (dispatch/registered-providers)]
+    (try
+      (dispatch/register-providers!
+       {:anthropic (descriptor (constantly true) anthropic-adapter)
+        :deepseek (descriptor (constantly true) openai-adapter)
+        :openai-compat (descriptor (constantly true) openai-adapter)
+        :diffusiongemma (descriptor (constantly true) control-adapter)
+        :typeahead (descriptor (constantly true) typeahead-adapter)})
       (doseq [[provider backend expected]
               [[:anthropic nil anthropic-adapter]
                [:deepseek nil openai-adapter]
                [:openai-compat nil openai-adapter]
                [:diffusiongemma :control control-adapter]
-               [:diffusiongemma :vllm openai-adapter]
                [:typeahead nil typeahead-adapter]]]
-        (is (identical? expected (dispatch/adapter (resolution provider backend))))))))
+        (is (identical? expected (dispatch/adapter (resolution provider backend)))))
+      (finally (dispatch/register-providers! originals)))))
 
 (deftest absent-provider-credentials-select-the-stub
   (let [unexpected (fn [& _]
-                     (throw (js/Error. "adapter constructed without credentials")))]
-    (with-redefs [anthropic/api-key-configured? (constantly false)
-                  openai/api-key-configured? (constantly false)
-                  diffusiongemma/api-configured? (constantly false)
-                  anthropic/agent-adapter unexpected
-                  openai/agent-adapter unexpected
-                  diffusiongemma/agent-adapter unexpected
-                  typeahead/agent-adapter unexpected]
+                     (throw (js/Error. "adapter constructed without credentials")))
+        originals (dispatch/registered-providers)]
+    (try
+      (dispatch/register-providers!
+       (into {}
+             (map (fn [provider]
+                    [provider (descriptor (constantly false) unexpected)]))
+             (keys originals)))
       (doseq [[provider backend]
               [[:anthropic nil] [:deepseek nil] [:openai-compat nil]
                [:diffusiongemma :control] [:diffusiongemma :vllm]
                [:typeahead nil]]]
         (is (identical? dispatch/stub
-                        (dispatch/adapter (resolution provider backend))))))))
+                        (dispatch/adapter (resolution provider backend)))))
+      (finally (dispatch/register-providers! originals)))))
+
+(deftest diffusion-provider-descriptor-owns-backend-selection
+  (let [control-adapter (tagged-adapter :control)
+        openai-adapter (tagged-adapter :openai)
+        constructor (fn [adapter] (fn ([] adapter) ([_] adapter)))]
+    (with-redefs [diffusiongemma/api-configured? (constantly true)
+                  openai/api-key-configured? (constantly true)
+                  diffusiongemma/agent-adapter (constructor control-adapter)
+                  openai/agent-adapter (constructor openai-adapter)]
+      (doseq [[backend expected]
+              [[:control :control] [:vllm :openai]]]
+        (let [resolved (resolution :diffusiongemma backend)
+              selected ((dispatch/adapter resolved)
+                        {:seon.ai/ctx "ctx"
+                         :seon.ai/config-resolution resolved})]
+          (is (= expected (:selected selected))))))))
+
+(deftest registration-rejects-provider-ids-outside-the-locality-authority
+  (let [before (dispatch/registered-providers)
+        result (dispatch/register-providers!
+                {:unknown-provider (descriptor (constantly true)
+                                               (tagged-adapter :unknown))})]
+    (is (= :user-input (get-in result [:seon/error :seon.error/kind])))
+    (is (re-find #"declare provider locality"
+                 (get-in result [:seon/error :seon.error/message])))
+    (is (= before (dispatch/registered-providers)))))
+
+(deftest unregistered-selection-steers-through-the-existing-stub-reply
+  (async done
+    (let [registered (dispatch/registered-providers)]
+      (with-redefs [dispatch/registered-providers
+                    (constantly (dissoc registered :diffusiongemma))]
+        (-> (dispatch/stub {:seon.ai/ctx "ctx"
+                            :seon.ai/config-resolution
+                            (resolution :diffusiongemma)})
+            (.then (fn [response]
+                     (is (re-find #":diffusiongemma is not registered"
+                                  (:text response)))
+                     (done)))
+            (.catch (fn [error]
+                      (is false (str error))
+                      (done))))))))
 
 (deftest dispatch-consumes-the-supplied-resolution-on-every-call
   (let [seen (atom [])
@@ -106,8 +151,8 @@
           #js [(openai/complete {:seon.ai/ctx "ctx"})
                (anthropic/complete {:seon.ai/ctx "ctx"})
                (diffusiongemma/complete
-                 {:seon.ai.diffusiongemma/mode :generate
-                  :seon.ai.diffusiongemma/prompt "ctx"})])
+                 {:seon.diffusion.gemma/mode :generate
+                  :seon.diffusion.gemma/prompt "ctx"})])
         (.then (fn [responses]
                  (doseq [response (array-seq responses)]
                    (is (= "" (:seon.ai/text response)))

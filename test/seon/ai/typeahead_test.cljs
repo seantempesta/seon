@@ -5,9 +5,9 @@
     [cljs.test :refer [async deftest is]]
     [clojure.string :as str]
     [seon.agent.ctx.menu :as menu]
-    [seon.ai.diffusiongemma :as dg]
     [seon.ai.typeahead :as ta]
-    [seon.db :as db]))
+    [seon.db :as db]
+    [seon.diffusion.gemma :as dg]))
 
 (def ^:private agent-id "typeaheadtestA")
 (def ^:private database

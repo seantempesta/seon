@@ -50,11 +50,21 @@ LLM call sits in the turn), `observability.md` (what of the request/response
 `docs/seon/reference/llm-adapters.md` §"Model catalog" — update it when a
 provider ships/deprecates a model.
 
-`dispatch.cljs` owns provider selection and planning dispatch.
+`dispatch.cljs` owns the one process-local provider registry, provider
+selection, and planning dispatch. Core provider namespaces are loaded by
+`seon.client` and self-register; an undeclared provider id is rejected as a
+steering error value, while an unloaded or unconfigured declared provider
+selects the deterministic stub.
 `typeahead.cljs` owns the optional completion consumer; it does not create a
-second LLM retry or transport path. Adapters are `openai_compat.cljs`
-(DeepSeek et al—the pod default), `anthropic.cljs`, and
-`diffusiongemma.cljs` (the optional diffusion-worker provider).
+second LLM retry or transport path. It owns the registered step-backing
+contract and its request/response terms. Adapters are `openai_compat.cljs`
+(DeepSeek et al—the pod default) and `anthropic.cljs`; the optional
+diffusion-worker provider is `seon.diffusion.gemma`.
+
+The development-only opt-in door is Shadow's additive config merge:
+`--config-merge '{:devtools {:preloads [seon.diffusion.gemma]}}'`. It keeps
+the default `seon.demo` preload and loads Gemma's provider and typeahead-step
+registrations. Release artifacts deliberately have no NS-1b load door yet.
 Verified `:openai-compat` gateways: OpenRouter (acme), Meta Model API
 (Muse Spark 1.1 — config recipe, measured speed, and the
 `SEON_AI_THINKING=minimal` dial in

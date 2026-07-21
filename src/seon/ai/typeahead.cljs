@@ -7,7 +7,7 @@
    (`SEON_DG_ENDPOINT`; a full `http(s)://…` value is a local worker).
 
    One provider call = one STEP LOOP. Each round submits `mode=step` to
-   the worker (via the ONE wire path, [[seon.ai.diffusiongemma/complete]])
+   a registered step backing
    with `{prompt: the rendered context, committed, draft, offers,
    policy, null_render}` — offers/policy derived from the SAME data the
    rendered menu shows (the one structured `seon.agent.ctx.menu` acquisition),
@@ -30,8 +30,7 @@
    (results reach the model next turn via the transcript's real `⟹`
    rows; see the P3b report for the seam mismatch).
 
-   Errors are values (`:seon.ai/error`, shaped by the diffusiongemma
-   adapter): a worker transport failure / 5xx is retryable by
+   Errors are values (`:seon.ai/error`): a worker transport failure / 5xx is retryable by
    `seon.agent.turn/call-llm!` (the SOLE retry authority — this ns adds
    NO retry loop; one attempt per step); an in-band `gen_error` is a
    processing error, never retried.
@@ -51,7 +50,7 @@
     [malli.core :as m]
     [seon.agent.ctx.menu :as menu]
     [seon.ai :as ai]
-    [seon.ai.diffusiongemma :as dg]
+    [seon.ai.dispatch :as dispatch]
     [seon.ai.tokens :as tokens]
     [seon.db :as db]
     [seon.instrument :as instrument]
@@ -141,19 +140,82 @@
 
 (schema/register! ::call-id :seon.typeahead/call)
 (schema/register! ::step-idx :seon.typeahead/step-idx)
-;; The worker's step output map — a third-party wire boundary (same
-;; stance as seon.ai.diffusiongemma's ::worker-output).
+;; The worker's step output map is a third-party boundary.
 (schema/register! ::step-output :map)
 (schema/register! ::locked-forms [:vector :string])
 (schema/register! ::final-draft :string)
 (schema/register! ::outcome [:enum :done :gave-up :round-cap])
 (schema/register! ::steps [:vector :seon.typeahead/step])
 (schema/register! ::opts :map)
+(schema/register! ::mode [:= :step])
+(schema/register! ::prompt :string)
+(schema/register! ::committed :string)
+(schema/register! ::draft :string)
+(schema/register! ::template-segment
+  [:or [:tuple [:= "clamp"] :string] [:tuple [:= "free"] :int]
+   [:tuple [:= "prefill"] :string]])
+(schema/register! ::offer
+  [:map-of :string [:or :string [:vector ::template-segment]]])
+(schema/register! ::offers [:vector ::offer])
+(schema/register! ::prefills
+  [:map-of :string [:vector ::template-segment]])
+(schema/register! ::policy
+  [:map-of :string [:or :double :int :boolean]])
+(schema/register! ::null-render :string)
+(schema/register! ::worker-output :map)
+(schema/register! ::step-request
+  [:map
+   [::mode ::mode]
+   [::prompt ::prompt]
+   [::committed {:optional true} ::committed]
+   [::draft {:optional true} ::draft]
+   [::offers {:optional true} ::offers]
+   [::prefills {:optional true} ::prefills]
+   [::policy {:optional true} ::policy]
+   [::null-render {:optional true} ::null-render]
+   [:seon.ai/abort-signal {:optional true} :seon.ai/abort-signal]
+   [:seon.ai/config-resolution {:optional true} :seon.ai/config-resolution]])
+(schema/register! ::step-response
+  [:map
+   [::worker-output {:optional true} ::worker-output]
+   [:seon.ai/text :string]
+   [:seon.ai/error {:optional true} :seon.ai/error]
+   [:seon.ai/config-evidence {:optional true} :seon.ai/config-evidence]])
+(schema/register! ::step-backing-fn 'fn?)
+(schema/register! ::step-backing
+  [:map
+   [::complete ::step-backing-fn]
+   [::configured? ::step-backing-fn]])
+
+(defonce ^:private !step-backing (atom nil))
+
+(defn register-step-backing!
+  "Register the loaded implementation of the typeahead step contract."
+  {:malli/schema [:=> [:catn [::backing ::step-backing]] ::step-backing]}
+  [backing]
+  (reset! !step-backing backing))
+
+(defn step-backing-configured?
+  "Whether a loaded step backing is configured for this resolution."
+  {:malli/schema [:=> [:cat :seon.ai/config-resolution] :boolean]}
+  [resolution]
+  (boolean (and @!step-backing
+                ((::configured? @!step-backing) resolution))))
+
+(defn- complete-step
+  [request]
+  (if-let [complete (::complete @!step-backing)]
+    (complete request)
+    (js/Promise.resolve
+     {:seon.ai/text ""
+      :seon.ai/error
+      {:seon.ai/msg
+       "Typeahead step backing is not registered in this build"}})))
 
 (defn offers->wire
   "Menu offers as the worker's string-keyed `offers` wire maps."
   {:malli/schema [:=> [:catn [::offers :seon.agent.ctx.menu/offers-view]]
-                  :seon.ai.diffusiongemma/offers]}
+                  ::offers]}
   [offers]
   (mapv (fn [{:seon.typeahead/keys [glyph label template]}]
           {"glyph" glyph "label" label "template" template})
@@ -169,7 +231,7 @@
    deliberately does NOT map onto `worst_entropy_gate` (nats) — the
    units differ; the worker keeps its measured default."
   {:malli/schema [:=> [:catn [::policy :seon.agent.ctx.menu/policy-view]]
-                  :seon.ai.diffusiongemma/policy]}
+                  ::policy]}
   [{:seon.typeahead/keys [auto-offer-margin probe-budget menu-cap max-rounds]}]
   {"auto_offer_margin" auto-offer-margin
    "probe_lengths"     probe-budget
@@ -924,14 +986,14 @@
   [opts policy entries call-id]
   (let [head     (some (fn [[h e]] (when (::template e) h)) entries)
         {::keys [template doc arg-key scoped?]} (get entries head)
-        wire     (merge {::dg/mode      :step
-                         ::dg/prompt    pass-render
-                         ::dg/policy    (policy->wire policy)
-                         ::dg/prefills  {head template}
-                         ::dg/committed ""
-                         ::dg/draft     (str "(" head " ")}
+        wire     (merge {::mode      :step
+                         ::prompt    pass-render
+                         ::policy    (policy->wire policy)
+                         ::prefills  {head template}
+                         ::committed ""
+                         ::draft     (str "(" head " ")}
                         opts)
-        resp     (await (dg/complete wire))]
+        resp     (await (complete-step wire))]
     (if (:seon.ai/error resp)
       (do (seon-log/warn!
            {:seon.log/source ::plan-pass
@@ -939,7 +1001,7 @@
             (str "plan pass skipped — "
                  (pr-str (:seon.ai/msg (:seon.ai/error resp))))})
           nil)
-      (let [out        (::dg/worker-output resp)
+      (let [out        (::worker-output resp)
             form       (first (mapv str (:locked out)))
             unchanged? (boolean (and form (no-change? template form)))
             ;; A SCOPED pass's edit writes back through the merge — the
@@ -1024,11 +1086,11 @@
         ;; gates the glyph baseline on BOTH (cursor.py: `offers and
         ;; null_render`), so auto-offers can actually fire (P5; P4 measured
         ;; uptake 0.0 with this unwired).
-        wire       (cond-> {::dg/mode   :step
-                            ::dg/prompt prompt
-                            ::dg/policy (policy->wire policy)}
-                     (seq offers)   (assoc ::dg/null-render (null-render prompt))
-                     (seq prefills) (assoc ::dg/prefills prefills))
+        wire       (cond-> {::mode   :step
+                            ::prompt prompt
+                            ::policy (policy->wire policy)}
+                     (seq offers)   (assoc ::null-render (null-render prompt))
+                     (seq prefills) (assoc ::prefills prefills))
         max-rounds (max 1 (:seon.typeahead/max-rounds policy))
         call-id    (str (random-uuid))
         ptoks      (tokens/estimate prompt)
@@ -1064,17 +1126,17 @@
         :else
         (let [live (into [] (remove #(contains? failed (:seon.typeahead/glyph %)))
                          offers)
-              resp (await (dg/complete (merge (cond-> wire
+              resp (await (complete-step (merge (cond-> wire
                                                 (seq live)
-                                                (assoc ::dg/offers (offers->wire live)))
+                                                (assoc ::offers (offers->wire live)))
                                               opts
-                                              {::dg/committed committed
-                                               ::dg/draft     draft})))]
+                                              {::committed committed
+                                               ::draft     draft})))]
           (if-let [err (:seon.ai/error resp)]
             ;; One failing step fails the provider call as a value; the
             ;; turn loop's retry classification applies to the whole call.
             {:text "" :seon.ai/raw resp :seon.ai/error err}
-            (let [out         (::dg/worker-output resp)
+            (let [out         (::worker-output resp)
                   locked      (mapv str (:locked out))
                   locked-all' (into locked-all locked)
                   committed'  (->> (cons committed locked)
@@ -1172,7 +1234,7 @@
    (`SEON_DG_ENDPOINT`) and returns a Promise of `{:text …
    :seon.ai/raw …}` — plus a top-level `:seon.ai/error` when a step
    failed. Optional `opts` merge into every step request (e.g.
-   `{:seon.ai.diffusiongemma/seed 7}`). This adapter buffers (the loop
+   provider-specific generation options). This adapter buffers (the loop
    IS its structure), so it uses the ctx and ignores `:seon.ai/stream?`."
   {:malli/schema
    [:function
@@ -1180,3 +1242,7 @@
     [:=> [:catn [::opts ::opts]] :any]]}
   ([] (agent-adapter {}))
   ([opts] (fn [request] (step-loop! opts request))))
+
+(dispatch/register-providers!
+ {:typeahead {::dispatch/configured? step-backing-configured?
+              ::dispatch/agent-adapter agent-adapter}})

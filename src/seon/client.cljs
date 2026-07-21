@@ -59,7 +59,12 @@
     [seon.agent.schedule]
     [seon.agent.ctx :as agent.ctx]
     [seon.ai :as ai]
+    ;; Core provider namespaces self-register with dispatch at load. Optional
+    ;; diffusion providers enter through an explicit development preload.
+    [seon.ai.anthropic]
     [seon.ai.dispatch :as ai.dispatch]
+    [seon.ai.openai-compat]
+    [seon.ai.typeahead]
     [seon.ai.generate-code :as generate-code]
     [seon.db :as db]
     [seon.db.branch :as db.branch]

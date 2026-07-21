@@ -52,6 +52,7 @@
   (:require [clojure.string :as str]
             ["@anthropic-ai/sdk" :as Anthropic]
             [seon.ai :as ai]
+            [seon.ai.dispatch :as dispatch]
             [seon.agent.ctx :as ctx]
             [seon.error :as error]
             [seon.platform :as platform]
@@ -432,3 +433,7 @@
    ;; This adapter buffers, so it ignores `:seon.ai/stream?`, but preserves the
    ;; request's attempt-cancellation signal.
    (fn [request] (complete+wrap opts request))))
+
+(dispatch/register-providers!
+ {:anthropic {::dispatch/configured? api-key-configured?
+              ::dispatch/agent-adapter agent-adapter}})

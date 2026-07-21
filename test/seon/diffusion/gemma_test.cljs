@@ -1,7 +1,7 @@
-(ns seon.ai.diffusiongemma-test
+(ns seon.diffusion.gemma-test
   "Offline tests for the DiffusionGemma CONTROL adapter (the RunPod
    async-job worker). NO network, NO GPU — every wire test drives the
-   adapter through the injected `seon.ai.diffusiongemma/*fetch*` seam
+   adapter through the injected `seon.diffusion.gemma/*fetch*` seam
    (root-set!, like the openai adapter's *fetch*; restored in a
    `.finally`) with a SCRIPTED submit→poll sequence, and `*poll-ms*` is
    set to 0 so the poll loop never waits.
@@ -17,12 +17,12 @@
        recovers (the cold-start transient inherits the turn loop's retry)
 
    Run interactively via MCP eval:
-     (require 'seon.ai.diffusiongemma-test :reload)
-     (cljs.test/run-tests 'seon.ai.diffusiongemma-test)"
+     (require 'seon.diffusion.gemma-test :reload)
+     (cljs.test/run-tests 'seon.diffusion.gemma-test)"
   (:require
     [cljs.test :refer [deftest is testing async]]
     [seon.ai :as ai]
-    [seon.ai.diffusiongemma :as dg]
+    [seon.diffusion.gemma :as dg]
     [seon.retry :as retry]))
 
 (defn- resolution
