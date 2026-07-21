@@ -59,6 +59,23 @@
               (recur (conj forms form)))))))
     (catch Throwable _ [])))
 
+(defn read-ns-form
+  "The leading namespace declaration in `source`, or nil.
+
+   Reads only the first form, before aliases declared by that form exist. The
+   host loader then derives those aliases through [[ns-require-edges]] and
+   passes them back to [[read-forms]] for the one whole-source read."
+  ;; A tools.reader form is the genuinely polymorphic third-party boundary.
+  {:malli/schema [:=> [:cat ::source] :any]}
+  [source]
+  (try
+    (binding [*ns* (create-ns 'user)]
+      (let [reader (reader-types/source-logging-push-back-reader source)
+            form (tools.reader/read {:eof nil :read-cond :preserve} reader)]
+        (when (and (seq? form) (= 'ns (first form)) (symbol? (second form)))
+          form)))
+    (catch Throwable _ nil)))
+
 (defn- single-defn?
   "True iff `forms` is exactly one top-level `defn`/`defn-` form.
 
@@ -221,8 +238,13 @@
 
     :else nil))
 
-(defn- ns-require-edges
-  "The `:seon.ns.require/*` edge set an `(ns …)` form declares."
+(defn ns-require-edges
+  "The `:seon.ns.require/*` edge set an `(ns …)` form declares.
+
+   This is the one source-form parser for host recording and host toolkit
+   loading. Consumers derive ordering from the returned target facts; they do
+   not reparse namespace text with a second regex or dependency model."
+  {:malli/schema [:=> [:cat :any] [:set :map]]}
   [ns-form]
   (into #{}
         (comp (filter #(and (seq? %) (= :require (first %))))

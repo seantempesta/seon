@@ -119,9 +119,25 @@
 (schema/register! ::pure-blocks [:int {:min 0}])
 (schema/register! ::loaded [:int {:min 0}])
 (schema/register! ::failed [:int {:min 0}])
+(schema/register! ::excluded [:int {:min 0}])
+(schema/register! ::source-path :string)
+(schema/register! ::namespace :symbol)
+(schema/register! ::status [:enum :loaded :failed :excluded])
+(schema/register! ::reason [:string {:min 1}])
+(schema/register!
+ ::block
+ [:map {:closed true}
+  [::source-path ::source-path]
+  [::namespace ::namespace]
+  [::block-name :string]
+  [::status ::status]
+  [::reason {:optional true} ::reason]])
+(schema/register! ::blocks [:vector ::block])
 (schema/register!
  ::failures
  [:vector [:map {:closed true}
+           [::source-path ::source-path]
+           [::namespace ::namespace]
            [::block-name :string]
            [::failure :string]]])
 (schema/register!
@@ -131,6 +147,8 @@
   [::pure-blocks ::pure-blocks]
   [::loaded ::loaded]
   [::failed ::failed]
+  [::excluded ::excluded]
+  [::blocks ::blocks]
   [::failures ::failures]])
 (schema/register!
  ::base
@@ -518,23 +536,33 @@
 
 ;;; Portable `my.*` slice, loaded from the real sources.
 
-(def ^:private my-source-files
-  ["src/my/data.cljs" "src/my/plan.cljs" "src/my/kb.cljs" "src/my/ns.cljs"
-   "src/my/canvas.cljs" "src/my/ui.cljs" "src/my/skills.cljs"
-   "src/my/blob.cljs"])
+(def ^:private toolkit-source-root (io/file "src/my"))
 
-(defn- defn-blocks
-  "Top-level defn blocks of one source string."
-  [source]
-  (let [lines (vec (str/split-lines source))
-        tops (vec (keep-indexed
-                   (fn [index line]
-                     (when (re-find #"^\((defn|def )" line) index))
-                   lines))]
-    (for [[from to] (map vector tops (concat (rest tops) [(count lines)]))
-          :let [block (str/join "\n" (subvec lines from to))]
-          :when (str/starts-with? block "(defn")]
-      block)))
+(defn- toolkit-source-files
+  "Every toolkit Clojure source path in deterministic discovery order."
+  []
+  (->> (file-seq toolkit-source-root)
+       (filter #(.isFile ^java.io.File %))
+       (filter #(re-find #"\.clj[sc]$" (.getName ^java.io.File %)))
+       (mapv #(.getPath ^java.io.File %))
+       sort
+       vec))
+
+(defn- definition-form?
+  [form]
+  (and (seq? form) (contains? '#{def defn defn-} (first form))))
+
+(defn- definition-blocks
+  "Top-level definition blocks from the one tools.reader source read."
+  [source ns-sym aliases]
+  (into []
+        (comp (filter definition-form?)
+              (map (fn [form]
+                     {::block-name (str (second form))
+                      ::source (or (:source (meta form)) (pr-str form))})))
+        (record/read-forms {::record/source source
+                            ::record/ns-sym ns-sym
+                            ::record/aliases aliases})))
 
 (defn- pure-block?
   "True when a defn block has no async, js-interop, or db-boundary marker."
@@ -542,30 +570,93 @@
   (not (re-find #"\^:async|\(await |js/|#js|\(\.\-|\(\. |\(\.[a-zA-Z]|db/transact!|db/query|db/pull|db/entity|db/db\b|blob/"
                 block)))
 
-(defn- block-name [block]
-  (or (second (re-find #"\(defn-? \^?[:a-z]*\s*([^\s]+)" block)) "unknown"))
+(defn- edge-aliases
+  [edges]
+  (into {}
+        (keep (fn [{:seon.ns.require/keys [target alias]}]
+                (when (and target alias) [alias target])))
+        edges))
 
-(defn- file-ns-name [path]
-  (-> path
-      (str/replace #"^src/" "")
-      (str/replace #"\.cljs$" "")
-      (str/replace "/" ".")
-      symbol))
+(defn- source-unit
+  [path]
+  (let [source (slurp (io/file path))
+        ns-form (record/read-ns-form source)
+        ns-sym (second ns-form)
+        edges (if ns-form (record/ns-require-edges ns-form) #{})
+        aliases (edge-aliases edges)]
+    {::source-path path
+     ::namespace ns-sym
+     ::require-edges edges
+     ::blocks (if ns-sym (definition-blocks source ns-sym aliases) [])}))
+
+(defn dependency-order
+  "Topologically order source units by their parsed namespace requires.
+
+   Only edges between supplied units constrain the result. Input position is
+   the deterministic tie-breaker; a cycle is returned as data."
+  {:malli/schema [:=> [:cat [:vector :map]]
+                  [:map [::ordered [:vector :map]]
+                   [::cycle [:vector :symbol]]]]}
+  [units]
+  (let [names (mapv ::namespace units)
+        candidates (set names)
+        position (zipmap names (range))
+        by-name (into {} (map (juxt ::namespace identity)) units)
+        needs (into {}
+                    (map (fn [{::keys [namespace require-edges]}]
+                           [namespace
+                            (into #{}
+                                  (comp (map :seon.ns.require/target)
+                                        (filter candidates))
+                                  require-edges)]))
+                    units)]
+    (loop [remaining needs ordered []]
+      (if (empty? remaining)
+        {::ordered (mapv by-name ordered) ::cycle []}
+        (let [ready (->> remaining
+                         (keep (fn [[name required]]
+                                 (when (empty? required) name)))
+                         (sort-by position)
+                         vec)]
+          (if (empty? ready)
+            {::ordered (mapv by-name ordered)
+             ::cycle (->> (keys remaining) (sort-by position) vec)}
+            (let [released (set ready)]
+              (recur (into {}
+                           (map (fn [[name required]]
+                                  [name (apply disj required released)]))
+                           (apply dissoc remaining ready))
+                     (into ordered ready)))))))))
+
+(defn- require-spec
+  [{:seon.ns.require/keys [target alias refers refer-all? as-alias?]}]
+  (cond-> [target]
+    (and alias (not as-alias?)) (conj :as alias)
+    (seq refers) (conj :refer (vec (sort refers)))
+    refer-all? (conj :refer :all)))
 
 (defn- synthetic-ns-form
   "The synthetic `(ns …)` source establishing one context namespace.
 
    Stands in for the production augment-ns-source aliases, pointed at
    the host capability namespaces the registry provisions."
-  [ns-sym]
-  (str "(ns " ns-sym
-       " (:require [clojure.string :as str]"
-       " [clojure.set :as set]"
-       " [clojure.edn :as edn]"
-       " [clojure.walk :as walk]"
-       " [seon.db :as db]"
-       " [seon.schema :as schema]"
-       " [seon.ai.tokens :as tokens]))"))
+  [ns-sym require-edges available-libs]
+  (let [parsed (->> require-edges
+                    (remove :seon.ns.require/as-alias?)
+                    (filter #(contains? available-libs
+                                        (:seon.ns.require/target %)))
+                    (sort-by (comp str :seon.ns.require/target))
+                    (mapv require-spec))
+        defaults [['clojure.string :as 'str]
+                  ['clojure.set :as 'set]
+                  ['clojure.edn :as 'edn]
+                  ['clojure.walk :as 'walk]
+                  ['seon.db :as 'db]
+                  ['seon.schema :as 'schema]
+                  ['seon.ai.tokens :as 'tokens]]
+        parsed-targets (set (map first parsed))
+        specs (into parsed (remove #(contains? parsed-targets (first %))) defaults)]
+    (pr-str (list 'ns ns-sym (cons :require specs)))))
 
 (defn ensure-context-ns!
   "Ensure `ns-sym` exists in `ctx` with the standard capability aliases.
@@ -575,45 +666,92 @@
   {:malli/schema [:=> [:catn [::ctx ::ctx] [::ns-sym :symbol]] :nil]}
   [ctx ns-sym]
   (when-not (sci/eval-string* ctx (str "(find-ns '" ns-sym ")"))
-    (sci/eval-string* ctx (synthetic-ns-form ns-sym)))
+    (sci/eval-string* ctx (synthetic-ns-form ns-sym #{}
+                                             '#{clojure.string clojure.set
+                                                clojure.edn clojure.walk
+                                                seon.db seon.schema
+                                                seon.ai.tokens})))
   nil)
 
-(defn- load-portable-slice!
+(defn- block-row
+  [unit block status reason]
+  (cond-> {::source-path (::source-path unit)
+           ::namespace (::namespace unit)
+           ::block-name (::block-name block)
+           ::status status}
+    reason (assoc ::reason reason)))
+
+(defn load-portable-slice!
   "Eval every pure `my.*` defn block from its real source into `ctx`.
 
    Returns the honest ledger: block counts plus each failure's first error
    line. Failures are references to impure private helpers the pure slice
    does not carry, recorded — never silently skipped."
-  [ctx]
-  (let [loads
-        (vec
-         (for [path my-source-files
-               :let [ns-sym (file-ns-name path)
-                     source (slurp (io/file path))
-                     pure (filterv pure-block? (defn-blocks source))]]
-           (do
-             (sci/eval-string* ctx (synthetic-ns-form ns-sym))
-             (reduce
-              (fn [tally block]
-                (let [outcome
-                      (try (sci/eval-string*
-                            ctx (str "(in-ns '" ns-sym ")\n" block))
-                           ::ok
-                           (catch Throwable throwable
-                             (first (str/split-lines
-                                     (str (.getMessage throwable))))))]
-                  (if (= ::ok outcome)
-                    (update tally ::loaded inc)
-                    (update tally ::failures conj
-                            {::block-name (block-name block)
-                             ::failure (str outcome)}))))
-              {::pure-blocks (count pure) ::loaded 0 ::failures []}
-              pure))))]
-    {::files (count my-source-files)
-     ::pure-blocks (reduce + (map ::pure-blocks loads))
-     ::loaded (reduce + (map ::loaded loads))
-     ::failed (reduce + (map (comp count ::failures) loads))
-     ::failures (into [] (mapcat ::failures) loads)}))
+  [ctx registry]
+  (let [units (mapv source-unit (toolkit-source-files))
+        {::keys [ordered cycle]} (dependency-order units)
+        candidate-libs (set (map ::namespace units))
+        available-libs (into candidate-libs (keys @registry))
+        loaded-rows
+        (into []
+              (mapcat
+               (fn [{::keys [namespace require-edges blocks] :as unit}]
+                 (let [portable (filterv (comp pure-block? ::source) blocks)
+                       excluded-blocks (remove (comp pure-block? ::source) blocks)
+                       excluded-rows
+                       (mapv #(block-row unit % :excluded
+                                         "The block is outside the portable C1 class (async, JS, database, or blob capability evidence).")
+                             excluded-blocks)
+                       ns-error
+                       (try
+                         (sci/eval-string*
+                          ctx (synthetic-ns-form namespace require-edges
+                                                 available-libs))
+                         nil
+                         (catch Throwable throwable
+                           (first (str/split-lines
+                                   (str (.getMessage throwable))))))]
+                   (into excluded-rows
+                         (if ns-error
+                           (map #(block-row unit % :failed ns-error) portable)
+                           (map (fn [{::keys [source] :as block}]
+                                  (try
+                                    (sci/eval-string*
+                                     ctx (str "(in-ns '" namespace ")\n" source))
+                                    (block-row unit block :loaded nil)
+                                    (catch Throwable throwable
+                                      (block-row
+                                       unit block :failed
+                                       (first (str/split-lines
+                                               (str (.getMessage throwable))))))))
+                                portable))))))
+              ordered)
+        cycle-rows
+        (into []
+              (mapcat
+               (fn [namespace]
+                 (let [unit (first (filter #(= namespace (::namespace %)) units))]
+                   (map #(block-row unit % :failed
+                                    (str "Namespace require cycle: "
+                                         (str/join ", " cycle)))
+                        (filter (comp pure-block? ::source) (::blocks unit)))))
+               cycle))
+        rows (into loaded-rows cycle-rows)
+        failures (into []
+                       (comp (filter #(= :failed (::status %)))
+                             (map (fn [row]
+                                    {::source-path (::source-path row)
+                                     ::namespace (::namespace row)
+                                     ::block-name (::block-name row)
+                                     ::failure (::reason row)})))
+                       rows)]
+    {::files (count units)
+     ::pure-blocks (count (remove #(= :excluded (::status %)) rows))
+     ::loaded (count (filter #(= :loaded (::status %)) rows))
+     ::failed (count failures)
+     ::excluded (count (filter #(= :excluded (::status %)) rows))
+     ::blocks rows
+     ::failures failures}))
 
 (defn build-base!
   "Build the one shared base context for a host serving one cluster.
@@ -634,7 +772,7 @@
               (fn []
                 (when (.isInterrupted (Thread/currentThread))
                   (interrupt/interrupt! "eval deadline exceeded")))})
-        report (load-portable-slice! ctx)]
+        report (load-portable-slice! ctx wrapper-registry)]
     {::ctx ctx ::report report ::registry wrapper-registry}))
 
 (defn fork-context
