@@ -108,6 +108,9 @@
 (schema/register! :seon.config.render/value-max-depth    :seon.config/cap)
 (schema/register! :seon.config.render/value-max-keys     :seon.config/cap)
 (schema/register! :seon.config.render/value-max-items    :seon.config/cap)
+(schema/register! :seon.config.render/value-max-path-segments :seon.config/cap)
+(schema/register! :seon.config.render/value-max-path-bytes :seon.config/cap)
+(schema/register! :seon.config.render/value-max-realized-items :seon.config/cap)
 (schema/register! :seon.config.render/value-max-string   :seon.config/cap)
 (schema/register! :seon.config.render/value-shape-sample :seon.config/cap)
 (schema/register! :seon.config.render/value-verbatim-cap :seon.config/cap)
@@ -194,7 +197,7 @@
 ;;; (decision: default in ONE place — the manifest `#or`); the accessors below
 ;;; apply the SAME literal as their own fallback when the section is absent.
 (schema/register! :seon.config/render
-  [:map
+  [:map {:closed true}
    [:seon.config.render/database-edn-cap   {:optional true} :seon.config.render/database-edn-cap]
    [:seon.config.render/eval-cap           {:optional true} :seon.config.render/eval-cap]
    [:seon.config.render/message-cap        {:optional true} :seon.config.render/message-cap]
@@ -202,6 +205,12 @@
    [:seon.config.render/value-max-depth    {:optional true} :seon.config.render/value-max-depth]
    [:seon.config.render/value-max-keys     {:optional true} :seon.config.render/value-max-keys]
    [:seon.config.render/value-max-items    {:optional true} :seon.config.render/value-max-items]
+   [:seon.config.render/value-max-path-segments
+    {:optional true} :seon.config.render/value-max-path-segments]
+   [:seon.config.render/value-max-path-bytes
+    {:optional true} :seon.config.render/value-max-path-bytes]
+   [:seon.config.render/value-max-realized-items
+    {:optional true} :seon.config.render/value-max-realized-items]
    [:seon.config.render/value-max-string   {:optional true} :seon.config.render/value-max-string]
    [:seon.config.render/value-shape-sample {:optional true} :seon.config.render/value-shape-sample]
    [:seon.config.render/value-verbatim-cap {:optional true} :seon.config.render/value-verbatim-cap]
@@ -524,6 +533,12 @@
    [:seon.config.render/value-max-depth    {:optional true} :seon.config/cap]
    [:seon.config.render/value-max-keys     {:optional true} :seon.config/cap]
    [:seon.config.render/value-max-items    {:optional true} :seon.config/cap]
+   [:seon.config.render/value-max-path-segments
+    {:optional true} :seon.config.render/value-max-path-segments]
+   [:seon.config.render/value-max-path-bytes
+    {:optional true} :seon.config.render/value-max-path-bytes]
+   [:seon.config.render/value-max-realized-items
+    {:optional true} :seon.config.render/value-max-realized-items]
    [:seon.config.render/value-max-string   {:optional true} :seon.config/cap]
    [:seon.config.render/value-shape-sample {:optional true} :seon.config/cap]
    [:seon.config.render/value-verbatim-cap {:optional true} :seon.config/cap]
@@ -862,6 +877,12 @@
              :seon.config.render/value-max-depth    (get r :seon.config.render/value-max-depth 3)
              :seon.config.render/value-max-keys     (get r :seon.config.render/value-max-keys 8)
              :seon.config.render/value-max-items    (get r :seon.config.render/value-max-items 8)
+             :seon.config.render/value-max-path-segments
+             (get r :seon.config.render/value-max-path-segments 32)
+             :seon.config.render/value-max-path-bytes
+             (get r :seon.config.render/value-max-path-bytes 4096)
+             :seon.config.render/value-max-realized-items
+             (get r :seon.config.render/value-max-realized-items 1024)
              :seon.config.render/value-max-string   (get r :seon.config.render/value-max-string 80)
              :seon.config.render/value-shape-sample (get r :seon.config.render/value-shape-sample 8)
              :seon.config.render/value-verbatim-cap (get r :seon.config.render/value-verbatim-cap 1500)
@@ -1162,6 +1183,32 @@
   {:malli/schema [:=> [:cat :seon.config/singleton] :int]}
   [configuration]
   (get configuration :seon.config.render/value-max-items 8))
+
+(defn value-max-path-segments
+  "Max decoded path elements in one value-drill request.
+
+   Manifest `:seon.config.render/value-max-path-segments`; 32."
+  {:malli/schema [:=> [:cat :seon.config/singleton] :int]}
+  [configuration]
+  (get configuration :seon.config.render/value-max-path-segments 32))
+
+(defn value-max-path-bytes
+  "Max raw encoded path bytes in one value-drill request.
+
+   Manifest `:seon.config.render/value-max-path-bytes`; 4096. The HTTP owner
+   measures UTF-8 bytes before URL decoding or EDN reading."
+  {:malli/schema [:=> [:cat :seon.config/singleton] :int]}
+  [configuration]
+  (get configuration :seon.config.render/value-max-path-bytes 4096))
+
+(defn value-max-realized-items
+  "Max admitted offset plus page size for one value drill.
+
+   Manifest `:seon.config.render/value-max-realized-items`; 1024. The later
+   request owner performs checked safe-integer arithmetic before realization."
+  {:malli/schema [:=> [:cat :seon.config/singleton] :int]}
+  [configuration]
+  (get configuration :seon.config.render/value-max-realized-items 1024))
 
 (defn value-max-string
   "Max chars of a string leaf before it is clipped to a marker.

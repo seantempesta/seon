@@ -21,6 +21,15 @@ shape candidates. It does not bound path elements, encoded path bytes, offset,
 or `offset + page-size`. A child asked for a large offset could therefore walk
 unbounded input before retaining one bounded page.
 
+Unit 1D now supplies the configuration half of the boundary: the existing
+render-policy section and flat singleton carry independent positive caps for
+32 decoded segments, 4,096 raw encoded bytes, and 1,024 total realized items.
+The focused config proof covers closed-map rejection, Datahike attribute
+derivation, absent/shipped fallback parity, and independent manifest
+overrides. The issue remains open because the renderer-owned public limit
+schemas, shared effective-limit normalizer, and instrumented parent/child
+zero-work proofs are later dependency-ordered units.
+
 ## Owner
 
 The value-browser configuration contract owns path length, encoded request

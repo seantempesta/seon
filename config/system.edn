@@ -131,6 +131,11 @@
   :seon.config.render/value-max-depth    3
   :seon.config.render/value-max-keys     8
   :seon.config.render/value-max-items    8
+  ;; Independent value-drill admission bounds: decoded path cardinality, raw
+  ;; percent-encoded UTF-8 bytes before decoding, and total offset + page work.
+  :seon.config.render/value-max-path-segments 32
+  :seon.config.render/value-max-path-bytes 4096
+  :seon.config.render/value-max-realized-items 1024
   :seon.config.render/value-max-string   80
   :seon.config.render/value-shape-sample 8
   :seon.config.render/value-verbatim-cap 1500

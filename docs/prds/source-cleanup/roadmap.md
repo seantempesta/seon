@@ -235,6 +235,15 @@ ordered/indexed representation. Sequence and set paging retain the
 `offset + page-size + 1` work bound. This preserves insertion-equivalent byte
 identity and bounded work; no downstream transport or UI may relax either.
 
+Unit 1D's configuration leaves are implemented in the existing config owner:
+the closed render policy and flat singleton now carry the ruled
+32-segment/4,096-byte/1,024-item defaults, the shipped manifest states the same
+values, and the focused config gate passes 27 tests / 149 assertions. The
+effective-limit normalizer remains deliberately dependency-ordered with the
+`seon.render.value` public `operation-limits` and `effective-limits` schemas
+frozen by `ec86accb`; landing it earlier would require a loose `:map` contract
+or duplicate schemas and would break the one-contract ruling.
+
 Only after those contracts freeze does
 [[research/execution-child-value-sampling-boundary-2026-07-20]] (`a568deef`)
 extend the existing execution protocol with closed, correlated ordinary-data

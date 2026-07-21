@@ -53,7 +53,22 @@
   (testing "the render-bounds section validates"
     (is (m/validate :seon.config/manifest
                     {:seon.config/render {:seon.config.render/value-width 72
-                                          :seon.config.render/database-edn-cap 16384}})))
+                                          :seon.config.render/database-edn-cap 16384
+                                          :seon.config.render/value-max-path-segments 32
+                                          :seon.config.render/value-max-path-bytes 4096
+                                          :seon.config.render/value-max-realized-items 1024}}))
+    (doseq [attribute [:seon.config.render/value-max-path-segments
+                       :seon.config.render/value-max-path-bytes
+                       :seon.config.render/value-max-realized-items]
+            invalid [0 -1 1.5]]
+      (is (not (m/validate :seon.config/manifest
+                           {:seon.config/render {attribute invalid}}))
+          (str attribute " rejects " invalid)))
+    (is (not (m/validate :seon.config/manifest
+                         {:seon.config/render
+                          {:seon.config.render/value-max-path-segments 32
+                           :seon.config.render/unknown-drill-cap 1}}))
+        "the render policy remains closed"))
   (testing "a minimal-cluster-shaped manifest validates (system-text + repl-mode + explicit ctx)"
     (is (m/validate :seon.config/manifest
                     {:seon.config/system-text "; ── system ──\n; the minimal prompt"
@@ -463,15 +478,24 @@
     (let [configuration (config/resolve-config-singleton {})]
       (is (= 72 (config/value-width configuration)))
       (is (= 16384 (config/database-edn-cap configuration)))
-      (is (= 3 (config/value-max-depth configuration)))))
+      (is (= 3 (config/value-max-depth configuration)))
+      (is (= 32 (config/value-max-path-segments configuration)))
+      (is (= 4096 (config/value-max-path-bytes configuration)))
+      (is (= 1024 (config/value-max-realized-items configuration)))))
   (testing "a manifest value overrides the fallback"
     (let [configuration
           (config/resolve-config-singleton
            {:seon.config/render
             {:seon.config.render/value-width 40
-             :seon.config.render/database-edn-cap 999}})]
+             :seon.config.render/database-edn-cap 999
+             :seon.config.render/value-max-path-segments 31
+             :seon.config.render/value-max-path-bytes 4095
+             :seon.config.render/value-max-realized-items 1023}})]
       (is (= 40 (config/value-width configuration)))
       (is (= 999 (config/database-edn-cap configuration)))
+      (is (= 31 (config/value-max-path-segments configuration)))
+      (is (= 4095 (config/value-max-path-bytes configuration)))
+      (is (= 1023 (config/value-max-realized-items configuration)))
       ;; an unset key in a present section still falls back to the literal
       (is (= 3 (config/value-max-depth configuration))))))
 
@@ -586,6 +610,9 @@
       (is (= 100       (:seon.config.run/batch-turn-limit s)))
       (is (= 300       (:seon.config.run/stream-form-limit s)))
       (is (= 1800000   (:seon.config.run/deadline-ms s)))
+      (is (= 32        (:seon.config.render/value-max-path-segments s)))
+      (is (= 4096      (:seon.config.render/value-max-path-bytes s)))
+      (is (= 1024      (:seon.config.render/value-max-realized-items s)))
       (is (not (contains? s
                           :seon.config.model-transport/response-identity-cap))
           "config-free history preserves absence")
@@ -622,7 +649,11 @@
                         [{:seon.agent.ctx/name :canvas}]}
           skills {:seon.config/dirs ["seon-skills"]}
           s (config/resolve-config-singleton
-              {:seon.config/render {:seon.config.render/eval-cap 42}
+              {:seon.config/render
+               {:seon.config.render/eval-cap 42
+                :seon.config.render/value-max-path-segments 17
+                :seon.config.render/value-max-path-bytes 2048
+                :seon.config.render/value-max-realized-items 512}
                :seon.config/run {:seon.config.run/batch-turn-limit 7
                                  :seon.config.run/stream-form-limit 19
                                  :seon.config.run/deadline-ms 123456}
@@ -636,6 +667,9 @@
                :seon.config/agent-context agent-context
                :seon.config/root-context root-context})]
       (is (= 42 (:seon.config.render/eval-cap s)))
+      (is (= 17 (:seon.config.render/value-max-path-segments s)))
+      (is (= 2048 (:seon.config.render/value-max-path-bytes s)))
+      (is (= 512 (:seon.config.render/value-max-realized-items s)))
       (is (= 7 (:seon.config.run/batch-turn-limit s)))
       (is (= 19 (:seon.config.run/stream-form-limit s)))
       (is (= 123456 (:seon.config.run/deadline-ms s)))
