@@ -269,6 +269,19 @@ the named boundaries.
   native code). The W0.7 hostile battery is a permanent test surface;
   every new capability ships its hostile gate.
 
+- **One eval pipeline, no parallel guards** (owner, 2026-07-21): every
+  piece of agent-authored code — eval forms, canvas renderers, AI
+  twins, button handlers, authored invocations — executes through the
+  ONE execution dispatch into the agent's execution environment, under
+  the same deadline/interrupt/error-value containment. The June-era
+  canvas-specific sci guard is history, not a pattern. W5 refinement:
+  U11's render-into-pod migration covers CORE rendering only — the pod
+  renders data and compiled blocks (registered canvas forms are pure
+  data per the render/canvas.cljs platform law); agent-authored
+  renderer/handler FUNCTIONS route through the one dispatch to the
+  agent's sci context (the W3 authored-invocation port), never
+  executing in the pod. A hung renderer yields honest-unavailable
+  rendering on the feed; it cannot block SSE or the pod.
 - **Key namespaces are a discoverability promise** (owner, 2026-07-21):
   every key fully namespaced and spec'd, and the key's namespace is
   where a reader would expect to find the functions operating on that
