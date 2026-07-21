@@ -463,24 +463,28 @@ blocking persisted-scale failures, recorded before correction by `90c20486`,
 exact config-apply migration from the obsolete plan HTML symbol to
 `my.plan/plan-surface`; independent source review accepts its conjunctive
 selector, fixed query bounds, encoded CAS, immutable-database fence, custom
-renderer preservation, and zero-write second apply. Commit `b2d701cc`
-implements bounded transcript acquisition through fixed run and turn index
-pages plus one retained-payload pull. Its focused adversary performs the same
-three authority calls and 52 simulated index visits for 50 and 1,000,000 old
-turns; the empty-run adversary stops at eight calls and 68 members, and AI and
-HTML both mark omitted history honestly. The focused transcript gate passes 15
-tests / 47 assertions.
+renderer preservation, and zero-write second apply. Commit `5b6c04f3` adds the
+remaining reconcile-skip, structured migration-error, and operation-total
+branch proof; the combined plan migration gate passes 52 tests / 257 assertions.
+Commit `b2d701cc` is a rejected transcript draft, not settled evidence. Its
+focused adversary held calls and simulated visits fixed, but independent review
+found that it preselected by entity ID instead of the prior `:at` order, lost
+omission state across run pages, and could still fail the whole transcript on
+one over-weight usage string. Its million-history fixture also marked a full
+limit-sized page complete, so it did not model real index continuation.
 
-The **earliest unsettled contract** is now independent adversarial acceptance
-of the transcript diff, including newest-order semantics and a single hostile
-payload, followed by its cold real-writer proof. Its **integrated proof** keeps
-authority calls and visited index members fixed as old history grows and then
-renders the exact root feed. The first occupied parallel lane owns that
-read-only review. The second owns the remaining plan migration branch tests:
-failed reconciliation skips migration, migration failure remains a structured
-core error, and successful operation totals compose. The **next refill** is one
-coordinated frozen-source restart plus explicit config apply, database readback,
-direct child render, identity-encoded server-side SSE, and browser proof. The
+The **earliest unsettled contract** is therefore the corrected bounded
+transcript acquisition. Its active owner is replacing run/eid preselection with
+a fixed global time-index scan that returns only certified matching newest
+turns and marks an exhausted scan honestly; omission must accumulate across
+every page, and usage acquisition must be non-critical and bounded independently.
+Its **integrated proof** uses divergent entity IDs and timestamps, a real
+incomplete page, and one hostile scalar while keeping authority calls and
+visited index members fixed as old history grows, followed by a cold real-writer
+comparison and the exact root feed. The independent review lane refills when
+that correction commits. The **next refill** after acceptance is one coordinated
+frozen-source restart plus explicit config apply, database readback, direct
+child render, identity-encoded server-side SSE, and browser proof. The
 **final graduation gate** remains the complete Stage 1.5 live
 sampler/retirement/route/UI matrix and then the ordered A-H program gates;
 neither live defect displaces the later ledger.
