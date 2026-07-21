@@ -663,9 +663,33 @@ decisions batch for their return.
   absent; provider registry live with `(:anthropic :deepseek
   :openai-compat :typeahead)` self-registered. NS-1/2/3/4 + registry
   are integrated and proven as one system.
-- **sol design review (read-only)** of NS-0.5/NS-5 + fresh-tree
-  critique in flight — logs `tmp/orchestrator/ns-design-review-*`;
-  report to be persisted under `research/` and judged on return.
+- **NS-0.5/NS-5 design review DONE + ACCEPTED** — persisted as
+  `research/ns05-ns5-design-review-2026-07-21.md` (`eb219136`). It
+  SUPERSEDES the namespace design's NS-0.5 counts (real production
+  violations: repl.internal 10, my.plan.internal 4, db 2, schema 6,
+  eval 1, agent 1) and the NS-5 single-bundle framing. Accepted unit
+  cut: **NS-0.5a** (now: agent.internal→agent.authorization rename;
+  db.id false edge deleted; `seon.db.storage` extraction) →
+  **NS-0.5b** (after NS-0.5a: `seon.schema.form` extraction —
+  strongest genuine extraction; `seon.eval.internal`→
+  `seon.eval.receipt` `.cljc`) → **NS-0.5c** (at the repl-lane
+  handoff, BEFORE W5: repl.internal→repl.parse; my.plan seam repairs;
+  optional my.plan.generation). NS-5 splits: earlier (parse rename,
+  receipt, analyzer-info parser extraction), W5-coupled (child bands,
+  execution.host→dispatch, contract promotion — CONSTANTS/SCHEMAS
+  ONLY, codecs are platform-bound; band A now deletes from
+  `host/session.clj:12-78`), later (`seon.eval` render/lookup/timeout
+  split as its own unit). NEW early unit: extract `seon.ns.source`
+  from `analyzer-info` (its persisted `:seon.ns.require/*` schemas +
+  parser are CORE — used by client — not diffusion; ruling-6 remnant
+  disposition corrected). q15 web.serve: post-W5, with the review's
+  handler-owner split. q12 uds.cljc: DEMOTED to noise (truthful
+  JVM/bb sharing; evidence in the review).
+- **NS-0.5a in flight** — sol low, codex thread
+  `019f86a3-f463-7d22-9b31-db8aaf2e50df`, spec
+  `specs/ns-0.5a-internals-first-wave.md`, logs
+  `tmp/orchestrator/ns-05a-*`. Cluster stays UP for the research lane;
+  no bin/seon ops in-lane.
 - **sol W1.2 grounding research (read-only, live-probe enabled)** in
   flight — logs `tmp/orchestrator/w12-grounding-*`; interface ledger
   for the live-writer-reconstruction spec (W0.4 pool member lifecycle,
