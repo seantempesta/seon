@@ -1,10 +1,9 @@
-(ns seon.eval.internal
-  "Transform evaluation receipts behind the `seon.eval` service.
+(ns seon.eval.receipt
+  "Build and inspect durable evaluation receipts.
 
-   Pure helpers normalize forms, outcomes, and captured program facts; compiler
-   invocation and database publication remain at the public execution boundary."
+   Pure helpers derive receipt state and build the transaction data that starts
+   and terminalizes one receipt on either active runtime tier."
   (:require
-    [seon.db :as db]
     [seon.db.id :as db.id]
     [seon.schema :as schema]))
 
@@ -59,9 +58,9 @@
   "Build the CAS-fenced terminal transition for one running eval receipt."
   {:malli/schema [:=> [:catn [::request ::terminal-request]] :seon.db/tx-data]}
   [{eval-id :seon.eval/id status :seon.eval/status}]
-  [(db/cas-assert [:seon.eval/id eval-id]
-                  :seon.eval/status
-                  :running)
+  ;; Plain transaction data matching the agent-facing `seon.db/cas-assert`.
+  [[:db.fn/cas [:seon.eval/id eval-id]
+    :seon.eval/status :running :running]
    {:seon.eval/id eval-id
     :seon.eval/status status
     :seon.eval/ok? (= :done status)}])

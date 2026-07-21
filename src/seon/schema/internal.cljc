@@ -1,30 +1,20 @@
 (ns seon.schema.internal
-  "Malli-form mechanics and register!-time gates for `seon.schema`.
+  "Registration admission and entity-shape derivation for `seon.schema`.
 
    Private engine internals, factored out of the public registry surface
    so they stay indexed + grep-able WITHOUT rendering into agent context
    (the `*.internal` convention drops them from the curated namespaces
    body — see `seon.agent.ctx.ns-name/hidden-ns-name?`).
 
-   Everything here is pure form-shape inspection over a Malli schema form,
-   plus the two `register!` gates. The registry atom lives in `seon.schema`;
+   Reusable Malli-form inspection lives in `seon.schema.form`. The registry
+   atom lives in `seon.schema`;
    the identity check ([[identity-attr?]]) reads it through a passed-in
    `schemas` map so this namespace never requires `seon.schema` (no cycle:
    schema → schema.internal only)."
   (:require [clojure.string :as str]
             [malli.core :as m]
-            [malli.registry :as mr]))
-
-(def primitive-schema-forms
-  "Seon's canonical primitive aliases missing from Malli's built-in registry."
-  {:inst 'inst?})
-
-(defn attr-form-properties
-  "The Malli props map from an attr-schema form, or nil. Mirrors
-   `seon.db/form-properties` (kept here to avoid a db→schema cycle)."
-  [form]
-  (when (vector? form)
-    (some (fn [x] (when (map? x) x)) (rest form))))
+            [malli.registry :as mr]
+            [seon.schema.form :as form]))
 
 (defn identity-attr?
   "True when the schema form for `attr-key` in `schemas` carries
@@ -33,48 +23,18 @@
      [:keyword {:seon.db/identity true}]
      [:and {:seon.db/identity true} :seon.db/id]"
   [schemas attr-key]
-  (boolean (some-> (get schemas attr-key) attr-form-properties :seon.db/identity)))
-
-(defn map-shape?
-  "True if `v` looks like a Malli `:map` schema form."
-  [v]
-  (and (vector? v) (= :map (first v))))
-
-(defn map-entries
-  "Entries of a `:map` schema form — vector of `[entry-key (props?)
-   entry-schema]`, with the head and optional schema-level props stripped."
-  [v]
-  (let [body (rest v)
-        body (if (and (seq body) (map? (first body))) (rest body) body)]
-    (vec body)))
-
-(defn schema-properties
-  "The `:map` schema's properties map (between head and entries), or nil."
-  [v]
-  (when (map-shape? v)
-    (let [body (rest v)]
-      (when (and (seq body) (map? (first body)))
-        (first body)))))
-
-(defn enum-members
-  "Members of an `:enum` form, or [] when `form` is not an enum. Strips an
-   optional leading props map (`[:enum {…} :a :b]`)."
-  [form]
-  (if (and (vector? form) (= :enum (first form)))
-    (let [body (rest form)
-          body (if (and (seq body) (map? (first body))) (rest body) body)]
-      (vec body))
-    []))
+  (boolean
+   (some-> (get schemas attr-key) form/attr-form-properties :seon.db/identity)))
 
 (defn- map-identity-entry-key
   "The first entry key of `:map` schema `v` that is itself an identity
    attr in `schemas` (`{:seon.db/identity true}`), or nil."
   [schemas v]
-  (when (map-shape? v)
+  (when (form/map-shape? v)
     (some (fn [entry]
             (when-let [k (and (vector? entry) (first entry))]
               (when (identity-attr? schemas k) k)))
-          (map-entries v))))
+          (form/map-entries v))))
 
 (defn derive-entity-id-attr
   "Identity-attr entry key of `v` when `v` is a `:map` DECLARED a stored
@@ -85,7 +45,7 @@
    kind. The derived id-attr makes a declared schema self-describing for
    the renderer's discovery walk — no per-row `:seon.entity/kind` stamp."
   [schemas v]
-  (when (:seon.db/entity (schema-properties v))
+  (when (:seon.db/entity (form/schema-properties v))
     (map-identity-entry-key schemas v)))
 
 (defn map-required-attrs
@@ -93,7 +53,7 @@
    true}` (excluding the `::m/default` sentinel) — the required-attrs
    index for schemas-as-queryable-data."
   [v]
-  (when (map-shape? v)
+  (when (form/map-shape? v)
     (into []
           (keep (fn [entry]
                   (when (vector? entry)
@@ -103,7 +63,7 @@
                                  (not= k :malli.core/default)
                                  (not (:optional props)))
                         k)))))
-          (map-entries v))))
+          (form/map-entries v))))
 
 (defn with-entity-id-attr
   "Attach `{:seon.entity/id-attr <k>}` to `v`'s props when `v` is a
@@ -151,16 +111,6 @@
                 :seon.error/kind   :user-input}
                e)))))
 
-(defn nilable-value-schema?
-  "True when `v` is a top-level `[:maybe X]` value registration.
-
-   Optionality belongs at a map entry or function slot, never in the
-   registered value shape itself. This predicate is shared by registration
-   admission and the Malli→Datahike bridge so the two boundaries cannot
-   drift."
-  [v]
-  (and (vector? v) (= :maybe (first v))))
-
 (defn assert-non-nilable-value-schema!
   "Projection-build gate: reject a top-level nilable value schema whose inner
    is a raw Malli built-in type — e.g. `[:maybe :int]`. In seon a stored
@@ -172,7 +122,7 @@
    `schemas` is accepted because projection validation passes the complete
    population through the same gate; the decision depends only on `v`."
   [_schemas k v]
-  (when (nilable-value-schema? v)
+  (when (form/nilable-value-schema? v)
     (let [body (rest v)
           body (if (and (seq body) (map? (first body))) (rest body) body)
           inner (first body)]

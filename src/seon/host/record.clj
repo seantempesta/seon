@@ -22,7 +22,7 @@
             [seon.ai.tokens :as tokens]
             [seon.content-hash :as content-hash]
             [seon.schema :as schema]
-            [seon.schema.internal :as schema.internal]))
+            [seon.schema.form :as schema.form]))
 
 (set! *warn-on-reflection* true)
 
@@ -289,7 +289,7 @@
    the whole transaction)."
   [k at]
   (let [form (schema/schema-definition k)
-        properties (schema.internal/attr-form-properties form)]
+        properties (schema.form/attr-form-properties form)]
     (cond-> {:seon.schema/key k
              :seon.schema/form (pr-str form)
              :seon.schema/created-at at}
@@ -305,7 +305,7 @@
 (defn start-tx-data
   "The component transaction data that starts one eval receipt.
 
-   Shape-for-shape `seon.eval.internal/start-tx-data`: the `:running`
+   Shape-for-shape `seon.eval.receipt/start-tx-data`: the `:running`
    receipt row rides inside its owning turn's `:seon.agent.turn/evals`."
   {:malli/schema [:=> [:cat [:map [:seon.agent.turn/id :string]
                              [:seon.eval/id :string]

@@ -17,7 +17,7 @@
     [seon.db.id :as db.id]
     [seon.db.protocol :as protocol]
     [seon.error :as error]
-    [seon.eval.internal :as eval.internal]
+    [seon.eval.receipt :as eval.receipt]
     [seon.schema :as schema]))
 
 ;; ---------------------------------------------------------------------------
@@ -389,7 +389,7 @@
         eval-closes
         (into []
               (mapcat (fn [eval-id]
-                        (eval.internal/terminal-tx-data
+                        (eval.receipt/terminal-tx-data
                          {:seon.eval/id eval-id
                           :seon.eval/status :interrupted})))
               eval-ids)

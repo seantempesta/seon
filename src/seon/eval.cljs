@@ -64,7 +64,7 @@
             [seon.error :as error]
             [seon.log :as seon-log]
             [seon.eval.bootstrap-cache :as bootstrap-cache]
-            [seon.eval.internal :as eval.internal]
+            [seon.eval.receipt :as eval.receipt]
             [seon.error.instrument :as einstrument]
             [seon.instrument :as instrument]
             [seon.platform :as platform]
@@ -74,7 +74,7 @@
             [seon.repl.internal :as internal]
             [seon.runtime.admission :as admission]
             [seon.schema :as schema]
-            [seon.schema.internal :as schema.internal]
+            [seon.schema.form :as schema.form]
             [seon.test.runner :as test-runner]))
 
 (schema/register!
@@ -1943,7 +1943,7 @@
    open-issues-prd-2026-06-11 — resume-durability loss for every
    agent-authored entity schema)."
   [k form at]
-  (let [properties (schema.internal/attr-form-properties form)]
+  (let [properties (schema.form/attr-form-properties form)]
     (cond-> {:seon.schema/key        k
              :seon.schema/form       (pr-str form)
              :seon.schema/created-at at}
@@ -2975,7 +2975,7 @@
                ::db.id/transaction-builder
                (fn [{eval-id ::eval-allocation}]
                  {:seon.db/tx-data
-                  (eval.internal/start-tx-data
+                  (eval.receipt/start-tx-data
                     (cond->
                       {:seon.agent.turn/id turn-id
                        :seon.eval/id eval-id
@@ -3097,7 +3097,7 @@
         (fn ^:async terminalize-record! [accepted-tee]
           (let [status (if (::ok? result) :done :error)
                 [fence terminal-row]
-                (eval.internal/terminal-tx-data
+                (eval.receipt/terminal-tx-data
                   {:seon.eval/id eval-id
                    :seon.eval/status status})]
             (await
@@ -3125,7 +3125,7 @@
         settled-status
         (when (and settled-read
                    (not (:seon.error/message settled-read)))
-          (eval.internal/receipt-state settled-read))]
+          (eval.receipt/receipt-state settled-read))]
     (cond
       (not (database-error? primary))
       (cond->

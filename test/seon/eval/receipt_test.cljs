@@ -10,7 +10,7 @@
     [seon.db.protocol :as protocol]
     [seon.error :as error]
     [seon.eval :as seval]
-    [seon.eval.internal :as receipt]
+    [seon.eval.receipt :as receipt]
     [seon.runtime.admission :as admission]))
 
 (def configuration (config/resolve-config-singleton {}))

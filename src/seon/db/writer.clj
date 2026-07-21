@@ -33,7 +33,7 @@
             [seon.dev.restore :as restore]
             [seon.launch :as launch]
             [seon.schema :as schema]
-            [seon.schema.internal :as schema.internal]
+            [seon.schema.form :as schema.form]
             [taoensso.timbre :as log]))
 
 (set! *warn-on-reflection* true)
@@ -469,10 +469,10 @@
               (comp
                (filter
                 (fn [[_schema-key form]]
-                  (and (schema.internal/map-shape? form)
+                  (and (schema.form/map-shape? form)
                        (:seon.db/entity
-                        (schema.internal/schema-properties form)))))
-               (mapcat (comp schema.internal/map-entries second))
+                        (schema.form/schema-properties form)))))
+               (mapcat (comp schema.form/map-entries second))
                (keep (fn [entry]
                        (let [attribute (when (vector? entry) (first entry))]
                          (when (qualified-keyword? attribute) attribute)))))

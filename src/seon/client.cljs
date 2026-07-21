@@ -69,7 +69,6 @@
     [seon.db :as db]
     [seon.db.branch :as db.branch]
     [seon.db.id :as id]
-    [seon.db.internal :as db.internal]
     [seon.db.process :as db.process]
     [seon.derive :as derive]
     [seon.error :as error]
@@ -108,7 +107,7 @@
     ;; render symbols. Renderer kind-lookup queries these via
     ;; datalog instead of walking the in-memory *schemas atom.
     [seon.schema :as schema]
-    [seon.schema.internal :as schema.internal]
+    [seon.schema.form :as schema.form]
     ;; Phase 2 — test capture as data. Required so the bundle
     ;; includes the runner; agent code reaches it from
     ;; bootstrap-CLJS eval via the analyzer's globalThis fallback
@@ -1082,7 +1081,7 @@
 
   Reopening the database never clobbers runtime appends."
   [configuration]
-  (db.internal/encode-edn-slot-values
+  (db/encode-edn-slot-values
    (into [configuration {:seon.user/id "user"}]
          (my.kb.shared/seed-tx-data))))
 
@@ -1799,7 +1798,7 @@
                   (when (keyword? k)
                     (let [form v
                           properties
-                          (schema.internal/attr-form-properties form)
+                          (schema.form/attr-form-properties form)
                           generator-present?
                           (contains? properties :seon.db.id/generator)
                           form-string (schema/form-string k)]

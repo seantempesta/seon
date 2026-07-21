@@ -1403,6 +1403,12 @@
 (defn tx-meta-datahike-schema []
   (internal/tx-meta-datahike-schema))
 
+(defn encode-edn-slot-values
+  "Encode mixed-union attribute values before database transport."
+  {:malli/schema [:=> [:catn [::tx-data ::tx-data]] ::tx-data]}
+  [tx-data]
+  (internal/encode-edn-slot-values tx-data))
+
 (defn decode-edn-value
   "Decode one mixed-schema attribute value returned by the database."
   {:malli/schema [:=> [:cat :keyword :any] :any]}

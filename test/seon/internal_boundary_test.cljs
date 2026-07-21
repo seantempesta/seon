@@ -22,6 +22,7 @@
 ;; whose body it backs). NONE may leak to an agent.
 (def ^:private internal-nses
   '[seon.db.internal
+    seon.schema.internal
     seon.agent.search.internal
     seon.agent.fs.internal])
 
@@ -42,6 +43,7 @@
   ;; the suffix alone, while the public parent renders. Falsifies a hollow
   ;; "always false" check by asserting the parent IS included.
   (doseq [[internal parent] '[[seon.db.internal           seon.db]
+                              [seon.schema.internal       seon.schema]
                               [seon.agent.search.internal seon.agent.search]
                               [seon.agent.fs.internal     seon.agent.fs]]]
     (is (false? (ns-name/included-ns? internal))

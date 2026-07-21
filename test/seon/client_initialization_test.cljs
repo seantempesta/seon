@@ -64,6 +64,21 @@
 (def ^:private configuration
   (config/resolve-config-singleton {}))
 
+(deftest public-edn-slot-encoder-preserves-transaction-data-shape
+  (is (= [{:seon.render/ai "my.render/status"
+           :seon.user/id "user"
+           :seon.client-initialization-test/nested
+           {:seon.render/ai "[:status :ok]"}}
+          [:db/add [:seon.user/id "user"]
+           :seon.render/ai "my.render/status"]]
+         (db/encode-edn-slot-values
+          [{:seon.render/ai 'my.render/status
+            :seon.user/id "user"
+            :seon.client-initialization-test/nested
+            {:seon.render/ai [:status :ok]}}
+           [:db/add [:seon.user/id "user"]
+            :seon.render/ai 'my.render/status]]))))
+
 (deftest managed-identity-attrs-follow-desired-registered-entities
   (let [identity-attrs (deref #'client/desired-identity-attrs)
         desired [{:seon.route/name :root}
@@ -182,7 +197,7 @@
     (is (not-any? #(or (contains? % :seon.fn/created-at)
                        (contains? % :seon.schema/created-at))
                   (:seon.db/program forward)))
-    (is (= (db.internal/encode-edn-slot-values
+    (is (= (db/encode-edn-slot-values
             [configuration
              {:seon.user/id "user"}
              {:my.kb.shared/id "shared"}])

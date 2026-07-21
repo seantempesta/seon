@@ -9,7 +9,7 @@
    [seon.db :as-alias db]
    [seon.error :as error]
    [seon.schema :as schema]
-   [seon.schema.internal :as schema.internal]))
+   [seon.schema.form :as schema.form]))
 
 ;;; Process-local execution context. Ordinary database descriptors may pin
 ;;; reads; native Datahike database values never enter these scopes.
@@ -80,12 +80,6 @@
 ;;; Malli to Datahike schema data. The authority installs the returned maps.
 
 (def tx-meta-attrs #{::db/user ::db/process})
-
-(defn form-properties
-  "The property map in one Malli form, when present."
-  [form]
-  (when (vector? form)
-    (some #(when (map? %) %) (rest form))))
 
 (defn form-children
   "The non-property children of one Malli form."
@@ -162,7 +156,7 @@
         (if (and (= 1 (count types)) (not (contains? types ::unmappable)))
           (first types)
           :db.type/string))
-      (schema.internal/nilable-value-schema? resolved)
+      (schema.form/nilable-value-schema? resolved)
       (throw (ex-info (str "Stored attributes cannot use `:maybe`. Register the "
                            "non-nil base shape, then omit an absent key or mark "
                            "its entity-map entry `{:optional true}`.")
@@ -199,7 +193,7 @@
                               " with the intended concrete type before "
                               "transacting it.")
                                 {::db/attr attr :seon.error/kind :user-input})))
-        props (form-properties raw)
+        props (schema.form/attr-form-properties raw)
         value-form (-> raw resolve-malli-form form->child-form resolve-malli-form)
         secondary? (boolean (:db.secondary/only props))]
     (when (and secondary?

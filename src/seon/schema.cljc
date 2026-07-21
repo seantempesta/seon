@@ -15,11 +15,11 @@
      (schema/register! ::user-id   :uuid)
      (schema/register! ::user-name [:string {:min 1 :max 200}])
 
-   Form mechanics and register!-time gates live in
-   `seon.schema.internal` (kept out of agent context; grep there for the
-   Malli-form helpers)."
+   Reusable form inspection lives in `seon.schema.form`; register!-time gates
+   live in `seon.schema.internal`, outside agent context."
   (:require [malli.core :as m]
             [malli.registry :as mr]
+            [seon.schema.form :as form]
             [seon.schema.internal :as internal]
             #?(:clj [clojure.edn :as edn]
                :cljs [cljs.reader :as reader])))
@@ -197,7 +197,7 @@
 ;; consistency with :string, :int, etc. The quoted predicate is pure data and
 ;; round-trips through the canonical database schema fact.
 (defonce ^:private _inst-type
-  (update-candidate-forms! merge internal/primitive-schema-forms))
+  (update-candidate-forms! merge form/primitive-schema-forms))
 
 ;; :seon.db/lookup-ref-value — the value position in a lookup-ref. Datahike
 ;; accepts strings, uuids, keywords, symbols, and ints as unique-attr values.
@@ -283,7 +283,7 @@
    (keywords/strings/ints) — a third-party-structure boundary, hence `:any`."
   {:malli/schema [:=> [:cat :keyword] [:vector :any]]}
   [attr-key]
-  (internal/enum-members (get (candidate-forms) attr-key)))
+  (form/enum-members (get (candidate-forms) attr-key)))
 
 (defn ^:seon.fn/agent-facing? register!
   "Define a new attribute so facts using it can be saved and queried.
@@ -408,9 +408,9 @@
               (keep
                 (fn [[k raw]]
                   (let [form (internal/with-entity-id-attr forms raw)
-                        map-shape? (internal/map-shape? form)
+                        map-shape? (form/map-shape? form)
                         props (when map-shape?
-                                (or (internal/schema-properties form) {}))
+                                (or (form/schema-properties form) {}))
                         required-attrs
                         (when map-shape?
                           (set (internal/map-required-attrs form)))
