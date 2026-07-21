@@ -60,6 +60,7 @@
    `render-ai` and `project-plain` — see ns-end note.)"
   (:require
     [clojure.string :as str]
+    [malli.error :as me]
     [seon.ai.tokens :as tokens]
     [seon.config :as config]
     [seon.schema :as schema]))
@@ -831,6 +832,34 @@
 ;; fresh server `/call` — see the U coordination ask in the PRD note).
 ;; ============================================================
 
+(defn- schema-status-row [status row]
+  {:seon.schema/key (:seon.schema/key row)
+   :seon.schema/entity? (:seon.schema/entity? row)
+   :seon.render.value/status status})
+
+(defn- schema-projection [value incomplete?]
+  (if incomplete?
+    {:seon.render.value/schemas
+     (mapv #(schema-status-row :shape-only %)
+           (schema/candidate-shapes value))}
+    (let [matches (schema/matching-shapes value)]
+      (if (seq matches)
+        {:seon.render.value/schemas
+         (mapv #(schema-status-row :valid %) matches)}
+        (if-let [candidate (first (schema/candidate-shapes value))]
+          (let [explanation (schema/explain-shape
+                              (:seon.schema/key candidate) value)
+                humanized (some-> explanation me/humanize)
+                error-value (some-> explanation me/error-value)]
+            (cond->
+              {:seon.render.value/schemas
+               [(schema-status-row :invalid candidate)]}
+              (and (some? humanized) (some? error-value))
+              (assoc :seon.render.value/explanation
+                     {:seon.render.value/humanized humanized
+                      :seon.render.value/error-value error-value})))
+          {:seon.render.value/schemas []})))))
+
 (defn render-html-data
   "DATA CONTRACT the interactive HTML value-browser consumes.
 
@@ -839,24 +868,31 @@
      {:seon.render.value/eval-id    <id-string>     ; live-var handle
       :seon.render.value/summary    <\"map 12 keys\">  ; one-line header
       :seon.render.value/truncated? <bool>          ; is this a partial view
-      :seon.render.value/tree       <sample skeleton>}
+      :seon.render.value/tree       <sample skeleton>
+      :seon.render.value/schemas    <ordered status rows>
+      :seon.render.value/explanation <invalid-only Malli projections>}
 
    The `:tree` is the same plain-data skeleton `render-ai` emits — the
    panel renders each marker as a collapsible affordance and requests
-   deeper slices by path. No hiccup here: styling + interactivity are U's."
+   deeper slices by path. Schema status derives only from the activated
+   projection; incomplete evidence is shape-only and never validated or
+   explained. No hiccup here: styling + interactivity are U's."
   {:malli/schema [:=> [:catn [:seon.config/configuration
                               :seon.config/singleton]
                              [:seon.render.value/eval-id :string]
                              [:seon.render.value/value :any]]
                   :map]}
   [configuration eval-id value]
-  (let [skel (sample configuration value {})]
-    {:seon.render.value/eval-id    eval-id
-     :seon.render.value/summary    (or (top-type+size value)
-                                       (some-> (:seon.eval/opaque skel))
-                                       "scalar")
-     :seon.render.value/truncated? (truncated? skel)
-     :seon.render.value/tree       skel}))
+  (let [skel (sample configuration value {})
+        incomplete? (truncated? skel)]
+    (merge
+      {:seon.render.value/eval-id    eval-id
+       :seon.render.value/summary    (or (top-type+size value)
+                                         (some-> (:seon.eval/opaque skel))
+                                         "scalar")
+       :seon.render.value/truncated? incomplete?
+       :seon.render.value/tree       skel}
+      (schema-projection value incomplete?))))
 
 ;; ============================================================
 ;; Live integration:

@@ -9,7 +9,8 @@
     [clojure.string :as str]
     [seon.ai.tokens :as tokens]
     [seon.config :as config]
-    [seon.render.value :as v]))
+    [seon.render.value :as v]
+    [seon.schema :as schema]))
 
 (def configuration (config/resolve-config-singleton {}))
 
@@ -70,6 +71,15 @@
                     (sampled-map v)
                     v)]))
         (:seon.render.value/map-entries sampled)))
+
+(defn- with-active-projection [forms body]
+  (let [before (schema/snapshot-state)]
+    (try
+      (schema/activate-projection! (schema/build-projection forms))
+      (body)
+      (finally
+        (schema/restore-state! before)
+        (schema/relink-registry!)))))
 
 ;; ============================================================
 ;; sample — depth + breadth bounds, marker shapes.
@@ -502,6 +512,170 @@
     ;; the tree is the same skeleton render-ai emits
     (is (= (v/sample configuration (vec (range 100)) {})
            (:seon.render.value/tree data)))))
+
+(deftest html-data-samples-once-and-returns-the-identical-skeleton
+  (let [calls (atom 0)
+        skeleton {:seon.render.value/kind :vector
+                  :seon.render.value/shown [1]
+                  :seon.render.value/elided 1}]
+    (with-redefs [v/sample (fn [_ _ _]
+                             (swap! calls inc)
+                             skeleton)
+                  schema/candidate-shapes (constantly [])]
+      (let [data (v/render-html-data configuration "one-pass" [1 2])]
+        (is (= 1 @calls))
+        (is (identical? skeleton (:seon.render.value/tree data)))
+        (is (= [] (:seon.render.value/schemas data)))))))
+
+(deftest html-data-schema-status-is-activated-ordered-and-invalid-only
+  (let [a :value-test.schema/a
+        b :value-test.schema/b
+        alpha :value-test.schema/alpha
+        beta :value-test.schema/beta
+        specific :value-test.schema/specific
+        forms {a :string
+               b :int
+               alpha [:map [a a]]
+               beta [:map [a a]]
+               specific [:map [a a] [b b]]}]
+    (with-active-projection
+      forms
+      (fn []
+        (let [valid (v/render-html-data configuration "valid" {a "yes" b 7})
+              invalid (v/render-html-data configuration "invalid"
+                                          {a 42 b "wrong"})]
+          (is (= [[specific :valid] [alpha :valid] [beta :valid]]
+                 (mapv (juxt :seon.schema/key
+                             :seon.render.value/status)
+                       (:seon.render.value/schemas valid))))
+          (is (not (contains? valid :seon.render.value/explanation)))
+          (is (= [[specific :invalid]]
+                 (mapv (juxt :seon.schema/key
+                             :seon.render.value/status)
+                       (:seon.render.value/schemas invalid))))
+          (is (map? (get-in invalid [:seon.render.value/explanation
+                                     :seon.render.value/humanized])))
+          (is (map? (get-in invalid [:seon.render.value/explanation
+                                     :seon.render.value/error-value]))))))))
+
+(deftest html-data-every-partial-marker-forbids-validation-and-explanation
+  (let [sample-calls (atom 0)
+        candidate-calls (atom 0)
+        matching-calls (atom 0)
+        explainer-calls (atom 0)
+        row {:seon.schema/key :value-test.partial/shape
+             :seon.schema/entity? false}
+        skeletons
+        [{:seon.render.value/kind :seq
+          :seon.render.value/shown [] :seon.render.value/elided 1}
+         {:seon.render.value/map-entries []
+          :seon.render.value/elided-keys 1}
+         {:seon.render.value/map-entries [[:safe 1]]
+          :seon.render.value/projected-keys 1}
+         {:seon.render.value/pruned :map :seon.render.value/count 1}
+         {:seon.eval/opaque "host/value"}
+         {:seon.eval/datom [1 :value-test.partial/a 2]}
+         {:seon.render.value/string-len 100
+          :seon.render.value/head "head"}]]
+    (with-redefs [v/sample (fn [_ _ _]
+                             (let [skeleton (nth skeletons @sample-calls)]
+                               (swap! sample-calls inc)
+                               skeleton))
+                  schema/candidate-shapes (fn [_]
+                                            (swap! candidate-calls inc)
+                                            [row])
+                  schema/matching-shapes (fn [_]
+                                           (swap! matching-calls inc)
+                                           [row])
+                  schema/explain-shape (fn [_ _]
+                                         (swap! explainer-calls inc)
+                                         {:errors [:unsafe]})]
+      (doseq [i (range (count skeletons))]
+        (let [data (v/render-html-data configuration (str "partial-" i)
+                                       {:value-test.partial/a "value"})]
+          (is (true? (:seon.render.value/truncated? data)))
+          (is (= [[:value-test.partial/shape :shape-only]]
+                 (mapv (juxt :seon.schema/key
+                             :seon.render.value/status)
+                       (:seon.render.value/schemas data))))
+          (is (not (contains? data :seon.render.value/explanation)))))
+      (is (= (count skeletons) @sample-calls))
+      (is (= (count skeletons) @candidate-calls))
+      (is (zero? @matching-calls))
+      (is (zero? @explainer-calls)))))
+
+(deftest html-data-million-entry-map-and-schema-work-are-bounded
+  (let [shared :k0
+        shapes (into {}
+                     (map (fn [i]
+                            [(keyword "value-test.bound" (str "shape-" i))
+                             [:map [shared shared]]]))
+                     (range 100))
+        forms (assoc shapes shared :int)]
+    (with-active-projection
+      forms
+      (fn []
+        (let [entry-visits (atom 0)
+              child-touches (atom 0)
+              poison-touches (atom 0)
+              schema-visits (atom 0)
+              value (CountingMap.
+                      1000000 entry-visits
+                      (fn [i]
+                        (if (< i schema/shape-input-key-limit)
+                          (map (fn [x] (swap! child-touches inc) x) [i])
+                          (map (fn [_]
+                                 (swap! poison-touches inc)
+                                 (throw (js/Error. "poison beyond budget")))
+                               [i]))))
+              data (binding [schema/*candidate-visit!*
+                             (fn [_] (swap! schema-visits inc))]
+                     (v/render-html-data configuration "million" value))]
+          (is (<= @entry-visits
+                  (+ (inc 32) schema/shape-input-key-limit))
+              "sampler head+tail and schema input windows are both bounded")
+          (is (zero? @poison-touches)
+              "neither bounded pass touches the value beyond its window")
+          (is (<= @child-touches 32))
+          (is (= schema/shape-candidate-limit @schema-visits))
+          (is (= schema/shape-candidate-limit
+                 (count (:seon.render.value/schemas data))))
+          (is (every? #(= :shape-only
+                          (:seon.render.value/status %))
+                      (:seon.render.value/schemas data)))
+          (is (= (- 1000000
+                    (count (get-in data [:seon.render.value/tree
+                                         :seon.render.value/map-entries])))
+                 (get-in data [:seon.render.value/tree
+                               :seon.render.value/elided-keys]))))))))
+
+(deftest html-data-status-is-deterministic-and-activated-only
+  (let [before (schema/snapshot-state)
+        attr :value-test.activation/value
+        shape :value-test.activation/shape
+        string-forms {attr :string shape [:map [attr attr]]}
+        int-forms {attr :int shape [:map [attr attr]]}]
+    (try
+      (schema/activate-projection! (schema/build-projection string-forms))
+      (let [value-a (into {} [[attr "active"] [:ordinary/x 1]])
+            value-b (into {} [[:ordinary/x 1] [attr "active"]])
+            p1 (v/render-html-data configuration "same" value-a)]
+        (is (= (:seon.render.value/schemas p1)
+               (:seon.render.value/schemas
+                 (v/render-html-data configuration "same" value-b))))
+        (schema/restore! int-forms)
+        (is (= (:seon.render.value/schemas p1)
+               (:seon.render.value/schemas
+                 (v/render-html-data configuration "candidate-only" value-a))))
+        (schema/activate-projection! (schema/build-projection int-forms))
+        (let [p2 (v/render-html-data configuration "p2" value-a)]
+          (is (= :invalid
+                 (get-in p2 [:seon.render.value/schemas 0
+                             :seon.render.value/status])))
+          (is (contains? p2 :seon.render.value/explanation))))
+      (finally
+        (schema/restore-state! before)
+        (schema/relink-registry!)))))
 
 ;; ------------------------------------------------------------
 ;; Explicit-whitespace rendering (transcript-render redesign) — the central
