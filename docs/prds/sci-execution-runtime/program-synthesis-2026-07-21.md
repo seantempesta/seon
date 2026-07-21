@@ -685,11 +685,36 @@ decisions batch for their return.
   disposition corrected). q15 web.serve: post-W5, with the review's
   handler-owner split. q12 uds.cljc: DEMOTED to noise (truthful
   JVM/bb sharing; evidence in the review).
-- **NS-0.5a in flight** — sol low, codex thread
-  `019f86a3-f463-7d22-9b31-db8aaf2e50df`, spec
-  `specs/ns-0.5a-internals-first-wave.md`, logs
-  `tmp/orchestrator/ns-05a-*`. Cluster stays UP for the research lane;
-  no bin/seon ops in-lane.
+- **NS-0.5a DONE `01a5dc99`** — agent.internal→agent.authorization;
+  db.id false edge deleted; focused gate 599/3089 green. Its item 3
+  (db.storage) correctly re-sequenced by the implementer's stop into
+  NS-0.5b behind schema.form (edn-encoded-attr? consumes Malli-form
+  helpers). Transient pod drain during the rename recovered with one
+  `bin/seon up`; root 200.
+- **W1.2 GROUNDING DONE + ACCEPTED** — persisted as
+  `research/w12-writer-reconstruction-grounding-2026-07-21.md`
+  (`8086bd16`). SUPERSEDES the boot-contract design's "reuse W0.4
+  replace-member!" shorthand: replacement is OPERATOR-owned
+  (`clean-or-force!` → `ensure!`); W0.4's pool only reconverges a
+  surviving sci host afterward. Unit split accepted: **W1.2a**
+  (reconstruction lifecycle over currently-enforced heap/processors,
+  narrow pod pause/drain + resume, single-resolution handoff,
+  immutable generation-named envelopes) → **W1.5** (enforcement
+  surfaces: connection/frame/executor/codec into constructors) →
+  **W1.2b** (all boot-critical keys trigger replacement, live-driven).
+  THREE CRITICAL GAPS gate the W1.2a spec: (i) no narrow pause/resume
+  (quiesce destroys too much, no resume path — client.cljs:2600-2716);
+  (ii) apply sends only a PATH and the pod re-resolves with different
+  FD observations (cli.clj:339-347, config.cljs:658-665); (iii)
+  select-manifest overwrites the launched envelope before diff
+  (config.clj:177-185). Also: selected-processors manifest override
+  NOT GROUNDED (resolve.cljc:865-870) — fold into W1.2a; q-row:
+  admission gate closes the config route itself (router.cljs:273-284).
+- **NS-0.5b in flight** — sol low, spec
+  `specs/ns-0.5b-schema-form-receipt-storage.md`, logs
+  `tmp/orchestrator/ns-05b-*` (schema.form extraction, eval.receipt
+  `.cljc` promotion, db.storage). NEXT after it lands: write + dispatch
+  the W1.2a spec (waits on NS-0.5b only for the shared client.cljs).
 - **sol W1.2 grounding research (read-only, live-probe enabled)** in
   flight — logs `tmp/orchestrator/w12-grounding-*`; interface ledger
   for the live-writer-reconstruction spec (W0.4 pool member lifecycle,
