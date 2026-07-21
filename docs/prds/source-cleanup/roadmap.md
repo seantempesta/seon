@@ -313,13 +313,17 @@ Second,
 projection nor a safe ambient fallback. Moving a convenient config subset
 would leave browser truth dependent on namespace load order; globally
 activating only database forms would delete JVM-private host schemas. The open
-blocker [[../../seon/issues/jvm-value-drill-lacks-committed-schema-projection]]
-(`8a9283d7`) therefore owns the ordered prerequisite: one shared pure rows-to-
-projection transform, projection-explicit schema APIs, and an immutable
-basis-fenced committed projection retained by the existing host lifecycle and
-refreshed monotonically after successful schema/function commits. Unit 1G may
-consume the portable producer only after identical CLJ/CLJS map status,
-explanation, byte, malformed-population, restart, and refresh-race proofs pass.
+blocker [[../../seon/issues/archive/jvm-value-drill-lacks-committed-schema-projection]]
+(`8a9283d7`) owned that ordered prerequisite. It is closed by `414b8137`: one
+portable rows-to-projection transform rejects malformed, duplicate, unresolved,
+and overflow populations; projection-explicit schema APIs share recursively
+canonical CLJ/CLJS fingerprints; and the JVM host pins acquisition to one
+immutable database value, retains the basis-fenced projection, and refuses
+drill during pending or faulted refreshes. Independent proof passed 110 CLJS
+tests / 706 assertions and 47 writer tests / 188 assertions. A fresh live query
+confirmed the four projection schemas and new projection API contracts are
+committed with their final source forms. The issue is archived by `e11243b4`;
+Unit 1G is now the earliest unsettled contract.
 
 Unit 1D's configuration leaves are implemented in the existing config owner:
 the closed render policy and flat singleton now carry the ruled
