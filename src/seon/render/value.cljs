@@ -21,13 +21,15 @@
    clip yields invalid EDN AND destroys the navigation metadata an agent
    needs to form a `get-in` path (research: Clojure REPL Data Sampling,
    §'Technical Constraints of Naive Truncation'). This ns instead builds a
-   DEPTH- and BREADTH-bounded SKELETON of the value — every retained node
-   keeps its real key/index, so a path read off the skeleton resolves
-   against the live `result/<id>` value verbatim.
+   DEPTH- and BREADTH-bounded SKELETON of the value. Every retained vector
+   node keeps its real index. Retained map keys keep their original value only
+   when the closed drill codec admits them; display-only keys are named by
+   output-local metadata and never masquerade as paths.
 
    ## What the skeleton preserves
 
-   - navigation paths — map keys + vector indices intact (`get-in`/`nth`)
+   - navigation paths — admitted map keys + vector indices stay intact
+     (`get-in`/`nth`); display-only map keys are marked non-drillable
    - per-node TYPE + COUNT — `{…12 keys}`, `[…96 items]`, `#{…5 items}`
    - elision markers — `… +129 more`, plus, for a HOMOGENEOUS collection of
      maps, the shared key-set: `… +129 more each {:a :b :c}` (the column
@@ -47,7 +49,8 @@
       :seon.render.value/elided  n | :more        ; tail count (or :more)
       :seon.render.value/shape   [:k …]}          ; shared keys, if homogeneous
      {:seon.render.value/map-entries [[<k> <v>] …] ; map w/ elided tail
-      :seon.render.value/elided-keys n}
+      :seon.render.value/elided-keys n
+      :seon.render.value/non-drillable-key-indexes [0 3]}
      {:seon.render.value/pruned :map|:vector|:set|:seq
       :seon.render.value/count  n}                 ; depth-limit prune
      {:seon.render.value/string-len n :seon.render.value/head \"…\"}
@@ -266,8 +269,22 @@
      :seon.render.value/head       (subs s 0 (max 0 (dec max-string)))}
     s))
 
+(defn- drillable-map-key?
+  "Whether a retained original key belongs to the closed drill scalar codec."
+  [k max-string]
+  (or (nil? k)
+      (boolean? k)
+      (and (number? k)
+           (js/Number.isFinite k)
+           (not (and (zero? k) (= js/-Infinity (/ 1 k)))))
+      (and (string? k) (<= (count k) max-string))
+      (and (or (keyword? k) (symbol? k))
+           (<= (+ (count (name k))
+                  (if-some [ns (namespace k)] (inc (count ns)) 0))
+               max-string))))
+
 (defn- map-key-projection
-  "Safe display/path projection plus whether the original key was replaced."
+  "Bounded display projection plus whether the original key is non-drillable."
   [k {:keys [max-string]}]
   (cond
     (opaque? k)
@@ -288,7 +305,15 @@
     (coll? k)
     [{:seon.eval/opaque "map-key/collection"} true]
 
-    :else [k false]))
+    (drillable-map-key? k max-string)
+    [k false]
+
+    (number? k)
+    [{:seon.eval/opaque "map-key/number"
+      :seon.eval/summary (tokens/bounded-pr-str k 20)} true]
+
+    :else
+    [{:seon.eval/opaque "map-key/unsupported"} true]))
 
 (defn- named-scalar-marker
   "Bounded marker for a huge keyword or symbol, otherwise nil."
@@ -418,7 +443,8 @@
     ;; recursively visiting every value. The explicit visit budget preserves
     ;; the useful small-value preference within a bounded window. Retained
     ;; entries stay in the immutable map's iteration order, so repeated renders
-    ;; are byte-stable and every original key remains a valid drill path.
+    ;; are byte-stable. Only keys admitted by the closed scalar codec remain
+    ;; drill paths; the rest become bounded display markers.
     (let [visit-limit (max max-keys (or max-map-visits max-keys))
           candidates+1 (into [] (take (inc visit-limit)) x)
           candidates (take visit-limit candidates+1)
@@ -430,9 +456,17 @@
                               [(count (tokens/bounded-pr-str sv 20)) i])
                             (map-indexed vector sampled))
           keep-idx (into #{} (map first) (take max-keys ranked))
-          kept     (keep-indexed (fn [i kv] (when (contains? keep-idx i) kv)) sampled)
-          projected-keys (count (filter #(nth % 2) kept))
-          kept     (mapv (fn [[k v _]] [k v]) kept)
+          kept     (into []
+                         (keep-indexed
+                           (fn [i kv] (when (contains? keep-idx i) kv)))
+                         sampled)
+          [kept non-drillable-key-indexes]
+          (reduce-kv
+            (fn [[entries indexes] output-index [k v non-drillable?]]
+              [(conj entries [k v])
+               (cond-> indexes non-drillable? (conj output-index))])
+            [[] []]
+            kept)
           total    (counted-count x)
           over-window? (> (count candidates+1) visit-limit)
           elided   (cond
@@ -441,7 +475,9 @@
                      :else (max 0 (- (count candidates) (count kept))))]
       (cond-> {:seon.render.value/map-entries (vec kept)}
         (not= 0 elided) (assoc :seon.render.value/elided-keys elided)
-        (pos? projected-keys) (assoc :seon.render.value/projected-keys projected-keys)))
+        (seq non-drillable-key-indexes)
+        (assoc :seon.render.value/non-drillable-key-indexes
+               non-drillable-key-indexes)))
 
     (vector? x) (sample-seqish x opts depth :vector)
     (set? x)    (sample-seqish x opts depth :set)
@@ -451,8 +487,9 @@
 
 (defn sample
   "Depth + breadth bounded SKELETON of `x` (plain data + marker maps).
-   `opts` overrides `default-opts`. Navigation paths (map keys, vector
-   indices) are preserved on every retained node. Lazy-safe; never throws."
+   `opts` overrides `default-opts`. Admitted map keys and vector indices are
+   preserved as paths; display-only map keys carry output-local non-drillable
+   metadata. Lazy-safe; never throws."
   {:malli/schema [:=> [:catn [:seon.config/configuration
                               :seon.config/singleton]
                              [:seon.render.value/x :any]
@@ -484,7 +521,7 @@
                 (or (contains? % :seon.render.value/elided)
                     (and (contains? % :seon.render.value/map-entries)
                          (not= 0 (or (:seon.render.value/elided-keys %) 0)))
-                    (pos? (or (:seon.render.value/projected-keys %) 0))
+                    (seq (:seon.render.value/non-drillable-key-indexes %))
                     (contains? % :seon.render.value/pruned)
                     (contains? % :seon.eval/opaque)
                     (contains? % :seon.eval/datom)
@@ -538,7 +575,8 @@
 (defn- map-parts [m]
   (let [wrapped? (contains? m :seon.render.value/map-entries)
         elided   (when wrapped? (:seon.render.value/elided-keys m))
-        projected (when wrapped? (:seon.render.value/projected-keys m))
+        non-drillable (when wrapped?
+                        (:seon.render.value/non-drillable-key-indexes m))
         entries  (if wrapped?
                    (:seon.render.value/map-entries m)
                    m)]
@@ -549,9 +587,9 @@
                           (if (= :more elided)
                             "… +more keys"
                             (str "… +" elided " more keys")))
-                        (when projected
-                          (str projected " non-scalar key"
-                               (when (not= 1 projected) "s")
+                        (when (seq non-drillable)
+                          (str (count non-drillable) " non-drillable key"
+                               (when (not= 1 (count non-drillable)) "s")
                                " shown safely"))]))]))
 
 (defn- seqish-parts [m]
@@ -825,8 +863,10 @@
 ;; panel (UI session U's lane). PLAIN DATA only — no hiccup, no web
 ;; classes. U turns this into a collapsible browser.
 ;;
-;; The tree IS the `sample` skeleton: every node carries its real key /
-;; index, so the panel reconstructs a `get-in` PATH from a node's position
+;; The tree IS the `sample` skeleton: every vector node carries its real index,
+;; and every admitted map node its original key. Output-local metadata marks
+;; display-only map keys, so the panel reconstructs a `get-in` PATH only from
+;; drillable positions.
 ;; and EXPANDS a pruned/elided node by re-sampling `(get-in result/<id>
 ;; path)` one level deeper (the live value is `result/<id>`; expansion is a
 ;; fresh server `/call` — see the U coordination ask in the PRD note).

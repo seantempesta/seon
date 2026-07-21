@@ -49,6 +49,21 @@
                         (entries (inc i))))))]
       (entries 0))))
 
+(deftype KeyedCountingMap [n visits key-at value-at]
+  IMap
+  (-dissoc [this _] this)
+  ICounted
+  (-count [_] n)
+  ISeqable
+  (-seq [_]
+    (letfn [(entries [i]
+              (lazy-seq
+                (when (< i n)
+                  (swap! visits inc)
+                  (cons [(key-at i) (value-at i)]
+                        (entries (inc i))))))]
+      (entries 0))))
+
 (deftype HugePrintedRecord [writes]
   IRecord
   IPrintWithWriter
@@ -131,6 +146,31 @@
     (is (= k (count (:seon.render.value/map-entries skel))))
     (is (= (- n k) (:seon.render.value/elided-keys skel)))))
 
+(deftest projected-key-index-work-stays-inside-the-map-visit-budget
+  (let [entry-visits (atom 0)
+        key-writes (atom 0)
+        work-budget 16
+        child-touches (atom 0)
+        m (KeyedCountingMap.
+            1000000 entry-visits
+            (fn [i]
+              (if (even? i)
+                (keyword (str "safe" i))
+                (HugePrintedRecord. key-writes)))
+            (fn [i]
+              (map (fn [x] (swap! child-touches inc) x) [i])))
+        skel (v/sample configuration m {:max-keys 6
+                                        :max-map-visits work-budget})]
+    (is (<= @entry-visits (inc work-budget))
+        "index derivation never revisits the source map")
+    (is (<= @child-touches work-budget)
+        "only candidate children are sampled")
+    (is (zero? @key-writes)
+        "retained and discarded hostile key printers remain untouched")
+    (is (seq (:seon.render.value/non-drillable-key-indexes skel)))
+    (is (every? #(< % (count (:seon.render.value/map-entries skel)))
+                (:seon.render.value/non-drillable-key-indexes skel)))))
+
 (deftest uncounted-map-work-is-bounded-with-an-honest-unknown-tail
   (let [entry-visits (atom 0)
         child-touches (atom 0)
@@ -182,6 +222,50 @@
     (is (< (count huge-ai) 600))
     (is (str/includes? huge-ai "map-key/string"))
     (is (str/includes? huge-ai "partial view"))))
+
+(deftest map-key-drillability-is-output-local-and-honest
+  (let [huge (apply str (repeat 1000000 "h"))
+        raw-children (atom {})
+        source (array-map
+                 :safe/keyword 1
+                 "short" 2
+                 [:collection] 3
+                 huge 4
+                 -7.5 5
+                 false 6)
+        skel (v/sample configuration source {:max-keys 5
+                                             :max-map-visits 6})
+        entries (:seon.render.value/map-entries skel)
+        indexes (:seon.render.value/non-drillable-key-indexes skel)
+        index-set (set indexes)]
+    (is (= indexes (vec (sort indexes)))
+        "indexes ascend in final retained output order")
+    (is (every? #(< % (count entries)) indexes))
+    (doseq [[i [display-key sampled-child]] (map-indexed vector entries)]
+      (if (contains? index-set i)
+        (is (map? display-key) "a display-only key exposes no path component")
+        (do
+          (swap! raw-children assoc display-key (get source display-key))
+          (is (= sampled-child (get-in source [display-key]))
+              "every unmarked displayed key is the exact original lookup key"))))
+    (is (seq indexes))
+    (is (= @raw-children
+           (into {}
+                 (keep-indexed
+                   (fn [i [k _]]
+                     (when-not (contains? index-set i)
+                       [k (get source k)])))
+                 entries)))
+    (is (not (str/includes? (pr-str skel) huge))
+        "the unsafe original huge key never enters the returned skeleton")))
+
+(deftest non-finite-and-negative-zero-map-keys-are-display-only
+  (doseq [k [js/NaN js/Infinity js/-Infinity (/ -1 js/Infinity)]]
+    (let [skel (v/sample configuration {k :child} {})]
+      (is (= [0] (:seon.render.value/non-drillable-key-indexes skel)))
+      (is (= "map-key/number"
+             (get-in skel [:seon.render.value/map-entries 0 0
+                           :seon.eval/opaque]))))))
 
 (deftest direct-error-maps-use-ordinary-map-sampling
   (let [error {:seon.error/message "writer unavailable"
@@ -571,7 +655,7 @@
          {:seon.render.value/map-entries []
           :seon.render.value/elided-keys 1}
          {:seon.render.value/map-entries [[:safe 1]]
-          :seon.render.value/projected-keys 1}
+          :seon.render.value/non-drillable-key-indexes [0]}
          {:seon.render.value/pruned :map :seon.render.value/count 1}
          {:seon.eval/opaque "host/value"}
          {:seon.eval/datom [1 :value-test.partial/a 2]}
