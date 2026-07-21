@@ -459,23 +459,30 @@ graduates.
 
 The exact-head live checkpoint after the complete source gates exposed two
 blocking persisted-scale failures, recorded before correction by `90c20486`,
-`194be873`, and `309e2ce1`. The **earliest unsettled contract** is now the
-bounded transcript window acquisition: `(turns-query 50)` materializes all
-historical usage strings before Datahike applies its output limit, so 330 turns
-consume result weight 72,328 and fail the shipped 65,536 bound. Its
-**integrated proof** is a cold real-writer comparison whose index visits,
-authority calls, work, result count, and result weight remain fixed as old
-history grows, followed by the exact root feed. The first occupied parallel
-lane owns that transcript/index correction. The second lane owns the
-independent plan migration: all twelve copied agent-local plan blocks retain
-the deleted `my.plan.internal/plan-block-html` default even though the manifest
-and admitted artifact correctly provide `my.plan/plan-surface`; only that exact
-obsolete default may migrate, while custom renderers remain untouched and a
-second apply writes nothing. The **next refill** after either lane returns is
-independent adversarial review of its owned diff; after both integrate, the
-refill is one frozen-source restart plus direct child, server-side SSE, and
-browser proof. The **final graduation gate** remains the complete Stage 1.5
-live sampler/retirement/route/UI matrix and then the ordered A-H program gates;
+`194be873`, and `309e2ce1`. Commits `25152c33` and `1268e540` implement the
+exact config-apply migration from the obsolete plan HTML symbol to
+`my.plan/plan-surface`; independent source review accepts its conjunctive
+selector, fixed query bounds, encoded CAS, immutable-database fence, custom
+renderer preservation, and zero-write second apply. Commit `b2d701cc`
+implements bounded transcript acquisition through fixed run and turn index
+pages plus one retained-payload pull. Its focused adversary performs the same
+three authority calls and 52 simulated index visits for 50 and 1,000,000 old
+turns; the empty-run adversary stops at eight calls and 68 members, and AI and
+HTML both mark omitted history honestly. The focused transcript gate passes 15
+tests / 47 assertions.
+
+The **earliest unsettled contract** is now independent adversarial acceptance
+of the transcript diff, including newest-order semantics and a single hostile
+payload, followed by its cold real-writer proof. Its **integrated proof** keeps
+authority calls and visited index members fixed as old history grows and then
+renders the exact root feed. The first occupied parallel lane owns that
+read-only review. The second owns the remaining plan migration branch tests:
+failed reconciliation skips migration, migration failure remains a structured
+core error, and successful operation totals compose. The **next refill** is one
+coordinated frozen-source restart plus explicit config apply, database readback,
+direct child render, identity-encoded server-side SSE, and browser proof. The
+**final graduation gate** remains the complete Stage 1.5 live
+sampler/retirement/route/UI matrix and then the ordered A-H program gates;
 neither live defect displaces the later ledger.
 
 The final consumer cut is grounded by
