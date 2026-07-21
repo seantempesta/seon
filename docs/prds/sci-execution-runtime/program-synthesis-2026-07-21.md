@@ -626,11 +626,14 @@ decisions batch for their return.
 - **NS-1b provider registry** — sol medium, codex thread
   `019f8681-b944-7532-952f-8bd179cce5c7`, spec
   `specs/ns-1b-provider-registry.md`, logs `tmp/orchestrator/ns-1b-*`.
-- **NS-2 lifecycle grouping** — sol low, codex thread
-  `019f867a-86dc-7630-90b6-0789166b0eeb`, spec
-  `specs/ns-2-lifecycle-grouping.md`, logs `tmp/orchestrator/ns-2-*`;
-  resumed with expanded scope after its wake?-is-persisted stop; its
-  `git mv` renames sit in the shared index — commits stay `--only`.
+- **NS-2 DONE `5e0720f2`** — state→runtime.state, indexing→
+  client.indexing, agent.runtime merged into agent.lifecycle with the
+  persisted wake? dial renamed to `:seon.agent.lifecycle/wake?`
+  (no-lock-in ruling). Full suite 1482/7163 green in-lane; rg-proven
+  zero old references. Reset boundary now PENDING at integration.
+- **NS-3 render subtree** — sol low, codex thread
+  `019f8684-61ca-7d30-af4d-1874e27711fc`, spec
+  `specs/ns-3-render-subtree.md`, logs `tmp/orchestrator/ns-3-*`.
 - Neither lane runs `bin/seon`; the orchestrator does ONE live boot
   proof after integrating both. NS-3 follows NS-2 (shared
   `client.cljs`); NS-1b follows NS-1a.
