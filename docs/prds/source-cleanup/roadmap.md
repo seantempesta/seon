@@ -457,6 +457,27 @@ uncommitted generated-terminal repair and do not count as a frozen checkpoint.
 Frozen live eval, browser, and server-side SSE proof remain before Stage 1.5
 graduates.
 
+The exact-head live checkpoint after the complete source gates exposed two
+blocking persisted-scale failures, recorded before correction by `90c20486`,
+`194be873`, and `309e2ce1`. The **earliest unsettled contract** is now the
+bounded transcript window acquisition: `(turns-query 50)` materializes all
+historical usage strings before Datahike applies its output limit, so 330 turns
+consume result weight 72,328 and fail the shipped 65,536 bound. Its
+**integrated proof** is a cold real-writer comparison whose index visits,
+authority calls, work, result count, and result weight remain fixed as old
+history grows, followed by the exact root feed. The first occupied parallel
+lane owns that transcript/index correction. The second lane owns the
+independent plan migration: all twelve copied agent-local plan blocks retain
+the deleted `my.plan.internal/plan-block-html` default even though the manifest
+and admitted artifact correctly provide `my.plan/plan-surface`; only that exact
+obsolete default may migrate, while custom renderers remain untouched and a
+second apply writes nothing. The **next refill** after either lane returns is
+independent adversarial review of its owned diff; after both integrate, the
+refill is one frozen-source restart plus direct child, server-side SSE, and
+browser proof. The **final graduation gate** remains the complete Stage 1.5
+live sampler/retirement/route/UI matrix and then the ordered A-H program gates;
+neither live defect displaces the later ledger.
+
 The final consumer cut is grounded by
 [[research/universal-data-browser-ui-migration-boundary-2026-07-20]]
 (`e7cc6f94`). It extends the existing render dispatcher, migrates `/data` and
