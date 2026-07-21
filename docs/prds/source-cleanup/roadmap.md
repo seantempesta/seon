@@ -412,10 +412,17 @@ assertions with zero warnings and zero execution sends. Static `/data` routes
 remain deliberately intact until Stage 4.
 
 The plan extensibility proof is the earliest unsettled Stage 1.5 source
-contract. Its paths are currently owned by a concurrent generate-code repair,
-so the UI migration preserves that diff until the owner commits and releases
-it. Exact-source restart, integrated browser proof, and closure of the retained
-value issues remain after the plan handoff.
+contract. The formerly ownerless generate-code repair and the independently
+discovered toolkit-current-namespace wedge are integrated by `9f826df1`.
+Failed evals now retain their current namespace without publishing require
+edges, generated-program evidence uses a bounded complete query, terminal
+delivery keeps the root CAS without a whole-database fence, and namespace setup
+targets the agent's home namespace while the batch continues in its derived
+current namespace. The focused plan/eval/runtime gate passes 87 tests / 382
+assertions. An independent review and frozen live recovery proof remain before
+the blocker issue closes. The ruled plan UI migration now owns the released
+paths. Exact-source restart, integrated browser proof, and closure of the
+retained value issues remain after that handoff.
 
 The final consumer cut is grounded by
 [[research/universal-data-browser-ui-migration-boundary-2026-07-20]]

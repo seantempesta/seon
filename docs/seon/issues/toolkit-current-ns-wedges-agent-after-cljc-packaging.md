@@ -61,6 +61,15 @@ not permanently disable an agent.
   an honest recoverable error that does not recur forever.
 - The underlying analyzer failure is preserved in the fault data.
 
+## Implementation state
+
+`9f826df1` targets setup at the agent's home namespace, preserves the batch's
+derived current namespace for evaluation, returns setup failures as values,
+records their underlying data, and still runs the batch. Focused plan, eval,
+and runtime proof passes 87 tests / 382 assertions. Keep this issue open until
+a frozen default-cluster run proves that an agent starting in a toolkit
+namespace reaches the LLM again and a forced setup failure remains recoverable.
+
 ## Workaround used (battery lane, 2026-07-21)
 
 Re-assert the agent's `:seon.agent/namespace` assignment (retract +
