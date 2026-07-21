@@ -618,6 +618,21 @@ weakness → the Weakness queue with a WHEN. No namespace lock-in
 (rename+reset). No auto-persist of agent code (ruling R1). Owner
 decisions batch for their return.
 
+### IN-FLIGHT LANES (2026-07-21 night)
+
+- **NS-1a diffusion fence** — sol medium, codex thread
+  `019f867a-8477-7673-8fef-9b06f74c2968`, spec
+  `specs/ns-1a-diffusion-fence.md`, logs `tmp/orchestrator/ns-1a-*`.
+- **NS-2 lifecycle grouping** — sol low, codex thread
+  `019f867a-86dc-7630-90b6-0789166b0eeb`, spec
+  `specs/ns-2-lifecycle-grouping.md`, logs `tmp/orchestrator/ns-2-*`.
+- Neither lane runs `bin/seon`; the orchestrator does ONE live boot
+  proof after integrating both. NS-3 follows NS-2 (shared
+  `client.cljs`); NS-1b follows NS-1a.
+- Dispatch gotcha learned: specs start with `---` frontmatter, so pass
+  them via stdin with the bare `-` sentinel — a quoted argv spec makes
+  clap parse `---` as a flag (exit 2 usage error).
+
 ### NO PENDING OWNER DECISIONS
 
 The 4 W1-boot decisions were folded as recommendations into the shipped
