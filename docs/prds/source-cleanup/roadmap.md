@@ -399,6 +399,24 @@ with zero warnings. The universal UI consumer migration is now the earliest
 dependency-ready source contract; route live proof remains part of the later
 frozen Stage 1.5 checkpoint.
 
+The first two UI consumers are migrated. `a82924bd` exposes the one public
+render-owned stable subtree identity, `df32b0d5` replaces successful eval
+technical-result materialization with a lazy authorized value-route morph, and
+`b26fd185` bounds the stored fallback's input work before token clipping.
+Focused eval proof passes 5 tests / 25 assertions. `02a88d1e` replaces `/data`'s
+raw datom `pr-str` with bounded whole-entity roots in stable first-seen order,
+all read from the feed's identical immutable database value; the value route
+and debug page now share one schema'd `seon.web.value` policy/projection
+acquisition owner. Focused `/data` and route proof passes 36 tests / 218
+assertions with zero warnings and zero execution sends. Static `/data` routes
+remain deliberately intact until Stage 4.
+
+The plan extensibility proof is the earliest unsettled Stage 1.5 source
+contract. Its paths are currently owned by a concurrent generate-code repair,
+so the UI migration preserves that diff until the owner commits and releases
+it. Exact-source restart, integrated browser proof, and closure of the retained
+value issues remain after the plan handoff.
+
 The final consumer cut is grounded by
 [[research/universal-data-browser-ui-migration-boundary-2026-07-20]]
 (`e7cc6f94`). It extends the existing render dispatcher, migrates `/data` and
