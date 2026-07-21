@@ -23,6 +23,7 @@
 (def database-name "u1-drill")
 (def agent-count 20)
 (def artifact-digest (apply str (repeat 64 "d")))
+(def boot-number (atom 0))
 
 (defn data! [m] (println (str "DRILL " (pr-str m))) (flush))
 
@@ -73,7 +74,10 @@
   (let [builder (ProcessBuilder.
                  ["clojure" "-M:writer:host" "-m" "seon.host" host-config])]
     (.redirectErrorStream builder true)
-    (.redirectOutput builder (io/file "tmp/host-drill/host.log"))
+    (.redirectOutput
+     builder
+     (java.lang.ProcessBuilder$Redirect/appendTo
+      (io/file "tmp/host-drill/host.log")))
     (let [process (.start builder)
           deadline (+ (System/currentTimeMillis) 120000)]
       (loop []
@@ -86,7 +90,21 @@
 
           (try (with-open [probe (uds/connect! host-socket)] true)
                (catch Throwable _ false))
-          process
+          (let [ready-line (with-open [reader
+                                       (io/reader "tmp/host-drill/host.log")]
+                             (->> (line-seq reader)
+                                  (filter #(.startsWith ^String % "HOST READY"))
+                                  last))
+                [_ loaded portable failed excluded]
+                (re-find #"base-loaded=(\d+)/(\d+) base-failed=(\d+) base-excluded=(\d+)"
+                         ready-line)]
+            (data! {:phase :host-boot-ledger
+                    :boot (swap! boot-number inc)
+                    :loaded (parse-long loaded)
+                    :portable (parse-long portable)
+                    :failed (parse-long failed)
+                    :excluded (parse-long excluded)})
+            process)
 
           :else (do (Thread/sleep 100) (recur)))))))
 

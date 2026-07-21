@@ -802,11 +802,12 @@
          :seon.host.context/database-name \"default\"}'"
   [& [configuration]]
   (let [request (edn/read-string configuration)
-        host (start! request)]
+        host (start! request)
+        report (get-in host [::base ::context/report])]
     (println (str "HOST READY " (::socket-path request)
-                  " base-loaded=" (get-in host [::base ::context/report
-                                                ::context/loaded])
-                  "/" (get-in host [::base ::context/report
-                                    ::context/pure-blocks])))
+                  " base-loaded=" (::context/loaded report)
+                  "/" (::context/pure-blocks report)
+                  " base-failed=" (::context/failed report)
+                  " base-excluded=" (::context/excluded report)))
     (flush)
     @(promise)))
