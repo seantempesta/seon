@@ -666,6 +666,14 @@ decisions batch for their return.
 - **sol design review (read-only)** of NS-0.5/NS-5 + fresh-tree
   critique in flight — logs `tmp/orchestrator/ns-design-review-*`;
   report to be persisted under `research/` and judged on return.
+- **sol W1.2 grounding research (read-only, live-probe enabled)** in
+  flight — logs `tmp/orchestrator/w12-grounding-*`; interface ledger
+  for the live-writer-reconstruction spec (W0.4 pool member lifecycle,
+  writer process lifecycle, config-apply path, launch envelope, live
+  heap/processor equality probe, W1.5 sequencing recommendation).
+- Owner rulings tonight: bounce ideas off sol (design interlocutor);
+  sol also does research/analysis and live REPL probes; diffusion
+  stays dev-only (D12 closed).
   (First dispatch `019f868c-5d79-…` died instantly — a shell-`&`
   background does not survive the orchestrator's tool-call exit; use
   the harness background mechanism for every codex run.)
