@@ -116,6 +116,50 @@ with-ctx lazy-forcing requirement; perf tax accepted at agent scale).
    `:open`, lifecycle scripts trusted by default). Tighten to the
    allowlist later; the config keys make that a one-fact flip.
 
+## Owner decision batch round 2 (2026-07-21 PM — namespaces + packages)
+
+- **No namespace lock-in; erase-and-reset is acceptable.** Renames are
+  never blocked by persisted data: update the schema-registering code,
+  reset clusters at the boundary. The design's "rename-frozen" rows are
+  downgraded to "rename at a reset boundary."
+- **Namespace decisions D1–D12: all recommendations accepted**, with
+  D2 FLIPPED to its alternative under the no-lock-in rule:
+  `seon.execution.host` → `seon.execution.dispatch` at the W5 window
+  (cluster resets included there). D9 confirmed: fence diffusion now.
+- **Internals law (standing):** only a namespace's parent may require
+  its `.internal`. Violations found 2026-07-21: `seon.repl.internal`
+  (13 external), `my.plan.internal` (9), `seon.db.internal` (7),
+  `seon.schema.internal` (6), `seon.eval.internal` (2),
+  `seon.agent.internal` (1); capability internals clean. Extraction into
+  proper namespaces is an EARLY NS unit (NS-0.5), sequenced around the
+  WP-A lane (host/context.clj requires repl.internal) and coordinated
+  with the repl-autosuggest worktree for repl surfaces.
+- **CLJC maximization is a program direction:** push platform-specific
+  code to the edges; convert genuinely portable namespaces to `.cljc`
+  so one canon runs on both tiers (aligns with stored-source-is-
+  canonical-CLJC and the W5 protocol promotion). Read-only portability
+  audit dispatched; its report scopes the conversion units.
+- **Package hosts: boundary-layer-first (owner).** Production surface =
+  compiled, spec'd per-package CLJS boundary namespaces
+  (`seon.packages.<pkg>`) in the package-host build: goal-shaped
+  functions, malli schemas + tests + hostile gates, data-shaped
+  returns; streams/events forwarded as bounded `::protocol/event`
+  frames; the SCI HOST writes the facts (package hosts stay
+  database-free). The generic op tier (package-call/handle-call/
+  dispose/describe/subscribe) remains as the dev-gated exploration
+  substrate and the mechanism boundary functions ride on. Extension
+  path: agent-authored wrappers graduate → host relaunches with them
+  compiled in.
+- **Playwright probe PASS** (`research/probe-evalfree-playwright-2026-07-21.md`,
+  executed prototype): goal path + dialogs + waiters proven eval-free;
+  overhead ~0.03 ms/call. WP-B amendments mandated: `handle-subscribe`
+  (subscription = held object, cursor-addressed bounded ring),
+  concurrent shared-handle sessions (serial would deadlock dialogs),
+  explicit channel adoption registry (constructor names lie),
+  recursive handle refs in args, and an explicit statement that
+  `page.evaluate`/callback-taking APIs stay unavailable or become
+  audited declarative ops.
+
 ## Strong / weak / PoC map
 
 **STRONG (keep, build on):** writer multi-class dispatcher (parallel
