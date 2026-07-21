@@ -14,11 +14,13 @@ database boundary, and U4 closed its retained `u15` branch: there is no branch
 process record, filesystem branch coordinate, or matching Git branch left.
 Those facts must not remain in the active blocker count.
 
-The shortest current falsifier is instead the active Stage 1.5 source lane.
-At observed HEAD `c7700584`, five `src/my` namespaces are being translated from
-`.cljs` to `.cljc`, so the default watcher is rebuild-pending and its old client
-is drained. Stage 2 cannot freeze, quiesce, or compute a rename manifest across
-that moving source boundary.
+The shortest current falsifier is instead an external concurrent source lane
+whose owner has not yet been identified. At observed HEAD `c7700584`, five
+`src/my` namespaces are being translated from `.cljs` to `.cljc`, apparently as
+part of JVM-portability integration, so the default watcher is rebuild-pending
+and its old client is drained. Stage 2 cannot freeze, quiesce, or compute a
+rename manifest across that moving source boundary. Stage 1.5 Unit 1A
+explicitly does not own these paths.
 
 This refresh is read-only evidence. It did not run a lifecycle command, touch
 a branch or worktree, stop or adopt a process, prune a cache, edit source, or
@@ -47,7 +49,7 @@ records, `bin/seon status`, `bin/acme status`, `lsof`, and `ps`.
 
 ## Current blocker ledger
 
-### 1. Active source owner and incoherent default artifact
+### 1. Unidentified source owner and incoherent default artifact
 
 The current tracked/untracked pair set is:
 
@@ -59,11 +61,14 @@ D  src/my/plan/internal.cljs      ?? src/my/plan/internal.cljc
 D  src/my/ui.cljs                 ?? src/my/ui.cljc
 ```
 
-These paths belong to the active Stage 1.5 Unit 1A lane, not Stage 2. The
-default status consequently reports watcher `rebuild-pending`, writer alive,
-and the old client drained/not-ready. The owner must commit and explicitly
-release the paths, then the orchestrator must obtain a coherent default build
-before considering a freeze base.
+These paths do not belong to Stage 1.5 Unit 1A or Stage 2. They appear related
+to concurrent JVM-portability integration, but that is not sufficient evidence
+to assign ownership. The default status consequently reports watcher
+`rebuild-pending`, writer alive, and the old client drained/not-ready. The
+orchestrator must identify the actual owner; that owner must commit and
+explicitly release these paths (and any related `host/context.clj` integration
+boundary), then the orchestrator must obtain a coherent default build before
+considering a freeze base.
 
 ### 2. Three persisted pre-rename client identities
 
@@ -120,9 +125,10 @@ The B2 caches are explicitly outside both concerns. Preserve
 
 ## Shortest safe readiness path
 
-1. Wait for the Stage 1.5 Unit 1A owner to commit, prove, and release the five
-   `.cljs` to `.cljc` translations. Rebuild default to one coherent ready
-   artifact; any further source movement invalidates the candidate.
+1. Identify the external owner of the five `.cljs` to `.cljc` translations and
+   any related `host/context.clj` portability work. Obtain that owner's coherent
+   commit, proof, and explicit path release. Rebuild default to one coherent
+   ready artifact; any further source movement invalidates the candidate.
 2. Obtain explicit dispositions from every source lane and all ten worktrees.
    The stable owner must acknowledge the rename sequence and stop its 7980/
    7981 pair; the `kimi-k3-test` and `reactive-proof` owners must retire their
@@ -144,7 +150,7 @@ The B2 caches are explicitly outside both concerns. Preserve
 
 | Order | Falsifier | Refreshed result |
 |---|---|---|
-| 1 | Stable HEAD and no active edits in rename scope | **Fail**: Stage 1.5 owns five in-flight namespace translations |
+| 1 | Stable HEAD and no active edits in rename scope | **Fail**: five in-flight namespace translations have an unidentified external owner |
 | 2 | Explicit lane and ten-worktree dispositions | **Fail/not fully evidenced** |
 | 3 | No pre-rename process records | **Fail**: three `pod.edn` records remain; `u15` is resolved |
 | 4 | Both operator surfaces down and all four ports absent | **Fail**: default is degraded/alive; stable owns live 7980/7981 |
