@@ -296,6 +296,31 @@ there. No raw value crosses to the parent, no persisted result is reparsed, and
 retirement or tier mismatch returns honest unavailability. The later route
 unit continues to own canonical EDN and exact raw percent-encoded byte checks.
 
+Cross-tier review then exposed two prerequisites that prevent a Bun-only or
+load-order-dependent implementation from claiming that boundary. First,
+[[research/value-drill-portable-owner-boundary-2026-07-20]] (`64e19c31`)
+rules that the existing `seon.render.value` namespace itself is the portable
+owner; no host copy, raw-value fallback, or second kernel is permitted. The
+truthful mechanical checkpoint `7c124879` atomically promotes it to `.cljc`,
+passes the complete effective sampling policy as request data, and preserves
+exact ordinary CLJ/CLJS result bytes. Focused CLJS renderer/config proof is
+95 tests / 595 assertions and the JVM portability proof is 4 / 17. This
+checkpoint deliberately does not claim schema-aware JVM map parity.
+
+Second,
+[[research/jvm-value-drill-schema-projection-admission-boundary-2026-07-20]]
+(`6177ae2e`) proves the JVM host has neither the complete committed schema
+projection nor a safe ambient fallback. Moving a convenient config subset
+would leave browser truth dependent on namespace load order; globally
+activating only database forms would delete JVM-private host schemas. The open
+blocker [[../../seon/issues/jvm-value-drill-lacks-committed-schema-projection]]
+(`8a9283d7`) therefore owns the ordered prerequisite: one shared pure rows-to-
+projection transform, projection-explicit schema APIs, and an immutable
+basis-fenced committed projection retained by the existing host lifecycle and
+refreshed monotonically after successful schema/function commits. Unit 1G may
+consume the portable producer only after identical CLJ/CLJS map status,
+explanation, byte, malformed-population, restart, and refresh-race proofs pass.
+
 Unit 1D's configuration leaves are implemented in the existing config owner:
 the closed render policy and flat singleton now carry the ruled
 32-segment/4,096-byte/1,024-item defaults, the shipped manifest states the same
