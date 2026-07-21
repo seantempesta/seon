@@ -427,32 +427,52 @@
         (schema/build-projection
           {:demo/recursive-root
            [:map {:seon.render/html 'seon.render.block-test/custom-html}
-            [:my.plan/roots [:vector :map]]]})
+            [:demo/roots
+             [:sequential
+              [:schema
+               {:registry
+                {:demo/recursive-node
+                 [:map
+                  [:demo/id :int]
+                  [:demo/children {:optional true}
+                   [:sequential [:ref :demo/recursive-node]]]]}}
+               [:ref :demo/recursive-node]]]]]})
         request {:seon.schema/projection projection}
         custom-calls (atom 0)
         original-sample rv/sample]
+    (let [validator-visits (atom 0)
+          control {:demo/roots
+                   (map (fn [i]
+                          (swap! validator-visits inc)
+                          {:demo/id i :demo/children []})
+                        (range 200))}]
+      (is (= [:demo/recursive-root]
+             (mapv :seon.schema/key
+                   (schema/matching-shapes-in projection control))))
+      (is (= 200 @validator-visits)
+          "the recursive Malli control traverses every child"))
     (doseq [[label value visits]
             (let [root-visits (atom 0)
                   child-visits (atom 0)]
               [["million roots"
-                {:my.plan/roots
-                 (map (fn [i] (swap! root-visits inc) {:my.plan/id i})
+                {:demo/roots
+                 (map (fn [i] (swap! root-visits inc) {:demo/id i})
                       (range 1000000))}
                 root-visits]
                ["million children"
-                {:my.plan/roots
-                 [{:my.plan/id 0
-                   :my.plan/_parent
+                {:demo/roots
+                 [{:demo/id 0
+                   :demo/children
                    (map (fn [i]
                           (swap! child-visits inc)
-                          {:my.plan/id i})
+                          {:demo/id i})
                         (range 1000000))}]}
                 child-visits]
                ["deep unary chain"
-                {:my.plan/roots
+                {:demo/roots
                  [(reduce (fn [child i]
-                            {:my.plan/id i :my.plan/_parent [child]})
-                          {:my.plan/id 10000}
+                            {:demo/id i :demo/children [child]})
+                          {:demo/id 10000}
                           (range 10000))]}
                 (atom 0)]])]
       (let [sample-calls (atom 0)
