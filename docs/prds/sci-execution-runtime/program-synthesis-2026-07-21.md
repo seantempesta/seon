@@ -231,6 +231,17 @@ the named boundaries.
   versioned contracts (database protocol + execution contract) —
   validated against Bun IPC/gRPC/nREPL and kept. Extension mechanism
   is transit tagged types + new ops, not a protocol swap.
+- **Agent-steering errors are abridged-first, addressable-full**
+  (owner, 2026-07-21): every error value leads with a compact optimized
+  steering head — the classified cause, the suggestion, the failing
+  frame in the agent's own terms — within a token budget measured by
+  `seon.ai.tokens/estimate`. The complete detail (full sci stacktrace,
+  ex-data chain, analysis context) is persisted like any large value
+  and addressed on demand through the existing result/{id} binding and
+  the get-in/path value browser — never inlined. A 20-page stack trace
+  is a reference the agent can follow, not a payload the agent must
+  scroll past. Applies to the sci fork's error patches (W3), capability
+  host errors (W6), and every hostile-gate error shape.
 - **Robustness DNA**: `:seon.config/on-core-error` stays the dev
   fast-loud dial; production layering = errors-as-values (exceptions),
   interrupt merge + watchdog + pool fairness (runaways), disposable
