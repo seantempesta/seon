@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, architecture, schema, rendering]
 ---
@@ -115,3 +115,17 @@ move, second registry, or copied schema-index algorithm belongs in this fix.
   source digest.
 - Unit 1G does not begin and the JVM-host live-value issue does not close until
   the schema-aware cross-runtime drill proof passes.
+
+## Resolution
+
+Resolved by `414b8137`. The JVM host now acquires schema and function-contract
+rows against one immutable database value, rejects incomplete or malformed
+populations before readiness, retains a basis-fenced committed projection, and
+refuses schema-aware drill while refresh is pending or faulted. The portable
+drill consumes the projection explicitly and uses a recursively canonical
+cross-runtime fingerprint.
+
+Independent verification passed 110 CLJS tests with 706 assertions and 47 JVM
+writer tests with 188 assertions. A fresh live database query confirmed the
+four projection schema rows and the new projection API function contracts were
+committed with their final source forms.
