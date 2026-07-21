@@ -514,15 +514,21 @@ sampler/retirement/route/UI matrix and then the ordered A-H program gates;
 neither live defect displaces the later ledger.
 
 Initial integration commits are Datahike `58764d90`, parent gitlink `e042cb0e`,
-and Seon `88d35f77` + implicit-index correction `7e752954`. Focused dependency
-proof passed 39 tests / 279 assertions across three index backends; focused
-Seon writer initialization passed 6/36 and transcript/turn/retry passed 42/142.
-Independent review has not accepted the dependency yet: direct
-`[:db/retract <attr> :db/index true]` bypasses entity-map schema validation,
-can remove the schema facet while leaving stale AVET, and would stop later
-writes from maintaining it. The dependency lane is closing that monotonicity
-hole and must prove unchanged basis/schema/current+temporal AVET after every
-facet-removal route before the parent advances again.
+and Seon `88d35f77` + implicit-index correction `7e752954`. Independent review
+then found that direct add/retract/CAS and entity retraction routes could bypass
+entity-map validation and remove the index facet while leaving stale AVET.
+Datahike `c1c4c293` and parent gitlink `cc2d812b` close that reducer-boundary
+hole. The dependency matrix now passes 45 tests / 327 assertions across three
+index backends and covers every removal syntax, unchanged basis/schema/current
+and temporal AVET on rejection, subsequent maintenance, both same-transaction
+orderings, as-of/since, implicit unique indexes, cardinality-many, and reopen.
+Independent review accepts the integrated mechanism. The complete Seon writer
+gate passes 283 tests / 2,154 assertions; focused transcript/turn/retry remains
+42/142. The migration is synchronous O(current attribute facts + retained
+history) under the writer lock; atomicity is preferred to partial publication,
+and the current roughly 330-turn migration is the measured live target. Generic
+huge-attribute migration latency remains an explicit operational follow-up,
+not a correctness claim.
 
 The final consumer cut is grounded by
 [[research/universal-data-browser-ui-migration-boundary-2026-07-20]]

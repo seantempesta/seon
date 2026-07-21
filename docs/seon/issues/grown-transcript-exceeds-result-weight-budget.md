@@ -229,3 +229,27 @@ indexed-attribute migration (or another exact timestamp-ordered fixed-work
 mechanism), a real empty-before/nonempty-after AVET probe on an existing
 database, and then the already specified divergent-ID/cursor/hostile-usage
 proof. Until that succeeds, the source correction is not live-accepted.
+
+## Additive timestamp-index correction
+
+Pinned Datahike commits `58764d90` and `c1c4c293` add the required monotonic
+schema evolution. A nil→true `:db/index` assertion atomically copies current
+AEVT facts into AVET and retained temporal AEVT facts—including retractions—
+into temporal AVET before publishing the database value. Reducer-boundary
+validation rejects entity-map changes plus direct add, retract, CAS,
+`retractAttribute`, and `retractEntity` removal routes without changing the
+basis, schema, current index, or history index. Both schema/data orderings in
+one transaction, as-of/since, implicit unique indexes, cardinality-many, and
+file reopen are covered. The dependency gate passes 45 tests / 327 assertions
+across the spec, persistent-set, and hitchhiker-tree profiles.
+
+Seon commits `88d35f77` and `7e752954` mark
+`:seon.agent.turn/at` indexed and permit only the exact same-shape missing-index
+declaration through writer admission; omitted index metadata never requests
+removal of an implicit or explicit installed index. The complete writer gate
+passes 283 tests / 2,154 assertions. Independent review accepts the integrated
+source mechanism. The one-time migration is synchronous and proportional to
+the attribute's current plus retained history under the writer lock; this is
+the atomic-publication tradeoff and must not be generalized into a bounded
+writer-latency claim. Live default migration and transcript/feed proof remain
+the closure gate.
