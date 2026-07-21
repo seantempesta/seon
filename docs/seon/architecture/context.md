@@ -468,12 +468,14 @@ learned order improves real reuse. The bands are:
 3. **the current `ns`'s render fns** — the twins above; they *follow* the
    stable code they belong to. Their output moves with the db, so this is
    where the cache prefix ends.
-4. **the transcript** — recent doing, windowed by age with per-band caps and
-   eval-result decay plus a fixed total budget for older events; **content is
-   byte-identical while it remains in an age band** and eviction never rewrites
-   retained events into summaries. Only the leading edge and explicit band
-   transitions move. What must outlive the window goes to the DB (plan, kb,
-   blobs), not transcript residue; a large inbound payload clips to a blob ref.
+4. **the transcript** — recent doing acquired through a fixed-work newest-turn
+   window, with per-band caps, eval-result decay, and a fixed total budget for
+   older retained events. The same immutable database value and policy produce
+   the same bytes; the leading edge may evict the oldest retained turn whenever
+   a newer one arrives. Eviction never rewrites retained events into summaries,
+   and every truncated older tail is marked honestly. What must outlive the
+   window goes to the DB (plan, kb, blobs), not transcript residue; a large
+   inbound payload clips to a blob ref.
 5. **pull-first relevance (conditional, not a standing band)** — reference
    code and retrieval beyond the current namespace are explicitly inspected or
    called when needed. Functions whose *input* specs match the shapes the agent

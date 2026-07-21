@@ -670,7 +670,10 @@
                     "(seon.agent.lifecycle/complete \"…\") or message the result.\n"))
           :else "")]
     (str steer
-         "; " ns-str " · turn " n-turns " · loop " loop-k "/" cap
+         "; " ns-str " · turn "
+         (when (::turn-history-omitted? input) "≥") n-turns
+         (when (::turn-history-omitted? input) " retained")
+         " · loop " loop-k "/" cap
          " · " (name (or state :idle)) " · " now " · agent " id "\n"
          (when (= "root" id) (str (host-telemetry) "\n"))
          ns-str "=> ")))
@@ -731,15 +734,6 @@
    :datahike.resource/max-results max-results
    :datahike.resource/max-result-weight max-result-weight})
 
-(defn- pull-member
-  [selector entity-id max-work max-results max-result-weight]
-  {::protocol/operation protocol/pull-operation
-   ::protocol/selector selector
-   ::protocol/entity-id entity-id
-   :datahike.resource/max-work max-work
-   :datahike.resource/max-results max-results
-   :datahike.resource/max-result-weight max-result-weight})
-
 (defn- member-value
   [member]
   (cond
@@ -747,14 +741,6 @@
     (contains? member :datahike.query/result)
     {:datahike.query/result (:datahike.query/result member)}
     :else {::protocol/result (::protocol/result member)}))
-
-(def ^:private turn-count-query
-  '[:find (count ?turn) .
-    :in $ ?agent-id
-    :where
-    [?agent :seon.agent/id ?agent-id]
-    [?run :seon.agent.run/agent ?agent]
-    [?turn :seon.agent.turn/run ?run]])
 
 (def ^:private last-action-query
   '[:find (max ?at) .
@@ -887,20 +873,126 @@
     {:seon.agent.message/from [:db/id :seon.user/id :seon.agent/id]}
     {:seon.agent.message/to [:db/id :seon.user/id :seon.agent/id]}])
 
-(defn- turns-query [window-size]
-  {:find '[?turn ?at ?scheduled? ?run ?run-id ?usage ?usage-estimated?]
-   :in '[$ ?agent-id]
-   :where '[[?agent :seon.agent/id ?agent-id]
-            [?run :seon.agent.run/agent ?agent]
-            [?run :seon.agent.run/id ?run-id]
-            [?turn :seon.agent.turn/run ?run]
-            [?turn :seon.agent.turn/at ?at]
-            [(get-else $ ?turn :seon.agent.turn/scheduled? false) ?scheduled?]
-            [(get-else $ ?turn :seon.agent.turn/llm-usage "") ?usage]
-            [(get-else $ ?turn :seon.agent.turn/usage-estimated? false)
-             ?usage-estimated?]]
-   :order-by '[?at :desc ?turn :desc]
-   :limit window-size})
+(def ^:private turn-pull-pattern
+  '[:db/id
+    :seon.agent.turn/at
+    :seon.agent.turn/scheduled?
+    :seon.agent.turn/llm-usage
+    :seon.agent.turn/usage-estimated?
+    {:seon.agent.turn/run [:db/id :seon.agent.run/id]}])
+
+(def ^:private run-page-size 16)
+(def ^:private max-run-pages 4)
+
+(defn- index-member
+  [database attribute value limit & [cursor]]
+  (cond->
+    {::protocol/operation protocol/index-page-operation
+     ::db/db database
+     ::protocol/index :avet
+     ::protocol/prefix [attribute value]
+     ::protocol/direction :reverse
+     ::protocol/limit limit
+     :datahike.resource/max-result-weight 131072}
+    cursor (assoc ::protocol/cursor cursor)))
+
+(defn- successful-members? [response expected]
+  (and (= expected (count (::db/results response)))
+       (every? #(true? (::protocol/success? %)) (::db/results response))))
+
+(defn- turn-row [turn]
+  (let [run (:seon.agent.turn/run turn)]
+    [(:db/id turn)
+     (:seon.agent.turn/at turn)
+     (boolean (:seon.agent.turn/scheduled? turn))
+     (:db/id run)
+     (:seon.agent.run/id run)
+     (or (:seon.agent.turn/llm-usage turn) "")
+     (boolean (:seon.agent.turn/usage-estimated? turn))]))
+
+(defn- ^:async acquire-recent-turns
+  "Acquire newest agent turns through bounded ref indexes and one payload pull."
+  [database agent-id window-size]
+  (loop [page-number 0
+         cursor nil
+         retained []]
+    (let [run-response
+          (await
+           (db/execute-many
+            {::db/db database
+             ::db/members
+             [(index-member database :seon.agent.run/agent
+                            [:seon.agent/id agent-id]
+                            run-page-size cursor)]
+             ::db/max-result-weight 196608}))]
+      (if-not (successful-members? run-response 1)
+        {::error (or (::error run-response)
+                     (first (::db/results run-response))
+                     run-response)}
+        (let [run-member (first (::db/results run-response))
+              run-ids (mapv first (:datahike.index-page/datoms run-member))
+              turn-response
+              (if (seq run-ids)
+                (await
+                 (db/execute-many
+                  {::db/db database
+                   ::db/members
+                   (mapv #(index-member database :seon.agent.turn/run %
+                                        window-size)
+                         run-ids)
+                   ::db/max-result-weight 4194304}))
+                {::db/results []})]
+          (if-not (successful-members? turn-response (count run-ids))
+            {::error (or (::error turn-response)
+                         (some #(when-not (true? (::protocol/success? %)) %)
+                               (::db/results turn-response))
+                         turn-response)}
+            (let [turn-members (::db/results turn-response)
+                  turn-ids (->> turn-members
+                                (mapcat :datahike.index-page/datoms)
+                                (map first))
+                  candidate-ids (->> (concat retained turn-ids)
+                                     distinct
+                                     (sort >)
+                                     vec)
+                  retained (->> candidate-ids
+                                (take window-size)
+                                vec)
+                  complete? (:datahike.index-page/complete? run-member)
+                  cursor (:datahike.index-page/cursor run-member)
+                  more-turns? (some #(false?
+                                      (:datahike.index-page/complete? %))
+                                    turn-members)
+                  page-limit? (= (inc page-number) max-run-pages)
+                  omitted? (or (> (count candidate-ids) window-size)
+                               more-turns?
+                               (and (not complete?)
+                                    (or (>= (count retained) window-size)
+                                        page-limit?)))]
+              (if (and (< (count retained) window-size)
+                       (not complete?)
+                       (not page-limit?))
+                (recur (inc page-number) cursor retained)
+                (let [turns
+                      (if (seq retained)
+                        (await
+                         (db/pull-many
+                          {::db/db database
+                           ::db/pull-pattern turn-pull-pattern
+                           ::db/refs retained
+                           ::db/max-work 100000
+                           ::db/max-results 4096
+                           ::db/max-result-weight 262144}))
+                        [])]
+                  (if (and (map? turns)
+                           (string? (:seon.error/message turns)))
+                    {::error turns}
+                    {::turn-history-omitted? (boolean omitted?)
+                     ::turn-rows
+                     (->> turns
+                          (remove nil?)
+                          (sort-by (juxt :seon.agent.turn/at :db/id))
+                          (mapv turn-row))}))))))))))
 
 (defn- messages-query [cutoff-at run-id]
   (let [base {:find [(list 'pull '?message message-selector)]
@@ -974,12 +1066,7 @@
         configuration (:seon.config/configuration input)
         stage-one-members
         (cond->
-          [;; Datahike charges intermediate relations to max-results and their
-           ;; retained structure to max-result-weight. Both remain finite;
-           ;; the grown-query fixture calibrates them independently.
-           (query-member database turn-count-query [id] 1000000 1000000 4096)
-           (query-member database (turns-query window-size) [id] 1000000 1000000 65536)
-           (query-member database last-action-query [id] 500000 500000 8192)
+          [(query-member database last-action-query [id] 500000 500000 8192)
            (query-member database home/latest-successful-ns-query
                          [id] 1000000 32768 262144)
            (query-member database home/namespace-assignment-query
@@ -988,26 +1075,31 @@
                                     500000 500000 4096)
                       (query-member database run-form-count-query [run-id]
                                     500000 500000 4096)))
-        stage-one (if (database-error database)
-                    database
-                    (await (db/execute-many {::db/db database
-                                             ::db/members stage-one-members
-                                             ::db/max-result-weight 131072})))]
+        stage-one-results
+        (if (database-error database)
+          [database {::error database}]
+          (array-seq
+           (await
+            (js/Promise.all
+             #js [(db/execute-many {::db/db database
+                                    ::db/members stage-one-members
+                                    ::db/max-result-weight 131072})
+                  (acquire-recent-turns database id window-size)]))))
+        stage-one (first stage-one-results)
+        recent-turns (second stage-one-results)]
     (if-let [error (or (::error stage-one)
+                       (::error recent-turns)
                        (database-error stage-one)
                        (acquisition-error (::db/results stage-one)))]
       (assoc input ::error error)
-      (let [[turn-count-member turns-member action-member
+      (let [[action-member
              latest-ns-member assignment-member
              run-turn-member run-form-member] (::db/results stage-one)
-            turn-count (or (query-result turn-count-member) 0)
-            newest-rows (->> (query-result turns-member)
+            newest-rows (->> (::turn-rows recent-turns)
                              (sort-by (juxt second first))
                              vec)
-            first-index (- turn-count (count newest-rows))
-            cutoff-index (turn-window-cutoff turn-count window-size
-                                             (or (::turn-eviction-size node)
-                                                 default-turn-eviction-size))
+            turn-count (count newest-rows)
+            first-index 0
             turns (->> newest-rows
                        (map-indexed
                          (fn [offset [turn at scheduled? run-eid row-run-id
@@ -1023,9 +1115,9 @@
                              (assoc :seon.agent.turn/llm-usage usage-edn)
                              usage-estimated?
                              (assoc :seon.agent.turn/usage-estimated? true))))
-                       (filterv #(>= (::turn-idx %) cutoff-index)))
+                       vec)
             cutoff-at (:seon.agent.turn/at (first turns))
-            rotated? (pos? cutoff-index)
+            omitted? (::turn-history-omitted? recent-turns)
             eval-pages (acquire-eval-pages database turns eval-selector)
             stage-two-members
             (cond-> []
@@ -1035,7 +1127,7 @@
                                     (and run-id cutoff-at) (conj run-id)
                                     cutoff-at (conj cutoff-at))
                                   1000000 1000000 262144))
-              rotated?
+              omitted?
               (conj (query-member database (previous-ns-query cutoff-at) [id cutoff-at]
                                   500000 500000 8192)))
             joined (array-seq
@@ -1090,6 +1182,7 @@
                     :seon.derive/state state
                     :seon.eval/ns current-ns
                     ::turn-count turn-count
+                    ::turn-history-omitted? (boolean omitted?)
                     ::turns turns
                     ::messages (mapv first (or (query-result message-member) []))
                     ::last-action-at (query-result action-member)
@@ -1124,13 +1217,10 @@
    inbound gate is [[inbound-msg?]] — the SAME conditions as the wake, so a
    `:core` nudge never shows as a fake inbound.
 
-   The AI window rotates only in complete configured chunks and caps the
-   settled chunk by actual rendered tokens. Retained events are never rewritten
-   or summarized. Within a decay band and between rotation boundaries, every
-   past event is byte-identical; only the append-only edge and free dynamic
-   readline move."
-  [{:seon.agent/keys [id entity]
-    cur-ns :seon.eval/ns
+   Acquisition bounds work to a fixed newest-turn window and marks omitted
+   older history honestly. The settled portion is additionally capped by
+   actual rendered tokens. Retained events are never rewritten or summarized."
+  [{cur-ns :seon.eval/ns
     last-action-at ::last-action-at
     turn-count ::turn-count
     render-fn :seon.render/render
@@ -1171,18 +1261,18 @@
         ;; render-context path node = the stored block, so this is
         ;; byte-identical — it additionally lets a PROFILE caller (the
         ;; seon.repl.autocomplete projection) pass per-render config.
-        ;; Batched rotation is derived from turn facts. At 50 turns it removes
-        ;; the oldest complete 25-turn chunk; at 75 it removes the next one.
-        ;; This creates 24 append-only/cache-stable turns between membership
-        ;; changes instead of sliding one event out on every turn.
+        ;; Acquisition already selected the bounded newest-turn window. The
+        ;; eviction size still separates its newest active tail from the
+        ;; settled portion governed by the settled token cap.
         window-size   (or (::turn-window-size node)
                           default-turn-window-size)
         eviction-size (or (::turn-eviction-size node)
                           default-turn-eviction-size)
         settled-cap   (or (::settled-token-cap node)
                           default-settled-token-cap)
-        events*t      (clip-events-by-turn-window
-                        turn-count window-size eviction-size events*c)
+        ;; Acquisition already returns the fixed newest window. Re-clipping it
+        ;; from a full-history count would require an unbounded count query.
+        events*t      events*c
         ;; move 4 / CP-5 — the per-eval RESULT-BODY cap off `::result-decay` ×
         ;; the eval's AGE (turn-offset = newest turn − the eval's `::turn-idx`).
         ;; The default 3-level schedule is [0→4096, 2→1024, 5→512]: a fresh
@@ -1228,9 +1318,7 @@
                        events*t)
         ;; Render each event directly. Handle availability is already an exact
         ;; per-eval fact on the event; no run/process boundary is inferred.
-        active-start (if (< turn-count window-size)
-                       0
-                       (* eviction-size (quot turn-count eviction-size)))
+        active-start (max 0 (- turn-count eviction-size))
         body
         (->> events**
              (keep (fn [ev]
@@ -1241,13 +1329,18 @@
              (map ::text)
              (str/join "\n"))
         head (masthead ns-str (or (:seon.config/repl-mode input) :batch))
+        history-note
+        (when (::turn-history-omitted? input)
+          (str "; transcript history before this bounded newest-" window-size
+               "-turn window is omitted; durable plans, knowledge, and blobs "
+               "remain queryable."))
         ;; ::readline? false (node first, stored block fallback) drops the
         ;; folded live readline — the ONE moving (`now`-reading) line — so a
         ;; profile render is a pure function of the db value. Default true.
         readline? (let [nv (::readline? node)]
                     (if (some? nv) nv true))
         tail (when readline? (readline input))]
-      (->> [head body tail]
+      (->> [head history-note body tail]
            (remove str/blank?)
            (str/join "\n\n")))))
 
@@ -1378,9 +1471,15 @@
       [:div {:class "seon-card"}
        [:div {:class "seon-card-compact"}
         (or latest-reply (last cards))]
-       (into [:div {:class "seon-card-expanded flex flex-col"}] cards)]
+      (into [:div {:class "seon-card-expanded flex flex-col"}
+              (when (::turn-history-omitted? input)
+                [:div {:class "text-text-500 italic px-3 py-2 text-xs font-mono"}
+                 "older transcript history omitted; durable data remains queryable"])]
+             cards)]
       [:div {:class "text-text-500 italic p-2 text-xs font-mono"}
-       "no events yet — every message and eval this agent makes appears here live"])))
+       (if (::turn-history-omitted? input)
+         "older transcript history omitted; no retained events"
+         "no events yet — every message and eval this agent makes appears here live")])))
 
 (defn ^:async transcript-block-html
   "The HTML TWIN of [[transcript-block]]: the agent's flat time-ordered

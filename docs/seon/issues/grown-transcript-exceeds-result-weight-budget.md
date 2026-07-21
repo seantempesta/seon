@@ -157,3 +157,26 @@ issue. A cold real-writer regression must keep index visits, authority calls,
 work, result count, and result weight within fixed ceilings when old history
 grows from 50 to a large population while returning byte-identical newest
 turns in honest order.
+
+## Bounded acquisition correction (2026-07-21)
+
+The stage-one full-history turn relation and its separate full-history count
+are removed. Transcript acquisition now reverse-pages the indexed
+`:seon.agent.run/agent` refs through at most four 16-run pages, reverse-reads at
+most the configured turn-window entries for each retained run, selects the
+newest distinct turn entity IDs, and pulls payload only for that fixed set. A
+truncated run page, turn page, or aggregate candidate set produces an explicit
+older-history omission marker in both the AI and HTML twins.
+
+The focused work-bound regression supplies 50 and 1,000,000 historical turns
+to the same authority boundary. Both cases return the newest 50 turns in the
+same order with exactly three authority calls and 52 simulated index visits.
+The adversarial empty-run case stops after four run pages: eight authority
+calls and 68 index members total, with no payload pull and an honest omission
+marker. `seon.agent.ctx.transcript-test` passes 15 tests and 47 assertions; its
+full log is `tmp/test-cljs-20260721-022326-93618.log`.
+
+Closure still requires the cold live/default acquisition and real grown page
+proof. The shared watcher was rebuild-pending and the pod drained during this
+unit because of an unrelated parse failure in another owned source path, so
+that evidence is intentionally not claimed here.
