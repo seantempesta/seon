@@ -62,13 +62,38 @@ live: the parse-forms closed-options regression that failed every `:batch`
 turn ([[../../seon/issues/archive/parse-forms-closed-options-broke-batch-turns]],
 `793a8ea6`) and cause-query result-node budgets that datahike charges per
 candidate rule row rather than per projected value (`dee42356`, `882fbe1c`,
-plus the eval-evidence container fix). NOT yet closed: the A-green/B-repair
-completion checkpoint — every green-path drive was killed by concurrent-lane
-churn on the shared tree (mid-edit compile faults, artifact churn killing the
-execution child, and repeated whole-supervisor cycles), and a planner run
-that fails before publication strands its root `:open` with no re-drive
-([[../../seon/issues/generated-root-has-no-planner-retry-path]]). Stage 8
-therefore remains open; rerun the one two-namespace drive on a quiet tree.
+plus the eval-evidence container fix).
+
+The 2026-07-21 rerun (fresh `gencode` database, ten live Muse drives,
+`da845f88` plus the swept `9f826df1` share) closed three strand causes in
+place: the generated-terminal whole-database expected-value fence that
+stranded roots `:open` on any concurrent datom (the root-status CAS is now
+the one delivery fence), the eval-evidence result-node budget whose exact
+per-row formula datahike does not honor (live: 5 ids → 6 nodes, 13 → 16,
+18 → 45; now a flat fail-closed cap), and the failed-eval recording rows
+that froze `:seon.eval/ns nil` against the `:symbol` schema, silently lost
+the row, and retired the active execution child. With those fixes the full
+pipeline ran end-to-end on real Muse: an 18-form program evaluated 18/18
+across a hot reload, the DAG published multiple namespace units, green
+units completed from evidence, generated functions persisted as
+`:seon.fn` rows with `:seon.fn/source-fingerprint`
+(`my.pressure.convert/kpa->psi` df248500…, `psi->kpa` 18518075…,
+`my.pressure.label/describe` 709319a9…), behavioral deftests recorded
+passing `:seon.test/last-passed-at` datoms, and the `:blocked` terminal
+envelope rendered verbatim into the caller root's captured turn context
+(`xaguzbcuh9fs`) with no raw error junk. Two roots (`gns77gfqdm8c`,
+`h3ikyzpafl9u`) reached `:done`, but through the planner's own ordinary
+`my.plan` transition rather than evidence-derived terminal delivery, so
+the compact `:done` envelope was skipped
+([[../../seon/issues/planner-self-done-bypasses-generated-terminal-delivery]]).
+An exploring planner that redeclares its home namespace also blocks its
+root on a self-recipient dispatch refusal
+([[../../seon/issues/planner-home-ns-step-blocks-on-self-recipient]]),
+and a planner run that fails before any publication still strands its
+root `:open`
+([[../../seon/issues/generated-root-has-no-planner-retry-path]], narrowed
+to the no-reply strand). Stage 8 remains open on exactly those three
+issues; the evidence-derived `:done` envelope is the one unproven leg.
 
 The preparatory context cleanup is complete at `e205dc9e`: namespace rendering
 has one configuration owner, the `:namespaces` block. Cluster
@@ -776,20 +801,20 @@ Exit:
 ## Next implementation boundary
 
 The embedding-ranked augmentation contract and the public wrapper landed at
-`68d19cca` (see Current status). The earliest unsettled contract is now the
-Stage 8 live completion checkpoint: one two-namespace goal driven on a QUIET
-tree through `seon.ai/generate-code!`, with the valid namespace accepted
-immediately, one warm repair worker fixing only the deliberately failing
-namespace, the dependent namespace starting only after its prerequisite, and
-the caller receiving the accurate compact `:done` result. The 2026-07-21
-drives proved root commit, real-provider planning turns, restore, DAG
-publication, and `:blocked` terminal delivery, but every green path was
-killed by concurrent-lane churn; the checkpoint requires a stable source
-freeze. Before or with that drive, close the planner re-drive gap
-([[../../seon/issues/generated-root-has-no-planner-retry-path]]): a planner
-run that closes `:error` with no published DAG must either re-issue the
-planning assignment through the existing message/claim mechanism or commit
-the `:blocked` terminal with its error evidence. Embedding-ranked selection
-also still needs a live SEON_EMBED-enabled context proof (compact/full
-rendering without clipping or stale warm-agent accumulation); only the
-unranked fallback is live-proven.
+`68d19cca`, and the 2026-07-21 rerun (`da845f88`) live-proved generation,
+ordered evaluation, DAG publication, evidence-derived unit completion,
+durable `:seon.fn` fingerprints, passing behavioral tests, and clean
+`:blocked` terminal envelopes in the caller's rendered context. The
+earliest unsettled contract is now the evidence-derived `:done` terminal:
+close [[../../seon/issues/planner-self-done-bypasses-generated-terminal-delivery]]
+(one owner closes a generated root; the ordinary agent transition must not
+skip envelope delivery) together with
+[[../../seon/issues/planner-home-ns-step-blocks-on-self-recipient]] and the
+narrowed no-reply strand of
+[[../../seon/issues/generated-root-has-no-planner-retry-path]], then rerun
+one two-namespace drive with a deliberate first-pass defect for the full
+Stage 8 exit (warm repair worker, dependent ordering, compact `:done`
+envelope). Embedding-ranked selection also still needs a live
+SEON_EMBED-enabled context proof (compact/full rendering without clipping
+or stale warm-agent accumulation); only the unranked fallback is
+live-proven.
