@@ -764,8 +764,16 @@ decisions batch for their return.
   codecs) and the risk-1 at-capacity falsifier run BEFORE selector
   work. Sol medium, sole lane, thread
   `019f86f3-47e9-7c10-a977-a261a087786c`, logs
-  `tmp/orchestrator/w15b-*`. Refill after: W1.2b graduation (owns
-  q20) → W1 config-facts sweep → packages WP-B∥WP-J.
+  `tmp/orchestrator/w15b-*`. STOP 1 resolved: encoding probe PASSED
+  (209–424 B, both codecs); granted `config_test.cljs` + the four
+  raw-channel writer tests (one shared admitted-channel helper);
+  specified the three missing failure shapes via the canonical
+  protocol constructors — `session-open-required` (correlated),
+  `frame-too-large` inbound (reserved id `"session/control"`, CLJS
+  rejects all pending) and response (correlated) — all through the
+  same <4096 probe; confirmed the separate database-session opener
+  beside raw `connect!`. Refill after: W1.2b graduation (owns q20) →
+  W1 config-facts sweep → packages WP-B∥WP-J.
 - **W1.5a DONE `85cdd68e`** — 28 keys flipped :enforced (six executor
   families, transport request-server options, codec workers/queue)
   via one envelope-consumer translation into the owners' existing
