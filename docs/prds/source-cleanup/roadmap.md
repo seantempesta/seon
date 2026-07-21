@@ -203,6 +203,15 @@ optionality at their function slots; and database failures return copyable
 database-remote, home, Datastar, and plan tests are green. Fresh-start/live
 proof and the G8-G11 extensions remain before Stage 1.6 graduates.
 
+The G2 closure audit
+[[research/g2-nilable-registration-closure-audit-2026-07-20]] (`f72d7384`)
+confirms the three registrations and registration gate are complete, but the
+two-real-child integration driver still filters top-level `:maybe` forms before
+seeding. The remaining proof unit deletes that filter, asserts submitted rows
+equal the complete keyword-keyed compiled population, runs the frozen process
+proof, and performs the fresh-agent reject/corrected-call probe. No semantic
+registration owner is reopened.
+
 G8's non-canvas checkpoint is `d883bb05` with issue evidence in `f14219a3`:
 the registry-derived audit covers 25 request maps across `my.blob`, `my.data`,
 `my.kb`, `my.ns`, and `my.ui`; 19 formerly open public schemas are now closed
