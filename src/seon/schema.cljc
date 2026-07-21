@@ -44,6 +44,50 @@
        ::m/walk-refs #(not (contains? canonical-keys %))})
     @!references))
 
+(defn- portable-string-hash [s]
+  #?(:clj (.hashCode ^String s)
+     :cljs
+     (loop [i 0 result 0]
+       (if (= i (.-length s))
+         result
+         (recur (inc i)
+                (bit-or 0 (+ (* 31 result) (.charCodeAt s i))))))))
+
+(defn- framed [tag payload]
+  (str tag (count payload) ":" payload))
+
+(declare canonical-data-string)
+
+(defn- canonical-coll-string [tag values]
+  (framed tag (apply str (map canonical-data-string values))))
+
+(defn- canonical-data-string [value]
+  (cond
+    (nil? value) "n"
+    (true? value) "b1"
+    (false? value) "b0"
+    (keyword? value) (framed "k" (str value))
+    (symbol? value) (framed "y" (str value))
+    (string? value) (framed "s" value)
+    (number? value) (framed "d" (str value))
+    (vector? value) (canonical-coll-string "v" value)
+    (set? value) (canonical-coll-string
+                   "t" (sort (map canonical-data-string value)))
+    (map? value)
+    (canonical-coll-string
+      "m"
+      (sort (map (fn [[k v]]
+                   (str (canonical-data-string k)
+                        (canonical-data-string v)))
+                 value)))
+    (sequential? value) (canonical-coll-string "q" value)
+    :else
+    (throw (ex-info "Schema projection fingerprint contains non-EDN data."
+                    {:seon.schema/error
+                     :seon.schema/noncanonical-projection-data
+                     :seon.schema/value value
+                     :seon.error/kind :core-bug}))))
+
 (defn direct-references
   "Canonical schema keys directly referenced by `form` in `projection`.
 
@@ -192,6 +236,22 @@
 (defonce ^:private _discarded-keys-type
   (update-candidate-forms! assoc :seon.schema/discarded-keys
                            [:set :seon.schema/registry-key]))
+(defonce ^:private _projection-row-type
+  (update-candidate-forms! assoc :seon.schema/projection-row
+                           [:tuple [:or :keyword :string :symbol] :string]))
+(defonce ^:private _projection-rows-type
+  (update-candidate-forms! assoc :seon.schema/projection-rows
+                           [:or
+                            [:set :seon.schema/projection-row]
+                            [:sequential :seon.schema/projection-row]]))
+(defonce ^:private _projection-input-type
+  (update-candidate-forms!
+    assoc :seon.schema/projection-input
+    [:map {:closed true}
+     [:seon.schema/schema-rows :seon.schema/projection-rows]
+     [:seon.schema/function-contract-rows :seon.schema/projection-rows]]))
+(defonce ^:private _projection-type
+  (update-candidate-forms! assoc :seon.schema/projection 'map?))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Registration API
@@ -407,10 +467,8 @@
                               (assoc :seon.schema.catalog/render-html html)))))
                       vec)
         fingerprint
-        (hash (pr-str {:seon.schema.projection/forms
-                       (sort-by key forms)
-                       :seon.schema.projection/function-contracts
-                       (sort-by key function-contracts)}))]
+        (portable-string-hash
+          (canonical-data-string [forms function-contracts]))]
     {:seon.schema.projection/forms forms
      :seon.schema.projection/registry registry
      :seon.schema.projection/schema-dependencies schema-dependencies
@@ -423,6 +481,78 @@
      :seon.schema.projection/shape-rows shape-rows
      :seon.schema.projection/catalog catalog
      :seon.schema.projection/fingerprint fingerprint})))
+
+(defn projection-from-rows
+  "Build one complete projection from committed schema and contract rows.
+
+   Rows are ordinary database query results. Duplicate identities are rejected
+   rather than resolved by iteration order, and every EDN form is parsed by
+   the platform reader before the one [[build-projection]] mechanism runs."
+  {:malli/schema [:=> [:catn [::projection-input ::projection-input]]
+                  ::projection]}
+  [{:seon.schema/keys [schema-rows function-contract-rows]}]
+  (letfn [(parse-rows [rows identity-fn identity-label]
+            (reduce
+              (fn [parsed row]
+                (when-not (and (sequential? row) (= 2 (count row)))
+                  (throw (ex-info (str "Malformed committed " identity-label
+                                       " row.")
+                                  {:seon.schema/error
+                                   :seon.schema/malformed-projection-row
+                                   :seon.schema/row row
+                                   :seon.error/kind :core-bug})))
+                (let [[raw-identity form-string] row
+                      identity (identity-fn raw-identity)]
+                  (when-not (string? form-string)
+                    (throw (ex-info (str "Malformed committed " identity-label
+                                         " form.")
+                                    {:seon.schema/error
+                                     :seon.schema/malformed-projection-form
+                                     :seon.schema/row row
+                                     :seon.error/kind :core-bug})))
+                  (when (contains? parsed identity)
+                    (throw (ex-info (str "Duplicate committed " identity-label
+                                         " " identity ".")
+                                    {:seon.schema/error
+                                     :seon.schema/duplicate-projection-row
+                                     :seon.schema/identity identity
+                                     :seon.error/kind :core-bug})))
+                  (assoc parsed identity
+                         (#?(:clj edn/read-string :cljs reader/read-string)
+                           form-string))))
+              {}
+              rows))]
+    (build-projection
+       (parse-rows schema-rows
+                  (fn [identity]
+                    (if (keyword? identity)
+                      identity
+                      (throw (ex-info "Committed schema identity is not a keyword."
+                                      {:seon.schema/error
+                                       :seon.schema/malformed-projection-identity
+                                       :seon.schema/identity identity
+                                       :seon.error/kind :core-bug}))))
+                  "schema")
+      (parse-rows function-contract-rows
+                  (fn [identity]
+                    (cond
+                      (qualified-symbol? identity) identity
+                      (string? identity)
+                      (let [parsed (symbol identity)]
+                        (if (qualified-symbol? parsed)
+                          parsed
+                          (throw (ex-info "Committed function identity is not qualified."
+                                          {:seon.schema/error
+                                           :seon.schema/malformed-projection-identity
+                                           :seon.schema/identity identity
+                                           :seon.error/kind :core-bug}))))
+                      :else
+                      (throw (ex-info "Committed function identity is malformed."
+                                      {:seon.schema/error
+                                       :seon.schema/malformed-projection-identity
+                                       :seon.schema/identity identity
+                                       :seon.error/kind :core-bug}))))
+                   "function contract"))))
 
 (defn activate-projection!
   "Atomically publish an already validated projection.
@@ -604,7 +734,7 @@
 
 (defn projection-validator
   "Compile a validator against exactly one immutable projection."
-  {:malli/schema [:=> [:catn [::projection :map]
+  {:malli/schema [:=> [:catn [::projection ::projection]
                              [::registry-key ::registry-key]]
                   ::compiled-validator]}
   [projection schema-key]
@@ -615,7 +745,7 @@
 
 (defn projection-explainer
   "Compile an explainer against exactly one immutable projection."
-  {:malli/schema [:=> [:catn [::projection :map]
+  {:malli/schema [:=> [:catn [::projection ::projection]
                              [::registry-key ::registry-key]]
                   ::compiled-validator]}
   [projection schema-key]
@@ -633,21 +763,19 @@
           (:seon.schema.shape/projection cached)
           (build-projection forms)))))
 
-(defn- ensure-shape-generation! []
-  (let [projection (shape-projection)]
+(defn- ensure-shape-generation-for! [projection]
     (when-not (identical? projection
                            (:seon.schema.shape/projection @!shape-generation))
       (reset! !shape-generation
               {:seon.schema.shape/projection projection
                :seon.schema.shape/candidate-forms
-               (when-not (current-projection) (candidate-forms))
+               nil
                :seon.schema.shape/validators {}
                :seon.schema.shape/explainers {}}))
-    @!shape-generation))
+    @!shape-generation)
 
-(defn- cached-compiler! [cache-key compiler schema-key]
-  (let [{:seon.schema.shape/keys [projection] :as generation}
-        (ensure-shape-generation!)]
+(defn- cached-compiler-in! [projection cache-key compiler schema-key]
+  (let [generation (ensure-shape-generation-for! projection)]
     (or (get (get generation cache-key) schema-key)
         (let [compiled (compiler projection schema-key)]
           (swap! !shape-generation
@@ -702,6 +830,19 @@
         :else
         selected))))
 
+(defn candidate-shapes-in
+  "Bounded diagnostic schema window from explicit `projection`."
+  {:malli/schema [:=> [:catn [::projection ::projection] [::value ::value]]
+                  [:vector :map]]}
+  [projection value]
+  (if-let [attrs (seq (sort-by str (diagnostic-present-attrs value)))]
+    (let [rows (:seon.schema.projection/shape-rows projection)]
+      (->> (diagnostic-schema-keys projection attrs)
+           (map rows)
+           (sort-by shape-rank)
+           vec))
+    []))
+
 (defn candidate-shapes
   "Bounded diagnostic schema window from the activated projection.
 
@@ -711,13 +852,29 @@
    Candidate declarations do not affect the result after activation."
   {:malli/schema [:=> [:catn [::value ::value]] [:vector :map]]}
   [value]
-  (if-let [attrs (seq (sort-by str (diagnostic-present-attrs value)))]
-    (let [{:seon.schema.shape/keys [projection]}
-          (ensure-shape-generation!)
-          rows (:seon.schema.projection/shape-rows projection)]
-      (->> (diagnostic-schema-keys projection attrs)
+  (let [projection (shape-projection)]
+    (candidate-shapes-in projection value)))
+
+(defn matching-shapes-in
+  "All schemas in explicit `projection` that validate `value`."
+  {:malli/schema [:=> [:catn [::projection ::projection] [::value ::value]]
+                  [:vector :map]]}
+  [projection value]
+  (if-let [attrs (seq (complete-present-attrs value))]
+    (let [index (:seon.schema.projection/shape-index projection)
+          rows (:seon.schema.projection/shape-rows projection)
+          present (set attrs)
+          possible (into #{} (mapcat #(get index % [])) attrs)]
+      (->> possible
            (map rows)
+           (filter (fn [row]
+                     (every? present (:seon.schema/required-attrs row))))
            (sort-by shape-rank)
+           (filter (fn [{:seon.schema/keys [key]}]
+                     ((cached-compiler-in!
+                        projection :seon.schema.shape/validators
+                        projection-validator key)
+                      value)))
            vec))
     []))
 
@@ -728,25 +885,25 @@
    structurally possible schemas validate and survive in deterministic order."
   {:malli/schema [:=> [:catn [::value ::value]] [:vector :map]]}
   [value]
-  (if-let [attrs (seq (complete-present-attrs value))]
-    (let [{:seon.schema.shape/keys [projection]}
-          (ensure-shape-generation!)
-          index (:seon.schema.projection/shape-index projection)
-          rows (:seon.schema.projection/shape-rows projection)
-          present (set attrs)
-          possible (into #{} (mapcat #(get index % [])) attrs)]
-      (->> possible
-           (map rows)
-           (filter (fn [row]
-                     (every? present (:seon.schema/required-attrs row))))
-           (sort-by shape-rank)
-           (filter
-             (fn [{:seon.schema/keys [key]}]
-               ((cached-compiler!
-                  :seon.schema.shape/validators projection-validator key)
-                value)))
-           vec))
-    []))
+  (let [projection (shape-projection)]
+    (matching-shapes-in projection value)))
+
+(defn explain-shape-in
+  "Explain `value` against `schema-key` in explicit `projection`."
+  {:malli/schema [:=> [:catn [::projection ::projection]
+                             [::registry-key ::registry-key]
+                             [::value ::value]]
+                  [:maybe ::explanation]]}
+  [projection schema-key value]
+  (when-not (contains? (:seon.schema.projection/shape-rows projection)
+                       schema-key)
+    (throw (ex-info (str "Unknown projected map schema " schema-key ".")
+                    {:seon.schema/error :seon.schema/unknown-shape
+                     :seon.schema/key schema-key
+                     :seon.error/kind :core-bug})))
+  ((cached-compiler-in!
+     projection :seon.schema.shape/explainers projection-explainer schema-key)
+   value))
 
 (defn explain-shape
   "Explain `value` against one activated structural schema.
@@ -758,19 +915,8 @@
                              [::value ::value]]
                   [:maybe ::explanation]]}
   [schema-key value]
-  (let [{:seon.schema.shape/keys [projection]}
-        (ensure-shape-generation!)]
-    (when-not (contains? (:seon.schema.projection/shape-rows projection)
-                         schema-key)
-      (throw
-        (ex-info
-          (str "Unknown activated map schema " schema-key ".")
-          {:seon.schema/error :seon.schema/unknown-shape
-           :seon.schema/key schema-key
-           :seon.error/kind :core-bug})))
-    ((cached-compiler!
-       :seon.schema.shape/explainers projection-explainer schema-key)
-     value)))
+  (let [projection (shape-projection)]
+    (explain-shape-in projection schema-key value)))
 
 (defn candidate-validator
   "Compile a recursively resolved validator from current declarations."

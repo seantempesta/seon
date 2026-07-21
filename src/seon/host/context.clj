@@ -82,6 +82,8 @@
 (schema/register! ::channel-state 'some?)
 (schema/register! ::call-lock 'some?)
 (schema/register! ::eval-generator 'some?)
+(schema/register! ::projection-state 'some?)
+(schema/register! ::committed-basis :int)
 (schema/register!
  ::writer
  [:map
@@ -1021,7 +1023,9 @@
                 (seq candidates)
                 (assoc ::protocol/generated-candidates (vec candidates)))))]
         (if (::protocol/success? response)
-          {:seon.db/ok? true}
+          {:seon.db/ok? true
+           :db-after (select-keys (:db-after response)
+                                  [:db-name :t :datahike/commit-id])}
           (protocol-error-value response))))))
 
 (defn query-writer!
@@ -1029,6 +1033,161 @@
   {:malli/schema [:=> [:cat ::writer :any [:sequential :any]] :any]}
   [writer query-form arguments]
   (apply db-query writer query-form arguments))
+
+(def ^:private committed-schema-query
+  '[:find ?key ?form
+    :where
+    [?schema :seon.schema/key ?key]
+    [?schema :seon.schema/form ?form]])
+
+(def ^:private committed-function-contract-query
+  '[:find ?sym ?form
+    :where
+    [?function :seon.fn/sym ?sym]
+    [?function :seon.fn/spec ?form]])
+
+(def ^:private committed-projection-row-limit 4096)
+
+(defn acquire-committed-projection!
+  "Acquire and compile the complete committed program at one database value."
+  {:malli/schema [:=> [:catn [::writer ::writer]] :map]}
+  [writer]
+  (try
+    (let [database (resolve-head! writer)]
+      (if (:seon/error database)
+        database
+        (let [member (fn [query]
+                       {::protocol/operation protocol/query-operation
+                        :seon.db/db database
+                        ::protocol/query-form query
+                        ::protocol/arguments []
+                        :datahike.resource/max-work 1000000
+                        ;; One sentinel proves the claimed complete population
+                        ;; did not stop at Datahike's early-stop row limit.
+                        :datahike.resource/max-results
+                        (inc committed-projection-row-limit)
+                        :datahike.resource/max-result-weight (* 3 1024 1024)})
+              response
+              (writer-call!
+                writer
+                (protocol/execute-many-request
+                  {::protocol/request-id (str (random-uuid))
+                   ::protocol/members
+                   [(member committed-schema-query)
+                    (member committed-function-contract-query)]
+                   :datahike.resource/max-result-weight (* 6 1024 1024)}))]
+          (if-not (::protocol/success? response)
+            (protocol-error-value response)
+            (let [[schemas contracts] (::protocol/results response)]
+              (if-not (every? ::protocol/success? [schemas contracts])
+                {:seon/error
+                 {:seon.error/message
+                  "Committed schema projection acquisition failed."
+                  :seon.error/kind :core-bug
+                  :seon.error/data
+                  {:seon.host.context/member-results [schemas contracts]}}}
+                (let [schema-rows (:datahike.query/result schemas)
+                      contract-rows (:datahike.query/result contracts)]
+                  (if (or (> (count schema-rows)
+                             committed-projection-row-limit)
+                          (> (count contract-rows)
+                             committed-projection-row-limit))
+                    {:seon/error
+                     {:seon.error/message
+                      "Committed schema projection exceeds its complete-row bound."
+                      :seon.error/kind :core-bug}}
+                    {::database database
+                     ::projection
+                     (schema/projection-from-rows
+                       {:seon.schema/schema-rows schema-rows
+                        :seon.schema/function-contract-rows
+                        contract-rows})}))))))))
+    (catch Throwable throwable
+      {:seon/error
+       {:seon.error/message
+        (str "Committed schema projection is invalid: "
+             (.getMessage throwable))
+        :seon.error/kind :core-bug
+        :seon.error/data (ex-data throwable)}})))
+
+(defn publish-committed-projection!
+  "Publish `acquired` only when its basis transaction is newer."
+  {:malli/schema [:=> [:catn [::projection-state ::projection-state]
+                             [::acquired :map]]
+                  :map]}
+  [projection-state acquired]
+  (swap! projection-state
+         (fn [current]
+           (let [floor (max (get-in current [::database :t] -1)
+                            (get current ::committed-basis -1))
+                 acquired-basis (get-in acquired [::database :t] -1)]
+             (if (or (< floor acquired-basis)
+                     (and (::fault current) (= floor acquired-basis)))
+               acquired
+               current)))))
+
+(defn current-committed-projection
+  "Return the complete retained projection or its newer-generation fault."
+  {:malli/schema [:=> [:catn [::projection-state ::projection-state]] :map]}
+  [projection-state]
+  (let [current @projection-state]
+    (if-let [fault (::fault current)]
+      {:seon/error fault}
+      {::database (::database current)
+       ::projection (::projection current)})))
+
+(defn refresh-committed-projection!
+  "Rebuild and monotonically publish the writer's complete projection."
+  {:malli/schema [:=> [:catn [::writer ::writer]
+                             [::projection-state ::projection-state]
+                             [::committed-basis ::committed-basis]]
+                  :map]}
+  [writer projection-state committed-basis]
+  ;; The durable commit is already newer than the served projection. Publish
+  ;; an unavailable floor before any reacquire/build work can block, so a
+  ;; concurrent browser never observes the old generation as current truth.
+  (swap! projection-state
+         (fn [current]
+           (let [floor (max (get-in current [::database :t] -1)
+                            (get current ::committed-basis -1))]
+             (if (< floor committed-basis)
+               {::fault
+                {:seon.error/message
+                 "Committed schema projection refresh is pending."
+                 :seon.error/kind :core-bug}
+                ::pending? true
+                ::committed-basis committed-basis}
+               current))))
+  (let [read-result (acquire-committed-projection! writer)
+        acquired
+        (if (and (not (:seon/error read-result))
+                 (< (get-in read-result [::database :t] -1)
+                    committed-basis))
+          {:seon/error
+           {:seon.error/message
+            "Committed schema projection refresh returned a stale database value."
+            :seon.error/kind :core-bug}}
+          read-result)]
+    (if (:seon/error acquired)
+      (do
+        (swap! projection-state
+               (fn [current]
+                 (if (< (max (get-in current [::database :t] -1)
+                             (get current ::committed-basis -1))
+                        committed-basis)
+                   {::fault (:seon/error acquired)
+                    ::committed-basis committed-basis}
+                   (if (and (::pending? current)
+                            (= committed-basis
+                               (::committed-basis current)))
+                     {::fault (:seon/error acquired)
+                      ::committed-basis committed-basis}
+                     current))))
+        (let [current @projection-state]
+          (if (>= (get-in current [::database :t] -1) committed-basis)
+            current
+            acquired)))
+      (publish-committed-projection! projection-state acquired))))
 
 (defn transact-writer!
   "Commit host-derived transaction data through the retained writer."
@@ -1142,4 +1301,17 @@
                   ::record/var-meta (or var-meta {})
                   ::record/new-schema-keys (or new-schema-keys #{})
                   ::record/at at})))]
-    (record-transact! writer {::tx-data tx-data})))
+    (let [result (record-transact! writer {::tx-data tx-data})
+          projection-change?
+          (boolean
+            (some (fn [operation]
+                    (or (and (map? operation)
+                             (or (contains? operation :seon.schema/form)
+                                 (contains? operation :seon.fn/spec)))
+                        (and (vector? operation)
+                             (contains? #{:seon.schema/form :seon.fn/spec}
+                                        (nth operation 2 nil)))))
+                  tx-data))]
+      (cond-> result
+        (:seon.db/ok? result)
+        (assoc ::projection-changed? projection-change?)))))

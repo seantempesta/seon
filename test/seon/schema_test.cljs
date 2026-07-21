@@ -571,3 +571,88 @@
                  :seon.render/assemble-request
                  :seon.effect/wake-request]]
         (is (not (contains? kinds k)) (str k " must NOT be a kind"))))))
+
+(deftest explicit-projection-cache-rotates-by-object-not-fingerprint
+  (let [attr :schematest.projection-cache/id
+        shape :schematest.projection-cache/shape
+        forms {attr :int shape [:map [attr attr]]}
+        first-projection (schema/build-projection forms)
+        equal-projection (schema/build-projection forms)
+        validators (atom 0)
+        original-validator m/validator]
+    (is (= (:seon.schema.projection/fingerprint first-projection)
+           (:seon.schema.projection/fingerprint equal-projection)))
+    (is (not (identical? first-projection equal-projection)))
+    (with-redefs [m/validator (fn
+                               ([form]
+                                (swap! validators inc)
+                                (original-validator form))
+                               ([form options]
+                                (swap! validators inc)
+                                (original-validator form options)))]
+      (schema/matching-shapes-in first-projection {attr 1})
+      (let [after-first @validators]
+        (schema/matching-shapes-in first-projection {attr 2})
+        (is (= after-first @validators)
+            "the same projection reuses its compiler")
+        (schema/matching-shapes-in equal-projection {attr 3})
+        (let [after-rotation @validators]
+          (is (> after-rotation after-first)
+              "a different projection object rotates the cache")
+          (schema/matching-shapes-in equal-projection {attr 4})
+          (is (= after-rotation @validators)
+              "equal fingerprints do not preserve another object's compiler"))))))
+
+(deftest ambient-selection-survives-an-interleaved-explicit-generation
+  (let [before (schema/snapshot-state)
+        attr :schematest.projection-race/id
+        shape :schematest.projection-race/shape
+        active (schema/build-projection {attr :int shape [:map [attr attr]]})
+        explicit (schema/build-projection
+                   {attr :string shape [:map [attr attr]]})
+        interleaved? (atom false)
+        original-validator m/validator]
+    (try
+      (schema/activate-projection! active)
+      (with-redefs [m/validator
+                    (fn
+                      ([form]
+                      (when (compare-and-set! interleaved? false true)
+                        (is (= [shape]
+                               (mapv :seon.schema/key
+                                     (schema/matching-shapes-in
+                                       explicit {attr "explicit"})))))
+                       (original-validator form))
+                      ([form options]
+                       (when (compare-and-set! interleaved? false true)
+                         (is (= [shape]
+                                (mapv :seon.schema/key
+                                      (schema/matching-shapes-in
+                                        explicit {attr "explicit"})))))
+                       (original-validator form options)))]
+        (is (= [shape]
+               (mapv :seon.schema/key
+                     (schema/matching-shapes {attr 1}))))
+        (is @interleaved?)
+        (is (= "[:schematest.projection-race/shape]"
+               (pr-str (mapv :seon.schema/key
+                             (schema/matching-shapes-in
+                               explicit {attr "B"})))))
+        (is (= "[:schematest.projection-race/shape]"
+               (pr-str (mapv :seon.schema/key
+                             (schema/matching-shapes {attr 2})))))
+        (is (empty? (schema/matching-shapes {attr "not-A"}))))
+      (finally (schema/restore-state! before)))))
+
+(deftest committed-relation-sets-are-honest-projection-input
+  (let [projection
+        (schema/projection-from-rows
+          {:seon.schema/schema-rows
+           #{[:schematest.rows/id ":int"]
+             [:schematest.rows/shape
+              "[:map [:schematest.rows/id :schematest.rows/id]]"]}
+           :seon.schema/function-contract-rows #{}})]
+    (is (= [:schematest.rows/shape]
+           (mapv :seon.schema/key
+                 (schema/matching-shapes-in
+                   projection {:schematest.rows/id 1}))))))

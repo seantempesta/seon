@@ -6,7 +6,6 @@
    committed generation. Closing admission hides process-local wrapper and
    projection surgery from agent, schedule, and web execution boundaries."
   (:require
-    [cljs.reader :as reader]
     [seon.db :as db]
     [seon.db.protocol :as protocol]
     [seon.error :as error]
@@ -210,17 +209,9 @@
   "Build the canonical projection from ordinary acquired rows."
   {:malli/schema [:=> [:catn [::acquired :map]] :map]}
   [{::keys [schema-rows function-contract-rows]}]
-  (let [forms
-        (into {}
-              (map (fn [[key form]]
-                     [key (reader/read-string form)]))
-              schema-rows)
-        function-contracts
-        (into {}
-              (map (fn [[sym form]]
-                     [(symbol sym) (reader/read-string form)]))
-              function-contract-rows)]
-    (schema/build-projection forms function-contracts)))
+  (schema/projection-from-rows
+    {:seon.schema/schema-rows schema-rows
+     :seon.schema/function-contract-rows function-contract-rows}))
 
 (defn- query-member
   [query]

@@ -144,7 +144,7 @@
                      [:seon.db.process/id :seon.db.process/repl]}
                     {:seon.fn/sym "seed/install-probe"
                      :seon.fn/agent-facing? true
-                     :seon.fn/spec ":int"
+                     :seon.fn/spec "[:=> [:cat :int] :int]"
                      :seon.fn/schema-error "none"
                      :seon.fn/read-attrs [:seed/attr]}])
                   "})"))]

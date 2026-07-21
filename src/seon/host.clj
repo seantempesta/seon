@@ -73,6 +73,7 @@
             [seon.host.context :as context]
             [seon.host.graduate :as graduate]
             [seon.host.record :as record]
+            [seon.render.value :as render.value]
             [seon.schema :as schema])
   (:import [java.io File OutputStream]
            [java.net StandardProtocolFamily UnixDomainSocketAddress]
@@ -165,9 +166,27 @@
  [:map
   [::server ::server]
   [::base ::base]
-  [::contexts ::contexts]])
+  [::contexts ::contexts]
+  [::projection-state ::context/projection-state]])
 
 (def ^:private default-eval-threads 10)
+
+(defn drill-value
+  "Project a host value against the exact retained committed generation."
+  {:malli/schema [:=> [:catn [::host ::host]
+                       [::value :seon.render.value/value]
+                       [::request :seon.render.value/value]]
+                  :seon.render.value/drill-result]}
+  [host value request]
+  (let [admitted
+        (context/current-committed-projection (::projection-state host))]
+    (if-let [fault (:seon/error admitted)]
+      {:seon.render.value/ok? false
+       :seon/error
+       {:seon.error/message "Schema-aware value browsing is unavailable."
+        :seon.error/kind :core-bug}}
+      (render.value/drill-value (::context/projection admitted)
+                                value request))))
 
 (defn- now-ms [] (System/currentTimeMillis))
 
@@ -414,6 +433,21 @@
                           ::context/forms forms
                           ::context/var-meta var-meta
                           ::context/new-schema-keys new-schema-keys}))
+                      projection-change?
+                      (true? (::context/projection-changed? recorded))
+                      projection-refresh
+                      (when projection-change?
+                        (context/refresh-committed-projection!
+                          writer (::projection-state session)
+                          (get-in recorded [:db-after :t])))
+                      _ (when (:seon/error projection-refresh)
+                          (throw
+                            (ex-info
+                              (get-in projection-refresh
+                                      [:seon/error :seon.error/message])
+                              {:seon.error/kind :core-bug
+                               :seon.host/projection-error
+                               (:seon/error projection-refresh)})))
                       ids (if (and recorded (:seon.db/ok? recorded))
                             (conj ids eval-id)
                             ids)
@@ -507,7 +541,7 @@
             {::error (error-value
                       (str (first (str/split-lines
                                    (str (.getMessage throwable)))))
-                      :agent)})
+                      (or (:seon.error/kind (ex-data throwable)) :agent))})
           (finally
             (.cancel deadline-task false)
             (Thread/interrupted)))]
@@ -691,6 +725,7 @@
                  ::cancel-requested? (atom false)
                  ::contexts (::contexts host)
                  ::writer (::writer host)
+                 ::projection-state (::projection-state host)
                  ::eval-pool (::eval-pool host)
                  ::watchdog (::watchdog host)}]
     (try
@@ -737,6 +772,17 @@
                                       ::context/database-name
                                       ::context/backend
                                       ::context/database-path]))
+        acquired-projection (context/acquire-committed-projection! writer)
+        _ (when (:seon/error acquired-projection)
+            (context/close-session! writer)
+            (throw
+              (ex-info
+                (get-in acquired-projection
+                        [:seon/error :seon.error/message])
+                {:seon.error/kind :core-bug
+                 :seon.host/projection-error
+                 (:seon/error acquired-projection)})))
+        projection-state (atom acquired-projection)
         base (context/build-base! writer)
         graduation-report
         (graduate/rebuild!
@@ -754,6 +800,7 @@
                     {::writer writer
                      ::server server
                      ::base base
+                     ::projection-state projection-state
                      ::graduation-report graduation-report
                      ::contexts contexts
                      ::eval-pool eval-pool

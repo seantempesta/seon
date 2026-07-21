@@ -922,12 +922,9 @@
       (seed-toolkit-refers! compile-state (require-specs require-edges)))
     (let [old-projection (schema/current-projection)
           projection
-          (schema/build-projection
-           (into {} (map (fn [[key form]] [key (reader/read-string form)]))
-                 schema-forms)
-           (into {} (map (fn [[sym form]]
-                           [(symbol sym) (reader/read-string form)]))
-                 function-contracts))]
+          (schema/projection-from-rows
+            {:seon.schema/schema-rows schema-forms
+             :seon.schema/function-contract-rows function-contracts})]
       ;; cljs.js needs the admitted schemas while it analyzes authored source.
       ;; Wrapper reconciliation follows loading so newly materialized authored
       ;; vars and bundled toolkit vars share the same complete generation.

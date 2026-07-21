@@ -15,6 +15,7 @@
     [seon.client :as client]
     [seon.config :as config]
     [seon.render.value :as v]
+    [seon.render.value-projection-fixture :as projection-fixture]
     [seon.schema :as schema]))
 
 (def configuration (config/resolve-config-singleton {}))
@@ -252,6 +253,11 @@
     :seon.config.render/value-shape-sample 8
     :seon.render.value/page-size page-size}})
 
+(defn- drill-value [value request]
+  (v/drill-value (or (schema/current-projection)
+                     (schema/build-projection (schema/snapshot)))
+                 value request))
+
 (def ^:private portable-ordinary-fixtures
   [nil 42 [1 2 3 4]])
 
@@ -264,8 +270,36 @@
   (let [request (drill-request [] 0 3 32)]
     (is (= portable-ordinary-result-bytes
            (binding [*print-namespace-maps* false]
-             (mapv #(pr-str (v/drill-value % request))
+             (mapv #(pr-str (drill-value % request))
                    portable-ordinary-fixtures))))))
+
+(deftest schema-aware-map-drills-have-the-exact-jvm-parity-bytes
+  (let [projection (schema/projection-from-rows projection-fixture/rows)]
+    (is (= projection-fixture/expected-fingerprint
+           (:seon.schema.projection/fingerprint projection)))
+    (is (= projection-fixture/expected-shape-rows-bytes
+           (binding [*print-namespace-maps* false]
+             (pr-str (vec (vals
+                            (:seon.schema.projection/shape-rows projection)))))))
+    (let [actual
+          (binding [*print-namespace-maps* false]
+            (mapv (fn [value request]
+                    (pr-str (v/drill-value projection value request)))
+                  projection-fixture/values
+                  projection-fixture/requests))]
+      (doseq [[index expected result]
+              (map vector (range) projection-fixture/expected-bytes actual)]
+        (is (= expected result)
+            (pr-str {:index index
+                     :expected-length (count expected)
+                     :actual-length (count result)
+                     :expected-hash (hash expected)
+                     :actual-hash (hash result)}))))))
+
+(deftest nested-qualified-schema-maps-have-the-jvm-parity-fingerprint
+  (is (= projection-fixture/expected-nested-fingerprint
+         (:seon.schema.projection/fingerprint
+           (schema/projection-from-rows projection-fixture/nested-rows)))))
 
 (defn- exact-counting-seq
   [visits poison-at]
@@ -288,7 +322,7 @@
                      (drill-request (vec (repeat 33 :x)) 0 8 1024)
                      (assoc (drill-request [] 0 8 1024)
                             :seon.render.value/unknown true)]]
-      (let [result (v/drill-value value request)]
+      (let [result (drill-value value request)]
         (is (false? (:seon.render.value/ok? result)))
         (is (= :user-input (get-in result [:seon/error :seon.error/kind])))))
     (is (zero? @visits)
@@ -305,18 +339,18 @@
                       i
                       (do (swap! poison-touches inc)
                           (throw (js/Error. "request admission over-walk"))))))
-        result (v/drill-value :untouched request)]
+        result (drill-value :untouched request)]
     (is (false? (:seon.render.value/ok? result)))
     (is (= 4 @visits) "three allowed request keys plus one sentinel")
     (is (zero? @poison-touches))))
 
 (deftest drill-value-descends-only-through-exact-map-and-vector-segments
   (let [value {:safe [{:answer 42}]}
-        found (v/drill-value value
+        found (drill-value value
                              (drill-request [:safe 0 :answer] 0 4 32))
-        missing (v/drill-value value
+        missing (drill-value value
                                (drill-request [:safe 1] 0 4 32))
-        seq-path (v/drill-value '(1 2 3)
+        seq-path (drill-value '(1 2 3)
                                 (drill-request [0] 0 4 32))]
     (is (true? (:seon.render.value/ok? found)))
     (is (= 42 (get-in found [:seon.render.value/projection
@@ -326,11 +360,11 @@
         "sequences and sets never acquire positional descent semantics")))
 
 (deftest drill-value-turns-hostile-lookup-and-realization-into-closed-failures
-  (let [lookup-result (v/drill-value (ThrowingLookupMap.)
+  (let [lookup-result (drill-value (ThrowingLookupMap.)
                                      (drill-request [:x] 0 4 32))
         visits (atom 0)
         realization-result
-        (v/drill-value (exact-counting-seq visits 2)
+        (drill-value (exact-counting-seq visits 2)
                        (drill-request [] 0 4 32))]
     (is (false? (:seon.render.value/ok? lookup-result)))
     (is (false? (:seon.render.value/ok? realization-result)))
@@ -340,7 +374,7 @@
 (deftest drill-value-sequence-paging-has-an-exact-total-work-bound
   (let [visits (atom 0)
         value (exact-counting-seq visits 8)
-        result (v/drill-value value
+        result (drill-value value
                               (drill-request [] 3 4 7))
         projection (:seon.render.value/projection result)]
     (is (true? (:seon.render.value/ok? result)))
@@ -358,7 +392,7 @@
 (deftest drill-value-enforces-the-ruled-1025-touch-ceiling
   (let [visits (atom 0)
         value (exact-counting-seq visits 1025)
-        accepted (v/drill-value value
+        accepted (drill-value value
                                 (drill-request [] 1016 8 1024))]
     (is (true? (:seon.render.value/ok? accepted)))
     (is (= 1025 @visits))
@@ -367,7 +401,7 @@
                              :seon.render.value/tree
                              :seon.render.value/shown]))))
   (let [visits (atom 0)
-        refused (v/drill-value
+        refused (drill-value
                                (exact-counting-seq visits 0)
                                (drill-request [] 1017 8 1024))]
     (is (false? (:seon.render.value/ok? refused)))
@@ -384,12 +418,12 @@
                     (do (swap! poison-touches inc)
                         (throw (js/Error. "map poison beyond sentinel"))))))
         request (drill-request [] 0 4 16)
-        first-result (v/drill-value value request)
+        first-result (drill-value value request)
         first-tree (get-in first-result [:seon.render.value/projection
                                          :seon.render.value/tree])
         visits-after-first @visits
-        second-result (v/drill-value value request)
-        offset-result (v/drill-value value
+        second-result (drill-value value request)
+        offset-result (drill-value value
                                      (drill-request [] 1 4 16))]
     (is (= 5 visits-after-first)
         "a million-entry map touches one bounded page plus the sentinel")
@@ -409,7 +443,7 @@
 
 (deftest drill-value-never-trusts-or-calls-a-partial-maps-count
   (let [visits (atom 0)
-        result (v/drill-value (ThrowingCountMap. 1000000 visits)
+        result (drill-value (ThrowingCountMap. 1000000 visits)
                               (drill-request [] 0 4 16))
         projection (:seon.render.value/projection result)]
     (is (true? (:seon.render.value/ok? result)))
@@ -422,7 +456,7 @@
 (deftest bounded-deep-result-validation-rejects-marker-and-index-corruption
   (let [limits (:seon.render.value/effective-limits
                  (drill-request [] 0 1 32))
-        good (v/drill-value {:safe 1}
+        good (drill-value {:safe 1}
                             (drill-request [] 0 1 32))
         projection (:seon.render.value/projection good)
         tree (:seon.render.value/tree projection)
@@ -454,7 +488,7 @@
 (deftest bounded-result-validation-enforces-path-size-and-frame-fields
   (let [request (drill-request [] 0 4 32)
         limits (:seon.render.value/effective-limits request)
-        good (v/drill-value [1 2] request)
+        good (drill-value [1 2] request)
         huge-name (apply str (repeat 5000 "x"))
         huge-keyword (keyword huge-name)
         forged
@@ -498,7 +532,7 @@
 (deftest drill-result-union-round-trips-through-the-existing-transit-codec
   (let [request (drill-request [] 0 4 32)
         limits (:seon.render.value/effective-limits request)
-        available (v/drill-value [1 2] request)
+        available (drill-value [1 2] request)
         projection (:seon.render.value/projection available)
         unavailable {:seon.render.value/ok? true
                      :seon.render.value/availability :unavailable
@@ -523,21 +557,21 @@
       (fn []
         (let [matching-calls (atom 0)
               explain-calls (atom 0)
-              original-matching schema/matching-shapes
-              original-explain schema/explain-shape]
-          (with-redefs [schema/matching-shapes
-                        (fn [value]
+              original-matching schema/matching-shapes-in
+              original-explain schema/explain-shape-in]
+          (with-redefs [schema/matching-shapes-in
+                        (fn [projection value]
                           (swap! matching-calls inc)
-                          (original-matching value))
-                        schema/explain-shape
-                        (fn [schema-key value]
+                          (original-matching projection value))
+                        schema/explain-shape-in
+                        (fn [projection schema-key value]
                           (swap! explain-calls inc)
-                          (original-explain schema-key value))]
-            (let [complete (v/drill-value {attr 1} request)
-                  invalid (v/drill-value {attr "wrong"} request)
+                          (original-explain projection schema-key value))]
+            (let [complete (drill-value {attr 1} request)
+                  invalid (drill-value {attr "wrong"} request)
                   after-complete @matching-calls
                   after-explain @explain-calls
-                  partial (v/drill-value (range)
+                  partial (drill-value (range)
                                          request)]
               (is (true? (:seon.render.value/ok? complete)))
               (is (= :valid
@@ -569,7 +603,7 @@
         (let [candidate-visits (atom 0)
               result (binding [schema/*candidate-visit!*
                                (fn [_] (swap! candidate-visits inc))]
-                       (v/drill-value {attr 1}
+                       (drill-value {attr 1}
                                       (drill-request [] 0 1 32)))
               rows (get-in result [:seon.render.value/projection
                                    :seon.render.value/schemas])]
@@ -1136,7 +1170,7 @@
     (with-redefs [v/sample (fn [_ _ _]
                              (swap! calls inc)
                              skeleton)
-                  schema/candidate-shapes (constantly [])]
+                  schema/candidate-shapes-in (fn [_ _] [])]
       (let [data (v/render-html-data configuration "one-pass" [1 2])]
         (is (= 1 @calls))
         (is (identical? skeleton (:seon.render.value/tree data)))
@@ -1196,13 +1230,13 @@
                              (let [skeleton (nth skeletons @sample-calls)]
                                (swap! sample-calls inc)
                                skeleton))
-                  schema/candidate-shapes (fn [_]
+                  schema/candidate-shapes-in (fn [_ _]
                                             (swap! candidate-calls inc)
                                             [row])
-                  schema/matching-shapes (fn [_]
+                  schema/matching-shapes-in (fn [_ _]
                                            (swap! matching-calls inc)
                                            [row])
-                  schema/explain-shape (fn [_ _]
+                  schema/explain-shape-in (fn [_ _ _]
                                          (swap! explainer-calls inc)
                                          {:errors [:unsafe]})]
       (doseq [i (range (count skeletons))]

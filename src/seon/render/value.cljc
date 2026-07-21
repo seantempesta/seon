@@ -1039,17 +1039,18 @@
    :seon.schema/entity? (:seon.schema/entity? row)
    :seon.render.value/status status})
 
-(defn- schema-projection [value incomplete?]
+(defn- schema-projection-in [projection value incomplete?]
   (if incomplete?
     {:seon.render.value/schemas
      (mapv #(schema-status-row :shape-only %)
-           (schema/candidate-shapes value))}
-    (let [matches (schema/matching-shapes value)]
+           (schema/candidate-shapes-in projection value))}
+    (let [matches (schema/matching-shapes-in projection value)]
       (if (seq matches)
         {:seon.render.value/schemas
          (mapv #(schema-status-row :valid %) matches)}
-        (if-let [candidate (first (schema/candidate-shapes value))]
-          (let [explanation (schema/explain-shape
+        (if-let [candidate (first (schema/candidate-shapes-in projection value))]
+          (let [explanation (schema/explain-shape-in
+                              projection
                               (:seon.schema/key candidate) value)
                 humanized (some-> explanation me/humanize)
                 error-value (some-> explanation me/error-value)]
@@ -1061,6 +1062,13 @@
                      {:seon.render.value/humanized humanized
                       :seon.render.value/error-value error-value})))
           {:seon.render.value/schemas []})))))
+
+#?(:cljs
+   (defn- schema-projection [value incomplete?]
+     (schema-projection-in
+       (or (schema/current-projection)
+           (schema/build-projection (schema/snapshot)))
+       value incomplete?)))
 
 (defn- drill-failure
   [message]
@@ -1507,11 +1515,12 @@
 
 (defn drill-value
   "Project one admitted path and bounded page from a live value."
-  {:malli/schema [:=> [:catn [::value ::value]
+  {:malli/schema [:=> [:catn [::schema-projection :map]
+                             [::value ::value]
                              [::request ::value]]
                   ::drill-result]}
-  [value request]
-  (try
+  [projection-input value request]
+   (try
     (if-not (admitted-drill-request? request)
       (drill-failure "Invalid or over-budget value drill request.")
       (let [{::keys [path offset effective-limits]} request
@@ -1559,7 +1568,7 @@
                      ::truncated? incomplete?
                      ::more? more?
                      ::tree sampled}
-                    (schema-projection page incomplete?))]
+                    (schema-projection-in projection-input page incomplete?))]
               (let [result {::ok? true
                             ::availability :available
                             ::projection projection}]

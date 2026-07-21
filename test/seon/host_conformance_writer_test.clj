@@ -67,6 +67,21 @@
           :datahike.resource/result-weight 9
           :datahike.resource/limits {}}})
 
+      protocol/execute-many-operation
+      {::protocol/success? true
+       ::protocol/request-id request-id
+       ::protocol/results
+       (mapv (fn [member]
+               (let [query-form (::protocol/query-form member)]
+                 {::protocol/success? true
+                  ::protocol/request-id request-id
+                  :datahike.query/result
+                  (cond
+                    (some #{:seon.schema/form} (flatten (vec query-form))) []
+                    (some #{:seon.fn/spec} (flatten (vec query-form))) []
+                    :else fake-agent-rows)}))
+             (::protocol/members request))}
+
       protocol/pull-operation
       {::protocol/success? true
        ::protocol/request-id request-id

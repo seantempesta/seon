@@ -237,6 +237,7 @@
    attributes the U4 recorder persists."
   [{:seon.schema/key :seon.schema/key
     :seon.schema/form "[:keyword {:seon.db/identity true}]"}
+   {:seon.schema/key :inst :seon.schema/form "inst?"}
    {:seon.schema/key :seon.schema/form :seon.schema/form ":string"}
    {:seon.schema/key :seon.schema/created-at :seon.schema/form ":inst"}
    {:seon.schema/key :seon.db/lookup-ref-value
@@ -401,7 +402,7 @@
                                    :seon.db.process/repl]}
                                  {:seon.fn/sym "seed/install-probe"
                                   :seon.fn/agent-facing? true
-                                  :seon.fn/spec ":int"
+                                  :seon.fn/spec "[:=> [:cat :int] :int]"
                                   :seon.fn/schema-error "none"
                                   :seon.fn/read-attrs [:seed/attr]}])
                         "})"))]

@@ -5,7 +5,9 @@
    `jvm-value-drill-lacks-committed-schema-projection` issue and the accepted
    projection-admission boundary grounded in research at `6177ae2e`."
   (:require [clojure.test :refer [deftest is testing]]
-            [seon.render.value :as value]))
+            [seon.render.value :as value]
+            [seon.render.value-projection-fixture :as fixture]
+            [seon.schema :as schema]))
 
 (def ^:private limits
   {:seon.config.render/value-max-path-segments 32
@@ -22,6 +24,11 @@
    {:seon.render.value/path path
     :seon.render.value/offset offset
     :seon.render.value/effective-limits effective-limits}))
+
+(def ^:private empty-projection (schema/build-projection {}))
+
+(defn- drill-value [value request]
+  (value/drill-value empty-projection value request))
 
 (def ^:private ordinary-fixtures
   [nil 42 [1 2 3 4]])
@@ -41,7 +48,7 @@
 (deftest ordinary-results-have-exact-cross-runtime-bytes
   (is (= ordinary-result-bytes
          (binding [*print-namespace-maps* false]
-           (mapv #(pr-str (value/drill-value % (request)))
+           (mapv #(pr-str (drill-value % (request)))
                  ordinary-fixtures)))))
 
 (deftest numeric-identity-matches-the-wire-contract
@@ -55,13 +62,13 @@
 (deftest logical-million-and-infinite-seq-have-source-work-bounds
   (testing "offset plus page plus one sentinel on a logical million items"
     (let [visits (atom 0)
-          result (value/drill-value (take 1000000 (exact-counting-seq visits))
+          result (drill-value (take 1000000 (exact-counting-seq visits))
                                     (request [] 2 limits))]
       (is (true? (:seon.render.value/ok? result)))
       (is (= 6 @visits))))
   (testing "offset plus page plus one sentinel on an infinite sequence"
     (let [visits (atom 0)
-          result (value/drill-value (exact-counting-seq visits)
+          result (drill-value (exact-counting-seq visits)
                                     (request [] 2 limits))]
       (is (true? (:seon.render.value/ok? result)))
       (is (= 6 @visits))
@@ -69,8 +76,27 @@
                                   :seon.render.value/more?]))))))
 
 (deftest platform-native-values-use-an-honest-fixed-marker
-  (let [result (value/drill-value (Object.) (request))]
+  (let [result (drill-value (Object.) (request))]
     (is (= "jvm/Object"
            (get-in result [:seon.render.value/projection
                            :seon.render.value/tree
                            :seon.eval/opaque])))))
+
+(deftest schema-aware-map-drills-have-the-exact-portable-bytes
+  (let [projection (schema/projection-from-rows fixture/rows)]
+    (is (= fixture/expected-fingerprint
+           (:seon.schema.projection/fingerprint projection)))
+    (is (= fixture/expected-shape-rows-bytes
+           (binding [*print-namespace-maps* false]
+             (pr-str (vec (vals
+                            (:seon.schema.projection/shape-rows projection)))))))
+    (is (= fixture/expected-bytes
+           (binding [*print-namespace-maps* false]
+             (mapv (fn [value request]
+                     (pr-str (value/drill-value projection value request)))
+                   fixture/values fixture/requests))))))
+
+(deftest nested-qualified-schema-maps-have-the-portable-fingerprint
+  (is (= fixture/expected-nested-fingerprint
+         (:seon.schema.projection/fingerprint
+           (schema/projection-from-rows fixture/nested-rows)))))
