@@ -642,9 +642,12 @@ decisions batch for their return.
 - **NS-3 DONE `8ceaa32a`** — handlers→render.handlers, view-unit→
   render.view-unit; rename-only, full suite 1482/7163 green, rg-proven
   clean. Rides the same pending reset boundary as NS-2.
-- **NS-1b RESUMED** (same thread `019f8681-…cce5c7`) with the accepted
-  loader/enum/stub seams and expanded owned paths now that client.cljs
-  is free.
+- **NS-1b DONE `7e9d72a4`+`015fcc06`** — dispatch registry (closed
+  provider-locality enum, membership-asserting registration, honest
+  unregistered-provider stub), client-loads-providers seam, typeahead
+  step-backing contract, gemma relocated into the diffusion tree,
+  dev-only preload door, fence zero ai-side edges. Full suite
+  1485/7168 green in-lane. Release door = the batched owner decision.
 - **NS-4 host decomposition** — sol medium, codex thread
   `019f868c-da14-7012-834c-28f0ef00c0a1`, spec
   `specs/ns-4-host-decomposition.md` (see its Amendment section), logs
