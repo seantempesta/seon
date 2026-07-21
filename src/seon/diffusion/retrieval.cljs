@@ -433,8 +433,8 @@
 (defn- ns-of [fq]
   (let [i (.lastIndexOf fq "/")] (when (>= i 0) (subs fq 0 i))))
 
-;; The near-name distance fn is the SHARED `seon.diffusion.grammar/levenshtein`
-;; (one mechanism — the worker's `op:"repair"` candidate sweep uses the same fn).
+;; The near-name distance fn is the SHARED `seon.repair.candidates/levenshtein`
+;; (one mechanism — grammar delegates to it for this diffusion-side call).
 
 (defn- symbol-resolves-in?
   [functions name qualifier aliases]

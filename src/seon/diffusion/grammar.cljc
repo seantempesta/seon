@@ -1,12 +1,15 @@
 (ns seon.diffusion.grammar
   "Recognize Clojure form shapes for diffusion tooling.
 
-   Deliberately dependency-free — no `seon.schema`, no datahike, no malli
-   require — so babashka loads it straight from source (the `:malli/schema`
-   metadata uses only BUILT-IN malli types, inert to bb, read by the pod's
-   instrumentation; same pattern as `seon.repl.internal`). A `form` is an
-   arbitrary read sexpr from `seon.repl.internal/parse-forms`, hence the `:any`
-   input type.")
+   Deliberately dependency-light — no `seon.schema`, datahike, or malli
+   require — so babashka loads it straight from source. Its sole Seon
+   dependency is the shared pure repair-candidate mechanics. The
+   `:malli/schema` metadata uses only BUILT-IN malli types, inert to bb and
+   read by the pod's instrumentation (the `seon.repl.internal` pattern). A
+   `form` is an arbitrary read sexpr from `seon.repl.internal/parse-forms`,
+   hence the `:any` input type."
+  (:require
+    [seon.repair.candidates :as candidates]))
 
 (defn malformed-def?
   "A top-level `(def …)` that is NOT a valid `def` — a `defn` typo.
@@ -52,32 +55,10 @@
     (when (symbol? h) (name h))))
 
 (defn levenshtein
-  "Classic edit distance between strings `a` and `b`.
-
-   Lives HERE (the shared dependency-free ns) because it is the ONE distance
-   fn for near-name candidate scoring on BOTH sides of the wire: the pod's
-   retrieval leg (`seon.diffusion.retrieval`) and the co-located worker's
-   `op:\"repair\"` candidate sweep (`seon.worker-eval`) — one mechanism, no
-   per-bundle copy."
+  "The shared repair-candidate edit-distance function."
   {:malli/schema [:=> [:catn [::a :string] [::b :string]] :int]}
   [a b]
-  (let [m (count a) n (count b)]
-    (cond
-      (zero? m) n
-      (zero? n) m
-      :else
-      (loop [i 1 prev (vec (range (inc n)))]
-        (if (> i m)
-          (peek prev)
-          (let [ca (nth a (dec i))
-                cur (reduce
-                      (fn [row j]
-                        (let [cost (if (= ca (nth b (dec j))) 0 1)]
-                          (conj row (min (inc (peek row))             ; insertion
-                                         (inc (nth prev j))           ; deletion
-                                         (+ cost (nth prev (dec j))))))) ; substitution
-                      [i] (range 1 (inc n)))]
-            (recur (inc i) cur)))))))
+  (candidates/levenshtein a b))
 
 (defn phase-violation?
   "True when `form` is a top-level call whose head is NOT allowed in `phase`.

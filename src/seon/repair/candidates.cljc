@@ -12,7 +12,7 @@
    form-autofix-system-2026-07-05.md):
 
    - candidates rank by Levenshtein distance — the ONE distance fn,
-     `seon.diffusion.grammar/levenshtein` — within the band ≤ ⌈n/3⌉.
+     `seon.repair.candidates/levenshtein` — within the band ≤ ⌈n/3⌉.
      ⌈n/3⌉ is deliberately TIGHTER than retrieval's ⌈n/2⌉ generation
      band: at ⌈n/2⌉ a long typo whose true target cannot resolve in the
      trial environment walked deep tiers into garbage that happened to
@@ -22,17 +22,43 @@
    - exactly ONE passing candidate applies; 2+ passers = ambiguous
      (refuse, hint); 0 passers = no fix.
 
-   Deliberately dependency-light (grammar only — no seon.schema, no db,
-   no pod state) so the lean worker bundle loads it without dragging the
-   pod cage. `:malli/schema` metadata uses only BUILT-IN malli types
-   (the `seon.diffusion.grammar` pattern): inert in the worker bundle,
-   read by the pod's instrumentation."
-  (:require
-    [seon.diffusion.grammar :as grammar]))
+   Deliberately dependency-free — no seon.schema, no db, no pod state —
+   so the lean worker bundle loads it without dragging the pod cage.
+   `:malli/schema` metadata uses only BUILT-IN malli types (the
+   `seon.diffusion.grammar` pattern): inert in the worker bundle, read by
+   the pod's instrumentation.")
 
 (def max-candidates
   "Candidate cap per unresolved name (k ≤ 5 — the research sweep bound)."
   5)
+
+(defn levenshtein
+  "Classic edit distance between strings `a` and `b`.
+
+   Lives HERE (the shared dependency-free ns) because it is the ONE distance
+   fn for near-name candidate scoring on BOTH sides of the wire: the pod's
+   retrieval leg (`seon.diffusion.retrieval`) and the co-located worker's
+   `op:\"repair\"` candidate sweep (`seon.worker-eval`) — one mechanism, no
+   per-bundle copy."
+  {:malli/schema [:=> [:catn [::a :string] [::b :string]] :int]}
+  [a b]
+  (let [m (count a) n (count b)]
+    (cond
+      (zero? m) n
+      (zero? n) m
+      :else
+      (loop [i 1 prev (vec (range (inc n)))]
+        (if (> i m)
+          (peek prev)
+          (let [ca (nth a (dec i))
+                cur (reduce
+                      (fn [row j]
+                        (let [cost (if (= ca (nth b (dec j))) 0 1)]
+                          (conj row (min (inc (peek row))             ; insertion
+                                         (inc (nth prev j))           ; deletion
+                                         (+ cost (nth prev (dec j))))))) ; substitution
+                      [i] (range 1 (inc n)))]
+            (recur (inc i) cur)))))))
 
 (defn name-part
   "The NAME part of a possibly `ns/name`-qualified symbol string."
@@ -98,7 +124,7 @@
     (->> names
          distinct
          (keep (fn [nm]
-                 (let [d (grammar/levenshtein from nm)]
+                 (let [d (levenshtein from nm)]
                    (when (and (pos? d) (<= d thresh))
                      {:seon.repair/to nm :seon.repair/distance d}))))
          (sort-by (juxt :seon.repair/distance (comp count :seon.repair/to)))
