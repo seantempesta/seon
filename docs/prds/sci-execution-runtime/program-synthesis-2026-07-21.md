@@ -591,6 +591,16 @@ profiles. Two spec-gap catches corrected (require cycle, distinct read
 shapes). Full cljs 1469/7076 + writer 326/2399 green (implementer);
 orchestrator reran both on the settled tree.
 
+Also accepted: **W1.1 boot resolution `baeac2ee`** — pure
+`config/resolve.cljc` (1083 LOC, both-tier portable), operator resolves
+once + `--launch-envelope`, heap/processors enforced now, connection-cap
+carried-for-W1.5, retained-vs-selected boot distinction, post-reconcile
+equality proof + divergence fault. Gates cljs 1481/7161 + writer
+342/2584 + operator 293/1645 green, AND a live `up`/`status`/`down`
+cycle (faulted correctly on a pre-W1 retained db, then clean boot). The
+config-overhaul SPINE is in; W1.2 (live writer reconstruction) + W1.5
+(connection-cap/executor enforcement) + the config-facts sweep follow.
+
 Also accepted since: **WP-K `19654064`** (package data layer:
 `seon.packages.cljc` ledger/planning/manifests, 14 config accessors,
 per-cluster skeleton; CLJS 1478/7153 + operator 293/1644 green) and
