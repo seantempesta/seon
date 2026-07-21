@@ -10,7 +10,7 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (44)
+## Blocker (45)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -49,6 +49,7 @@ See `README.md` for the convention.
 | [Reduce retained memory in each execution child](execution-children-retain-hundreds-of-megabytes.md) | blocker | agent |
 | [Restore writer admin transition is unimplemented](restore-writer-admin-transition-is-unimplemented.md) | blocker | Core |
 | [Retain complete model transport evidence in Inspect logs](inspect-model-transport-evidence-is-incomplete.md) | blocker | agent |
+| [Retain live eval values in the owning JVM host](retain-live-eval-values-in-the-owning-jvm-host.md) | blocker | agent |
 | [Score reachability from real context transitions](inspect-reachability-assumes-nonexistent-evidence.md) | blocker | agent |
 | [Separate restore intent from completion identity](restore-completion-reuses-operator-intent-identity.md) | blocker | Core |
 | [Sequence calls within each agent execution child](rendering-and-turns-collided-in-one-execution-child.md) | blocker | UI |
