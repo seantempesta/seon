@@ -50,7 +50,10 @@
             [seon.host.record :as record]
             [seon.repair.candidates :as candidates]
             [seon.schema :as schema]
-            [seon.time :as time]))
+            [seon.time :as time])
+  (:import [java.nio.channels SocketChannel]
+           [java.util.concurrent Callable ExecutorService Executors]
+           [java.util.concurrent.locks Condition ReentrantLock]))
 
 (set! *warn-on-reflection* true)
 
@@ -80,8 +83,10 @@
 (schema/register! ::database-name ::protocol/database-name)
 (schema/register! ::backend ::protocol/backend)
 (schema/register! ::database-path ::protocol/database-path)
-(schema/register! ::channel-state 'some?)
-(schema/register! ::call-lock 'some?)
+(schema/register! ::pool-state 'some?)
+(schema/register! ::pool-lock 'some?)
+(schema/register! ::pool-condition 'some?)
+(schema/register! ::call-executor 'some?)
 (schema/register! ::eval-generator 'some?)
 (schema/register! ::projection-state 'some?)
 (schema/register! ::committed-basis :int)
@@ -92,8 +97,10 @@
   [::database-name ::database-name]
   [::backend {:optional true} ::backend]
   [::database-path {:optional true} ::database-path]
-  [::channel-state ::channel-state]
-  [::call-lock ::call-lock]
+  [::pool-state ::pool-state]
+  [::pool-lock ::pool-lock]
+  [::pool-condition ::pool-condition]
+  [::call-executor ::call-executor]
   [::eval-generator ::eval-generator]])
 (schema/register! ::ctx 'some?)
 (schema/register! ::registry 'some?)
@@ -179,13 +186,32 @@
   [:seon.eval/ok? :boolean]])
 (schema/register! ::replay-envelopes [:vector ::replay-envelope])
 
-(defn writer-session
-  "Build one host writer session over one retained physical connection.
+(def writer-pool-defaults
+  "Hardware-derived host writer-pool defaults.
 
-   The writer scopes database access to physical connections and releases
-   the shared indexes when the last one closes, so the host keeps ONE
-   standing channel (the connection is genuinely process-local state) and
-   serializes its synchronous round-trips — C1 measured ~2 ms per call."
+   W1's config-facts sweep will relocate these values into the
+   aero-to-database configuration pipeline. The member count mirrors the
+   writer executor's `cpu-workers` derivation because both processes share
+   the machine."
+  {::pool-size (max 1 (dec (.availableProcessors (Runtime/getRuntime))))
+   ::pool-wait-timeout-ms 1000
+   ::call-deadline-ms 120000
+   ::request-conflict-backoff-ms 10})
+
+(defn- initial-pool-state
+  []
+  {::closed? false
+   ::members {}
+   ::available []
+   ::opening 0})
+
+(defn writer-session
+  "Build one host writer session over a lazy retained connection pool.
+
+   Every member independently acquires the configured database and remains
+   retained until eviction or session close. One leased member serves one
+   round-trip at a time; other callers use other members up to the writer's
+   useful read parallelism instead of serializing behind one channel."
   {:malli/schema [:=> [:cat [:map [::writer-socket-path ::writer-socket-path]
                              [::database-name ::database-name]
                              [::backend {:optional true} ::backend]
@@ -193,50 +219,404 @@
                               ::database-path]]]
                   ::writer]}
   [{::keys [writer-socket-path database-name backend database-path]}]
-  (cond-> {::writer-socket-path writer-socket-path
-           ::database-name database-name
-           ::channel-state (atom nil)
-           ::call-lock (Object.)
-           ::eval-generator (atom nil)}
-    backend (assoc ::backend backend)
-    database-path (assoc ::database-path database-path)))
+  (let [pool-size (::pool-size writer-pool-defaults)
+        pool-lock (ReentrantLock.)]
+    (cond-> {::writer-socket-path writer-socket-path
+             ::database-name database-name
+             ::pool-state (atom (initial-pool-state))
+             ::pool-lock pool-lock
+             ::pool-condition (.newCondition pool-lock)
+             ::call-executor (Executors/newFixedThreadPool (int pool-size))
+             ::eval-generator (atom nil)}
+      backend (assoc ::backend backend)
+      database-path (assoc ::database-path database-path))))
 
-(defn close-session!
-  "Close the writer session's retained connection."
-  {:malli/schema [:=> [:cat ::writer] :nil]}
-  [{::keys [channel-state]}]
-  (when-let [channel @channel-state]
-    (reset! channel-state nil)
-    (try (.close ^java.nio.channels.SocketChannel channel)
+(defn- with-pool-lock
+  [{::keys [pool-lock]} f]
+  (.lock ^ReentrantLock pool-lock)
+  (try
+    (f)
+    (finally
+      (.unlock ^ReentrantLock pool-lock))))
+
+(defn- pool-snapshot
+  [{::keys [pool-state] :as writer}]
+  (with-pool-lock
+    writer
+    (fn []
+      (let [{::keys [closed? members available opening]} @pool-state]
+        {::closed? closed?
+         ::pool-size (::pool-size writer-pool-defaults)
+         ::live-members (count members)
+         ::available-members (count available)
+         ::in-flight-members (- (count members) (count available))
+         ::opening-members opening}))))
+
+(defn- pool-error
+  ([writer reason message]
+   (pool-error writer reason message {}))
+  ([writer reason message data]
+   {:seon/error
+    {:seon.error/message message
+     :seon.error/kind :agent
+     :seon.error/data (merge {::pool-reason reason
+                              ::pool (pool-snapshot writer)}
+                             data)}}))
+
+(defn- close-channel!
+  [channel]
+  (when channel
+    (try (.close ^SocketChannel channel)
          (catch Throwable _)))
   nil)
 
+(defn- member-present?
+  [state {::keys [member-id channel]}]
+  (identical? channel (get-in state [::members member-id ::channel])))
+
+(defn- release-member!
+  [{::keys [pool-state pool-condition] :as writer} member]
+  (let [retain?
+        (with-pool-lock
+          writer
+          (fn []
+            (let [state @pool-state]
+              (if (and (not (::closed? state))
+                       (member-present? state member))
+                (do (swap! pool-state update ::available conj
+                           (::member-id member))
+                    (.signal ^Condition pool-condition)
+                    true)
+                false))))]
+    (when-not retain?
+      (close-channel! (::channel member)))
+    nil))
+
+(defn- evict-member!
+  [{::keys [pool-state pool-condition] :as writer} member]
+  (with-pool-lock
+    writer
+    (fn []
+      (when (member-present? @pool-state member)
+        (swap! pool-state
+               (fn [state]
+                 (-> state
+                     (update ::members dissoc (::member-id member))
+                     (update ::available
+                             (fn [member-ids]
+                               (filterv #(not= (::member-id member) %)
+                                        member-ids))))))
+        (.signalAll ^Condition pool-condition))))
+  (close-channel! (::channel member))
+  nil)
+
+(declare protocol-error-value)
+
+(defn- handshake-request!
+  [channel request]
+  (uds/call! {::uds/channel channel ::uds/message request}))
+
+(defn- open-member!
+  [{::keys [writer-socket-path database-name backend database-path]
+    :as writer}]
+  ;; The host registers no listen interests today. If it does, the pool recipe
+  ;; requires pinning them to one designated member and re-registering them
+  ;; whenever that member is replaced.
+  (let [channel (atom nil)]
+    (try
+      (let [connected (uds/connect! writer-socket-path)
+            _ (reset! channel connected)
+            ensure-response
+            (when backend
+              (handshake-request!
+               connected
+               (protocol/ensure-database-request
+                (cond-> {::protocol/request-id (str (random-uuid))
+                         ::protocol/database-name database-name
+                         ::protocol/backend backend}
+                  database-path
+                  (assoc ::protocol/database-path database-path)))))
+            ensure-error (when (and ensure-response
+                                    (not (::protocol/success? ensure-response)))
+                           (protocol-error-value ensure-response))
+            resolve-response
+            (when-not ensure-error
+              (handshake-request!
+               connected
+               (protocol/resolve-head-request
+                {::protocol/request-id (str (random-uuid))
+                 ::protocol/database-name database-name})))
+            resolve-error (when (and resolve-response
+                                     (not (::protocol/success? resolve-response)))
+                            (protocol-error-value resolve-response))]
+        (if-let [error (or ensure-error resolve-error)]
+          (do (close-channel! connected) error)
+          {::member-id (random-uuid) ::channel connected}))
+      (catch Throwable throwable
+        (close-channel! @channel)
+        (if (::uds/eof (ex-data throwable))
+          (pool-error writer :writer-capacity
+                      "The database writer is at its connection capacity."
+                      {::protocol/request-id
+                       (::protocol/request-id (ex-data throwable))})
+          (pool-error writer :connect-failed
+                      "The host could not open a database writer connection."
+                      {::failure (str throwable)}))))))
+
+(defn- finish-opening!
+  [{::keys [pool-state pool-condition] :as writer} result]
+  (let [installed?
+        (with-pool-lock
+          writer
+          (fn []
+            (swap! pool-state update ::opening dec)
+            (let [closed? (::closed? @pool-state)]
+              (when (and (not closed?) (not (:seon/error result)))
+                (swap! pool-state assoc-in
+                       [::members (::member-id result)] result))
+              (.signalAll ^Condition pool-condition)
+              (and (not closed?) (not (:seon/error result))))))]
+    (cond
+      (:seon/error result) result
+      installed? result
+      :else (do (close-channel! (::channel result))
+                (pool-error writer :session-closed
+                            "The database writer session is closed.")))))
+
+(defn- acquire-member!
+  [{::keys [pool-state pool-condition] :as writer} wait-timeout-ms]
+  (let [deadline (+ (System/nanoTime)
+                    (.toNanos java.util.concurrent.TimeUnit/MILLISECONDS
+                              (long wait-timeout-ms)))
+        decision
+        (with-pool-lock
+          writer
+          (fn []
+            (loop []
+              (let [{::keys [closed? members available opening]} @pool-state
+                    remaining (- deadline (System/nanoTime))]
+                (cond
+                  closed?
+                  (pool-error writer :session-closed
+                              "The database writer session is closed.")
+
+                  (seq available)
+                  (let [member-id (peek available)
+                        member (get members member-id)]
+                    (swap! pool-state update ::available pop)
+                    member)
+
+                  (< (+ (count members) opening)
+                     (::pool-size writer-pool-defaults))
+                  (do (swap! pool-state update ::opening inc)
+                      ::open-member)
+
+                  (not (pos? remaining))
+                  (pool-error writer :pool-exhausted
+                              "Every database writer connection is busy."
+                              {::pool-wait-timeout-ms wait-timeout-ms})
+
+                  :else
+                  (let [interrupted?
+                        (try
+                          (.awaitNanos ^Condition pool-condition remaining)
+                          false
+                          (catch InterruptedException _ true))]
+                    (if interrupted?
+                      (do (.interrupt (Thread/currentThread))
+                          (pool-error writer :interrupted
+                                      "Waiting for a database writer connection was interrupted."))
+                      (recur))))))))]
+    (if (= ::open-member decision)
+      (finish-opening! writer (open-member! writer))
+      decision)))
+
+(defn- replace-member!
+  [writer]
+  (let [member (acquire-member!
+                writer (::pool-wait-timeout-ms writer-pool-defaults))]
+    (when-not (:seon/error member)
+      (release-member! writer member))
+    member))
+
+(defn close-session!
+  "Close every retained connection in the writer session."
+  {:malli/schema [:=> [:cat ::writer] :nil]}
+  [{::keys [pool-state pool-condition call-executor] :as writer}]
+  (let [members
+        (with-pool-lock
+          writer
+          (fn []
+            (let [members (vals (::members @pool-state))]
+              (swap! pool-state assoc
+                     ::closed? true ::members {} ::available [])
+              (.signalAll ^Condition pool-condition)
+              members)))]
+    (run! #(close-channel! (::channel %)) members)
+    (.shutdownNow ^ExecutorService call-executor))
+  nil)
+
+(defn- throwable-cause
+  [throwable]
+  (or (.getCause ^Throwable throwable) throwable))
+
+(defn- invoke-member!
+  [{::keys [call-executor] :as writer} member request deadline-ms]
+  (let [task (.submit ^ExecutorService call-executor
+                      ^Callable
+                      (fn []
+                        (uds/call! {::uds/channel (::channel member)
+                                    ::uds/message request})))
+        timeout ::deadline]
+    (try
+      (let [response (deref task (long deadline-ms) timeout)]
+        (if (= timeout response)
+          (do (evict-member! writer member)
+              {::call-outcome :deadline})
+          (do (release-member! writer member)
+              {::call-outcome :response ::response response})))
+      (catch Throwable throwable
+        (evict-member! writer member)
+        {::call-outcome :failure
+         ::failure (throwable-cause throwable)}))))
+
+(defn- call-attempt!
+  [writer request budget-ms]
+  (let [started (System/nanoTime)
+        wait-ms (min (long budget-ms)
+                     (long (::pool-wait-timeout-ms writer-pool-defaults)))
+        member (acquire-member! writer wait-ms)]
+    (if (:seon/error member)
+      {::call-outcome :error ::response member}
+      (let [spent-ms (.toMillis java.util.concurrent.TimeUnit/NANOSECONDS
+                                (- (System/nanoTime) started))
+            remaining (max 0 (- (long budget-ms) spent-ms))]
+        (if (zero? remaining)
+          (do (release-member! writer member)
+              {::call-outcome :deadline})
+          (invoke-member! writer member request remaining))))))
+
+(defn- active-request-conflict?
+  [response]
+  (and (false? (::protocol/success? response))
+       (= protocol/request-conflict-error (::protocol/error-kind response))
+       (true? (::protocol/running? response))))
+
+(defn- release-in-flight?
+  [response]
+  (= protocol/release-error
+     (get-in response [:seon/error :seon.error/data ::protocol/error-kind])))
+
+(defn- sleep-before-recovery-poll!
+  [remaining]
+  (let [backoff-ms
+        (min remaining
+             (long (::request-conflict-backoff-ms writer-pool-defaults)))]
+    (try
+      (Thread/sleep (long backoff-ms))
+      true
+      (catch InterruptedException _
+        (.interrupt (Thread/currentThread))
+        false))))
+
+(defn- recovery-write!
+  [writer request]
+  (let [budget-ms (long (::call-deadline-ms writer-pool-defaults))
+        deadline (+ (System/nanoTime)
+                    (.toNanos java.util.concurrent.TimeUnit/MILLISECONDS
+                              budget-ms))]
+    (loop []
+      (let [remaining (.toMillis java.util.concurrent.TimeUnit/NANOSECONDS
+                                 (max 0 (- deadline (System/nanoTime))))]
+        (if (zero? remaining)
+          (pool-error writer :request-conflict-timeout
+                      "The database writer is still settling the original write."
+                      {::protocol/request-id (::protocol/request-id request)
+                       ::protocol/error-kind protocol/request-conflict-error
+                       ::protocol/running? true})
+          (let [{::keys [call-outcome response failure]}
+                (call-attempt! writer request remaining)]
+            (case call-outcome
+              :response
+              (if (active-request-conflict? response)
+                (if (sleep-before-recovery-poll! remaining)
+                  (recur)
+                  (pool-error writer :interrupted
+                              "Database write recovery was interrupted."))
+                response)
+
+              :error
+              (if (release-in-flight? response)
+                (if (sleep-before-recovery-poll! remaining)
+                  (recur)
+                  (pool-error writer :interrupted
+                              "Database write recovery was interrupted."))
+                response)
+              :deadline
+              (pool-error writer :write-recovery-deadline
+                          "The database write recovery reached its deadline."
+                          {::protocol/request-id (::protocol/request-id request)})
+              :failure
+              (pool-error writer :write-recovery-failed
+                          "The database write recovery connection failed."
+                          {::protocol/request-id (::protocol/request-id request)
+                           ::failure (str failure)}))))))))
+
 (defn- writer-call!
-  "One serialized round-trip on the retained connection; reconnect once."
-  [{::keys [writer-socket-path channel-state call-lock]} request]
-  (locking call-lock
-    (let [call (fn []
-                 (let [channel (or @channel-state
-                                   (reset! channel-state
-                                           (uds/connect! writer-socket-path)))]
-                   (uds/call! {::uds/channel channel ::uds/message request})))]
-      (try
-        (call)
-        (catch Throwable _
-          (when-let [channel @channel-state]
-            (reset! channel-state nil)
-            (try (.close ^java.nio.channels.SocketChannel channel)
-                 (catch Throwable _)))
-          (call))))))
+  "Dispatch one bounded round-trip and reconnect a failed member once."
+  [writer request]
+  (let [write? (= protocol/transact-operation (::protocol/operation request))
+        deadline-ms (::call-deadline-ms writer-pool-defaults)
+        {::keys [call-outcome response failure]}
+        (call-attempt! writer request deadline-ms)]
+    (case call-outcome
+      :response response
+      :error response
+      :deadline
+      (if write?
+        (recovery-write! writer request)
+        (do (replace-member! writer)
+            (pool-error writer :call-deadline
+                        "The database writer call reached its deadline."
+                        {::protocol/request-id (::protocol/request-id request)})))
+      :failure
+      (let [{retry-outcome ::call-outcome
+             retry-response ::response
+             retry-failure ::failure}
+            (call-attempt! writer request deadline-ms)]
+        (case retry-outcome
+          :response
+          (if (and write? (active-request-conflict? retry-response))
+            (recovery-write! writer request)
+            retry-response)
+          :error
+          (if (and write? (release-in-flight? retry-response))
+            (recovery-write! writer request)
+            retry-response)
+          :deadline
+          (if write?
+            (recovery-write! writer request)
+            (do (replace-member! writer)
+                (pool-error writer :call-deadline
+                            "The database writer call reached its deadline."
+                            {::protocol/request-id
+                             (::protocol/request-id request)})))
+          :failure
+          (pool-error writer :connection-failed
+                      "The database writer connection failed after reconnecting."
+                      {::protocol/request-id (::protocol/request-id request)
+                       ::failure (str (or retry-failure failure))}))))))
 
 (defn- protocol-error-value
   [response]
-  {:seon/error
-   {:seon.error/message
-    (str "The database writer rejected the call: "
-         (or (::protocol/error response) (::protocol/error-kind response)))
-    :seon.error/kind :agent
-    :seon.error/data (select-keys response [::protocol/error-kind])}})
+  (if (:seon/error response)
+    response
+    {:seon/error
+     {:seon.error/message
+      (str "The database writer rejected the call: "
+           (or (::protocol/error response) (::protocol/error-kind response)))
+      :seon.error/kind :agent
+      :seon.error/data (select-keys response [::protocol/error-kind])}}))
 
 (defn- ensure-database!
   "Ensure the configured database on the writer; explicit config only.

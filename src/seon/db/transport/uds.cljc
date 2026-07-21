@@ -277,14 +277,24 @@
     (write-frame! output message)
     (loop []
       (let [response (read-frame input)]
-        (if (::protocol/event response)
+        (cond
+          (nil? response)
+          (throw
+           (ex-info "Database transport reached EOF before a response."
+                    {::eof true
+                     ::protocol/request-id request-id}))
+
+          (::protocol/event response)
           (recur)
-          (if (= request-id (::protocol/request-id response))
-            response
-            (throw
-             (ex-info "Database response does not match the request."
-                      {::protocol/request-id request-id
-                       ::protocol/response response}))))))))
+
+          (= request-id (::protocol/request-id response))
+          response
+
+          :else
+          (throw
+           (ex-info "Database response does not match the request."
+                    {::protocol/request-id request-id
+                     ::protocol/response response})))))))
 
 (defn- codec-workers
   "Create the bounded off-selector codec and admission executor."
