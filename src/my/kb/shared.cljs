@@ -81,7 +81,7 @@
      (if (and (map? result) (string? (:seon.error/message result)))
        result
        (->> result
-            (sort-by (fn [[at text]] [(.getTime at) text]))
+            (sort-by (fn [[at text]] [(inst-ms at) text]))
             (mapv second))))))
 
 (defn- format-instructions-block

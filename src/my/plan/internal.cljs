@@ -18,7 +18,8 @@
     [seon.log :as seon-log]
     [seon.repair.candidates :as cand]
     [seon.repl.internal :as repl-internal]
-    [seon.schema :as schema]))
+    [seon.schema :as schema]
+    [seon.time :as time]))
 
 (def rules
   "Datalog rules over the plan graph — `my.plan/rules` re-defs this value:
@@ -149,14 +150,14 @@
   [rows]
   (->> rows
        (filter #(ready-from-rows? rows (row-id %)))
-       (sort-by #(.getTime ^js (:my.plan/created-at %)))
+       (sort-by #(inst-ms (:my.plan/created-at %)))
        (mapv #(select-keys % [:my.plan/id :my.plan/title :my.plan/created-at]))))
 
 (defn active-steps-from-rows
   [rows]
   (->> rows
        (filter #(= :active (:my.plan/status %)))
-       (sort-by #(.getTime ^js (:my.plan/created-at %)))
+       (sort-by #(inst-ms (:my.plan/created-at %)))
        vec))
 
 (defn ancestor-chain-from-rows
@@ -203,7 +204,7 @@
   [rows]
   (->> rows
        (filter #(nil? (row-parent-id %)))
-       (sort-by #(.getTime ^js (:my.plan/created-at %)))
+       (sort-by #(inst-ms (:my.plan/created-at %)))
        (keep #(subtree-from-rows rows (row-id %)))
        vec))
 
@@ -211,7 +212,7 @@
   [rows]
   (->> rows
        (remove #(= :done (:my.plan/status %)))
-       (sort-by #(.getTime ^js (:my.plan/created-at %)))
+       (sort-by #(inst-ms (:my.plan/created-at %)))
        (mapv #(select-keys % [:my.plan/id :my.plan/title :my.plan/status
                               :my.plan/created-at :my.plan/description
                               :my.plan/message]))))
@@ -1046,8 +1047,7 @@
    the row carries no envelope data or it doesn't read back."
   [row]
   (when-let [s (:seon.eval/error-data row)]
-    (try (:seon.error/kind (edn/read-string s))
-         (catch :default _ nil))))
+    (:seon.error/kind (first (repl-internal/read-forms s)))))
 
 (defn wedge
   "The dominant live failure streak in ordered eval `rows`, or nil.
@@ -1213,11 +1213,11 @@
                  :my.plan/episode        (:my.plan/episode escalation)}
                 (merge env {:my.plan/consulted?     false
                             :my.plan/consult-reason :send-failed})))))))
-    (catch :default e
+    (catch #?(:clj Throwable :cljs :default) e
       (seon-log/error!
         {:seon.log/source ::maybe-consult
          :seon.log/message
-         (str "maybe-consult! failed: " (or (.-message e) (str e)))})
+         (str "maybe-consult! failed: " (or (ex-message e) (str e)))})
       {:my.plan/consulted? false :my.plan/consult-reason :send-failed})))
 
 ;; --- The WINDOWED plan-block render (`:plan` context section). ------------
@@ -1481,8 +1481,9 @@
         (->> candidate-rows
              (keep (fn [[id raw-provider]]
                      (let [override
-                           (db/decode-edn-value :seon.ai/agent-provider
-                                                raw-provider)
+                           (if (string? raw-provider)
+                             (edn/read-string raw-provider)
+                             raw-provider)
                            provider (if (= :inherit override)
                                       global-provider
                                       override)]
@@ -1643,7 +1644,9 @@
    clock). A relative \"3m ago\" string would change on every render and
    bust the stable-prefix cache for an unchanged block."
   [at]
-  (-> (.toISOString ^js at) (subs 0 16) (str/replace "T" " ")))
+  (-> (time/iso-string at)
+      (subs 0 16)
+      (str/replace "T" " ")))
 
 (defn anchor-section
   "The position-anchor lines for [[anchor]] map `a` — \"\" when nil.

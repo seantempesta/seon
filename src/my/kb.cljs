@@ -175,12 +175,15 @@
   [{::keys [claim source confidence]}]
   (let [[_ path line] (re-matches #"(.+):(\d+)" source)
         prov          (if path
-                        {::source-path path ::source-line (js/parseInt line 10)}
+                        {::source-path path
+                         ::source-line #?(:clj (Long/parseLong line 10)
+                                          :cljs (js/parseInt line 10))}
                         {::source-path source})
         row           (merge {:db/id       "finding"
                               ::claim      claim
                               ::confidence confidence
-                              ::verified-at (js/Date.)}
+                              ::verified-at #?(:clj (java.util.Date.)
+                                               :cljs (js/Date.))}
                             prov)
         {::db/keys [ok? tempids] :as env} (await (db/transact! {::db/tx-data [row]}))]
     (if ok?

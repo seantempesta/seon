@@ -820,7 +820,7 @@
               read-error (acquisition-error "step!" acquired)
               found-ids (into #{} (map ::id) (::rows acquired))
               missing (into [] (remove found-ids) target-ids)
-              created-at (js/Date.)
+              created-at #?(:clj (java.util.Date.) :cljs (js/Date.))
               env
               (when-not (or read-error (seq missing))
                 (await
@@ -901,7 +901,7 @@
                "one step with my.plan/step!; close one with my.plan/done!."))
 
         :else
-        (let [now     (js/Date.)
+        (let [now     #?(:clj (java.util.Date.) :cljs (js/Date.))
               preview (internal/compile-plan agent request {} now)
               error   (::internal/error preview)]
           (if error
@@ -1054,7 +1054,7 @@
                    ::db.id/transaction-builder
                    (generated-terminal-transaction-builder
                     database message-transaction root-id terminal-status
-                    (js/Date.))}))]
+                    #?(:clj (java.util.Date.) :cljs (js/Date.)))}))]
             (if (:seon.error/message allocation)
               (await
                (generated-terminal-race-result
@@ -1152,7 +1152,7 @@
                    (pr-str (:seon/error batch)))))))
 
       :else
-      (let [now (js/Date.)
+      (let [now #?(:clj (java.util.Date.) :cljs (js/Date.))
             completion
             (internal/namespace-completion
              program batch (::eval-rows acquired))
@@ -1304,7 +1304,8 @@
                  (db/transact!
                    (expected-write
                      acquired
-                     [{::id id ::status :done ::completed-at (js/Date.)}])))
+                     [{::id id ::status :done
+                       ::completed-at #?(:clj (java.util.Date.) :cljs (js/Date.))}])))
                (internal/write-result "done!" id)))))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} blocked!
@@ -1498,7 +1499,7 @@
             read-error
             (internal/check-doc-keys "reconcile!" nodes)
             (let [rows (::rows acquired)
-                  now      (js/Date.)
+                  now      #?(:clj (java.util.Date.) :cljs (js/Date.))
                   preview  (internal/compile-reconcile
                              rows "reconcile!" agent
                              nodes {} now)
@@ -1587,7 +1588,7 @@
       (if (:seon.error/message rows)
         (internal/fail (str "next: " (:seon.error/message rows)))
         (->> rows
-             (sort-by #(.getTime ^js (::created-at %)))
+             (sort-by #(inst-ms (::created-at %)))
              vec)))
     []))
 
@@ -1733,5 +1734,5 @@
           (internal/fail (str "list-open: " (:seon.error/message rows)))
           {::ok? true
            ::steps (->> rows
-                        (sort-by #(.getTime ^js (::created-at %)))
+                        (sort-by #(inst-ms (::created-at %)))
                         vec)})))))

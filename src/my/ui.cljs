@@ -174,7 +174,9 @@
      ;; human: a 70%-filled bar  ·  ai: \"Steps: 7/10 (70%)\""
   {:malli/schema [:=> [:cat ::progress-request] :seon.render/html-response]}
   [{::keys [label current total tone]}]
-  (let [pct (if (pos? total) (js/Math.round (* 100.0 (/ current total))) 0)]
+  (let [pct (if (pos? total)
+              (long (+ 0.5 (* 100.0 (/ current total))))
+              0)]
     {:seon.render/hiccup
      [:div {:class "flex flex-col gap-1"}
       [:div {:class "flex flex-row justify-between"}
