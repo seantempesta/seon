@@ -418,7 +418,7 @@ an explicit "when" — never chat-only.
 | q17 | fresh-boot config circularity: writer needs heap/frame/executor limits before the pod can commit facts | W1 step 1 (two-phase boot authority: aero-resolve pre-launch → launch envelope → reconcile → equality proof) | FIRST W1 step; everything else in W1 builds on it |
 | q24 | interrupted containment owners leak their UDS control sockets under `tmp/seon-containment/` (three stale entries found; the owner has `finally` cleanup but no orphan-sweep exists for crash paths) | WP-S supervision / q2 host-supervisor work | with WP-S — supervision owns process-artifact hygiene; harmless until then |
 | q23 | the fs/ns-form scan idiom (`source-files`, `sanitized-ns-form`) is now duplicated across THREE conformance tests (diffusion_fence, internal_require_boundary, internal_boundary) | small test-infra extraction into one shared test helper ns | next quiet W10 slot; pure test hygiene, zero production risk |
-| q22 | THREE semantically-identical committed-program acquisitions exist: pod admission (`admission.cljs:196`), sci host context (`context.clj:1491`, hard 4096-row sentinel — shares q21's scaling weakness), web value projection (`web/value.cljs:8`). Drift risk + duplicated mechanism | convergence unit: one shared paging recipe after q21's pod-side paging proves the shape | after q21 lands, before U12 scale (the host sentinel breaks at 4096 rows); found by q21 grounding falsifier 5 |
+| q22 | UNBOUNDED grouped acquisitions across FIVE+ owners (GREW 2026-07-22, live-drive-proven; issue `docs/seon/issues/unbounded-runtime-acquisitions-exceed-frame.md`): pod admission (PAGED — q21 done, the precedent), execution child program acquisition (`execution.cljs:718` — 422 KB, plus nil-subvec on frame error → "v must satisfy IVector"), namespaces ctx renderer (683 KB vs hardcoded 4 MiB), warnings ctx (550 KB), sci host context (`context.clj:1491`, 4096-row sentinel), web value projection. Two ctx owners also SWALLOW the top-level frame error into nil-data messages | convergence unit(s): extend q21's index-page+pull-many paging precedent + preserve top-level database errors before member access | HIGH after the W3 series — turns/context break at any small ceiling and the host sentinel breaks at 4096 rows before U12; audits in `research/live-*-defect-2026-07-22.md` |
 | q21 | the pod's boot-mandatory "Committed program acquisition" response is unbounded (>64 KiB) — a small legal frame ceiling faults the pod at boot; W1.5b's enforcement surfaced it honestly (correlated frame-too-large, pod core fault). Kin to q3's realize-before-bounding family | its acquisition owner (bounded/paged response) | before a small `maximum-frame-bytes` is a SUPPORTED operational configuration; until then document the practical floor; W1.5b live drive covers connection-cap at the default ceiling |
 
 Then **U10** (integration kill/restart tests with live agents) and
@@ -1002,19 +1002,24 @@ happened. Now take the next thing off the queue.
 - **Bonus live proof:** the orchestrator's own wrong-arg
   `seon.db/entity` call was caught by structural instrumentation with
   the full envelope — instrumentation demonstrably live on HEAD.
-- **LIVE AGENT DRIVE (Muse, 1 turn, 96 tokens) FOUND 3 REAL DEFECTS
-  ON HEAD** (evidence `tmp/orchestrator/drive-result.json`, agent
-  light-roses-smoke, turn va1uj4ncpg9u): (i) turn_error "v must
-  satisfy IVector" — turn closed :error with 0 evals; (ii) the
-  [namespaces] ctx block renders a :core-bug failure ("Namespace
-  selected member failed"); (iii) the [warnings] block fails
-  ("Warning acquisition failed"). Likely rename/extraction fallout
-  reaching agent-facing context — root-cause lane IN FLIGHT (logs
-  `tmp/orchestrator/live-defects-*`; authorized to fix if unambiguous
-  and prove with a clean drive). W3c1 fence + W3d1 authored-call live
-  proofs still pending — they need the sci host under supervision
-  (q2/WP-S) or a test-driven session; writer-gate socket coverage
-  remains their proof meanwhile.
+- **LIVE DRIVE FINDINGS RECLASSIFIED (root-cause lane, `dd3d218e`):**
+  the drive ran DURING the 64 KiB window, and its three failures are
+  ONE pre-existing class (July 16 vintage, NOT tonight's renames —
+  proven by re-rendering the historical database value): unbounded
+  grouped acquisitions the 4 MiB ceiling always hid (execution child
+  program 422 KB with nil-subvec on the frame error; namespaces ctx
+  683 KB; warnings ctx 550 KB) plus two error-swallowing sites. q22
+  GREW to own the class (see its row); audits persisted as
+  `research/live-*-defect-2026-07-22.md` + the open issue.
+- **CLEAN DRIVE AT DEFAULT CEILING: PASSED** (`drive2-result.json`):
+  the agent resumed its ORIGINAL plan from the errored turn (plan
+  persistence proven), completed the celsius exercise across 14 turns
+  / 52 evals, zero turn errors, no render failures — including the
+  deliberate wrong-arg call rejected structurally. Agent loop, plans,
+  eval, instrumentation, and messaging all healthy on HEAD.
+  W3c1 fence + W3d1 authored-call live proofs still pending — they
+  need the sci host under supervision (q2/WP-S) or a test-driven
+  session; writer-gate socket coverage remains their proof meanwhile.
 - Note: cluster config still selects Muse as provider — fine for tiny
   drives; larger drives should route DeepSeek per the worker ruling.
 
