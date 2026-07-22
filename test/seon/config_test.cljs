@@ -519,10 +519,23 @@
          (first (db/malli->datahike-schema [:seon.config/skills-dir])))
       "the optional skill corpus input stores one ordinary string")
   (is (= {:db/ident :seon.config/model-variants
-          :db/valueType :db.type/string
-          :db/cardinality :db.cardinality/one}
+          :db/valueType :db.type/ref
+          :db/cardinality :db.cardinality/many
+          :db/isComponent true}
          (first (db/malli->datahike-schema [:seon.config/model-variants])))
-      "named model maps use the existing cardinality-one EDN slot bridge"))
+      "named models are component children of the config singleton")
+  (is (= {:db/ident :seon.config/model-variant
+          :db/valueType :db.type/keyword
+          :db/cardinality :db.cardinality/one
+          :db/unique :db.unique/identity}
+         (first (db/malli->datahike-schema [:seon.config/model-variant])))
+      "each model variant has one native keyword identity")
+  (doseq [attribute (vals resolve/repair-class-attributes)]
+    (is (= {:db/ident attribute
+            :db/valueType :db.type/boolean
+            :db/cardinality :db.cardinality/one}
+           (first (db/malli->datahike-schema [attribute])))
+        "each repair switch is one native boolean fact")))
 
 (deftest config-absent-is-identity
   (testing "the {} manifest leaves the route seed untouched"
@@ -814,6 +827,18 @@
         configuration (config/resolve-config-singleton manifest)
         selected (get (config/model-variants configuration) :planning)
         resolved (config/resolve-agent-context "planner" selected configuration)]
+    (is (= [{:seon.config/model-variant :planning
+             :seon.ai/agent-provider :openai-compat
+             :seon.config/repl-mode :batch
+             :seon.ai/agent-model "kimi-k3"
+             :seon.ai/agent-max-tokens 16384
+             :seon.ai/agent-completion-limit-field :max-completion-tokens
+             :seon.ai/agent-timeout-ms 180000
+             :seon.ai/agent-attempt-timeout-ms 240000
+             :seon.ai/agent-base-url "https://api.moonshot.ai/v1"
+             :seon.ai/agent-api-key-env "MOONSHOT_API_KEY"}]
+           (:seon.config/model-variants configuration))
+        "resolution emits identified component children")
     (is (= {:planning planning} (config/model-variants configuration)))
     (is (= {} (config/model-variants
                (config/resolve-config-singleton {}))))
@@ -1241,7 +1266,10 @@
       (is (= 16        (:seon.config/reactive-settle-ms s)))
       (is (= 300       (:seon.config/reactive-structural-settle-ms s)))
       (is (= 500       (:seon.config/reactive-max-latency-ms s)))
-      (is (= {}        (:seon.config.repair/classes s)))
+      (is (= {}        (config/repair-classes s)))
+      (is (not-any? #(contains? s %)
+                    (vals resolve/repair-class-attributes))
+          "absent repair switches remain absent native facts")
       (is (= []        (:seon.agent.web/allowed-domains s)))
       (is (not (contains? s :seon.config/current-ns))
           "namespace render selection belongs to the namespaces block")
@@ -1303,16 +1331,66 @@
   (let [singleton (config/resolve-config-singleton
                    {:seon.config/skills-dir "seon-skills"
                     :seon.config/namespaces
-                    {:seon.config/always '[my.kb seon.agent.message]}})
+                    {:seon.config/always '[my.kb seon.agent.message]}
+                    :seon.config/repair
+                    {:seon.config.repair/classes
+                     {:seon.repl.parse.repair/undeclared-var false}}
+                    :seon.config/model-variants
+                    {:planning {:seon.ai/agent-model "planner"}}})
         native-values (select-keys singleton
                                    [:seon.config/id
                                     :seon.config/always
-                                    :seon.config/skills-dir])]
+                                    :seon.config/skills-dir
+                                    :seon.config.repair.class/undeclared-var?
+                                    :seon.config/model-variants])]
     (is (= native-values
            (first (db/encode-edn-slot-values [native-values]))))
     (is (= #{'my.kb 'seon.agent.message}
            (:seon.config/always singleton)))
-    (is (= "seon-skills" (:seon.config/skills-dir singleton)))))
+    (is (= "seon-skills" (:seon.config/skills-dir singleton)))
+    (is (false? (:seon.config.repair.class/undeclared-var? singleton)))
+    (is (= {:planning {:seon.ai/agent-model "planner"}}
+           (config/model-variants singleton)))))
+
+(deftest pulled-model-variant-components-decode-to-the-consumer-map
+  (let [pulled {:seon.config/id "cluster"
+                :seon.config/model-variants
+                [{:db/id 42
+                  :seon.config/model-variant :planning
+                  :seon.ai/agent-model "planner"}
+                 {:db/id 43
+                  :seon.config/model-variant :muse
+                  :seon.ai/agent-thinking "minimal"}]}
+        decoded (db/decode-edn-values pulled)]
+    (is (= {:planning {:seon.ai/agent-model "planner"}
+            :muse {:seon.ai/agent-thinking "minimal"}}
+           (config/model-variants decoded))
+        "the authority's pulled component vector becomes the consumer map")))
+
+(deftest reconcile-replaces-model-variant-components-exactly
+  (let [identity [:seon.config/id config/cluster-config-id]
+        installed {:seon.config/model-variants
+                   {:db/valueType :db.type/ref
+                    :db/cardinality :db.cardinality/many
+                    :db/isComponent true}}
+        current {:seon.config/id config/cluster-config-id
+                 :seon.config/model-variants
+                 [{:db/id 42 :seon.config/model-variant :planning
+                   :seon.ai/agent-model "old"}
+                  {:db/id 43 :seon.config/model-variant :muse
+                   :seon.ai/agent-model "muse"}]}
+        desired {:seon.config/id config/cluster-config-id
+                 :seon.config/model-variants
+                 [{:seon.config/model-variant :planning
+                   :seon.ai/agent-model "new"}
+                  {:seon.config/model-variant :execution
+                   :seon.ai/agent-model "fast"}]}
+        tx-data (#'state/entity-exact-tx
+                 {} {} installed identity desired current)]
+    (is (= [[:db.fn/retractAttribute identity :seon.config/model-variants]
+            desired]
+           tx-data)
+        "one reconcile retracts removed children before adding the exact tree")))
 
 (deftest pulled-cardinality-many-set-attrs-decode-to-their-registered-shape
   ;; Datahike materializes cardinality-many values as VECTORS on pull/entity.

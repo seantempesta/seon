@@ -55,9 +55,8 @@
 ;;; the manifest section specs below AND the `:seon.config` singleton entity
 ;;; schema (config-db-migration 2026-07-10): register once, reference
 ;;; everywhere. Enum/int/boolean/string scalars store natively as singleton
-;;; datoms; the collection knobs are registered with the singleton block (they
-;;; ride the mixed-`:or` EDN-slot bridge, so their datom shape differs from
-;;; their manifest-section shape).
+;;; datoms; collection knobs whose database shape differs from their manifest
+;;; declaration are registered with the singleton block.
 
 ;; Shared positive-int cap shape — every render/eval/timeout cap knob
 ;; references it (register-once, no inline duplication).
@@ -113,6 +112,18 @@
   [:enum :off :safe-syntax :symbols :aggressive])
 (schema/register! :seon.config.repair/max-fixes-per-form :seon.config/cap)
 (schema/register! :seon.config.repair/budget-ms          :seon.config/cap)
+
+(def repair-class-attributes
+  "Manifest repair classes mapped to their native singleton attributes."
+  {:seon.repl.parse.repair/delimiters
+   :seon.config.repair.class/delimiters?
+   :seon.repl.parse.repair/def-vs-defn
+   :seon.config.repair.class/def-vs-defn?
+   :seon.repl.parse.repair/undeclared-var
+   :seon.config.repair.class/undeclared-var?})
+
+(doseq [attribute (vals repair-class-attributes)]
+  (schema/register! attribute :boolean))
 ;; Multi-agent dials (watchdog staleness, schedule-breaker N + window).
 (schema/register! :seon.config.watchdog/stale-ms    :seon.config/cap)
 (schema/register! :seon.config.breaker/crash-count  :seon.config/cap)
@@ -394,10 +405,15 @@
   [:vector {:max 1} :seon.config/ai-row])
 
 (schema/register! :seon.config/model-variant
-                  [:and :keyword [:not= :inherit]])
+                  [:and {:seon.db/identity true} :keyword [:not= :inherit]])
 (schema/register! :seon.config/model-variants-spec
                   [:map-of :seon.config/model-variant
                    agent-model-config-schema])
+
+(schema/register! :seon.config/model-variant-entity
+  (into [:map {:seon.db/entity true}
+         [:seon.config/model-variant :seon.config/model-variant]]
+        agent-model-config-entries))
 
 (schema/register! :seon.config/agent-context
   [:or
@@ -470,12 +486,17 @@
 ;;; `{class-kw boolean}` map COMBINED with the class registry in
 ;;; `seon.repl.parse.repair/class-levels` (enablement is computed, never a call-site
 ;;; list). `:aggressive` is an enum slot only — not implemented. `classes`
-;;; stays a plain map HERE (the manifest shape); its DATOM shape is the
-;;; mixed-`:or` EDN-slot registration in the singleton block below.
+;;; stays a plain map HERE (the manifest shape); resolution projects its three
+;;; closed entries onto native optional boolean attributes on the singleton.
+(schema/register! :seon.config/repair-classes-spec
+  (into [:map {:closed true}]
+        (map (fn [class] [class {:optional true} :boolean]))
+        (keys repair-class-attributes)))
+
 (schema/register! :seon.config/repair
-  [:map
+  [:map {:closed true}
    [:seon.config.repair/level              {:optional true} :seon.config.repair/level]
-   [:seon.config.repair/classes            {:optional true} [:map-of :keyword :boolean]]
+   [:seon.config.repair/classes            {:optional true} :seon.config/repair-classes-spec]
    [:seon.config.repair/max-fixes-per-form {:optional true} :seon.config.repair/max-fixes-per-form]
    [:seon.config.repair/budget-ms          {:optional true} :seon.config.repair/budget-ms]])
 
@@ -547,9 +568,7 @@
 ;;; at BOOT and TRANSACTED into the db (this singleton); from then on EVERY
 ;;; runtime read begins with one ordinary singleton row acquired by the owning
 ;;; database operation. Each knob is its OWN registered attr — a real type is the knob's
-;;; contract, NEVER an EDN-blob dump of the whole config. The heterogeneous
-;;; heterogeneous collection knobs such as `:seon.config.repair/classes` ride
-;;; the established mixed-`:or` EDN-slot bridge. The homogeneous
+;;; contract, NEVER an EDN-blob dump of the whole config. The homogeneous
 ;;; `:seon.config/always` and web allowlist attrs use native cardinality-many
 ;;; storage; exact config reconciliation retracts removed values before asserting
 ;;; the desired set. The
@@ -567,8 +586,8 @@
 ;;; section specs above (the LEAF-attr block before `:seon.config/render`) —
 ;;; the singleton entity schema below references those registrations. Only
 ;;; the knobs whose DATOM shape differs from their manifest shape live here.
-;;; Heterogeneous collections ride the mixed-`:or` EDN-slot bridge; homogeneous
-;;; collections use native cardinality-many values.
+;;; Homogeneous collections use native cardinality-many values. Entity-shaped
+;;; configuration uses explicit component refs.
 ;; The always-on FULL-source ns render list — the resolved symbol set
 ;; (`:seon.config/namespaces` `:always`). Native cardinality-many symbols.
 (schema/register! :seon.config/always
@@ -577,8 +596,6 @@
     :error/message
     "The always-source policy must contain symbols; omit its manifest declaration to use the shipped policy."}
    :symbol])
-;; The per-class repair kill-switch map `{class-kw boolean}`. EDN-slot bridged.
-(schema/register! :seon.config.repair/classes [:or [:map-of :keyword :boolean] :nil])
 ;; The web allowlist hosts (meaningful only under `:allowlist`). This established
 ;; cardinality-many string attribute is already installed in durable databases.
 (schema/register! :seon.agent.web/allowed-domains [:vector :string])
@@ -600,10 +617,10 @@
 ;; EDN-slot bridged (mixed `:or`, the ::home-requires pattern).
 (schema/register! :seon.config/context-profiles
   [:or [:map-of :keyword [:vector :map]] :nil])
-;; Named launch-time model configurations. The selected map is copied onto the
-;; new agent entity; the selector itself is not persisted on that agent.
+;; Named launch-time model configurations. Each child is identified by its
+;; variant keyword and owned by the singleton through this component ref.
 (schema/register! :seon.config/model-variants
-  [:or :seon.config/model-variants-spec :nil])
+  [:vector {:seon.db/component true} :seon.db/ref])
 
 ;; The singleton entity schema — every knob optional (a `{}` manifest seeds the
 ;; resolved defaults; `:seon.config/id` is the only required key).
@@ -657,7 +674,12 @@
    [:seon.config.repair/level              {:optional true} :seon.config.repair/level]
    [:seon.config.repair/max-fixes-per-form {:optional true} :seon.config/cap]
    [:seon.config.repair/budget-ms          {:optional true} :seon.config/cap]
-   [:seon.config.repair/classes            {:optional true} :seon.config.repair/classes]
+   [:seon.config.repair.class/delimiters?
+    {:optional true} :seon.config.repair.class/delimiters?]
+   [:seon.config.repair.class/def-vs-defn?
+    {:optional true} :seon.config.repair.class/def-vs-defn?]
+   [:seon.config.repair.class/undeclared-var?
+    {:optional true} :seon.config.repair.class/undeclared-var?]
    ;; LEAF types for the web knobs — `seon.agent.web` (which registers the
    ;; authoritative `:seon.agent.web/policy`/`search-backend`/`search-model`
    ;; enums) loads AFTER this leaf ns, so a schema-keyword ref here would break
@@ -1269,7 +1291,6 @@
                           #{:off :safe-syntax :symbols :aggressive} :symbols)
              :seon.config.repair/max-fixes-per-form (get rep :seon.config.repair/max-fixes-per-form 1)
              :seon.config.repair/budget-ms          (get rep :seon.config.repair/budget-ms 50)
-             :seon.config.repair/classes            (get rep :seon.config.repair/classes {})
              :seon.agent.web/policy
              (coerce-enum (get web :seon.agent.web/policy :public-only)
                           #{:open :public-only :allowlist} :public-only)
@@ -1323,8 +1344,14 @@
              (:seon.config.model-transport/endpoint-cap transport))
       (contains? manifest :seon.config/context-profiles)
       (assoc :seon.config/context-profiles (:seon.config/context-profiles manifest))
-      (contains? manifest :seon.config/model-variants)
-      (assoc :seon.config/model-variants (:seon.config/model-variants manifest))
+      (seq (:seon.config/model-variants manifest))
+      (assoc :seon.config/model-variants
+             (into []
+                   (map (fn [[variant configuration]]
+                          (assoc configuration
+                                 :seon.config/model-variant variant)))
+                   (sort-by (comp str key)
+                            (:seon.config/model-variants manifest))))
       (contains? manifest :seon.config/skills-dir)
       (assoc :seon.config/skills-dir (:seon.config/skills-dir manifest))
       (contains? manifest :seon.config/agent-context)
@@ -1333,7 +1360,13 @@
       (assoc :seon.config/root-context (:seon.config/root-context manifest))
 
       true
-      (merge (resolve-operational-values manifest hardware)))))
+      (merge (into {}
+                   (keep (fn [[class enabled?]]
+                           (when-let [attribute
+                                      (get repair-class-attributes class)]
+                             [attribute enabled?])))
+                   (:seon.config.repair/classes rep))
+             (resolve-operational-values manifest hardware)))))
 
 (defn execution-host-respawn-backoff-ms
   "The demand-triggered host reconcile backoff from one resolved singleton."

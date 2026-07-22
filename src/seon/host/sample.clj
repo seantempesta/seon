@@ -1,7 +1,6 @@
 (ns seon.host.sample
   "Serve retained value sampling for one JVM host session."
-  (:require [clojure.edn :as edn]
-            [seon.db.protocol :as db.protocol]
+  (:require [seon.db.protocol :as db.protocol]
             [seon.host.context :as context]
             [seon.host.session :as session]
             [seon.render.value :as render.value]
@@ -210,7 +209,8 @@
 
 (def ^:private sampling-policy-query
   '[:find [?path-segments ?path-bytes ?realized ?depth ?string ?shape ?items
-           ?database-edn-cap ?repair-level ?repair-classes ?repair-max-fixes
+           ?database-edn-cap ?repair-level ?repair-delimiters?
+           ?repair-def-vs-defn? ?repair-undeclared-var? ?repair-max-fixes
            ?repair-budget-ms]
     :in $ ?id
     :where
@@ -225,7 +225,12 @@
     [(get-else $ ?config :seon.config.render/database-edn-cap 16384)
      ?database-edn-cap]
     [(get-else $ ?config :seon.config.repair/level :symbols) ?repair-level]
-    [(get-else $ ?config :seon.config.repair/classes "{}") ?repair-classes]
+    [(get-else $ ?config :seon.config.repair.class/delimiters? true)
+     ?repair-delimiters?]
+    [(get-else $ ?config :seon.config.repair.class/def-vs-defn? true)
+     ?repair-def-vs-defn?]
+    [(get-else $ ?config :seon.config.repair.class/undeclared-var? true)
+     ?repair-undeclared-var?]
     [(get-else $ ?config :seon.config.repair/max-fixes-per-form 1)
      ?repair-max-fixes]
     [(get-else $ ?config :seon.config.repair/budget-ms 50) ?repair-budget-ms]])
@@ -236,7 +241,7 @@
   [writer database]
   (let [row (context/query-writer-at! writer database
                                       sampling-policy-query ["cluster"])
-        policy (when (and (vector? row) (= 12 (count row)))
+        policy (when (and (vector? row) (= 14 (count row)))
                  (zipmap
                   [:seon.config.render/value-max-path-segments
                    :seon.config.render/value-max-path-bytes
@@ -247,27 +252,29 @@
                    :seon.render.value/page-size
                    :seon.config.render/database-edn-cap
                    :seon.config.repair/level
-                   :seon.config.repair/classes
+                   :seon.config.repair.class/delimiters?
+                   :seon.config.repair.class/def-vs-defn?
+                   :seon.config.repair.class/undeclared-var?
                    :seon.config.repair/max-fixes-per-form
                    :seon.config.repair/budget-ms]
                   row))
-        policy
-        (if (string? (:seon.config.repair/classes policy))
-          (try
-            (update policy :seon.config.repair/classes edn/read-string)
-            (catch Throwable _ policy))
-          policy)
         sampling-limits
         (apply dissoc policy
                [:seon.config.render/database-edn-cap
                 :seon.config.repair/level
-                :seon.config.repair/classes
+                :seon.config.repair.class/delimiters?
+                :seon.config.repair.class/def-vs-defn?
+                :seon.config.repair.class/undeclared-var?
                 :seon.config.repair/max-fixes-per-form
                 :seon.config.repair/budget-ms])]
     (if (and (pos-int? (:seon.config.render/database-edn-cap policy))
              (contains? #{:off :safe-syntax :symbols :aggressive}
                         (:seon.config.repair/level policy))
-             (map? (:seon.config.repair/classes policy))
+             (every? boolean?
+                     ((juxt :seon.config.repair.class/delimiters?
+                            :seon.config.repair.class/def-vs-defn?
+                            :seon.config.repair.class/undeclared-var?)
+                      policy))
              (pos-int? (:seon.config.repair/max-fixes-per-form policy))
              (pos-int? (:seon.config.repair/budget-ms policy))
              (render.value/effective-limits-within? sampling-limits

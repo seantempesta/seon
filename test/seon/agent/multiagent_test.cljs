@@ -330,13 +330,12 @@
                             :seon.ai/agent-timeout-ms 180000
                             :seon.ai/agent-base-url "https://api.moonshot.ai/v1"
                             :seon.ai/agent-api-key-env "MOONSHOT_API_KEY"}
-          configured-singleton
-          (assoc configuration
-                 :seon.config/model-variants {:planning configured-model})
           stored-configured-singleton
           (assoc stored-configuration
                  :seon.config/model-variants
-                 (pr-str {:planning configured-model}))]
+                 [(assoc configured-model
+                         :db/id 901
+                         :seon.config/model-variant :planning)])]
       (set! db/db
             (fn
               ([] (js/Promise.resolve database))
@@ -376,8 +375,8 @@
                       [:seon.config/id config/cluster-config-id]]
                      (::db/refs @pull-request)))
               (is (= 4096 (::db/max-results @pull-request)))
-              (is (= configured-singleton @received-configuration)
-                  "creation receives the decoded ordinary singleton")
+              (is (= stored-configured-singleton @received-configuration)
+                  "creation receives the decoded pulled singleton")
               (is (= configured-model @received-override)
                   "the selected variant is the birth-context override")
               (is (identical? database (::db/db @transaction)))
@@ -560,9 +559,10 @@
                  (js/Promise.resolve
                   [(assoc stored-configuration
                           :seon.config/model-variants
-                          (pr-str {:planning
-                                   {:seon.ai/agent-provider :openai-compat
-                                    :seon.ai/agent-model model}}))])))
+                          [{:db/id (+ 900 @db-calls)
+                            :seon.config/model-variant :planning
+                            :seon.ai/agent-provider :openai-compat
+                            :seon.ai/agent-model model}])])))
               ([_ _] (js/Promise.reject (js/Error. "unexpected pull-many arity")))
               ([_ _ _] (js/Promise.reject (js/Error. "unexpected pull-many arity")))))
       (set! ctx/initial-agent-context

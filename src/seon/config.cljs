@@ -839,12 +839,16 @@
 (defn repair-classes
   "The per-class repair kill-switch map `{class-kw boolean}`.
 
-   Manifest `:seon.config.repair/classes`; default `{}` (the level alone
-   decides). Combined with `seon.repl.parse.repair/class-levels` by
-   `seon.repl.parse.repair/class-enabled?`."
+   The manifest map is stored as three optional native boolean attributes;
+   absence leaves that class enabled. This projection preserves the parser's
+   class-keyed policy shape without storing an opaque aggregate."
   {:malli/schema [:=> [:cat :seon.config/singleton] :map]}
   [configuration]
-  (get configuration :seon.config.repair/classes {}))
+  (into {}
+        (keep (fn [[class attribute]]
+                (when (contains? configuration attribute)
+                  [class (get configuration attribute)])))
+        resolve/repair-class-attributes))
 
 (defn repair-max-fixes
   "Max chained symbol fixes per form.
@@ -1141,4 +1145,8 @@
   {:malli/schema [:=> [:cat :seon.config/singleton]
                   :seon.config/model-variants-spec]}
   [configuration]
-  (or (:seon.config/model-variants configuration) {}))
+  (into {}
+        (map (fn [variant]
+               [(:seon.config/model-variant variant)
+                (dissoc variant :db/id :seon.config/model-variant)]))
+        (or (:seon.config/model-variants configuration) [])))

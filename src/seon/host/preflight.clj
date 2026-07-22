@@ -4,6 +4,7 @@
             [sci.core :as sci]
             [sci.ctx-store]
             [sci.impl.analyzer :as analyzer]
+            [seon.config.resolve :as config.resolve]
             [seon.error.sci :as error.sci]
             [seon.repl.parse.repair :as repair]))
 
@@ -22,8 +23,11 @@
   (let [level (:seon.config.repair/level configuration)]
     {:seon.config.repair/level
      (if (contains? repair-levels level) level :symbols)
-     :seon.config.repair/classes
-     (or (:seon.config.repair/classes configuration) {})
+     :seon.repl.parse.repair/classes
+     (into {}
+           (map (fn [[class attribute]]
+                  [class (get configuration attribute true)]))
+           config.resolve/repair-class-attributes)
      :seon.config.repair/max-fixes-per-form
      (or (:seon.config.repair/max-fixes-per-form configuration) 1)
      :seon.config.repair/budget-ms
@@ -33,7 +37,7 @@
   [policy class]
   (repair/class-enabled?
    {:seon.repl.parse.repair/level (:seon.config.repair/level policy)
-    :seon.repl.parse.repair/classes (:seon.config.repair/classes policy)
+    :seon.repl.parse.repair/classes (:seon.repl.parse.repair/classes policy)
     :seon.repl.parse.repair/class class}))
 
 (defn- namespace-object!

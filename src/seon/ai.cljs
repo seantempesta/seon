@@ -752,7 +752,7 @@
                        attempt-timeout-ms))))
         primary (provider-resolution agent-row)
         fallback-variant (agent-row-fallback-variant agent-row)
-        fallback-row (get (:seon.config/model-variants config-row)
+        fallback-row (get (config/model-variants config-row)
                           fallback-variant)]
     (cond-> primary
       (and fallback-variant (map? fallback-row))

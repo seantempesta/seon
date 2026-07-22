@@ -339,6 +339,32 @@
     (is (= :config-row
            (get-in resolution [::ai/provenance ::ai/max-tokens])))))
 
+(deftest declared-fallback-variant-resolves-from-pulled-component-children
+  (let [resolution
+        (ai/resolved-config-from-rows
+         {::ai/provider :deepseek
+          ::ai/model "primary-model"
+          :seon.config/model-variants
+          [{:seon.config/model-variant :planning
+            ::ai/agent-provider :openai-compat
+            ::ai/agent-model "fallback-model"
+            ::ai/agent-base-url "https://fallback.example/v1"
+            ::ai/agent-api-key-env "FALLBACK_API_KEY"}]}
+         {::ai/agent-fallback-variant :planning})
+        fallback (::ai/fallback-config-resolution resolution)
+        fallback-config (::ai/resolved-config fallback)]
+    (is (= :planning (::ai/fallback-variant resolution)))
+    (is (= [:openai-compat
+           "fallback-model"
+           "https://fallback.example/v1"
+           "FALLBACK_API_KEY"]
+           (mapv #(get fallback-config %)
+                 [::ai/provider ::ai/model ::ai/base-url ::ai/api-key-env]))
+        "the decoded accessor preserves a declared fallback from the pulled child vector")
+    (doseq [attribute [::ai/provider ::ai/model ::ai/base-url ::ai/api-key-env]]
+      (is (= :agent-override (get-in fallback [::ai/provenance attribute]))
+          (str attribute " remains a variant override")))))
+
 (deftest resolution-carries-the-attempt-cap-once-at-acquisition
   ;; I6 (frozen-turn-inputs): the per-attempt wall-clock cap is resolved by
   ;; the builder — agent override, else the SEON_LLM_ATTEMPT_TIMEOUT_MS

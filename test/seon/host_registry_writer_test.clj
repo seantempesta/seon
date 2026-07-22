@@ -338,8 +338,12 @@
     :seon.schema/form ":seon.config/cap"}
    {:seon.schema/key :seon.config.repair/level
     :seon.schema/form "[:enum :off :safe-syntax :symbols :aggressive]"}
-   {:seon.schema/key :seon.config.repair/classes
-    :seon.schema/form "[:or [:map-of :keyword :boolean] :nil]"}
+   {:seon.schema/key :seon.config.repair.class/delimiters?
+    :seon.schema/form ":boolean"}
+   {:seon.schema/key :seon.config.repair.class/def-vs-defn?
+    :seon.schema/form ":boolean"}
+   {:seon.schema/key :seon.config.repair.class/undeclared-var?
+    :seon.schema/form ":boolean"}
    {:seon.schema/key :seon.config.repair/max-fixes-per-form
     :seon.schema/form ":seon.config/cap"}
    {:seon.schema/key :seon.config.repair/budget-ms
@@ -355,7 +359,6 @@
    :seon.config.render/value-shape-sample 8
    :seon.config.render/value-max-items 12
    :seon.config.repair/level :symbols
-   :seon.config.repair/classes "{}"
    :seon.config.repair/max-fixes-per-form 1
    :seon.config.repair/budget-ms 50})
 

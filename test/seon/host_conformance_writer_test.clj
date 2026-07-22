@@ -87,7 +87,8 @@
       (let [query-form (::protocol/query-form request)
             result (cond
                      (some #{:seon.config/id} (flatten (vec query-form)))
-                     [32 4096 1024 3 80 2 12 16384 :symbols "{}" 1 50]
+                     [32 4096 1024 3 80 2 12 16384 :symbols
+                      true true true 1 50]
 
                      (= query-form db.id/generator-policy-query)
                      [[:seon.eval/id :seon.db.id.generator/compact]]
@@ -300,11 +301,12 @@
         acquire (var-get #'host.sample/acquire-sampling-policy!)
         invalid [nil
                  [32 4096 1024 3 80 2 12]
-                 [32 4096 1024 3 80 2 12 16384 :symbols "{}" 1]
-                 [32 4096 1024 3 80 2 12 "16384" :symbols "{}" 1 50]
-                 [32 4096 1024 3 80 2 12 16384 :unknown "{}" 1 50]
-                 [[32 4096 1024 3 80 2 12 16384 :symbols "{}" 1 50]
-                  [32 4096 1024 3 80 2 12 16384 :symbols "{}" 1 50]]
+                 [32 4096 1024 3 80 2 12 16384 :symbols true true true 1]
+                 [32 4096 1024 3 80 2 12 "16384" :symbols true true true 1 50]
+                 [32 4096 1024 3 80 2 12 16384 :unknown true true true 1 50]
+                 [32 4096 1024 3 80 2 12 16384 :symbols :yes true true 1 50]
+                 [[32 4096 1024 3 80 2 12 16384 :symbols true true true 1 50]
+                  [32 4096 1024 3 80 2 12 16384 :symbols true true true 1 50]]
                  {:seon/error {:seon.error/kind :core-bug}}]]
     (doseq [response invalid]
       (with-redefs-fn
@@ -319,7 +321,30 @@
             (catch clojure.lang.ExceptionInfo error
               (is (= :core-bug (:seon.error/kind (ex-data error)))))))))
     (is (= (repeat (count invalid) [database ["cluster"]]) @seen)
-        "every refusal queries the exact invocation database before eval")))
+        "every refusal queries the exact invocation database before eval")
+    (let [row [32 4096 1024 3 80 2 12 16384 :symbols false true false 2 75]]
+      (with-redefs-fn
+        {#'context/query-writer-at!
+         (fn [_ passed-database _ arguments]
+           (is (= database passed-database))
+           (is (= ["cluster"] arguments))
+           row)}
+        (fn []
+          (is (= {:seon.config.render/value-max-path-segments 32
+                  :seon.config.render/value-max-path-bytes 4096
+                  :seon.config.render/value-max-realized-items 1024
+                  :seon.config.render/value-max-depth 3
+                  :seon.config.render/value-max-string 80
+                  :seon.config.render/value-shape-sample 2
+                  :seon.render.value/page-size 12
+                  :seon.config.render/database-edn-cap 16384
+                  :seon.config.repair/level :symbols
+                  :seon.config.repair.class/delimiters? false
+                  :seon.config.repair.class/def-vs-defn? true
+                  :seon.config.repair.class/undeclared-var? false
+                  :seon.config.repair/max-fixes-per-form 2
+                  :seon.config.repair/budget-ms 75}
+                 (acquire ::writer database))))))))
 
 (deftest frame-preflight-falls-back-before-consuming-the-settle-cas
   (let [token {::host.invoke/invocation {}}

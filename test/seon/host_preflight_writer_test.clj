@@ -26,9 +26,15 @@
 
 (def ^:private default-policy
   {:seon.config.repair/level :symbols
-   :seon.config.repair/classes {}
    :seon.config.repair/max-fixes-per-form 1
    :seon.config.repair/budget-ms 50})
+
+(def ^:private normalized-default-policy
+  (assoc default-policy
+         :seon.repl.parse.repair/classes
+         {:seon.repl.parse.repair/delimiters true
+          :seon.repl.parse.repair/def-vs-defn true
+          :seon.repl.parse.repair/undeclared-var true}))
 
 (defn- registry-with-candidates []
   (let [registry (context/registry)]
@@ -68,8 +74,7 @@
         (preflight/preflight!
          ctx registry home-ns home-ns
          (assoc default-policy
-                :seon.config.repair/classes
-                {:seon.repl.parse.repair/undeclared-var false})
+                :seon.config.repair.class/undeclared-var? false)
          "(my.registry/thing-ac)")
         error (get-in result [:seon.host.preflight/envelope :seon/error])
         suggestions
@@ -97,8 +102,7 @@
           :seon.eval/starting-ns home-ns}
          (assoc default-policy
                 :seon.config.render/database-edn-cap 16384
-                :seon.config.repair/classes
-                {:seon.repl.parse.repair/undeclared-var false})
+                :seon.config.repair.class/undeclared-var? false)
          {:db-name "preflight-test" :t 1}
          {})
         results (:seon.host/results result)]
@@ -166,7 +170,7 @@
               (preflight/preflight!
                ctx nil home-ns home-ns configuration source))]
     (testing "absent configuration uses the owner defaults"
-      (is (= default-policy (preflight/repair-policy {})))
+      (is (= normalized-default-policy (preflight/repair-policy {})))
       (is (= :fixed (:seon.host.preflight/status (run {} "(knwon)")))))
 
     (testing ":off disables delimiter and symbol repair"
@@ -182,8 +186,7 @@
     (testing "a disabled symbol class never applies a candidate"
       (let [result
             (run (assoc default-policy
-                        :seon.config.repair/classes
-                        {:seon.repl.parse.repair/undeclared-var false})
+                        :seon.config.repair.class/undeclared-var? false)
                  "(knwon)")]
         (is (= :terminal (:seon.host.preflight/status result)))
         (is (nil? (:seon.repl.parse.repair/fixes result)))))

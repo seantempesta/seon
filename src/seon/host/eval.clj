@@ -21,7 +21,9 @@
 
 (def ^:private repair-policy-keys
   [:seon.config.repair/level
-   :seon.config.repair/classes
+   :seon.config.repair.class/delimiters?
+   :seon.config.repair.class/def-vs-defn?
+   :seon.config.repair.class/undeclared-var?
    :seon.config.repair/max-fixes-per-form
    :seon.config.repair/budget-ms])
 

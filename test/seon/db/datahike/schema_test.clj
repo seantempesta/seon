@@ -2,6 +2,7 @@
   "Tests for Malli -> Datahike schema bridge."
   (:require [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
+            [seon.config.resolve]
             [seon.db.datahike.schema :as dhs]
             [seon.schema :as schema]))
 
@@ -500,5 +501,133 @@
                  (get (d/entity @conn entity-id) always-attr))
               "retracting one symbol leaves exactly seven")
           (is (= 7 (count (get (d/entity @conn entity-id) always-attr)))))
+        (finally
+          (d/release conn))))))
+
+(deftest normalized-repair-and-model-variant-facts-round-trip-test
+  (let [repair-delimiters :seon.config.repair.class/delimiters?
+        repair-def-vs-defn :seon.config.repair.class/def-vs-defn?
+        repair-undeclared-var :seon.config.repair.class/undeclared-var?
+        model-variants :seon.config/model-variants
+        model-variant :seon.config/model-variant
+        entity-schema
+        [:map
+         [:seon.config/id :seon.config/id]
+         [repair-delimiters repair-delimiters]
+         [repair-def-vs-defn repair-def-vs-defn]
+         [repair-undeclared-var repair-undeclared-var]
+         [model-variants model-variants]
+         [model-variant model-variant]
+         [:seon.ai/agent-provider
+          [:enum :deepseek :anthropic :openai-compat
+           :diffusiongemma :typeahead]]
+         [:seon.ai/agent-model :string]
+         [:seon.ai/agent-max-tokens :int]
+         [:seon.ai/agent-thinking :string]]
+        derived (dhs/malli-map->datahike-schema entity-schema)
+        cfg (mem-cfg)
+        child-fields [model-variant
+                      :seon.ai/agent-provider
+                      :seon.ai/agent-model
+                      :seon.ai/agent-max-tokens
+                      :seon.ai/agent-thinking]
+        children-by-name
+        (fn [entity]
+          (into (sorted-map)
+                (map (juxt model-variant #(select-keys % child-fields)))
+                (get entity model-variants)))]
+    (doseq [attribute [repair-delimiters
+                       repair-def-vs-defn
+                       repair-undeclared-var]]
+      (is (= {:db/ident attribute
+              :db/valueType :db.type/boolean
+              :db/cardinality :db.cardinality/one}
+             (find-attr derived attribute))))
+    (is (= {:db/ident model-variant
+            :db/valueType :db.type/keyword
+            :db/cardinality :db.cardinality/one
+            :db/unique :db.unique/identity}
+           (find-attr derived model-variant)))
+    (is (= {:db/ident model-variants
+            :db/valueType :db.type/ref
+            :db/cardinality :db.cardinality/many
+            :db/isComponent true}
+           (find-attr derived model-variants)))
+    (d/create-database cfg)
+    (let [conn (d/connect cfg)]
+      (try
+        (d/transact conn derived)
+        (d/transact
+         conn
+         [{:seon.config/id "cluster"
+           repair-delimiters false
+           repair-def-vs-defn true
+           model-variants
+           [{model-variant :planning
+             :seon.ai/agent-provider :openai-compat
+             :seon.ai/agent-model "kimi-k3"
+             :seon.ai/agent-max-tokens 16384}
+            {model-variant :muse
+             :seon.ai/agent-provider :openai-compat
+             :seon.ai/agent-model "muse-spark-1.1"
+             :seon.ai/agent-thinking "minimal"}]}])
+        (let [acquired (d/pull @conn '[*] [:seon.config/id "cluster"])]
+          (is (vector? (get acquired model-variants))
+              "cardinality-many acquisition materializes component children as a vector")
+          (is (= {repair-delimiters false
+                  repair-def-vs-defn true}
+                 (select-keys acquired
+                              [repair-delimiters
+                               repair-def-vs-defn
+                               repair-undeclared-var])))
+          (is (not (contains? acquired repair-undeclared-var))
+              "an omitted repair-class override remains absent")
+          (is (= {:muse
+                  {model-variant :muse
+                   :seon.ai/agent-provider :openai-compat
+                   :seon.ai/agent-model "muse-spark-1.1"
+                   :seon.ai/agent-thinking "minimal"}
+                  :planning
+                  {model-variant :planning
+                   :seon.ai/agent-provider :openai-compat
+                   :seon.ai/agent-model "kimi-k3"
+                   :seon.ai/agent-max-tokens 16384}}
+                 (children-by-name acquired))))
+        (d/transact
+         conn
+         [[:db.fn/retractAttribute
+           [:seon.config/id "cluster"] model-variants]
+          {:seon.config/id "cluster"
+           model-variants
+           [{model-variant :planning
+             :seon.ai/agent-provider :openai-compat
+             :seon.ai/agent-model "kimi-k3.1"
+             :seon.ai/agent-max-tokens 32768}
+            {model-variant :execution
+             :seon.ai/agent-provider :deepseek
+             :seon.ai/agent-model "deepseek-v4-flash"
+             :seon.ai/agent-thinking "false"}]}])
+        (let [acquired (d/pull @conn '[*] [:seon.config/id "cluster"])]
+          (is (vector? (get acquired model-variants))
+              "replacement acquisition preserves the cardinality-many vector shape")
+          (is (= #{:planning :execution}
+                 (set (map model-variant (get acquired model-variants))))
+              "the removed child is absent and the new child is present")
+          (is (= {:execution
+                  {model-variant :execution
+                   :seon.ai/agent-provider :deepseek
+                   :seon.ai/agent-model "deepseek-v4-flash"
+                   :seon.ai/agent-thinking "false"}
+                  :planning
+                  {model-variant :planning
+                   :seon.ai/agent-provider :openai-compat
+                   :seon.ai/agent-model "kimi-k3.1"
+                   :seon.ai/agent-max-tokens 32768}}
+                 (children-by-name acquired)))
+          (is (empty?
+               (d/q '[:find ?e
+                      :where [?e :seon.config/model-variant :muse]]
+                    @conn))
+              "retracting the component connection also removes the old child"))
         (finally
           (d/release conn))))))
