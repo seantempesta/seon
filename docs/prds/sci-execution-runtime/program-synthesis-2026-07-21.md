@@ -902,7 +902,14 @@ happened. Now take the next thing off the queue.
   repl/plan/typeahead surfaces.
 - Standing overnight rules: owner-taste decisions batch for morning;
   live drives on isolated clusters only; path-limited commits; anchor
-  updated every cycle.
+  updated every cycle. LESSON (00:xx): a lane's isolated cluster must
+  be brought DOWN when its drive ends — w15b-live3's leftover watcher
+  held the shared build role and blocked default (`ownership-conflict`,
+  watcher `foreign`). Recovery recipe: reap through the owning
+  supervisor (`SEON_PROC_DIR=tmp/seon-operator-<name>
+  SEON_LOG_DIR=logs/operator-<name> bin/seon down`), then default
+  `bin/seon up`. Future isolated-drive specs must end with the
+  isolated operator's own `down`.
 - **Overnight progress ledger:**
   NS-0.5d DONE `6de77e34` (require-law gate + computed boundary lists;
   my anchor overclaim struck `df5de597`; q23 queued) ·
