@@ -598,7 +598,17 @@ CLJC-maximization clarified (portable canon; platform at edges).
 
 ### Next-tranche queue (in order, nothing blocked on owner)
 
-Normalize-class EDN upgrades (post-audit) · Stage 1 tuple exposure ·
+EDN normalize series per the inventory's ranked order
+(`research/edn-slot-inventory-2026-07-22.md`, `2d34cc96`): (1) delete
+the :inherit sentinel from nine AI-override attrs (absence already
+means inherit), (2) :seon.config/always + skills → cardinality-many,
+(3) normalize telemetry/tempid receipts, (4) entity-shape the big maps
+(repair classes, model variants, context profiles, agent/root ctx),
+(5) split render-fn identity from literal content, (6) DAG-scale
+residents wait for Stage 2, (7) honestly-EDN stays (vendor payloads,
+source text). REVISION: Stage-1 tuple exposure got NO work-list from
+the census — demoted to infrastructure-on-demand; modeling-first is
+the plan (owner predicted this). ·
 WP-S2 lazy respawn (shape pre-ruled by decision 6; owns q20/q27) ·
 W5-0 retirement proof (spec-ready from stage15 verdict) · W5 cutover
 (D20 move-set; flips the host-tier dial after W5-0) · then packages
