@@ -780,6 +780,18 @@ continuing the queue. Results:
   `docs/seon/issues/host-preflight-candidate-ranking-crashes.md`'s
   parity section; owner = W5-0.
 
+### Normalize-1 ruling (orchestrator mechanism decision, 2026-07-22)
+
+The :inherit-sentinel deletion is RESET-BOUNDED, same attribute names,
+native types (five previously-string-installed numerics become real
+:double/:long) — under the standing no-lock-in precedent; no in-place
+migration, no dual-read, no backfill. Grounds: the lane's stop proved
+Datahike rejects retyping installed attributes and no consumer uses
+three-state logic; new-names dual-read would be a shim for data nobody
+retains. Declaration-path rejection of explicit :inherit stays. The
+reset boundary, ACME coordination, and live proof are the
+orchestrator's at integration. Lane resumed (thread `019f8b17-…`).
+
 ### Queue-order correction (fresh-eyes ruling, recorded)
 
 The wind-down queue serialized the EDN normalize series ahead of
