@@ -63,7 +63,7 @@
       (let [query-form (::protocol/query-form request)
             result (cond
                      (some #{:seon.config/id} (flatten (vec query-form)))
-                     [32 4096 1024 3 80 2 12]
+                     [32 4096 1024 3 80 2 12 16384]
 
                      (= query-form db.id/generator-policy-query)
                      [[:seon.eval/id :seon.db.id.generator/compact]]
@@ -254,15 +254,15 @@
 (deftest sampling-policy-is-read-at-the-invocation-basis-and-fails-closed
   (is (some? (datalog.parser/parse
               (var-get #'host.sample/sampling-policy-query)))
-      "the maintained seven-value tuple query parses at the writer boundary")
+      "the maintained invocation-policy tuple query parses at the writer boundary")
   (let [seen (atom [])
         acquire (var-get #'host.sample/acquire-sampling-policy!)
         invalid [nil
-                 [32 4096 1024 3 80 2]
-                 [32 4096 1024 3 80 2 12 99]
-                 [32 4096 1024 3 80 2 "12"]
-                 [[32 4096 1024 3 80 2 12]
-                  [32 4096 1024 3 80 2 12]]
+                 [32 4096 1024 3 80 2 12]
+                 [32 4096 1024 3 80 2 12 16384 99]
+                 [32 4096 1024 3 80 2 12 "16384"]
+                 [[32 4096 1024 3 80 2 12 16384]
+                  [32 4096 1024 3 80 2 12 16384]]
                  {:seon/error {:seon.error/kind :core-bug}}]]
     (doseq [response invalid]
       (with-redefs-fn
@@ -509,7 +509,7 @@
         (is (not (str/includes? (second outputs) "first-only"))
             "output attribution is per form, not cumulative")
         (is (str/includes? (second outputs) "truncated"))
-        (is (<= (tokens/estimate (second outputs)) 2048)))
+        (is (<= (count (second outputs)) 16384)))
       (is (zero? (.size host-bytes)) "SCI prints never reach host stdout")
       (finally
         (System/setOut original-out)
@@ -531,8 +531,15 @@
         (send! session
                (invoke-value "late-interrupt-agent" "late-interrupt"
                              [(form "(+ 1 1)")]))
-        (is (= :seon.execution.message/error
-               (:seon.execution/message (recv! session))))))
+        (let [response (recv! session)]
+          (is (= :seon.execution.message/error
+                 (:seon.execution/message response)))
+          (is (= :interrupt
+                 (get-in response [:seon.execution/error :seon.error/data
+                                   :seon.error.sci/class])))
+          (is (= :timeout
+                 (get-in response [:seon.execution/error :seon.error/data
+                                   :seon.error/kind]))))))
       (is (some #(= :interrupted (:seon.eval/status %))
                 (recorded-tx-data))
           "the terminal record commits despite the late interrupt")

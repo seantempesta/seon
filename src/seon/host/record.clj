@@ -333,14 +333,16 @@
        :seon.eval/ns eval-ns}
        agent (assoc :seon.eval/agent agent))]}])
 
-(def ^:private result-edn-token-cap
-  "Persisted result/output budget; W1 moves it to a config fact."
-  2048)
-
 (defn- cap-edn
-  "Token-clip text stored on an eval row."
-  [s]
-  (tokens/clip-str s result-edn-token-cap))
+  "Character-clip text stored on an eval row."
+  [s database-edn-cap]
+  (let [s (str s)
+        n (count s)]
+    (if (> n database-edn-cap)
+      (str (subs s 0 database-edn-cap) " …⟨"
+           (tokens/chars->tokens (- n database-edn-cap))
+           " tokens elided⟩")
+      s)))
 
 (defn terminal-tx-data
   "The CAS-fenced terminal transition plus the frozen eval row.
@@ -357,16 +359,23 @@
                              [::narration :string]
                              [::ns-sym ::ns-sym]
                              [::agent-ref {:optional true} :any]
-                             [::output {:optional true} :string]]]
+                             [::output {:optional true} :string]
+                             [::database-edn-cap {:optional true}
+                              [:int {:min 1}]]]]
                   [:vector :any]]}
   [{eval-id :seon.eval/id
     ::keys [envelope at duration-ms source narration ns-sym agent-ref
-            output]}]
-  (let [ok? (boolean (:seon.eval/ok? envelope))
+            output database-edn-cap]}]
+  (let [database-edn-cap (or database-edn-cap 16384)
+        result-token-cap (tokens/chars->tokens database-edn-cap)
+        ok? (boolean (:seon.eval/ok? envelope))
         value-text (if (contains? envelope :seon.eval/value-display)
-                     (cap-edn (str (:seon.eval/value-display envelope)))
-                     (tokens/bounded-pr-str (:seon.eval/value envelope)
-                                            result-edn-token-cap))
+                     (cap-edn (str (:seon.eval/value-display envelope))
+                              database-edn-cap)
+                     (cap-edn
+                      (tokens/bounded-pr-str (:seon.eval/value envelope)
+                                             result-token-cap)
+                      database-edn-cap))
         row (cond-> {:seon.eval/id eval-id
                      :seon.eval/status (cond
                                          (:seon.eval/interrupted? envelope)
@@ -383,11 +392,13 @@
               ok? (assoc :seon.eval/result-edn value-text)
               (not ok?)
               (assoc :seon.eval/error
-                     (cap-edn (str (get-in envelope
-                                           [:seon/error
-                                            :seon.error/message]))))
+                     (cap-edn
+                      (str (get-in envelope
+                                   [:seon/error :seon.error/message]))
+                      database-edn-cap))
               (and (string? output) (not (str/blank? output)))
-              (assoc :seon.eval/output (cap-edn output)))]
+              (assoc :seon.eval/output
+                     (cap-edn output database-edn-cap)))]
     [[:db.fn/cas [:seon.eval/id eval-id] :seon.eval/status
       :running :running]
      row]))

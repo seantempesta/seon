@@ -208,7 +208,8 @@
   (get-in @(::session/live-values session) [::session/values eval-id ::session/value]))
 
 (def ^:private sampling-policy-query
-  '[:find [?path-segments ?path-bytes ?realized ?depth ?string ?shape ?items]
+  '[:find [?path-segments ?path-bytes ?realized ?depth ?string ?shape ?items
+           ?database-edn-cap]
     :in $ ?id
     :where
     [?config :seon.config/id ?id]
@@ -218,7 +219,9 @@
     [?config :seon.config.render/value-max-depth ?depth]
     [?config :seon.config.render/value-max-string ?string]
     [?config :seon.config.render/value-shape-sample ?shape]
-    [?config :seon.config.render/value-max-items ?items]])
+    [?config :seon.config.render/value-max-items ?items]
+    [(get-else $ ?config :seon.config.render/database-edn-cap 16384)
+     ?database-edn-cap]])
 
 (defn acquire-sampling-policy!
   "Acquire the value-sampling policy at an invocation database value."
@@ -226,7 +229,7 @@
   [writer database]
   (let [row (context/query-writer-at! writer database
                                       sampling-policy-query ["cluster"])
-        limits (when (and (vector? row) (= 7 (count row)))
+        policy (when (and (vector? row) (= 8 (count row)))
                  (zipmap
                   [:seon.config.render/value-max-path-segments
                    :seon.config.render/value-max-path-bytes
@@ -234,9 +237,13 @@
                    :seon.config.render/value-max-depth
                    :seon.config.render/value-max-string
                    :seon.config.render/value-shape-sample
-                   :seon.render.value/page-size]
-                  row))]
-    (if (and limits (render.value/effective-limits-within? limits limits))
-      limits
+                   :seon.render.value/page-size
+                   :seon.config.render/database-edn-cap]
+                  row))
+        sampling-limits (dissoc policy :seon.config.render/database-edn-cap)]
+    (if (and (pos-int? (:seon.config.render/database-edn-cap policy))
+             (render.value/effective-limits-within? sampling-limits
+                                                    sampling-limits))
+      policy
       (throw (ex-info "The invocation database lacks a complete value-sampling policy."
                       {:seon.error/kind :core-bug})))))

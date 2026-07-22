@@ -1736,7 +1736,8 @@
   {:malli/schema [:=> [:cat ::writer :map] :map]}
   [writer {eval-id :seon.eval/id
            ::keys [envelope at duration-ms source narration ns-sym
-                   agent-id forms var-meta new-schema-keys output]}]
+                   agent-id forms var-meta new-schema-keys output
+                   database-edn-cap]}]
   (let [tx-data
         (into (record/terminal-tx-data
                {:seon.eval/id eval-id
@@ -1747,7 +1748,8 @@
                 ::record/narration narration
                 ::record/ns-sym ns-sym
                 ::record/agent-ref [:seon.agent/id agent-id]
-                ::record/output output})
+                ::record/output output
+                ::record/database-edn-cap database-edn-cap})
               (when (:seon.eval/ok? envelope)
                 (record/tee-tx-data
                  {::record/forms (or forms [])

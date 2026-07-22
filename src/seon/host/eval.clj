@@ -2,7 +2,6 @@
   "Serve recorded SCI eval batches for the JVM execution host."
   (:require [sci.core :as sci]
             [sci.ctx-store]
-            [seon.ai.tokens :as tokens]
             [seon.db.transport.uds :as uds]
             [seon.error.sci :as error.sci]
             [seon.host.context :as context]
@@ -14,9 +13,6 @@
 
 (set! *warn-on-reflection* true)
 
-(def ^:private output-token-cap
-  "Per-form SCI output budget; W1 moves it to a config fact."
-  2048)
 (def ^:private output-truncation-marker "…⟨output truncated⟩")
 
 (defn agent-home-ns
@@ -60,8 +56,8 @@
           (-> envelope
               (dissoc :seon.eval/value)
               (assoc :seon.eval/value-display (pr-str value))))))))
-(defn- output-capture []
-  (let [limit (max 0 (- (tokens/estimate-chars output-token-cap)
+(defn- output-capture [database-edn-cap]
+  (let [limit (max 0 (- database-edn-cap
                         (count output-truncation-marker)))
         text (StringBuilder.)
         truncated? (volatile! false)
@@ -107,7 +103,8 @@
        :seon.eval/interrupted? true
        :seon/error
        (session/error-value "The invocation was interrupted." :agent
-                    {:seon.error.sci/class :interrupt})}
+                    {:seon.error.sci/class :interrupt
+                     :seon.error/kind :timeout})}
       envelope)))
 
 (defn eval-form!
@@ -116,34 +113,40 @@
    `::var-meta` (a returned sci var's metadata, the tee's projection
    input) is host-internal and stripped before the envelope crosses the
    protocol."
-  {:malli/schema [:=> [:cat ::session/session :any :symbol :string] :map]}
-  [session ctx home-ns source]
-  (let [{::keys [output-writer output-text]} (output-capture)]
-    (locking (::session/interrupt-lock session)
-      (reset! (::session/worker-phase session) :evaluating))
-    (let [envelope
-          (try
-            (let [value (sci/with-bindings {sci/out output-writer
-                                            sci/err output-writer}
-                          (sci/eval-string* ctx source))]
-              (cond-> (assoc (sci.ctx-store/with-ctx ctx
-                               (wire-safe-value {:seon.eval/ok? true
-                                                 :seon.eval/value value}))
-                             ::live-value value)
-                (instance? sci.lang.Var value)
-                (assoc ::var-meta (meta value))))
-            (catch Throwable throwable
-              (let [error (classified-error-value ctx home-ns throwable)
-                    interrupted? (= :interrupt
-                                    (get-in error [:seon.error/data
-                                                   :seon.error.sci/class]))]
-                {:seon.eval/ok? false
-                 :seon.eval/interrupted? interrupted?
-                 :seon/error error})))
-          envelope (finish-evaluation! session envelope)
-          output (output-text)]
-      (cond-> envelope
-        (seq output) (assoc ::output output)))))
+  {:malli/schema
+   [:function
+    [:=> [:cat ::session/session :any :symbol :string] :map]
+    [:=> [:cat ::session/session :any :symbol :string [:int {:min 1}]] :map]]}
+  ([session ctx home-ns source]
+   (eval-form! session ctx home-ns source 16384))
+  ([session ctx home-ns source database-edn-cap]
+   (let [{::keys [output-writer output-text]}
+         (output-capture database-edn-cap)]
+     (locking (::session/interrupt-lock session)
+       (reset! (::session/worker-phase session) :evaluating))
+     (let [envelope
+           (try
+             (let [value (sci/with-bindings {sci/out output-writer
+                                             sci/err output-writer}
+                           (sci/eval-string* ctx source))]
+               (cond-> (assoc (sci.ctx-store/with-ctx ctx
+                                (wire-safe-value {:seon.eval/ok? true
+                                                  :seon.eval/value value}))
+                              ::live-value value)
+                 (instance? sci.lang.Var value)
+                 (assoc ::var-meta (meta value))))
+             (catch Throwable throwable
+               (let [error (classified-error-value ctx home-ns throwable)
+                     interrupted? (= :interrupt
+                                     (get-in error [:seon.error/data
+                                                    :seon.error.sci/class]))]
+                 {:seon.eval/ok? false
+                  :seon.eval/interrupted? interrupted?
+                  :seon/error error})))
+           envelope (finish-evaluation! session envelope)
+           output (output-text)]
+       (cond-> envelope
+         (seq output) (assoc ::output output))))))
 
 (defn- read-error-envelope [entry]
   {:seon.eval/ok? false
@@ -201,7 +204,11 @@
         writer (::session/writer session)
         agent-id (:seon.execution/agent-id @(::session/startup session))
         record? (boolean (and writer turn-id agent-id))
-        batch-ns (or starting-ns 'user)]
+        batch-ns (or starting-ns 'user)
+        database-edn-cap
+        (:seon.config.render/database-edn-cap sampling-limits)
+        value-sampling-limits
+        (dissoc sampling-limits :seon.config.render/database-edn-cap)]
     (when-not (contains? record/transient-ns-syms batch-ns)
       (context/ensure-context-ns! ctx batch-ns))
     (loop [entries (vec (or parsed []))
@@ -243,7 +250,8 @@
                         #(if (= :form kind)
                            (eval-form! session ctx (agent-home-ns agent-id)
                                        (str "(in-ns '" current-ns ")\n"
-                                            source))
+                                            source)
+                                       database-edn-cap)
                            (read-error-envelope entry)))
                       ok? (boolean (:seon.eval/ok? raw-envelope))
                       ;; A failed eval must not leave half a registration:
@@ -280,7 +288,8 @@
                           ::context/forms forms
                           ::context/var-meta var-meta
                           ::context/new-schema-keys new-schema-keys
-                          ::context/output output}))
+                          ::context/output output
+                          ::context/database-edn-cap database-edn-cap}))
                       projection-change?
                       (true? (::context/projection-changed? recorded))
                       projection-refresh
@@ -301,7 +310,7 @@
                             ids)
                       _ (when (and ok? recorded (:seon.db/ok? recorded))
                           (sample/retain-live-value! session eval-id live-value
-                                              sampling-limits database))
+                                              value-sampling-limits database))
                       envelope (if (and recorded
                                         (not (:seon.db/ok? recorded)))
                                  ;; The outcome could not become durable —

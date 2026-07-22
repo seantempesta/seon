@@ -404,13 +404,73 @@
       (let [output (first (turn-outputs turn-id))]
         (is (string? output))
         (is (str/includes? output "truncated"))
-        (is (<= (tokens/estimate output) 2048)))
+        (is (<= (count output) 16384)))
       (is (zero? (.size host-bytes)))
       (assert-survivor! survivor survivor-id)
       (finally
         (System/setOut original-out)
         (close-session! attacker)
         (close-session! survivor)))))
+
+(deftest concurrent-sessions-keep-output-attributed-to-own-eval-row
+  (let [left-id "battery-output-left"
+        right-id "battery-output-right"
+        left-turn "battery-output-left-turn"
+        right-turn "battery-output-right-turn"
+        left-label :output-left
+        right-label :output-right
+        left-entered (promise)
+        right-entered (promise)
+        left-release (promise)
+        right-release (promise)
+        left (open-session! left-id)
+        right (open-session! right-id)]
+    (seed-turn! left-id left-turn)
+    (seed-turn! right-id right-turn)
+    (swap! controls assoc
+           left-label {::entered left-entered ::release left-release}
+           right-label {::entered right-entered ::release right-release})
+    (try
+      (assert-ready! left)
+      (assert-ready! right)
+      (send-invoke!
+       left
+       {:agent-id left-id
+        :invocation-id "concurrent-output-left"
+        :turn-id left-turn
+        :sources
+        ["(do (require 'seon.host.hostile-battery) (print \"LEFT-BEGIN\") (seon.host.hostile-battery/block :output-left) (print \"LEFT-END\") :left)"]})
+      (send-invoke!
+       right
+       {:agent-id right-id
+        :invocation-id "concurrent-output-right"
+        :turn-id right-turn
+        :sources
+        ["(do (require 'seon.host.hostile-battery) (print \"RIGHT-BEGIN\") (seon.host.hostile-battery/block :output-right) (print \"RIGHT-END\") :right)"]})
+      (wait-for! left-entered "left output capture")
+      (wait-for! right-entered "right output capture")
+      (deliver left-release true)
+      (deliver right-release true)
+      (let [left-response (receive! left)
+            right-response (receive! right)
+            left-output (first (turn-outputs left-turn))
+            right-output (first (turn-outputs right-turn))]
+        (is (= :left (eval-value left-response)) (pr-str left-response))
+        (is (= :right (eval-value right-response)) (pr-str right-response))
+        (is (= 1 (turn-eval-count left-turn)))
+        (is (= 1 (turn-eval-count right-turn)))
+        (is (str/includes? left-output "LEFT-BEGIN"))
+        (is (str/includes? left-output "LEFT-END"))
+        (is (not (str/includes? left-output "RIGHT")))
+        (is (str/includes? right-output "RIGHT-BEGIN"))
+        (is (str/includes? right-output "RIGHT-END"))
+        (is (not (str/includes? right-output "LEFT"))))
+      (finally
+        (deliver left-release true)
+        (deliver right-release true)
+        (swap! controls dissoc left-label right-label)
+        (close-session! left)
+        (close-session! right)))))
 
 (deftest shared-built-in-vars-refuse-root-mutation-and-bystander-stays-correct
   (let [attacker-id "battery-var-attacker"
