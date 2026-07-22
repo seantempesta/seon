@@ -1154,6 +1154,24 @@ robustness battery, the supervisor layer's is WP-S2 + the q18 OOME
 drill + U10/U12. "The eval that crashes, crashes; the system that
 contains it, provably doesn't."
 
+### OWNER DESIGN DIRECTION (2026-07-22 evening): STRUCTURED SHARED VALUES
+
+Add first-class large-immutable-Clojure-value support to OUR datahike
+fork, stored as content-addressed DAGs through konserve so structural
+sharing IS diff storage (v2 writes only changed nodes + root). Doctrine
+layering: (1) bread-and-butter stays specs over native attributes/
+connections; (2) the missing ordered-collection/vector value type is a
+real gap — the EDN-slot encoder (opaque strings, no sharing/query) is
+the wart it deletes; (3) big structured values = shared DAGs; (4)
+my.blob demotes to true binary. Second gear: program-graph derivation
+storage (base-ref + pinned transformation, lazy materialization) —
+"derive don't store" extended to big values. Design research dispatched
+(high, logs `tmp/orchestrator/structured-values-design-*`): value-type
+seam, konserve node engine + atomic multi-key publication, the
+vector-type slice, derivation layer placement, EDN-slot/blob/q22-paging
+interplay, cost probes, staged unit cut. Feeds the post-W5 series
+alongside the virtual-agents closures.
+
 ### NO PENDING OWNER DECISIONS
 
 The 4 W1-boot decisions were folded as recommendations into the shipped
