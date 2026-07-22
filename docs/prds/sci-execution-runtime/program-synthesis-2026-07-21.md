@@ -913,10 +913,11 @@ happened. Now take the next thing off the queue.
 - **Overnight progress ledger:**
   NS-0.5d DONE `6de77e34` (require-law gate + computed boundary lists;
   my anchor overclaim struck `df5de597`; q23 queued) ·
-  q21 grounding ACCEPTED
-  (`research/q21-committed-acquisition-grounding-2026-07-21.md`;
-  implementation IN FLIGHT, probe-first, logs `tmp/orchestrator/q21-*`;
-  q22 queued — triplicate acquisition, host 4096 sentinel) ·
+  **q21 DONE `d3c7c83a`** (paged acquisition, probe-proven page-32 max
+  13.9 KB vs the 64 KiB floor; live equivalence exact at a frozen
+  basis — 2,112 schemas / 864 contracts; full cljs 1501/7244; the
+  64 KiB end-to-end boot proof stays a pending coordinated checkpoint;
+  q22 still queued) ·
   W3 grounding ACCEPTED (`research/w3-parity-grounding-2026-07-21.md`;
   FOUR premise corrections: W3a typed classification already landed;
   W3b must use `m/-instrument` (multi-arity); `invoke/settle!` is NOT
