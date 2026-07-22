@@ -1151,6 +1151,17 @@ Lane states at wind-down:
   acceptance: message/lifecycle · my.* · blob fan out with the
   exemplar as the worked pattern. P3a stays closed per the ruling
   above; no relitigation without invalidating evidence.
+- Second-wave P2 specs PRE-WRITTEN, dispatch-ready on p1c acceptance
+  (fill in the exemplar commit, reconcile PROTECTED lists against
+  then-live lanes): `tmp/orchestrator/p2-message-lifecycle-spec.md`
+  (no message channel; ALS/clock/admission = leaf; ruling-9 upgrades
+  message!/complete to :idempotent via op-id→managed-id receipt) ·
+  `p2-blob-spec.md` (no blob transport — fs publication + db seam;
+  content hash IS the receipt; SHA converges on content_hash.cljc) ·
+  `p2-my-families-spec.md` (child-inward inventory is the lane's
+  first deliverable; excludes my.blob). Owner goal text installed as
+  the harness persistent goal (dissolve-first, parallelize,
+  pre-ruled specs).
 - Earliest unsettled contract: the seam exemplar (P1c) proving one
   same-source seon.db definition on both tiers. Its integrated proof =
   the dual-tier .cljc test file + census delta + live isolated-cluster
