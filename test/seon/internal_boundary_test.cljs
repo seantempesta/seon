@@ -1,51 +1,110 @@
 (ns seon.internal-boundary-test
   "The `.internal` boundary — the framework's `*.internal` namespaces hold
-   private machinery agents must never see or reach. The whole `.internal`
-   refine-wave premise is that this boundary is STRUCTURAL (the `.internal`
-   suffix IS the filter), not nominal — so these assertions pin the
-   MECHANISM that enforces it, not any particular namespace's contents:
-
-     1. `.internal` nses are NEVER rendered full to an agent —
-        `seon.agent.ctx.namespaces/full-source-ns?` rejects them no matter the
-        config policy (the `.internal` suffix beats `:seon.config/always`).
-     2. The structural selection rule `included-ns?` EXCLUDES every
-        `.internal` ns from the agent prompt while INCLUDING its public
-        parent — one suffix rule, no per-namespace special-casing."
+   private machinery. The structural `included-ns?` rule excludes every
+   `.internal` namespace from rendered namespace sections while including its
+   public parent. Stored full source is a separate contract:
+   `full-source-ns?` rejects non-`my.*` internals, while `my.*` internals keep
+   stored source for SCI lexical-alias reconstruction without prompt rendering."
   (:require
+    ["node:fs" :as fs]
+    ["node:path" :as np]
     [cljs.test :refer [deftest is]]
     [seon.agent.authorization :as authorization]
     [seon.agent.ctx.ns-name :as ns-name]
     [seon.agent.ctx.namespaces :as ns]
     [seon.config :as config]))
 
-;; The real framework `.internal` namespaces (each a sibling of a public ns
-;; whose body it backs). NONE may leak to an agent.
+(defn- source-files
+  [dir]
+  (mapcat
+    (fn [entry]
+      (let [path (.join np dir (.-name entry))]
+        (cond
+          (.isDirectory entry) (source-files path)
+          (re-find #"\.clj[sc]?$" path) [path]
+          :else [])))
+    (.readdirSync fs dir #js {:withFileTypes true})))
+
+(defn- sanitized-ns-form
+  "The raw first `ns` form with strings and comments replaced by spaces."
+  [source]
+  (let [start (.search source #"\(ns(?:\s|$)")]
+    (when-not (neg? start)
+      (loop [i start depth 0 in-string? false escaped? false in-comment? false out ""]
+        (when (< i (count source))
+          (let [c (subs source i (inc i))]
+            (cond
+              in-comment?
+              (recur (inc i) depth false false (not= c "\n") (str out " "))
+
+              in-string?
+              (cond
+                escaped? (recur (inc i) depth true false false (str out " "))
+                (= c "\\") (recur (inc i) depth true true false (str out " "))
+                (= c "\"") (recur (inc i) depth false false false (str out " "))
+                :else (recur (inc i) depth true false false (str out " ")))
+
+              (= c ";")
+              (recur (inc i) depth false false true (str out " "))
+
+              (= c "\"")
+              (recur (inc i) depth true false false (str out " "))
+
+              (= c "(")
+              (recur (inc i) (inc depth) false false false (str out c))
+
+              (= c ")")
+              (let [next-depth (dec depth)
+                    next-out (str out c)]
+                (if (zero? next-depth)
+                  next-out
+                  (recur (inc i) next-depth false false false next-out)))
+
+              :else
+              (recur (inc i) depth false false false (str out c)))))))))
+
+(defn- declared-ns
+  [source]
+  (some->> (sanitized-ns-form source)
+           (re-find #"^\(ns\s+([^\s()]+)")
+           second
+           symbol))
+
 (def ^:private internal-nses
-  '[seon.db.internal
-    seon.schema.internal
-    seon.agent.search.internal
-    seon.agent.fs.internal])
+  (->> (source-files (.join np (.cwd js/process) "src"))
+       (keep #(declared-ns (.readFileSync fs % "utf-8")))
+       (filter #(re-find #"\.internal$" (str %)))
+       sort
+       vec))
+
+(defn- parent-ns
+  [internal-ns]
+  (symbol (subs (str internal-ns) 0 (- (count (str internal-ns))
+                                        (count ".internal")))))
 
 (def ^:private configuration
   (config/resolve-config-singleton {}))
 
-(deftest internal-nses-never-render-full
-  (doseq [n internal-nses]
-    (is (false? (ns/full-source-ns? configuration n))
-        (str "full-source-ns? never inlines " n " — .internal is hidden"))
-    ;; the `.internal` suffix beats the config policy: even if a (mistaken)
-    ;; manifest listed it in `:seon.config/always`, the hidden-ns rule wins.
-    (is (false? (ns/full-source-ns? configuration (str (name n))))
-        (str "full-source-ns? rejects the string form of " n " too"))))
+(deftest internal-nses-store-source-only-when-sci-reconstruction-needs-it
+  (doseq [internal internal-nses]
+    (if (ns/my-ns-name? internal)
+      (do
+        (is (true? (ns/full-source-ns? configuration internal))
+            (str internal " keeps source for SCI lexical-alias reconstruction"))
+        (is (false? (ns-name/included-ns? internal))
+            (str internal " keeps source without entering rendered sections")))
+      (do
+        (is (false? (ns/full-source-ns? configuration internal))
+            (str internal " does not store full source"))
+        (is (false? (ns/full-source-ns? configuration (str (name internal))))
+            (str "full-source-ns? rejects the string form of " internal " too"))))))
 
 (deftest included-ns-excludes-internal-keeps-the-public-parent
   ;; The structural agent-prompt selection rule: .internal is filtered out by
   ;; the suffix alone, while the public parent renders. Falsifies a hollow
   ;; "always false" check by asserting the parent IS included.
-  (doseq [[internal parent] '[[seon.db.internal           seon.db]
-                              [seon.schema.internal       seon.schema]
-                              [seon.agent.search.internal seon.agent.search]
-                              [seon.agent.fs.internal     seon.agent.fs]]]
+  (doseq [internal internal-nses
+          :let [parent (parent-ns internal)]]
     (is (false? (ns-name/included-ns? internal))
         (str internal " is excluded from the agent prompt (.internal suffix)"))
     (is (true? (ns-name/included-ns? parent))
