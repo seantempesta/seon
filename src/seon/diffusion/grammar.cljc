@@ -5,8 +5,8 @@
    require — so babashka loads it straight from source. Its sole Seon
    dependency is the shared pure repair-candidate mechanics. The
    `:malli/schema` metadata uses only BUILT-IN malli types, inert to bb and
-   read by the pod's instrumentation (the `seon.repl.internal` pattern). A
-   `form` is an arbitrary read sexpr from `seon.repl.internal/parse-forms`,
+   read by the pod's instrumentation (the `seon.repl.parse` pattern). A
+   `form` is an arbitrary read sexpr from `seon.repl.parse/parse-forms`,
    hence the `:any` input type."
   (:require
     [seon.repl.parse.repair :as candidates]))

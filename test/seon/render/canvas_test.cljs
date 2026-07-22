@@ -7,7 +7,7 @@
     [clojure.string :as str]
     [malli.core :as m]
     [seon.render.canvas :as canvas]
-    [seon.repl.parse :as repl.internal]
+    [seon.repl.parse :as repl.parse]
     [seon.schema :as schema]
     [seon.ui.html :as html]))
 
@@ -416,7 +416,7 @@
 
 (deftest wiring-source-parses-as-one-tutorial-form
   (let [agent-id "AGTwiresrc0001"
-        parsed   (repl.internal/parse-forms (canvas/wiring-source agent-id))
+        parsed   (repl.parse/parse-forms (canvas/wiring-source agent-id))
         {:seon.repl/keys [kind narration form]} (first parsed)]
     (is (= 1 (count parsed)) "exactly ONE form — the wiring transact")
     (is (= :form kind) "it parses cleanly (:form, not :read)")

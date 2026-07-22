@@ -191,7 +191,7 @@
   ;; ~0.4ms local Bun call instead of a ~100ms internet round-trip.
   ;;
   ;; ONLY compiles seon.diffusion.worker.parse + its minimal transitive deps
-  ;; (seon.repl.internal → clojure.string + rewrite-clj — pure CLJC, NO
+  ;; (seon.repl.parse → clojure.string + rewrite-clj — pure CLJC, NO
   ;; datahike / malli / pod state). A SINGLE standalone bundle the Python
   ;; worker spawns as a subprocess: code on stdin → one JSON line on
   ;; stdout. `:optimizations :simple` for a small bundle + fast cold

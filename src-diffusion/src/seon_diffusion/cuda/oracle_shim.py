@@ -66,7 +66,7 @@ class Oracle:
             text=True,
             bufsize=1,  # line-buffered
         )
-        # Cold-start barrier: the bb script `(require 'seon.repl.internal)` +
+        # Cold-start barrier: the bb script `(require 'seon.repl.parse)` +
         # rewrite-clj load happens on first use; the Node server loads the
         # ~15MB bootstrap cache before printing "ready\n" to stderr. bb does NOT
         # block here (first .call() pays it); the Node server is gated by

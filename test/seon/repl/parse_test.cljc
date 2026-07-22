@@ -1,4 +1,4 @@
-(ns seon.repl.internal-test
+(ns seon.repl.parse-test
   "Corpus tests for `seon.repl.parse/parse-forms`. CLJC so both JVM
    (`bin/test-parser`) and the CLJS pod can exercise it
    from the same file.

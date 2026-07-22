@@ -1,7 +1,7 @@
 (ns seon.repl
   "Iteration-surface helpers for `dev-init!` and the compiler state.
    The text→entries parser used to live here too but
-   was extracted to [[seon.repl.internal]] (.cljc — JVM-testable, no pod
+   was extracted to [[seon.repl.parse]] (.cljc — JVM-testable, no pod
    required for the corpus).
 
    ## Iteration surface (`dev-init!`)
@@ -51,20 +51,20 @@
     ;; Pulled in so the :client bundle can reach rewrite-clj via the
     ;; host REPL (`eval_cljs`) for ad-hoc core probes
     ;; — e.g. `(rewrite-clj.parser/parse-string-all "...")`. The
-    ;; parse-forms parser itself lives in seon.repl.internal (.cljc).
+    ;; parse-forms parser itself lives in seon.repl.parse (.cljc).
     [rewrite-clj.parser]
     [rewrite-clj.node]
     [rewrite-clj.zip]
     [seon.schema :as schema]))
 
 ;; ============================================================
-;; The parse-entry envelope (produced by seon.repl.internal/parse-forms —
-;; the .internal machinery of THIS ns, which owns the data). In-memory
+;; The parse-entry envelope (produced by seon.repl.parse/parse-forms —
+;; the parser machinery of THIS ns, which owns the data). In-memory
 ;; only, never transacted whole. `::form` is deliberately UNREGISTERED —
 ;; it carries an arbitrary read sexpr (same reasoning as the unregistered
 ;; :seon.eval/value). A `:read` entry's failure is the ONE :seon/error
 ;; value: {:seon.error/kind <classified> :seon.error/message <parser msg>}.
-;; Registered here, not in the .cljc producer, because seon.repl.internal
+;; Registered here, not in the .cljc producer, because seon.repl.parse
 ;; must stay loadable by bare babashka (bin/oracle-server) — no malli.
 ;; ============================================================
 

@@ -1196,7 +1196,7 @@
         ;; not a form to run — rendered as a `;` prose comment so the
         ;; arglist `(ns/fn [args])` is NEVER a bare callable list. If an
         ;; agent echoes a rendered signature back into its reply,
-        ;; `seon.repl.internal/parse-forms` skips the comment line instead
+        ;; `seon.repl.parse/parse-forms` skips the comment line instead
         ;; of EXECUTING it (a `(seon.schema/clear-all! [])` signature once
         ;; wiped the live registry that way). Render is a pure read; the
         ;; only re-runnable forms it emits are full `(defn …)` source.

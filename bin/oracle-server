@@ -45,11 +45,11 @@
          '[babashka.fs :as fs])
 
 ;;; Put the repo's `src/` on the classpath (relative to THIS script, not cwd)
-;;; so `seon.repl.internal` (the pure .cljc parser) loads from source — the
+;;; so `seon.repl.parse` (the pure .cljc parser) loads from source — the
 ;;; bin/test-parser approach, cwd-independent for the deployed image.
 (cp/add-classpath (str (fs/file (fs/parent (fs/parent (fs/absolutize *file*))) "src")))
 
-(require '[seon.repl.internal :as internal]
+(require '[seon.repl.parse :as internal]
          '[seon.diffusion.grammar :as grammar]        ; shared T1/phase predicates (bb + pod)
          '[cheshire.core :as json]
          '[clojure.string :as str]

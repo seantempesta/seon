@@ -145,7 +145,7 @@ self-host-specific -- they do NOT apply to ahead-of-time `.cljs`:
   miss).
 - **A bare `result/<id>` on its own line is a RE-REFERENCE, not a fresh eval.**
   It is a SYMBOL, and a bare symbol is otherwise PROSE (dropped by
-  `seon.repl.internal/parse-forms`). The parser special-cases the `result`
+  `seon.repl.parse/parse-forms`). The parser special-cases the `result`
   namespace (`result-ref-symbol?`) so the bare ref survives as a `:seon.repl/kind :form`
   entry and self-evaluates into its stashed value via `eval.cljs`'s
   `result-var-ref?` (eval'd in `:expr` context so the value actually returns,
