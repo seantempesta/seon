@@ -1003,14 +1003,14 @@
                        (error-of response)))))
       (finally (close! session)))))
 
-(deftest authored-identity-names-the-recorded-seam
+(deftest authored-identity-verifies-the-pinned-database-source
   (let [[session _ready] (open-session! "authored-agent")]
     (try
       (send! session (invoke-value "authored-agent" "invocation-authored" []
                                    :function-symbol 'my.agent.authored/helper
                                    :identity-key
                                    :seon.execution/source-digest))
-      (is (= "Authored function invocation is not yet served by the JVM host."
+      (is (= "The requested current agent function does not exist."
              (error-of (recv! session))))
       (finally (close! session)))))
 

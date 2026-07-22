@@ -1,8 +1,11 @@
 (ns seon.host.invoke
   "Own invocation settlement, execution, cancellation, and shutdown."
-  (:require [seon.error :as error]
+  (:require [sci.core :as sci]
+            [sci.ctx-store]
+            [seon.error :as error]
             [seon.host.context :as context]
             [seon.host.eval :as eval]
+            [seon.host.instrument :as instrument]
             [seon.host.sample :as sample]
             [seon.host.session :as session]
             [seon.schema :as schema])
@@ -30,6 +33,33 @@
     (when (= :evaluating @(::session/worker-phase session))
       (.interrupt ^Thread worker)))
   nil)
+
+(defn- invoke-authored!
+  [session database function-symbol source-fingerprint arguments run-fence]
+  (let [writer (::session/writer session)
+        retained-ctx (::session/ctx session)
+        agent-id (:seon.execution/agent-id @(::session/startup session))
+        fence-result (eval/claim-run-fence! writer database agent-id run-fence)]
+    (if (:seon/error fence-result)
+      {:seon.eval/fenced? true}
+      (instrument/call-with-read-admission
+       (::instrument/state session)
+       (fn []
+         (context/verify-pinned-function! writer database function-symbol
+                                          source-fingerprint)
+         (let [live-var (sci/resolve retained-ctx function-symbol)
+               [call-ctx function-var]
+               (if (and live-var
+                        (instrument/source-fingerprint-matches?
+                         @live-var source-fingerprint))
+                 [retained-ctx live-var]
+                 (context/materialize-pinned-function!
+                  writer retained-ctx database function-symbol
+                  source-fingerprint
+                  #(instrument/reconcile-ephemeral-vars!
+                    (::instrument/state session) %)))]
+           (sci.ctx-store/with-ctx call-ctx
+             (apply @function-var arguments))))))))
 
 (defn settle!
   "Send one terminal frame for the active invocation exactly once."
@@ -83,13 +113,11 @@
                       :core-bug)}
 
             (not compiled?)
-            ;; TODO SEAM (U2): authored invocation = corpus acquisition +
-            ;; source-digest verification + context load, through the one
-            ;; program-graph mechanism `seon.execution` owns today.
-            {::error (session/error-value
-                      "Authored function invocation is not yet served by the JVM host."
-                      :core-bug
-                      {:seon.execution/function-symbol function-symbol})}
+            {::value
+             (invoke-authored!
+              session database function-symbol
+              (:seon.execution/source-digest identity-value)
+              arguments (or run-fence {}))}
 
             (= function-symbol 'seon.execution.runtime/eval-batch!)
               (let [sampling-limits (sample/acquire-sampling-policy!

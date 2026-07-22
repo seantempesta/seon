@@ -197,6 +197,17 @@
   (let [run-ref [:seon.agent.run/id (:seon.agent.run/id run-fence)]]
     [[:db.fn/cas [:seon.agent/id agent-id] :seon.agent/run run-ref run-ref]]))
 
+(defn claim-run-fence!
+  "Claim one invocation run fence at its immutable database value."
+  {:malli/schema
+   [:=> [:cat ::context/writer :seon.db/db [:string {:min 1}]
+         [:map-of :qualified-keyword :any]]
+    [:or :nil :map]]}
+  [writer database agent-id run-fence]
+  (when (seq run-fence)
+    (context/transact-writer!
+     writer database (run-fence-transaction agent-id run-fence))))
+
 (defn- declared-next-ns
   "The ns an executed source moves the batch to, when it moves it.
 
@@ -248,10 +259,7 @@
         (apply dissoc sampling-limits
                (conj repair-policy-keys
                      :seon.config.render/database-edn-cap))
-        fence-result
-        (when (seq run-fence)
-          (context/transact-writer!
-           writer database (run-fence-transaction agent-id run-fence)))]
+        fence-result (claim-run-fence! writer database agent-id run-fence)]
     (if (:seon/error fence-result)
       (assoc (batch-summary [] []) :seon.eval/fenced? true)
       (do

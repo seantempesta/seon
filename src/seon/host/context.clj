@@ -106,6 +106,7 @@
 (schema/register! ::registry 'some?)
 (schema/register! ::lib :symbol)
 (schema/register! ::wrapper-fn 'fn?)
+(schema/register! ::reconcile-ephemeral! 'fn?)
 ;; An SCI var may hold ordinary immutable data as well as a function. This is
 ;; the genuinely polymorphic interpreter-binding boundary; callers still use
 ;; the closed `::wrapper` union so a registration cannot supply both shapes.
@@ -185,6 +186,7 @@
  [:map
   [:seon.eval/ok? :boolean]])
 (schema/register! ::replay-envelopes [:vector ::replay-envelope])
+(schema/register! ::materialized-function [:tuple ::ctx 'some?])
 
 (def writer-pool-defaults
   "Hardware-derived host writer-pool defaults.
@@ -1489,6 +1491,108 @@
     (if (::protocol/success? response)
       (:datahike.query/result response)
       (protocol-error-value response))))
+
+(def ^:private pinned-namespace-sources-query
+  '[:find ?sym ?source ?transaction
+    :in $ ?ns-sym
+    :where
+    [?namespace :seon.ns/name ?ns-sym]
+    [?function :seon.fn/ns ?namespace]
+    [?function :seon.fn/sym ?sym]
+    [?function :seon.fn/source ?source ?transaction]
+    [?transaction :seon.db/process ?process]
+    [?process :seon.db.process/id :seon.db.process/repl]])
+
+(defn verify-pinned-function!
+  "Verify one authored source identity at an explicit immutable database value."
+  {:malli/schema
+   [:=> [:cat ::writer :seon.db/db :qualified-symbol :string]
+    [:vector [:tuple :string :string :int]]]}
+  [writer database function-symbol source-fingerprint]
+  (let [ns-sym (symbol (namespace function-symbol))
+        rows (query-writer-at! writer database pinned-namespace-sources-query
+                               [ns-sym])]
+    (when (:seon/error rows)
+      (throw (ex-info (get-in rows [:seon/error :seon.error/message])
+                      {:seon.error/kind :core-bug})))
+    (let [target-source
+          (some (fn [[sym source _transaction]]
+                  (when (= function-symbol (symbol sym)) source))
+                rows)]
+      (when-not target-source
+        (throw (ex-info "The requested current agent function does not exist."
+                        {:seon.execution/function-symbol function-symbol
+                         :seon.error/kind :agent})))
+      (when-not (= source-fingerprint
+                   (content-hash/sha-256 target-source))
+        (throw (ex-info "The requested function source is no longer current."
+                        {:seon.execution/function-symbol function-symbol
+                         :seon.error/kind :agent})))
+      (vec rows))))
+
+(defn- stamp-source-root!
+  [sci-var source]
+  (let [source-fingerprint (content-hash/sha-256 source)
+        root @sci-var]
+    (sci/alter-var-root
+     sci-var
+     (constantly
+      (with-meta root
+        (assoc (meta root)
+               :seon.fn/source-fingerprint source-fingerprint)))))
+  sci-var)
+
+(defn materialize-pinned-function!
+  "Materialize one pinned authored function in a detached disposable context."
+  {:malli/schema
+   [:=> [:catn [::writer ::writer]
+               [::ctx ::ctx]
+               [:seon.db/db :seon.db/db]
+               [::function-symbol :qualified-symbol]
+               [::source-fingerprint :string]
+               [::reconcile-ephemeral! ::reconcile-ephemeral!]]
+    ::materialized-function]}
+  [writer retained-ctx database function-symbol source-fingerprint
+   reconcile-ephemeral!]
+  (let [ns-sym (symbol (namespace function-symbol))
+        rows (verify-pinned-function! writer database function-symbol
+                                      source-fingerprint)]
+    (let [ctx (sci/fork retained-ctx)]
+        ;; A plain fork retains identical SCI Vars. Remove then recreate the
+        ;; authored namespace before replay so pinned definitions cannot bind
+        ;; shared roots in the retained context or registry.
+        (sci/eval-string* ctx (str "(remove-ns '" ns-sym ")"))
+        (ensure-context-ns! ctx ns-sym)
+        (let [ordered (sort-by #(nth % 2) rows)
+              envelopes
+              (replay-defs!
+               ctx
+               (mapv (fn [[_ source _]]
+                       (str "(in-ns '" ns-sym ")\n" source))
+                     ordered))]
+          (when-let [failed (first (remove :seon.eval/ok? envelopes))]
+            (throw (ex-info (get-in failed [:seon/error :seon.error/message])
+                            {:seon.error/kind :agent})))
+          (let [vars-by-symbol
+                (into {}
+                      (keep (fn [[sym source _]]
+                              (when-let [sci-var (sci/resolve ctx (symbol sym))]
+                                [(symbol sym)
+                                 (stamp-source-root! sci-var source)])))
+                      ordered)
+                target-var (get vars-by-symbol function-symbol)]
+            (when-not target-var
+              (throw
+               (ex-info "The requested current agent function did not load."
+                        {:seon.execution/function-symbol function-symbol
+                         :seon.error/kind :core-bug})))
+            (let [reconciled (reconcile-ephemeral! vars-by-symbol)]
+              (when (:seon/error reconciled)
+                (throw
+                 (ex-info
+                  (get-in reconciled [:seon/error :seon.error/message])
+                  {:seon.error/kind :core-bug}))))
+            [ctx target-var])))))
 
 (def ^:private committed-schema-query
   '[:find ?key ?form

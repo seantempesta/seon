@@ -213,7 +213,12 @@
 
 (defn- install-implementation!
   [registry contexts function-row implementation]
-  (let [lib (row-lib function-row)]
+  (let [lib (row-lib function-row)
+        source-fingerprint (fingerprint (:seon.fn/source function-row))
+        implementation
+        (with-meta implementation
+          (assoc (meta implementation)
+                 :seon.fn/source-fingerprint source-fingerprint))]
     (context/register-wrappers!
      {::context/registry registry
       ::context/lib lib

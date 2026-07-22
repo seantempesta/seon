@@ -74,52 +74,79 @@
 
 (defn- marked-root [wrapped original sym fingerprint]
   (with-meta wrapped
-    (assoc (meta wrapped)
+    (assoc (merge (meta original) (meta wrapped))
            ::original-root original
            ::symbol sym
-           ::projection-fingerprint fingerprint)))
+           ::projection-fingerprint fingerprint
+           :seon.fn/source-fingerprint
+           (:seon.fn/source-fingerprint (meta original)))))
+
+(defn source-fingerprint-matches?
+  "True when a function root carries the requested source fingerprint."
+  {:malli/schema [:=> [:cat 'fn? :string] :boolean]}
+  [root source-fingerprint]
+  (= source-fingerprint
+     (:seon.fn/source-fingerprint (meta (root-original root)))))
+
+(defn- desired-root
+  [projection sym current-root]
+  (let [contracts (:seon.schema.projection/function-contracts projection)
+        registry (:seon.schema.projection/registry projection)
+        fingerprint (:seon.schema.projection/fingerprint projection)
+        contract (get contracts sym)
+        current-meta (meta current-root)
+        already-current?
+        (and contract
+             (= sym (::symbol current-meta))
+             (= fingerprint (::projection-fingerprint current-meta)))]
+    (cond
+      already-current? current-root
+      contract
+      (let [original (root-original current-root)
+            wrapped (m/-instrument
+                     {:schema contract :report (decorated-report sym)}
+                     original
+                     {:registry registry})]
+        (marked-root wrapped original sym fingerprint))
+      :else (root-original current-root))))
 
 (defn- reconcile-var!
   ([instrument-state projection sym sci-var]
    (reconcile-var! instrument-state projection sym sci-var @sci-var))
   ([instrument-state projection sym sci-var current-root]
-   (let [contracts (:seon.schema.projection/function-contracts projection)
-         registry (:seon.schema.projection/registry projection)
-         fingerprint (:seon.schema.projection/fingerprint projection)
-         contract (get contracts sym)
-         current-meta (meta current-root)
-         already-current?
-         (and contract
-              (= sym (::symbol current-meta))
-              (= fingerprint (::projection-fingerprint current-meta)))]
+   (let [fingerprint (:seon.schema.projection/fingerprint projection)
+         desired (desired-root projection sym current-root)
+         instrumented? (some? (::projection-fingerprint (meta desired)))]
      (install-watch! instrument-state sym sci-var)
-     (cond
-       already-current?
-       (swap! (::apply-ledger instrument-state)
-              assoc sci-var {::symbol sym ::projection-fingerprint fingerprint})
+     ;; Desired generation reaches the ledger before bindRoot notifies its
+     ;; watch. The marked desired root makes that nested notification a no-op.
+     (swap! (::apply-ledger instrument-state)
+            assoc sci-var
+            {::symbol sym
+             ::projection-fingerprint (when instrumented? fingerprint)})
+     (when-not (identical? current-root desired)
+       (sci/alter-var-root sci-var (constantly desired))))))
 
-       contract
-       (let [original (root-original current-root)
-             wrapped (m/-instrument
-                      {:schema contract :report (decorated-report sym)}
-                      original
-                      {:registry registry})
-             installed (marked-root wrapped original sym fingerprint)]
-         ;; Desired generation reaches the ledger before bindRoot notifies its
-         ;; watch. The marked installed root makes that nested notification a
-         ;; no-op instead of recursively wrapping.
-         (swap! (::apply-ledger instrument-state)
-                assoc sci-var {::symbol sym ::projection-fingerprint fingerprint})
-         (sci/alter-var-root sci-var (constantly installed)))
-
-       :else
-       (let [original (root-original current-root)]
-         ;; Removal becomes desired before root restoration, so the synchronous
-         ;; watch cannot resurrect the removed contract.
-         (swap! (::apply-ledger instrument-state)
-                assoc sci-var {::symbol sym ::projection-fingerprint nil})
-         (when (::projection-fingerprint current-meta)
-           (sci/alter-var-root sci-var (constantly original))))))))
+(defn reconcile-ephemeral-vars!
+  "Instrument detached invocation vars without retaining watches or ledger rows."
+  {:malli/schema [:=> [:cat ::state [:map-of :symbol 'some?]] :map]}
+  [instrument-state vars-by-symbol]
+  (let [current @(::projection-state instrument-state)]
+    (if-let [fault (::context/fault current)]
+      {:seon/error fault}
+      (let [projection (::context/projection current)]
+        (doseq [[sym sci-var] vars-by-symbol]
+          (let [current-root @sci-var
+                desired (desired-root projection sym current-root)]
+            (when-not (identical? current-root desired)
+              (sci/alter-var-root sci-var (constantly desired)))))
+        {::projection-fingerprint
+         (:seon.schema.projection/fingerprint projection)
+         ::instrumented
+         (count
+          (filter (fn [[_ sci-var]]
+                    (some? (::projection-fingerprint (meta @sci-var))))
+                  vars-by-symbol))}))))
 
 (defn- registry-var [registry sym]
   (get-in @registry

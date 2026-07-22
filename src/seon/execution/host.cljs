@@ -13,10 +13,9 @@
      Transit-UDS stream through `seon.db.transport.uds/connect-stream!`.
 
    Tier assignment is DATA on the agent entity: an agent carrying
-   `::eval-socket-path` has its `eval-batch!` invocations served by the
-   JVM agent host at that socket; every other invocation (prompt/view
-   rendering, authored calls) stays on the Bun child until the U4/U11
-   seams move them. Absence of the fact keeps today's child for
+   `::eval-socket-path` has its eval batches and authored calls served by the
+   JVM agent host at that socket; compiled prompt/view rendering stays on the
+   Bun child until the U11 seam moves it. Absence of the fact keeps today's child for
    everything (sci-execution-runtime design §9 step 1)."
   (:require
    [seon.db :as db]
@@ -804,6 +803,10 @@
      (get-in invocation [::execution/function-identity
                          ::execution/function-symbol])))
 
+(defn- authored-invocation? [invocation]
+  (contains? (::execution/function-identity invocation)
+             ::execution/source-digest))
+
 (defn- ^:async pull-eval-host-coordinate!
   "Read the agent's eval host coordinate fact at the pinned database value.
 
@@ -858,14 +861,14 @@
 (defn- invoke-now!
   "Route the head invocation by the agent's tier data, then run it.
 
-   Only `eval-batch!` consults the tier fact in U1.5: prompt/view
-   rendering and authored calls stay on the Bun child (synchronous spawn
-   preserved) until their seams move (U4 recording, U11 retirement). A
+   Eval batches and source-digest authored calls consult the host coordinate;
+   artifact-digest prompt/view rendering stays on the Bun child. A
    failed tier read surfaces loudly as an error frame — never a silent
    child fallback that could run a host-tier agent's eval in a fresh
    empty child context."
   [invocation]
-  (if-not (eval-batch-invocation? invocation)
+  (if-not (or (eval-batch-invocation? invocation)
+              (authored-invocation? invocation))
     (invoke-in-lane! child-lane nil invocation)
     (let [lookup (or (::eval-host-coordinate! (host-configuration))
                      pull-eval-host-coordinate!)]

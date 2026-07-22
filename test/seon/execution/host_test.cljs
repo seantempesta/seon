@@ -142,7 +142,7 @@
     :seon.db/db database
     ::execution/function-identity
     {::execution/function-symbol 'my.render/view
-     ::execution/source-digest digest}
+     ::execution/artifact-digest digest}
     ::execution/arguments [{:my.render/value 1}]
     ::execution/deadline-ms 9999999999999
     ::execution/result-limit-bytes 4096}))
@@ -1044,6 +1044,18 @@
    ::execution/deadline-ms 9999999999999
    ::execution/result-limit-bytes 4096})
 
+(defn- compiled-render-invocation [invocation-id]
+  (assoc
+   (execution/compiled-invocation
+    "agent-1" 'seon.execution.runtime/render-agent-view! [] database digest)
+   ::execution/invocation-id invocation-id))
+
+(defn- authored-invocation [invocation-id]
+  (assoc-in (invocation invocation-id)
+            [::execution/function-identity]
+            {::execution/function-symbol 'my.render/view
+             ::execution/source-digest digest}))
+
 (defn- configure-with-host! [spawn!]
   (host/configure!
    {::host/launch-descriptor (descriptor)
@@ -1197,7 +1209,7 @@
                (reset! !connect-native prior-connect)
                (done))))))))
 
-(deftest render-invocations-stay-on-the-bun-child-for-host-tier-agents
+(deftest authored-invocations-ride-the-uds-stream-not-a-child
   (async done
     (let [fixture (fake-host-socket)
           prior-connect @!connect-native
@@ -1210,17 +1222,28 @@
                    (:process child))]
       (reset! !connect-native (::connect fixture))
       (configure-with-host! spawn!)
-      (let [completion (host/invoke! (invocation "render-1"))]
-        (is (= 1 (count @spawned))
-            "a non-eval invocation spawns the Bun child synchronously")
-        (feed! @options (:process child) (ready-message))
+      (let [completion (host/invoke! (authored-invocation "authored-1"))]
         (-> (turn*)
             (.then
              (fn [_]
-               (is (zero? (count @(::writes fixture)))
-                   "no host session opens for a render invocation")
-               (feed! @options (:process child)
-                      (result-message "render-1" {:my.render/value 7}))
+               (is (empty? @spawned)
+                   "no Bun child spawns for a host-tier authored call")
+               (is (= "tmp/fake-agent-host.sock"
+                      (aget @(::options fixture) "unix")))
+               (host-inject! fixture (host-ready-message))
+               (turn*)))
+            (.then
+             (fn [_]
+               (let [sent (written-message (second @(::writes fixture)))]
+                 (is (= digest
+                        (get-in sent [::execution/function-identity
+                                      ::execution/source-digest])))
+                 (is (= 'my.render/view
+                        (get-in sent [::execution/function-identity
+                                      ::execution/function-symbol]))))
+               (host-inject! fixture
+                             (result-message "authored-1"
+                                             {:my.render/value 7}))
                completion))
             (.then
              (fn [result]
@@ -1228,6 +1251,42 @@
             (.catch
              (fn [error]
                (is false (str "render lane failed: " error))))
+            (.finally
+             (fn []
+               (reset! !connect-native prior-connect)
+               (done))))))))
+
+(deftest compiled-render-invocations-stay-on-the-bun-child
+  (async done
+    (let [fixture (fake-host-socket)
+          prior-connect @!connect-native
+          spawned (atom [])
+          child (fake-process 404)
+          options (atom nil)
+          spawn! (fn [value]
+                   (reset! options value)
+                   (swap! spawned conj value)
+                   (:process child))]
+      (reset! !connect-native (::connect fixture))
+      (configure-with-host! spawn!)
+      (let [completion
+            (host/invoke! (compiled-render-invocation "render-compiled-1"))]
+        (is (= 1 (count @spawned))
+            "an artifact-digest render spawns the Bun child synchronously")
+        (feed! @options (:process child) (ready-message))
+        (-> (turn*)
+            (.then
+             (fn [_]
+               (is (zero? (count @(::writes fixture)))
+                   "no host session opens for compiled rendering")
+               (feed! @options (:process child)
+                      (result-message "render-compiled-1" :rendered))
+               completion))
+            (.then (fn [result]
+                     (is (= :rendered (::execution/result result)))))
+            (.catch
+             (fn [error]
+               (is false (str "compiled render lane failed: " error))))
             (.finally
              (fn []
                (reset! !connect-native prior-connect)
