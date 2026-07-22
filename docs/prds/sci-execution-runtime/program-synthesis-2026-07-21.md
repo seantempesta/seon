@@ -716,7 +716,11 @@ decisions batch for their return.
   and the db.storage CANCELLATION: `seon.db` gained the one public
   `encode-edn-slot-values` instead (sole-database-API repair; the
   implementer's stop proved the extraction would have split the
-  mechanism). Internal-boundary law now holds in production — every
+  mechanism). CORRECTION (2026-07-21 overnight, caught by NS-0.5d's
+  scan): the law holds for the EXTRACTED/RENAMED internals only —
+  `seon.repl.internal` (10 external requires) and `my.plan.internal`
+  (4) remain open as the held NS-0.5c surfaces; NS-0.5d's gate carries
+  them as two dated allowlist rows. Original overclaim struck: every
   `.internal` required only by its parent. Full gates: cljs 1486/7171,
   writer 342/2584. Remaining NS-0.5c (repl.parse rename + my.plan seam
   repairs) still waits for the repl-lane handoff.
