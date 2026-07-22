@@ -336,54 +336,42 @@
 
 (def ^:private maximum-program-results 16384)
 (def ^:private maximum-program-bytes (* 3 1024 1024))
+(def ^:private acquisition-page-size 32)
+(def ^:private acquisition-page-max-result-weight 60000)
 
-(def ^:private runtime-namespace-query
-  '[:find ?name ?source
+(def ^:private repl-source-entity-query
+  '[:find [?entity ...]
+    :in $ [?entity ...] ?source-attr
     :where
-    [?namespace :seon.ns/name ?name]
-    [?namespace :seon.ns/source ?source ?tx]
+    [?entity ?source-attr _ ?tx]
     [?tx :seon.db/process ?process]
     [?process :seon.db.process/id :seon.db.process/repl]])
 
-(def ^:private runtime-require-edge-query
-  '[:find ?name (pull ?edge [*])
+(def ^:private repl-require-edge-query
+  '[:find ?namespace ?edge
+    :in $ [?namespace ...]
     :where
-    [?namespace :seon.ns/name ?name]
     [?namespace :seon.ns/require-edges ?edge ?tx]
     [?tx :seon.db/process ?process]
     [?process :seon.db.process/id :seon.db.process/repl]])
 
-(def ^:private runtime-function-query
-  '[:find ?sym ?source ?ns-name
-    :where
-    [?function :seon.fn/sym ?sym]
-    [?function :seon.fn/source ?source ?tx]
-    [?tx :seon.db/process ?process]
-    [?process :seon.db.process/id :seon.db.process/repl]
-    [?function :seon.fn/ns ?namespace]
-    [?namespace :seon.ns/name ?ns-name]])
+(def ^:private namespace-source-pull-pattern
+  '[:seon.ns/name :seon.ns/source])
 
-(def ^:private runtime-test-query
-  '[:find ?sym ?source ?ns-name
-    :where
-    [?test :seon.test/sym ?sym]
-    [?test :seon.test/source ?source ?tx]
-    [?tx :seon.db/process ?process]
-    [?process :seon.db.process/id :seon.db.process/repl]
-    [?test :seon.test/ns ?namespace]
-    [?namespace :seon.ns/name ?ns-name]])
+(def ^:private require-edge-pull-pattern
+  '[*])
 
-(def ^:private schema-query
-  '[:find ?key ?form
-    :where
-    [?schema :seon.schema/key ?key]
-    [?schema :seon.schema/form ?form]])
+(def ^:private function-source-pull-pattern
+  '[:seon.fn/sym :seon.fn/source {:seon.fn/ns [:seon.ns/name]}])
 
-(def ^:private function-contract-query
-  '[:find ?sym ?form
-    :where
-    [?function :seon.fn/sym ?sym]
-    [?function :seon.fn/spec ?form]])
+(def ^:private test-source-pull-pattern
+  '[:seon.test/sym :seon.test/source {:seon.test/ns [:seon.ns/name]}])
+
+(def ^:private schema-pull-pattern
+  '[:seon.schema/key :seon.schema/form])
+
+(def ^:private function-contract-pull-pattern
+  '[:seon.fn/sym :seon.fn/spec])
 
 (def ^:private invocation-source-query
   '[:find ?requested ?source
@@ -401,13 +389,15 @@
    :datahike.resource/max-results maximum-program-results
    :datahike.resource/max-result-weight maximum-program-bytes})
 
-(defn- config-member [database]
-  (merge
-   {::db.protocol/operation db.protocol/pull-operation
-    ::db/db database
-    ::db.protocol/selector '[*]
-    ::db.protocol/entity-id [:seon.config/id config/cluster-config-id]}
-   config/configuration-read-profile))
+(defn- config-request [database]
+  {::db/db database
+   ::db/pull-pattern '[*]
+   ::db/ref [:seon.config/id config/cluster-config-id]
+   ::db/max-work (:datahike.resource/max-work
+                  config/configuration-read-profile)
+   ::db/max-results (:datahike.resource/max-results
+                     config/configuration-read-profile)
+   ::db/max-result-weight acquisition-page-max-result-weight})
 
 (defn- query-result [member]
   (if (::db.protocol/success? member)
@@ -415,11 +405,19 @@
     (throw (ex-info "Authored program acquisition failed."
                     {:seon.db/error member :seon.error/kind :core-bug}))))
 
-(defn- pull-result [member]
-  (if (::db.protocol/success? member)
-    (::db.protocol/result member)
-    (throw (ex-info "Configuration acquisition failed."
-                    {:seon.db/error member :seon.error/kind :core-bug}))))
+(defn- failed-read? [value]
+  (and (map? value) (string? (:seon.error/message value))))
+
+(defn- acquisition-error! [stage value]
+  (throw (ex-info "Authored program acquisition failed."
+                  {:seon.db/error value
+                   :seon.execution/acquisition-stage stage
+                   :seon.error/kind :core-bug})))
+
+(defn- checked-read [stage value]
+  (if (failed-read? value)
+    (acquisition-error! stage value)
+    value))
 
 (defn- normalize-require-edge [edge]
   (cond-> (dissoc edge :db/id)
@@ -605,18 +603,147 @@
                     ::function-identity identity))))
      invocation-plans)))
 
-(defn- program-members [database]
-  [(query-member database runtime-namespace-query [])
-   (query-member database runtime-require-edge-query [])
-   (query-member database runtime-function-query [])
-   (query-member database runtime-test-query [])
-   (query-member database schema-query [])
-   (query-member database function-contract-query [])])
+(defn- ^:async acquire-identity-pages!
+  [database identity-attr initial combine-page acquire-page!]
+  (loop [cursor nil
+         acquired initial]
+    (let [page
+          (checked-read
+           :index-page
+           (await
+            (db/index-page
+             (cond-> {::db/db database
+                      ::db/index :aevt
+                      ::db/components [identity-attr]
+                      ::db/direction :forward
+                      ::db/limit acquisition-page-size
+                      ::db/max-result-weight
+                      acquisition-page-max-result-weight}
+               cursor (assoc ::db/cursor cursor)))))
+          page-value (await (acquire-page! page))
+          next-acquired (combine-page acquired page-value)]
+      (if (:datahike.index-page/complete? page)
+        next-acquired
+        (recur (:datahike.index-page/cursor page) next-acquired)))))
 
-(defn- program-from-results [results]
-  (let [[namespaces edges functions tests schemas contracts]
-        (mapv query-result results)
-        program (canonical-program namespaces edges [] functions tests
+(defn- ^:async query-page!
+  [database query arguments max-results]
+  (checked-read
+   :query
+   (await
+    (db/query
+     {::db/db database
+      ::db/query query
+      ::db/args arguments
+      ::db/max-results max-results
+      ::db/max-result-weight acquisition-page-max-result-weight}))))
+
+(defn- ^:async pull-page!
+  [database pull-pattern refs]
+  (if (seq refs)
+    (checked-read
+     :pull-many
+     (await
+      (db/pull-many
+       {::db/db database
+        ::db/pull-pattern pull-pattern
+        ::db/refs (vec refs)
+        ::db/max-result-weight acquisition-page-max-result-weight})))
+    []))
+
+(defn- ^:async authored-rows!
+  [database identity-attr source-attr pull-pattern row-fn]
+  (await
+   (acquire-identity-pages!
+    database identity-attr [] into
+    (fn ^:async acquire-page [page]
+      (let [entity-ids (mapv first (:datahike.index-page/datoms page))
+            authored-ids
+            (await
+             (query-page! database repl-source-entity-query
+                          [entity-ids source-attr]
+                          acquisition-page-size))
+            entities (await (pull-page! database pull-pattern authored-ids))]
+        (into [] (keep row-fn) entities))))))
+
+(defn- ^:async namespace-rows!
+  [database]
+  (await
+   (acquire-identity-pages!
+    database :seon.ns/name {::namespace-sources [] ::require-edges []}
+    (partial merge-with into)
+    (fn ^:async acquire-page [page]
+      (let [identity-datoms (:datahike.index-page/datoms page)
+            namespace-ids (mapv first identity-datoms)
+            namespace-name-by-id (into {} (map (juxt first #(nth % 2)))
+                                       identity-datoms)
+            source-ids
+            (await
+             (query-page! database repl-source-entity-query
+                          [namespace-ids :seon.ns/source]
+                          acquisition-page-size))
+            edge-pairs
+            (await
+             (query-page! database repl-require-edge-query [namespace-ids]
+                          maximum-program-results))
+            source-entities
+            (await
+             (pull-page! database namespace-source-pull-pattern source-ids))
+            edge-ids (mapv second edge-pairs)
+            edge-entities
+            (await (pull-page! database require-edge-pull-pattern edge-ids))
+            edge-by-id (into {} (keep #(when % [(:db/id %) %])) edge-entities)]
+        {::namespace-sources
+         (into []
+               (keep (fn [entity]
+                       (when (and (contains? entity :seon.ns/name)
+                                  (contains? entity :seon.ns/source))
+                         [(:seon.ns/name entity) (:seon.ns/source entity)])))
+               source-entities)
+         ::require-edges
+         (into []
+               (keep (fn [[namespace-id edge-id]]
+                       (when-let [edge (get edge-by-id edge-id)]
+                         [(get namespace-name-by-id namespace-id) edge])))
+               edge-pairs)})))))
+
+(defn- ^:async entity-rows!
+  [database identity-attr pull-pattern row-fn]
+  (await
+   (acquire-identity-pages!
+    database identity-attr [] into
+    (fn ^:async acquire-page [page]
+      (let [entity-ids (mapv first (:datahike.index-page/datoms page))
+            entities (await (pull-page! database pull-pattern entity-ids))]
+        (into [] (keep row-fn) entities))))))
+
+(defn- function-row [entity]
+  (let [namespace-name (get-in entity [:seon.fn/ns :seon.ns/name])]
+    (when (and (contains? entity :seon.fn/sym)
+               (contains? entity :seon.fn/source)
+               namespace-name)
+      [(:seon.fn/sym entity) (:seon.fn/source entity) namespace-name])))
+
+(defn- test-row [entity]
+  (let [namespace-name (get-in entity [:seon.test/ns :seon.ns/name])]
+    (when (and (contains? entity :seon.test/sym)
+               (contains? entity :seon.test/source)
+               namespace-name)
+      [(:seon.test/sym entity) (:seon.test/source entity) namespace-name])))
+
+(defn- schema-row [entity]
+  (when (and (contains? entity :seon.schema/key)
+             (contains? entity :seon.schema/form))
+    [(:seon.schema/key entity) (:seon.schema/form entity)]))
+
+(defn- function-contract-row [entity]
+  (when (and (contains? entity :seon.fn/sym)
+             (contains? entity :seon.fn/spec))
+    [(:seon.fn/sym entity) (:seon.fn/spec entity)]))
+
+(defn- program-from-rows
+  [namespaces edges functions tests schemas contracts]
+  (let [program (canonical-program namespaces edges [] functions tests
                                    schemas contracts)
         source-by-symbol
         (into {}
@@ -628,12 +755,26 @@
 
 (defn- ^:async acquire-program!
   [database]
-  (let [result (await
-                (db/execute-many
-                 {::db/db database
-                  ::db/max-result-weight maximum-program-bytes
-                  ::db/members (program-members database)}))]
-    (program-from-results (::db/results result))))
+  (let [{::keys [namespace-sources require-edges]}
+        (await (namespace-rows! database))
+        functions
+        (await
+         (authored-rows! database :seon.fn/sym :seon.fn/source
+                         function-source-pull-pattern function-row))
+        tests
+        (await
+         (authored-rows! database :seon.test/sym :seon.test/source
+                         test-source-pull-pattern test-row))
+        schemas
+        (await
+         (entity-rows! database :seon.schema/key schema-pull-pattern
+                       schema-row))
+        contracts
+        (await
+         (entity-rows! database :seon.fn/sym function-contract-pull-pattern
+                       function-contract-row))]
+    (program-from-rows namespace-sources require-edges functions tests
+                       schemas contracts)))
 
 (defn- verify-authored-identity!
   [program invocation]
@@ -715,15 +856,11 @@
    broken declaration through the same supervised child."
   [state invocation]
   (let [database (:seon.db/db invocation)
-        acquired (await
-                  (db/execute-many
-                   {::db/db database
-                    ::db/max-result-weight (+ maximum-program-bytes 65536)
-                    ::db/members (conj (program-members database)
-                                       (config-member database))}))
-        results (::db/results acquired)
-        program (program-from-results (subvec results 0 6))
-        configuration (db/decode-edn-values (pull-result (nth results 6)))
+        program (await (acquire-program! database))
+        configuration
+        (->> (await (db/pull (config-request database)))
+             (checked-read :configuration)
+             db/decode-edn-values)
         symbols (vec (keys (::source-by-symbol program)))
         compile-state (await (ensure-compile-state! state))
         load-error

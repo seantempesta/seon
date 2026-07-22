@@ -568,10 +568,14 @@
            (execution/source-digest second-value)))))
 
 (deftest execution-configuration-pull-budgets-retained-nodes
-  (let [member (@#'execution/config-member database)]
-    (is (= '[*] (::protocol/selector member)))
-    (is (= config/configuration-read-profile
-           (select-keys member (keys config/configuration-read-profile))))))
+  (let [request (@#'execution/config-request database)]
+    (is (= '[*] (::db/pull-pattern request)))
+    (is (= database (::db/db request)))
+    (is (= 60000 (::db/max-result-weight request)))
+    (is (= (:datahike.resource/max-work config/configuration-read-profile)
+           (::db/max-work request)))
+    (is (= (:datahike.resource/max-results config/configuration-read-profile)
+           (::db/max-results request)))))
 
 (deftest authored-program-queries-bound-retained-results-and-bytes
   (let [member (@#'execution/query-member database '[:find ?value] [])]
@@ -588,48 +592,191 @@
 
 (deftest runtime-program-acquisition-is-one-shared-database-value
   (async done
-    (let [request (atom nil)
-          results
-          [#{['my.agent.agent-1 "(ns my.agent.agent-1)"]}
-           #{}
-           #{["my.agent.agent-1/run" "(defn run [] :ok)"
-              'my.agent.agent-1]}
-           #{["my.agent.agent-1/check" "(deftest check (is true))"
-              'my.agent.agent-1]}
-           #{}
-           #{}]
-          response
-          {::db/results
-           (mapv (fn [result]
-                   {::protocol/success? true
-                    :datahike.query/result result})
-                 results)}]
-      (with-redefs [db/execute-many
-                    (fn [value]
-                      (reset! request value)
-                      (js/Promise.resolve response))]
+    (let [requests (atom [])
+          namespace-rows [['my.agent.agent-1 "(ns my.agent.agent-1)"]]
+          edge {:db/id 100 :seon.ns.require/target 'seon.db
+                :seon.ns.require/alias 'db}
+          edge-rows [['my.agent.agent-1 edge]]
+          function-rows
+          [["my.agent.agent-1/run" "(defn run [] :ok)"
+            'my.agent.agent-1]
+           ["my.agent.agent-1/helper" "(defn helper [] 1)"
+            'my.agent.agent-1]]
+          test-rows
+          [["my.agent.agent-1/check" "(deftest check (is true))"
+            'my.agent.agent-1]]
+          schema-rows [[:my/value ":int"]]
+          contract-rows
+          [["my.agent.agent-1/run" "[:=> [:cat] :keyword]"]]
+          expected (execution/canonical-program
+                    namespace-rows edge-rows [] function-rows test-rows
+                    schema-rows contract-rows)
+          page-response
+          (fn [request]
+            (swap! requests conj request)
+            (let [attr (first (::db/components request))
+                  cursor (::db/cursor request)]
+              (js/Promise.resolve
+               (case attr
+                 :seon.ns/name
+                 {:datahike.index-page/datoms
+                  [[1 attr 'my.agent.agent-1 1 true]]
+                  :datahike.index-page/complete? true}
+
+                 :seon.fn/sym
+                 (if cursor
+                   {:datahike.index-page/datoms
+                    [[11 attr "my.agent.agent-1/helper" 1 true]]
+                    :datahike.index-page/complete? true}
+                   {:datahike.index-page/datoms
+                    [[10 attr "my.agent.agent-1/run" 1 true]]
+                    :datahike.index-page/complete? false
+                    :datahike.index-page/cursor [10 attr
+                                                 "my.agent.agent-1/run"
+                                                 1 true]})
+
+                 :seon.test/sym
+                 {:datahike.index-page/datoms
+                  [[20 attr "my.agent.agent-1/check" 1 true]]
+                  :datahike.index-page/complete? true}
+
+                 :seon.schema/key
+                 {:datahike.index-page/datoms [[30 attr :my/value 1 true]]
+                  :datahike.index-page/complete? true}))))
+          page
+          (fn
+            ([request] (page-response request))
+            ([_ _]
+             (js/Promise.reject (js/Error. "unexpected positional index-page"))))
+          query
+          (fn [request]
+            (swap! requests conj request)
+            (let [arguments (::db/args request)]
+              (js/Promise.resolve
+               (if (= 2 (count arguments))
+                 (case (second arguments)
+                   :seon.ns/source [1]
+                   :seon.fn/source (first arguments)
+                   :seon.test/source [20])
+                 [[1 100]]))))
+          pull-many-response
+          (fn [request]
+            (swap! requests conj request)
+            (let [pattern (::db/pull-pattern request)
+                  refs (::db/refs request)]
+              (js/Promise.resolve
+               (cond
+                 (= pattern @#'execution/namespace-source-pull-pattern)
+                 [{:seon.ns/name 'my.agent.agent-1
+                   :seon.ns/source "(ns my.agent.agent-1)"}]
+
+                 (= pattern @#'execution/require-edge-pull-pattern) [edge]
+
+                 (= pattern @#'execution/function-source-pull-pattern)
+                 (mapv (fn [ref]
+                         (let [[sym source namespace-name]
+                               (first (filter #(= ref (if (= "my.agent.agent-1/run"
+                                                            (first %)) 10 11))
+                                              function-rows))]
+                           {:seon.fn/sym sym
+                            :seon.fn/source source
+                            :seon.fn/ns {:seon.ns/name namespace-name}}))
+                       refs)
+
+                 (= pattern @#'execution/test-source-pull-pattern)
+                 [{:seon.test/sym "my.agent.agent-1/check"
+                   :seon.test/source "(deftest check (is true))"
+                   :seon.test/ns {:seon.ns/name 'my.agent.agent-1}}]
+
+                 (= pattern @#'execution/schema-pull-pattern)
+                 [{:seon.schema/key :my/value :seon.schema/form ":int"}]
+
+                 (= pattern @#'execution/function-contract-pull-pattern)
+                 (mapv (fn [ref]
+                         (when (= 10 ref)
+                           {:seon.fn/sym "my.agent.agent-1/run"
+                            :seon.fn/spec "[:=> [:cat] :keyword]"}))
+                       refs)))))
+          pull-many
+          (fn
+            ([request] (pull-many-response request))
+            ([_ _]
+             (js/Promise.reject (js/Error. "unexpected positional pull-many")))
+            ([_ _ _]
+             (js/Promise.reject (js/Error. "unexpected positional pull-many"))))]
+      (with-redefs [db/index-page page
+                    db/query query
+                    db/pull-many pull-many]
         (-> (js/Promise.resolve
              (@#'execution/acquire-program! database))
             (.then
              (fn [program]
-               (is (= 6 (count (::db/members @request))))
-               (is (every? #(= database
-                                (first (::protocol/arguments %)))
-                           (::db/members @request)))
+               (is (= expected
+                      (select-keys program [::execution/namespace-rows
+                                            ::execution/schema-forms
+                                            ::execution/function-contracts])))
+               (is (every? #(= database (::db/db %)) @requests))
+               (is (every? #(or (nil? (::db/limit %))
+                                (= 32 (::db/limit %)))
+                           @requests))
+               (is (every? #(or (nil? (::db/max-result-weight %))
+                                (= 60000 (::db/max-result-weight %)))
+                           @requests))
+               (is (= 4 (count (filter #(= :seon.fn/sym
+                                            (first (::db/components %)))
+                                      @requests)))
+                   "function source and contract cursors page independently")
                (let [row (first (::execution/namespace-rows program))]
                  (is (= 'my.agent.agent-1 (:seon.ns/name row)))
-                 (is (= ['my.agent.agent-1/run]
+                 (is (= ['my.agent.agent-1/helper 'my.agent.agent-1/run]
                         (mapv :seon.fn/sym (:seon.fn/_ns row))))
                  (is (= ['my.agent.agent-1/check]
                         (mapv :seon.test/sym (:seon.test/_ns row))))
                  (is (re-find #"deftest check" (seval/namespace-source row))))
-               (is (= #{'my.agent.agent-1/run 'my.agent.agent-1/check}
+               (is (= #{'my.agent.agent-1/run 'my.agent.agent-1/helper
+                        'my.agent.agent-1/check}
                       (set (keys (::execution/source-by-symbol program)))))
                (done)))
             (.catch
              (fn [error]
                (is false (str "program acquisition rejected: " error))
                (done))))))))
+
+(deftest top-level-program-frame-error-reaches-the-child-error-value
+  (async done
+    (let [messages (atom [])
+          state (atom {::execution/startup startup})
+          open-session! db/open-session!
+          index-page db/index-page
+          frame-error
+          {:seon.error/message "The database response exceeded its frame limit."
+           :seon.error/kind :core-bug
+           :seon.error/data
+           {::protocol/error-kind :seon.db.protocol.error/frame-too-large
+            ::protocol/request-id "frame-request"}}]
+      (set! db/open-session!
+            (fn [_] (js/Promise.resolve {:seon.db/db database})))
+      (set! db/index-page
+            (fn
+              ([_] (js/Promise.resolve frame-error))
+              ([_ _] (js/Promise.resolve frame-error))))
+      (@#'execution/begin-invocation!
+       state invocation (decoded-sender messages) (fn [_]) 0)
+      (js/setTimeout
+       (fn []
+         (let [message (first @messages)
+               child-error (::execution/error message)]
+           (is (= execution/error-message (::execution/message message)))
+           (is (= "Authored program acquisition failed."
+                  (:seon.error/message child-error)))
+           (is (= frame-error
+                  (get-in child-error [:seon.error/data :seon.db/error])))
+           (is (not= "v must satisfy IVector"
+                     (:seon.error/message child-error)))
+           (set! db/open-session! open-session!)
+           (set! db/index-page index-page)
+           (done)))
+       20))))
 
 (deftest authored-loader-loads-each-selected-namespace-once
   (async done
@@ -708,15 +855,16 @@
   (async done
     (let [compile-state (atom {})
           state (atom {::execution/startup startup})
-          empty-query-result
-          {::protocol/success? true
-           :datahike.query/result []}
-          response
-          {::db/results
-           (conj (vec (repeat 6 empty-query-result))
-                 {::protocol/success? true
-                  :datahike.pull/result {}})}]
-      (with-redefs [db/execute-many (fn [_] (js/Promise.resolve response))
+          program (assoc (execution/canonical-program [] [] [] [] [] [] [])
+                         ::execution/digest (execution/source-digest {})
+                         ::execution/source-by-symbol {})]
+      (with-redefs [execution/acquire-program!
+                    (fn [_] (js/Promise.resolve program))
+                    db/pull
+                    (fn
+                      ([_] (js/Promise.resolve {}))
+                      ([_ _] (js/Promise.resolve {}))
+                      ([_ _ _] (js/Promise.resolve {})))
                     seval/init-bootstrap!
                     (fn [] (js/Promise.resolve compile-state))
                     seval/load-authored-program!
