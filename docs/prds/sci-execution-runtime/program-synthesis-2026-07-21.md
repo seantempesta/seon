@@ -965,13 +965,21 @@ happened. Now take the next thing off the queue.
   var populations, generation-admission barrier, three hooks,
   wire-safe-value strengthened; HINTS FIRE FOR THE FIRST TIME on both
   tiers — m/form repair; writer 362/2717 + cljs 1502/7246) ·
-  **W3c2 IN FLIGHT** (`specs/w3c2-host-repair-preflight.md`, sol
-  medium, logs `tmp/orchestrator/w3c2-*`: delimiter repair + symbol
-  preflight under the ACCEPTED host semantics — receipt-first,
-  unresolved terminal, disposable-fork analysis, policy through the
-  one W3a acquisition) ·
-  **B11 IN FLIGHT** (`specs/b11-fixture-isolation.md`, sol low,
-  diagnostics only, logs `tmp/orchestrator/b11-*`) ·
+  **W3c2 DONE `e3a11969`** (delimiter repair via the portable owner +
+  parse-next+string spans; receipt-first preflight, terminal
+  unresolved; policy through the one acquisition; LATENT BUG FIXED:
+  pick-winner's unqualified await was JVM-broken in the .cljc owner;
+  parinferish pinned into :host — W9 audit note; writer 368/2752 +
+  cljs 1502/7246; all four falsifiers proved) ·
+  **B11 DONE `b231e198`** (fixture-isolated containment sockets via
+  the existing knob + first-failure evidence capture; 10/10 loop;
+  q24 queued — socket orphan sweep belongs to WP-S) ·
+  **W3d1 IN FLIGHT** (`specs/w3d1-authored-invocation.md`, sol medium,
+  logs `tmp/orchestrator/w3d1-*`: pinned source identity wins over
+  mutable roots, disposable-fork materialization, composition with
+  fence+instrumentation+settle, :core-bug refusal replaced, pod
+  routing to the host session; W3d2 cross-agent live require queued
+  separately) ·
   **W10 intermittents investigation IN FLIGHT** (read-only, B8/B11 +
   branch-qualified eval-cljs hang, logs
   `tmp/orchestrator/w10-intermittents-*`). Spine after W3b: W3c2
