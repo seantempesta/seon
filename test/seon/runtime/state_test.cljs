@@ -360,6 +360,75 @@
     managed-identity-attrs
     adopt-identities)))
 
+(deftest full-reconcile-creates-a-missing-adopted-identity-once
+  (async done
+    (let [original-db db/db
+          original-execute db/execute-many
+          original-transact db/transact!
+          desired [{:seon.runtime.state.scratch.a/id "adopt-new"
+                    :seon.runtime.state.scratch.a/label "declared"}]
+          identity [:seon.runtime.state.scratch.a/id "adopt-new"]
+          database (atom authority-database)
+          entity (atom nil)
+          writes (atom [])
+          request {:seon.runtime.state/desired desired
+                   :seon.db/managed-scope #{:seon.db.process/boot}
+                   :seon.db/managed-identity-attrs
+                   #{:seon.runtime.state.scratch.a/id}
+                   :seon.runtime.state/adopt-identities #{identity}}
+          restore! (fn []
+                     (set! db/db original-db)
+                     (set! db/execute-many original-execute)
+                     (set! db/transact! original-transact))]
+      (set! db/db
+            (fn
+              ([] (js/Promise.resolve @database))
+              ([_]
+               (js/Promise.reject
+                (js/Error. "reconcile unexpectedly reacquired by name")))))
+      (set! db/execute-many
+            (fn [_]
+              (let [present @entity]
+                (js/Promise.resolve
+                 (authority-acquisition
+                  installed-scratch-schema
+                  (cond-> [] present (conj [41 present]))
+                  (cond-> [] present (conj [41 100]))
+                  (cond-> [] present
+                    (conj [100 :seon.db.process/config])))))))
+      (set! db/transact!
+            (fn [& [transaction]]
+              (swap! writes conj transaction)
+              (reset! entity (assoc (first (::db/tx-data transaction))
+                                    :db/id 41))
+              (reset! database authority-database-after)
+              (js/Promise.resolve
+               (assoc authority-transaction-report
+                      :tx-data (::db/tx-data transaction)))))
+      (-> (state/reconcile! request)
+          (.then
+           (fn [first-result]
+             (is (= {:seon.runtime.state/ok? true
+                     :seon.runtime.state/changed? true
+                     :seon.runtime.state/operations 1
+                     :seon.runtime.state/attempts 1}
+                    first-result))
+             (is (= (assoc (first desired) :db/id 41) @entity)
+                 "the public reconcile path creates the absent identity")
+             (state/reconcile! request)))
+          (.then
+           (fn [second-result]
+             (is (= {:seon.runtime.state/ok? true
+                     :seon.runtime.state/changed? false
+                     :seon.runtime.state/operations 0
+                     :seon.runtime.state/attempts 1}
+                    second-result))
+             (is (= 1 (count @writes))
+                 "an identical second apply submits no transaction")
+             (is (= desired (::db/tx-data (first @writes))))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally (fn [] (restore!) (done)))))))
+
 (deftest compiler-adds-updates-and-retracts-one-managed-population
   (let [rows
         [(acquired-row

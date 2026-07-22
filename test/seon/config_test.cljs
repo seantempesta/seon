@@ -1,25 +1,33 @@
 (ns seon.config-test
   "Unit tests for the config-read layer (`seon.config`).
 
-   Pure-data tests — no conn, no pod boot: the resolvers take a manifest map
-   + the raw seed data and return the curated data. Covers schema validity,
-   the config-absent identity (the `{}` manifest = byte-identical to a
-   no-config boot), route curation, the render-bounds section, and the env
-   accessors.
+   Most tests are pure data: the resolvers take a manifest map + raw seed data
+   and return curated data. One config-apply contract test drives the real
+   client/runtime-state reconcile path against authority-shaped responses.
+   Covers schema validity, the config-absent identity (the `{}` manifest =
+   byte-identical to a no-config boot), route curation, the render-bounds
+   section, and the env accessors.
 
    Run via bin/test-cljs, or interactively via MCP eval:
      (require 'seon.config-test :reload)
      (cljs.test/run-tests 'seon.config-test)"
   (:require
-    [cljs.test :refer [deftest is testing]]
+    [cljs.test :refer [async deftest is testing]]
     [malli.core :as m]
-    [seon.agent]
+    [my.skills :as skills]
+    [seon.agent :as agent]
+    [seon.agent.ctx :as agent.ctx]
     [seon.agent.message]
     [seon.agent.web]
+    [seon.client :as client]
     [seon.config :as config]
     [seon.config.resolve :as resolve]
     [seon.db :as db]
-    [seon.schema :as schema]))
+    [seon.db.protocol :as protocol]
+    [seon.launch :as launch]
+    [seon.runtime.state :as state]
+    [seon.schema :as schema]
+    [seon.test.async :as test.async]))
 
 (def ^:private routes
   [{:seon.route/name :seon.route/root  :seon.route/pattern "/"}
@@ -240,6 +248,192 @@
   (let [manifest (config/read-config-file "config/acme.edn")]
     (is (= [{:seon.ai/id "config" :seon.ai/provider :typeahead}]
            (config/resolve-ai-config manifest)))))
+
+(deftest declared-ai-reclaims-repl-provenance-and-repeat-is-zero-operation
+  (async done
+    (let [manifest
+          {:seon.config/ai
+           {:seon.ai/provider :deepseek
+            :seon.ai/model "deepseek-v4-pro"
+            :seon.ai/base-url "https://api.deepseek.com"
+            :seon.ai/api-key-env "DEEPSEEK_API_KEY"}}
+          singleton (resolve/resolve-config-singleton
+                     manifest {} fixed-hardware)
+          desired-ai (first (resolve/resolve-ai-config manifest))
+          repl-ai (assoc desired-ai
+                         :seon.ai/provider :openai-compat
+                         :seon.ai/model "agent-authored")
+          database-before
+          {:db-name "config-adoption-test"
+           :t 10
+           :as-of nil
+           :since nil
+           :history false
+           :datahike/commit-id
+           #uuid "00000000-0000-0000-0000-000000000010"}
+          database-after
+          (assoc database-before
+                 :t 11
+                 :datahike/commit-id
+                 #uuid "00000000-0000-0000-0000-000000000011")
+          installed
+          (into {}
+                (map (juxt :db/ident identity))
+                (db/malli->datahike-schema
+                 (into (vec (keys singleton)) (keys desired-ai))))
+          stored-singleton
+          (into {}
+                (remove (fn [[attribute value]]
+                          (and (= :db.cardinality/many
+                                  (:db/cardinality (get installed attribute)))
+                               (empty? value))))
+                (first (db/encode-edn-slot-values [singleton])))
+          phase (atom :foreign)
+          writes (atom [])
+          original-db db/db
+          original-execute-many db/execute-many
+          original-transact db/transact!
+          original-routes config/resolve-routes
+          original-skills skills/seed-skills-tx-data
+          original-host-coordinates agent/reconcile-host-coordinates!
+          original-migrate agent.ctx/migrate-plan-surface-default!
+          success (fn [m] (protocol/success m))
+          entity-rows
+          (fn [identity-attr]
+            (case identity-attr
+              :seon.ai/id
+              [[41 (assoc (if (= :foreign @phase) repl-ai desired-ai)
+                          :db/id 41)]]
+
+              :seon.config/id
+              (if (= :managed @phase)
+                [[42 (assoc stored-singleton :db/id 42)]]
+                [])
+
+              []))
+          provenance-rows
+          (fn [identity-attr]
+            (case identity-attr
+              :seon.ai/id [[41 100]]
+              :seon.config/id (if (= :managed @phase) [[42 101]] [])
+              []))
+          process-rows
+          (fn [identity-attr]
+            (case identity-attr
+              :seon.ai/id [[100 :seon.db.process/repl]]
+              :seon.config/id
+              (if (= :managed @phase)
+                [[101 :seon.db.process/config]]
+                [])
+              []))
+          query-result
+          (fn [member]
+            (let [query (::protocol/query-form member)
+                  identity-attr (first (::protocol/arguments member))]
+              (success
+               {:datahike.query/result
+                (cond
+                  (= query (deref #'state/reconcile-state-query))
+                  (entity-rows identity-attr)
+
+                  (= query (deref #'state/reconcile-provenance-query))
+                  (provenance-rows identity-attr)
+
+                  (= query
+                     (deref #'state/reconcile-transaction-process-query))
+                  (process-rows identity-attr)
+
+                  (= query (deref #'state/reconcile-lookup-ref-query))
+                  (entity-rows identity-attr)
+
+                  :else
+                  (throw (js/Error. "unexpected reconcile query")))})))
+          payload
+          {:seon.config/manifest manifest
+           :seon.config/singleton singleton
+           ::launch/operational-envelope
+           (resolve/resolve-envelope manifest fixed-hardware 7)
+           ::launch/config-apply-generation 7}
+          restore!
+          (fn []
+            (set! db/db original-db)
+            (set! db/execute-many original-execute-many)
+            (set! db/transact! original-transact)
+            (set! config/resolve-routes original-routes)
+            (set! skills/seed-skills-tx-data original-skills)
+            (set! agent/reconcile-host-coordinates! original-host-coordinates)
+            (set! agent.ctx/migrate-plan-surface-default! original-migrate))]
+      (set! db/db
+            (fn
+              ([] (js/Promise.resolve
+                   (if (= :foreign @phase) database-before database-after)))
+              ([_] (js/Promise.resolve
+                    (if (= :foreign @phase) database-before database-after)))))
+      (set! db/execute-many
+            (fn [request]
+              (js/Promise.resolve
+               {::db/results
+                (mapv (fn [member]
+                        (if (= protocol/schema-operation
+                               (::protocol/operation member))
+                          (success {::protocol/schema installed})
+                          (query-result member)))
+                      (::db/members request))})))
+      (set! db/transact!
+            (fn [& [request]]
+              (swap! writes conj request)
+              (reset! phase :managed)
+              (js/Promise.resolve
+               {:db-before database-before
+                :db-after database-after
+                :tx-data (::db/tx-data request)
+                :tempids {}})))
+      (set! config/resolve-routes (fn [_ _] []))
+      (set! skills/seed-skills-tx-data (fn [_] []))
+      (set! agent/reconcile-host-coordinates!
+            (fn [_]
+              (js/Promise.resolve
+               {::agent/host-coordinate-ok? true
+                ::agent/host-coordinate-changed? false
+                ::agent/host-coordinate-operations 0})))
+      (set! agent.ctx/migrate-plan-surface-default!
+            (fn []
+              (js/Promise.resolve
+               {::agent.ctx/ok? true
+                ::agent.ctx/changed? false
+                ::agent.ctx/operations 0})))
+      (-> (client/apply-config! payload)
+          (.then
+           (fn [first-apply]
+             (is (true? (::state/ok? first-apply)))
+             (is (true? (::state/changed? first-apply)))
+             (is (= 1 (count @writes)))
+             (let [tx-data (::db/tx-data (first @writes))]
+               (is (some #{[:db.fn/retractAttribute
+                            [:seon.ai/id "config"]
+                            :seon.ai/provider]}
+                         tx-data)
+                   "the declaration retracts the agent-authored provider")
+               (is (some (fn [operation]
+                           (and (map? operation)
+                                (= "config" (:seon.ai/id operation))
+                                (= :deepseek (:seon.ai/provider operation))
+                                (= "deepseek-v4-pro"
+                                   (:seon.ai/model operation))))
+                         tx-data)
+                   "the fixed config identity receives the declaration"))
+             (client/apply-config! payload)))
+          (.then
+           (fn [second-apply]
+             (is (= {::state/ok? true
+                     ::state/changed? false
+                     ::state/operations 0
+                     ::state/attempts 1}
+                    second-apply))
+             (is (= 1 (count @writes))
+                 "a converged repeat submits no transaction")))
+          (.finally restore!)
+          (test.async/settle! done)))))
 
 (deftest manifest-schema-validity
   (testing "a representative manifest validates against :seon.config/manifest"

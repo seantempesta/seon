@@ -13,6 +13,7 @@
    [seon.config.resolve :as config.resolve]
    [seon.db :as db]
    [seon.db.internal :as db.internal]
+   [seon.db.protocol :as protocol]
    [seon.launch :as launch]
    [seon.error :as error]
    [seon.runtime.admission :as admission]
@@ -414,6 +415,60 @@
                             "\n" (.-stack error)))))
           (.finally cleanup!)))))
 
+(deftest acme-request-adopts-only-its-declared-typeahead-selection
+  (async done
+    (let [original-skills skills/seed-skills-tx-data
+          original-reconcile state/reconcile!
+          original-host-coordinates agent/reconcile-host-coordinates!
+          original-migrate ctx/migrate-plan-surface-default!
+          applied-request (atom nil)
+          manifest (config/read-config-file "config/acme.edn")
+          expected-ai {:seon.ai/id "config"
+                       :seon.ai/provider :typeahead}
+          cleanup!
+          (fn []
+            (set! skills/seed-skills-tx-data original-skills)
+            (set! state/reconcile! original-reconcile)
+            (set! agent/reconcile-host-coordinates! original-host-coordinates)
+            (set! ctx/migrate-plan-surface-default! original-migrate)
+            (done))]
+      (set! skills/seed-skills-tx-data (fn [_directory] []))
+      (set! state/reconcile!
+            (fn [request]
+              (reset! applied-request request)
+              (js/Promise.resolve
+               {:seon.runtime.state/ok? true
+                :seon.runtime.state/changed? false
+                :seon.runtime.state/operations 0
+                :seon.runtime.state/attempts 1})))
+      (set! agent/reconcile-host-coordinates!
+            (fn [_configuration]
+              (js/Promise.resolve
+               {::agent/host-coordinate-ok? true
+                ::agent/host-coordinate-changed? false
+                ::agent/host-coordinate-operations 0})))
+      (set! ctx/migrate-plan-surface-default!
+            (fn []
+              (js/Promise.resolve
+               {::ctx/ok? true ::ctx/changed? false ::ctx/operations 0})))
+      (-> (js/Promise.resolve
+           (#'client/reconcile-config!
+            manifest
+            (config/resolve-config-singleton manifest)))
+          (.then
+           (fn [_]
+             (is (= expected-ai
+                    (last (:seon.runtime.state/desired @applied-request)))
+                 "ACME's own declaration produces the Typeahead desired row")
+             (is (= #{[:seon.ai/id "config"]}
+                    (::state/adopt-identities @applied-request))
+                 "the request adopts exactly the identity ACME declared")))
+          (.catch
+           (fn [error]
+             (is false (str "ACME request construction rejected: " error
+                            "\n" (.-stack error)))))
+          (.finally cleanup!)))))
+
 (deftest absent-ai-selection-stays-out-of-config-reconcile
   (async done
     (let [original-skills skills/seed-skills-tx-data
@@ -538,6 +593,135 @@
              (is (= [:reconcile :host-coordinates :migrate] @effects)
                  "host-coordinate and plan reconciliation follow config")))
           (.catch (fn [error] (is false (str error))))
+          (.finally cleanup!)))))
+
+(deftest config-retry-observes-the-commit-before-a-migration-failure
+  (async done
+    (let [original-routes config/resolve-routes
+          original-skills skills/seed-skills-tx-data
+          original-db db/db
+          original-execute db/execute-many
+          original-transact db/transact!
+          original-host-coordinates agent/reconcile-host-coordinates!
+          original-migrate ctx/migrate-plan-surface-default!
+          singleton {:seon.config/id config/cluster-config-id}
+          database (atom {:db-name "default"
+                          :t 42
+                          :as-of nil
+                          :since nil
+                          :history false
+                          :datahike/commit-id
+                          #uuid "00000000-0000-0000-0000-000000000042"})
+          committed (atom nil)
+          transactions (atom [])
+          acquisitions (atom [])
+          migration-calls (atom 0)
+          host-calls (atom 0)
+          installed {:seon.config/id
+                     {:db/unique :db.unique/identity}}
+          acquisition
+          (fn []
+            (let [entity-rows
+                  (if-let [entity @committed]
+                    [[41 (assoc entity :db/id 41)]]
+                    [])
+                  provenance-rows (if @committed [[41 100]] [])
+                  process-rows
+                  (if @committed [[100 :seon.db.process/config]] [])]
+              {::db/results
+               [(protocol/success {::protocol/schema installed})
+                (protocol/success
+                 {:datahike.query/result entity-rows})
+                (protocol/success
+                 {:datahike.query/result provenance-rows})
+                (protocol/success
+                 {:datahike.query/result process-rows})]}))
+          cleanup!
+          (fn []
+            (set! config/resolve-routes original-routes)
+            (set! skills/seed-skills-tx-data original-skills)
+            (set! db/db original-db)
+            (set! db/execute-many original-execute)
+            (set! db/transact! original-transact)
+            (set! agent/reconcile-host-coordinates! original-host-coordinates)
+            (set! ctx/migrate-plan-surface-default! original-migrate)
+            (done))
+          apply! (fn [] (#'client/reconcile-config! {} singleton))]
+      ;; Keep the desired population to the real config singleton so the test
+      ;; isolates commit/retry behavior from the shipped route and skill data.
+      (set! config/resolve-routes (fn [_routes _manifest] []))
+      (set! skills/seed-skills-tx-data (fn [_directory] []))
+      (set! db/db
+            (fn
+              ([] (js/Promise.resolve @database))
+              ([_request] (js/Promise.resolve @database))))
+      (set! db/execute-many
+            (fn [request]
+              (swap! acquisitions conj
+                     {:seon.db/db (::db/db request)
+                      :seon.db/member-count (count (::db/members request))
+                      :seon.client-initialization-test/committed @committed})
+              (js/Promise.resolve (acquisition))))
+      (set! db/transact!
+            (fn [& [request]]
+              (let [before @database
+                    tx-data (::db/tx-data request)
+                    after (assoc before
+                                 :t (inc (:t before))
+                                 :datahike/commit-id
+                                 #uuid "00000000-0000-0000-0000-000000000043")]
+                (swap! transactions conj request)
+                (reset! committed (first tx-data))
+                (reset! database after)
+                (js/Promise.resolve
+                 {:db-before before
+                  :db-after after
+                  :tx-data tx-data
+                  :tempids {}
+                  :tx-meta {}}))))
+      (set! agent/reconcile-host-coordinates!
+            (fn [_configuration]
+              (swap! host-calls inc)
+              (js/Promise.resolve
+               {::agent/host-coordinate-ok? true
+                ::agent/host-coordinate-changed? false
+                ::agent/host-coordinate-operations 0})))
+      (set! ctx/migrate-plan-surface-default!
+            (fn []
+              (if (= 1 (swap! migration-calls inc))
+                (js/Promise.resolve
+                 {::ctx/ok? false ::ctx/error "injected migration failure"})
+                (js/Promise.resolve
+                 {::ctx/ok? true ::ctx/changed? false ::ctx/operations 0}))))
+      (-> (apply!)
+          (.then
+           (fn [failed]
+             (is (= :core-bug (:seon.error/kind failed)))
+             (is (= singleton @committed)
+                 "the managed config transaction committed before migration")
+             (is (= 1 (count @transactions)))
+             (apply!)))
+          (.then
+           (fn [retried]
+             (is (= {:seon.runtime.state/ok? true
+                     :seon.runtime.state/changed? false
+                     :seon.runtime.state/operations 0
+                     :seon.runtime.state/attempts 1}
+                    retried)
+                 "retry reacquires the committed row and converges")
+             (is (= 1 (count @transactions))
+                 "convergence submits no replacement transaction")
+             (is (= [nil singleton]
+                    (mapv :seon.client-initialization-test/committed
+                          @acquisitions))
+                 "the second real reconcile acquisition sees the first commit")
+             (is (every? #(= 4 (:seon.db/member-count %)) @acquisitions))
+             (is (= 2 @host-calls))
+             (is (= 2 @migration-calls))))
+          (.catch
+           (fn [error]
+             (is false (str "stateful config retry rejected: " error
+                            "\n" (.-stack error)))))
           (.finally cleanup!)))))
 
 (deftest invalid-complete-program-fails-before-session-open
