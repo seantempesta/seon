@@ -136,6 +136,7 @@ See `README.md` for the convention.
 | [Shared-HEAD amend can absorb a concurrent commit](shared-head-amend-can-absorb-concurrent-commit.md) | friction | agent |
 | [Single-entity pulls budgeted as one result node](single-entity-pulls-budgeted-as-one-result-node.md) | friction | agent |
 | [Thread one database value through debug and data feeds](debug-feed-captures-foreign-database-reads.md) | friction | UI |
+| [Unbounded runtime acquisitions exceed the negotiated frame](unbounded-runtime-acquisitions-exceed-frame.md) | friction | agent |
 | [Transact output schema crashed child on ordinary error](transact-output-schema-crashed-child-on-ordinary-error.md) | friction | agent |
 | [Transcript decay does not bound total context](transcript-decay-does-not-bound-total-context.md) | friction | agent |
 | [Turn debug treated a database error as an entity id](turn-debug-treated-database-error-as-entity-id.md) | friction | Core |
