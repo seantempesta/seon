@@ -1045,6 +1045,25 @@ happened. Now take the next thing off the queue.
 - Note: cluster config still selects Muse as provider — fine for tiny
   drives; larger drives should route DeepSeek per the worker ruling.
 
+### TRANCHE 2 (owner-planned, 2026-07-22 morning)
+
+Owner rulings: **WP-S leads, then W5 cutover, packages after** ·
+Stage 1.5 gate = INVESTIGATE (lane dispatched) · **DeepSeek seeded as
+the cluster default** — DONE live: `:seon.ai/id "config"` transacted to
+`:deepseek`/`deepseek-chat`, DEEPSEEK_API_KEY added to the git-ignored
+`.env` (it was only in shell configs/.env.acme; the operator sources
+`.env`), restart + live drive proven (`deepseek-chat`, clean turn,
+honest reply) · **NS-0.5c HANDED OFF — GO** (the repl-autosuggest
+boundary released; the feature itself remains experimental).
+
+Lanes at tranche open: Stage 1.5 investigation (read-only,
+`tmp/orchestrator/stage15-*`) · WP-S grounding (read-only,
+`tmp/orchestrator/wps-grounding-*`) · NS-0.5c implementation
+(`specs/ns-0.5c-repl-parse-plan-seams.md`,
+`tmp/orchestrator/ns-05c-*`). Queue behind them: WP-S implementation →
+W5 (pending the Stage 1.5 verdict) → packages WP-B∥WP-J; tail units
+(q22c/q22d, W1 sweep, W1.2b, W8/W9 crumbs) fill free slots.
+
 ### NO PENDING OWNER DECISIONS
 
 The 4 W1-boot decisions were folded as recommendations into the shipped
