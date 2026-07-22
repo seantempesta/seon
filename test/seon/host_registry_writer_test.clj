@@ -13,14 +13,17 @@
      killed between commit and acknowledgement never re-executes and a
      retry with the same op-id returns the recorded outcome. The writer
      here is the REAL `seon.db.writer` on a memory backend."
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.edn :as edn]
+            [clojure.test :refer [deftest is]]
             [sci.core :as sci]
+            [seon.db.host :as db.host]
             [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds]
             [seon.db.writer :as writer]
             [seon.db.writer-test-support :as writer-test]
             [seon.host :as host]
-            [seon.host.context :as context])
+            [seon.host.context :as context]
+            [seon.schema :as schema])
   (:import [java.io File]
            [java.nio.channels Channels SocketChannel]))
 
@@ -129,6 +132,23 @@
        (when op-id (str " :seon.capability/op-id " (pr-str op-id)))
        "})"))
 
+(defn- register-runtime-schemas!
+  [rows]
+  (doseq [{:seon.schema/keys [key form]} rows]
+    (schema/register! key (edn/read-string form)))
+  nil)
+
+(defn- seed-schema-rows!
+  "Commit the fresh database's one deliberately unattributed genesis."
+  [session rows]
+  (let [database (db.host/resolve-db! session nil false)]
+    (db.host/call!
+     session
+     (protocol/transaction-request
+      {::protocol/request-id (str (random-uuid))
+       :seon.db/db database
+       ::protocol/transaction-data (vec rows)}))))
+
 (deftest transact-through-the-registry-is-exactly-once-by-op-id-receipt
   (let [database-name (str "host-registry-" (random-uuid))
         request-path (socket-path "writer")
@@ -143,6 +163,41 @@
         base (context/build-base! session)
         ctx (context/fork-context base)]
     (try
+      (let [rows [{:seon.schema/key :seon.schema/key
+                   :seon.schema/form "[:keyword {:seon.db/identity true}]"}
+                  {:seon.schema/key :seon.schema/form
+                   :seon.schema/form ":string"}
+                  {:seon.schema/key :seon.host-registry-writer-test/note
+                   :seon.schema/form "[:string {:min 1}]"}
+                  {:seon.schema/key :seon.db/lookup-ref-value
+                   :seon.schema/form
+                   "[:or :string :uuid :keyword :symbol :int]"}
+                  {:seon.schema/key :seon.db/ref
+                   :seon.schema/form
+                   "[:or :int :string [:tuple :keyword :seon.db/lookup-ref-value]]"}
+                  {:seon.schema/key :seon.db/user
+                   :seon.schema/form ":seon.db/ref"}
+                  {:seon.schema/key :seon.db/process
+                   :seon.schema/form ":seon.db/ref"}
+                  {:seon.schema/key :seon.user/id
+                   :seon.schema/form "[:string {:seon.db/identity true}]"}
+                  {:seon.schema/key :seon.db.process/id
+                   :seon.schema/form "[:keyword {:seon.db/identity true}]"}]]
+        (register-runtime-schemas! rows)
+        (let [seeded (seed-schema-rows!
+                      session
+                      (into rows [{:seon.user/id "user"}
+                                  {:seon.db.process/id
+                                   :seon.db.process/repl}]))]
+          (is (true? (::protocol/success? seeded)) (pr-str seeded))))
+      (let [installed
+            (seed-schema-rows!
+             session
+             [{:seon.user/id "bootstrap"
+               :seon.db/user [:seon.user/id "user"]
+               :seon.db/process
+               [:seon.db.process/id :seon.db.process/repl]}])]
+        (is (true? (::protocol/success? installed)) (pr-str installed)))
       ;; Declare the note attribute's canonical schema (with the
       ;; self-describing `:seon.schema` rows a fresh database needs —
       ;; the same shapes the pod's compiled-program reconcile writes),
@@ -153,14 +208,8 @@
              (str "(require 'seon.db)"
                   "(seon.db/transact!"
                   " {:seon.db/tx-data"
-                  "  [{:seon.schema/key :seon.schema/key"
-                  "    :seon.schema/form \"[:keyword {:seon.db/identity true}]\"}"
-                  "   {:seon.schema/key :seon.schema/form"
-                  "    :seon.schema/form \":string\"}"
-                  "   {:seon.schema/key :seon.host-registry-writer-test/note"
-                  "    :seon.schema/form \"[:string {:min 1}]\"}"
-                  "   {:seon.host-registry-writer-test/note \"first\"}]})"))]
-        (is (true? (:seon.db/ok? first-outcome)))
+                  "  [{:seon.host-registry-writer-test/note \"first\"}]})"))]
+        (is (map? (:db-after first-outcome)) (pr-str first-outcome))
         (is (string? (:seon.capability/op-id first-outcome)))
         (is (not (contains? first-outcome :seon.capability/replayed?))))
 
@@ -170,11 +219,11 @@
                      ctx (transact-note-form "alpha" "op-alpha"))
             replay (sci/eval-string*
                     ctx (transact-note-form "alpha" "op-alpha"))]
-        (is (true? (:seon.db/ok? outcome)))
+        (is (map? (:db-after outcome)) (pr-str outcome))
         (is (= "op-alpha" (:seon.capability/op-id outcome)))
         (is (not (contains? outcome :seon.capability/replayed?)))
-        (is (true? (:seon.db/ok? replay)))
-        (is (true? (:seon.capability/replayed? replay)))
+        (is (map? (:db-after replay)) (pr-str replay))
+        (is (true? (:seon.capability/replayed? replay)) (pr-str replay))
         (is (= 1 (note-count ctx "alpha"))))
 
       ;; Crash drill: the request is delivered and committed, then the
@@ -197,7 +246,11 @@
           {::protocol/request-id "op-crash"
            :seon.db/db head
            ::protocol/transaction-data
-           [{:seon.host-registry-writer-test/note "crash"}]})
+           [{:seon.host-registry-writer-test/note "crash"}]
+           ::protocol/transaction-meta
+           {:seon.db/user [:seon.user/id "user"]
+            :seon.db/process
+            [:seon.db.process/id :seon.db.process/repl]}})
          (::protocol/maximum-frame-bytes raw-session))
         ;; Wait until the fact is committed (observed over the surviving
         ;; wrapper connection), then kill the raw connection so the
@@ -212,7 +265,7 @@
         (try (.close raw) (catch Throwable _))
         (let [retry (sci/eval-string*
                      ctx (transact-note-form "crash" "op-crash"))]
-          (is (true? (:seon.db/ok? retry)))
+          (is (map? (:db-after retry)))
           (is (true? (:seon.capability/replayed? retry)))
           (is (= 1 (note-count ctx "crash"))))
         ;; "Did it happen?" is answered by query — the receipt is the
@@ -252,6 +305,8 @@
    {:seon.schema/key :seon.db.id/generator :seon.schema/form ":keyword"}
    {:seon.schema/key :seon.db/user :seon.schema/form ":seon.db/ref"}
    {:seon.schema/key :seon.db/process :seon.schema/form ":seon.db/ref"}
+   {:seon.schema/key :seon.user/id
+    :seon.schema/form "[:string {:seon.db/identity true}]"}
    {:seon.schema/key :seon.db.process/id
     :seon.schema/form
     (str "[:and {:seon.db/identity true}"
@@ -436,21 +491,33 @@
                  (sci/eval-string*
                   seed-ctx (str "(seon.db/query (quote " (pr-str form) "))")))]
     (try
+      (register-runtime-schemas! corpus-schema-rows)
+      (let [genesis (seed-schema-rows!
+                     session
+                     (into corpus-schema-rows
+                           [{:seon.user/id "user"}
+                            {:seon.db.process/id
+                             :seon.db.process/repl}]))]
+        (is (true? (::protocol/success? genesis)) (pr-str genesis)))
+      (let [installed (seed-schema-rows!
+                       session
+                       [{:seon.user/id "bootstrap"
+                         :seon.db/user [:seon.user/id "user"]
+                         :seon.db/process
+                         [:seon.db.process/id :seon.db.process/repl]}])]
+        (is (true? (::protocol/success? installed)) (pr-str installed)))
       ;; Seed the self-describing schema rows, the agent, the process
       ;; identity, and the owning turn.
       (let [seeded (sci/eval-string*
                     seed-ctx
                     (str "(require 'seon.db)"
                          "(seon.db/transact! {:seon.db/tx-data "
-                         (pr-str (into corpus-schema-rows
-                                       [value-sampling-policy
-                                        {:seon.agent/id agent-id}
+                         (pr-str [value-sampling-policy
+                                  {:seon.agent/id agent-id}
                                         {:seon.agent/id caller-agent-id}
-                                        {:seon.db.process/id
-                                         :seon.db.process/repl}
-                                        {:seon.agent.turn/id "turn-parity"}]))
+                                  {:seon.agent.turn/id "turn-parity"}])
                          "})"))]
-        (is (true? (:seon.db/ok? seeded)) (pr-str seeded)))
+        (is (map? (:db-after seeded)) (pr-str seeded)))
       (is (:seon.db/ok?
            (context/transact-writer!
             session
@@ -482,7 +549,7 @@
                                   :seon.fn/schema-error "none"
                                   :seon.fn/read-attrs [:seed/attr]}])
                         "})"))]
-        (is (true? (:seon.db/ok? probe)) (pr-str probe)))
+        (is (map? (:db-after probe)) (pr-str probe)))
       (let [head (context/resolve-head! session)
             live (host-session! host-socket agent-id database-name)
             caller-live
@@ -702,7 +769,7 @@
                     (str "(seon.db/pull"
                          " [:seon.execution.host/eval-socket-path]"
                          " [:seon.schema/key :seon.schema/form])"))]
-        (is (some? (:seon/error pulled))
+        (is (string? (:seon.error/message pulled))
             "a pull selector naming the uninstalled attribute is rejected"))
       (finally
         (context/close-session! session)

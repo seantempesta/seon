@@ -293,7 +293,7 @@
                  :seon.fn/execution-tier :graduated}])]
           (if-not (:seon.db/ok? recorded)
             (assoc (error-result "The graduation facts did not commit.")
-                   :seon/error (:seon/error recorded))
+                   :seon/error recorded)
             (do
               (install-implementation! registry contexts function-row @compiled)
               {::ok? true

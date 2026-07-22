@@ -266,7 +266,7 @@
                                  {:seon.db.process/id :seon.db.process/repl}
                                  {:seon.agent.turn/id "turn-parity"}]))
                   "})"))]
-        (is (true? (:seon.db/ok? seeded)) (pr-str seeded)))
+        (is (map? (:db-after seeded)) (pr-str seeded)))
       ;; Install optional corpus attributes that exact-set terminal recording
       ;; may retract, matching a real cluster's genesis population.
       (let [probe
@@ -284,7 +284,7 @@
                            {:seon.fn/sym "seon.ai.tokens/estimate-chars"
                             :seon.fn/spec "[:=> [:cat :int] :int]"}])
                   "})"))]
-        (is (true? (:seon.db/ok? probe)) (pr-str probe)))
+        (is (map? (:db-after probe)) (pr-str probe)))
       (let [started
             (host/start! {::host/socket-path host-socket
                           ::context/writer-socket-path request-path

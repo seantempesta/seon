@@ -255,7 +255,8 @@
                 {:seon.error/kind :core-bug
                  :seon.host/projection-error
                  (:seon/error acquired-projection)})))
-        projection-state (atom acquired-projection)
+        projection-state (::context/projection-state writer)
+        _ (reset! projection-state acquired-projection)
         contexts (atom {})
         base (context/build-base! writer)
         graduation-report

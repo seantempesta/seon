@@ -4,6 +4,7 @@
             [clojure.test :refer [deftest is use-fixtures]]
             [sci.core :as sci]
             [seon.ai.tokens :as tokens]
+            [seon.db.host :as db.host]
             [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds]
             [seon.db.writer-test-support :as writer-test]
@@ -231,11 +232,11 @@
     (let [database-name (str "host-hostile-battery-" (random-uuid))
           request-path (socket-path "writer")
           host-socket (socket-path "host")
-          pool-defaults (assoc (var-get #'context/writer-pool-defaults)
-                               ::context/pool-size 2
-                               ::context/pool-wait-timeout-ms 100)]
+          pool-defaults (assoc db.host/defaults
+                               ::db.host/pool-size 2
+                               ::db.host/pool-wait-timeout-ms 100)]
       (with-redefs-fn
-        {#'context/writer-pool-defaults pool-defaults}
+        {#'db.host/defaults pool-defaults}
         (fn []
           (let [server
                 (writer-test/start!
@@ -267,7 +268,7 @@
                              {:seon.agent/id "hostile-schema-probe"}
                              {:seon.db.process/id :seon.db.process/repl}]))
                           "})"))]
-                (is (true? (:seon.db/ok? seeded)) (pr-str seeded)))
+                (is (map? (:db-after seeded)) (pr-str seeded)))
               (let [installed
                     (sci/eval-string*
                      seed-ctx
@@ -285,7 +286,7 @@
                              :seon.fn/schema-error "none"
                              :seon.fn/read-attrs [:hostile/probe]}])
                           "})"))]
-                (is (true? (:seon.db/ok? installed)) (pr-str installed)))
+                (is (map? (:db-after installed)) (pr-str installed)))
               (let [started
                     (host/start!
                      {::host/socket-path host-socket
@@ -729,9 +730,9 @@
                       [(str "(seon.db/transact! {:seon.db/tx-data "
                             "[{:seon.host-hostile-battery-writer-test/sentinel \""
                             sentinel "\"}]})")]})]
-        (is (true? (get-in survivor-response
-                           [:seon.execution/result :seon.host/results 0
-                            :seon.eval/value :seon.db/ok?]))
+        (is (map? (get-in survivor-response
+                          [:seon.execution/result :seon.host/results 0
+                           :seon.eval/value :db-after]))
             (pr-str survivor-response))
         (is (= 1 (sentinel-count sentinel)))
         (doseq [[expected-class response] (deref storm 15000 [])]
@@ -785,11 +786,11 @@
                     (context/query-writer-at!
                      (::host/writer *host*) head
                      '[:find ?e :where [?e :seon.db.process/id]] [])
-                    data (get-in direct [:seon/error :seon.error/data])]
-                (is (= :pool-exhausted (::context/pool-reason data))
+                    data (:seon.error/data direct)]
+                (is (= :pool-exhausted (::db.host/pool-reason data))
                     (pr-str direct))
-                (is (= 2 (get-in data [::context/pool
-                                       ::context/in-flight-members]))
+                (is (= 2 (get-in data [::db.host/pool
+                                       ::db.host/in-flight-members]))
                     (pr-str direct)))
               ;; An invocation during saturation is REJECTED bounded — an
               ;; error frame, never a hang (bounded-rejection, not service).

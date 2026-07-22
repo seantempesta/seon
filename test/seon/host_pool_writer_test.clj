@@ -1,11 +1,11 @@
 (ns seon.host-pool-writer-test
   "Retained host writer-pool concurrency, deadlines, and recovery."
   (:require [clojure.test :refer [deftest is]]
+            [seon.db.host :as db.host]
             [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds]
             [seon.db.writer-test-support :as writer-test]
-            [seon.db.writer :as writer]
-            [seon.host.context :as context])
+            [seon.db.writer :as writer])
   (:import [java.io File]
            [java.nio.channels SocketChannel]
            [java.util.concurrent CountDownLatch TimeUnit]))
@@ -31,29 +31,29 @@
   [label pool-default-overrides body]
   (let [database-name (str "host-pool-" (random-uuid))
         request-path (socket-path label)
-        defaults (merge (var-get #'context/writer-pool-defaults)
+        defaults (merge (var-get #'db.host/defaults)
                         pool-default-overrides)]
     (with-redefs-fn
-      {#'context/writer-pool-defaults defaults}
+      {#'db.host/defaults defaults}
       (fn []
         (let [server (writer-test/start! {::writer/dependencies (dependencies)
                                      ::writer/database-name database-name
                                      ::writer/backend :memory
                                      ::writer/selected-processors 3
                                      ::writer/request-socket-path request-path})
-              session (context/writer-session
-                       {::context/writer-socket-path request-path
-                        ::context/database-name database-name
-                        ::context/backend :memory})]
+              session (db.host/writer-session
+                       {::db.host/writer-socket-path request-path
+                        ::db.host/database-name database-name
+                        ::db.host/backend :memory})]
           (try
             (body server session)
             (finally
-              (context/close-session! session)
+              (db.host/close-session! session)
               (writer/stop! server)
               (.delete (File. ^String request-path)))))))))
 
 (defn- writer-call! [session request]
-  ((var-get #'context/writer-call!) session request))
+  ((var-get #'db.host/call!) session request))
 
 (defn- query-request [head request-id]
   (protocol/query-request
@@ -66,15 +66,15 @@
   (.await latch 5 TimeUnit/SECONDS))
 
 (defn- pool-members [session]
-  (vals (::context/members @(::context/pool-state session))))
+  (vals (::db.host/members @(::db.host/pool-state session))))
 
 (deftest call-surfaces-transport-owned-eof-data
   (with-writer-session
     "typed-eof"
-    {::context/pool-size 1}
+    {::db.host/pool-size 1}
     (fn [_server session]
       (let [database-session
-            (uds/open-session! (::context/writer-socket-path session))]
+            (uds/open-session! (::db.host/writer-socket-path session))]
         (try
         (with-redefs [uds/read-frame (fn
                                       ([_input] nil)
@@ -97,9 +97,9 @@
 (deftest a-slow-call-does-not-hold-the-other-member
   (with-writer-session
     "concurrency"
-    {::context/pool-size 2 ::context/call-deadline-ms 5000}
+    {::db.host/pool-size 2 ::db.host/call-deadline-ms 5000}
     (fn [_server session]
-      (let [head (context/resolve-head! session)
+      (let [head (db.host/resolve-db! session)
             slow-request (query-request head "pool/concurrency-slow")
             quick-request (query-request head "pool/concurrency-quick")
             slow-entered (CountDownLatch. 1)
@@ -128,9 +128,9 @@
 (deftest a-deadlined-member-is-evicted-and-the-session-recovers
   (with-writer-session
     "deadline"
-    {::context/pool-size 1 ::context/call-deadline-ms 50}
+    {::db.host/pool-size 1 ::db.host/call-deadline-ms 50}
     (fn [_server session]
-      (let [head (context/resolve-head! session)
+      (let [head (db.host/resolve-db! session)
             victim (first (pool-members session))
             entered (CountDownLatch. 1)
             release-slow (CountDownLatch. 1)
@@ -150,24 +150,24 @@
               (try
                 (is (await-latch! entered))
                 (let [outcome (deref call 5000 {})]
-                  (is (:seon/error outcome))
+                  (is (:seon.error/message outcome))
                   (is (= :call-deadline
-                         (get-in outcome [:seon/error :seon.error/data
-                                          ::context/pool-reason])))
+                         (get-in outcome [:seon.error/data
+                                          ::db.host/pool-reason])))
                   (is (not (.isOpen ^SocketChannel
-                                    (::uds/channel (::context/session victim)))))
+                                    (::uds/channel (::db.host/session victim)))))
                   (let [replacement (first (pool-members session))]
                     (is (some? replacement))
-                    (is (not= (::context/member-id victim)
-                              (::context/member-id replacement)))))
+                    (is (not= (::db.host/member-id victim)
+                              (::db.host/member-id replacement)))))
                 (finally
                   (.countDown release-slow))))))
-      (let [next-head (context/resolve-head! session)
+      (let [next-head (db.host/resolve-db! session)
             replacement (first (pool-members session))]
         (is (map? next-head))
-        (is (not (:seon/error next-head)))
-        (is (not= (::context/member-id victim)
-                  (::context/member-id replacement))))))))
+        (is (not (:seon.error/message next-head)))
+        (is (not= (::db.host/member-id victim)
+                  (::db.host/member-id replacement))))))))
 
 (def ^:private note-schema-transaction
   [{:seon.schema/key :seon.schema/key
@@ -180,9 +180,9 @@
 (deftest a-lost-write-response-recovers-with-the-same-request-id
   (with-writer-session
     "write-retry"
-    {::context/pool-size 2 ::context/call-deadline-ms 5000}
+    {::db.host/pool-size 2 ::db.host/call-deadline-ms 5000}
     (fn [_server session]
-      (let [head (context/resolve-head! session)
+      (let [head (db.host/resolve-db! session)
             seed (writer-call!
                   session
                   (protocol/transaction-request
@@ -229,11 +229,11 @@
 (deftest an-active-same-id-conflict-is-polled-until-durable-recovery
   (with-writer-session
     "active-conflict"
-    {::context/pool-size 2
-     ::context/call-deadline-ms 100
-     ::context/request-conflict-backoff-ms 5}
+    {::db.host/pool-size 2
+     ::db.host/call-deadline-ms 100
+     ::db.host/request-conflict-backoff-ms 5}
     (fn [_server session]
-      (let [head (context/resolve-head! session)
+      (let [head (db.host/resolve-db! session)
             seed (writer-call!
                   session
                   (protocol/transaction-request
@@ -292,11 +292,11 @@
 (deftest an-exhausted-pool-returns-a-bounded-steering-error
   (with-writer-session
     "exhaustion"
-    {::context/pool-size 2
-     ::context/pool-wait-timeout-ms 50
-     ::context/call-deadline-ms 5000}
+    {::db.host/pool-size 2
+     ::db.host/pool-wait-timeout-ms 50
+     ::db.host/call-deadline-ms 5000}
     (fn [_server session]
-      (let [head (context/resolve-head! session)
+      (let [head (db.host/resolve-db! session)
             entered (CountDownLatch. 2)
             release-slow (CountDownLatch. 1)
             execute-read! (var-get #'writer/execute-read!)]
@@ -322,11 +322,11 @@
                 (let [outcome (writer-call!
                                session
                                (query-request head "pool/over-wait"))
-                      data (get-in outcome [:seon/error :seon.error/data])]
-                  (is (:seon/error outcome))
-                  (is (= :pool-exhausted (::context/pool-reason data)))
-                  (is (= 2 (get-in data [::context/pool
-                                         ::context/in-flight-members]))))
+                      data (get-in outcome [:seon.error/data])]
+                  (is (:seon.error/message outcome))
+                  (is (= :pool-exhausted (::db.host/pool-reason data)))
+                  (is (= 2 (get-in data [::db.host/pool
+                                         ::db.host/in-flight-members]))))
                 (finally
                   (.countDown release-slow)
                   (is (::protocol/success? (deref first-call 5000 {})))
@@ -335,9 +335,9 @@
 (deftest a-local-oversize-is-not-retried-or-evicted
   (with-writer-session
     "local-oversize"
-    {::context/pool-size 1 ::context/call-deadline-ms 5000}
+    {::db.host/pool-size 1 ::db.host/call-deadline-ms 5000}
     (fn [_server session]
-      (context/resolve-head! session)
+      (db.host/resolve-db! session)
       (let [request-id "pool/local-oversize"
             failure (protocol/frame-too-large-failure
                      {::protocol/request-id request-id
@@ -354,27 +354,15 @@
                   (protocol/ping-request
                    {::protocol/request-id request-id}))))
           (is (= 1 @attempts))
-          (is (identical? (::context/session member-before)
-                          (::context/session (first (pool-members session))))))))))
-
-(deftest a-frame-failure-retains-its-configuration-data
-  (let [protocol-error-value (var-get #'context/protocol-error-value)
-        response (protocol/frame-too-large-failure
-                  {::protocol/request-id "pool/oversized-response"
-                   ::protocol/maximum-frame-bytes 65536})]
-    (is (= {::protocol/error-kind protocol/frame-too-large-error
-            ::protocol/configuration-key
-            :seon.config.database.transport/maximum-frame-bytes
-            ::protocol/maximum-frame-bytes 65536}
-           (get-in (protocol-error-value response)
-                   [:seon/error :seon.error/data])))))
+          (is (identical? (::db.host/session member-before)
+                          (::db.host/session (first (pool-members session))))))))))
 
 (deftest close-session-closes-every-member-and-a-fresh-session-admits
   (with-writer-session
     "close"
-    {::context/pool-size 2 ::context/call-deadline-ms 5000}
+    {::db.host/pool-size 2 ::db.host/call-deadline-ms 5000}
     (fn [_server session]
-      (let [head (context/resolve-head! session)
+      (let [head (db.host/resolve-db! session)
             entered (CountDownLatch. 2)
             release-slow (CountDownLatch. 1)
             execute-read! (var-get #'writer/execute-read!)]
@@ -398,25 +386,25 @@
               (run! #(is (::protocol/success? (deref % 5000 {}))) calls))))
         (let [members (vec (pool-members session))]
           (is (= 2 (count members)))
-          (context/close-session! session)
+          (db.host/close-session! session)
           (is (empty? (pool-members session)))
           (is (every? #(not (.isOpen ^SocketChannel
-                                     (::uds/channel (::context/session %))))
+                                     (::uds/channel (::db.host/session %))))
                       members)))
-        (let [fresh (context/writer-session
-                     {::context/writer-socket-path
-                      (::context/writer-socket-path session)
-                      ::context/database-name (::context/database-name session)
-                      ::context/backend :memory})]
+        (let [fresh (db.host/writer-session
+                     {::db.host/writer-socket-path
+                      (::db.host/writer-socket-path session)
+                      ::db.host/database-name (::db.host/database-name session)
+                      ::db.host/backend :memory})]
           (try
             (let [deadline (+ (System/currentTimeMillis) 5000)
                   admitted
                   (loop []
-                    (let [head (context/resolve-head! fresh)]
-                      (if (or (not (:seon/error head))
+                    (let [head (db.host/resolve-db! fresh)]
+                      (if (or (not (:seon.error/message head))
                               (>= (System/currentTimeMillis) deadline))
                         head
                         (do (Thread/sleep 10) (recur)))))]
-              (is (not (:seon/error admitted))))
+              (is (not (:seon.error/message admitted))))
             (finally
-              (context/close-session! fresh))))))))
+              (db.host/close-session! fresh))))))))

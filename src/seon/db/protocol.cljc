@@ -1668,7 +1668,9 @@
      (hasch/uuid
       {::version current-version
        ::transaction-data (::transaction-data request)
-       :seon.db/db (:seon.db/db request)
+       ;; The source database is delivery context, not logical operation
+       ;; identity. Public op-id replay resolves from a later head; an explicit
+       ;; expected-db remains part of the hash when snapshot identity matters.
        :seon.db/expected-db (:seon.db/expected-db request)
        ::transaction-meta (or (::transaction-meta request) {})
        ::generated-candidates (or (::generated-candidates request) [])})))

@@ -100,7 +100,7 @@
                             [{:seon.agent/id agent-id}
                              {:seon.db.process/id :seon.db.process/repl}]))
               "})"))]
-    (is (true? (:seon.db/ok? seed)) (pr-str seed))
+    (is (map? (:db-after seed)) (pr-str seed))
     (let [installed
           (sci/eval-string*
            ctx
@@ -114,7 +114,7 @@
                           :seon.fn/schema-error "none"
                           :seon.fn/read-attrs [:seed/attr]}])
                 "})"))]
-      (is (true? (:seon.db/ok? installed)) (pr-str installed)))
+      (is (map? (:db-after installed)) (pr-str installed)))
     (let [database-before-functions (context/resolve-head! session)]
       (binding [context/*agent-id* agent-id]
       (let [seeded

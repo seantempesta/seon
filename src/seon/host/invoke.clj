@@ -40,7 +40,7 @@
         retained-ctx (::session/ctx session)
         agent-id (:seon.execution/agent-id @(::session/startup session))
         fence-result (eval/claim-run-fence! writer database agent-id run-fence)]
-    (if (:seon/error fence-result)
+    (if (:seon.error/message fence-result)
       {:seon.eval/fenced? true}
       (instrument/call-with-read-admission
        (::instrument/state session)

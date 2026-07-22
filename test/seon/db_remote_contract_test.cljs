@@ -6,6 +6,7 @@
    [seon.db :as db]
    [seon.db.internal :as internal]
    [seon.db.protocol :as protocol]
+   [seon.db.session :as session]
    [seon.db.transport.uds :as uds]
    [seon.instrument :as instrument]
    [seon.schema :as schema]))
@@ -202,7 +203,7 @@
                  ::uds/configured-maximum-frame-bytes
                  protocol/maximum-frame-bytes
                  ::uds/maximum-frame-bytes protocol/maximum-frame-bytes}]
-    (reset! @#'db/!session nil)
+    (reset! @#'session/!session nil)
     (set! uds/connect!
           (fn [options]
             (swap! connect-count inc)
@@ -228,7 +229,7 @@
         (.finally
          (fn []
            (db/close-session!)
-           (reset! @#'db/!session nil)
+           (reset! @#'session/!session nil)
            (set! uds/connect! original-connect!)
            (set! uds/request! original-request!)
            (set! uds/connected? original-connected?)
@@ -868,7 +869,7 @@
                                      @requests protocol/execute-many-operation))]
                        (is (= [inherited]
                               (mapv ::db/db (::protocol/members request)))))
-                     (swap! @#'db/!session assoc ::db/databases {})
+                     (swap! @#'session/!session assoc ::session/databases {})
                      (reset! requests [])
                      (db/execute-many {::db/members [member member]})))
                   (.then
@@ -980,7 +981,8 @@
                 (.then
                  (fn [values]
                    (let [report (aget values 2)]
-                     (is (= #{:db-before :db-after :tx-data :tempids :tx-meta}
+                     (is (= #{:db-before :db-after :tx-data :tempids :tx-meta
+                              :seon.capability/op-id}
                             (set (keys report))))
                      (is (= database (:db-after report)))
                      (is (= [[1 :example/id "one" 536870913 true]]
@@ -990,7 +992,8 @@
                                   {:seon.db/user [:seon.agent/id "root"]}})))
                 (.then
                  (fn [report]
-                   (is (= #{:db-before :db-after :tx-data :tempids :tx-meta}
+                   (is (= #{:db-before :db-after :tx-data :tempids :tx-meta
+                            :seon.capability/op-id}
                           (set (keys report))))
                    (is (empty? (operation-requests
                                 @requests protocol/resolve-head-operation))
@@ -1015,8 +1018,8 @@
                                         #(swap! first-events conj %)})))
                   (.then (fn [key] (is (= :updates key))
                            (is (= database
-                                  (get-in @@#'db/!session
-                                          [::db/databases database-name])))
+                                  (get-in @@#'session/!session
+                                          [::session/databases database-name])))
                            (db/listen! :updates
                                        #(swap! replacement-events conj %))))
                   (.then
@@ -1124,8 +1127,8 @@
                             (.then
                              (fn [removed?]
                                (is (nil?
-                                    (get-in @@#'db/!session
-                                            [::db/interest-handlers
+                                    (get-in @@#'session/!session
+                                            [::session/interest-handlers
                                              ":updates"])))
                                (reset! connected? true)
                                (@reconnect session)

@@ -138,7 +138,7 @@
                                   :seon.db.process/repl}
                                  {:seon.agent.turn/id "turn-parity"}]))
                   "})"))]
-        (is (true? (:seon.db/ok? seeded)) (pr-str seeded)))
+        (is (map? (:db-after seeded)) (pr-str seeded)))
       (is (= [32 4096 1024 3 80 8 12]
              (context/query-writer! session value-sampling-policy-query
                                     ["cluster"])))
@@ -157,7 +157,7 @@
                      :seon.fn/schema-error "none"
                      :seon.fn/read-attrs [:seed/attr]}])
                   "})"))]
-        (is (true? (:seon.db/ok? probe)) (pr-str probe)))
+        (is (map? (:db-after probe)) (pr-str probe)))
       (reset! started
               (host/start! {::host/socket-path host-socket
                             ::context/writer-socket-path request-path

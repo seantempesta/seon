@@ -3,6 +3,7 @@
   (:require
    [cljs.test :refer [async deftest is]]
    [seon.db :as db]
+   [seon.db.session :as session]
    [seon.db.protocol :as protocol]
    [seon.db.transport.uds :as uds]))
 
@@ -116,7 +117,7 @@
                ::database database-0
                ::defer-next-ensure? false
                ::fail-next-ensure? false})]
-    (reset! @#'db/!session nil)
+    (reset! @#'session/!session nil)
     (set! uds/connect!
           (fn [_]
             (swap! control update ::connect-count inc)
@@ -135,7 +136,7 @@
         (.finally
          (fn []
            (db/close-session!)
-           (reset! @#'db/!session nil)
+           (reset! @#'session/!session nil)
            (set! uds/connect! original-connect!)
            (set! uds/request! original-request!)
            (set! uds/connected? original-connected?)
@@ -227,15 +228,15 @@
                  (fn [listener-key]
                    (is (= :program listener-key))
                    (let [entry-before
-                         (get-in @@#'db/!session
-                                 [::db/interest-handlers ":program"])]
+                         (get-in @@#'session/!session
+                                 [::session/interest-handlers ":program"])]
                      (clear-requests! control)
                      (-> (open! initialization-1)
                          (.then
                           (fn [opened]
                             (let [entry-after
-                                  (get-in @@#'db/!session
-                                          [::db/interest-handlers ":program"])]
+                                  (get-in @@#'session/!session
+                                          [::session/interest-handlers ":program"])]
                               (is (= 1 (::connect-count @control)))
                               (is (= [protocol/ensure-database-operation
                                       protocol/acquire-database-operation]
@@ -330,8 +331,8 @@
                 (.then
                  (fn [_]
                    (let [entry-before
-                         (get-in @@#'db/!session
-                                 [::db/interest-handlers ":program"])]
+                         (get-in @@#'session/!session
+                                 [::session/interest-handlers ":program"])]
                      (clear-requests! control)
                      (swap! control assoc ::fail-next-ensure? true)
                      (-> (open! initialization-1)
@@ -340,14 +341,14 @@
                             (is false "failed ensure unexpectedly opened")))
                          (.catch
                           (fn [_]
-                            (let [state @@#'db/!session
+                            (let [state @@#'session/!session
                                   entry-after
                                   (get-in state
-                                          [::db/interest-handlers ":program"])]
+                                          [::session/interest-handlers ":program"])]
                               (is (true? (db/attached?)))
                               (is (= database-0
                                      (get-in state
-                                             [::db/databases database-name])))
+                                             [::session/databases database-name])))
                               (is (identical? (::db/owner entry-before)
                                               (::db/owner entry-after)))
                               (is (= [protocol/ensure-database-operation]

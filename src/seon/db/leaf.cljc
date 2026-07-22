@@ -1,0 +1,26 @@
+(ns seon.db.leaf
+  "Define the ordinary platform-leaf contract consumed by `seon.db`."
+  (:refer-clojure :exclude [uuid]))
+
+(def call! ::call!)
+(def transaction-call! ::transaction-call!)
+(def resolve-db! ::resolve-db!)
+(def read-db! ::read-db!)
+(def request-db! ::request-db!)
+(def cache-db! ::cache-db!)
+(def context ::context)
+(def uuid ::uuid)
+(def resource-options ::resource-options)
+(def on-commit! ::on-commit!)
+
+(def current-tx-context ::current-tx-context)
+(def current-agent-id ::current-agent-id)
+(def with-read-evidence ::with-read-evidence)
+(def record-read-evidence! ::record-read-evidence!)
+(def with-agent ::with-agent)
+(def without-agent ::without-agent)
+(def with-tx-context ::with-tx-context)
+(def install-configuration-context! ::install-configuration-context!)
+(def schema-projection ::schema-projection)
+(def cache-schema-projection! ::cache-schema-projection!)
+(def schema-validation? ::schema-validation?)

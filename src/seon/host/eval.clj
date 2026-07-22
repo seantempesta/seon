@@ -286,7 +286,7 @@
                (conj repair-policy-keys
                      :seon.config.render/database-edn-cap))
         fence-result (claim-run-fence! writer database agent-id run-fence)]
-    (if (:seon/error fence-result)
+    (if (:seon.error/message fence-result)
       (assoc (batch-summary [] []) :seon.eval/fenced? true)
       (do
         (when-not (contains? record/transient-ns-syms batch-ns)
@@ -325,12 +325,12 @@
                                   :seon.eval/narration narration
                                   :seon.eval/ns current-ns
                                   :seon.agent/id agent-id}))]
-                  (if (and record? (:seon/error started))
+                  (if (and record? (:seon.error/message started))
                 ;; The receipt is the durable execution boundary: a form
                 ;; whose receipt cannot commit never runs.
                     (recur (rest entries) current-ns ids
                            (conj results {:seon.eval/ok? false
-                                          :seon/error (:seon/error started)}))
+                                          :seon/error started}))
                     (let [preflight-result
                           (when (= :form kind)
                             (preflight/preflight!
@@ -457,8 +457,7 @@
                                         (not (:seon.db/ok? recorded)))
                                  ;; The outcome could not become durable —
                                  ;; surface it on the envelope as data.
-                                 (assoc envelope ::record-error
-                                        (:seon/error recorded))
+                                 (assoc envelope ::record-error recorded)
                                  envelope)
                       next-ns (or (when ok? (declared-next-ns forms))
                                   current-ns)]

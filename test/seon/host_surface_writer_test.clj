@@ -53,9 +53,9 @@
                                  ::record/ns-sym ns-sym
                                  ::record/aliases aliases})}))
 
-(defn- agent-facing-symbols
+(defn- agent-facing-definitions
   []
-  (into #{}
+  (into {}
         (mapcat
          (fn [path]
            (let [{::keys [namespace forms]} (source-forms path)]
@@ -66,8 +66,13 @@
                               (symbol? (second form))
                               (true? (:seon.fn/agent-facing?
                                       (meta (second form)))))]
-               (str namespace "/" (second form))))))
+               [(str namespace "/" (second form))
+                (meta (second form))]))))
         (source-scan/source-files "src")))
+
+(defn- agent-facing-symbols
+  []
+  (set (keys (agent-facing-definitions))))
 
 (defn- only-source
   [suffix]
@@ -130,15 +135,21 @@
    {::context/writer-socket-path "tmp/unused-host-surface-test.sock"
     ::context/database-name "host-surface-test"}))
 
-(defn- computed-base-resolved-symbols
+(defn- computed-host-resolution
   [left-symbols]
   (let [base (context/build-base! (unconnected-writer))]
-    (into #{}
-          (comp
-           (filter #(= :loaded (::context/status %)))
-           (map #(str (::context/namespace %) "/" (::context/block-name %)))
-           (filter left-symbols))
-          (get-in base [::context/report ::context/blocks]))))
+    {::computed-base
+     (into #{}
+           (comp
+            (filter #(= :loaded (::context/status %)))
+            (map #(str (::context/namespace %) "/" (::context/block-name %)))
+            (filter left-symbols))
+           (get-in base [::context/report ::context/blocks]))
+     ::computed-registry
+     (into #{}
+           (mapcat (fn [[lib entry]]
+                     (map #(str lib "/" %) (keys (::context/vars entry)))))
+           @(::context/registry base))}))
 
 ;; Rows without ::disposition are deliberately computed base rows. Their
 ;; status is filled only after the real loader reports the block `:loaded`.
@@ -240,31 +251,31 @@
    ["seon.agent.shell/py-run" {::disposition :host/capability-pending ::unit :w5-0g}]
    ["seon.agent.shell/run" {::disposition :host/capability-pending ::unit :w5-0g}]
    ["seon.agent.shell/run-bg!" {::disposition :host/capability-pending ::unit :w5-0g}]
-
-   ;; W5-0h web capability family.
    ["seon.agent.web/fetch" {::disposition :host/capability-pending ::unit :w5-0h}]
    ["seon.agent.web/grants" {::disposition :host/capability-pending ::unit :w5-0h}]
    ["seon.agent.web/search" {::disposition :host/capability-pending ::unit :w5-0h}]
+
+   ;; W5-0h web capability family.
 
    ;; W5-0f provider-backed AI capability family.
    ["seon.ai/generate-code!" {::disposition :host/capability-pending ::unit :w5-0f}]
 
    ;; W5-0b database capability family; existing registry names are resolved.
-   ["seon.db/as-of" {::disposition :host/capability-pending ::unit :w5-0b}]
-   ["seon.db/cas-assert" {::disposition :host/capability-pending ::unit :w5-0b}]
-   ["seon.db/current-agent-id" {::disposition :host/capability-pending ::unit :w5-0b}]
-   ["seon.db/db" {::disposition :host/capability-pending ::unit :w5-0b}]
-   ["seon.db/entity" {::disposition :host/capability-pending ::unit :w5-0b}]
-   ["seon.db/execute-many" {::disposition :host/capability-pending ::unit :w5-0b}]
-   ["seon.db/history" {::disposition :host/capability-pending ::unit :w5-0b}]
-   ["seon.db/index-page" {::disposition :host/capability-pending ::unit :w5-0b}]
-   ["seon.db/installed-schema" {::disposition :host/capability-pending ::unit :w5-0b}]
-   ["seon.db/pull" {::disposition :host/resolved ::unit :w5-0a}]
-   ["seon.db/pull-many" {::disposition :host/capability-pending ::unit :w5-0b}]
-   ["seon.db/query" {::disposition :host/resolved ::unit :w5-0a}]
-   ["seon.db/query-with-evidence" {::disposition :host/resolved ::unit :w5-0a}]
-   ["seon.db/since" {::disposition :host/capability-pending ::unit :w5-0b}]
-   ["seon.db/transact!" {::disposition :host/resolved ::unit :w5-0a}]
+   ["seon.db/as-of" {::unit :w5-0b}]
+   ["seon.db/cas-assert" {::unit :w5-0b}]
+   ["seon.db/current-agent-id" {::unit :w5-0b}]
+   ["seon.db/db" {::unit :w5-0b}]
+   ["seon.db/entity" {::unit :w5-0b}]
+   ["seon.db/execute-many" {::unit :w5-0b}]
+   ["seon.db/history" {::unit :w5-0b}]
+   ["seon.db/index-page" {::unit :w5-0b}]
+   ["seon.db/installed-schema" {::unit :w5-0b}]
+   ["seon.db/pull" {::unit :w5-0b}]
+   ["seon.db/pull-many" {::unit :w5-0b}]
+   ["seon.db/query" {::unit :w5-0b}]
+   ["seon.db/query-with-evidence" {::unit :w5-0b}]
+   ["seon.db/since" {::unit :w5-0b}]
+   ["seon.db/transact!" {::unit :w5-0b}]
 
    ;; W5-0f schema capability family; compiled registry entries are resolved.
    ["seon.schema/enum-members" {::disposition :host/capability-pending ::unit :w5-0f}]
@@ -276,13 +287,17 @@
    ["seon.schema/schemas-in-namespace" {::disposition :host/capability-pending ::unit :w5-0f}]])
 
 (defn- disposition-table
-  [computed-base]
+  [computed-base computed-registry]
   (into (sorted-map)
         (map (fn [[sym disposition]]
-               [sym (if (and (contains? computed-base sym)
-                             (not (contains? disposition ::disposition)))
-                      (assoc disposition ::disposition :host/base-resolved)
-                      disposition)]))
+               [sym (if (contains? disposition ::disposition)
+                      disposition
+                      (cond
+                        (contains? computed-registry sym)
+                        (assoc disposition ::disposition :host/resolved)
+                        (contains? computed-base sym)
+                        (assoc disposition ::disposition :host/base-resolved)
+                        :else disposition))]))
         disposition-seeds))
 
 (defn- excluded-row?
@@ -299,16 +314,19 @@
   (into (sorted-map) (frequencies (map (comp ::disposition val) table))))
 
 (deftest computed-agent-surface-has-one-honest-host-disposition
-  (let [left-symbols (agent-facing-symbols)
+  (let [definitions (agent-facing-definitions)
+        left-symbols (set (keys definitions))
         forms (context-forms)
-        registry-symbols (registry-declared-symbols forms)
-        computed-base (computed-base-resolved-symbols left-symbols)
+        {computed-base ::computed-base
+         registry-symbols ::computed-registry}
+        (computed-host-resolution left-symbols)
         seeded-base (into #{}
                           (comp (filter #(not (contains? (second %)
                                                          ::disposition)))
+                                (remove #(contains? registry-symbols (first %)))
                                 (map first))
                           disposition-seeds)
-        table (disposition-table computed-base)
+        table (disposition-table computed-base registry-symbols)
         table-symbols (set (keys table))
         resolved (into #{}
                        (comp (filter #(= :host/resolved
@@ -344,6 +362,21 @@
                (pr-str (sort (set/difference table-symbols left-symbols)))))
       (is (every? valid-dispositions (map (comp ::disposition val) table))
           "every row must carry exactly one recognized disposition"))
+    (testing "every ported database capability declares one effect"
+      (let [valid-effects #{:pure :read :idempotent :external}
+            missing-or-invalid
+            (into (sorted-map)
+                  (comp
+                   (filter (fn [[sym _]] (str/starts-with? sym "seon.db/")))
+                   (keep (fn [[sym metadata]]
+                           (let [effect (:seon.capability/effect metadata)]
+                             (when-not (contains? valid-effects effect)
+                               [sym effect])))))
+                  definitions)]
+        (is (empty? missing-or-invalid)
+            (str "ported seon.db functions missing a valid "
+                 ":seon.capability/effect: "
+                 (pr-str missing-or-invalid)))))
     (testing "registry-backed resolution agrees with registry declarations"
       (is (= resolved (set/intersection left-symbols registry-symbols))
           (str "resolved rows and declared registry names disagree: "

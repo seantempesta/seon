@@ -21,13 +21,16 @@
             [seon.host.preflight :as host.preflight]
             [seon.host.sample :as host.sample]
             [seon.host.session :as host.session]
-            [seon.render.value :as render.value])
+            [seon.render.value :as render.value]
+            [seon.schema :as schema])
   (:import [java.io ByteArrayInputStream ByteArrayOutputStream DataOutputStream
             File IOException OutputStream PrintStream]
            [java.net StandardProtocolFamily UnixDomainSocketAddress]
            [java.nio.channels Channels ServerSocketChannel SocketChannel]))
 
 (def ^:private artifact-digest (apply str (repeat 64 "a")))
+
+(schema/register! :seon.agent/run :seon.db/ref)
 
 (def ^:private database
   {:db-name "host-conformance"

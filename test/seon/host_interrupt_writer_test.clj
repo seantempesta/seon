@@ -139,7 +139,7 @@
                     (pr-str (into (registry-value 'corpus-schema-rows)
                                   [(registry-value 'value-sampling-policy)]))
                     "})"))]
-          (is (true? (:seon.db/ok? seeded)) (pr-str seeded)))
+          (is (map? (:db-after seeded)) (pr-str seeded)))
         (let [started
               (host/start!
                {::host/socket-path host-socket

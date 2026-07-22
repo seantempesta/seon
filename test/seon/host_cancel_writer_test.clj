@@ -184,7 +184,7 @@
                             {:seon.agent/id "cancel-schema-probe"}
                             {:seon.db.process/id :seon.db.process/repl}]))
                     "})"))]
-          (is (true? (:seon.db/ok? seeded)) (pr-str seeded)))
+          (is (map? (:db-after seeded)) (pr-str seeded)))
         ;; Install optional provenance and sentinel attrs before the host's
         ;; recorder/query paths use them. Schema rows alone are intentionally
         ;; not physical Datahike attribute installation.
@@ -200,7 +200,7 @@
                        :seon.host-cancel-writer-test/sentinel
                        "schema-install-probe"}])
                     "})"))]
-          (is (true? (:seon.db/ok? installed)) (pr-str installed)))
+          (is (map? (:db-after installed)) (pr-str installed)))
         (let [started
               (host/start!
                {::host/socket-path host-socket

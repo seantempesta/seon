@@ -1,85 +1,40 @@
 (ns seon.db.internal
   "Transform transaction and schema data behind `seon.db`.
 
-   This internal namespace normalizes public requests and process-local scope
-   into protocol data; transport and authoritative execution live elsewhere."
+   This internal namespace normalizes public requests and ordinary context
+   data into protocol data; platform scope and transport live elsewhere."
   (:require
    [clojure.string :as str]
    [seon.ai.tokens :as tokens]
    [seon.db :as-alias db]
-   [seon.error :as error]
    [seon.schema :as schema]
    [seon.schema.form :as schema.form]))
-
-;;; Process-local execution context. Ordinary database descriptors may pin
-;;; reads; native Datahike database values never enter these scopes.
-
-(defonce ^:private tx-context
-  (let [ctor (.-AsyncLocalStorage (js/require "node:async_hooks"))]
-    (ctor.)))
-
-(defonce ^:private agent-context
-  (let [ctor (.-AsyncLocalStorage (js/require "node:async_hooks"))]
-    (ctor.)))
-
-(defonce ^:private read-evidence-context
-  (let [ctor (.-AsyncLocalStorage (js/require "node:async_hooks"))]
-    (ctor.)))
-
-(defn current-tx-context
-  "The current fiber-local transaction context."
-  []
-  (some-> tx-context .getStore))
-
-(defn current-agent-id
-  "The current fiber-local agent id."
-  []
-  (some-> agent-context .getStore))
-
-(defn record-read-evidence!
-  "Retain one ordinary Datahike read-evidence entry in the current fiber."
-  [evidence]
-  (when-let [entries (some-> read-evidence-context .getStore)]
-    (swap! entries conj evidence))
-  nil)
-
-(defn run-with-read-evidence
-  "Run `f` in a fresh fiber-local evidence scope and return value + evidence."
-  [f]
-  (let [entries (atom [])]
-    (.run
-     read-evidence-context entries
-     (fn []
-       (-> (js/Promise.resolve nil)
-           (.then (fn [_] (f)))
-           (.then (fn [value]
-                    {::db/value value
-                     ::db/read-evidence (vec (distinct @entries))})))))))
-
-(defn run-with-tx-context
-  "Run `f` with `context` merged into the current transaction context."
-  [context f]
-  (.run tx-context (merge (current-tx-context) context) f))
-
-(defn enter-tx-context!
-  "Make `context` available to async work created from the current fiber."
-  [context]
-  (.enterWith tx-context (merge (current-tx-context) context))
-  nil)
-
-(defn run-with-agent
-  "Run `f` with `agent-id` as the current agent."
-  [agent-id f]
-  (.run agent-context agent-id f))
-
-(defn run-without-agent
-  "Run `f` without an inherited agent id."
-  [f]
-  (.exit agent-context f))
 
 ;;; Malli to Datahike schema data. The authority installs the returned maps.
 
 (def tx-meta-attrs #{::db/user ::db/process})
+
+(def ^:dynamic *schema-projection* nil)
+
+(defn with-schema-projection
+  "Run `f` against one immutable committed schema projection when supplied."
+  [projection f]
+  (binding [*schema-projection* projection] (f)))
+
+(defn- registered? [schema-key]
+  (if *schema-projection*
+    (contains? (:seon.schema.projection/forms *schema-projection*) schema-key)
+    (schema/registered? schema-key)))
+
+(defn- schema-definition [schema-key]
+  (if *schema-projection*
+    (get (:seon.schema.projection/forms *schema-projection*) schema-key)
+    (schema/schema-definition schema-key)))
+
+(defn- valid-value? [schema-key value]
+  (if *schema-projection*
+    ((schema/projection-validator *schema-projection* schema-key) value)
+    (schema/valid-candidate-value? schema-key value)))
 
 (defn form-children
   "The non-property children of one Malli form."
@@ -93,8 +48,8 @@
   [form]
   (cond
     (= :seon.db/ref form) form
-    (and (keyword? form) (schema/registered? form))
-    (let [definition (schema/schema-definition form)]
+    (and (keyword? form) (registered? form))
+    (let [definition (schema-definition form)]
       (if (or (keyword? definition) (vector? definition))
         (resolve-malli-form definition)
         form))
@@ -153,7 +108,8 @@
                       (schema.form/attr-form-properties resolved))
             types (into #{} (map #(try
                                     (form->datahike-value-type %)
-                                    (catch :default _ ::unmappable)))
+                                    (catch #?(:clj Throwable :cljs :default) _
+                                      ::unmappable)))
                         (form-children resolved))]
         (or explicit
             (when (and (= 1 (count types))
@@ -190,7 +146,7 @@
 (defn malli->datahike-attr
   "Derive one ordinary Datahike attribute declaration."
   [attr]
-  (let [raw (or (schema/schema-definition attr)
+  (let [raw (or (schema-definition attr)
                 (throw (ex-info
                          (str "The attribute has no registered schema. Run "
                               (registration-form attr :string)
@@ -233,8 +189,8 @@
 (defn edn-encoded-attr?
   "True when a mixed Malli union is stored as an EDN string."
   [attr]
-  (when (and (keyword? attr) (schema/registered? attr))
-    (let [form (resolve-malli-form (schema/schema-definition attr))]
+  (when (and (keyword? attr) (registered? attr))
+    (let [form (resolve-malli-form (schema-definition attr))]
       (and (vector? form)
            (= :or (first form))
            (= :db.type/string (form->datahike-value-type form))))))
@@ -246,8 +202,8 @@
    the registered schema is the shape authority, so the one decode boundary
    reconstructs the set. Computed from the registry — never a name list."
   [attr]
-  (when (and (keyword? attr) (schema/registered? attr))
-    (let [form (resolve-malli-form (schema/schema-definition attr))]
+  (when (and (keyword? attr) (registered? attr))
+    (let [form (resolve-malli-form (schema-definition attr))]
       (and (vector? form) (= :set (first form))))))
 
 (defn- admits-ref-value?
@@ -270,7 +226,7 @@
          (= :db.type/ref
             (try
               (form->datahike-value-type resolved)
-              (catch :default _ nil))))))
+              (catch #?(:clj Throwable :cljs :default) _ nil))))))
 
 (defn- admits-entity-value?
   "True when a Malli value form structurally admits an entity map."
@@ -289,8 +245,8 @@
    The rule is derived from the one registered Malli form: a cardinality-many
    component collection whose child value is stored as a ref."
   [attr]
-  (when (and (keyword? attr) (schema/registered? attr))
-    (let [form (resolve-malli-form (schema/schema-definition attr))
+  (when (and (keyword? attr) (registered? attr))
+    (let [form (resolve-malli-form (schema-definition attr))
           head (form-head form)
           props (schema.form/attr-form-properties form)
           child (some-> form form-children first)]
@@ -302,7 +258,7 @@
   "True when a component ref attr also declares its acquired entity shape."
   [attr]
   (when (component-children-attr? attr)
-    (let [form (resolve-malli-form (schema/schema-definition attr))
+    (let [form (resolve-malli-form (schema-definition attr))
           child (some-> form form-children first)]
       (admits-entity-value? child))))
 
@@ -328,6 +284,24 @@
               :else item))
           tx-data)))
 
+(defn omit-nil-entity-values
+  "Omit absent map attributes recursively before validation and transport."
+  [tx-data]
+  (letfn [(normalize [value]
+            (cond
+              (map? value)
+              (reduce-kv (fn [result attr child]
+                           (if (nil? child)
+                             result
+                             (assoc result attr (normalize child))))
+                         (empty value)
+                         value)
+              (vector? value) (mapv normalize value)
+              (set? value) (into #{} (map normalize) value)
+              (sequential? value) (mapv normalize value)
+              :else value))]
+    (mapv normalize tx-data)))
+
 ;;; Pure transaction normalization and validation.
 
 (defn system-attr?
@@ -352,8 +326,8 @@
   [attr]
   (and (qualified-keyword? attr)
        (not (system-attr? attr))
-       (schema/registered? attr)
-       (some? (ref-attr-arity (schema/schema-definition attr)))))
+       (registered? attr)
+       (some? (ref-attr-arity (schema-definition attr)))))
 
 (defn extract-tx-attrs
   "Collect every attribute named by transaction data."
@@ -378,7 +352,7 @@
   [attrs]
   (let [unknown (->> attrs
                      (remove #(or (system-attr? %)
-                                  (schema/registered? %)))
+                                  (registered? %)))
                      (sort-by str)
                      vec)]
     (when (seq unknown)
@@ -402,7 +376,7 @@
 (defn- validate-ref! [attr value]
   (cond
     (map? value) (validate-entity-values! value)
-    (schema/valid-candidate-value? :seon.db/ref value) nil
+    (valid-value? :seon.db/ref value) nil
     :else (throw (ex-info
                    (str "A ref attribute contains an invalid reference. Use an "
                         "entity id or lookup ref, for example "
@@ -415,26 +389,26 @@
   "Validate one transaction entity using registered Malli forms."
   [entity]
   (doseq [[attr value] entity
-          :when (and (not (system-attr? attr)) (schema/registered? attr))]
+          :when (and (not (system-attr? attr)) (registered? attr))]
     (when (and (acquired-component-schema? attr)
-               (not (schema/valid-candidate-value? attr value)))
+               (not (valid-value? attr value)))
       (throw (ex-info
                (str "Transaction data fails its registered component schema "
-                    (pr-str (schema/schema-definition attr)) ". "
+                    (pr-str (schema-definition attr)) ". "
                     "Transact identified child entities or entity refs; for "
                     "example "
                     (transaction-form
                       [{attr 'value-matching-registered-schema}]) ".")
                       {::db/attr attr ::db/actual-value value
-                       ::db/expected-schema (schema/schema-definition attr)
+                       ::db/expected-schema (schema-definition attr)
                        :seon.error/kind :user-input})))
-    (case (ref-attr-arity (schema/schema-definition attr))
+    (case (ref-attr-arity (schema-definition attr))
       :one (validate-ref! attr value)
       :many (doseq [child value] (validate-ref! attr child))
-      (when-not (schema/valid-candidate-value? attr value)
+      (when-not (valid-value? attr value)
         (throw (ex-info
                  (str "Transaction data fails its registered schema "
-                      (pr-str (schema/schema-definition attr)) ". "
+                      (pr-str (schema-definition attr)) ". "
                       (if (nil? value)
                         (str "Omit the absent key; for example "
                              (transaction-form [(dissoc entity attr)]) ".")
@@ -442,7 +416,7 @@
                              (transaction-form
                                [{attr 'value-matching-registered-schema}]) ".")))
                         {::db/attr attr ::db/actual-value value
-                         ::db/expected-schema (schema/schema-definition attr)
+                         ::db/expected-schema (schema-definition attr)
                          :seon.error/kind :user-input})))))
   nil)
 
@@ -457,10 +431,10 @@
   "True for a keyword-valued identity attribute."
   [attr]
   (and (qualified-keyword? attr)
-       (schema/registered? attr)
+       (registered? attr)
        (schema/identity-attr? attr)
        (= :keyword
-          (-> attr schema/schema-definition resolve-malli-form
+          (-> attr schema-definition resolve-malli-form
               form->child-form resolve-malli-form form-head))))
 
 (defn coerce-lookup-ref-symbol
@@ -520,7 +494,7 @@
               (if-not (contains? normalized ::db/ref)
                 normalized
                 (let [ref (::db/ref normalized)]
-                  (when-not (schema/valid-candidate-value? :seon.db/ref ref)
+                  (when-not (valid-value? :seon.db/ref ref)
                     (throw (ex-info
                              (str "`:seon.db/ref` contains an invalid entity "
                                   "reference. Use one identity lookup ref, for "
@@ -568,23 +542,8 @@
 
 (defn merge-tx-context-into-opts
   "Merge selected provenance into transaction metadata."
-  [opts]
-  (let [provenance (selected-provenance (or (current-tx-context) {})
-                                        (current-agent-id))
+  [opts context agent-id]
+  (let [provenance (selected-provenance (or context {}) agent-id)
         explicit (into {} (remove #(= "seon.db" (namespace (key %))))
                        (or (:tx-meta opts) {}))]
     (assoc (or opts {}) :tx-meta (merge explicit provenance))))
-
-(defn error-envelope
-  "Convert an exception to the canonical transaction failure envelope."
-  [exception]
-  (let [value (error/->map exception)]
-    {::db/ok? false
-     ::db/error (cond-> value
-                  (nil? (:seon.error/kind value))
-                  (assoc :seon.error/kind :core-bug))}))
-
-(defn commit-error-envelope
-  "Convert a transaction failure to ordinary data."
-  [exception]
-  (error-envelope exception))

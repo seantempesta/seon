@@ -42,6 +42,20 @@ the anchor stays the state ledger.
 
 ## Async / platform portability
 
+- **A scalar success with a ruled error-value failure needs an explicit union.**
+  `home-dir` could not remain `[] -> :string` after errors-as-values: register
+  the exact string-or-flat-error response and regress the absent environment
+  at the public entry (`src/seon/agent/fs.cljs:165,544-556`), or Malli turns
+  the repaired failure into a new throw.
+- **A `.cljc` rename is not a portability proof.** Require the promoted
+  namespace on the JVM immediately: pod-only aliases hidden by conditional
+  requires still fail when an unconditional function body resolves them.
+  Keep native bodies in the leaf and make the portable load a focused gate
+  (`src/seon/agent/web.cljc:1-20,239-359`).
+- **A prose-closed request needs `{:closed true}` in its Malli map.** Web fetch
+  and search documented closed option sets but their schemas admitted unknown
+  resource dials; the portable drift test caught the mismatch
+  (`src/seon/agent/web.cljc:69-75,127-133`).
 - **Async is contagious upward.** Don't sprinkle reader conditionals
   through logic — push the async/sync difference down to the ONE
   transport/capability leaf; everything above is plain portable
@@ -109,6 +123,31 @@ the anchor stays the state ledger.
 - **Env-coupled cljs tests**: a focused-build failure that's green in
   the integrated run is usually schema load-order, not your bug
   (my.plan-test precedent) — verify in the full run before chasing.
+- **Put dual-tier `.cljc` tests below a namespace directory.** The writer
+  runner discovers `test/seon/**/_test.clj[c]`, while the CLJS runner follows
+  namespaces; `test/seon/db/portable_test.cljc:1` is visible to both, unlike a
+  new root-level `.cljc` file that the retained writer discovery can miss.
+- **Public replay identity hashes logical intent, not the moving source
+  database.** A second `:seon.capability/op-id` call normally starts from the
+  new head, so `src/seon/db/protocol.cljc:798` excludes `:seon.db/db` from the
+  receipt hash while preserving explicit `:seon.db/expected-db`; transport
+  `::request-id` remains private roundtrip identity.
+- **A JVM portable core validates through its bound committed projection.**
+  Source declarations are process-global and leak across sequential test
+  hosts; `src/seon/host/context.clj:236` supplies one projection accessor and
+  `src/seon/db/internal.cljc:15` scopes the shared transforms to that immutable
+  value. An empty fake/bootstrap database explicitly disables domain
+  validation until its schema declaration transaction establishes a
+  projection; never activate one host's projection process-wide.
+- **Normalize optional component nils before portable validation.** Malli
+  default decoding can materialize absent optional keys inside acquired maps;
+  `src/seon/db/internal.cljc:287` recursively omits those nil map entries so
+  validation and transport see the database's one representation of absence.
+- **CLJS dynamic leaf bindings end before Promise continuations.** A JVM host
+  can use the synchronous closures returned by `src/seon/db.cljc:196`, but an
+  async Bun test must install its leaf for the complete Promise lifetime and
+  restore it before calling `done` (`test/seon/db/portable_test.cljc:321`).
+  Never let a fake leaf escape into later namespaces.
 
 ## Process/operator
 
