@@ -921,6 +921,33 @@ censused). Dispatch near-miss noted: a codex run shell-&'d inside a
 harness-backgrounded call survived by luck — the no-shell-& rule
 applies INSIDE backgrounded compounds too; watcher armed manually.
 
+### Normalize-4a landed `7d5a2fb2` + second acquisition-shape boot catch; W5-0a census numbers (2026-07-22 late night)
+
+- Normalize-4a committed (repair classes = three native booleans;
+  model variants = identified component children; host EDN decode
+  deleted; fallback-preservation regression; cljs 1542/7516 + writer
+  381/2896). THE RESET BOUNDARY THEN CAUGHT THE SAME CLASS AGAIN, one
+  level deeper: the ACQUIRED singleton carries pulled component-child
+  maps where the ref schema validates int/string/lookup — pod died at
+  database-pull-policy instrumentation. The lane's regression tested
+  its accessor, not the acquired-singleton boot path. Lane resumed
+  (high): fix at the one decode/schema boundary via a COMPUTED rule
+  (component-children-attr? beside set-valued-attr?, no name lists) +
+  the FULL acquisition-path regression (resolve → real-Datahike
+  transact → entity/pull → decode → singleton validation →
+  database-pull-policy) that would have caught both this and
+  5fc0accd. CLUSTER DOWN until the fix; recovery + re-reset are the
+  orchestrator's.
+- **W5-0a census first sweep: the agent surface is 106 symbols** —
+  staples are 27 (db 4 resolved + 11 pending; blob 4 platform + stat;
+  message 2; lifecycle 5); remaining 77 = 46 portable my.*, 25
+  fs/search/shell/web, 1 AI, 5 unregistered-schema. RULING: fifth
+  disposition `:host/base-resolved`, COMPUTED from the loader
+  classifier (hand rows disagreeing with the computation fail the gate
+  both directions); the 25 capability symbols seed pending under named
+  units (W5-0g fs, W5-0h web, …); exclusions are owner-review-pending
+  and COUNT AS PENDING for the cutover assertion. Lane resumed.
+
 ### Queue-order correction (fresh-eyes ruling, recorded)
 
 The wind-down queue serialized the EDN normalize series ahead of
