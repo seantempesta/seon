@@ -903,14 +903,27 @@ happened. Now take the next thing off the queue.
 - Standing overnight rules: owner-taste decisions batch for morning;
   live drives on isolated clusters only; path-limited commits; anchor
   updated every cycle.
-- **Overnight lanes at start:** W3 grounding (read-only, logs
-  `tmp/orchestrator/w3-grounding-*`) · q21 grounding (read-only,
-  `tmp/orchestrator/q21-grounding-*`) · **NS-0.5d** internal-require
-  conformance gate (curiosity-pass finding: the require law had no
-  checked-in gate and `internal_boundary_test.cljs` hand-maintains its
-  ns list against the computed-rules rule; spec
-  `specs/ns-0.5d-internal-require-gate.md`, test-only, sol low,
-  logs `tmp/orchestrator/ns-05d-*`).
+- **Overnight progress ledger:**
+  NS-0.5d DONE `6de77e34` (require-law gate + computed boundary lists;
+  my anchor overclaim struck `df5de597`; q23 queued) ·
+  q21 grounding ACCEPTED
+  (`research/q21-committed-acquisition-grounding-2026-07-21.md`;
+  implementation IN FLIGHT, probe-first, logs `tmp/orchestrator/q21-*`;
+  q22 queued — triplicate acquisition, host 4096 sentinel) ·
+  W3 grounding ACCEPTED (`research/w3-parity-grounding-2026-07-21.md`;
+  FOUR premise corrections: W3a typed classification already landed;
+  W3b must use `m/-instrument` (multi-arity); `invoke/settle!` is NOT
+  the run fence — W3c splits W3c1 fence (prereq for W3d) / W3c2
+  repair-preflight with ACCEPTED semantic differences from the child;
+  authored invocation never used the U2 registry — W3d composes pinned
+  source identity + digest verification + versioned materialization.
+  Order: W3a → W3c1 → W3b → W3c2 → W3d, `host/eval.clj` hooks
+  serialized. SCI checkout is `8fac6e88`, not the design's `be4021d`.
+  WP-D stays adjacent-open; W3d must serve ALL authored consumers) ·
+  **W3a IN FLIGHT** (`specs/w3a-interrupt-output-closure.md`, sol
+  medium, logs `tmp/orchestrator/w3a-*`: late-interrupt timeout
+  identity, host output-cap → config authority (q16-class duplicate
+  limit), concurrent-bleed proof, flood regression guard).
 
 ### NO PENDING OWNER DECISIONS
 
