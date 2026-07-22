@@ -474,7 +474,7 @@
         (into #{}
               (map first)
               (drop 2 (schema/schema-definition :seon.ns)))
-        edge-form (schema/schema-definition :seon.analyzer-info/require-edge)]
+        edge-form (schema/schema-definition :seon.ns.source/require-edge)]
     (is (contains? namespace-attributes :seon.ns/require-edges))
     (is (contains? namespace-attributes :seon.ns/doc))
     (is (contains? namespace-attributes :seon.ns/summary))

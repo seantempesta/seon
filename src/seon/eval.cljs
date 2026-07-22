@@ -54,6 +54,7 @@
             [seon.agent.home :as home]
             [seon.ai.tokens :as tokens]
             [seon.analyzer-info :as analyzer-info]
+            [seon.ns.source]
             [seon.config :as config]
             [seon.content-hash :as content-hash]
             [seon.db :as db]
@@ -2643,7 +2644,7 @@
    SYMBOLS. An `:as-alias?` edge contributes its ALIAS only (keyword
    resolution), never a ::nses entry — its target is NOT loaded.
    Total: `#{}` of edges folds to the empty info."
-  {:malli/schema [:=> [:cat :seon.analyzer-info/require-edges] ::require-info]}
+  {:malli/schema [:=> [:cat :seon.ns.source/require-edges] ::require-info]}
   [edges]
   (reduce
     (fn [acc {:seon.ns.require/keys [target alias refers refer-all? as-alias?]}]
@@ -2665,7 +2666,7 @@
    required."
   {:malli/schema
    [:=> [:catn [::ns-kw :symbol]
-         [::new-edges :seon.analyzer-info/require-edges]]
+         [::new-edges :seon.ns.source/require-edges]]
         [:vector :any]]}
   [ns-kw new-edges]
   (cond-> [[:db.fn/retractAttribute

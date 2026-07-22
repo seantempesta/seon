@@ -22,9 +22,8 @@
    both throw `TypeError: undefined`. We read
    `(:cljs.analyzer/namespaces @compile-state)` directly. The
    research note's reference impl is wrong on that point."
-  (:require [cljs.reader :as reader]
-            [clojure.string :as str]
-            [malli.core :as m]
+  (:require [malli.core :as m]
+            [seon.ns.source :as ns.source]
             [seon.schema :as schema]))
 
 ;;; ---------------------------------------------------------------------------
@@ -211,117 +210,6 @@
              (fn [defs] (apply dissoc defs phantoms))))
     phantoms))
 
-;; ---------------------------------------------------------------------------
-;; Reified require edges (M4/C28 structural store — code-as-data: the
-;; analyzer already produced the alias/refer facts at eval time; store
-;; them on the `:seon.ns` row instead of re-parsing `:seon.ns/source`
-;; text at render time). One edge per required ns, carrying the `:as`
-;; alias and `:refer` set when present. The attr registrations live HERE
-;; (this ns loads before seon.eval → seon.client, so
-;; every reader/writer sees them registered on a cold boot).
-;; ---------------------------------------------------------------------------
-
-(schema/register! :seon.ns.require/target :symbol)
-(schema/register! :seon.ns.require/alias  :symbol)
-(schema/register! :seon.ns.require/refers [:set :symbol])
-;; `:refer :all` — never produced by the analyzer (CLJS has no
-;; `:refer :all`); only the SOURCE-parse path
-;; ([[require-edges-from-source]], over legacy/handwritten ns text) can yield
-;; it. Registered so a parsed edge round-trips.
-(schema/register! :seon.ns.require/refer-all? :boolean)
-;; `[x :as-alias y]` — a READER alias for qualified keywords with NO
-;; load of the target (Clojure 1.11 semantics; the analyzer stores it
-;; in the ns entry's `:as-aliases`, never `:requires`). The flag keeps
-;; the edge distinguishable so [[seon.eval/namespace-head]] emits
-;; `:as-alias` back (a plain `:as` would LOAD the target on resume) and
-;; the SCI env never treats the target as a loaded ns.
-(schema/register! :seon.ns.require/as-alias? :boolean)
-
-(schema/register! ::require-edge
-                  [:map {:seon.db/entity true}
-                   [:seon.ns.require/target :seon.ns.require/target]
-                   [:seon.ns.require/alias {:optional true} :seon.ns.require/alias]
-                   [:seon.ns.require/refers {:optional true} :seon.ns.require/refers]
-                   [:seon.ns.require/refer-all? {:optional true} :seon.ns.require/refer-all?]
-                   [:seon.ns.require/as-alias? {:optional true} :seon.ns.require/as-alias?]])
-(schema/register! ::require-edges [:set ::require-edge])
-
-(schema/register! :seon.ns/doc :string)
-(schema/register! :seon.ns/summary [:string {:min 1}])
-(schema/register! ::namespace-info
-                  [:map
-                   [:seon.ns/doc {:optional true} :seon.ns/doc]
-                   [:seon.ns/summary {:optional true} :seon.ns/summary]
-                   [:seon.ns/require-edges ::require-edges]])
-
-(defn- require-edges-from-form
-  "Return the reified require edges declared by one parsed namespace form."
-  [form]
-  (let [reqs (->> form
-                  (filter seq?)
-                  (some #(when (= :require (first %)) (rest %))))]
-    (into #{}
-          (keep (fn [r]
-                  (cond
-                    (symbol? r)
-                    {:seon.ns.require/target r}
-
-                    (and (vector? r) (symbol? (first r)))
-                    (let [tns  (first r)
-                          opts (try (apply hash-map (rest r))
-                                    (catch :default _ {}))
-                          as   (:as opts)
-                          asa  (:as-alias opts)
-                          refr (:refer opts)]
-                      (cond-> {:seon.ns.require/target tns}
-                        (symbol? as) (assoc :seon.ns.require/alias as)
-                        (and (symbol? asa) (not (symbol? as)))
-                        (assoc :seon.ns.require/alias asa
-                               :seon.ns.require/as-alias? true)
-                        (sequential? refr)
-                        (assoc :seon.ns.require/refers (set refr))
-                        (= :all refr)
-                        (assoc :seon.ns.require/refer-all? true)))
-
-                    :else nil)))
-          (or reqs []))))
-
-(defn namespace-info-from-source
-  "Derive namespace documentation and require edges from one source string.
-
-   Reads the leading `(ns …)` form once. The complete docstring is retained;
-   its trimmed first line is the compact summary. Missing documentation is
-   represented by absent attributes. Unreadable or non-namespace source
-   returns the same empty, valid projection used by namespace scaffolding."
-  {:malli/schema [:=> [:cat :string] ::namespace-info]}
-  [source]
-  (try
-    (let [form (reader/read-string source)]
-      (if (and (seq? form) (= 'ns (first form)))
-        (let [doc (when (string? (nth form 2 nil)) (nth form 2))
-              summary (some-> doc str/split-lines first str/trim not-empty)]
-          (cond-> {:seon.ns/require-edges (require-edges-from-form form)}
-            (some? doc) (assoc :seon.ns/doc doc)
-            summary (assoc :seon.ns/summary summary)))
-        {:seon.ns/require-edges #{}}))
-    (catch :default _
-      {:seon.ns/require-edges #{}})))
-
-(defn require-edges-from-source
-  "Parse an `(ns …)` `source` string into the reified require-edge set.
-
-   The SOURCE-side counterpart of
-   `seon.analyzer-info/ns-require-edges` — same `::analyzer-info/
-   require-edge` maps, derived by reading the form's `:require` clause.
-   Used where no analyzer state exists: the boot indexer's full-source
-   ns rows and the SCI cage's legacy fallback for pre-structural rows.
-   Also carries `:seon.ns.require/refer-all? true` for a
-   `:refer :all` clause (legacy text only — CLJS can't compile one).
-   Fail-soft → `#{}` on any read error or a non-`(ns …)` form."
-  {:malli/schema [:=> [:cat :string] :seon.analyzer-info/require-edges]}
-  [source]
-  (:seon.ns/require-edges (namespace-info-from-source source)))
-
 (defn ns-require-edges
   "The reified require-edge set for `ns-sym`, read from the analyzer.
 
@@ -337,7 +225,7 @@
    what the tee stores as `:seon.ns/require-edges` (component rows) so
    runtime consumers use datoms, never a reader over `:seon.ns/source`
    text (M4)."
-  {:malli/schema [:=> [:cat ::compile-state :symbol] ::require-edges]}
+  {:malli/schema [:=> [:cat ::compile-state :symbol] ::ns.source/require-edges]}
   [compile-state ns-sym]
   (let [ns-info    (get-in @compile-state [:cljs.analyzer/namespaces ns-sym])
         reqs       (:requires ns-info)

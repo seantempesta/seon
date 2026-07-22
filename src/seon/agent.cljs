@@ -68,7 +68,7 @@
     [seon.agent.ctx.namespaces :as ctx-namespaces]
     [seon.agent.ctx.transcript :as ctx-transcript]
     [seon.agent.ctx.warnings :as ctx-warnings]
-    [seon.analyzer-info]
+    [seon.ns.source]
     [seon.config :as config]
     [seon.db :as db]
     [seon.db.id :as db.id]

@@ -212,10 +212,8 @@
     ;; includes it and its render-slot symbols resolve.
     [seon.agent.ctx.typeahead-steps]
     [seon.platform]
-    ;; Phase B item 9 — shared read-side wrapper over the analyzer
-    ;; state. Required here so the build includes it; item 10's
-    ;; detect-and-tee in seon.eval/eval-batch! consumes it.
-    [seon.analyzer-info :as analyzer-info]
+    ;; Namespace-source parsing and its persisted schema registrations.
+    [seon.ns.source :as ns.source]
     ;; One multiplexed authority session owns reads, writes, and interests.
     [seon.db.protocol :as db.protocol]
     [seon.db.restore :as db.restore]
@@ -1335,7 +1333,7 @@
                                " unreadable — falling back to the (ns x) stub"))
                         stub))
                 stub)
-        info  (analyzer-info/namespace-info-from-source (or real-src src))
+        info  (ns.source/namespace-info-from-source (or real-src src))
         ;; Reified require edges (M4 persisted facts) for the SCI-
         ;; renderable surface: full-source nses are exactly where an
         ;; agent-authored-sym render fn can live (my.* + downstream), so
