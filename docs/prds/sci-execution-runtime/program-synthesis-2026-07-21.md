@@ -1162,6 +1162,19 @@ Lane states at wind-down:
   first deliverable; excludes my.blob). Owner goal text installed as
   the harness persistent goal (dissolve-first, parallelize,
   pre-ruled specs).
+- **Ruling 15 (owner + orchestrator, 2026-07-22): direct env interop
+  and the unserializable boundary.** (a) Direct js//Java interop is
+  supported WITHIN a tier; such values live in the volatile
+  process-local tier addressable by result symbol (existing Promise/
+  result-symbol mechanism — nothing new). (b) Crossing the seam,
+  database, or a receipt requires DATA; a non-serializable value at
+  that boundary returns the one flat error value with a steering
+  message (`:seon.error/kind` names the class; message says keep it
+  local / extract data / use the owning capability fn) — NEVER a
+  lossy print, stringify, or silent drop. (c) Handles (WP-H) are the
+  deliberate opt-in per-family mechanism for stateful cross-boundary
+  references; pull forward only if the my.* inventory shows a real
+  present need. P2 lanes enforce (b) in their interpreters/tests.
 - Weakness queue: AGENT-FACING interface-design guidance does not
   exist yet (dev-side skills/conventions do). WHEN: immediately after
   exemplar acceptance — one small unit distilling the seam contract
