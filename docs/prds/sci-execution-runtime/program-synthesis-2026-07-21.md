@@ -699,6 +699,50 @@ continuing the queue. Results:
   ns rename — docstrings render into agent context, so they lie;
   mechanical sol low, next free slot.
 
+### Fix tranche landed (2026-07-22 afternoon)
+
+- **q30 DONE `41110a9a`** — read-budget declines steer `:user-input`
+  naming the governing `:seon.config.database.read/*` key (structural
+  ex-data classification, one shared path for reads and execute-many
+  members; unknown errors keep the `:core-bug` last-resort). Writer
+  373/2812 + cljs regressions. Live probe joins the next checkpoint.
+- **q33 DONE `9ca35886`** — every lying `seon.repl.internal` /
+  `seon.repair` prose reference retired (src, skills, tooling);
+  `internal_test.cljc` → `parse_test.cljc`. The sweep found the
+  UNGATED bb tooling surface broken: `bin/test-parser` bare-classpath
+  bypassed bb.edn (broken since malli entered the corpus 07-20) and
+  `bin/oracle-server` was unloadable since D13 dragged
+  parinferish+schema under grammar.cljc. bb.edn now pins parinferish
+  0.8.0 and owns both scripts; test-parser 47/379 green. Residual
+  bare-deployment question:
+  `docs/seon/issues/d13-merge-broke-bare-babashka-loading.md` (W9's
+  parinferish audit owns).
+- **q29 ROOT CAUSE CORRECTED + FIXED `ac074d28`+`16a040e6`** — the fix
+  lane FALSIFIED the instrument attribution with a live-projection
+  proof (registered wrong-arg `estimate-chars` → structural envelope,
+  good/bad/good batch continues: host instrumentation parity WORKS).
+  Real crash: `preflight/candidate-names` handed a SET to
+  `rank-candidates`' sequential contract — every unresolved qualified
+  symbol under the dial nth-crashed the invocation. Fixed at the
+  producer (sorted vector, deterministic suggestions);
+  red-before/green-after + containment + parity regressions; writer
+  375/2839. Issue renamed:
+  `docs/seon/issues/host-preflight-candidate-ranking-crashes.md`.
+  **NEW W5-BLOCKING FINDING recorded there: `seon.db`/`my.blob` are
+  not resolvable on the host base (base-excluded=112) — the
+  agent-facing surface parity census is now an explicit W5-0 scope
+  item.**
+- **q32 DONE `bfe2fa21`** — 4/5 explicit-adoption regressions (public
+  reconcile! missing-identity create-once, REPL-provenance
+  reclamation, ACME desired+adoption derivation, stateful
+  post-migration-failure retry). Fifth (writer-backed atomicity
+  injection) queued behind q31's file ownership.
+- q31 read-defaults constructor floor: lane in flight.
+- Pending at next coordinated checkpoint (after q31): `bin/seon up`
+  rebuild, q30 live decline probe, q29 live drive under the dial
+  (unresolved symbol + registered wrong-arg both survive per-eval, run
+  completes), restore dial OFF.
+
 ### Queue-order correction (fresh-eyes ruling, recorded)
 
 The wind-down queue serialized the EDN normalize series ahead of
