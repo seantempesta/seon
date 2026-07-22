@@ -34,6 +34,7 @@
 (schema/register! ::http-port-file ::path)
 (schema/register! ::writer-repl-port-file ::path)
 (schema/register! ::request-socket-path ::socket-path)
+(schema/register! ::eval-socket-path ::socket-path)
 (schema/register! ::sha-256 [:re "^[0-9a-f]{64}$"])
 (schema/register! ::reconcile-manifest? :boolean)
 (schema/register!
@@ -98,6 +99,10 @@
   [::request-socket-path ::request-socket-path]
   [::writer-repl-port-file ::writer-repl-port-file]])
 (schema/register!
+ ::host-owner
+ [:map {:closed true}
+  [::eval-socket-path ::eval-socket-path]])
+(schema/register!
  ::watcher-owner
  [:map {:closed true}
   [::process-dir ::process-dir]])
@@ -153,6 +158,7 @@
   [::database ::database]
   [::watcher-owner {:optional true} ::watcher-owner]
   [::writer-owner ::writer-owner]
+  [::host-owner {:optional true} ::host-owner]
   [::process ::process]
   [::packages-dir {:optional true} ::packages-dir]
   [::blob-storage-view ::blob-storage-view]
@@ -169,6 +175,7 @@
   [::execution-build-id {:optional true} ::execution-build-id]
   [::execution-output {:optional true} ::execution-output]
   [::request-socket-path ::request-socket-path]
+  [::eval-socket-path {:optional true} ::eval-socket-path]
   [::writer-repl-port-file ::writer-repl-port-file]
   [::writer-process-dir {:optional true} ::writer-process-dir]
   [::process-dir ::process-dir]
@@ -296,7 +303,7 @@
   "Derive one ordinary autonomous-cluster launch descriptor."
   {:malli/schema [:=> [:cat ::default-descriptor-request] ::descriptor]}
   [{::keys [cluster-dir artifact-flavor client-build-id execution-build-id
-            execution-output request-socket-path
+            execution-output request-socket-path eval-socket-path
             writer-repl-port-file writer-process-dir process-dir log-dir
             http-port http-port-file]}]
   (let [cluster-dir (normalize-path cluster-dir)
@@ -324,6 +331,11 @@
        ::writer-process-dir (normalize-path (or writer-process-dir process-dir))
        ::request-socket-path request-socket-path
        ::writer-repl-port-file writer-repl-port-file}
+      ::host-owner
+      {::eval-socket-path
+       (normalize-path
+        (or eval-socket-path
+            (str (normalize-path process-dir) "/host-eval.sock")))}
       ::process
       {::process-dir (normalize-path process-dir)
        ::log-dir (normalize-path log-dir)
@@ -450,6 +462,9 @@
        ::protocol/database-path (::protocol/database-path source-database)}
       ::watcher-owner (::watcher-owner source-descriptor)
       ::writer-owner (::writer-owner source-descriptor)
+      ::host-owner
+      {::eval-socket-path
+       (str (normalize-path process-dir) "/host-eval.sock")}
       ::process
       {::process-dir (normalize-path process-dir)
        ::log-dir (normalize-path log-dir)
@@ -480,6 +495,8 @@
               [(::protocol/database-path source-database)
                (:my.blob/writable-dir source-blobs)
                (::packages-dir source-descriptor)
+               (get-in source-descriptor
+                       [::host-owner ::eval-socket-path])
                (::process-dir source-process)
                (::log-dir source-process)
                (::http-port-file source-process)])
@@ -517,6 +534,9 @@
       ::packages-dir (normalize-path packages-dir)
       ::watcher-owner (::watcher-owner source-descriptor)
       ::writer-owner (::writer-owner source-descriptor)
+      ::host-owner
+      {::eval-socket-path
+       (str (normalize-path process-dir) "/host-eval.sock")}
       ::process
       {::process-dir (normalize-path process-dir)
        ::log-dir (normalize-path log-dir)

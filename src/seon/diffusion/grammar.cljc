@@ -9,7 +9,7 @@
    `form` is an arbitrary read sexpr from `seon.repl.internal/parse-forms`,
    hence the `:any` input type."
   (:require
-    [seon.repair.candidates :as candidates]))
+    [seon.repl.parse.repair :as candidates]))
 
 (defn malformed-def?
   "A top-level `(def …)` that is NOT a valid `def` — a `defn` typo.

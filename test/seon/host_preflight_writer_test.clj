@@ -3,7 +3,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [sci.core :as sci]
             [seon.host.preflight :as preflight]
-            [seon.repair.candidates :as candidates]))
+            [seon.repl.parse.repair :as candidates]))
 
 (defn- context-with-known-symbols []
   (let [ctx (sci/init {})]
@@ -26,23 +26,23 @@
    :seon.config.repair/budget-ms 50})
 
 (deftest pick-winner-is-synchronous-on-the-jvm
-  (let [near {:seon.repair/to "near" :seon.repair/distance 1}
-        peer {:seon.repair/to "peer" :seon.repair/distance 1}
-        far {:seon.repair/to "far" :seon.repair/distance 2}
+  (let [near {:seon.repl.parse.repair/to "near" :seon.repl.parse.repair/distance 1}
+        peer {:seon.repl.parse.repair/to "peer" :seon.repl.parse.repair/distance 1}
+        far {:seon.repl.parse.repair/to "far" :seon.repl.parse.repair/distance 2}
         seen (atom [])
         choose (fn [passing]
                  (candidates/pick-winner
-                  {:seon.repair/cands [near peer far]
-                   :seon.repair/over? (constantly false)
-                   :seon.repair/passes?
+                  {:seon.repl.parse.repair/cands [near peer far]
+                   :seon.repl.parse.repair/over? (constantly false)
+                   :seon.repl.parse.repair/passes?
                    (fn [candidate]
-                     (swap! seen conj (:seon.repair/to candidate))
-                     (contains? passing (:seon.repair/to candidate)))}))]
-    (is (= near (:seon.repair/winner (choose #{"near"}))))
+                     (swap! seen conj (:seon.repl.parse.repair/to candidate))
+                     (contains? passing (:seon.repl.parse.repair/to candidate)))}))]
+    (is (= near (:seon.repl.parse.repair/winner (choose #{"near"}))))
     (is (= ["near" "peer"] @seen)
         "the farther tier is never trialled")
     (reset! seen [])
-    (is (= [near peer] (:seon.repair/ambiguous
+    (is (= [near peer] (:seon.repl.parse.repair/ambiguous
                         (choose #{"near" "peer"}))))
     (is (= ["near" "peer"] @seen))))
 
@@ -62,8 +62,8 @@
                    :seon.repl/source "(+ 1 2"})
         entry (first (:seon.host.preflight/entries repaired))]
     (is (= "(+ 1 2)" (:seon.repl/source entry)))
-    (is (seq (:seon.repair/changes entry)))
-    (is (nil? (:seon.repair/fixes entry)))
+    (is (seq (:seon.repl.parse.repair/changes entry)))
+    (is (nil? (:seon.repl.parse.repair/fixes entry)))
     (is (re-find #"auto-balanced" (:seon.repl/narration entry)))))
 
 (deftest repair-policy-table-controls-the-host-tier
@@ -89,10 +89,10 @@
       (let [result
             (run (assoc default-policy
                         :seon.config.repair/classes
-                        {:seon.repair/undeclared-var false})
+                        {:seon.repl.parse.repair/undeclared-var false})
                  "(knwon)")]
         (is (= :terminal (:seon.host.preflight/status result)))
-        (is (nil? (:seon.repair/fixes result)))))
+        (is (nil? (:seon.repl.parse.repair/fixes result)))))
 
     (testing "max-fixes terminalizes a still-unresolved chained typo"
       (let [result (run default-policy "(vector (knwon-one) (knwon-two))")]

@@ -29,7 +29,8 @@
             {:seon.dev.process/id id
              :seon.dev.process/classification classification})
           (filterv targets
-                   [process/pod-id process/writer-id process/watcher-id]))}))
+                   [process/pod-id process/host-id process/writer-id
+                    process/watcher-id]))}))
 
 (defn- component-result
   ([id classification]
@@ -221,8 +222,8 @@
                     "  data:  http://127.0.0.1:7890/data\n"
                     "  restart: forced\n"
                     "    pod: forced\n"
-                    "    writer: forced\n"
-                    "    watcher: forced\n")
+                    "    host: forced\n"
+                    "    writer: forced\n")
                (with-out-str (#'cli/print-ready! target false))))))))
 
 (deftest ready-url-selects-an-ordinary-agent-from-the-root-feed
@@ -609,8 +610,8 @@
         (is (= (str "○ Seon is down\n"
                     "  down: forced\n"
                     "    pod: forced\n"
-                    "    writer: forced\n"
-                    "    watcher: forced\n")
+                    "    host: forced\n"
+                    "    writer: forced\n")
                (with-out-str (#'cli/down! configuration []))))))
     (is (= {:seon.dev.process/configuration configuration
             :seon.dev.process/operation :seon.dev.process.operation/down
@@ -1028,13 +1029,15 @@
         (fn []
           (is (= (str "  reset: forced\n"
                       "    pod: forced\n"
+                      "    host: forced\n"
                       "    writer: forced\n"
                       "● cluster default reset and ready\n")
                  (with-out-str
                    (#'cli/reset-cluster! configuration ["default"]))))))
       (is (= [{:seon.dev.process/configuration configuration
                :seon.dev.process/operation :seon.dev.process.operation/reset
-               :seon.dev.process/targets #{process/pod-id process/writer-id}}]
+               :seon.dev.process/targets
+               #{process/pod-id process/host-id process/writer-id}}]
              @requests))
       (is (= configuration (ffirst @reconciled)))
       (is (= [(:seon.dev.config/launch-descriptor configuration)]

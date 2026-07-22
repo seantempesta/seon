@@ -228,7 +228,7 @@
                (get-in resolution [:seon.error/data
                                    :seon.error.sci/symbol])))
         (is (seq (get-in resolution [:seon.error/data
-                                    :seon.repair/suggestions])))
+                                    :seon.repl.parse.repair/suggestions])))
         (is (= :arity
                (get-in arity [:seon.error/data :seon.error.sci/class])))
         (is (= :refusal

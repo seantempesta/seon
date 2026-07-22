@@ -48,7 +48,7 @@
             [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds]
             [seon.host.record :as record]
-            [seon.repair.candidates :as candidates]
+            [seon.repl.parse.repair :as candidates]
             [seon.schema :as schema]
             [seon.time :as time])
   (:import [java.util.concurrent Callable ExecutorService Executors]
@@ -1052,7 +1052,7 @@
                   ::arglists '([instant])}}})
   (register-host-wrappers!
    {::registry registry
-    ::lib 'seon.repair.candidates
+    ::lib 'seon.repl.parse.repair
     ::wrappers
     {'rank-candidates {::wrapper-fn candidates/rank-candidates
                        ::arglists '([from names])}}})

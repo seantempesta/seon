@@ -12,8 +12,8 @@
             [seon.host.sample :as sample]
             [seon.host.session :as session]
             [seon.schema :as schema])
-  (:import [java.io File]
-           [java.net StandardProtocolFamily UnixDomainSocketAddress]
+  (:import [java.net StandardProtocolFamily UnixDomainSocketAddress]
+           [java.nio.file Files Path]
            [java.nio.channels ServerSocketChannel SocketChannel]
            [java.util.concurrent ExecutorService Executors ScheduledExecutorService TimeUnit]))
 
@@ -45,6 +45,34 @@
 (def ^:private startup-read-timeout-ms
   "Startup-frame deadline; W1 moves it to a config fact."
   10000)
+
+(defn- socket-accepting?
+  [socket-path]
+  (try
+    (with-open [_channel (uds/connect! socket-path)] true)
+    (catch Throwable _ false)))
+
+(defn- delete-dead-socket!
+  [socket-path]
+  (when-not (socket-accepting? socket-path)
+    (Files/deleteIfExists (Path/of socket-path (make-array String 0)))))
+
+(defn- bind-server!
+  [socket-path]
+  (when (socket-accepting? socket-path)
+    (throw
+     (ex-info "A live listener already owns the host eval socket."
+              {::socket-path socket-path
+               :seon.error/kind :seon.host.error/socket-owned})))
+  (delete-dead-socket! socket-path)
+  (let [server (ServerSocketChannel/open StandardProtocolFamily/UNIX)]
+    (try
+      (.bind server (UnixDomainSocketAddress/of ^String socket-path))
+      server
+      (catch Throwable throwable
+        (try (.close server) (catch Throwable _ nil))
+        (throw throwable)))))
+
 (defn- accept-startup!
   "Validate the session's first frame and answer ready, or refuse."
   [session host startup]
@@ -201,7 +229,9 @@
   {:malli/schema [:=> [:cat ::start-request] ::host]}
   [{::keys [socket-path eval-threads]
     :as request}]
-  (let [writer (context/writer-session
+  (let [^ServerSocketChannel server (bind-server! socket-path)]
+    (try
+      (let [writer (context/writer-session
                 (select-keys request [::context/writer-socket-path
                                       ::context/database-name
                                       ::context/backend
@@ -245,9 +275,6 @@
         eval-pool (Executors/newFixedThreadPool
                    (int (or eval-threads default-eval-threads)))
         watchdog (Executors/newScheduledThreadPool 2)
-        _ (try (.delete (File. ^String socket-path)) (catch Throwable _))
-        address (UnixDomainSocketAddress/of ^String socket-path)
-        server (ServerSocketChannel/open StandardProtocolFamily/UNIX)
         host (merge writer
                     {::writer writer
                      ::server server
@@ -280,10 +307,13 @@
                        (invoke/record-core-fault! throwable))))
                  (recur)))))
          "seon-host-acceptor")]
-    (.bind server address)
-    (.setDaemon acceptor true)
-    (.start acceptor)
-    (assoc host ::acceptor acceptor)))
+        (.setDaemon acceptor true)
+        (.start acceptor)
+        (assoc host ::acceptor acceptor))
+      (catch Throwable throwable
+        (try (.close server) (catch Throwable _ nil))
+        (try (delete-dead-socket! socket-path) (catch Throwable _ nil))
+        (throw throwable)))))
 
 (defn stop!
   "Stop the host acceptor and release its pools and socket."
@@ -295,7 +325,7 @@
   (error/set-db-hooks! {})
   (when writer (context/close-session! writer))
   (when socket-path
-    (try (.delete (File. ^String socket-path)) (catch Throwable _)))
+    (try (delete-dead-socket! socket-path) (catch Throwable _)))
   nil)
 
 (defn -main

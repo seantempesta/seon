@@ -1,6 +1,6 @@
-(ns seon.repair-test
-  "Corpus tests for `seon.repair/repair-source` (A.2). CLJC so both the
-   JVM (`bin/test seon.repair-test`) and the CLJS pod / `:node-test`
+(ns seon.repl.parse.repair-test
+  "Corpus tests for `seon.repl.parse.repair/repair-source` (A.2). CLJC so both the
+   JVM (`bin/test seon.repl.parse.repair-test`) and the CLJS pod / `:node-test`
    build exercise the SAME repair mechanism — parinferish indent-mode is
    pure CLJC and runs identically on both.
 
@@ -17,7 +17,7 @@
     #?(:clj  [clojure.test :as t :refer [deftest is testing]]
        :cljs [cljs.test    :as t :refer [deftest is testing]])
     [clojure.string :as str]
-    [seon.repair :as repair]
+    [seon.repl.parse.repair :as repair]
     [seon.repl.parse :as parse]))
 
 (defn- reads?
@@ -30,8 +30,8 @@
 (defn- repair*
   "Convenience: run repair-source with the parser-based reads? gate."
   [source]
-  (repair/repair-source {:seon.repair/source source
-                         :seon.repair/reads? reads?}))
+  (repair/repair-source {:seon.repl.parse.repair/source source
+                         :seon.repl.parse.repair/reads? reads?}))
 
 (defn- body-map
   "Extract the body map of a repaired top-level form. For a bare map
@@ -57,9 +57,9 @@
 
 (deftest missing-trailing-paren-repaired
   (let [res (repair* "(defn foo [x]\n  (+ x 1")]
-    (is (true? (:seon.repair/repaired? res)))
-    (is (reads? (:seon.repair/source res)))
-    (is (seq (:seon.repair/changes res))
+    (is (true? (:seon.repl.parse.repair/repaired? res)))
+    (is (reads? (:seon.repl.parse.repair/source res)))
+    (is (seq (:seon.repl.parse.repair/changes res))
         "the change-set names the inserted delimiter")))
 
 (deftest unclosed-call-before-bracket-repaired
@@ -67,21 +67,21 @@
   ;; closed before `]]}` arrives.
   (let [src "[:div\n  (str \"a\" b \"c\" (js/Date.)]]"
         res (repair* src)]
-    (is (true? (:seon.repair/repaired? res)))
-    (is (reads? (:seon.repair/source res)))))
+    (is (true? (:seon.repl.parse.repair/repaired? res)))
+    (is (reads? (:seon.repl.parse.repair/source res)))))
 
 (deftest mismatched-close-delimiter-repaired
   ;; indent-mode swaps a wrong close-delimiter TYPE.
   (let [res (repair* "(let [x 1)\n  x)")]
-    (is (true? (:seon.repair/repaired? res)))
-    (is (reads? (:seon.repair/source res)))))
+    (is (true? (:seon.repl.parse.repair/repaired? res)))
+    (is (reads? (:seon.repl.parse.repair/source res)))))
 
 (deftest stray-extra-closer-repaired
   (let [res (repair* "(+ 1 2))")]
     ;; Either repaired to balanced, or already-reads handling: the
     ;; contract is the OUTPUT reads cleanly when :repaired? is true.
-    (when (:seon.repair/repaired? res)
-      (is (reads? (:seon.repair/source res))))))
+    (when (:seon.repl.parse.repair/repaired? res)
+      (is (reads? (:seon.repl.parse.repair/source res))))))
 
 ;; ============================================================
 ;; (a) REAL episode forms — key-set preservation [critique-flagged].
@@ -122,10 +122,10 @@
 (deftest real-high-scores-form-preserves-both-render-keys
   (testing "the form that failed 12× repairs AND keeps both render keys"
     (let [res  (repair* real-high-scores-form)]
-      (is (true? (:seon.repair/repaired? res))
+      (is (true? (:seon.repl.parse.repair/repaired? res))
           "the real high-scores form is repairable")
-      (is (reads? (:seon.repair/source res)))
-      (let [body (body-map (:seon.repair/source res))]
+      (is (reads? (:seon.repl.parse.repair/source res)))
+      (let [body (body-map (:seon.repl.parse.repair/source res))]
         (is (map? body) "the repaired body is a map")
         (is (contains? body :seon.render/hiccup)
             ":seon.render/hiccup survives the repair")
@@ -138,10 +138,10 @@
 (deftest real-start-screen-form-preserves-both-render-keys
   (testing "the start-screen Usd form repairs AND keeps both render keys"
     (let [res  (repair* real-start-screen-form)]
-      (is (true? (:seon.repair/repaired? res))
+      (is (true? (:seon.repl.parse.repair/repaired? res))
           "the real start-screen form is repairable")
-      (is (reads? (:seon.repair/source res)))
-      (let [body (body-map (:seon.repair/source res))]
+      (is (reads? (:seon.repl.parse.repair/source res)))
+      (let [body (body-map (:seon.repl.parse.repair/source res))]
         (is (map? body))
         (is (contains? body :seon.render/hiccup))
         (is (contains? body :seon.render/ai))
@@ -161,11 +161,11 @@
   (doseq [src already-balanced-cases]
     (testing (str "balanced source untouched — " (pr-str src))
       (let [res (repair* src)]
-        (is (false? (:seon.repair/repaired? res))
+        (is (false? (:seon.repl.parse.repair/repaired? res))
             "balanced source is not repaired")
-        (is (= src (:seon.repair/source res))
+        (is (= src (:seon.repl.parse.repair/source res))
             "byte-identical output")
-        (is (empty? (:seon.repair/changes res)))))))
+        (is (empty? (:seon.repl.parse.repair/changes res)))))))
 
 ;; ============================================================
 ;; Unrepairable garbage → :repaired? false, original returned.
@@ -181,12 +181,12 @@
       (let [res (repair* src)]
         ;; Contract: when not repaired, the ORIGINAL source is returned
         ;; (never a half-baked output that still doesn't read).
-        (when (false? (:seon.repair/repaired? res))
-          (is (= src (:seon.repair/source res)))
-          (is (empty? (:seon.repair/changes res))))
+        (when (false? (:seon.repl.parse.repair/repaired? res))
+          (is (= src (:seon.repl.parse.repair/source res)))
+          (is (empty? (:seon.repl.parse.repair/changes res))))
         ;; And if it DID claim a repair, the output MUST read.
-        (when (true? (:seon.repair/repaired? res))
-          (is (reads? (:seon.repair/source res))))))))
+        (when (true? (:seon.repl.parse.repair/repaired? res))
+          (is (reads? (:seon.repl.parse.repair/source res))))))))
 
 ;; ============================================================
 ;; The repair note — names the change + the structural shape.
@@ -194,8 +194,8 @@
 
 (deftest repair-note-names-changes-and-shape
   (let [res  (repair* real-high-scores-form)
-        note (repair/repair-note {:seon.repair/changes (:seon.repair/changes res)
-                                  :seon.repair/shape "2-key map"})]
+        note (repair/repair-note {:seon.repl.parse.repair/changes (:seon.repl.parse.repair/changes res)
+                                  :seon.repl.parse.repair/shape "2-key map"})]
     (is (string? note))
     (is (re-find #"auto-balanced" note))
     (is (str/starts-with? note "↻")
@@ -215,35 +215,35 @@
 (deftest class-enabled-computed-from-level-and-switches
   (testing ":off disables every class (the pure A/B control arm)"
     (doseq [c (keys repair/class-levels)]
-      (is (false? (repair/class-enabled? {:seon.repair/level :off
-                                          :seon.repair/classes {}
-                                          :seon.repair/class c})))))
+      (is (false? (repair/class-enabled? {:seon.repl.parse.repair/level :off
+                                          :seon.repl.parse.repair/classes {}
+                                          :seon.repl.parse.repair/class c})))))
   (testing ":safe-syntax enables delimiters only"
-    (is (true?  (repair/class-enabled? {:seon.repair/level :safe-syntax
-                                        :seon.repair/classes {}
-                                        :seon.repair/class :seon.repair/delimiters})))
-    (is (false? (repair/class-enabled? {:seon.repair/level :safe-syntax
-                                        :seon.repair/classes {}
-                                        :seon.repair/class :seon.repair/undeclared-var}))))
+    (is (true?  (repair/class-enabled? {:seon.repl.parse.repair/level :safe-syntax
+                                        :seon.repl.parse.repair/classes {}
+                                        :seon.repl.parse.repair/class :seon.repl.parse.repair/delimiters})))
+    (is (false? (repair/class-enabled? {:seon.repl.parse.repair/level :safe-syntax
+                                        :seon.repl.parse.repair/classes {}
+                                        :seon.repl.parse.repair/class :seon.repl.parse.repair/undeclared-var}))))
   (testing ":symbols enables the symbol tier on top of delimiters"
-    (doseq [c [:seon.repair/delimiters :seon.repair/def-vs-defn
-               :seon.repair/undeclared-var]]
-      (is (true? (repair/class-enabled? {:seon.repair/level :symbols
-                                         :seon.repair/classes {}
-                                         :seon.repair/class c})))))
+    (doseq [c [:seon.repl.parse.repair/delimiters :seon.repl.parse.repair/def-vs-defn
+               :seon.repl.parse.repair/undeclared-var]]
+      (is (true? (repair/class-enabled? {:seon.repl.parse.repair/level :symbols
+                                         :seon.repl.parse.repair/classes {}
+                                         :seon.repl.parse.repair/class c})))))
   (testing "the per-class kill switch beats the level"
     (is (false? (repair/class-enabled?
-                  {:seon.repair/level :symbols
-                   :seon.repair/classes {:seon.repair/undeclared-var false}
-                   :seon.repair/class :seon.repair/undeclared-var})))
+                  {:seon.repl.parse.repair/level :symbols
+                   :seon.repl.parse.repair/classes {:seon.repl.parse.repair/undeclared-var false}
+                   :seon.repl.parse.repair/class :seon.repl.parse.repair/undeclared-var})))
     (is (true?  (repair/class-enabled?
-                  {:seon.repair/level :symbols
-                   :seon.repair/classes {:seon.repair/undeclared-var false}
-                   :seon.repair/class :seon.repair/def-vs-defn}))))
+                  {:seon.repl.parse.repair/level :symbols
+                   :seon.repl.parse.repair/classes {:seon.repl.parse.repair/undeclared-var false}
+                   :seon.repl.parse.repair/class :seon.repl.parse.repair/def-vs-defn}))))
   (testing "an unknown class is never enabled"
-    (is (false? (repair/class-enabled? {:seon.repair/level :aggressive
-                                        :seon.repair/classes {}
-                                        :seon.repair/class :seon.repair/nope})))))
+    (is (false? (repair/class-enabled? {:seon.repl.parse.repair/level :aggressive
+                                        :seon.repl.parse.repair/classes {}
+                                        :seon.repl.parse.repair/class :seon.repl.parse.repair/nope})))))
 
 ;; ============================================================
 ;; The symbol-fix notes — visible original → fixed; refusals name the
@@ -252,8 +252,8 @@
 
 (deftest fix-note-shows-original-and-fixed
   (let [note (repair/fix-note
-               {:seon.repair/fixes [{:seon.repair/from "even"
-                                     :seon.repair/to "even?"}]})]
+               {:seon.repl.parse.repair/fixes [{:seon.repl.parse.repair/from "even"
+                                     :seon.repl.parse.repair/to "even?"}]})]
     (is (str/starts-with? note "↻ fixed:")
         "leads with the ruled `↻ fixed:` glyph line")
     (is (str/includes? note "even"))
@@ -263,17 +263,17 @@
 
 (deftest suggestion-note-names-candidates
   (let [amb (repair/suggestion-note
-              {:seon.repair/from "thing-ax"
-               :seon.repair/suggestions [{:seon.repair/to "thing-aa"
-                                          :seon.repair/distance 1}
-                                         {:seon.repair/to "thing-ab"
-                                          :seon.repair/distance 1}]
-               :seon.repair/ambiguous? true})
+              {:seon.repl.parse.repair/from "thing-ax"
+               :seon.repl.parse.repair/suggestions [{:seon.repl.parse.repair/to "thing-aa"
+                                          :seon.repl.parse.repair/distance 1}
+                                         {:seon.repl.parse.repair/to "thing-ab"
+                                          :seon.repl.parse.repair/distance 1}]
+               :seon.repl.parse.repair/ambiguous? true})
         did (repair/suggestion-note
-              {:seon.repair/from "transct!"
-               :seon.repair/suggestions [{:seon.repair/to "transact!"
-                                          :seon.repair/distance 1}]
-               :seon.repair/ambiguous? false})]
+              {:seon.repl.parse.repair/from "transct!"
+               :seon.repl.parse.repair/suggestions [{:seon.repl.parse.repair/to "transact!"
+                                          :seon.repl.parse.repair/distance 1}]
+               :seon.repl.parse.repair/ambiguous? false})]
     (testing "ambiguous refusal names every candidate + that it refused"
       (is (re-find #"(?i)ambiguous" amb))
       (is (str/includes? amb "thing-aa"))

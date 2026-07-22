@@ -22,6 +22,7 @@
    [:seon.dev.config/cluster-dir :string]
    [:seon.dev.config/cluster-name :string]
    [:seon.dev.config/request-socket :string]
+   [:seon.dev.config/host-eval-socket {:optional true} :string]
    [:seon.dev.config/http-port [:int {:min 0 :max 65535}]]
    [:seon.dev.config/http-port-file :string]
    [:seon.dev.config/writer-repl-port [:int {:min 0 :max 65535}]]
@@ -504,6 +505,11 @@
         req-sock (root-path root
                             (get environment "SEON_REQ_SOCK"
                                  (str (fs/path state-dir "tmp/seon-cluster-default-req.sock"))))
+        host-eval-socket
+        (when source-checkout?
+          (root-path root
+                     (str (fs/path state-dir
+                                   (str "tmp/seon-host-eval-" cluster-name ".sock")))))
         port-file (root-path root
                              (get environment "SEON_PORT_FILE"
                                   (str (fs/path state-dir "tmp/seon-port"))))
@@ -524,7 +530,7 @@
         http-port (parse-long (get environment "SEON_PORT" "7890"))
         launch-descriptor
         (launch/default-descriptor
-         {::launch/cluster-dir cluster-dir
+         (cond-> {::launch/cluster-dir cluster-dir
           ::launch/artifact-flavor
           (:seon.dev.config/artifact-flavor artifact)
           ::launch/client-build-id
@@ -539,9 +545,10 @@
           ::launch/process-dir proc-dir
           ::launch/log-dir log-dir
           ::launch/http-port http-port
-          ::launch/http-port-file port-file})]
+          ::launch/http-port-file port-file}
+           host-eval-socket (assoc ::launch/eval-socket-path host-eval-socket)))]
     (validate-configuration!
-      (merge
+      (cond-> (merge
         (dissoc artifact :seon.dev.config/artifact-manifest-name)
         package
         {:seon.dev.config/root root
@@ -568,4 +575,6 @@
              (str (fs/path
                    proc-dir
                    (:seon.dev.config/artifact-manifest-name artifact))))
-         :seon.dev.config/launch-descriptor launch-descriptor}))))
+         :seon.dev.config/launch-descriptor launch-descriptor})
+        host-eval-socket
+        (assoc :seon.dev.config/host-eval-socket host-eval-socket)))))

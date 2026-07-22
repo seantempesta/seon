@@ -65,6 +65,12 @@
   :seon.config.run/deadline-ms
   #long #or [#env SEON_RUN_DEADLINE_MS 1800000]}
 
+ ;; ── EXECUTION TIER — supervision is independent of cutover. The JVM host
+ ;; starts and remains ready while this is false; W5 flips this one database
+ ;; fact only after retire-while-sampling proof.
+ :seon.config/execution
+ {:seon.config.execution/host-tier? false}
+
  ;; ── ROOT FLEET PROJECTION — bounded activity and failed-eval lookbacks. This
  ;; is a database dial, so a frozen db value reproduces exactly which recent
  ;; rows root considered. It is a lookback count, not a display-character cap.
@@ -183,8 +189,8 @@
  ;; behavior) | :symbols (+ def-vs-defn + unique-winner undeclared-var fixes)
  ;; | :aggressive (enum slot only — NOT implemented). Absent section =
  ;; :symbols (the ruled default; this mirror is for visibility). Per-class
- ;; kill switches, e.g. {:seon.repair/undeclared-var false}; class registry =
- ;; seon.repair/class-levels (enablement is computed, never a call-site list).
+ ;; kill switches, e.g. {:seon.repl.parse.repair/undeclared-var false}; class registry =
+ ;; seon.repl.parse.repair/class-levels (enablement is computed, never a call-site list).
  :seon.config/repair
  {:seon.config.repair/level :symbols}
 

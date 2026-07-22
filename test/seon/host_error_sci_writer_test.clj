@@ -47,9 +47,9 @@
         (is (= :resolution (::error.sci/class data)))
         (is (= 'totl (::error.sci/symbol data)))
         (is (int? (::error.sci/line data)))
-        (is (seq (:seon.repair/suggestions data)))
+        (is (seq (:seon.repl.parse.repair/suggestions data)))
         (is (= "my.agent.hostile/total"
-               (:seon.repair/to (first (:seon.repair/suggestions data)))))))
+               (:seon.repl.parse.repair/to (first (:seon.repl.parse.repair/suggestions data)))))))
 
     (testing "wrong arity uses ArityException and the var's arglists metadata"
       (let [[_throwable classified]

@@ -17,7 +17,7 @@
     [seon.embed :as embed]
     [seon.log :as log]
     [seon.reactive :as reactive]
-    [seon.repair.candidates :as candidates]
+    [seon.repl.parse.repair :as candidates]
     [seon.schema :as schema]
     [seon.schema.form :as schema.form]))
 
@@ -135,7 +135,7 @@
             (->> (candidates/rank-candidates
                   (name bad)
                   (mapv name (filter #(= "my.plan" (namespace %)) accepted)))
-                 (mapv (fn [{candidate :seon.repair/to}]
+                 (mapv (fn [{candidate :seon.repl.parse.repair/to}]
                          (str ":my.plan/" candidate))))]
         (generation-failure
          (str "generate-code!: unknown key " bad

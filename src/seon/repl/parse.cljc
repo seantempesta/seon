@@ -808,7 +808,7 @@
    UNSAFE = needs the agent / a lookup — never silently rewritten):
 
      :eof                 — unclosed delimiter/string/regex (EOF family).
-                            SAFE: parinferish closes it (`seon.repair`).
+                            SAFE: parinferish closes it (`seon.repl.parse.repair`).
      :unmatched-delimiter — a stray closer. SAFE: drop the surplus.
      :odd-map             — a map literal with an odd form count
                             (`{:a 1 :b}`). UNSAFE: a value is MISSING —

@@ -239,6 +239,23 @@
   (testing "the {} manifest leaves the route seed untouched"
     (is (= routes (config/resolve-routes routes {})))))
 
+(deftest host-tier-policy-is-one-default-off-config-fact
+  (is (m/validate :seon.config/manifest
+                  {:seon.config/execution
+                   {:seon.config.execution/host-tier? true}}))
+  (is (false?
+       (:seon.config.execution/host-tier?
+        (config/resolve-config-singleton {}))))
+  (is (true?
+       (:seon.config.execution/host-tier?
+        (config/resolve-config-singleton
+         {:seon.config/execution
+          {:seon.config.execution/host-tier? true}}))))
+  (is (not
+       (m/validate :seon.config/manifest
+                   {:seon.config/execution
+                    {:seon.config.execution/unknown? true}}))))
+
 (deftest package-accessors-use-the-open-wp-k-posture
   (let [configuration (config/resolve-config-singleton {})]
     (is (= :open (config/packages-policy configuration)))

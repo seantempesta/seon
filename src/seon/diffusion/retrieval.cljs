@@ -433,7 +433,7 @@
 (defn- ns-of [fq]
   (let [i (.lastIndexOf fq "/")] (when (>= i 0) (subs fq 0 i))))
 
-;; The near-name distance fn is the SHARED `seon.repair.candidates/levenshtein`
+;; The near-name distance fn is the SHARED `seon.repl.parse.repair/levenshtein`
 ;; (one mechanism — grammar delegates to it for this diffusion-side call).
 
 (defn- symbol-resolves-in?

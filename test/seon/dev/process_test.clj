@@ -15,7 +15,9 @@
             [seon.db.transport.uds :as uds]
             [seon.launch :as launch])
   (:import [java.io BufferedReader InputStreamReader]
-           [java.net ServerSocket SocketException]
+           [java.net ServerSocket SocketException StandardProtocolFamily
+            UnixDomainSocketAddress]
+           [java.nio.channels ServerSocketChannel]
            [java.util.concurrent TimeUnit]))
 
 (defn- test-config []
@@ -174,6 +176,8 @@
      (:seon.dev.config/execution-output target)
      ::launch/request-socket-path
      (:seon.dev.config/request-socket target)
+     ::launch/eval-socket-path
+     (:seon.dev.config/host-eval-socket target)
      ::launch/writer-repl-port-file
      (:seon.dev.config/writer-repl-port-file target)
      ::launch/process-dir (:seon.dev.config/process-dir target)
@@ -206,12 +210,57 @@
                 :seon.dev.config/cluster-name "test"
                 :seon.dev.config/request-socket
                 (str (fs/path directory "req.sock"))
+                :seon.dev.config/host-eval-socket
+                (str (fs/path directory "host-eval.sock"))
                 :seon.dev.config/writer-repl-port 0
                 :seon.dev.config/writer-repl-port-file
                 (str (fs/path directory "writer-port"))
                 :seon.dev.config/http-port 0
                 :seon.dev.config/http-port-file
                 (str (fs/path directory "pod-port"))})))
+
+(declare target-manifest-for)
+
+(deftest source-checkout-specs-supervise-the-host-between-writer-and-pod
+  (let [base (test-config)
+        configuration (target-config base (:seon.dev.test/directory base))
+        spec-map (process/specs configuration
+                                (target-manifest-for configuration))
+        host (get spec-map process/host-id)]
+    (is (= [process/watcher-id process/writer-id process/host-id process/pod-id]
+           (process/start-order spec-map)))
+    (is (= [process/watcher-id process/writer-id]
+           (:seon.dev.process/dependencies host)))
+    (is (= :seon.dev.process.readiness/host
+           (:seon.dev.process/readiness host)))
+    (is (= ["clojure" "-M:writer:host" "-m" "seon.host"]
+           (subvec (:seon.dev.process/argv host) 0 4)))
+    (is (= (:seon.dev.config/host-eval-socket configuration)
+           (:seon.host/socket-path
+            (edn/read-string (last (:seon.dev.process/argv host))))))
+    (is (= [process/watcher-id process/writer-id process/host-id]
+           (get-in spec-map [process/pod-id :seon.dev.process/dependencies])))))
+
+(deftest host-readiness-cleanup-never-unlinks-a-live-listener
+  (let [configuration (test-config)
+        socket-path (str (fs/path "tmp"
+                                  (str "h-" (subs (str (random-uuid)) 0 8)
+                                       ".sock")))
+        configuration (assoc configuration
+                             :seon.dev.config/host-eval-socket socket-path)]
+    (try
+      (with-open [server (ServerSocketChannel/open StandardProtocolFamily/UNIX)]
+        (.bind server (UnixDomainSocketAddress/of socket-path))
+        (is (#'process/unix-socket-ready? socket-path))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"live host eval socket"
+                              (#'process/clear-readiness!
+                               configuration process/host-id)))
+        (is (fs/exists? socket-path)))
+      (finally
+        (fs/delete-if-exists socket-path)
+        (fs/delete-tree (:seon.dev.test/directory configuration)
+                        {:force true})))))
 
 (def target-manifest
   (merge
@@ -2789,9 +2838,10 @@
     (try
       (is (= process/all-process-ids
              (process/start-order ordinary-specs)))
-      (is (= [process/pod-id] (process/start-order branch-specs)))
-      (is (= #{process/pod-id} (set (keys branch-specs))))
-      (is (= [] (:seon.dev.process/dependencies pod)))
+      (is (= [process/host-id process/pod-id]
+             (process/start-order branch-specs)))
+      (is (= #{process/host-id process/pod-id} (set (keys branch-specs))))
+      (is (= [process/host-id] (:seon.dev.process/dependencies pod)))
       (is (= [process/watcher-id process/writer-id]
              (mapv :seon.dev.process/id
                    (:seon.dev.process/external-dependencies pod))))
@@ -2879,9 +2929,9 @@
          (get-in pod [:seon.dev.process/environment
                       "SEON_LAUNCH_DESCRIPTOR"]))]
     (try
-      (is (= #{process/pod-id} (set (keys specs))))
-      (is (= [process/pod-id] (process/start-order specs)))
-      (is (= [] (:seon.dev.process/dependencies pod)))
+      (is (= #{process/host-id process/pod-id} (set (keys specs))))
+      (is (= [process/host-id process/pod-id] (process/start-order specs)))
+      (is (= [process/host-id] (:seon.dev.process/dependencies pod)))
       (is (= [process/watcher-id process/writer-id]
              (mapv :seon.dev.process/id
                    (:seon.dev.process/external-dependencies pod))))
@@ -2918,10 +2968,11 @@
         specs (process/specs selected manifest)
         pod (get specs process/pod-id)]
     (try
-      (is (= #{process/watcher-id process/pod-id} (set (keys specs))))
-      (is (= [process/watcher-id process/pod-id]
+      (is (= #{process/watcher-id process/host-id process/pod-id}
+             (set (keys specs))))
+      (is (= [process/watcher-id process/host-id process/pod-id]
              (process/start-order specs)))
-      (is (= [process/watcher-id]
+      (is (= [process/watcher-id process/host-id]
              (:seon.dev.process/dependencies pod)))
       (is (= [process/writer-id]
              (mapv :seon.dev.process/id
@@ -2958,12 +3009,12 @@
         external-package
         (dev-config/select-launch-descriptor config external-descriptor)]
     (try
-      (testing "a source checkout owns watcher, writer, and pod"
+      (testing "a source checkout owns watcher, writer, host, and pod"
         (let [specs (process/specs source-config source-manifest)]
           (is (= process/all-process-ids
                  (process/target-process-ids source-config)))
           (is (= (set process/all-process-ids) (set (keys specs))))
-          (is (= [process/watcher-id process/writer-id]
+          (is (= [process/watcher-id process/writer-id process/host-id]
                  (get-in specs [process/pod-id
                                 :seon.dev.process/dependencies])))))
       (testing "a package owns only writer and pod"

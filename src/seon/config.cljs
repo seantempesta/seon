@@ -147,7 +147,7 @@
 (schema/register! :seon.config.render/content-layout [:enum :structured :single-line])
 (schema/register! :seon.config.render/line-numbers   :boolean)
 ;; Repair dial scalars (level enum inlined by the LEAF rule — `seon.config`
-;; loads before `seon.repair`, so no keyword ref to `:seon.repair/level`).
+;; loads before `seon.repl.parse.repair`, so no keyword ref to `:seon.repl.parse.repair/level`).
 (schema/register! :seon.config.repair/level
   [:enum :off :safe-syntax :symbols :aggressive])
 (schema/register! :seon.config.repair/max-fixes-per-form :seon.config/cap)
@@ -160,6 +160,12 @@
 (schema/register! :seon.config/reactive-settle-ms :seon.config/cap)
 (schema/register! :seon.config/reactive-structural-settle-ms :seon.config/cap)
 (schema/register! :seon.config/reactive-max-latency-ms :seon.config/cap)
+(schema/register! :seon.config.execution/host-tier? :boolean)
+(schema/register!
+ :seon.config/execution
+ [:map {:closed true}
+  [:seon.config.execution/host-tier?
+   {:optional true} :seon.config.execution/host-tier?]])
 
 ;;; DATABASE READ RESOURCE POLICY — runaway-work ceilings, not pagination.
 ;;; Datahike defines `max-work` as charged execution steps, `max-results` as
@@ -402,7 +408,7 @@
 ;;; 2026-07-05; design docs/prds/agent-ctx/research/form-autofix-system-
 ;;; 2026-07-05.md). Levels as config data; per-class kill switches are a
 ;;; `{class-kw boolean}` map COMBINED with the class registry in
-;;; `seon.repair/class-levels` (enablement is computed, never a call-site
+;;; `seon.repl.parse.repair/class-levels` (enablement is computed, never a call-site
 ;;; list). `:aggressive` is an enum slot only — not implemented. `classes`
 ;;; stays a plain map HERE (the manifest shape); its DATOM shape is the
 ;;; mixed-`:or` EDN-slot registration in the singleton block below.
@@ -547,6 +553,8 @@
    [:seon.config.run/batch-turn-limit  {:optional true} :seon.config.run/batch-turn-limit]
    [:seon.config.run/stream-form-limit {:optional true} :seon.config.run/stream-form-limit]
    [:seon.config.run/deadline-ms       {:optional true} :seon.config.run/deadline-ms]
+   [:seon.config.execution/host-tier?
+    {:optional true} :seon.config.execution/host-tier?]
    [:seon.config.model-transport/response-identity-cap
     {:optional true} :seon.config.model-transport/response-identity-cap]
    [:seon.config.model-transport/endpoint-cap
@@ -643,6 +651,7 @@
    [:seon.config/skills        {:optional true} :seon.config/skills-spec]
    [:seon.config/repl-mode     {:optional true} :seon.config/repl-mode]
    [:seon.config/run           {:optional true} :seon.config/run]
+   [:seon.config/execution     {:optional true} :seon.config/execution]
    [:seon.config/model-transport {:optional true} :seon.config/model-transport]
    [:seon.config/namespaces    {:optional true} :seon.config/namespaces-spec]
    [:seon.config/routes        {:optional true} [:vector :seon.config/route-spec]]
@@ -1434,7 +1443,7 @@
 ;;; --- FORM-AUTOFIX (repair) accessors — the `:seon.config/repair` knobs, now
 ;;; singleton datoms. Absent section ⇒ the owner-ruled defaults (level
 ;;; `:symbols`, no class kill-switches, 1 fix/form, 50ms budget). Consumers
-;;; combine level + classes via `seon.repair/class-enabled?` (the computed rule).
+;;; combine level + classes via `seon.repl.parse.repair/class-enabled?` (the computed rule).
 
 (defn repair-level
   "The repair level: `:off` / `:safe-syntax` / `:symbols` / `:aggressive`.
@@ -1452,8 +1461,8 @@
   "The per-class repair kill-switch map `{class-kw boolean}`.
 
    Manifest `:seon.config.repair/classes`; default `{}` (the level alone
-   decides). Combined with `seon.repair/class-levels` by
-   `seon.repair/class-enabled?`."
+   decides). Combined with `seon.repl.parse.repair/class-levels` by
+   `seon.repl.parse.repair/class-enabled?`."
   {:malli/schema [:=> [:cat :seon.config/singleton] :map]}
   [configuration]
   (get configuration :seon.config.repair/classes {}))

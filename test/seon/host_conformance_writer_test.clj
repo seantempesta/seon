@@ -24,7 +24,8 @@
             [seon.render.value :as render.value])
   (:import [java.io ByteArrayInputStream ByteArrayOutputStream DataOutputStream
             File IOException OutputStream PrintStream]
-           [java.nio.channels Channels SocketChannel]))
+           [java.net StandardProtocolFamily UnixDomainSocketAddress]
+           [java.nio.channels Channels ServerSocketChannel SocketChannel]))
 
 (def ^:private artifact-digest (apply str (repeat 64 "a")))
 
@@ -42,6 +43,24 @@
     (.mkdirs directory)
     (.getAbsolutePath
      (File. directory (str "seon-" label "-" (random-uuid) ".sock")))))
+
+(deftest start-refuses-a-live-foreign-eval-socket-without-unlinking-it
+  (let [path (socket-path "foreign-host")
+        address (UnixDomainSocketAddress/of path)]
+    (with-open [listener (ServerSocketChannel/open StandardProtocolFamily/UNIX)]
+      (.bind listener address)
+      (let [failure
+            (try
+              (host/start! {::host/socket-path path
+                            ::context/writer-socket-path "unused"
+                            ::context/database-name "unused"})
+              nil
+              (catch clojure.lang.ExceptionInfo exception exception))]
+        (is (= :seon.host.error/socket-owned
+               (:seon.error/kind (ex-data failure))))
+        (with-open [channel (uds/connect! path)]
+          (is (.isConnected channel)
+              "the foreign listener remains reachable after refusal"))))))
 
 (def ^:private fake-agent-rows
   #{[1 "root"] [2 "task-a"] [3 "task-b"]})
@@ -537,7 +556,7 @@
               (is (= 2
                      (count
                       (get-in envelope [:seon/error :seon.error/data
-                                        :seon.repair/suggestions]))))))))
+                                        :seon.repl.parse.repair/suggestions]))))))))
       (finally (close! session)))))
 
 (deftest repaired-read-redispatches-through-the-ordinary-recorded-path
@@ -577,9 +596,9 @@
       (is (= (eval-sources correct) (eval-sources broken))
           "the repaired source is the receipt and terminal row source")
       (is (seq (get-in broken-result [:seon.host/results 0
-                                      :seon.repair/changes])))
+                                      :seon.repl.parse.repair/changes])))
       (is (nil? (get-in correct-result [:seon.host/results 0
-                                        :seon.repair/changes])))
+                                        :seon.repl.parse.repair/changes])))
       (is (= (into [] (keep :seon.ns/name) (:tx-data broken))
              (into [] (keep :seon.ns/name) (:tx-data correct)))
           "the repaired and correct namespace declarations tee equally"))))

@@ -25,9 +25,10 @@
 
 (def watcher-id :seon.dev.process/watcher)
 (def writer-id :seon.dev.process/writer)
+(def host-id :seon.dev.process/host)
 (def pod-id :seon.dev.process/pod)
 (def restore-admin-id :seon.dev.process/restore-admin)
-(def all-process-ids [watcher-id writer-id pod-id])
+(def all-process-ids [watcher-id writer-id host-id pod-id])
 
 (def ^:private legacy-containment-shutdown-grace-ms 2500)
 
@@ -196,6 +197,11 @@
        (get-in descriptor [::launch/watcher-owner ::launch/process-dir]
                writer-process-dir))))
 
+(defn- host-eval-socket [config]
+  (or (get-in config [:seon.dev.config/launch-descriptor
+                      ::launch/host-owner ::launch/eval-socket-path])
+      (:seon.dev.config/host-eval-socket config)))
+
 (defn target-process-ids
   "Return the processes owned by the selected runtime configuration."
   [config]
@@ -205,8 +211,13 @@
         owns-watcher? (and source-checkout? (owns-watcher-process? descriptor))]
     (cond
       (and owns-watcher? owns-writer?) all-process-ids
-      owns-watcher? [watcher-id pod-id]
-      owns-writer? [writer-id pod-id]
+      owns-watcher? (if source-checkout?
+                      [watcher-id host-id pod-id]
+                      [watcher-id pod-id])
+      owns-writer? (if source-checkout?
+                     [writer-id host-id pod-id]
+                     [writer-id pod-id])
+      source-checkout? [host-id pod-id]
       :else [pod-id])))
 
 (defn- release-member
@@ -486,7 +497,8 @@
            :seon.dev.process/dependencies
            (cond-> []
              owns-watcher-process? (conj watcher-id)
-             owns-writer-processes? (conj writer-id))
+             owns-writer-processes? (conj writer-id)
+             source-checkout? (conj host-id))
            :seon.dev.process/http-port-file
            (::launch/http-port-file descriptor-process)
            :seon.dev.process/readiness :seon.dev.process.readiness/pod
@@ -541,6 +553,37 @@
                            :seon.dev.process.readiness/writer
                            :seon.dev.process/artifact-digest
                            (:seon.dev.artifact/writer-digest manifest)}))))
+        host-spec
+        (when source-checkout?
+          (cond->
+           {:seon.dev.process/id host-id
+           :seon.dev.process/argv
+           ["clojure" "-M:writer:host" "-m" "seon.host"
+            (pr-str {:seon.host/socket-path
+                     (host-eval-socket config)
+                     :seon.host.context/writer-socket-path
+                     (:seon.dev.config/request-socket config)
+                     :seon.host.context/database-name
+                     (:seon.dev.config/cluster-name config)})]
+           :seon.dev.process/environment environment
+           :seon.dev.process/dependencies
+           (cond-> []
+             owns-watcher-process? (conj watcher-id)
+             owns-writer-processes? (conj writer-id))
+           :seon.dev.process/readiness :seon.dev.process.readiness/host
+           :seon.dev.process/ready-timeout-ms 180000
+           :seon.dev.process/shutdown-grace-ms 30000
+           :seon.dev.process/artifact-digest
+           (artifact/source-input-digest config)}
+            (not owns-writer-processes?)
+            (assoc :seon.dev.process/external-dependencies
+                   [{:seon.dev.process/id writer-id
+                     :seon.dev.process/owner-process-dir
+                     (::launch/writer-process-dir descriptor-writer)
+                     :seon.dev.process/readiness
+                     :seon.dev.process.readiness/writer
+                     :seon.dev.process/artifact-digest
+                     (:seon.dev.artifact/writer-digest manifest)}])))
         spec-map
         {watcher-id
          (watcher-spec config
@@ -573,9 +616,11 @@
       :seon.dev.process/artifact-digest
       (:seon.dev.artifact/writer-digest manifest)}
 
+     host-id host-spec
      pod-id pod-spec}
         selected-ids (set (target-process-ids config))
-        spec-map (select-keys spec-map selected-ids)]
+        spec-map (into {} (keep (fn [[id spec]] (when (and spec (selected-ids id))
+                                                  [id spec]))) spec-map)]
     (doseq [spec (vals spec-map)]
       (validate! process-spec-schema spec
                  "The derived process specification is invalid."
@@ -782,6 +827,15 @@
          (fs/regular-file? port-file)
          (some-> (slurp port-file) str/trim parse-long http-ready?))))
 
+(defn- unix-socket-ready? [path]
+  (boolean
+   (when (and path (fs/exists? path))
+     (try
+       (with-open [channel (SocketChannel/open StandardProtocolFamily/UNIX)]
+         (.connect channel (UnixDomainSocketAddress/of (str path))))
+       true
+       (catch Throwable _ false)))))
+
 (defn ready?
   "Probe readiness for the current process lifetime."
   [config spec record]
@@ -793,6 +847,8 @@
          (and (watcher-ready? config record)
               (current-watcher-outputs-ready? config spec))
          :seon.dev.process.readiness/writer (writer-ready? config)
+         :seon.dev.process.readiness/host
+         (unix-socket-ready? (host-eval-socket config))
          :seon.dev.process.readiness/pod (pod-ready? config spec record)
          false)))
 
@@ -884,6 +940,8 @@
                         (some-> (slurp file) str/trim parse-long))]
         (tcp-ready? (or published
                         (:seon.dev.config/writer-repl-port config))))))
+    :seon.dev.process/host
+    (unix-socket-ready? (host-eval-socket config))
     :seon.dev.process/pod
     (boolean (when-let [port (or (get-in config
                                          [:seon.dev.config/launch-descriptor
@@ -913,6 +971,8 @@
     (->> [(:seon.dev.config/request-socket config)
           (:seon.dev.config/writer-repl-port-file config)]
          (filterv string?))
+    :seon.dev.process/host
+    (if-let [path (host-eval-socket config)] [path] [])
     :seon.dev.process/pod
     (if-let [path
              (or (get-in config [:seon.dev.config/launch-descriptor
@@ -923,6 +983,11 @@
     []))
 
 (defn- clear-readiness! [config id]
+  (when (and (= host-id id) (accepting-unmanaged? config id))
+    (throw (ex-info "Refusing to unlink a live host eval socket."
+                    {:seon.dev.process/id id
+                     :seon.dev.process/socket-path
+                     (host-eval-socket config)})))
   (doseq [path (readiness-paths config id)]
     (fs/delete-if-exists path)))
 
@@ -1833,7 +1898,7 @@
                   lifecycle-reserve-ms)
         deadline (+ started budget)
         selected (set targets)
-        ordered (filterv selected [pod-id writer-id watcher-id])
+        ordered (filterv selected [pod-id host-id writer-id watcher-id])
         results (stop-selected! configuration deadline ordered)
         classifications (set (map :seon.dev.process/classification results))
         classification

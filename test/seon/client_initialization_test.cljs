@@ -462,6 +462,7 @@
     (let [original-skills skills/seed-skills-tx-data
           original-reconcile state/reconcile!
           original-migrate ctx/migrate-plan-surface-default!
+          original-host-coordinates agent/reconcile-host-coordinates!
           effects (atom [])
           reconcile-result (atom nil)
           migration-result (atom nil)
@@ -471,6 +472,7 @@
             (set! skills/seed-skills-tx-data original-skills)
             (set! state/reconcile! original-reconcile)
             (set! ctx/migrate-plan-surface-default! original-migrate)
+            (set! agent/reconcile-host-coordinates! original-host-coordinates)
             (done))
           apply! (fn []
                    (#'client/reconcile-config! {} configuration))]
@@ -487,6 +489,13 @@
               (swap! effects conj :migrate)
               (swap! migration-calls inc)
               (js/Promise.resolve @migration-result)))
+      (set! agent/reconcile-host-coordinates!
+            (fn [_configuration]
+              (swap! effects conj :host-coordinates)
+              (js/Promise.resolve
+               {::agent/host-coordinate-ok? true
+                ::agent/host-coordinate-changed? false
+                ::agent/host-coordinate-operations 0})))
       (reset! reconcile-result
               {:seon.runtime.state/ok? false
                :seon.runtime.state/error "reconcile failed"
@@ -512,7 +521,7 @@
              (is (= {:seon.error/message "migration failed"
                      :seon.error/kind :core-bug}
                     failed-migration))
-             (is (= [:reconcile :migrate] @effects))
+             (is (= [:reconcile :host-coordinates :migrate] @effects))
              (reset! effects [])
              (reset! migration-result
                      {::ctx/ok? true
@@ -526,8 +535,8 @@
                      :seon.runtime.state/operations 5
                      :seon.runtime.state/attempts 1}
                     combined))
-             (is (= [:reconcile :migrate] @effects)
-                 "migration follows reconciliation inside config apply")))
+             (is (= [:reconcile :host-coordinates :migrate] @effects)
+                 "host-coordinate and plan reconciliation follow config")))
           (.catch (fn [error] (is false (str error))))
           (.finally cleanup!)))))
 

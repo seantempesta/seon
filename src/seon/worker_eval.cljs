@@ -76,7 +76,7 @@
     [clojure.string :as str]
     [cljs.js :as cljs]
     [cljs.analyzer :as ana]
-    [seon.repair.candidates :as candidates]
+    [seon.repl.parse.repair :as candidates]
     [seon.eval.bootstrap-cache :as bootstrap-cache]
     [shadow.cljs.bootstrap.node :as boot]
     ["fs" :as fs]
@@ -475,7 +475,7 @@
 ;; candidate passes a compile-only trial; 2+ passers = ambiguous (hint, no
 ;; fix); trials execute NOTHING; the single winner is eval'd for real so
 ;; its defs land in the session. The candidate/distance/threshold/tier
-;; intelligence is the SHARED `seon.repair.candidates` (one mechanism —
+;; intelligence is the SHARED `seon.repl.parse.repair` (one mechanism —
 ;; the pod's pre-flight gate rides the same code); this op supplies only
 ;; its OWN candidate sources (session defs + cached core + graph names)
 ;; and its compile-only trial.
@@ -526,7 +526,7 @@
   "Ranked fix candidates (k ≤ 5) for the unresolved `from` over THIS
    worker's sources: session defs + cljs.core + `graph-names` (name
    parts). Ranking/threshold (Levenshtein ≤ ⌈n/3⌉, nearest first) is the
-   SHARED `seon.repair.candidates/rank-candidates` — see its docstring
+   SHARED `seon.repl.parse.repair/rank-candidates` — see its docstring
    for why ⌈n/3⌉ (the `transct!` → `tapset` deep-tier lesson)."
   [from graph-names]
   (candidates/rank-candidates
@@ -557,23 +557,23 @@
 
 (defn- pick-winner
   "The SHARED nearest-tier / unique-winner pick
-   (`seon.repair.candidates/pick-winner`) wired to THIS worker's
-   compile-only [[trial]]. Resolves `{:seon.repair/winner …}` /
-   `{:seon.repair/ambiguous [..]}` / `{:seon.repair/none? true}` /
-   `{:seon.repair/budget? true}`. `over?` is the budget check."
+   (`seon.repl.parse.repair/pick-winner`) wired to THIS worker's
+   compile-only [[trial]]. Resolves `{:seon.repl.parse.repair/winner …}` /
+   `{:seon.repl.parse.repair/ambiguous [..]}` / `{:seon.repl.parse.repair/none? true}` /
+   `{:seon.repl.parse.repair/budget? true}`. `over?` is the budget check."
   [code from cands over?]
   (candidates/pick-winner
-    {:seon.repair/cands cands
-     :seon.repair/over? over?
-     :seon.repair/passes?
+    {:seon.repl.parse.repair/cands cands
+     :seon.repl.parse.repair/over? over?
+     :seon.repl.parse.repair/passes?
      (fn ^:async candidate-passes? [c]
-       (let [to (:seon.repair/to c)
+       (let [to (:seon.repl.parse.repair/to c)
              t  (await (trial (candidates/substitute-symbol code from to)))]
          (trial-passes? t from to)))}))
 
 (defn- suggestions-js
   [cands]
-  (clj->js (mapv (fn [{:seon.repair/keys [to distance]}]
+  (clj->js (mapv (fn [{:seon.repl.parse.repair/keys [to distance]}]
                    {"sym" to "distance" distance})
                  cands)))
 
@@ -607,7 +607,7 @@
               (doto base
                 (gobj-set "ok" true)
                 (gobj-set "fixed_code" code*)
-                (gobj-set "fixes" (clj->js (mapv (fn [{:seon.repair/keys [from to]}]
+                (gobj-set "fixes" (clj->js (mapv (fn [{:seon.repl.parse.repair/keys [from to]}]
                                                    {"from" from "to" to})
                                                  fixes))))
               (if ok?
@@ -629,15 +629,15 @@
                 cands (candidates-for from graph-names)
                 pick  (await (pick-winner code* from cands over?))]
             (cond
-              (:seon.repair/budget? pick)   (repair-fail-js base "budget" [])
-              (:seon.repair/ambiguous pick) (repair-fail-js base "ambiguous"
-                                                            (:seon.repair/ambiguous pick))
-              (:seon.repair/none? pick)     (repair-fail-js base "no-candidate" cands)
+              (:seon.repl.parse.repair/budget? pick)   (repair-fail-js base "budget" [])
+              (:seon.repl.parse.repair/ambiguous pick) (repair-fail-js base "ambiguous"
+                                                            (:seon.repl.parse.repair/ambiguous pick))
+              (:seon.repl.parse.repair/none? pick)     (repair-fail-js base "no-candidate" cands)
               :else
-              (let [to (:seon.repair/to (:seon.repair/winner pick))]
+              (let [to (:seon.repl.parse.repair/to (:seon.repl.parse.repair/winner pick))]
                 (recur (candidates/substitute-symbol code* from to)
-                       (conj fixes {:seon.repair/from from
-                                    :seon.repair/to   to}))))))))))
+                       (conj fixes {:seon.repl.parse.repair/from from
+                                    :seon.repl.parse.repair/to   to}))))))))))
 
 ;; ============================================================
 ;; Wire boundary — clj result → JSON-serializable JS object.

@@ -17,7 +17,7 @@
     [seon.db :as db]
     [seon.db.protocol :as protocol]
     [seon.log :as seon-log]
-    [seon.repair.candidates :as cand]
+    [seon.repl.parse.repair :as cand]
     [seon.repl.parse :as repl-internal]
     [seon.schema :as schema]
     [seon.time :as time]))
@@ -247,7 +247,7 @@
 ;; --- `:my.plan/children`) is silently dropped and mints a childless plan.
 ;; --- The accepted key set is DERIVED from the registered schemas (never a
 ;; --- hand list), so it can't drift; the fix suggestion reuses the ONE
-;; --- candidate ranker (`seon.repair.candidates`).
+;; --- candidate ranker (`seon.repl.parse.repair`).
 
 (defn schema-map-keys
   "The accepted map-entry keys of registered schema `k`, DERIVED from its
@@ -284,7 +284,7 @@
                       first)]
     (let [targets (filterv my-plan-key? accepted)
           sugg    (->> (cand/rank-candidates (name bad) (mapv name targets))
-                       (mapv (fn [{to :seon.repair/to}] (str ":my.plan/" to))))]
+                       (mapv (fn [{to :seon.repl.parse.repair/to}] (str ":my.plan/" to))))]
       (fail (str fn-name ": unknown key " bad
                  (when (seq sugg)
                    (str " — did you mean " (str/join " or " sugg) "?"))

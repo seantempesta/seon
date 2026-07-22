@@ -5,8 +5,7 @@
             [sci.ctx-store]
             [sci.impl.analyzer :as analyzer]
             [seon.error.sci :as error.sci]
-            [seon.repair :as repair]
-            [seon.repair.candidates :as candidates]))
+            [seon.repl.parse.repair :as repair]))
 
 (set! *warn-on-reflection* true)
 
@@ -33,9 +32,9 @@
 (defn- class-enabled?
   [policy class]
   (repair/class-enabled?
-   {:seon.repair/level (:seon.config.repair/level policy)
-    :seon.repair/classes (:seon.config.repair/classes policy)
-    :seon.repair/class class}))
+   {:seon.repl.parse.repair/level (:seon.config.repair/level policy)
+    :seon.repl.parse.repair/classes (:seon.config.repair/classes policy)
+    :seon.repl.parse.repair/class class}))
 
 (defn- namespace-object!
   [ctx ns-sym]
@@ -63,18 +62,18 @@
                    (:seon.repl/source entry)
                    "")]
     (when (and (= :read (:seon.repl/kind entry))
-               (class-enabled? policy :seon.repair/delimiters))
+               (class-enabled? policy :seon.repl.parse.repair/delimiters))
       (let [reads? (fn [candidate]
                      (try
                        (boolean (seq (parsed-sources ctx ns-sym candidate)))
                        (catch Throwable _ false)))
             repaired (repair/repair-source
-                      {:seon.repair/source source
-                       :seon.repair/reads? reads?})]
-        (when (:seon.repair/repaired? repaired)
+                      {:seon.repl.parse.repair/source source
+                       :seon.repl.parse.repair/reads? reads?})]
+        (when (:seon.repl.parse.repair/repaired? repaired)
           (let [note (repair/repair-note
-                      {:seon.repair/changes
-                       (:seon.repair/changes repaired)})]
+                      {:seon.repl.parse.repair/changes
+                       (:seon.repl.parse.repair/changes repaired)})]
             {:seon.host.preflight/entries
              (mapv
               (fn [index form-source]
@@ -85,11 +84,11 @@
                          (str (when (seq (:seon.repl/narration entry))
                                 (str (:seon.repl/narration entry) "\n"))
                               note)
-                         :seon.repair/changes
-                         (:seon.repair/changes repaired))))
+                         :seon.repl.parse.repair/changes
+                         (:seon.repl.parse.repair/changes repaired))))
               (range)
               (parsed-sources ctx ns-sym
-                              (:seon.repair/source repaired)))}))))))
+                              (:seon.repl.parse.repair/source repaired)))}))))))
 
 (defn- analysis-context
   [ctx]
@@ -145,7 +144,7 @@
 
 (defn- resolved-prefix
   [ctx ns-sym token]
-  (when-let [prefix (candidates/ns-part token)]
+  (when-let [prefix (repair/ns-part token)]
     (let [prefix-sym (symbol prefix)]
       (or (get-in @(:env ctx) [:namespaces ns-sym :aliases prefix-sym])
           prefix-sym))))
@@ -174,8 +173,8 @@
 
 (defn- eligible?
   [policy ctx source]
-  (and (or (class-enabled? policy :seon.repair/undeclared-var)
-           (class-enabled? policy :seon.repair/def-vs-defn))
+  (and (or (class-enabled? policy :seon.repl.parse.repair/undeclared-var)
+           (class-enabled? policy :seon.repl.parse.repair/def-vs-defn))
        (not (str/blank? source))
        (let [form (try (sci/parse-string ctx source)
                        (catch Throwable _ nil))]
@@ -192,9 +191,9 @@
         classified
         (cond-> classified
           (seq suggestions)
-          (assoc-in [:seon.error/data :seon.repair/suggestions] suggestions)
+          (assoc-in [:seon.error/data :seon.repl.parse.repair/suggestions] suggestions)
           (seq suggestions)
-          (assoc-in [:seon.error/data :seon.repair/ambiguous?]
+          (assoc-in [:seon.error/data :seon.repl.parse.repair/ambiguous?]
                     (boolean ambiguous?)))
         classified
         (assoc classified :seon.error/message
@@ -231,52 +230,52 @@
               ok?
               (if (seq fixes)
                 {:seon.host.preflight/status :fixed
-                 :seon.repair/source candidate-source
-                 :seon.repair/fixes fixes
-                 :seon.repair/applied-class applied-class}
+                 :seon.repl.parse.repair/source candidate-source
+                 :seon.repl.parse.repair/fixes fixes
+                 :seon.repl.parse.repair/applied-class applied-class}
                 {:seon.host.preflight/status :clean})
 
               resolution
               (let [token (str (:sci.impl/symbol resolution))
-                    qualifier (candidates/ns-part token)
+                    qualifier (repair/ns-part token)
                     qualify (fn [name]
                               (if qualifier (str qualifier "/" name) name))
-                    ranked (candidates/rank-candidates
-                            (candidates/name-part token)
+                    ranked (repair/rank-candidates
+                            (repair/name-part token)
                             (candidate-names retained-ctx registry ns-sym token))
                     suggestions
-                    (mapv #(update % :seon.repair/to qualify) ranked)]
+                    (mapv #(update % :seon.repl.parse.repair/to qualify) ranked)]
                 (if (or (over?)
                         (not (class-enabled? policy
-                                             :seon.repair/undeclared-var))
+                                             :seon.repl.parse.repair/undeclared-var))
                         (>= (count fixes) max-fixes))
                   (terminal retained-ctx home-ns throwable suggestions false)
                   (let [pick
-                        (candidates/pick-winner
-                         {:seon.repair/cands ranked
-                          :seon.repair/over? over?
-                          :seon.repair/passes?
+                        (repair/pick-winner
+                         {:seon.repl.parse.repair/cands ranked
+                          :seon.repl.parse.repair/over? over?
+                          :seon.repl.parse.repair/passes?
                           (fn [candidate]
-                            (let [to-token (qualify (:seon.repair/to candidate))
+                            (let [to-token (qualify (:seon.repl.parse.repair/to candidate))
                                   trial-source
-                                  (candidates/substitute-symbol
+                                  (repair/substitute-symbol
                                    candidate-source token to-token)]
                               (:seon.host.preflight/ok?
                                (analyze-disposable! retained-ctx ns-sym
                                                     trial-source))))})]
-                    (if-let [winner (:seon.repair/winner pick)]
-                      (let [to-token (qualify (:seon.repair/to winner))]
-                        (recur (candidates/substitute-symbol
+                    (if-let [winner (:seon.repl.parse.repair/winner pick)]
+                      (let [to-token (qualify (:seon.repl.parse.repair/to winner))]
+                        (recur (repair/substitute-symbol
                                 candidate-source token to-token)
-                               (conj fixes {:seon.repair/from token
-                                            :seon.repair/to to-token})
+                               (conj fixes {:seon.repl.parse.repair/from token
+                                            :seon.repl.parse.repair/to to-token})
                                (or applied-class
-                                   :seon.repair/undeclared-var)))
+                                   :seon.repl.parse.repair/undeclared-var)))
                       (terminal
                        retained-ctx home-ns throwable
-                       (mapv #(update % :seon.repair/to qualify)
-                             (or (:seon.repair/ambiguous pick) ranked))
-                       (boolean (:seon.repair/ambiguous pick)))))))
+                       (mapv #(update % :seon.repl.parse.repair/to qualify)
+                             (or (:seon.repl.parse.repair/ambiguous pick) ranked))
+                       (boolean (:seon.repl.parse.repair/ambiguous pick)))))))
 
               :else
               {:seon.host.preflight/status :clean})))))))

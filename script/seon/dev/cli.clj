@@ -644,6 +644,7 @@
   (case value
     "watcher" process/watcher-id
     "writer" process/writer-id
+    "host" process/host-id
     "pod" process/pod-id
     nil))
 
@@ -680,7 +681,7 @@
     (if follow?
       (do
         (when-not (= 1 (count ids))
-          (throw (ex-info "`logs --follow` requires writer, watcher, or pod."
+          (throw (ex-info "`logs --follow` requires watcher, writer, host, or pod."
                           {:seon.dev.cli/arguments (vec arguments)})))
         (if-let [path (process/current-log configuration (first ids))]
           (shell/exec ["tail" "-n" (str lines) "-f" path])

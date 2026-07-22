@@ -6,7 +6,7 @@
             [sci.lang]
             [seon.ai.tokens :as tokens]
             [seon.error.instrument :as instrument]
-            [seon.repair.candidates :as candidates]
+            [seon.repl.parse.repair :as candidates]
             [seon.schema :as schema]))
 
 (schema/register!
@@ -102,10 +102,10 @@
                      candidate-syms)
           by-name (group-by name eligible)]
       (mapv
-       (fn [{:seon.repair/keys [to] :as ranked}]
+       (fn [{:seon.repl.parse.repair/keys [to] :as ranked}]
          (let [chosen (first (sort-by #(candidate-priority home-ns %)
                                       (get by-name to)))]
-           (assoc ranked :seon.repair/to (str chosen))))
+           (assoc ranked :seon.repl.parse.repair/to (str chosen))))
        (candidates/rank-candidates unresolved-name (keys by-name))))))
 
 (defn- sci-var-symbol
@@ -218,7 +218,7 @@
           resolution
           [:resolution
            (cond-> {::symbol (:sci.impl/symbol resolution)
-                    :seon.repair/suggestions
+                    :seon.repl.parse.repair/suggestions
                     (resolution-suggestions context home-ns
                                             (:sci.impl/symbol resolution))}
              (int? (:line resolution)) (assoc ::line (:line resolution))
@@ -256,7 +256,7 @@
   [{message :seon.error/message data :seon.error/data :as error-value}
    token-budget]
   (let [{::keys [class symbol line refused-var home-ns callstack-head]
-         :seon.repair/keys [suggestions]} data
+         :seon.repl.parse.repair/keys [suggestions]} data
         head
         (case class
           :schema-input
@@ -271,7 +271,7 @@
           :resolution
           (str "Unable to resolve " symbol
                (when line (str " (line " line ")")) "."
-               (when-let [suggestion (:seon.repair/to (first suggestions))]
+               (when-let [suggestion (:seon.repl.parse.repair/to (first suggestions))]
                  (str " Did you mean " suggestion "?"))
                (when home-ns (str " Your fns live in " home-ns ".")))
 
@@ -311,8 +311,8 @@
                      {:seon.error/message (first-line (ex-message cause))
                       :seon.error/data (detail-ex-data (or (ex-data cause) {}))})
                    (cause-chain throwable))}
-      (seq (:seon.repair/suggestions data))
-      (assoc :seon.repair/suggestions (:seon.repair/suggestions data))
+      (seq (:seon.repl.parse.repair/suggestions data))
+      (assoc :seon.repl.parse.repair/suggestions (:seon.repl.parse.repair/suggestions data))
 
       (instrument/instrument-error? data)
       (merge data))))

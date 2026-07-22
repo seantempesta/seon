@@ -70,8 +70,7 @@
             [seon.instrument :as instrument]
             [seon.platform :as platform]
             [seon.render.value :as value]
-            [seon.repair :as repair]
-            [seon.repair.candidates :as candidates]
+            [seon.repl.parse.repair :as repair]
             [seon.repl.parse :as internal]
             [seon.runtime.admission :as admission]
             [seon.schema :as schema]
@@ -3783,20 +3782,20 @@
 ;; form's FIRST run. Ambiguity ALWAYS refuses: the error gains the
 ;; did-you-mean candidates instead. One mechanism, two consumers: the
 ;; candidate/distance/threshold/tier logic is the SHARED
-;; `seon.repair.candidates` (the worker-eval bundle's op:"repair" rides
+;; `seon.repl.parse.repair` (the worker-eval bundle's op:"repair" rides
 ;; the same code).
 ;; ============================================================
 
 (defn- repair-class-on?
   "Is fix class `class` enabled under the live repair config? The
-   computed rule: `seon.repair/class-enabled?` over the config level +
+   computed rule: `seon.repl.parse.repair/class-enabled?` over the config level +
    per-class kill-switch map."
   [configuration class]
-  (repair/class-enabled? {:seon.repair/level
+  (repair/class-enabled? {:seon.repl.parse.repair/level
                           (config/repair-level configuration)
-                          :seon.repair/classes
+                          :seon.repl.parse.repair/classes
                           (config/repair-classes configuration)
-                          :seon.repair/class   class}))
+                          :seon.repl.parse.repair/class   class}))
 
 (defn- qualified-sym-misses
   "Qualified symbol references in `source` that provably resolve NOWHERE.
@@ -3949,7 +3948,7 @@
    qualification can never compile-prove (qualifier fixes are the
    unimplemented `:aggressive` tier)."
   [compile-state eval-ns token resolved-prefix]
-  (if (candidates/ns-part token)
+  (if (repair/ns-part token)
     (-> #{}
         (into (analyzer-def-names compile-state (symbol resolved-prefix)))
         (into (map str (keys (ns-fn-members resolved-prefix))))
@@ -3980,9 +3979,9 @@
           ;; form was fine (or only fails in ways this gate doesn't own).
           check-ok?
           (when (seq fixes)
-            {:seon.repair/source        src
-             :seon.repair/fixes         fixes
-             :seon.repair/applied-class (or cls :seon.repair/undeclared-var)})
+            {:seon.repl.parse.repair/source        src
+             :seon.repl.parse.repair/fixes         fixes
+             :seon.repl.parse.repair/applied-class (or cls :seon.repl.parse.repair/undeclared-var)})
 
           (over?) nil
 
@@ -3993,19 +3992,19 @@
           (let [form  (first (or (read-all-forms src) []))
                 fixed (when (and (empty? fixes)
                                  (repair-class-on? configuration
-                                                   :seon.repair/def-vs-defn)
+                                                   :seon.repl.parse.repair/def-vs-defn)
                                  (grammar/malformed-def? form))
                         (str/replace-first src #"\(\s*def\s+" "(defn "))]
             (when (and fixed (not= fixed src))
               (recur fixed
-                     (conj fixes {:seon.repair/from "def"
-                                  :seon.repair/to   "defn"})
-                     :seon.repair/def-vs-defn)))
+                     (conj fixes {:seon.repl.parse.repair/from "def"
+                                  :seon.repl.parse.repair/to   "defn"})
+                     :seon.repl.parse.repair/def-vs-defn)))
 
           ;; Undeclared var(s). Unique-winner substitution, else hint.
           :else
           (let [class-on? (repair-class-on?
-                            configuration :seon.repair/undeclared-var)]
+                            configuration :seon.repl.parse.repair/undeclared-var)]
             (if (or (nil? token) (not class-on?)
                     (>= (count fixes) max-fixes))
               ;; Won't fix (cap hit / no token) — still surface the
@@ -4013,32 +4012,32 @@
               (when (and token class-on? (empty? fixes))
                 (let [names (repair-candidate-names
                               compile-state ns-sym token (str (:prefix w)))
-                      cands (candidates/rank-candidates
-                              (candidates/name-part token) names)]
+                      cands (repair/rank-candidates
+                              (repair/name-part token) names)]
                   (when (seq cands)
-                    {:seon.repair/from        token
-                     :seon.repair/suggestions cands
-                     :seon.repair/ambiguous?  false})))
-              (let [qpart       (candidates/ns-part token)
-                    from-nm     (candidates/name-part token)
+                    {:seon.repl.parse.repair/from        token
+                     :seon.repl.parse.repair/suggestions cands
+                     :seon.repl.parse.repair/ambiguous?  false})))
+              (let [qpart       (repair/ns-part token)
+                    from-nm     (repair/name-part token)
                     replacement (fn [to-nm]
                                   (if qpart (str qpart "/" to-nm) to-nm))
                     names       (repair-candidate-names
                                   compile-state ns-sym token (str (:prefix w)))
-                    cands       (candidates/rank-candidates from-nm names)
+                    cands       (repair/rank-candidates from-nm names)
                     pick        (await
-                                  (candidates/pick-winner
-                                    {:seon.repair/cands cands
-                                     :seon.repair/over? over?
-                                     :seon.repair/passes?
+                                  (repair/pick-winner
+                                    {:seon.repl.parse.repair/cands cands
+                                     :seon.repl.parse.repair/over? over?
+                                     :seon.repl.parse.repair/passes?
                                      ;; PROOF: the substituted source must
                                      ;; compile with no thrown error and no
                                      ;; remaining undeclared hit on either
                                      ;; side of the swap (other names may
                                      ;; remain — the chained-typo case).
                                      (fn ^:async candidate-passes? [c]
-                                       (let [to-nm (:seon.repair/to c)
-                                             code' (candidates/substitute-symbol
+                                       (let [to-nm (:seon.repl.parse.repair/to c)
+                                             code' (repair/substitute-symbol
                                                      src token (replacement to-nm))
                                              {err2 ::check-error
                                               und2 ::check-undeclared}
@@ -4052,27 +4051,27 @@
                                                             (str (:suffix %)))
                                                 und2))))}))]
                 (cond
-                  (:seon.repair/winner pick)
+                  (:seon.repl.parse.repair/winner pick)
                   (let [to-tok (replacement
-                                 (:seon.repair/to (:seon.repair/winner pick)))]
-                    (recur (candidates/substitute-symbol src token to-tok)
-                           (conj fixes {:seon.repair/from token
-                                        :seon.repair/to   to-tok})
-                           (or cls :seon.repair/undeclared-var)))
+                                 (:seon.repl.parse.repair/to (:seon.repl.parse.repair/winner pick)))]
+                    (recur (repair/substitute-symbol src token to-tok)
+                           (conj fixes {:seon.repl.parse.repair/from token
+                                        :seon.repl.parse.repair/to   to-tok})
+                           (or cls :seon.repl.parse.repair/undeclared-var)))
 
-                  (:seon.repair/ambiguous pick)
-                  {:seon.repair/from        token
-                   :seon.repair/suggestions (mapv #(update % :seon.repair/to
+                  (:seon.repl.parse.repair/ambiguous pick)
+                  {:seon.repl.parse.repair/from        token
+                   :seon.repl.parse.repair/suggestions (mapv #(update % :seon.repl.parse.repair/to
                                                            replacement)
-                                                  (:seon.repair/ambiguous pick))
-                   :seon.repair/ambiguous?  true}
+                                                  (:seon.repl.parse.repair/ambiguous pick))
+                   :seon.repl.parse.repair/ambiguous?  true}
 
                   (seq cands)
-                  {:seon.repair/from        token
-                   :seon.repair/suggestions (mapv #(update % :seon.repair/to
+                  {:seon.repl.parse.repair/from        token
+                   :seon.repl.parse.repair/suggestions (mapv #(update % :seon.repl.parse.repair/to
                                                            replacement)
                                                   cands)
-                   :seon.repair/ambiguous?  false}
+                   :seon.repl.parse.repair/ambiguous?  false}
 
                   :else nil)))))))))
 
@@ -4109,8 +4108,8 @@
    repair trial is not side-effect-free and must not consume it before the
    real eval."
   [configuration compile-state source ns-sym]
-  (and (or (repair-class-on? configuration :seon.repair/undeclared-var)
-           (repair-class-on? configuration :seon.repair/def-vs-defn))
+  (and (or (repair-class-on? configuration :seon.repl.parse.repair/undeclared-var)
+           (repair-class-on? configuration :seon.repl.parse.repair/def-vs-defn))
        (not (str/blank? (str source)))
        (not (result-var-ref? source))
        (not (macro-invocation? compile-state ns-sym source))
@@ -4124,10 +4123,10 @@
 
    Returns nil (compiles clean / not repairable / over budget — the
    caller proceeds with the ORIGINAL source), a FIX map
-   (`:seon.repair/source` = the proven fixed source to eval INSTEAD,
-   `:seon.repair/fixes`, `:seon.repair/applied-class`), or a SUGGESTIONS
-   map (`:seon.repair/from` + `:seon.repair/suggestions` [+
-   `:seon.repair/ambiguous?`] — the fix was REFUSED; the caller appends
+   (`:seon.repl.parse.repair/source` = the proven fixed source to eval INSTEAD,
+   `:seon.repl.parse.repair/fixes`, `:seon.repl.parse.repair/applied-class`), or a SUGGESTIONS
+   map (`:seon.repl.parse.repair/from` + `:seon.repl.parse.repair/suggestions` [+
+   `:seon.repl.parse.repair/ambiguous?`] — the fix was REFUSED; the caller appends
    the did-you-mean to the eval error). Errors-as-values: a throw inside
    the gate records a `:core` fault and returns nil (the form just evals
    un-gated).
@@ -4340,12 +4339,12 @@
                          (await (preflight-repair!
                                   configuration compile-state authored-sources
                                   source @current-ns)))
-            fixed?     (some? (:seon.repair/source pre))
-            source     (if fixed? (:seon.repair/source pre) source)
+            fixed?     (some? (:seon.repl.parse.repair/source pre))
+            source     (if fixed? (:seon.repl.parse.repair/source pre) source)
             narration  (if fixed?
                          (str (when (seq narration) (str narration "\n"))
                               (repair/fix-note
-                                {:seon.repair/fixes (:seon.repair/fixes pre)}))
+                                {:seon.repl.parse.repair/fixes (:seon.repl.parse.repair/fixes pre)}))
                          narration)
             ;; The receipt is the durable execution boundary. Commit it only
             ;; after source repair has frozen the exact form, and do not run
@@ -4436,20 +4435,20 @@
             ;; symbol the gate analyzed (the message is the deepest —
             ;; the undeclared ex-info has no cause chain).
             result
-            (let [sugg (:seon.repair/suggestions pre)
+            (let [sugg (:seon.repl.parse.repair/suggestions pre)
                   msg  (get-in result [:seon/error :seon.error/message])]
               (if (and (not (::ok? result))
                        (seq sugg)
                        (string? msg)
                        (str/includes?
-                         msg (candidates/name-part (:seon.repair/from pre))))
+                         msg (repair/name-part (:seon.repl.parse.repair/from pre))))
                 (update result :seon/error assoc :seon.error/message
                         (str msg "\n"
                              (repair/suggestion-note
-                               {:seon.repair/from (:seon.repair/from pre)
-                                :seon.repair/suggestions sugg
-                                :seon.repair/ambiguous?
-                                (boolean (:seon.repair/ambiguous? pre))})))
+                               {:seon.repl.parse.repair/from (:seon.repl.parse.repair/from pre)
+                                :seon.repl.parse.repair/suggestions sugg
+                                :seon.repl.parse.repair/ambiguous?
+                                (boolean (:seon.repl.parse.repair/ambiguous? pre))})))
                 result))
             ;; No restore needed — capture was scoped to the `.run print-als`
             ;; span above. Record/tee/auto-test prints below run OUTSIDE that
@@ -4597,17 +4596,17 @@
           ;; tx: nested attrs need a boot-schema entry; top-level attrs
           ;; lazy-install.
           (when (and (not (database-error? recorded)) fixed?)
-            (let [fixes (:seon.repair/fixes pre)
+            (let [fixes (:seon.repl.parse.repair/fixes pre)
                   r     (await
                           (db/transact!
                             {:seon.db/tx-data
                              [{:seon.eval/id eval-id
-                               :seon.repair/applied-class
-                               (:seon.repair/applied-class pre)
-                               :seon.repair/from
-                               (str/join " ; " (map :seon.repair/from fixes))
-                               :seon.repair/to
-                               (str/join " ; " (map :seon.repair/to fixes))}]}))]
+                               :seon.repl.parse.repair/applied-class
+                               (:seon.repl.parse.repair/applied-class pre)
+                               :seon.repl.parse.repair/from
+                               (str/join " ; " (map :seon.repl.parse.repair/from fixes))
+                               :seon.repl.parse.repair/to
+                               (str/join " ; " (map :seon.repl.parse.repair/to fixes))}]}))]
               (when (database-error? r)
                 (seon-log/error!
                   {:seon.log/source ::preflight-repair
@@ -5278,16 +5277,16 @@
                       ;; `:read` names the awaited sentinel) is REFUSED repair
                       ;; here, so that error surfaces intact instead.
                       rep    (if (and (repair-class-on?
-                                       configuration :seon.repair/delimiters)
+                                       configuration :seon.repl.parse.repair/delimiters)
                                       (not (internal/contains-heredoc-opener?
                                              (:seon.repl/source entry))))
                                (repair/repair-source
-                                 {:seon.repair/source (:seon.repl/source entry)
-                                  :seon.repair/reads? reads?})
-                               {:seon.repair/repaired? false
-                                :seon.repair/source    (:seon.repl/source entry)
-                                :seon.repair/changes   []})]
-                  (if (:seon.repair/repaired? rep)
+                                 {:seon.repl.parse.repair/source (:seon.repl/source entry)
+                                  :seon.repl.parse.repair/reads? reads?})
+                               {:seon.repl.parse.repair/repaired? false
+                                :seon.repl.parse.repair/source    (:seon.repl/source entry)
+                                :seon.repl.parse.repair/changes   []})]
+                  (if (:seon.repl.parse.repair/repaired? rep)
                     ;; Repaired → re-parse the repaired span and run each
                     ;; resulting entry through `dispatch-eval-entry!` — the
                     ;; SAME per-entry mechanism the main loop's `:else` uses,
@@ -5295,16 +5294,16 @@
                     ;; handling. The repair note rides on the FIRST entry so
                     ;; the diff is visible.
                     (let [repaired-entries (internal/parse-forms
-                                             (:seon.repair/source rep))]
+                                             (:seon.repl.parse.repair/source rep))]
                       (loop [es repaired-entries first? true]
                         (when (and (seq es) (admission/available?))
                           (let [e    (first es)
                                 shape (form-shape (:seon.repl/form e))
                                 note (when first?
                                        (repair/repair-note
-                                         {:seon.repair/changes
-                                          (:seon.repair/changes rep)
-                                          :seon.repair/shape shape}))
+                                         {:seon.repl.parse.repair/changes
+                                          (:seon.repl.parse.repair/changes rep)
+                                          :seon.repl.parse.repair/shape shape}))
                                 narr (if (and first? note)
                                        (str (when (seq (:seon.repl/narration entry))
                                               (str (:seon.repl/narration entry) "\n"))

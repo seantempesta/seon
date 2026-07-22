@@ -11,7 +11,7 @@
             [seon.host.record :as record]
             [seon.host.sample :as sample]
             [seon.host.session :as session]
-            [seon.repair :as repair]
+            [seon.repl.parse.repair :as repair]
             [seon.schema :as schema])
   (:import [java.io Writer]))
 
@@ -341,14 +341,14 @@
                                     (:seon.host.preflight/status
                                      preflight-result))
                           source (if fixed?
-                                   (:seon.repair/source preflight-result)
+                                   (:seon.repl.parse.repair/source preflight-result)
                                    source)
                           narration
                           (if fixed?
                             (str (when (seq narration) (str narration "\n"))
                                  (repair/fix-note
-                                  {:seon.repair/fixes
-                                   (:seon.repair/fixes preflight-result)}))
+                                  {:seon.repl.parse.repair/fixes
+                                   (:seon.repl.parse.repair/fixes preflight-result)}))
                             narration)
                           schema-delta (schema/begin-registration-delta)
                       raw-envelope
@@ -372,15 +372,15 @@
                            (read-error-envelope entry)))
                       raw-envelope
                       (cond-> raw-envelope
-                        (seq (:seon.repair/changes entry))
-                        (assoc :seon.repair/changes
-                               (:seon.repair/changes entry))
+                        (seq (:seon.repl.parse.repair/changes entry))
+                        (assoc :seon.repl.parse.repair/changes
+                               (:seon.repl.parse.repair/changes entry))
 
-                        (seq (:seon.repair/fixes preflight-result))
-                        (assoc :seon.repair/fixes
-                               (:seon.repair/fixes preflight-result)
-                               :seon.repair/applied-class
-                               (:seon.repair/applied-class
+                        (seq (:seon.repl.parse.repair/fixes preflight-result))
+                        (assoc :seon.repl.parse.repair/fixes
+                               (:seon.repl.parse.repair/fixes preflight-result)
+                               :seon.repl.parse.repair/applied-class
+                               (:seon.repl.parse.repair/applied-class
                                 preflight-result)))
                       ok? (boolean (:seon.eval/ok? raw-envelope))
                       ;; A failed eval must not leave half a registration:

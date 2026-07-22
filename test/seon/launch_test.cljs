@@ -101,7 +101,10 @@
              (::launch/watcher-owner descriptor)))
       (is (= "tmp/source-process"
              (get-in descriptor
-                     [::launch/writer-owner ::launch/writer-process-dir]))))))
+                     [::launch/writer-owner ::launch/writer-process-dir])))
+      (is (= "tmp/source-process/host-eval.sock"
+             (get-in descriptor
+                     [::launch/host-owner ::launch/eval-socket-path]))))))
 
 (deftest default-descriptor-can-own-its-watcher-and-use-an-external-writer
   (let [descriptor
@@ -164,6 +167,8 @@
            (get-in branch
                    [::launch/runtime :seon.client/launch-capability])))
     (is (= (::launch/writer-owner source) (::launch/writer-owner branch)))
+    (is (= "tmp/acme-trial/host-eval.sock"
+           (get-in branch [::launch/host-owner ::launch/eval-socket-path])))
     (is (= (select-keys (::launch/runtime source)
                         [::launch/artifact-flavor ::launch/client-build-id])
            (select-keys (::launch/runtime branch)
@@ -198,6 +203,8 @@
            (get-in cluster
                    [::launch/runtime :seon.client/launch-capability])))
     (is (= (::launch/writer-owner source) (::launch/writer-owner cluster)))
+    (is (= "tmp/seon-experiment/host-eval.sock"
+           (get-in cluster [::launch/host-owner ::launch/eval-socket-path])))
     (is (= {::protocol/database-name "experiment"
             ::protocol/backend :file
             ::protocol/database-path "data/clusters/experiment/db"}
