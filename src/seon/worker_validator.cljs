@@ -7,7 +7,7 @@
    This ns is the bundle the worker spawns to get that local call.
 
    Scope (FIRST version): the PARSE/SYNTACTIC tier ONLY — `parse-forms`
-   from `seon.repl.internal`. That is the immediate need: the failure
+   from `seon.repl.parse`. That is the immediate need: the failure
    SPANS (`:error-kind` + char `[start end]`) drive the renoise (the
    Python side maps char-spans → code-buffer token positions via
    `build_offset_map`/`span_to_positions`). The heavier EVAL / program-graph
@@ -15,7 +15,7 @@
    seam and the design note
    (`docs/prds/diffusion-dynamic-context/research/worker-validator-colocation-2026-06-28.md`).
 
-   Dependency surface is intentionally tiny: `seon.repl.internal` →
+   Dependency surface is intentionally tiny: `seon.repl.parse` →
    `clojure.string` + `rewrite-clj` (pure CLJC). No DB, no pod state, no
    malli instrumentation, no datahike. `validate` is a PURE fn of the
    input string.
@@ -54,7 +54,7 @@
   (:require
     [clojure.string :as str]
     [goog.object :as gobj]
-    [seon.repl.internal :as internal]
+    [seon.repl.parse :as internal]
     ["fs" :as fs]
     ["readline" :as readline]))
 

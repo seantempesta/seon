@@ -30,6 +30,12 @@
   ;; + acme.* + isolation only; a same-value mirror is exactly the drift trap
   ;; acme.edn's header warns against).
 
+  ;; ACME's experimental local worker remains its explicit cluster default.
+  ;; Declaring it here preserves the prior SEON_AI_PROVIDER=typeahead behavior
+  ;; now that the inherited system manifest declares DeepSeek.
+  :seon.config/ai
+  {:seon.ai/provider :typeahead}
+
   :seon.config/agent-context
   {;; Acme's two additions to system.edn's inherited default toolbelt.
    ;; Sparse manifest composition merges requirements by namespace identity;

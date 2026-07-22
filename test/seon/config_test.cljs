@@ -120,7 +120,42 @@
              :seon.config.database.writer/jvm-heap-mb
              :seon.config.database.executor/selected-processors
              :seon.config.database.transport/maximum-frame-bytes
-             :seon.config.database.transport/maximum-connections])))))
+             :seon.config.database.transport/maximum-connections])))
+    (is (= [{:seon.ai/id "config"
+             :seon.ai/provider :deepseek
+             :seon.ai/model "deepseek-v4-pro"
+             :seon.ai/base-url "https://api.deepseek.com"
+             :seon.ai/api-key-env "DEEPSEEK_API_KEY"}]
+           (config/resolve-ai-config manifest)))))
+
+(deftest cluster-default-ai-selection-is-closed-and-optional
+  (let [selection {:seon.ai/provider :deepseek
+                   :seon.ai/model "deepseek-v4-pro"
+                   :seon.ai/base-url "https://api.deepseek.com"
+                   :seon.ai/api-key-env "DEEPSEEK_API_KEY"
+                   :seon.ai/thinking "false"}
+        manifest {:seon.config/ai selection}]
+    (is (m/validate :seon.config/manifest manifest))
+    (is (= [(assoc selection :seon.ai/id "config")]
+           (resolve/resolve-ai-config manifest)))
+    (is (= (resolve/resolve-ai-config manifest)
+           (config/resolve-ai-config manifest))
+        "the pod delegates cluster-row resolution to the portable owner")
+    (is (= [] (config/resolve-ai-config {}))
+        "an absent declaration contributes no desired entity")
+    (is (not (m/validate :seon.config/manifest
+                         {:seon.config/ai
+                          (assoc selection :seon.ai/api-key "secret")}))
+        "a secret value is not part of the closed manifest surface")
+    (is (not (m/validate :seon.config/manifest
+                         {:seon.config/ai
+                          (assoc selection :seon.ai/unknown true)}))
+        "unknown cluster-selection keys fail manifest validation")))
+
+(deftest acme-explicitly-preserves-its-typeahead-default
+  (let [manifest (config/read-config-file "config/acme.edn")]
+    (is (= [{:seon.ai/id "config" :seon.ai/provider :typeahead}]
+           (config/resolve-ai-config manifest)))))
 
 (deftest manifest-schema-validity
   (testing "a representative manifest validates against :seon.config/manifest"

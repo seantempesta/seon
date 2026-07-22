@@ -7,7 +7,7 @@
     [seon.agent.ctx :as ctx]
     [seon.agent.ctx.namespaces :as namespaces]
     [seon.db :as db]
-    [seon.repl.internal :as repl-internal]))
+    [seon.repl.parse :as repl-internal]))
 
 (def ^:private database
   {:db-name "default"

@@ -10,6 +10,7 @@
     [cljs.reader :as edn]
     [clojure.string :as str]
     [clojure.walk :as walk]
+    [my.plan.generation :as generation]
     [seon.agent.message :as msg]
     [seon.ai.provider :as ai-provider]
     [seon.ai.tokens :as tokens]
@@ -17,7 +18,7 @@
     [seon.db.protocol :as protocol]
     [seon.log :as seon-log]
     [seon.repair.candidates :as cand]
-    [seon.repl.internal :as repl-internal]
+    [seon.repl.parse :as repl-internal]
     [seon.schema :as schema]
     [seon.time :as time]))
 
@@ -790,8 +791,9 @@
        (boolean
         (or (blocked-from-rows? rows root-id)
             (some #(= :blocked (:my.plan/status %)) namespace-steps)))
-       ::namespace-steps namespace-steps
-       ::ready-steps (namespace-ready-frontier-from-rows rows root-id)})))
+       ::generation/namespace-steps namespace-steps
+       ::generation/ready-steps
+       (namespace-ready-frontier-from-rows rows root-id)})))
 
 (defn namespace-completion
   "Derive positively completed generated namespaces from one exact eval batch.

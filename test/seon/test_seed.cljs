@@ -2,7 +2,7 @@
   "Hermetic-store seed for tests that render agent context.
 
    The default ctx blocks reference `my.*` fns
-   (`my.kb.shared/instructions-block`, `my.plan.internal/plan-block`,
+   (`my.kb.shared/instructions-block`, `my.plan/plan-block`,
    `my.skills/catalog-block` / `skill-block`), so a hermetic test store
    that renders context must carry their source rows — exactly what the
    pod's boot indexer stores. [[my-core-rows]] is the `my.*` slice of

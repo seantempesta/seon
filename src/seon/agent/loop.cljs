@@ -7,7 +7,7 @@
    schedule matching remain delegated to their owning namespaces."
   (:require
     [clojure.string :as str]
-    [my.plan.internal :as plan-internal]
+    [my.plan :as plan]
     [seon.agent.home :as home]
     [seon.agent.message :as message]
     [seon.agent.run :as run]
@@ -21,7 +21,7 @@
     [seon.execution :as execution]
     [seon.error :as error]
     [seon.log :as seon-log]
-    [seon.repl.internal :as repl-internal]
+    [seon.repl.parse :as repl-internal]
     [seon.runtime.admission :as admission]
     [seon.runtime.recovery :as recovery]
     [seon.schema :as schema]
@@ -499,7 +499,7 @@
                       (await
                        (await-bounded
                         "plan/maybe-consult!"
-                        (plan-internal/maybe-consult!
+                        (plan/maybe-consult!
                          {:seon.agent/id id})))
                       (let [[next-streak next-observation]
                             (next-observation-state r streak prior-observation)]

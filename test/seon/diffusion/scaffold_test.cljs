@@ -4,7 +4,7 @@
    frame for a sample fn and asserts the four offline invariants:
 
      1. `::frame-text` PARSES as valid Clojure (no `:read`/`:error` entry from
-        `seon.repl.internal/parse-forms`) — the scaffold itself is well-formed.
+        `seon.repl.parse/parse-forms`) — the scaffold itself is well-formed.
      2. every `::infill-span` lands on a real generated slot (the substring at
         the span IS the placeholder for that slot).
      3. `::clamp-spans` cover the fixed structural tokens — `defn`,
@@ -20,7 +20,7 @@
     [cljs.test :as t :refer [deftest is testing]]
     [clojure.string :as str]
     [seon.diffusion.scaffold :as scaffold]
-    [seon.repl.internal :as internal]))
+    [seon.repl.parse :as internal]))
 
 (def ^:private req
   {:seon.diffusion.scaffold/fn-name "celsius->fahrenheit"

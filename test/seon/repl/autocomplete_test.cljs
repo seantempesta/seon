@@ -52,6 +52,8 @@
   (async done
     (let [original turn/render-prompt
           calls (atom [])]
+      (is (= 'my.plan/plan-block
+             (:seon.render/ai (first auto/context-blocks))))
       (set! turn/render-prompt
             (fn
               ([agent-id supplied-db]

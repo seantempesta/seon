@@ -2,7 +2,7 @@
   "Focused contracts for the authority-backed agent loop."
   (:require
     [cljs.test :refer [async deftest is testing]]
-    [my.plan.internal :as plan-internal]
+    [my.plan :as plan]
     [seon.agent.loop :as loop]
     [seon.agent.message :as message]
     [seon.agent.run :as run]
@@ -165,7 +165,7 @@
           execute-many db/execute-many
           beat run/beat!
           run-turn turn/run-turn!
-          consult plan-internal/maybe-consult!
+          consult plan/maybe-consult!
           database {:db-name "default" :t 7 :as-of nil :since nil
                     :history false
                     :datahike/commit-id
@@ -207,7 +207,7 @@
                     (js/Promise.resolve
                      {:seon.agent.turn/id "turn-a"
                       :seon.agent/eval-count 1})))
-          _ (set! plan-internal/maybe-consult!
+          _ (set! plan/maybe-consult!
                   (fn [_request] (js/Promise.resolve nil)))]
       (-> (loop/run-loop! {:seon.agent/id "agent-a"} "run-a")
           (.then
@@ -225,7 +225,7 @@
              (set! db/execute-many execute-many)
              (set! run/beat! beat)
              (set! turn/run-turn! run-turn)
-             (set! plan-internal/maybe-consult! consult)
+             (set! plan/maybe-consult! consult)
              (set! admission/state admission-state)
              (done)))))))
 
@@ -236,7 +236,7 @@
           execute-many db/execute-many
           beat run/beat!
           run-turn turn/run-turn!
-          consult plan-internal/maybe-consult!
+          consult plan/maybe-consult!
           close-run run/close-run!
           database {:db-name "default" :t 17 :as-of nil :since nil
                     :history false
@@ -276,7 +276,7 @@
                           :seon.eval/source "(plan/status {:my.plan/id \"same\"})"
                           :seon.eval/ok? true
                           :seon.eval/result-edn "{:my.plan/ready? true}"}]}))))
-          _ (set! plan-internal/maybe-consult!
+          _ (set! plan/maybe-consult!
                   (fn [_request] (js/Promise.resolve nil)))
           _ (set! run/close-run!
                   (fn [request]
@@ -301,7 +301,7 @@
              (set! db/execute-many execute-many)
              (set! run/beat! beat)
              (set! turn/run-turn! run-turn)
-             (set! plan-internal/maybe-consult! consult)
+             (set! plan/maybe-consult! consult)
              (set! run/close-run! close-run)
              (set! admission/state admission-state)
              (done)))))))
@@ -313,7 +313,7 @@
           execute-many db/execute-many
           beat run/beat!
           run-turn turn/run-turn!
-          consult plan-internal/maybe-consult!
+          consult plan/maybe-consult!
           close-run run/close-run!
           database {:db-name "default" :t 18 :as-of nil :since nil
                     :history false
@@ -358,7 +358,7 @@
                         [{:seon.eval/source source
                           :seon.eval/ok? true
                           :seon.eval/result-edn result}]}))))
-          _ (set! plan-internal/maybe-consult!
+          _ (set! plan/maybe-consult!
                   (fn [_request] (js/Promise.resolve nil)))
           _ (set! run/close-run!
                   (fn [request]
@@ -383,7 +383,7 @@
              (set! db/execute-many execute-many)
              (set! run/beat! beat)
              (set! turn/run-turn! run-turn)
-             (set! plan-internal/maybe-consult! consult)
+             (set! plan/maybe-consult! consult)
              (set! run/close-run! close-run)
              (set! admission/state admission-state)
              (done)))))))

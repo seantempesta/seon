@@ -1058,7 +1058,7 @@
                        ::arglists '([from names])}}})
   (register-host-wrappers!
    {::registry registry
-    ::lib 'seon.repl.internal
+    ::lib 'seon.repl.parse
     ::wrappers
     {'read-forms {::wrapper-fn
                   (fn

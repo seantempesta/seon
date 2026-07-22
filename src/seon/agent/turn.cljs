@@ -21,7 +21,7 @@
     [seon.execution :as execution]
     [seon.execution.host :as execution.host]
     [seon.log :as seon-log]
-    [seon.repl.internal :as repl-internal]
+    [seon.repl.parse :as repl-internal]
     [seon.schema :as schema]))
 
 ;; ============================================================

@@ -10,13 +10,7 @@
 (def ^:private internal-require-pattern
   #"\[\s*([A-Za-z0-9_.-]+\.internal)(?=[\s\]\}:])")
 
-(def ^:private allowlist
-  [{::required-ns "seon.repl.internal"
-    ::date "2026-07-21"
-    ::reason "NS-0.5c held — owner ruling: repl-autosuggest is experimental/parked; rename+seam-repairs land at the owner's explicit handoff"}
-   {::required-ns "my.plan.internal"
-    ::date "2026-07-21"
-    ::reason "NS-0.5c held — owner ruling: repl-autosuggest is experimental/parked; rename+seam-repairs land at the owner's explicit handoff"}])
+(def ^:private allowlist [])
 
 (defn- declared-ns
   [ns-form]

@@ -430,7 +430,7 @@
                   :seon.agent/ctx
                   [{:seon.agent.ctx/name :plan
                     :seon.agent.ctx/priority 50
-                    :seon.render/ai 'my.plan.internal/plan-block}]}]
+                    :seon.render/ai 'my.plan/plan-block}]}]
       (-> (call-with-acquired-agent
            entity
            {:seon.agent/id "agent-1" :seon.agent.run/id "run-1"}

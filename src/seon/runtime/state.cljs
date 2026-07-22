@@ -3,8 +3,9 @@
 
    The managed slice is defined by PROVENANCE, not a taxonomy: a row is
    managed iff its first-assertion tx refs a stable database process in the
-   managed scope (for example boot or config); agent-authored REPL rows sit
-   outside it and are NEVER touched. There are no
+   managed scope (for example boot or config). A caller may additionally name
+   exact desired identities to adopt regardless of their original provenance;
+   every identity not named keeps the strict provenance boundary. There are no
    entity 'kinds' — datahike has none. An entity is its attribute set,
    identity is a per-attribute `:db.unique/identity` property, and the
    managed/authored split is pure provenance. So reconcile takes NO kind
@@ -24,6 +25,9 @@
 ;; express "has SOME identity attr" generically.
 (schema/register! ::desired-entity :map)
 (schema/register! ::desired [:vector ::desired-entity])
+(schema/register! ::identity
+                  [:tuple :qualified-keyword :seon.db/lookup-ref-value])
+(schema/register! ::adopt-identities [:set ::identity])
 (schema/register! ::ok?       :boolean)
 (schema/register! ::error     :string)
 (schema/register! ::changed?  :boolean)
@@ -37,6 +41,7 @@
    [::desired ::desired]
    [:seon.db/managed-scope :seon.db/managed-scope]
    [:seon.db/managed-identity-attrs :seon.db/managed-identity-attrs]
+   [::adopt-identities {:optional true} ::adopt-identities]
    [::db/db {:optional true} ::db/db]])
 
 (schema/register!
@@ -182,7 +187,7 @@
         entity))
 
 (defn- desired-validation-error
-  [desired identity-attrs]
+  [desired identity-attrs adopt-identities]
   (let [identities (mapv desired-identity desired)
         outside    (into #{}
                          (comp (keep first) (remove identity-attrs))
@@ -208,6 +213,13 @@
       (seq duplicates)
       (str "reconcile!: duplicate desired identities: "
            (pr-str duplicates))
+
+      (seq (set/difference adopt-identities (set identities)))
+      (str "reconcile!: adopted identities must occur in the desired "
+           "population: "
+           (pr-str (sort-by pr-str
+                            (set/difference adopt-identities
+                                            (set identities)))))
 
       :else nil)))
 
@@ -249,7 +261,8 @@
         (> (count additions) 1) (conj additions)))))
 
 (defn- compile-reconcile-tx
-  [{::keys [installed-schema rows]} desired scope identity-attrs]
+  [{::keys [installed-schema rows]} desired scope identity-attrs
+   adopt-identities]
   (let [installed       installed-schema
         entities        (into {}
                               (map (fn [{::keys [entity]}]
@@ -274,7 +287,10 @@
                                                           (when (contains? entity attr)
                                                             [attr (get entity attr)])))
                                                   identity-attrs)]
-                                        (when (and (contains? scope first-process)
+                                        (when (and (or (contains? scope first-process)
+                                                       (seq (set/intersection
+                                                              identities
+                                                              adopt-identities)))
                                                    (seq identities))
                                           [(:db/id entity) identities]))))
                               rows)
@@ -480,12 +496,14 @@
      2. For retained entities, compare scalar, cardinality-many, ref, and
         component values. Retract changed/omitted attributes before adding the
         exact desired values; component retractions cascade to owned children.
-     3. ENUMERATE the current managed population PURELY BY PROVENANCE over the
-        explicit process and identity attribute scopes.
+     3. ENUMERATE the current managed population by provenance over the
+        explicit process and identity attribute scopes. The optional
+        `:seon.runtime.state/adopt-identities` set explicitly adopts only those
+        exact desired identities regardless of their original provenance.
      4. RETRACT (via `:db.fn/retractEntity`, which cascade-retracts component
         children) every managed entity whose identity is ABSENT from the
-        desired set. Rows outside the managed process scope
-        are NEVER touched.
+        desired set. Rows outside the managed process scope and not explicitly
+        adopted are NEVER touched.
 
    The operations land in ONE atomic transaction guarded by the acquired
    database value. A concurrent winner makes the serialized writer reject the
@@ -506,15 +524,20 @@
                  :seon.db/managed-scope
                  #{:seon.db.process/boot :seon.db.process/config}
                  :seon.db/managed-identity-attrs
-                 #{:seon.route/name :my.skills/name :seon.config/id}})))"
+                 #{:seon.route/name :my.skills/name :seon.config/id}
+                 :seon.runtime.state/adopt-identities
+                 #{[:seon.ai/id \"config\"]}})))"
   {:malli/schema [:=> [:cat ::reconcile-request] ::reconcile-response]}
   [{::keys [desired]
+    adopt-identities ::adopt-identities
     supplied-database ::db/db
     scope :seon.db/managed-scope
     identity-attrs :seon.db/managed-identity-attrs}]
   (try
-    (if-let [validation-error
-             (desired-validation-error desired identity-attrs)]
+    (let [adopt-identities (or adopt-identities #{})]
+      (if-let [validation-error
+               (desired-validation-error desired identity-attrs
+                                         adopt-identities)]
       {::ok? false ::error validation-error}
       (let [initial-database
             (if supplied-database supplied-database
@@ -531,7 +554,8 @@
                 acquired
                 (let [compiled
                       (compile-reconcile-tx
-                       acquired desired scope identity-attrs)]
+                       acquired desired scope identity-attrs
+                       adopt-identities)]
                   (if (false? (::ok? compiled))
                     (assoc compiled ::attempts attempt)
                     (let [tx-data (::tx-data compiled)]
@@ -568,7 +592,7 @@
                              "reconcile! transact returned neither a transaction report nor an error."
                              :seon.error/kind :core-bug
                              :seon.error/data
-                             {:seon.runtime.state/result result}}))))))))))))
+                             {:seon.runtime.state/result result}})))))))))))))
     (catch :default exception
       (let [value (error/->map exception)]
         (cond-> value

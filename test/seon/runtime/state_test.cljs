@@ -350,13 +350,15 @@
    ::state/first-process process})
 
 (defn- compile-state
-  [rows desired]
-  ((deref #'state/compile-reconcile-tx)
-   {::state/installed-schema installed-scratch-schema
-    ::state/rows rows}
-   desired
-   managed-processes
-   managed-identity-attrs))
+  ([rows desired] (compile-state rows desired #{}))
+  ([rows desired adopt-identities]
+   ((deref #'state/compile-reconcile-tx)
+    {::state/installed-schema installed-scratch-schema
+     ::state/rows rows}
+    desired
+    managed-processes
+    managed-identity-attrs
+    adopt-identities)))
 
 (deftest compiler-adds-updates-and-retracts-one-managed-population
   (let [rows
@@ -436,6 +438,32 @@
         compiled (compile-state rows desired-state)]
     (is (= {::state/ok? true ::state/tx-data []} compiled))))
 
+(deftest explicit-adoption-reclaims-a-foreign-provenance-identity
+  (let [identity [:seon.runtime.state.scratch.a/id "adopt-me"]
+        rows [(acquired-row
+               {:db/id 7
+                :seon.runtime.state.scratch.a/id "adopt-me"
+                :seon.runtime.state.scratch.a/label "repl-value"}
+               :seon.db.process/repl)]
+        desired [{:seon.runtime.state.scratch.a/id "adopt-me"
+                  :seon.runtime.state.scratch.a/label "declared-value"}]
+        tx-data (::state/tx-data (compile-state rows desired #{identity}))]
+    (is (= [[:db.fn/retractAttribute identity
+             :seon.runtime.state.scratch.a/label]
+            {:seon.runtime.state.scratch.a/id "adopt-me"
+             :seon.runtime.state.scratch.a/label "declared-value"}]
+           tx-data))))
+
+(deftest explicit-adoption-converges-without-a-transaction
+  (let [identity [:seon.runtime.state.scratch.a/id "adopt-me"]
+        desired [{:seon.runtime.state.scratch.a/id "adopt-me"
+                  :seon.runtime.state.scratch.a/label "declared-value"}]
+        rows [(acquired-row
+               (assoc (first desired) :db/id 7)
+               :seon.db.process/repl)]]
+    (is (= {::state/ok? true ::state/tx-data []}
+           (compile-state rows desired #{identity})))))
+
 (deftest empty-cardinality-many-is-equivalent-to-absence
   (let [desired [{:seon.runtime.state.scratch.a/id "empty-many"
                   :seon.runtime.state.scratch.a/tags #{}}]
@@ -504,6 +532,10 @@
            (fn [result]
              (is (false? (::state/ok? result)))
              (is (= 1 (::state/attempts result)))
+             (is (= (str "reconcile!: desired identity already belongs to an "
+                         "entity outside the managed provenance scope: "
+                         "[:seon.runtime.state.scratch.a/id \"owned-elsewhere\"]")
+                    (::state/error result)))
              (is (empty? @writes))))
           (.catch (fn [exception] (is false (str exception))))
           (.finally (fn [] (restore!) (done)))))))

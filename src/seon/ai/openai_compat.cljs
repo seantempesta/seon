@@ -56,7 +56,7 @@
             [seon.error :as error]
             [seon.log :as seon-log]
             [seon.platform :as platform]
-            [seon.repl.internal :as repl-internal]
+            [seon.repl.parse :as repl-internal]
             [seon.schema :as schema]))
 
 ;; ============================================================
@@ -372,7 +372,7 @@
   "Consume the SDK stream, aborting once one top-level form has streamed.
 
    The repl-mode `:stream` consumer. Per content delta: append to the accumulator, run the cheap
-   [[seon.repl.internal/first-top-level-close]] delimiter gate, and — only
+   [[seon.repl.parse/first-top-level-close]] delimiter gate, and — only
    when a top-level group has closed — CONFIRM with the real `parse-forms`
    that a genuine evaluable `:form` is present (a bare `{…}`/`[…]` closes at
    depth 0 but demotes to prose, so keep streaming). On confirm: `.abort()`

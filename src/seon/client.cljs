@@ -94,7 +94,7 @@
     ;; source capture below — rewrite-clj parses EXACTLY one top-level form,
     ;; so char/regex/string-literal parens are balanced correctly (a raw
     ;; depth counter truncates such a form). Same parser `parse-forms` uses.
-    [seon.repl.internal :as repl-internal]
+    [seon.repl.parse :as repl-internal]
     ;; REPL autocomplete (repl-autosuggest lane): the byte-exact situation
     ;; projection + the turn-mining exporter. Required so the build includes
     ;; it (curation attrs registered, export!/context callable + indexed).
@@ -1242,7 +1242,7 @@
 
 (defn- extract-form-at-line
   "Return the exact text of the top-level form beginning at `line-1based` in
-   `txt`. Delegates to `seon.repl.internal/form-source-at` — rewrite-clj's
+   `txt`. Delegates to `seon.repl.parse/form-source-at` — rewrite-clj's
    one-node parse, so char/regex/string-literal parens are balanced
    correctly (a `)` inside `\\)` or `#\"…)…\"` no longer truncates the form).
    Any leading indentation on the target line is dropped (a `defn` nested in
@@ -1257,7 +1257,7 @@
 (defn- extract-form-at-index
   "Return the exact text of the top-level form beginning at char `idx` in
    `txt` (`idx` must point AT a `(`). Delegates to
-   `seon.repl.internal/form-source-at` (see [[extract-form-at-line]])."
+   `seon.repl.parse/form-source-at` (see [[extract-form-at-line]])."
   [txt idx]
   (when (and (nat-int? idx) (< idx (count txt)))
     (repl-internal/form-source-at txt idx)))
@@ -1932,17 +1932,31 @@
   "Reconcile one resolved manifest into the config-managed database subset.
 
    This is the single declarative operation used by cold boot and the live
-   development operator. Routes, skills, and the flattened config singleton
-   land through one provenance-scoped `seon.runtime.state/reconcile!`; a converged
-   apply submits no transaction. The manifest is already resolved data, never
-   ambient process state."
+   development operator. Routes, skills, the flattened config singleton, and
+   a declared cluster-default LLM row land through one provenance-scoped
+   `seon.runtime.state/reconcile!`; a converged apply submits no transaction.
+   An absent `:seon.config/ai` section contributes no desired entity, preserving
+   an existing row for `seon.ai/sync!`'s seed-once contract. The manifest is
+   already resolved data, never ambient process state."
   [manifest singleton]
-  (let [desired      (-> (vec (config/resolve-routes
-                                (route/core-routes-tx)
-                                manifest))
-                         (into (my.skills/seed-skills-tx-data
-                                 (config/skills-dir manifest)))
-                         (conj singleton))]
+  (let [ai-rows (config/resolve-ai-config manifest)
+        desired (-> (vec (config/resolve-routes
+                           (route/core-routes-tx)
+                           manifest))
+                    (into (my.skills/seed-skills-tx-data
+                            (config/skills-dir manifest)))
+                    (conj singleton)
+                    (into ai-rows))
+        reconcile-request
+        (cond->
+          {:seon.runtime.state/desired desired
+           :seon.db/managed-scope
+           #{:seon.db.process/boot :seon.db.process/config}
+           :seon.db/managed-identity-attrs
+           (desired-identity-attrs desired)}
+          (seq ai-rows)
+          (assoc ::state/adopt-identities
+                 #{[:seon.ai/id (:seon.ai/id (first ai-rows))]}))]
     (await
       (db/without-agent
         (fn ^:async apply-unscoped! []
@@ -1953,12 +1967,7 @@
             (fn ^:async reconcile-declarative! []
               (let [reconciled
                     (await
-                     (state/reconcile!
-                      {:seon.runtime.state/desired desired
-                       :seon.db/managed-scope
-                       #{:seon.db.process/boot :seon.db.process/config}
-                       :seon.db/managed-identity-attrs
-                       (desired-identity-attrs desired)}))]
+                     (state/reconcile! reconcile-request))]
                 (if-not (:seon.runtime.state/ok? reconciled)
                   reconciled
                   (let [migrated

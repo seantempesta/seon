@@ -5,7 +5,7 @@
    pure CLJC and runs identically on both.
 
    The `reads?` gate is injected (cycle-free): in these pure tests we
-   inject a parser-based predicate built on `seon.repl.internal/parse-forms`
+   inject a parser-based predicate built on `seon.repl.parse/parse-forms`
    so the repair's accept-condition is exactly the eval pipeline's
    (`zero :kind :read failures`).
 
@@ -18,7 +18,7 @@
        :cljs [cljs.test    :as t :refer [deftest is testing]])
     [clojure.string :as str]
     [seon.repair :as repair]
-    [seon.repl.internal :as parse]))
+    [seon.repl.parse :as parse]))
 
 (defn- reads?
   "The eval pipeline's accept gate: TRUE iff `s` re-parses with zero

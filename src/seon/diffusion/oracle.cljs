@@ -3,7 +3,7 @@
 
    ## The three legs
 
-   - PARSE — `seon.repl.internal/parse-forms` (no-fence basis, spans index the
+   - PARSE — `seon.repl.parse/parse-forms` (no-fence basis, spans index the
      raw `code_buffer_text`, the `offset_map` basis). Yields the GOOD form spans (to
      HOLD) and the BROKEN-syntax spans (to RE-NOISE).
    - RETRIEVE — `seon.diffusion.retrieval/retrieve-for-code-buffer`. Yields the
@@ -32,7 +32,7 @@
    Captures one ordinary database value for the retrieve leg. No writes, no
    GPU."
   (:require
-    [seon.repl.internal :as internal]
+    [seon.repl.parse :as internal]
     [seon.diffusion.grammar :as grammar]            ; shared T1/phase predicates (bb + pod)
     [seon.diffusion.retrieval :as retrieval]
     [seon.schema :as schema]))

@@ -496,18 +496,18 @@
          "root")]
     (is (= [{:my.plan/id "a-service"
              :seon.ns/name 'my.generated.a-service}]
-           (:my.plan.internal/ready-steps initial)))
+           (:my.plan.generation/ready-steps initial)))
     (is (= ['my.generated.a-service 'my.generated.z-model]
            (mapv :seon.ns/name
-                 (:my.plan.internal/namespace-steps initial)))
+                 (:my.plan.generation/namespace-steps initial)))
         "frontier and status projections sort by namespace, not transaction order")
-    (is (empty? (:my.plan.internal/ready-steps claimed)))
+    (is (empty? (:my.plan.generation/ready-steps claimed)))
     (is (not= claimed done-state)
         "a claimed final leaf still changes the observed value when it closes")
     (is (= {:my.plan/done 2 :my.plan/total 2 :my.plan/done? true}
            (:my.plan/progress done-state)))
     (is (= :done
-           (-> done-state :my.plan.internal/namespace-steps first
+           (-> done-state :my.plan.generation/namespace-steps first
                :my.plan/status)))
     (is (:my.plan/blocked? blocked-state)
         "a blocked generated leaf makes its root terminal for scheduling")))

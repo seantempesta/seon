@@ -29,7 +29,7 @@
     ;; The profile's section fns resolve LATE (symbol slots via
     ;; seon.eval/lookup-value) — required here so every bundle that carries
     ;; this ns also carries the blocks it renders.
-    [my.plan.internal]
+    [my.plan]
     [seon.agent.ctx :as ctx]
     [seon.agent.ctx.namespaces :as ns-cards]
     [seon.agent.ctx.transcript]
@@ -130,7 +130,7 @@
   [{:seon.agent.ctx/name      :plan
     :seon.agent.ctx/priority  45
     :seon.agent.ctx/token-cap 200
-    :seon.render/ai           'my.plan.internal/plan-block}
+    :seon.render/ai           'my.plan/plan-block}
    {:seon.agent.ctx/name      :transcript
     :seon.agent.ctx/priority  100
     :seon.agent.ctx/token-cap 440

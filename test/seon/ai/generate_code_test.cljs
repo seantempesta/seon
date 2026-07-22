@@ -95,8 +95,8 @@
                  :my.plan/progress
                  {:my.plan/done 0 :my.plan/total 1 :my.plan/done? false}
                  :my.plan/blocked? false
-                 :my.plan.internal/namespace-steps []
-                 :my.plan.internal/ready-steps []}]
+                 :my.plan.generation/namespace-steps []
+                 :my.plan.generation/ready-steps []}]
       (set! plan/generated-root-state
             (fn [request]
               (swap! state-requests conj request)
@@ -226,8 +226,8 @@
            :my.plan/progress
            {:my.plan/done 0 :my.plan/total 2 :my.plan/done? false}
            :my.plan/blocked? false
-           :my.plan.internal/namespace-steps []
-           :my.plan.internal/ready-steps
+           :my.plan.generation/namespace-steps []
+           :my.plan.generation/ready-steps
            [{:my.plan/id "alpha" :seon.ns/name 'my.alpha}
             {:my.plan/id "beta" :seon.ns/name 'my.beta}]}]
       (set! agent/ensure-namespace-agent!
@@ -281,7 +281,7 @@
           {:my.plan/id "root"
            :my.plan/progress {:my.plan/done? false}
            :my.plan/blocked? false
-           :my.plan.internal/ready-steps []}
+           :my.plan.generation/ready-steps []}
           ]
       (set! generate/dispatch-root-state!
             (fn [request]
@@ -332,31 +332,31 @@
             :my.plan/progress
             {:my.plan/done 0 :my.plan/total 1 :my.plan/done? false}
             :my.plan/blocked? false
-            :my.plan.internal/namespace-steps []
-            :my.plan.internal/ready-steps []}
+            :my.plan.generation/namespace-steps []
+            :my.plan.generation/ready-steps []}
            "claimed-open"
            {:my.plan/id "claimed-open"
             :my.plan/status :open
             :my.plan/progress
             {:my.plan/done 0 :my.plan/total 1 :my.plan/done? false}
             :my.plan/blocked? false
-            :my.plan.internal/namespace-steps
+            :my.plan.generation/namespace-steps
             [{:my.plan/id "step"
               :seon.ns/name 'my.claimed
               :my.plan/status :open
               :my.plan/claim "assignment"}]
-            :my.plan.internal/ready-steps []}
+            :my.plan.generation/ready-steps []}
            "blocked"
            {:my.plan/id "blocked"
             :my.plan/status :open
             :my.plan/progress
             {:my.plan/done 0 :my.plan/total 1 :my.plan/done? false}
             :my.plan/blocked? true
-            :my.plan.internal/namespace-steps
+            :my.plan.generation/namespace-steps
             [{:my.plan/id "blocked-step"
               :seon.ns/name 'my.blocked
               :my.plan/status :blocked}]
-            :my.plan.internal/ready-steps []}}]
+            :my.plan.generation/ready-steps []}}]
       (set! plan/generated-root-candidates
             (fn [request]
               (reset! candidate-request request)
@@ -409,14 +409,14 @@
            :my.plan/progress
            {:my.plan/done 2 :my.plan/total 2 :my.plan/done? true}
            :my.plan/blocked? false
-           :my.plan.internal/namespace-steps
+           :my.plan.generation/namespace-steps
            [{:my.plan/id "model-step"
              :seon.ns/name 'my.generated.model
              :my.plan/status :done}
             {:my.plan/id "service-step"
              :seon.ns/name 'my.generated.service
              :my.plan/status :done}]
-           :my.plan.internal/ready-steps []}]
+           :my.plan.generation/ready-steps []}]
       (set! db/db
             (fn
               ([] (js/Promise.resolve database))
@@ -466,8 +466,8 @@
            :my.plan/progress
            {:my.plan/done 0 :my.plan/total 1 :my.plan/done? false}
            :my.plan/blocked? false
-           :my.plan.internal/namespace-steps []
-           :my.plan.internal/ready-steps
+           :my.plan.generation/namespace-steps []
+           :my.plan.generation/ready-steps
            [{:my.plan/id "step" :seon.ns/name 'my.failed}]}]
       (set! db/db
             (fn
@@ -696,6 +696,15 @@
          (fn [result]
            (is (false? (:my.plan/ok? result)))
            (is (re-find #"unknown key :my.plan/goals"
+                        (:my.plan/error result)))))
+        (.then
+         (fn [_]
+           (generate/start-generation!
+            {:my.plan.typo/goal "typo" :seon.agent/id "caller-1"})))
+        (.then
+         (fn [result]
+           (is (false? (:my.plan/ok? result)))
+           (is (re-find #"unknown key :my.plan.typo/goal"
                         (:my.plan/error result)))))
         (.then (fn [_] (done)))
         (.catch (fn [error] (is false (str error)) (done))))))

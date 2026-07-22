@@ -9,7 +9,7 @@
    [seon.db.id :as db.id]
    [seon.execution :as execution]
    [seon.execution.host :as execution.host]
-   [seon.repl.internal :as repl-internal]))
+   [seon.repl.parse :as repl-internal]))
 
 (def database
   {:db-name "turn-test"

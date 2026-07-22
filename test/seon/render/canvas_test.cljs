@@ -7,7 +7,7 @@
     [clojure.string :as str]
     [malli.core :as m]
     [seon.render.canvas :as canvas]
-    [seon.repl.internal :as repl.internal]
+    [seon.repl.parse :as repl.internal]
     [seon.schema :as schema]
     [seon.ui.html :as html]))
 

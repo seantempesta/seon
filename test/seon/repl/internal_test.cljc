@@ -1,6 +1,6 @@
 (ns seon.repl.internal-test
-  "Corpus tests for `seon.repl.internal/parse-forms`. CLJC so both JVM
-   (`bin/test seon.repl.internal-test`) and the CLJS pod can exercise it
+  "Corpus tests for `seon.repl.parse/parse-forms`. CLJC so both JVM
+   (`bin/test-parser`) and the CLJS pod can exercise it
    from the same file.
 
    Test design: each `def` below holds a vector of `{:in :expected
@@ -18,7 +18,7 @@
        :cljs [clojure.test.check.properties :as prop :include-macros true])
     [malli.core :as m]
     #?(:cljs [seon.db.protocol :as protocol])
-    [seon.repl.internal :as parse]))
+    [seon.repl.parse :as parse]))
 
 ;; ============================================================
 ;; Basic shapes — happy path

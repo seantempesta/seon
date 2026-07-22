@@ -363,6 +363,100 @@
           (is false (str "selected startup threw synchronously: " error))
           (cleanup!))))))
 
+(deftest declared-ai-selection-joins-the-one-config-reconcile
+  (async done
+    (let [original-skills skills/seed-skills-tx-data
+          original-reconcile state/reconcile!
+          original-migrate ctx/migrate-plan-surface-default!
+          applied-request (atom nil)
+          manifest {:seon.config/ai
+                    {:seon.ai/provider :deepseek
+                     :seon.ai/model "deepseek-v4-pro"
+                     :seon.ai/base-url "https://api.deepseek.com"
+                     :seon.ai/api-key-env "DEEPSEEK_API_KEY"}}
+          expected-ai (first (config/resolve-ai-config manifest))
+          cleanup!
+          (fn []
+            (set! skills/seed-skills-tx-data original-skills)
+            (set! state/reconcile! original-reconcile)
+            (set! ctx/migrate-plan-surface-default! original-migrate)
+            (done))]
+      (set! skills/seed-skills-tx-data (fn [_directory] []))
+      (set! state/reconcile!
+            (fn [request]
+              (reset! applied-request request)
+              (js/Promise.resolve
+               {:seon.runtime.state/ok? true
+                :seon.runtime.state/changed? false
+                :seon.runtime.state/operations 0
+                :seon.runtime.state/attempts 1})))
+      (set! ctx/migrate-plan-surface-default!
+            (fn []
+              (js/Promise.resolve
+               {::ctx/ok? true ::ctx/changed? false ::ctx/operations 0})))
+      (-> (js/Promise.resolve
+           (#'client/reconcile-config! manifest configuration))
+          (.then
+           (fn [_]
+             (let [desired (:seon.runtime.state/desired @applied-request)]
+               (is (= expected-ai (last desired)))
+               (is (= configuration (nth desired (- (count desired) 2))))
+               (is (contains?
+                    (:seon.db/managed-identity-attrs @applied-request)
+                    :seon.ai/id)
+                   "the declared row joins the existing managed population")
+               (is (= #{[:seon.ai/id "config"]}
+                      (::state/adopt-identities @applied-request))
+                   "only the explicitly declared row is adopted"))))
+          (.catch
+           (fn [error]
+             (is false (str "declared AI reconciliation rejected: " error
+                            "\n" (.-stack error)))))
+          (.finally cleanup!)))))
+
+(deftest absent-ai-selection-stays-out-of-config-reconcile
+  (async done
+    (let [original-skills skills/seed-skills-tx-data
+          original-reconcile state/reconcile!
+          original-migrate ctx/migrate-plan-surface-default!
+          applied-request (atom nil)
+          cleanup!
+          (fn []
+            (set! skills/seed-skills-tx-data original-skills)
+            (set! state/reconcile! original-reconcile)
+            (set! ctx/migrate-plan-surface-default! original-migrate)
+            (done))]
+      (set! skills/seed-skills-tx-data (fn [_directory] []))
+      (set! state/reconcile!
+            (fn [request]
+              (reset! applied-request request)
+              (js/Promise.resolve
+               {:seon.runtime.state/ok? true
+                :seon.runtime.state/changed? false
+                :seon.runtime.state/operations 0
+                :seon.runtime.state/attempts 1})))
+      (set! ctx/migrate-plan-surface-default!
+            (fn []
+              (js/Promise.resolve
+               {::ctx/ok? true ::ctx/changed? false ::ctx/operations 0})))
+      (-> (js/Promise.resolve
+           (#'client/reconcile-config! {} configuration))
+          (.then
+           (fn [_]
+             (is (= configuration
+                    (last (:seon.runtime.state/desired @applied-request))))
+             (is (not (contains?
+                       (:seon.db/managed-identity-attrs @applied-request)
+                       :seon.ai/id))
+                 "an absent section cannot retract or rewrite an existing row")
+             (is (nil? (::state/adopt-identities @applied-request))
+                 "manifest silence adopts no identity")))
+          (.catch
+           (fn [error]
+             (is false (str "absent AI reconciliation rejected: " error
+                            "\n" (.-stack error)))))
+          (.finally cleanup!)))))
+
 (deftest config-apply-sequences-and-folds-plan-default-migration
   (async done
     (let [original-skills skills/seed-skills-tx-data

@@ -7,7 +7,7 @@
   (:require
     [clojure.string :as str]
     [my.plan :as plan]
-    [my.plan.internal :as plan-internal]
+    [my.plan.generation :as generation]
     [seon.agent :as agent]
     [seon.agent.ctx :as ctx]
     [seon.agent.ctx.ns-name :as ns-name]
@@ -17,7 +17,9 @@
     [seon.embed :as embed]
     [seon.log :as log]
     [seon.reactive :as reactive]
-    [seon.schema :as schema]))
+    [seon.repair.candidates :as candidates]
+    [seon.schema :as schema]
+    [seon.schema.form :as schema.form]))
 
 (schema/register! ::claimed? :boolean)
 (schema/register! ::claim-request
@@ -44,7 +46,7 @@
   [:or :my.plan/id [:map [:seon.error/message :string]]])
 (schema/register! ::unobserve-request
   [:map {:closed true} [:my.plan/id :my.plan/id]])
-(schema/register! ::root-state :my.plan/generated-root-state)
+(schema/register! ::root-state ::generation/generated-root-state)
 (schema/register! ::dispatch-request
   [:map {:closed true}
    [:seon.agent/id :seon.agent/id]
@@ -105,6 +107,44 @@
 
 (defn- root-key [root-id]
   [::root root-id])
+
+(defn- generation-failure
+  [message]
+  {:my.plan/ok? false :my.plan/error message})
+
+(defn- plan-key?
+  [key]
+  (boolean
+   (when-let [key-namespace (namespace key)]
+     (or (= "my.plan" key-namespace)
+         (str/starts-with? key-namespace "my.plan.")))))
+
+(defn- generate-request-key-failure
+  [request]
+  (let [accepted
+        (into #{}
+              (keep #(when (vector? %) (first %)))
+              (schema.form/map-entries
+               (schema/schema-definition ::generate-request)))]
+    (when-let [bad
+               (->> (keys request)
+                    (filter plan-key?)
+                    (remove accepted)
+                    first)]
+      (let [suggestions
+            (->> (candidates/rank-candidates
+                  (name bad)
+                  (mapv name (filter #(= "my.plan" (namespace %)) accepted)))
+                 (mapv (fn [{candidate :seon.repair/to}]
+                         (str ":my.plan/" candidate))))]
+        (generation-failure
+         (str "generate-code!: unknown key " bad
+              (when (seq suggestions)
+                (str " — did you mean " (str/join " or " suggestions) "?"))
+              " Accepted my.plan keys: "
+              (str/join " " (sort (filter #(= "my.plan" (namespace %))
+                                           accepted)))
+              "."))))))
 
 ;;; ───────────────────────────────────────────────────────────────────────
 ;;; Embedding-ranked namespace augmentation — the one optional seon.embed
@@ -403,7 +443,7 @@
     root-state ::root-state
     model-variant :seon.config/model-variant}]
   (let [root-id (:my.plan/id root-state)
-        ready (:my.plan.internal/ready-steps root-state)
+        ready (::generation/ready-steps root-state)
         ranked (if (seq ready) (await (ranked-for-root! root-id)) [])
         promises
         (mapv #(ensure-and-claim! coordinator-id root-id model-variant
@@ -444,7 +484,7 @@
          {:my.plan/done 0 :my.plan/total 0})
      :my.plan/steps
      (mapv #(select-keys % [:my.plan/id :seon.ns/name :my.plan/status])
-           (:my.plan.internal/namespace-steps root-state))}
+           (::generation/namespace-steps root-state))}
      failure
      (assoc :my.plan/error (:seon.error/message failure)
             :seon.error/data (compact-failure failure)))))
@@ -623,7 +663,7 @@
   [request caller-id planner-id]
   (let [database (await (db/db))]
     (if (:seon.error/message database)
-      (plan-internal/fail
+      (generation-failure
        (str "generate-code!: database read failed — "
             (:seon.error/message database)))
       (let [message-transaction
@@ -634,7 +674,7 @@
                :seon.agent.message/to [[:seon.agent/id planner-id]]
                :seon.agent.message/content (planning-content request)}))]
         (if (:seon.error/message message-transaction)
-          (plan-internal/fail
+          (generation-failure
            (str "generate-code!: planner assignment failed — "
                 (:seon.error/message message-transaction)))
           (let [allocation
@@ -651,7 +691,7 @@
                     message-transaction request caller-id planner-id
                     (js/Date.))}))]
             (if (:seon.error/message allocation)
-              (plan-internal/fail
+              (generation-failure
                (str "generate-code!: root commit failed — "
                     (:seon.error/message allocation)))
               {:my.plan/ok? true
@@ -669,16 +709,15 @@
   {:malli/schema [:=> [:cat ::generate-request] ::generate-response]}
   [{goal :my.plan/goal caller-id :seon.agent/id :as request}]
   (or
-   (plan-internal/check-request-keys "generate-code!" request
-                                     ::generate-request)
+   (generate-request-key-failure request)
    (let [caller-id (or caller-id (db/current-agent-id))]
      (cond
        (or (nil? goal) (str/blank? goal))
-       (plan-internal/fail
+       (generation-failure
         "generate-code!: blank :my.plan/goal refused — state the outcome.")
 
        (nil? caller-id)
-       (plan-internal/fail
+       (generation-failure
         (str "generate-code!: no :seon.agent/id resolved — call from inside "
              "an agent turn (the boundary fills in you)."))
 
@@ -689,7 +728,7 @@
                {:seon.agent/purpose (str "Plan generated code: " goal)
                 :seon.config/model-variant :planning}))]
          (if (:seon.error/message planner)
-           (plan-internal/fail
+           (generation-failure
             (str "generate-code!: planner launch failed — "
                  (:seon.error/message planner)))
            (let [planner-id (:seon.agent/id planner)
@@ -720,7 +759,7 @@
                           :seon.config/model-variant :execution})))]
                  (if (:seon.error/message scheduler)
                    (assoc
-                    (plan-internal/fail
+                    (generation-failure
                      (str "generate-code!: root " (pr-str root-id)
                           " committed but its scheduler failed — "
                           (:seon.error/message scheduler)

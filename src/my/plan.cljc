@@ -8,6 +8,7 @@
   (:refer-clojure :exclude [next])
   (:require
     [clojure.string :as str]
+    [my.plan.generation :as generation]
     [my.plan.internal :as internal]
     [seon.agent]   ; load-order: request schemas reference :seon.agent/id
     [seon.agent.home :as home]
@@ -61,24 +62,7 @@
 (schema/register! ::progress [:map [::done :int] [::total :int]])
 (schema/register! ::direct-error [:map [:seon.error/message :string]])
 
-(schema/register! ::ready-namespace-state
-  [:map
-   [::id ::id]
-   [:seon.ns/name :symbol]])
-(schema/register! ::namespace-step-state
-  [:map
-   [::id ::id]
-   [:seon.ns/name :symbol]
-   [::status ::status]
-   [::claim {:optional true} ::claim]])
-(schema/register! ::generated-root-state
-  [:map
-   [::id ::id]
-   [::status ::status]
-   [::progress ::progress]
-   [::blocked? ::blocked?]
-   [:my.plan.internal/namespace-steps [:vector ::namespace-step-state]]
-   [:my.plan.internal/ready-steps [:vector ::ready-namespace-state]]])
+(schema/register! ::generated-root-state ::generation/generated-root-state)
 (schema/register! ::generated-root-candidate
   [:map
    [::id ::id]
@@ -277,6 +261,35 @@
     [::ok? [:= false]]
     [::id {:optional true} ::id]
     [::error ::error]]])
+
+(schema/register! ::consulted? :boolean)
+(schema/register! ::consult-reason
+  [:enum :not-flagged :no-planner :already-consulted :sent :send-failed])
+(schema/register! ::consult-request
+  [:map
+   [:seon.agent/id :seon.agent/id]
+   [::db/db {:optional true} :seon.db/db]])
+(schema/register! ::consult-response
+  [:map
+   [::consulted? ::consulted?]
+   [::consult-reason ::consult-reason]
+   [::planner {:optional true} :seon.agent/id]
+   [::episode {:optional true} ::db.id/compact-value]
+   [:seon.error/message {:optional true} :string]
+   [:seon.error/data {:optional true} :map]
+   [:seon.error/kind {:optional true} :keyword]])
+
+(defn ^:async plan-block
+  "Render the calling agent's bounded plan context block."
+  {:malli/schema [:=> [:cat :seon.render/section-request :any] :string]}
+  [input invoke-selected!]
+  (await (internal/plan-block input invoke-selected!)))
+
+(defn ^:async maybe-consult!
+  "Send one derived planner consult when the calling agent is flagged."
+  {:malli/schema [:=> [:cat ::consult-request] ::consult-response]}
+  [request]
+  (await (internal/maybe-consult! request)))
 
 ;; ::tree stays structurally permissive at the boundary — a malformed
 ;; document is EXPECTED input (hand-authored or model edits) and must come

@@ -12,7 +12,7 @@
     [seon.db :as db]
     [seon.db.protocol :as protocol]
     [seon.eval :as seval]
-    [seon.repl.internal :as repl-internal]
+    [seon.repl.parse :as repl-internal]
     [seon.schema :as schema]))
 
 ;; ============================================================
@@ -551,5 +551,5 @@
          ::text (format-function-menu functions)}))))
 
 ;; (The `:plan-ledger` section that used to live here retired 2026-07-11
-;; — see the ns docstring; `my.plan.internal/plan-block` carries the
+;; — see the ns docstring; `my.plan/plan-block` carries the
 ;; ▶/☐/done-dropped contract now.)

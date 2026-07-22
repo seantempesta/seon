@@ -72,7 +72,7 @@
             [seon.render.value :as value]
             [seon.repair :as repair]
             [seon.repair.candidates :as candidates]
-            [seon.repl.internal :as internal]
+            [seon.repl.parse :as internal]
             [seon.runtime.admission :as admission]
             [seon.schema :as schema]
             [seon.schema.form :as schema.form]
@@ -1793,7 +1793,7 @@
 
 ;; ============================================================
 ;; eval-batch! — the REPL harness primitive. Takes parsed pairs from
-;; seon.repl.internal/parse-forms; evaluates each in the agent's compile-state
+;; seon.repl.parse/parse-forms; evaluates each in the agent's compile-state
 ;; with PARTIAL-FAILURE semantics (form N+1 always runs, even if N
 ;; failed); persists each as a :seon.eval entity; and binds each successful
 ;; live value at its capped `result/<id>` handle. Returns the ordered vector
@@ -5103,7 +5103,7 @@
      5. Transact a :seon.eval entity carrying :seon.eval/ns = the
         post-update accumulator value.
 
-   `:seon.repl/kind :read` (a parse-forms failure, see seon.repl.internal):
+   `:seon.repl/kind :read` (a parse-forms failure, see seon.repl.parse):
      1. Skip the eval (no source to evaluate).
      2. Record as a failed :seon.eval with :seon.eval/ns = the
         unchanged accumulator value (the ns the form WOULD have
@@ -5126,7 +5126,7 @@
 
    Args:
      compile-state — the bootstrap compile-state (defonce'd at boot)
-     parsed        — vector from `seon.repl.internal/parse-forms`
+     parsed        — vector from `seon.repl.parse/parse-forms`
                      (mix of `:seon.repl/kind` :form and :read entries)
      agent-ns-sym  — agent's home ns (e.g. 'my.agent.seon)
      agent-id      — the owning agent's id
@@ -5252,7 +5252,7 @@
               (run-entry!
                 (fn ^:async run-one-entry! []
                   (cond
-                ;; Read-failure entry from seon.repl.internal. A.2: attempt
+                ;; Read-failure entry from seon.repl.parse. A.2: attempt
                 ;; a PER-FORM parinfer indent-mode repair on the bad span
                 ;; (never the whole reply — that would mangle good forms
                 ;; around it). If the repaired span re-reads cleanly, eval

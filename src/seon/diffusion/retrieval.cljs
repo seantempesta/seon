@@ -44,7 +44,7 @@
     [seon.db :as db]
     [seon.diffusion.grammar :as grammar]
     [seon.embed :as embed]
-    [seon.repl.internal :as internal]
+    [seon.repl.parse :as internal]
     [seon.schema :as schema]))
 
 ;; ============================================================

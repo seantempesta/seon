@@ -10,7 +10,6 @@
    [my.kb]
    [my.ns]
    [my.plan]
-   [my.plan.internal]
    [my.skills]
    [my.ui]
    [seon.agent]

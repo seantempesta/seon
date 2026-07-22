@@ -335,6 +335,32 @@
 (def ^:private agent-model-config-schema
   (into [:map {:closed true}] agent-model-config-entries))
 
+;; The cluster-default, non-secret LLM selection. These are the global row's
+;; owning `:seon.ai/*` terms, kept leaf-shaped because `seon.config` loads
+;; before `seon.ai`. Credentials remain environment values; `api-key-env`
+;; stores only the name of the environment variable that holds one.
+(schema/register! :seon.config/ai
+  [:map {:closed true}
+   [:seon.ai/provider
+    [:enum :deepseek :anthropic :openai-compat :diffusiongemma :typeahead]]
+   [:seon.ai/model {:optional true} [:string {:min 1}]]
+   [:seon.ai/thinking {:optional true} [:string {:min 1}]]
+   [:seon.ai/base-url {:optional true} [:string {:min 1}]]
+   [:seon.ai/api-key-env {:optional true} [:string {:min 1}]]])
+
+(schema/register! :seon.config/ai-row
+  [:map {:closed true}
+   [:seon.ai/id [:= "config"]]
+   [:seon.ai/provider
+    [:enum :deepseek :anthropic :openai-compat :diffusiongemma :typeahead]]
+   [:seon.ai/model {:optional true} [:string {:min 1}]]
+   [:seon.ai/thinking {:optional true} [:string {:min 1}]]
+   [:seon.ai/base-url {:optional true} [:string {:min 1}]]
+   [:seon.ai/api-key-env {:optional true} [:string {:min 1}]]])
+
+(schema/register! :seon.config/ai-rows
+  [:vector {:max 1} :seon.config/ai-row])
+
 (schema/register! :seon.config/model-variant :keyword)
 (schema/register! :seon.config/model-variants-spec
                   [:map-of :seon.config/model-variant
@@ -655,6 +681,7 @@
    [:seon.config/render        {:optional true} :seon.config/render]
    [:seon.config/system-text   {:optional true} :seon.config/system-text]
    [:seon.config/context-profiles {:optional true} :seon.config/context-profiles]
+   [:seon.config/ai             {:optional true} :seon.config/ai]
    [:seon.config/model-variants {:optional true} :seon.config/model-variants-spec]
    [:seon.config/on-core-error {:optional true} :seon.config/on-core-error]
    [:seon.config/web           {:optional true} :seon.config/web-spec]
@@ -1135,6 +1162,20 @@
 
       true
       (merge (resolve-operational-values manifest hardware)))))
+
+(defn resolve-ai-config
+  "The declared cluster-default LLM desired rows.
+
+   Startup reconciles a declared value before `seon.ai/sync!`; therefore the
+   resolution order is declared manifest value, existing database fact when
+   this section is absent, then the environment's first-boot seed when no row
+   exists. Returns zero or one row. `:seon.ai/api-key-env` is a variable name,
+   never a secret."
+  {:malli/schema [:=> [:cat :seon.config/manifest] :seon.config/ai-rows]}
+  [manifest]
+  (if-let [selection (:seon.config/ai manifest)]
+    [(assoc selection :seon.ai/id "config")]
+    []))
 
 (defn resolve-envelope
   "Resolve the complete boot envelope and each key's disposition."

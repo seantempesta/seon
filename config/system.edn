@@ -26,13 +26,18 @@
  ;; SEON_SKILLS_DIR.
  :seon.config/skills {:seon.config/dirs ["seon-skills"]}
 
- ;; ── GLOBAL LLM PROVIDER is not set in this manifest ──
- ;; The cluster default remains the env-seeded, database-owned `:seon.ai/config`
- ;; row. Select that default via env (e.g. in .env):
- ;;   SEON_AI_PROVIDER=diffusiongemma            ; deepseek (default) | anthropic
- ;;   SEON_DG_ENDPOINT=<runpod-endpoint-id>      ;   | openai-compat | diffusiongemma
- ;;   RUNPOD_API_KEY=<key>
- ;; A live switch is a transact: {:seon.ai/id "config" :seon.ai/provider :diffusiongemma}.
+ ;; ── CLUSTER-DEFAULT LLM SELECTION ──
+ ;; This non-secret row is reconciled before the seed-once environment path:
+ ;; declared manifest → existing database row → env first-boot seed. The
+ ;; credential value remains in DEEPSEEK_API_KEY; the database stores only its
+ ;; environment-variable name.
+ :seon.config/ai
+ {:seon.ai/provider :deepseek
+  :seon.ai/model "deepseek-v4-pro"
+  :seon.ai/base-url "https://api.deepseek.com"
+  :seon.ai/api-key-env "DEEPSEEK_API_KEY"}
+
+ ;; A live switch remains an ordinary transact against the database-owned row.
  ;; Per-agent model settings are ordinary optional `:seon.ai/agent-*` attributes
  ;; on the agent entity. They may also be declared in `agent-context` or
  ;; `root-context`; absent values inherit this global row. Endpoint and

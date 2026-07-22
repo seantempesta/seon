@@ -1,4 +1,4 @@
-(ns seon.repl.internal
+(ns seon.repl.parse
   "Parse model replies into ordered REPL entries.
 
    Pure rewrite-clj. CLJC so JVM tests can exercise the corpus without
@@ -7,8 +7,8 @@
 
    ## Entry shape
 
-   Keys live in the `:seon.repl` namespace — the `.internal` machinery
-   of `seon.repl`, which owns the parse-envelope data (registered below).
+   Keys live in the `:seon.repl` namespace, which owns the parse-envelope
+   data registered below.
    Each vector entry is one of:
 
        {:seon.repl/kind :form
@@ -88,9 +88,9 @@
     [rewrite-clj.node :as rcn]))
 
 ;; ============================================================
-;; The parse-entry envelope keys are :seon.repl/* — this ns is the
-;; .internal machinery of seon.repl, which OWNS the data and registers
-;; the envelope schemas (see seon.repl). They are not registered HERE
+;; The parse-entry envelope keys are :seon.repl/* — this namespace owns the
+;; parser mechanics while seon.repl owns the data and registers the envelope
+;; schemas. They are not registered HERE
 ;; because this ns must stay loadable by bare babashka (bin/oracle-server
 ;; puts only src/ on the bb classpath — no malli, no seon.schema).
 ;; ============================================================
