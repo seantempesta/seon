@@ -950,6 +950,8 @@
                (tcp-ready? port)))
     false))
 
+(declare containment-status)
+
 (defn ownership-conflicts
   "Process doors held without a matching live operator record."
   ([config] (ownership-conflicts config (target-process-ids config)))
@@ -958,8 +960,10 @@
      []
      (->> owned-processes
           (filter (fn [id]
-                    (let [record (read-process config id)]
-                      (and (not= :seon.dev.process.status/alive
+                  (let [record (read-process config id)]
+                      (and (not= :seon.dev.process.status/orphaned-workload
+                                 (containment-status record))
+                           (not= :seon.dev.process.status/alive
                                  (process-status record))
                            (accepting-unmanaged? config id)))))
           vec))))
@@ -1312,6 +1316,41 @@
       true
       (catch Throwable _ false))))
 
+(defn- exact-containment-record?
+  [record]
+  (let [containment (:seon.dev.process/containment record)]
+    (and containment
+         (= (:seon.dev.process/pid record)
+            (:seon.dev.process.containment/owner-pid containment))
+         (= (:seon.dev.process/start-instant record)
+            (:seon.dev.process.containment/owner-start-instant containment))
+         (= (:seon.dev.process.containment/anchor-pid containment)
+            (:seon.dev.process.containment/process-group containment)))))
+
+(defn- orphaned-workload?
+  [record]
+  (let [containment (:seon.dev.process/containment record)
+        owner (containment-identity containment :owner)]
+    (and (exact-containment-record? record)
+         (matching-adoption? containment)
+         (not (fs/exists?
+               (:seon.dev.process.containment/result-path containment)))
+         (not (state/process-identity-alive? owner))
+         (state/process-identity-alive?
+          (containment-identity containment :anchor))
+         (state/process-identity-alive?
+          (containment-identity containment :workload))
+         (not (containment-control-responsive? containment)))))
+
+(defn- orphaned-subtree-absent?
+  [record]
+  (let [containment (:seon.dev.process/containment record)]
+    (and (exact-containment-record? record)
+         (not-any? state/process-identity-alive?
+                   (map #(containment-identity containment %)
+                        [:owner :anchor :workload]))
+         (not (containment-control-responsive? containment)))))
+
 (defn- dead-stale-containment?
   [record]
   (let [containment (:seon.dev.process/containment record)
@@ -1322,11 +1361,7 @@
         recorded-pids
         (distinct [(:seon.dev.process/pid record)
                    owner-pid anchor-pid process-group workload-pid])]
-    (and containment
-         (= (:seon.dev.process/pid record) owner-pid)
-         (= (:seon.dev.process/start-instant record)
-            (:seon.dev.process.containment/owner-start-instant containment))
-         (= anchor-pid process-group)
+    (and (exact-containment-record? record)
          (every? pos-int? recorded-pids)
          (every? #(nil? (state/process-start-instant %)) recorded-pids)
          (not (containment-control-responsive? containment)))))
@@ -1342,6 +1377,8 @@
            (not (state/process-identity-alive?
                  (containment-identity containment :owner))))
       :seon.dev.process.status/drained
+      (orphaned-workload? record)
+      :seon.dev.process.status/orphaned-workload
       (dead-stale-containment? record) :seon.dev.process.status/dead-stale
       :else :seon.dev.process.status/containment-uncertain)))
 
@@ -1566,6 +1603,59 @@
                              :seon.dev.process.containment/result-path])]
     (fs/delete-tree (fs/parent result-path) {:force true})))
 
+(defn- matching-process-handle
+  [identity]
+  (try
+    (let [optional
+          (java.lang.ProcessHandle/of
+           (long (:seon.dev.process/pid identity)))]
+      (when (.isPresent optional)
+        (let [handle (.get optional)
+              start (.startInstant (.info handle))]
+          (when (and (.isPresent start)
+                     (= (:seon.dev.process/start-instant identity)
+                        (str (.get start))))
+            handle))))
+    (catch Throwable _ nil)))
+
+(defn- reap-orphaned-workload!
+  [record operation-deadline]
+  (let [containment (:seon.dev.process/containment record)
+        workload (containment-identity containment :workload)
+        handle (matching-process-handle workload)
+        force-at
+        (+ (monotonic-ms)
+           (:seon.dev.process.containment/shutdown-grace-ms containment))
+        deadline
+        (phase-deadline
+         operation-deadline
+         (+ (:seon.dev.process.containment/shutdown-grace-ms containment)
+            10000))]
+    (when-not handle
+      (throw
+       (ex-info "The orphaned workload identity changed before replacement."
+                {:seon.dev.process/status
+                 :seon.dev.process.status/containment-uncertain
+                 :seon.dev.process/id (:seon.dev.process/id record)
+                 :seon.dev.process/containment containment})))
+    (.destroy ^java.lang.ProcessHandle handle)
+    (loop [forced? false]
+      (cond
+        (orphaned-subtree-absent? record) true
+        (>= (monotonic-ms) deadline)
+        (throw
+         (ex-info "The orphaned workload subtree did not become absent."
+                  {:seon.dev.process/status
+                   :seon.dev.process.status/containment-uncertain
+                   :seon.dev.process/id (:seon.dev.process/id record)
+                   :seon.dev.process/containment containment}))
+        (and (not forced?) (>= (monotonic-ms) force-at))
+        (do
+          (when-let [current (matching-process-handle workload)]
+            (.destroyForcibly ^java.lang.ProcessHandle current))
+          (recur true))
+        :else (do (Thread/sleep 25) (recur forced?))))))
+
 (defn stop!
   "Drain one exact containment generation and return its terminal evidence."
   ([config id] (stop! config id no-process-expectation nil))
@@ -1589,11 +1679,19 @@
                   :seon.dev.process/id id})))
      (let [result
            (when record
-             (if (= :seon.dev.process.status/dead-stale
-                    (containment-status record))
+             (case (containment-status record)
+               :seon.dev.process.status/dead-stale
                {:seon.dev.process/id id
                 :seon.dev.process/reason
                 :seon.dev.process.reason/dead-stale}
+
+               :seon.dev.process.status/orphaned-workload
+               (do
+                 (reap-orphaned-workload! record operation-deadline)
+                 {:seon.dev.process/id id
+                  :seon.dev.process/reason
+                  :seon.dev.process.reason/orphaned-workload})
+
                (let [containment (:seon.dev.process/containment record)
                      terminal (drain-containment! record operation-deadline)]
                  (merge
@@ -2492,7 +2590,16 @@
    [:seon.dev.process/status [:= :seon.dev.process.status/alive]]
    [:seon.dev.process/ready? [:= true]]
    [:seon.dev.process/pid pos-int?]
+   [:seon.dev.process.containment/generation :uuid]
+   [:seon.dev.process.containment/owner-pid pos-int?]
+   [:seon.dev.process.containment/workload-pid pos-int?]
    [:seon.dev.process/swept-containment-sockets [:vector :string]]])
+
+(defn- managed-dependency-ready?
+  [configuration spec]
+  (when-let [record
+             (read-process configuration (:seon.dev.process/id spec))]
+    (ready? configuration spec record)))
 
 (defn ensure-host!
   "Reconcile exactly the source-checkout host member of the managed graph."
@@ -2514,7 +2621,7 @@
              (remove
               (fn [id]
                 (when-let [dependency (get spec-map id)]
-                  (converged? configuration dependency))))
+                  (managed-dependency-ready? configuration dependency))))
              vec)
         _ (when (seq unavailable)
             (throw
@@ -2549,12 +2656,19 @@
           (with-startup-ownership
            configuration
            #(ensure! configuration spec %)))]
-    {:seon.dev.process/id host-id
-     :seon.runtime.state/changed? (boolean (or (not exact?) (seq swept)))
-     :seon.dev.process/status :seon.dev.process.status/alive
-     :seon.dev.process/ready? true
-     :seon.dev.process/pid (:seon.dev.process/pid record)
-     :seon.dev.process/swept-containment-sockets swept}))
+    (let [containment (:seon.dev.process/containment record)]
+      {:seon.dev.process/id host-id
+       :seon.runtime.state/changed? (boolean (or (not exact?) (seq swept)))
+       :seon.dev.process/status :seon.dev.process.status/alive
+       :seon.dev.process/ready? true
+       :seon.dev.process/pid (:seon.dev.process/pid record)
+       :seon.dev.process.containment/generation
+       (:seon.dev.process.containment/generation containment)
+       :seon.dev.process.containment/owner-pid
+       (:seon.dev.process.containment/owner-pid containment)
+       :seon.dev.process.containment/workload-pid
+       (:seon.dev.process.containment/workload-pid containment)
+       :seon.dev.process/swept-containment-sockets swept})))
 
 (defn reported-process-status
   "Derive one managed generation's containment-aware operator status."
@@ -2563,6 +2677,7 @@
     [:enum :seon.dev.process.status/absent
      :seon.dev.process.status/alive
      :seon.dev.process.status/drained
+     :seon.dev.process.status/orphaned-workload
      :seon.dev.process.status/dead-stale
      :seon.dev.process.status/containment-uncertain]]}
   [record]
@@ -2583,16 +2698,19 @@
                      (let [record (read-process config id)
                            spec (get spec-map id)
                            recorded-state (process-status record)
+                           containment-state (reported-process-status record)
                            current-spec? (boolean
                                           (and record
                                                (same-process-spec? spec record)))
-                           foreign? (and (not= :seon.dev.process.status/alive
+                           foreign? (and (not= :seon.dev.process.status/orphaned-workload
+                                               containment-state)
+                                         (not= :seon.dev.process.status/alive
                                                recorded-state)
                                          (accepting-unmanaged? config id))
                            process-state
                            (if foreign?
                              :seon.dev.process.status/foreign
-                             (reported-process-status record))
+                             containment-state)
                            process-ready?
                            (boolean (and record (ready? config spec record)))
                            drift?
@@ -2617,7 +2735,18 @@
                                :seon.dev.process/artifact-digest
                                (:seon.dev.process/artifact-digest record)
                                :seon.dev.process/log
-                               (:seon.dev.process/log record)))])))
+                               (:seon.dev.process/log record))
+                             (:seon.dev.process/containment record)
+                             (assoc
+                              :seon.dev.process.containment/generation
+                              (get-in record [:seon.dev.process/containment
+                                              :seon.dev.process.containment/generation])
+                              :seon.dev.process.containment/owner-pid
+                              (get-in record [:seon.dev.process/containment
+                                              :seon.dev.process.containment/owner-pid])
+                              :seon.dev.process.containment/workload-pid
+                              (get-in record [:seon.dev.process/containment
+                                              :seon.dev.process.containment/workload-pid])))])))
               ordered)
         external-dependencies
         (into {}
@@ -2685,6 +2814,10 @@
                                foreign? :seon.dev.target.status/ownership-conflict
                                all-ready? :seon.dev.target.status/ready
                                rebuilding? :seon.dev.target.status/rebuilding
+                               (some #(= :seon.dev.process.status/orphaned-workload
+                                         (:seon.dev.process/status %))
+                                     (vals processes))
+                               :seon.dev.target.status/degraded
                                (some #(= :seon.dev.process.status/alive
                                          (:seon.dev.process/status %))
                                      (vals processes))

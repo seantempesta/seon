@@ -127,6 +127,10 @@
                 :seon.dev.process/status :seon.dev.process.status/alive
                 :seon.dev.process/ready? true
                 :seon.dev.process/pid 42
+                :seon.dev.process.containment/generation
+                #uuid "00000000-0000-0000-0000-000000000042"
+                :seon.dev.process.containment/owner-pid 42
+                :seon.dev.process.containment/workload-pid 44
                 :seon.dev.process/swept-containment-sockets []}]
     (with-redefs-fn
       {#'state/with-lock
@@ -163,6 +167,26 @@
          (is (thrown-with-msg? Exception #"exactly `host`"
                                (#'cli/ensure! configuration
                                 ["host" "pod"])))))))
+
+(deftest status-names-owner-and-workload-identities
+  (let [generation #uuid "00000000-0000-0000-0000-000000000042"
+        status
+        {:seon.dev.target/status :seon.dev.target.status/degraded
+         :seon.dev.target/processes
+         (array-map
+          process/host-id
+          {:seon.dev.process/status
+           :seon.dev.process.status/orphaned-workload
+           :seon.dev.process/ready? false
+           :seon.dev.process.containment/owner-pid 42
+           :seon.dev.process.containment/workload-pid 44
+           :seon.dev.process.containment/generation generation})}]
+    (with-redefs [cli/status-value (constantly status)]
+      (is (= (str "◐ Seon degraded\n"
+                  "  host  orphaned-workload  owner-pid=42"
+                  "  workload-pid=44  generation=" generation
+                  "  not-ready\n")
+             (with-out-str (#'cli/status! {} [])))))))
 
 (deftest release-command-publishes-through-the-one-release-producer
   (let [root (fs/create-temp-dir {:prefix "seon-cli-release-"})

@@ -1655,7 +1655,13 @@
   (let [host-spec (harmless-spec process/host-id ["host"])
         manifest {:manifest true}
         configuration (test-config)
-        live-record {:seon.dev.process/pid 101}
+        generation (random-uuid)
+        live-record
+        {:seon.dev.process/pid 101
+         :seon.dev.process/containment
+         {:seon.dev.process.containment/generation generation
+          :seon.dev.process.containment/owner-pid 101
+          :seon.dev.process.containment/workload-pid 103}}
         calls (atom [])]
     (try
       (with-redefs [process/specs (fn [_ selected]
@@ -1680,6 +1686,9 @@
                 :seon.dev.process/status :seon.dev.process.status/alive
                 :seon.dev.process/ready? true
                 :seon.dev.process/pid 101
+                :seon.dev.process.containment/generation generation
+                :seon.dev.process.containment/owner-pid 101
+                :seon.dev.process.containment/workload-pid 103
                 :seon.dev.process/swept-containment-sockets []}
                (process/ensure-host! configuration manifest)))
         (is (empty? @calls)))
@@ -1702,7 +1711,11 @@
                     (fn [_ spec start-owned!]
                       (swap! calls conj [:start (:seon.dev.process/id spec)
                                          start-owned!])
-                      {:seon.dev.process/pid 202})]
+                      {:seon.dev.process/pid 202
+                       :seon.dev.process/containment
+                       {:seon.dev.process.containment/generation generation
+                        :seon.dev.process.containment/owner-pid 202
+                        :seon.dev.process.containment/workload-pid 204}})]
         (let [result (process/ensure-host! configuration manifest)
               request (second (first @calls))]
           (is (true? (:seon.runtime.state/changed? result)))
@@ -1715,7 +1728,55 @@
         (fs/delete-tree (:seon.dev.test/directory configuration)
                         {:force true})))))
 
-(deftest ensure-host-replaces-a-hard-killed-generation-and-down-reaps-it
+(deftest ensure-host-accepts-a-ready-dependency-with-spec-drift
+  (let [host-spec (assoc (harmless-spec process/host-id ["host"])
+                         :seon.dev.process/dependencies [process/writer-id])
+        writer-spec (harmless-spec process/writer-id ["writer"])
+        generation (random-uuid)
+        host-record
+        {:seon.dev.process/pid 101
+         :seon.dev.process/containment
+         {:seon.dev.process.containment/generation generation
+          :seon.dev.process.containment/owner-pid 101
+          :seon.dev.process.containment/workload-pid 103}}
+        writer-record {:seon.dev.process/pid 201}
+        configuration (test-config)]
+    (try
+      (with-redefs [process/specs
+                    (constantly {process/host-id host-spec
+                                 process/writer-id writer-spec})
+                    process/read-process
+                    (fn [_ id]
+                      (case id
+                        :seon.dev.process/host host-record
+                        :seon.dev.process/writer writer-record))
+                    process/ready?
+                    (fn [_ spec record]
+                      (is (= process/writer-id
+                             (:seon.dev.process/id spec)))
+                      (is (= writer-record record))
+                      true)
+                    process/converged?
+                    (fn [_ spec]
+                      (is (= process/host-id (:seon.dev.process/id spec))
+                          "dependency availability must not require convergence")
+                      true)
+                    process/sweep-orphaned-host-containment-sockets!
+                    (constantly
+                     {:seon.dev.process/swept-containment-sockets []
+                      :seon.dev.process/uncertain-containment-sockets []})
+                    process/clean-or-force!
+                    (fn [& _] (throw (ex-info "healthy host was stopped" {})))
+                    process/with-startup-ownership
+                    (fn [& _] (throw (ex-info "healthy host was started" {})))]
+        (is (false?
+             (:seon.runtime.state/changed?
+              (process/ensure-host! configuration {:manifest true})))))
+      (finally
+        (fs/delete-tree (:seon.dev.test/directory configuration)
+                        {:force true})))))
+
+(deftest ensure-host-replaces-a-killed-workload-and-down-reaps-it
   (let [base (test-config)
         directory (:seon.dev.test/directory base)
         control-directory
@@ -1738,8 +1799,8 @@
               first-identity
               (select-keys first-record [:seon.dev.process/pid
                                          :seon.dev.process/start-instant])
-              anchor (:seon.dev.process.containment/anchor-pid
-                      first-containment)
+              workload (:seon.dev.process.containment/workload-pid
+                        first-containment)
               result-path (:seon.dev.process.containment/result-path
                            first-containment)]
           (swap! fixtures conj first-record)
@@ -1753,19 +1814,18 @@
                    first-containment)}))
           (is (zero? (:exit (shell/sh
                              {:continue true
-                              :cmd ["/bin/kill" "-KILL" "--"
-                                    (str "-" anchor)]})))
-              "the anchored KILL removes the host workload and anchor")
+                              :cmd ["/bin/kill" "-KILL" (str workload)]})))
+              "the drill kills the recorded workload, not its owner")
           (loop [remaining 500]
             (when (and (pos? remaining)
-                       (not= :seon.dev.process.status/dead-stale
+                       (not= :seon.dev.process.status/drained
                              (process/reported-process-status first-record)))
               (Thread/sleep 10)
               (recur (dec remaining))))
-          (is (= :seon.dev.process.status/dead-stale
+          (is (= :seon.dev.process.status/drained
                  (process/reported-process-status first-record)))
-          (is (not (fs/exists? result-path))
-              "SIGKILL leaves no fabricated terminal receipt")
+          (is (= "workload-exit"
+                 (:trigger (json/parse-string (slurp result-path) true))))
           (let [replacement-result
                 (process/ensure-host! configuration manifest)
                 replacement
@@ -1799,6 +1859,107 @@
             (is (true? (:seon.dev.process/ready? host-status)))
             (is (= :seon.dev.target.status/ready
                    (:seon.dev.target/status target)))
+            (let [down
+                  (process/clean-or-force!
+                   {:seon.dev.process/configuration configuration
+                    :seon.dev.process/operation
+                    :seon.dev.process.operation/down
+                    :seon.dev.process/targets #{process/host-id}})]
+              (is (= :seon.dev.process.classification/clean
+                     (:seon.dev.process/classification down)))
+              (is (nil? (process/read-process configuration
+                                             process/host-id)))
+              (is (not-any? state/process-identity-alive?
+                            (containment-identities replacement)))))))
+      (finally
+        (doseq [record @fixtures]
+          (hard-clean-containment-fixture! record))
+        (fs/delete-tree control-directory {:force true})
+        (fs/delete-tree directory {:force true})))))
+
+(deftest ensure-host-replaces-an-orphaned-workload-after-owner-death
+  (let [base (test-config)
+        directory (:seon.dev.test/directory base)
+        control-directory
+        (str (fs/path (:seon.dev.config/root base) "tmp"
+                      (str "host-owner-death-" (random-uuid))))
+        configuration
+        (assoc (target-config base directory)
+               :seon.dev.config/containment-socket-dir control-directory)
+        spec (harmless-spec process/host-id ["sleep" "300"])
+        manifest {:manifest true}
+        fixtures (atom [])]
+    (try
+      (with-redefs [process/specs (constantly {process/host-id spec})]
+        (let [first-record
+              (do
+                (process/ensure-host! configuration manifest)
+                (process/read-process configuration process/host-id))
+              first-containment (:seon.dev.process/containment first-record)
+              first-generation
+              (:seon.dev.process.containment/generation first-containment)
+              owner (:seon.dev.process.containment/owner-pid first-containment)
+              anchor-identity (second (containment-identities first-record))
+              workload-identity (nth (containment-identities first-record) 2)
+              result-path (:seon.dev.process.containment/result-path
+                           first-containment)]
+          (swap! fixtures conj first-record)
+          (is (zero? (:exit (shell/sh
+                             {:continue true
+                              :cmd ["/bin/kill" "-KILL" (str owner)]})))
+              "the drill kills only the recorded containment owner")
+          (loop [remaining 500]
+            (when (and (pos? remaining)
+                       (not= :seon.dev.process.status/orphaned-workload
+                             (process/reported-process-status first-record)))
+              (Thread/sleep 10)
+              (recur (dec remaining))))
+          (is (= :seon.dev.process.status/orphaned-workload
+                 (process/reported-process-status first-record)))
+          (is (state/process-identity-alive? anchor-identity))
+          (is (state/process-identity-alive? workload-identity))
+          (is (not (fs/exists? result-path))
+              "owner SIGKILL cannot fabricate a terminal receipt")
+          (let [orphan-status (process/status configuration manifest)
+                host-status
+                (get-in orphan-status
+                        [:seon.dev.target/processes process/host-id])]
+            (is (= :seon.dev.target.status/degraded
+                   (:seon.dev.target/status orphan-status)))
+            (is (= :seon.dev.process.status/orphaned-workload
+                   (:seon.dev.process/status host-status)))
+            (is (= owner
+                   (:seon.dev.process.containment/owner-pid host-status)))
+            (is (= (:seon.dev.process/pid workload-identity)
+                   (:seon.dev.process.containment/workload-pid host-status)))
+            (is (= first-generation
+                   (:seon.dev.process.containment/generation host-status))))
+          (let [replacement-result
+                (process/ensure-host! configuration manifest)
+                replacement
+                (process/read-process configuration process/host-id)
+                replacement-containment
+                (:seon.dev.process/containment replacement)]
+            (swap! fixtures conj replacement)
+            (is (not= first-generation
+                      (:seon.dev.process.containment/generation
+                       replacement-containment)))
+            (is (not (state/process-identity-alive? anchor-identity)))
+            (is (not (state/process-identity-alive? workload-identity)))
+            (is (= (:seon.dev.process.containment/owner-pid
+                    replacement-containment)
+                   (:seon.dev.process.containment/owner-pid
+                    replacement-result)))
+            (is (= (:seon.dev.process.containment/workload-pid
+                    replacement-containment)
+                   (:seon.dev.process.containment/workload-pid
+                    replacement-result)))
+            (let [ready (process/status configuration manifest)]
+              (is (= :seon.dev.target.status/ready
+                     (:seon.dev.target/status ready)))
+              (is (= :seon.dev.process.status/alive
+                     (get-in ready [:seon.dev.target/processes process/host-id
+                                    :seon.dev.process/status]))))
             (let [down
                   (process/clean-or-force!
                    {:seon.dev.process/configuration configuration

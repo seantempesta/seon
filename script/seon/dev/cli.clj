@@ -337,7 +337,12 @@
                                   (selected-manifest configuration))))]
     (println "● host ready")
     (println (str "  changed: " (:seon.runtime.state/changed? result)))
-    (println (str "  pid: " (:seon.dev.process/pid result)))
+    (println (str "  owner-pid: "
+                  (:seon.dev.process.containment/owner-pid result)))
+    (println (str "  workload-pid: "
+                  (:seon.dev.process.containment/workload-pid result)))
+    (println (str "  generation: "
+                  (:seon.dev.process.containment/generation result)))
     result))
 
 (defn- ready-config-target!
@@ -555,8 +560,18 @@
           (doseq [[id value] (:seon.dev.target/processes status)]
             (println (str "  " (name id) "  "
                           (name (:seon.dev.process/status value))
-                          (when-let [pid (:seon.dev.process/pid value)]
-                            (str "  pid=" pid))
+                          (when-let [pid
+                                     (:seon.dev.process.containment/owner-pid
+                                      value)]
+                            (str "  owner-pid=" pid))
+                          (when-let [pid
+                                     (:seon.dev.process.containment/workload-pid
+                                      value)]
+                            (str "  workload-pid=" pid))
+                          (when-let [generation
+                                     (:seon.dev.process.containment/generation
+                                      value)]
+                            (str "  generation=" generation))
                           (when-not (:seon.dev.process/ready? value)
                             (if (:seon.dev.process/rebuild-pending? value)
                               "  rebuild-pending"
