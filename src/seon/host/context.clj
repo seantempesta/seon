@@ -187,6 +187,7 @@
   [:seon.eval/ok? :boolean]])
 (schema/register! ::replay-envelopes [:vector ::replay-envelope])
 (schema/register! ::materialized-function [:tuple ::ctx 'some?])
+(schema/register! ::function-rows [:vector :map])
 
 (def writer-pool-defaults
   "Hardware-derived host writer-pool defaults.
@@ -904,19 +905,44 @@
     (sci/add-namespace! ctx lib vars))
   nil)
 
+(declare query-writer-at!)
+
+(def ^:private corpus-namespace-source-query
+  '[:find ?source .
+    :in $ ?lib
+    :where
+    [?namespace :seon.ns/name ?lib]
+    [?namespace :seon.ns/source ?source]])
+
+(defn- corpus-namespace-source
+  "Stored namespace source at one current immutable database value."
+  [writer lib]
+  (let [database (resolve-head! writer)]
+    (if (:seon/error database)
+      database
+      (query-writer-at! writer database corpus-namespace-source-query [lib]))))
+
 (defn- registry-load-fn
-  "Shared sci `:load-fn` over the registry; injects wrappers on require.
+  "Shared sci `:load-fn`; registry first, then stored corpus source.
 
    Called by sci only on the FIRST require of an unknown lib. The body is
-   a map lookup plus an env swap — it must stay that cheap because the
-   JVM require path holds one process-global load lock. Returning `{}`
-   (no source) leaves the `:as`/`:refer` wiring to sci itself."
-  [registry]
+   registry-first so provisioned wrappers remain the cheap path under the
+   JVM's process-global load lock. A missing registry namespace resolves
+   `:seon.ns/source` at one current immutable database value; sci evaluates
+   that source and recursively materializes its declared require closure."
+  [registry writer]
   (fn [{:keys [libname ctx]}]
-    (when (get-in @registry [libname ::vars])
-      (install-registered-wrappers!
-       {::registry registry ::ctx ctx ::lib libname})
-      {})))
+    (if (get-in @registry [libname ::vars])
+      (do
+        (install-registered-wrappers!
+         {::registry registry ::ctx ctx ::lib libname})
+        {})
+      (let [source (corpus-namespace-source writer libname)]
+        (when (:seon/error source)
+          (throw
+           (ex-info (get-in source [:seon/error :seon.error/message])
+                    {:seon.error/kind :core-bug})))
+        (when source {:source source})))))
 
 (defn- register-host-capabilities!
   "Seed the registry with the host's capability families over `writer`.
@@ -1358,7 +1384,7 @@
   (let [wrapper-registry (registry)
         _ (register-host-capabilities! wrapper-registry writer)
         ctx (sci/init
-             {:load-fn (registry-load-fn wrapper-registry)
+             {:load-fn (registry-load-fn wrapper-registry writer)
               :namespaces {'clojure.core interrupt/clojure-core
                            'clojure.string interrupt/clojure-string}
               :interrupt-fn
@@ -1852,7 +1878,22 @@
            ::keys [envelope at duration-ms source narration ns-sym
                    agent-id forms var-meta new-schema-keys output
                    database-edn-cap]}]
-  (let [tx-data
+  (let [program-tx-data
+        (when (:seon.eval/ok? envelope)
+          (record/tee-tx-data
+           {::record/forms (or forms [])
+            ::record/source source
+            ::record/ns-sym ns-sym
+            ::record/var-meta (or var-meta {})
+            ::record/new-schema-keys (or new-schema-keys #{})
+            ::record/at at}))
+        function-rows
+        (into []
+              (filter #(and (map? %)
+                            (contains? % :seon.fn/sym)
+                            (contains? % :seon.fn/source)))
+              program-tx-data)
+        tx-data
         (into (record/terminal-tx-data
                {:seon.eval/id eval-id
                 ::record/envelope envelope
@@ -1864,14 +1905,7 @@
                 ::record/agent-ref [:seon.agent/id agent-id]
                 ::record/output output
                 ::record/database-edn-cap database-edn-cap})
-              (when (:seon.eval/ok? envelope)
-                (record/tee-tx-data
-                 {::record/forms (or forms [])
-                  ::record/source source
-                  ::record/ns-sym ns-sym
-                  ::record/var-meta (or var-meta {})
-                  ::record/new-schema-keys (or new-schema-keys #{})
-                  ::record/at at})))]
+              program-tx-data)]
     (let [result (record-transact! writer {::tx-data tx-data})
           projection-change?
           (boolean
@@ -1885,4 +1919,5 @@
                   tx-data))]
       (cond-> result
         (:seon.db/ok? result)
-        (assoc ::projection-changed? projection-change?)))))
+        (assoc ::projection-changed? projection-change?
+               ::function-rows function-rows)))))

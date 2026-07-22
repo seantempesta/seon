@@ -45,13 +45,20 @@
   [:seon.fn/arglists {:optional true} :string]
   [:seon.fn/doc {:optional true} :string]])
 (schema/register! ::contexts [:vector ::context/ctx])
+(schema/register! ::function-var 'some?)
 (schema/register!
  ::install-request
- [:map {:closed true}
-  [::context/base ::context/base]
-  [::context/registry ::context/registry]
-  [::function-row ::function-row]
-  [::contexts {:optional true} ::contexts]])
+ [:or
+  [:map {:closed true}
+   [::context/base ::context/base]
+   [::context/registry ::context/registry]
+   [::function-row ::function-row]
+   [::contexts {:optional true} ::contexts]]
+  [:map {:closed true}
+   [::context/registry ::context/registry]
+   [::function-row ::function-row]
+   [::function-var ::function-var]
+   [::contexts {:optional true} ::contexts]]])
 (schema/register!
  ::graduate-request
  [:map {:closed true}
@@ -233,9 +240,11 @@
   [{base ::context/base
     registry ::context/registry
     function-row ::function-row
+    function-var ::function-var
     contexts ::contexts}]
   (try
-    (let [[_ctx function-var] (nursery-context+var base function-row)]
+    (let [function-var (or function-var
+                           (second (nursery-context+var base function-row)))]
       (install-implementation! registry contexts function-row @function-var)
       {::ok? true
        ::tier :nursery

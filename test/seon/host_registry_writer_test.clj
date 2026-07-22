@@ -414,6 +414,7 @@
         request-path (socket-path "u4-writer")
         host-socket (socket-path "u4-host")
         agent-id "parity-agent"
+        caller-agent-id "parity-caller"
         server (writer/start! {::writer/dependencies (dependencies)
                                ::writer/database-name database-name
                                ::writer/backend :memory
@@ -441,11 +442,23 @@
                          (pr-str (into corpus-schema-rows
                                        [value-sampling-policy
                                         {:seon.agent/id agent-id}
+                                        {:seon.agent/id caller-agent-id}
                                         {:seon.db.process/id
                                          :seon.db.process/repl}
                                         {:seon.agent.turn/id "turn-parity"}]))
                          "})"))]
         (is (true? (:seon.db/ok? seeded)) (pr-str seeded)))
+      (is (:seon.db/ok?
+           (context/transact-writer!
+            session
+            [{:seon.ns/name 'my.corpus-only
+              :seon.ns/source
+              (str "(ns my.corpus-only "
+                   "(:require [my.shared :as shared]))")
+              :seon.ns/require-edges
+              [{:seon.ns.require/target 'my.shared
+                :seon.ns.require/alias 'shared}]}]))
+          "the corpus-only namespace source is ordinary database data")
       (is (= [32 4096 1024 3 80 8 12]
              (context/query-writer! session value-sampling-policy-query
                                     ["cluster"])))
@@ -468,7 +481,9 @@
                         "})"))]
         (is (true? (:seon.db/ok? probe)) (pr-str probe)))
       (let [head (context/resolve-head! session)
-            live (host-session! host-socket agent-id database-name)]
+            live (host-session! host-socket agent-id database-name)
+            caller-live
+            (host-session! host-socket caller-agent-id database-name)]
         (try
           (is (= :seon.execution.message/ready
                  (:seon.execution/message (::ready live)))
@@ -540,8 +555,73 @@
                             [?row :seon.schema/key :my.parity/amount]
                             [?row :seon.schema/key ?key]
                             [?row :seon.schema/form ?form]])))))
+          (let [authored
+                (invoke-batch!
+                 live agent-id "live-require-author"
+                 (context/resolve-head! session)
+                 [{:seon.repl/kind :form
+                   :seon.repl/source "(ns my.shared)"}
+                  {:seon.repl/kind :form
+                   :seon.repl/source
+                   (str "(defn f "
+                        "{:malli/schema [:=> [:cat :int] :int]} "
+                        "[x] (inc x))")}
+                  {:seon.repl/kind :form
+                   :seon.repl/source
+                   (str "(ns my.consumer "
+                        "(:require [my.shared :as shared]))")}
+                  {:seon.repl/kind :form
+                   :seon.repl/source
+                   (str "(defn call-f "
+                        "{:malli/schema [:=> [:cat :int] :int]} "
+                        "[x] (shared/f x))")}])
+                caller
+                (invoke-batch!
+                 caller-live caller-agent-id "live-require-caller"
+                 (context/resolve-head! session)
+                 [{:seon.repl/kind :form
+                   :seon.repl/source
+                   "(require '[my.shared :as shared])"}
+                  {:seon.repl/kind :form
+                   :seon.repl/source "(shared/f 4)"}
+                  {:seon.repl/kind :form
+                   :seon.repl/source
+                   "(require '[my.consumer :as consumer])"}
+                  {:seon.repl/kind :form
+                   :seon.repl/source "(consumer/call-f 8)"}
+                  {:seon.repl/kind :form
+                   :seon.repl/source "(shared/f :wrong)"}
+                  {:seon.repl/kind :form
+                   :seon.repl/source "(require 'my.corpus-only)"}
+                  {:seon.repl/kind :form
+                   :seon.repl/source
+                   "(boolean (get (ns-aliases 'my.corpus-only) 'shared))"}])
+                caller-results
+                (get-in caller [:seon.execution/result
+                                :seon.host/results])]
+            (is (= 4 (get-in authored [:seon.execution/result
+                                       :seon.eval/n-ok]))
+                (pr-str authored))
+            (is (= 6 (get-in caller [:seon.execution/result
+                                     :seon.eval/n-ok]))
+                (pr-str caller))
+            (is (= 1 (get-in caller [:seon.execution/result
+                                     :seon.eval/n-fail]))
+                (pr-str caller))
+            (is (= 5 (get-in caller-results [1 :seon.eval/value]))
+                "agent B requires and calls agent A's live registry var")
+            (is (= 9 (get-in caller-results [3 :seon.eval/value]))
+                "a cold consumer namespace closes over its authored require")
+            (is (re-find #"malli/instrument-input.*my.shared/f"
+                         (get-in caller-results
+                                 [4 :seon/error :seon.error/message]))
+                (pr-str (nth caller-results 4)))
+            (is (true? (get-in caller-results [6 :seon.eval/value]))
+                "a registry miss loads stored namespace source and its edge"))
           (finally
             (try (.close ^SocketChannel (::channel live))
+                 (catch Throwable _))
+            (try (.close ^SocketChannel (::channel caller-live))
                  (catch Throwable _)))))
       ;; Restart drill: a brand-new host process state (fresh base, no
       ;; contexts) restores the agent by replaying the corpus defs — the

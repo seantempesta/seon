@@ -5,6 +5,7 @@
             [seon.db.transport.uds :as uds]
             [seon.error.sci :as error.sci]
             [seon.host.context :as context]
+            [seon.host.graduate :as graduate]
             [seon.host.instrument :as instrument]
             [seon.host.preflight :as preflight]
             [seon.host.record :as record]
@@ -226,6 +227,29 @@
 
       :else nil)))
 
+(defn- install-recorded-function!
+  "Install one durably recorded function through the nursery registry path."
+  [session function-row function-var]
+  (let [instrument-state (::instrument/state session)
+        lib (some-> (:seon.fn/sym function-row) symbol namespace symbol)
+        loaded-contexts
+        (into []
+              (filter #(sci/find-ns % lib))
+              (vals @(::session/contexts session)))
+        outcome
+        (graduate/install-nursery!
+         {::context/registry (::instrument/registry instrument-state)
+          ::graduate/function-row function-row
+          ::graduate/function-var function-var
+          ::graduate/contexts loaded-contexts})]
+    (when-not (::graduate/ok? outcome)
+      (throw
+       (ex-info (or (::graduate/error outcome)
+                    "The recorded nursery function did not install.")
+                {:seon.error/kind :core-bug
+                 :seon.host.graduate/outcome outcome})))
+    outcome))
+
 (defn eval-batch-result
   "Serve `seon.execution.runtime/eval-batch!` over sci WITH recording.
 
@@ -397,11 +421,22 @@
                           ::context/database-edn-cap database-edn-cap}))
                       projection-change?
                       (true? (::context/projection-changed? recorded))
+                      recorded-function-rows
+                      (::context/function-rows recorded)
                       projection-refresh
-                      (when projection-change?
-                        (instrument/refresh-and-reconcile!
-                         (::instrument/state session) writer
-                         (get-in recorded [:db-after :t])))
+                      (when (and ok? recorded (:seon.db/ok? recorded)
+                                 (or (seq recorded-function-rows)
+                                     projection-change?))
+                        (instrument/call-with-write-admission
+                         (::instrument/state session)
+                         (fn []
+                           (doseq [function-row recorded-function-rows]
+                             (install-recorded-function!
+                              session function-row live-value))
+                           (when projection-change?
+                             (instrument/refresh-and-reconcile!
+                              (::instrument/state session) writer
+                              (get-in recorded [:db-after :t]))))))
                       _ (when (:seon/error projection-refresh)
                           (throw
                             (ex-info
