@@ -869,6 +869,35 @@ spec (orchestrator, in progress).
   drilled live — workload kill → respawn+replay; owner kill → managed
   replace — with status correct and clean reap, zero manual surgery.**
 
+### WP-S2 CLOSED (2026-07-22 night) — both kill modes drilled live
+
+Round 3 landed `4b8463d9` (orphaned-workload classification; managed
+replacement through the surviving anchor — never the PGID; the
+misleading ensure refusal root-caused to converged?-as-availability;
+status/ensure label owner pid + workload pid + generation; both-mode
+regressions; operator 308/1777). CLOSING DRILL PASSED on the live
+default cluster, zero manual surgery:
+
+- WORKLOAD KILL (per the lane's recipe, workload-pid from structured
+  status): invocation settles honest ECONNREFUSED → pod-triggered
+  ensure respawns a NEW generation with no manual command → status
+  alive with all three identities → fresh invocations served. (Corpus
+  replay is writer-gate-proven — host_registry_writer_test:626;
+  receiptless orchestrator probes cannot exercise it by design.)
+- OWNER KILL: status classifies `orphaned-workload` (not foreign) →
+  `bin/seon ensure host` performs the managed replacement (new
+  generation ready) → orphaned owner+workload both reaped → dial-OFF
+  apply + converged idempotent + root 200 (the round-1 cascade is
+  dead).
+
+THE CONTAINMENT THESIS' PHYSICS LAYER IS LIVE: the host process is
+disposable in both its failure modes; durable truth is datoms; the
+supervisor recovers without a human. Remaining physics rows: q18 OOME
+drill (queued), U10/U12 graduation drills (post-W5).
+SPINE NEXT: W5-0 retirement preflight (stage15 verdict spec + q34
+surface census + wrong-arg/unresolved scenarios). Parallel: normalize-4
+(entity-shape the big config maps).
+
 ### Queue-order correction (fresh-eyes ruling, recorded)
 
 The wind-down queue serialized the EDN normalize series ahead of
