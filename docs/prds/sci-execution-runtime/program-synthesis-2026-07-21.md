@@ -1052,6 +1052,51 @@ Lane states at wind-down:
   Re-dispatch from `tmp/orchestrator/p3a-bun-worker-spec.md` (or
   resume thread `019f8bbe-4cb6-7663-aa95-1602a21650fb`).
 
+### E2E-FIRST STATE (2026-07-22 night — READ THIS FIRST)
+
+**THE SEAM IS LANDED AND PROVEN.** Committed: `f6d843ee` (P1c seon.db
+portable core, both tiers, wrappers deleted, op-id replay, effect
+metadata, census computed), `85780757` (P2 web), `29825ccc` (P2
+fs/shell + ruling-7 home-dir fix). Serial gates green over the
+combined tree: full cljs 1555/7688, full writer 382/2982. Census: 15
+db fns base-resolved; 70 capability-pending; 4 platform-pending; 17
+resolved. Four families now carry effect metadata (db 15, fs 12,
+shell 8, web 3).
+
+**OWNER RULING (E2E-first):** get an end-to-end working version
+running NOW — live drives, perf (tok/s), and the weirdness of real
+wrapper implementation are the next learning source; census grinding
+continues in parallel but does not precede E2E feedback. Always be
+updating the docs: every material change reconciles the anchor same
+turn and the architecture docs via the docs lane.
+
+**LIVE LANES (this wave):**
+
+1. `e2e-live-drive` — fix the open blocker issue
+   `final-agent-evidence-pulled-a-partial-config-without-identity`
+   (owner `seon.web.serve/project-model-transport-evidence`; it 500s
+   every live agent turn), then run a real multi-turn DeepSeek drive
+   through the landed seam on an isolated cluster; deliverable =
+   `research/e2e-seam-drive-2026-07-22.md` (perf in tok/s + weirdness
+   list) + one issue per defect. Spec
+   `tmp/orchestrator/e2e-live-drive-spec.md`.
+2. `pkg-wrapper-exemplar` — the FIRST real npm package wrapper under
+   ruling 16 (`seon.packages.js.<pkg>`): manifest row, install, leaf
+   wrapper in the cluster corpus, live agent call; deliverable
+   includes the friction/gap report (what WP-W install flow is
+   missing). Spec `tmp/orchestrator/pkg-wrapper-exemplar-spec.md`.
+3. `docs-reconcile` — reconcile `docs/seon/architecture/` with the
+   landed seam (capability boundary, effect classes, op-id, package
+   namespace convention, portable-core/leaf layering) — target-state
+   docs, no migration diary. Spec
+   `tmp/orchestrator/docs-reconcile-spec.md`.
+
+**STAGED NEXT (refill on any free slot):** p2-message-lifecycle ·
+p2-blob · p2-my-families (specs in tmp/orchestrator/, exemplar commit
+= `f6d843ee`) · agent-facing interface-guidance unit. Known open:
+drill-harness nil-FileInputStream failure (recorded, pre-writer
+readiness, not seam-owned — needs its own small issue/fix).
+
 ### Restart state (2026-07-22, orchestrator resumed in ~/src/seon)
 
 - normalize-4b: lane died mid-gate (second full bin/test-cljs run after
