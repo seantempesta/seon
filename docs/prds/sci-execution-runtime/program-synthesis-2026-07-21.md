@@ -1191,6 +1191,15 @@ This is also derivation-storage's purity precondition made checkable:
 unit design with the phase cursor (where death occurred) + effect log
 (what the dead form already did).
 
+### OWNER DESIGN TIEBREAKER (2026-07-22 night, standing)
+
+At every seam needing a design decision, choose what supports the
+vision: easy experimentation (reversible, config-dialed, opt-in,
+probe-cheap, time-travel-friendly) and simplification so complex
+systems can be easily reasoned about (fewer mechanisms, enumerable
+boundaries, constraints that delete hard cases). Between two sound
+options, the one a first-time reader can hold in their head wins.
+
 ### NO PENDING OWNER DECISIONS
 
 The 4 W1-boot decisions were folded as recommendations into the shipped
