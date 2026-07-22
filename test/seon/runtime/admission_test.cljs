@@ -106,28 +106,48 @@
   (is (false? (admission/begin-publication!))
       "publication cannot steal a quiescing runtime"))
 
-(defn- acquired-program []
-  {::db/branch-head
-   {:db-name "admission-test"
-    :t 42
-    :datahike/commit-id #uuid "00000000-0000-0000-0000-000000000042"}
-   ::db/results
-   [{:seon.db.protocol/success? true
-     :datahike.query/result []}
-    {:seon.db.protocol/success? true
-     :datahike.query/result []}]})
+(def ^:private acquisition-database
+  {:db-name "admission-test"
+   :store-id [#uuid "00000000-0000-0000-0000-000000000041"
+              :db
+              :seon.db.id.writer/serialized]
+   :t 42
+   :as-of nil
+   :since nil
+   :history false
+   :datahike/commit-id #uuid "00000000-0000-0000-0000-000000000042"})
 
 (defn- with-publication-seams
   [{::keys [committed-projection current-projection activate-projection!
             reconcile-projection! record!]}
    body]
-  (let [original-execute-many db/execute-many
+  (let [original-db db/db
+        original-index-page db/index-page
+        original-pull-many db/pull-many
         original-committed-projection admission/committed-projection
         original-current-projection schema/current-projection
         original-activate-projection! schema/activate-projection!
         original-reconcile-projection! instrument/reconcile-projection!
         original-record! error/record!]
-    (set! db/execute-many (fn [_] (js/Promise.resolve (acquired-program))))
+    (set! db/db
+          (fn
+            ([] (js/Promise.resolve acquisition-database))
+            ([_] (js/Promise.resolve acquisition-database))))
+    (set! db/index-page
+          (fn
+            ([_]
+             (js/Promise.resolve
+               {:datahike.index-page/datoms []
+                :datahike.index-page/complete? true}))
+            ([_ _]
+             (js/Promise.resolve
+               {:datahike.index-page/datoms []
+                :datahike.index-page/complete? true}))))
+    (set! db/pull-many
+          (fn
+            ([_] (js/Promise.resolve []))
+            ([_ _] (js/Promise.resolve []))
+            ([_ _ _] (js/Promise.resolve []))))
     (set! admission/committed-projection
           (or committed-projection
               (constantly
@@ -140,13 +160,206 @@
     (-> (js/Promise.resolve (body))
         (.finally
           (fn []
-            (set! db/execute-many original-execute-many)
+            (set! db/db original-db)
+            (set! db/index-page original-index-page)
+            (set! db/pull-many original-pull-many)
             (set! admission/committed-projection original-committed-projection)
             (set! schema/current-projection original-current-projection)
             (set! schema/activate-projection! original-activate-projection!)
             (set! instrument/reconcile-projection!
                   original-reconcile-projection!)
             (set! error/record! original-record!))))))
+
+(def ^:private acquisition-entities
+  {101 {:db/id 101
+        :seon.schema/key :probe.alpha/id
+        :seon.schema/form ":string"}
+   102 {:db/id 102
+        :seon.schema/key :probe.beta/count
+        :seon.schema/form ":int"}
+   103 {:db/id 103
+        :seon.schema/key :probe.gamma/enabled?
+        :seon.schema/form ":boolean"}
+   201 {:db/id 201
+        :seon.fn/sym "probe.alpha/find"
+        :seon.fn/spec "[:=> [:cat :string] :string]"}
+   202 {:db/id 202
+        :seon.fn/sym "probe.beta/unspecced"}
+   203 {:db/id 203
+        :seon.fn/sym "probe.gamma/count"
+        :seon.fn/spec "[:=> [:cat :int] :int]"}})
+
+(def ^:private schema-cursor
+  [102 :seon.schema/key :probe.beta/count 42 true])
+
+(defn- index-datom
+  [entity-id identity-attr]
+  [entity-id identity-attr (get-in acquisition-entities
+                                   [entity-id identity-attr])
+   42 true])
+
+(defn- scripted-index-page
+  [request]
+  (let [identity-attr (first (::db/components request))
+        cursor (::db/cursor request)]
+    (case identity-attr
+      :seon.schema/key
+      (if cursor
+        {:datahike.index-page/datoms [(index-datom 103 identity-attr)]
+         :datahike.index-page/complete? true}
+        {:datahike.index-page/datoms [(index-datom 101 identity-attr)
+                                      (index-datom 102 identity-attr)]
+         :datahike.index-page/complete? false
+         :datahike.index-page/cursor schema-cursor})
+
+      :seon.fn/sym
+      {:datahike.index-page/datoms [(index-datom 201 identity-attr)
+                                    (index-datom 202 identity-attr)
+                                    (index-datom 203 identity-attr)]
+       :datahike.index-page/complete? true})))
+
+(defn- scripted-pull-many
+  [request]
+  (mapv acquisition-entities (::db/refs request)))
+
+(defn- with-acquisition-seams
+  [{::keys [database db-fn index-page pull-many]} body]
+  (let [original-db db/db
+        original-index-page db/index-page
+        original-pull-many db/pull-many]
+    (set! db/db
+          (fn
+            ([] ((or db-fn
+                     (fn []
+                       (js/Promise.resolve
+                         (or database acquisition-database))))))
+            ([_]
+             ((or db-fn
+                  (fn []
+                    (js/Promise.resolve
+                      (or database acquisition-database))))))))
+    (set! db/index-page
+          (fn
+            ([request]
+             (js/Promise.resolve
+               ((or index-page scripted-index-page) request)))
+            ([_ options]
+             (js/Promise.resolve
+               ((or index-page scripted-index-page) options)))))
+    (set! db/pull-many
+          (fn
+            ([request]
+             (js/Promise.resolve
+               ((or pull-many scripted-pull-many) request)))
+            ([_ _] (js/Promise.resolve []))
+            ([_ _ _] (js/Promise.resolve []))))
+    (-> (js/Promise.resolve (body))
+        (.finally
+          (fn []
+            (set! db/db original-db)
+            (set! db/index-page original-index-page)
+            (set! db/pull-many original-pull-many))))))
+
+(defn- acquire-test-program!
+  []
+  ((deref #'admission/acquire-committed-projection!)))
+
+(deftest committed-acquisition-pages-both-identity-streams
+  (async done
+    (let [!index-requests (atom [])]
+      (-> (with-acquisition-seams
+            {::index-page
+             (fn [request]
+               (swap! !index-requests conj request)
+               (scripted-index-page request))}
+            acquire-test-program!)
+          (.then
+            (fn [acquired]
+              (let [schema-rows (::admission/schema-rows acquired)
+                    contract-rows (::admission/function-contract-rows acquired)
+                    expected-schema-rows
+                    (->> (vals acquisition-entities)
+                         (keep (fn [entity]
+                                 (when (and (contains? entity :seon.schema/key)
+                                            (contains? entity :seon.schema/form))
+                                   [(:seon.schema/key entity)
+                                    (:seon.schema/form entity)])))
+                         set)
+                    expected-contract-rows
+                    (->> (vals acquisition-entities)
+                         (keep (fn [entity]
+                                 (when (and (contains? entity :seon.fn/sym)
+                                            (contains? entity :seon.fn/spec))
+                                   [(:seon.fn/sym entity)
+                                    (:seon.fn/spec entity)])))
+                         set)]
+                (is (= expected-schema-rows (set schema-rows))
+                    "paged schemas equal the two-attribute presence query")
+                (is (= expected-contract-rows (set contract-rows))
+                    "paged contracts equal the spec-presence query")
+                (is (= (count schema-rows)
+                       (count (set (map first schema-rows))))
+                    "schema identities occur once")
+                (is (= (count contract-rows)
+                       (count (set (map first contract-rows))))
+                    "function identities occur once")
+                (is (= [:seon.schema/key :seon.schema/key :seon.fn/sym]
+                       (mapv #(first (::db/components %)) @!index-requests))
+                    "each stream continues independently through complete?")
+                (is (every? #(= 32 (::db/limit %)) @!index-requests))
+                (done))))
+          (.catch (fn [error]
+                    (is false (str "paged acquisition threw — " error))
+                    (done)))))))
+
+(deftest committed-acquisition-omits-functions-without-spec
+  (async done
+    (-> (with-acquisition-seams {} acquire-test-program!)
+        (.then
+          (fn [acquired]
+            (is (= #{"probe.alpha/find" "probe.gamma/count"}
+                   (set (map first
+                             (::admission/function-contract-rows acquired))))
+                "identity enumeration preserves the spec-presence filter")
+            (done)))
+        (.catch (fn [error]
+                  (is false (str "contract filtering threw — " error))
+                  (done))))))
+
+(deftest committed-acquisition-reuses-one-complete-database-value
+  (async done
+    (let [!db-calls (atom 0)
+          !requests (atom [])]
+      (-> (with-acquisition-seams
+            {::db-fn
+             (fn []
+               (swap! !db-calls inc)
+               (js/Promise.resolve acquisition-database))
+             ::index-page
+             (fn [request]
+               (swap! !requests conj request)
+               (scripted-index-page request))
+             ::pull-many
+             (fn [request]
+               (swap! !requests conj request)
+               (scripted-pull-many request))}
+            acquire-test-program!)
+          (.then
+            (fn [_]
+              (is (= 1 @!db-calls) "the database value is acquired once")
+              (is (every? #(= acquisition-database (::db/db %)) @!requests)
+                  "every page and pull carries the complete frozen value")
+              (is (every? #(identical? acquisition-database (::db/db %))
+                          @!requests)
+                  "requests reuse the exact immutable value")
+              (is (= #{[:seon.schema/key :seon.schema/form]
+                       [:seon.fn/sym :seon.fn/spec]}
+                     (set (keep ::db/pull-pattern @!requests)))
+                  "pulls request only each compiler input pair")
+              (done)))
+          (.catch (fn [error]
+                    (is false (str "database-value reuse threw — " error))
+                    (done)))))))
 
 (deftest superseded-publication-failure-cannot-poison-the-newer-publication
   (async done

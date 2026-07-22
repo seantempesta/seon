@@ -7,7 +7,6 @@
    projection surgery from agent, schedule, and web execution boundaries."
   (:require
     [seon.db :as db]
-    [seon.db.protocol :as protocol]
     [seon.error :as error]
     [seon.instrument :as instrument]
     [seon.schema :as schema]))
@@ -193,17 +192,14 @@
     (and (= :publishing (::status before))
          (= :available (::status after)))))
 
-(def ^:private schema-query
-  '[:find ?key ?form
-    :where
-    [?schema :seon.schema/key ?key]
-    [?schema :seon.schema/form ?form]])
+(def ^:private acquisition-page-size 32)
+(def ^:private acquisition-page-max-result-weight 60000)
 
-(def ^:private function-contract-query
-  '[:find ?sym ?form
-    :where
-    [?function :seon.fn/sym ?sym]
-    [?function :seon.fn/spec ?form]])
+(def ^:private schema-pull-pattern
+  '[:seon.schema/key :seon.schema/form])
+
+(def ^:private function-contract-pull-pattern
+  '[:seon.fn/sym :seon.fn/spec])
 
 (defn ^:no-doc committed-projection
   "Build the canonical projection from ordinary acquired rows."
@@ -213,40 +209,80 @@
     {:seon.schema/schema-rows schema-rows
      :seon.schema/function-contract-rows function-contract-rows}))
 
-(defn- query-member
-  [query]
-  {::protocol/operation protocol/query-operation
-   ::protocol/query-form query
-   ::protocol/arguments []
-   :datahike.resource/max-work 1000000
-   :datahike.resource/max-results 4096
-   :datahike.resource/max-result-weight (* 3 1024 1024)})
+(defn- acquisition-error!
+  [stage value]
+  (throw (ex-info "Committed program acquisition failed."
+                  {:seon.db/error value
+                   :seon.runtime.admission/stage stage
+                   :seon.error/kind :core-bug})))
 
-(defn- query-result
-  [member]
-  (if (::protocol/success? member)
-    (:datahike.query/result member)
-    (throw (ex-info "Committed program acquisition failed."
-                    {:seon.db/error member :seon.error/kind :core-bug}))))
+(defn- failed-read?
+  [value]
+  (and (map? value) (string? (:seon.error/message value))))
+
+(defn- schema-row
+  [entity]
+  (when (and (contains? entity :seon.schema/key)
+             (contains? entity :seon.schema/form))
+    [(:seon.schema/key entity) (:seon.schema/form entity)]))
+
+(defn- function-contract-row
+  [entity]
+  (when (and (contains? entity :seon.fn/sym)
+             (contains? entity :seon.fn/spec))
+    [(:seon.fn/sym entity) (:seon.fn/spec entity)]))
+
+(defn- ^:async acquire-identity-stream!
+  [database identity-attr pull-pattern row-fn]
+  (loop [cursor nil
+         rows []]
+    (let [page
+          (await
+           (db/index-page
+            (cond-> {::db/db database
+                     ::db/index :aevt
+                     ::db/components [identity-attr]
+                     ::db/direction :forward
+                     ::db/limit acquisition-page-size
+                     ::db/max-result-weight
+                     acquisition-page-max-result-weight}
+              cursor (assoc ::db/cursor cursor))))
+          _ (when (failed-read? page)
+              (acquisition-error! :index-page page))
+          entity-ids (mapv first (:datahike.index-page/datoms page))
+          entities
+          (if (seq entity-ids)
+            (await
+             (db/pull-many
+              {::db/db database
+               ::db/pull-pattern pull-pattern
+               ::db/refs entity-ids
+               ::db/max-result-weight acquisition-page-max-result-weight}))
+            [])
+          _ (when (failed-read? entities)
+              (acquisition-error! :pull-many entities))
+          next-rows (into rows (keep row-fn) entities)]
+      (if (:datahike.index-page/complete? page)
+        next-rows
+        (recur (:datahike.index-page/cursor page) next-rows)))))
 
 (defn ^:async ^:private acquire-committed-projection!
   []
   (let [database (await (db/db))
-        acquired
+        _ (when (failed-read? database)
+            (acquisition-error! :database database))
+        schemas
         (await
-         (db/execute-many
-          {::db/db database
-           ::db/max-result-weight (* 6 1024 1024)
-           ::db/members [(query-member schema-query)
-                         (query-member function-contract-query)]}))
-        _ (when (:seon.error/message acquired)
-            (throw (ex-info "Committed program acquisition failed."
-                            {:seon.db/error acquired
-                             :seon.error/kind :core-bug})))
-        [schemas contracts] (::db/results acquired)]
+         (acquire-identity-stream!
+          database :seon.schema/key schema-pull-pattern schema-row))
+        contracts
+        (await
+         (acquire-identity-stream!
+          database :seon.fn/sym function-contract-pull-pattern
+          function-contract-row))]
     {::db/db database
-     ::schema-rows (query-result schemas)
-     ::function-contract-rows (query-result contracts)}))
+     ::schema-rows schemas
+     ::function-contract-rows contracts}))
 
 (defn- ^:async reconcile-committed!
   [old-projection instrument?]
