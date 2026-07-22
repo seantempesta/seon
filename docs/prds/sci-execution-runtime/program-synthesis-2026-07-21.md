@@ -1081,6 +1081,28 @@ W5 (pending the Stage 1.5 verdict) → packages WP-B∥WP-J; tail units
   `deepseek-v4-pro` (deepseek-chat approaching retirement — my stale
   pick, caught by the lane).
 
+### ORGANIZATION DECISION SHEET RULINGS (owner, 2026-07-22 midday)
+
+Sheet persisted as `research/` (ns-org review, D13–D29). Owner rulings:
+D13 = MERGE repair into ONE `seon.repl.parse.repair` (owner philosophy:
+confident-fix-or-error; candidates was never a decision surface — the
+unique-winner mechanism already matches; keys follow, reset-bounded).
+D15 `worker.parse`/`worker.eval` shape approved. **D17 HELD** — owner
+gave vision instead (my.kb likely becomes mostly-data with elegant
+embedding-backed display; don't churn the teaching name). D14/D16/D18/
+D19/D21 + no-changes D22–D29 approved in the reviewer's sequence.
+NEW OWNER DIRECTION: make the general AI data renderer awesome —
+schema-claimed renderers for the types that deserve them, embedding
+search returning great data system-wide; renderer-quality audit
+dispatched (read REAL renders live, rank improvements).
+
+Lanes: D13 merge (`specs/d13-repair-under-parser.md`) · WP-S1a
+supervised host (`specs/wp-s1a-host-supervision.md`) · renderer
+audit (RO). Next after D13: D15 workers, D16 blob.internal. Combined
+NS-0.5c+W1.6 landed `9bc00982` (explicit-adoption reconcile contract;
+zero-allowlist internal gate; manifest-owned deepseek-v4-pro default,
+live-proven).
+
 ### NO PENDING OWNER DECISIONS
 
 The 4 W1-boot decisions were folded as recommendations into the shipped
