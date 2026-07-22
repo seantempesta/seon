@@ -163,6 +163,11 @@
      :seon.eval/n-fail (count (remove :seon.eval/ok? evaluated))
      :seon.host/results (vec results)}))
 
+(defn- run-fence-transaction
+  [agent-id run-fence]
+  (let [run-ref [:seon.agent.run/id (:seon.agent.run/id run-fence)]]
+    [[:db.fn/cas [:seon.agent/id agent-id] :seon.agent/run run-ref run-ref]]))
+
 (defn- declared-next-ns
   "The ns an executed source moves the batch to, when it moves it.
 
@@ -195,11 +200,14 @@
    home namespace, not scratch `user`. Recording engages only when the
    request names its owning turn; receiptless probes stay engine-only
    with empty `:seon.eval/ids`."
-  {:malli/schema [:=> [:cat ::session/session :map :map :seon.db/db] :map]}
+  {:malli/schema
+   [:=> [:cat ::session/session :map :map :seon.db/db
+         [:map-of :qualified-keyword :any]]
+    :map]}
   [session {parsed :seon.eval/parsed
             starting-ns :seon.eval/starting-ns
             turn-id :seon.agent.turn/id-of-turn}
-   sampling-limits database]
+   sampling-limits database run-fence]
   (let [ctx (::session/ctx session)
         writer (::session/writer session)
         agent-id (:seon.execution/agent-id @(::session/startup session))
@@ -208,42 +216,49 @@
         database-edn-cap
         (:seon.config.render/database-edn-cap sampling-limits)
         value-sampling-limits
-        (dissoc sampling-limits :seon.config.render/database-edn-cap)]
-    (when-not (contains? record/transient-ns-syms batch-ns)
-      (context/ensure-context-ns! ctx batch-ns))
-    (loop [entries (vec (or parsed []))
-           current-ns batch-ns
-           ids []
-           results []]
-      (if (empty? entries)
-        (batch-summary ids results)
-        (let [entry (first entries)
-              kind (:seon.repl/kind entry)]
-          (if-not (contains? #{:form :read} kind)
+        (dissoc sampling-limits :seon.config.render/database-edn-cap)
+        fence-result
+        (when (seq run-fence)
+          (context/transact-writer!
+           writer database (run-fence-transaction agent-id run-fence)))]
+    (if (:seon/error fence-result)
+      (assoc (batch-summary [] []) :seon.eval/fenced? true)
+      (do
+        (when-not (contains? record/transient-ns-syms batch-ns)
+          (context/ensure-context-ns! ctx batch-ns))
+        (loop [entries (vec (or parsed []))
+               current-ns batch-ns
+               ids []
+               results []]
+          (if (empty? entries)
+            (batch-summary ids results)
+            (let [entry (first entries)
+                  kind (:seon.repl/kind entry)]
+              (if-not (contains? #{:form :read} kind)
             ;; comment/prose entries evaluate and record nothing.
-            (recur (rest entries) current-ns ids
-                   (conj results {:seon.eval/ok? true
-                                  :seon.eval/skipped? true}))
-            (let [source (or (entry-source entry) "")
-                  narration (or (:seon.repl/narration entry) "")
-                  at (java.util.Date.)
-                  start-ms (session/now-ms)
-                  started (when record?
-                            (context/start-eval-receipt!
-                             writer
-                             {:seon.agent.turn/id turn-id
-                              :seon.eval/at at
-                              :seon.eval/source source
-                              :seon.eval/narration narration
-                              :seon.eval/ns current-ns
-                              :seon.agent/id agent-id}))]
-              (if (and record? (:seon/error started))
+                (recur (rest entries) current-ns ids
+                       (conj results {:seon.eval/ok? true
+                                      :seon.eval/skipped? true}))
+                (let [source (or (entry-source entry) "")
+                      narration (or (:seon.repl/narration entry) "")
+                      at (java.util.Date.)
+                      start-ms (session/now-ms)
+                      started (when record?
+                                (context/start-eval-receipt!
+                                 writer
+                                 {:seon.agent.turn/id turn-id
+                                  :seon.eval/at at
+                                  :seon.eval/source source
+                                  :seon.eval/narration narration
+                                  :seon.eval/ns current-ns
+                                  :seon.agent/id agent-id}))]
+                  (if (and record? (:seon/error started))
                 ;; The receipt is the durable execution boundary: a form
                 ;; whose receipt cannot commit never runs.
-                (recur (rest entries) current-ns ids
-                       (conj results {:seon.eval/ok? false
-                                      :seon/error (:seon/error started)}))
-                (let [schema-delta (schema/begin-registration-delta)
+                    (recur (rest entries) current-ns ids
+                           (conj results {:seon.eval/ok? false
+                                          :seon/error (:seon/error started)}))
+                    (let [schema-delta (schema/begin-registration-delta)
                       raw-envelope
                       (schema/call-with-registration-delta
                         schema-delta
@@ -320,10 +335,10 @@
                                  envelope)
                       next-ns (or (when ok? (declared-next-ns forms))
                                   current-ns)]
-                  (if (:seon.eval/interrupted? envelope)
-                    (batch-summary ids (conj results envelope))
-                    (recur (rest entries) next-ns ids
-                           (conj results envelope))))))))))))
+                      (if (:seon.eval/interrupted? envelope)
+                        (batch-summary ids (conj results envelope))
+                        (recur (rest entries) next-ns ids
+                               (conj results envelope))))))))))))))
 
 (defn interrupted-batch?
   "Whether an eval-batch result contains an interrupted form."

@@ -47,6 +47,10 @@
 
 (def ^:private transaction-requests (atom []))
 
+(defn- run-fence-cas [agent-id run-id]
+  (let [run-ref [:seon.agent.run/id run-id]]
+    [:db.fn/cas [:seon.agent/id agent-id] :seon.agent/run run-ref run-ref]))
+
 (defn- fake-writer-response [request]
   (let [request-id (::protocol/request-id request)]
     (condp = (::protocol/operation request)
@@ -104,13 +108,19 @@
       protocol/transact-operation
       (do
         (swap! transaction-requests conj request)
-        {::protocol/success? true
-         ::protocol/request-id request-id
-         :db-before database
-         :db-after (update database :t inc)
-         :tx-data []
-         :tempids {}
-         :tx-meta {}})
+        (if (= [(run-fence-cas "fenced-agent" "stale-run")]
+               (::protocol/transaction-data request))
+          {::protocol/success? false
+           ::protocol/request-id request-id
+           ::protocol/error-kind protocol/database-error
+           ::protocol/error "The run pointer CAS failed."}
+          {::protocol/success? true
+           ::protocol/request-id request-id
+           :db-before database
+           :db-after (update database :t inc)
+           :tx-data []
+           :tempids {}
+           :tx-meta {}}))
 
       {::protocol/success? false
        ::protocol/request-id request-id
@@ -188,25 +198,30 @@
 
 (defn- invoke-value
   [agent-id invocation-id parsed
-   & {:keys [deadline-ms result-limit-bytes function-symbol identity-key]
+   & {:keys [deadline-ms result-limit-bytes function-symbol identity-key
+             invocation-database run-fence turn-id]
       :or {deadline-ms (+ (System/currentTimeMillis) 30000)
            result-limit-bytes 1000000
            function-symbol 'seon.execution.runtime/eval-batch!
-           identity-key :seon.execution/artifact-digest}}]
-  {:seon.execution/message :seon.execution.message/invoke
-   :seon.execution/protocol-version 3
-   :seon.execution/agent-id agent-id
-   :seon.execution/invocation-id invocation-id
-   :seon.db/db database
-   :seon.execution/function-identity
-   {:seon.execution/function-symbol function-symbol
-    identity-key artifact-digest}
-   :seon.execution/arguments
-   [{:seon.eval/parsed parsed
-     :seon.eval/starting-ns 'my.agent.conformance
-     :seon.agent.turn/id-of-turn "turn-conformance"}]
-   :seon.execution/deadline-ms deadline-ms
-   :seon.execution/result-limit-bytes result-limit-bytes})
+           identity-key :seon.execution/artifact-digest
+           invocation-database database
+           turn-id "turn-conformance"}}]
+  (cond->
+   {:seon.execution/message :seon.execution.message/invoke
+    :seon.execution/protocol-version 3
+    :seon.execution/agent-id agent-id
+    :seon.execution/invocation-id invocation-id
+    :seon.db/db invocation-database
+    :seon.execution/function-identity
+    {:seon.execution/function-symbol function-symbol
+     identity-key artifact-digest}
+    :seon.execution/arguments
+    [(cond-> {:seon.eval/parsed parsed
+              :seon.eval/starting-ns 'my.agent.conformance}
+       turn-id (assoc :seon.agent.turn/id-of-turn turn-id))]
+    :seon.execution/deadline-ms deadline-ms
+    :seon.execution/result-limit-bytes result-limit-bytes}
+    run-fence (assoc :seon.execution/run-fence run-fence)))
 
 (defn- form [source] {:seon.repl/kind :form :seon.repl/source source})
 
@@ -460,6 +475,90 @@
       (is (= 10 (get-in (recv! session)
                         [:seon.execution/result :seon.host/results 0
                          :seon.eval/value])))
+      (finally (close! session)))))
+
+(deftest held-run-fence-uses-the-invocation-database-and-preserves-results
+  (reset! transaction-requests [])
+  (let [invocation-database
+        (assoc database
+               :t (dec (:t database))
+               :datahike/commit-id
+               #uuid "ea0976b4-cd7a-55d6-9832-8279c6d62365")
+        [session _ready] (open-session! "held-agent")]
+    (try
+      (send! session
+             (invoke-value "held-agent" "without-fence" [(form "(+ 20 22)")]
+                           :invocation-database invocation-database
+                           :turn-id nil))
+      (let [without-fence (:seon.execution/result (recv! session))]
+        (send! session
+               (invoke-value "held-agent" "with-fence" [(form "(+ 20 22)")]
+                             :invocation-database invocation-database
+                             :run-fence {:seon.agent.run/id "held-run"}
+                             :turn-id nil))
+        (let [with-fence (:seon.execution/result (recv! session))
+              requests @transaction-requests
+              request (first requests)]
+          (is (= without-fence with-fence)
+              "a held fence leaves the batch result equal")
+          (is (= (seq (uds/encode without-fence))
+                 (seq (uds/encode with-fence)))
+              "a held fence leaves the batch result byte-identical")
+          (is (= 1 (count requests))
+              "the held receiptless batch adds only its fence transaction")
+          (is (= invocation-database (:seon.db/db request)))
+          (is (= [(run-fence-cas "held-agent" "held-run")]
+                 (::protocol/transaction-data request))
+              "the transaction contains exactly one run-pointer CAS")))
+      (reset! transaction-requests [])
+      (send! session
+             (invoke-value "held-agent" "held-recorded"
+                           [(form "(do (print \"held-output\") 42)")]
+                           :invocation-database invocation-database
+                           :run-fence {:seon.agent.run/id "held-run"}))
+      (let [recorded (:seon.execution/result (recv! session))
+            requests @transaction-requests
+            transaction-data (mapcat ::protocol/transaction-data requests)]
+        (is (= 3 (count requests))
+            "the fence precedes the ordinary running and terminal receipts")
+        (is (= 1 (count (:seon.eval/ids recorded))))
+        (is (= 1 (:seon.eval/n-ok recorded)))
+        (is (= 42 (get-in recorded [:seon.host/results 0 :seon.eval/value])))
+        (is (= ["held-output"]
+               (into [] (keep :seon.eval/output) transaction-data))))
+      (finally (close! session)))))
+
+(deftest lost-run-fence-skips-receipts-and-evaluation-and-settles-as-a-result
+  (reset! transaction-requests [])
+  (let [[session _ready] (open-session! "fenced-agent")
+        eval-calls (atom 0)
+        original (var-get #'host.eval/eval-form!)]
+    (try
+      (with-redefs-fn
+        {#'host.eval/eval-form!
+         (fn [& arguments]
+           (swap! eval-calls inc)
+           (apply original arguments))}
+        (fn []
+          (send! session
+                 (invoke-value "fenced-agent" "lost-fence"
+                               [(form "(def forbidden 42)")]
+                               :run-fence {:seon.agent.run/id "stale-run"}))
+          (let [response (recv! session)]
+            (is (= :seon.execution.message/result
+                   (:seon.execution/message response)))
+            (is (= "lost-fence" (:seon.execution/invocation-id response)))
+            (is (= {:seon.eval/ids []
+                    :seon.eval/n-ok 0
+                    :seon.eval/n-fail 0
+                    :seon.host/results []
+                    :seon.eval/fenced? true}
+                   (:seon.execution/result response))))))
+      (is (zero? @eval-calls))
+      (is (= 1 (count @transaction-requests))
+          "the rejected fence is the only transaction, so no receipt exists")
+      (is (= [(run-fence-cas "fenced-agent" "stale-run")]
+             (::protocol/transaction-data (first @transaction-requests))))
       (finally (close! session)))))
 
 (deftest oversized-eval-error-is-bounded-and-the-session-survives

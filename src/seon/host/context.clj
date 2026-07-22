@@ -1440,19 +1440,21 @@
 (defn- record-transact!
   "One provenance-stamped transaction on the retained writer connection.
 
+   An explicit `database` becomes the protocol request's `:seon.db/db`;
+   omission preserves the current-head behavior used by receipt recording.
    `candidates` ride the protocol's `::generated-candidates` field, so
    the writer validates and commits managed identity allocation in the
    same transaction — the exact mechanism `seon.db.id/allocate!` uses."
-  [writer {::keys [tx-data candidates]}]
-  (let [head (resolve-head! writer)]
-    (if (:seon/error head)
-      head
+  [writer {::keys [tx-data candidates database]}]
+  (let [database (or database (resolve-head! writer))]
+    (if (:seon/error database)
+      database
       (let [response
             (writer-call!
              writer
              (protocol/transaction-request
               (cond-> {::protocol/request-id (str (random-uuid))
-                       :seon.db/db head
+                       :seon.db/db database
                        ::protocol/transaction-data (vec tx-data)}
                 (provenance)
                 (assoc ::protocol/transaction-meta (provenance))
@@ -1644,10 +1646,18 @@
       (publish-committed-projection! projection-state acquired))))
 
 (defn transact-writer!
-  "Commit host-derived transaction data through the retained writer."
-  {:malli/schema [:=> [:cat ::writer [:vector :any]] :map]}
-  [writer tx-data]
-  (record-transact! writer {::tx-data tx-data}))
+  "Commit host-derived transaction data through the retained writer.
+
+   The three-argument form sends the caller's immutable database value in the
+   transaction request. The two-argument form resolves the current head."
+  {:malli/schema
+   [:function
+    [:=> [:cat ::writer [:vector :any]] :map]
+    [:=> [:cat ::writer :seon.db/db [:vector :any]] :map]]}
+  ([writer tx-data]
+   (record-transact! writer {::tx-data tx-data}))
+  ([writer database tx-data]
+   (record-transact! writer {::database database ::tx-data tx-data})))
 
 (def ^:private eval-allocation-key ::eval-allocation)
 (def ^:private max-allocation-attempts 16)

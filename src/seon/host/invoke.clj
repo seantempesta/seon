@@ -58,6 +58,7 @@
            database :seon.db/db
            identity-value :seon.execution/function-identity
            arguments :seon.execution/arguments
+           run-fence :seon.execution/run-fence
            result-limit :seon.execution/result-limit-bytes} invocation
           function-symbol (:seon.execution/function-symbol identity-value)
           compiled? (contains? identity-value
@@ -97,7 +98,8 @@
                                    (:seon.execution/agent-id
                                     @(::session/startup session))]
                            (eval/eval-batch-result session (first arguments)
-                                              sampling-limits database))]
+                                              sampling-limits database
+                                              (or run-fence {})))]
               (if (and (eval/interrupted-batch? result)
                        @(::session/cancel-requested? session))
                 {::error (session/error-value "The invocation was canceled." :agent)}
