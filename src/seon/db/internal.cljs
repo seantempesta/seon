@@ -235,6 +235,17 @@
            (= :or (first form))
            (= :db.type/string (form->datahike-value-type form))))))
 
+(defn set-valued-attr?
+  "True when a registered Malli :set schema stores as cardinality-many.
+
+   Datahike materializes cardinality-many values as vectors on pull/entity;
+   the registered schema is the shape authority, so the one decode boundary
+   reconstructs the set. Computed from the registry — never a name list."
+  [attr]
+  (when (and (keyword? attr) (schema/registered? attr))
+    (let [form (resolve-malli-form (schema/schema-definition attr))]
+      (and (vector? form) (= :set (first form))))))
+
 (defn encode-edn-slot-values
   "Encode mixed-union attribute values before transport."
   [tx-data]

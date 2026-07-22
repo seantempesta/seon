@@ -1314,6 +1314,21 @@
            (:seon.config/always singleton)))
     (is (= "seon-skills" (:seon.config/skills-dir singleton)))))
 
+(deftest pulled-cardinality-many-set-attrs-decode-to-their-registered-shape
+  ;; Datahike materializes cardinality-many values as VECTORS on pull/entity.
+  ;; The singleton acquisition decodes through the one boundary
+  ;; (db/decode-edn-values), which must reconstruct the registered :set shape
+  ;; — the live boot failure this guards: namespaces-policy rejected the
+  ;; pulled vector at instrumentation and the pod died before readiness.
+  (let [pulled {:seon.config/id "cluster"
+                :seon.config/always ['my.kb 'seon.agent.message]}
+        decoded (db/decode-edn-values pulled)]
+    (is (= #{'my.kb 'seon.agent.message} (:seon.config/always decoded))
+        "the pulled vector decodes to the registered set shape")
+    (is (= {:seon.config/always #{'my.kb 'seon.agent.message}}
+           (config/namespaces-policy decoded))
+        "the decoded singleton satisfies the resolved policy schema")))
+
 (deftest reconcile-replaces-the-always-source-set-exactly
   (let [identity [:seon.config/id config/cluster-config-id]
         installed {:seon.config/always
