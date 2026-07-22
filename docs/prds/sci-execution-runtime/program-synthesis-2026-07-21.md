@@ -932,13 +932,22 @@ happened. Now take the next thing off the queue.
   `database-edn-cap` via the one per-invocation policy query — its W1
   IOU comment retired; late interrupts carry :interrupt AND :timeout;
   new concurrent attribution proof; writer 354/2670) ·
-  **W3c1 IN FLIGHT** (`specs/w3c1-host-run-fence.md`, sol medium, logs
-  `tmp/orchestrator/w3c1-*`: consume `:seon.execution/run-fence`, one
-  CAS at the invocation database via the strengthened transact seam,
-  fenced batches create zero receipts) ·
-  **q23 IN FLIGHT** (`specs/q23-conformance-scan-helper.md`, sol low,
-  logs `tmp/orchestrator/q23-*`). Spine after W3c1: W3b instrumentation
-  (m/-instrument) → W3c2 repair/preflight → W3d authored invocation.
+  **W3c1 DONE `1d9b0477`** (fence consumed, one CAS at the invocation
+  db through transact-writer! — :seon.db/db not expected-db; fenced
+  batches zero receipts; writer 356/2686; end-to-end live fence proof
+  joins q21's 64 KiB proof at the next coordinated checkpoint) ·
+  **q23 DONE `c609c860`** (one scan owner, seon.test.source-scan) ·
+  **ns.source DONE `9ce4366a`** (parser + persisted contract out of
+  analyzer-info; its surface now exactly the five analyzer-state fns;
+  W5's deletion path cleared) ·
+  **W3b IN FLIGHT** (`specs/w3b-host-instrumentation.md`, sol medium,
+  logs `tmp/orchestrator/w3b-*`: seon.host.instrument via
+  m/-instrument, registry + private-fork vars, cold/hot hooks,
+  portable coercion hints, wire-safety falsifier) ·
+  **W10 intermittents investigation IN FLIGHT** (read-only, B8/B11 +
+  branch-qualified eval-cljs hang, logs
+  `tmp/orchestrator/w10-intermittents-*`). Spine after W3b: W3c2
+  repair/preflight → W3d authored invocation.
 
 ### NO PENDING OWNER DECISIONS
 
