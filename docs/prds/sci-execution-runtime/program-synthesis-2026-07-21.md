@@ -1162,6 +1162,15 @@ Lane states at wind-down:
   first deliverable; excludes my.blob). Owner goal text installed as
   the harness persistent goal (dissolve-first, parallelize,
   pre-ruled specs).
+- Weakness queue: AGENT-FACING interface-design guidance does not
+  exist yet (dev-side skills/conventions do). WHEN: immediately after
+  exemplar acceptance — one small unit distilling the seam contract
+  (effect-class choice, op-id, errors-as-values, closed request maps,
+  register-and-reference) into the skill corpus / a context block,
+  show-don't-tell with the exemplar as the worked example. Seam
+  "tested" status: foundations green; the seam itself is mid-proof —
+  p1c's dual-tier test file + census + live turn ARE the test; do not
+  report it as tested before those gates land.
 - Earliest unsettled contract: the seam exemplar (P1c) proving one
   same-source seon.db definition on both tiers. Its integrated proof =
   the dual-tier .cljc test file + census delta + live isolated-cluster
