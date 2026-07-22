@@ -983,8 +983,17 @@ happened. Now take the next thing off the queue.
   exposes it through the wrapper + gains an EPHEMERAL reconciliation
   mode off the apply ledger; direct-call fast path only on stamped
   match; private authored fns allowed (child parity); the mislabeled
-  render fixture becomes the positive routing test. W3d2 cross-agent
-  live require queued separately) ·
+  render fixture becomes the positive routing test) ·
+  **W3d1 DONE `7aa16012`** + **W3d2 DONE `35269aaa`** (cross-agent
+  live require: post-eval install through the one path — the live Var
+  from eval-form! rides install-nursery!, no replay; corpus-backed
+  load-fn at one immutable database value; all falsifiers proven;
+  writer 369/2781). **THE W3 HOST-PARITY SERIES IS COMPLETE** —
+  typed interrupts, output parity, run fence, instrumentation,
+  repair/preflight, authored invocation, live require: the U6+U11
+  hard blockers are closed ·
+  **q22a IN FLIGHT** (`specs/q22a-execution-program-paging.md`, sol
+  medium, logs `tmp/orchestrator/q22a-*`) ·
   **W10 intermittents investigation IN FLIGHT** (read-only, B8/B11 +
   branch-qualified eval-cljs hang, logs
   `tmp/orchestrator/w10-intermittents-*`). Spine after W3b: W3c2
