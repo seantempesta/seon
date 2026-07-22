@@ -619,6 +619,99 @@ Pending live proofs at next checkpoint: none outstanding (q21 64KiB
 PASSED; W3c1/W3d1 host-tier live proof PASSED via WP-S1a's gated
 drive). Weakness queue rows current through q28.
 
+## SKEPTIC RESTART VERIFICATION (2026-07-22 midday) — Phase-1 fresh-eyes pass
+
+A deliberate adversarial re-verification of the 48-hour sprint before
+continuing the queue. Results:
+
+### Sound (verified, not just re-read)
+
+- **All three gates green on the exact final tree** (D15/D16 never had
+  a combined rerun): cljs 1523/7373 · writer 371/2790 · operator
+  300/1709, zero failures.
+- **Combined commits 9bc00982 + 05a13dd4 audited file-by-file**: both
+  two-unit coherence claims hold; every touched file traces to its
+  unit (riders in 05a13dd4 are D13 key-consumers).
+- **R1 LIVE PROOF PASSED** (it had only compiled-test evidence): real
+  DeepSeek drive on a fresh agent; bounded set render with `… +2130
+  more` + trailing `‹partial view…›` honest continuation; clean
+  identity-carrying map renders; `result/inline` absent from the whole
+  134k-char captured prompt; errors preserved as data; agent adapted
+  around budget declines and completed honestly in 6 turns.
+- **W1.6 explicit-adoption adversarial review (sol, fresh eyes):
+  SOUND, zero defects.** The adoption set is the fixed one-element
+  `[:seon.ai/id "config"]` derived from the declaration — it cannot
+  grow from database contents; delete-then-not-replace is impossible
+  (one fenced transaction); ACME derives its own adoption from its own
+  declaration. Five regression gaps queued (q32).
+- **Spot-checks re-derived from diffs (sol): W1.7, W3b-fix, D16 all
+  CONFIRMED.** W1.7 caveat → q31; D16 foreign diff = indentation only.
+
+### Defects found (the skepticism paid)
+
+- **q29 (CRITICAL, blocks W5-0/W5): host-tier instrument rejection
+  crashes envelope building** — with the dial ON, ANY wrong-arg call
+  to an instrumented fn on the supervised host throws `nth not
+  supported on this type: PersistentHashSet`, escapes the per-form
+  containment as an invocation-level error, and closes the run
+  `:error` (observed on a probe agent AND root; pod tier renders the
+  full envelope for identical calls). Found by the Phase-1 COMPOSITION
+  drive (fence + instrumentation + authored invocation under the dial
+  — the empty-batch WP-S1a proof could never see it). Evidence + repro:
+  `docs/seon/issues/host-instrument-rejection-crashes-envelope.md`.
+  Dial restored OFF, converged (0 ops), root 200. Sol fix lane in
+  flight (`tmp/orchestrator/fix-host-instrument-*`). W5-0's preflight
+  drive MUST include a wrong-arg rejection scenario.
+- **q30: datahike budget-exceeded mis-steers as `:core-bug`** — an
+  agent-induced read-ceiling decline crosses the protocol unkinded and
+  the pod default-stamps `:core-bug` (db/internal.cljs:503) with the
+  raw datahike message; the W1 steer-by-config-key contract does not
+  cover the query-budget declines. Sol fix lane in flight
+  (`tmp/orchestrator/fix-budget-steering-*`). Owner: writer-side
+  classification on ex-data, never message regex.
+- **Historical acceptance defect (healed, lesson only): W1.5b
+  `2ab1ce5e` committed five writer tests requiring
+  `seon.db.writer-test-support` WITHOUT the file** — it sat untracked
+  until riding along unmentioned in `9bc00982`; every intermediate
+  "writer green" was unreproducible from a fresh checkout. Reinforces:
+  add new untracked owned files explicitly in the same path-limited
+  commit; a green gate on a dirty tree proves nothing about the
+  commit.
+
+### Weakness queue additions (owner + when)
+
+- **q29** host instrument envelope crash — sol lane NOW; verify + live
+  proof = orchestrator; W5-0 scenario row. CLOSES only with the live
+  wrong-arg drive green under the dial.
+- **q30** budget-decline steering — sol lane NOW; regression in writer
+  gate.
+- **q31** `writer/start!` callers may omit `::read-defaults` →
+  effectively unbounded reads (W1.7 caveat) — fold into the W1
+  config-facts sweep.
+- **q32** W1.6 regression gaps (nonexistent-adopted-identity full
+  reconcile, writer-backed failure injection, end-to-end
+  REPL-provenance adoption drive, ACME request construction,
+  real-state retry after host-coordinate failure) — one small test
+  unit, next free slot.
+- **q33** stale `seon.repl.internal` prose/docstring tokens
+  (src/seon/repl.cljs ×4, src/seon/diffusion/grammar.cljc ×2,
+  src/seon/agent/ctx.cljs:1199) + `test/seon/repl/internal_test.cljc`
+  ns rename — docstrings render into agent context, so they lie;
+  mechanical sol low, next free slot.
+
+### Queue-order correction (fresh-eyes ruling, recorded)
+
+The wind-down queue serialized the EDN normalize series ahead of
+WP-S2. That conflated two rulings: "NORMALIZE dispatches FIRST" was
+modeling-before-tuple-INFRASTRUCTURE (structured-values context), not
+normalize-before-WP-S2; the standing tranche ruling is "WP-S leads,
+then W5, packages after", and the WP-S grounding names the critical
+gap (no sci-host respawn actor) that both the containment thesis and
+the cutover depend on. CORRECTED ORDER: **WP-S2 is the spine lane**
+(after q29 lands — respawn work should not build on a host tier that
+kills every real turn); the EDN normalize series (1)→(2)→(3)… fills
+the parallel slot; W5-0 → W5 after both q29 and WP-S2.
+
 ## Execution state (2026-07-21 evening, restart anchor)
 
 READ THIS FIRST on restart. Nothing is running; the tree is clean
