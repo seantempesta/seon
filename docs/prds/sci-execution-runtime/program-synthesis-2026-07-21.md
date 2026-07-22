@@ -996,9 +996,17 @@ happened. Now take the next thing off the queue.
   batches at one frozen basis; provenance catch — identity pulls alone
   would include boot/core rows; IVector crash dead; live equality vs
   all six legacy queries; cljs 1504/7261) ·
-  **q22b IN FLIGHT** (`specs/q22b-ctx-renderer-paging.md`, sol medium,
-  logs `tmp/orchestrator/q22b-*`: namespaces + warnings ctx renderers
-  page + preserve errors) ·
+  **q22b DONE `07c998a5`** (ctx renderers page — 12k-char source
+  chunks, count-distinct warnings; errors preserved; TWO live-drive
+  rounds: round 1's real-corpus failures — 79k-weight page + response
+  keyword in datalog — caught by the drive the unit's own error
+  preservation made diagnosable; round 2 clean end-to-end after the
+  admission refresh: fresh agent, both blocks healthy in the real
+  prompt, turn :completed. cljs 1508/7276. LESSON: prompt-side render
+  code rides the ADMITTED generation — hot reload alone doesn't
+  refresh agent prompts; live proofs of ctx changes need the
+  restart/admission boundary. The earlier :crashed close did not
+  recur.) Remaining q22: host sentinel (q22c), web value (q22d) ·
   **W10 intermittents investigation IN FLIGHT** (read-only, B8/B11 +
   branch-qualified eval-cljs hang, logs
   `tmp/orchestrator/w10-intermittents-*`). Spine after W3b: W3c2
