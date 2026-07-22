@@ -407,6 +407,76 @@
                           (str (name %) "-start-instant"))))
           [:owner :anchor :workload])))
 
+(defn- readable-file-evidence [path]
+  {:seon.dev.process-test/path path
+   :seon.dev.process-test/exists? (boolean (and path (fs/exists? path)))
+   :seon.dev.process-test/content
+   (when (and path (fs/regular-file? path))
+     (try
+       (slurp path)
+       (catch Throwable failure
+         (str "<unreadable: " (ex-message failure) ">"))))})
+
+(defn- shell-evidence [command]
+  (select-keys (shell/sh {:continue true
+                          :out :string
+                          :err :string
+                          :cmd command})
+               [:exit :out :err]))
+
+(defn- capture-b11-first-failure!
+  [directory record failure wait-elapsed-ms]
+  (let [containment (:seon.dev.process/containment record)
+        process-group
+        (:seon.dev.process.containment/process-group containment)
+        pids (mapv :seon.dev.process/pid (containment-identities record))
+        process-state
+        (shell-evidence
+         ["/bin/ps" "-o" "pid=,ppid=,pgid=,state=" "-p"
+          (str/join "," pids)])
+        group-absence-probe
+        (shell-evidence ["/bin/kill" "-0" "--" (str "-" process-group)])
+        evidence
+        {:seon.dev.process-test/summary
+         "B11 first containment-uncertain evidence"
+         :seon.dev.process-test/wait-elapsed-ms wait-elapsed-ms
+         :seon.dev.process-test/failure-message (ex-message failure)
+         :seon.dev.process-test/failure-data (ex-data failure)
+         :seon.dev.process-test/foreign-process-record record
+         :seon.dev.process-test/process-state process-state
+         :seon.dev.process-test/group-absence-probe group-absence-probe
+         :seon.dev.process-test/owner-log
+         (readable-file-evidence (:seon.dev.process/log record))
+         :seon.dev.process-test/descriptor
+         (readable-file-evidence
+          (some-> (:seon.dev.process.containment/result-path containment)
+                  fs/parent
+                  (fs/path "descriptor.json")
+                  str))
+         :seon.dev.process-test/terminal-result
+         (readable-file-evidence
+          (:seon.dev.process.containment/result-path containment))
+         :seon.dev.process-test/application-result
+         (readable-file-evidence
+          (:seon.dev.process.containment/application-result-path containment))}
+        capture-path (str (fs/path directory "B11-FIRST-FAILURE.txt"))]
+    (spit capture-path
+          (str "# B11 first containment-uncertain evidence\n\n"
+               "This fixture directory was retained before hard cleanup.\n"
+               "The EDN snapshot below contains the foreign process record, "
+               "containment owner log, descriptor and terminal/application "
+               "result files, PID/PPID/PGID/state, the process-group absence "
+               "probe, and elapsed wait time.\n\n"
+               (pr-str evidence) "\n"))
+    capture-path))
+
+(defn- b11-fixture-directory! []
+  (let [directory
+        (fs/path (System/getProperty "user.dir") "tmp"
+                 (str "b11-" (random-uuid)))]
+    (fs/create-dirs directory)
+    (str directory)))
+
 (deftest contained-one-shot-publishes-identity-before-workload-admission
   (let [directory (str (fs/create-temp-dir {:prefix "seon-one-shot-gate-"}))
         configuration (signal-fixture-config directory)
@@ -525,8 +595,11 @@
         (fs/delete-tree directory {:force true})))))
 
 (deftest contained-one-shot-drains-a-foreign-generation-without-overlap
-  (let [directory (str (fs/create-temp-dir {:prefix "seon-one-shot-foreign-"}))
-        configuration (signal-fixture-config directory)
+  (let [directory (b11-fixture-directory!)
+        configuration
+        (assoc (signal-fixture-config directory)
+               :seon.dev.config/containment-socket-dir
+               (str (fs/path directory "s")))
         application-result (str (fs/path directory "application.edn"))
         foreign-request
         (contained-one-shot-request
@@ -535,7 +608,9 @@
         (contained-one-shot-request
          configuration ["python3" "-c" "raise SystemExit(0)"]
          application-result 5000 "requested")
-        foreign (atom nil)]
+        foreign (atom nil)
+        capture-path (atom nil)
+        wait-started-ns (atom nil)]
     (try
       (reset! foreign
               (#'process/spawn-detached!
@@ -544,9 +619,18 @@
                 :seon.dev.process/application-result-path application-result}))
       (let [error
             (try
+              (reset! wait-started-ns (System/nanoTime))
               (process/contained-one-shot! requested)
               nil
-              (catch clojure.lang.ExceptionInfo failure failure))]
+              (catch clojure.lang.ExceptionInfo failure
+                (when (= :seon.dev.process.status/containment-uncertain
+                         (:seon.dev.process/status (ex-data failure)))
+                  (reset! capture-path
+                          (capture-b11-first-failure!
+                           directory @foreign failure
+                           (quot (- (System/nanoTime) @wait-started-ns)
+                                 1000000))))
+                failure))]
         (is (some? error))
         (is (= :seon.dev.process.status/foreign-one-shot
                (:seon.dev.process/status (ex-data error))))
@@ -558,7 +642,8 @@
                                                 process/restore-admin-id)]
           (hard-clean-containment-fixture! record))
         (when @foreign (hard-clean-containment-fixture! @foreign))
-        (fs/delete-tree directory {:force true})))))
+        (when-not @capture-path
+          (fs/delete-tree directory {:force true}))))))
 
 (defn- restore-admin-probe-record
   [configuration]
