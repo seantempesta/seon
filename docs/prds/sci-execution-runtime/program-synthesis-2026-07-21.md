@@ -1175,6 +1175,22 @@ Lane states at wind-down:
   deliberate opt-in per-family mechanism for stateful cross-boundary
   references; pull forward only if the my.* inventory shows a real
   present need. P2 lanes enforce (b) in their interpreters/tests.
+- **P2 first wave RETURNED, reviewed, HELD for the serial gate**:
+  `p2-web` (web.cljc + internal.cljc + pod leaf; effects
+  grants :read / fetch :external / search :external; no :idempotent
+  entry so no op-id) and `p2-fs-shell` (fs/core.cljc +
+  shell/core.cljc; 20 entries classified 12 :read / 8 :external;
+  home-dir fixed to the flat steering envelope per ruling 7) both
+  passed orchestrator skeptic review: zero platform residue in cores,
+  entry-only conditionals, installer boundary respected, JVM require
+  proofs green. Their full-suite runs + live proofs were honestly
+  reported INVALID (overlapped p1c's mid-edit shared build inputs —
+  known cost of unserializing P2). ACCEPTANCE PLAN: when p1c returns,
+  freeze the tree, run the authoritative serial gates (full
+  bin/test-cljs + bin/test-writer + isolated-cluster live proofs),
+  then path-limited commits in order p1c → p2-web → p2-fs-shell,
+  then dispatch the staged second wave (message/lifecycle · blob ·
+  my.* · agent-guidance unit).
 - Weakness queue: AGENT-FACING interface-design guidance does not
   exist yet (dev-side skills/conventions do). WHEN: immediately after
   exemplar acceptance — one small unit distilling the seam contract
