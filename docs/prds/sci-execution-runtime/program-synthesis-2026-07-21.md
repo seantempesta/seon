@@ -1172,6 +1172,25 @@ vector-type slice, derivation layer placement, EDN-slot/blob/q22-paging
 interplay, cost probes, staged unit cut. Feeds the post-W5 series
 alongside the virtual-agents closures.
 
+### OWNER DESIGN INSIGHT (2026-07-22 night): EFFECT-CLASSIFIED REPLAY
+
+Binding requirement for the virtual-agents closure design: the side-
+effect boundary is ENUMERABLE BY CONSTRUCTION (sci code reaches the
+world only through capability fns, db writes, provider calls) — so
+recovery classifies per eval receipt: PURE (no capability entries) →
+restore the stored value, never replay (re-interpret only to rebuild
+process-local objects, safe because pure); IDEMPOTENT effects (db
+request-ids, capability op-ids) → re-verify via receipts, retries
+discover committed results; EXTERNAL non-idempotent → never auto-
+replay, mark attempted-outcome-unknown, reconcile explicitly;
+READ-ONLY → replay freely (staleness is a freshness question).
+Replay policy declares per effect class on the capability fn schemas
+(computed rule: capability namespaces are effectful by construction).
+This is also derivation-storage's purity precondition made checkable:
+"provably pure" = zero effect entries. Folds into the four-closure
+unit design with the phase cursor (where death occurred) + effect log
+(what the dead form already did).
+
 ### NO PENDING OWNER DECISIONS
 
 The 4 W1-boot decisions were folded as recommendations into the shipped
