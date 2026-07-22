@@ -9,6 +9,7 @@
             [seon.db.protocol :as protocol]
             [seon.db.registry :as registry]
             [seon.db.transport.uds :as uds]
+            [seon.db.writer-test-support :as writer-test]
             [seon.db.writer :as writer]
             [seon.embed :as embed]
             [seon.schema :as schema])
@@ -39,7 +40,7 @@
 
 (defn- call!
   [channel request]
-  (uds/call! {::uds/channel channel ::uds/message request}))
+  (writer-test/call-channel! channel request))
 
 (deftest writer-failures-preserve-the-existing-seon-error-kind
   (let [throwable (ex-info "unknown attribute" {:seon.error/kind :user-input})
@@ -80,7 +81,7 @@
           ::writer/database-name database-name
           ::writer/backend :memory
           ::writer/request-socket-path request-path})
-        ^SocketChannel request-channel (uds/connect! request-path)]
+        ^SocketChannel request-channel (writer-test/open-channel! request-path)]
     (try
       (let [capability-request
             (protocol/capabilities-request
@@ -140,8 +141,8 @@
           ::writer/database-name database-name
           ::writer/backend :memory
           ::writer/request-socket-path request-path})
-        ^SocketChannel a (uds/connect! request-path)
-        ^SocketChannel b (uds/connect! request-path)]
+        ^SocketChannel a (writer-test/open-channel! request-path)
+        ^SocketChannel b (writer-test/open-channel! request-path)]
     (try
       (let [head
             (call! a
@@ -296,7 +297,7 @@
         transport
         (#'writer/transport-connection
          {::uds/close! (fn [] nil) ::uds/send! (fn [_message] nil)})
-        ^SocketChannel request-channel (uds/connect! request-path)]
+        ^SocketChannel request-channel (writer-test/open-channel! request-path)]
     (try
       (let [acquired (promise)]
         (writer/handle-request!
@@ -507,7 +508,7 @@
         (assoc (::registry/connection-id main) 1 :experiment/writer)]
     (try
       (d/branch! (::registry/conn main) :db :experiment/writer)
-      (with-open [channel (uds/connect! request-path)]
+      (with-open [channel (writer-test/open-channel! request-path)]
         (let [ensure-response
               (call! channel
                      (protocol/ensure-database-request
@@ -571,7 +572,7 @@
                  branch)
       (let [before (branch/head
                     (d/branch-as-db (::registry/conn main) branch))]
-        (with-open [channel (uds/connect! request-path)]
+        (with-open [channel (writer-test/open-channel! request-path)]
           (let [response
                 (call! channel
                        (protocol/ensure-database-request
@@ -606,7 +607,7 @@
           ::writer/database-name database-name
           ::writer/backend :memory
           ::writer/request-socket-path request-path})
-        ^SocketChannel request-channel (uds/connect! request-path)]
+        ^SocketChannel request-channel (writer-test/open-channel! request-path)]
     (try
       (let [acquired (acquire! request-channel database-name "writer/session")
             initial-db (:seon.db/db acquired)
@@ -732,8 +733,8 @@
           ::writer/database-name database-name
           ::writer/backend :memory
           ::writer/request-socket-path request-path})
-        ^SocketChannel a (uds/connect! request-path)
-        ^SocketChannel b (uds/connect! request-path)]
+        ^SocketChannel a (writer-test/open-channel! request-path)
+        ^SocketChannel b (writer-test/open-channel! request-path)]
     (try
       (let [acquired-a (acquire! a database-name "fence/a")
             _acquired-b (acquire! b database-name "fence/b")

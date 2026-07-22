@@ -11,6 +11,8 @@
             [seon.dev.process :as process]
             [seon.dev.release :as release]
             [seon.dev.state :as state]
+            [seon.db.protocol :as db.protocol]
+            [seon.db.transport.uds :as uds]
             [seon.launch :as launch])
   (:import [java.io BufferedReader InputStreamReader]
            [java.net ServerSocket SocketException]
@@ -238,7 +240,7 @@
    "babashka-1.12.218-macos-aarch64.tar.gz"
    :seon.dev.release/babashka-asset-sha-256
    "5bc992f39692b707403fc322e860fc82017da7de4a84a32267abb4d50a0c5f9d"
-   :seon.dev.release/database-protocol-version 12
+   :seon.dev.release/database-protocol-version 13
    :seon.dev.release/execution-protocol-version 3
    :seon.dev.release/bun-member :seon.release.member/bun
    :seon.dev.release/writer-member :seon.release.member/writer
@@ -320,8 +322,25 @@
   (fs/delete-tree (:seon.dev.test/directory configuration)))
 
 (def ^:private writer-fixture-source
-  (str "import os,socket,sys,time\n"
+  (let [opening-response
+        (uds/encode
+         (db.protocol/session-open-success
+          {::db.protocol/configured-maximum-frame-bytes
+           db.protocol/maximum-frame-bytes
+           ::db.protocol/maximum-frame-bytes
+           db.protocol/maximum-frame-bytes}))
+        opening-response-base64
+        (.encodeToString (java.util.Base64/getEncoder) opening-response)]
+    (str "import base64,os,socket,struct,sys,time\n"
        "req,port,delay=sys.argv[1],sys.argv[2],float(sys.argv[3])\n"
+       "response=base64.b64decode('" opening-response-base64 "')\n"
+       "def recv_exact(c,n):\n"
+       " data=b''\n"
+       " while len(data)<n:\n"
+       "  chunk=c.recv(n-len(data))\n"
+       "  if not chunk: return None\n"
+       "  data+=chunk\n"
+       " return data\n"
        "time.sleep(delay)\n"
        "try: os.unlink(req)\n"
        "except FileNotFoundError: pass\n"
@@ -329,7 +348,12 @@
        "s.bind(req); s.listen(16)\n"
        "open(port,'w').write('1')\n"
        "while True:\n"
-       " c,_=s.accept(); c.close()\n"))
+       " c,_=s.accept()\n"
+       " header=recv_exact(c,4)\n"
+       " if header:\n"
+       "  payload=recv_exact(c,struct.unpack('>I',header)[0])\n"
+       "  if payload is not None: c.sendall(struct.pack('>I',len(response))+response)\n"
+       " c.close()\n")))
 
 (def ^:private pod-fixture-source
   (str "import http.server,sys,time\n"

@@ -49,7 +49,10 @@
   (case (::protocol/operation request)
     :seon.db.protocol.operation/capabilities
     (success request
-             {::protocol/capabilities {:seon.db.capability/query true}})
+             {::protocol/capabilities
+              {:seon.db.capability/query true
+               ::protocol/version protocol/current-version
+               ::protocol/maximum-frame-bytes protocol/maximum-frame-bytes}})
 
     :seon.db.protocol.operation/ensure-database
     (if (true? (::fail-next-ensure? @control))
@@ -101,7 +104,11 @@
         original-request! uds/request!
         original-connected? uds/connected?
         original-close! uds/close!
-        session {::session true}
+        session {::session true
+                 ::uds/version protocol/current-version
+                 ::uds/configured-maximum-frame-bytes
+                 protocol/maximum-frame-bytes
+                 ::uds/maximum-frame-bytes protocol/maximum-frame-bytes}
         control
         (atom {::requests []
                ::connect-count 0

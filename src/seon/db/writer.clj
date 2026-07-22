@@ -106,7 +106,9 @@
   [::active-requests {:optional true} ::active-requests]
   [::query-jobs {:optional true} ::query-jobs]
   [::interest-state {:optional true} ::interest-state]
-  [::readiness-owner {:optional true} ::readiness-owner]])
+  [::readiness-owner {:optional true} ::readiness-owner]
+  [::protocol/configured-maximum-frame-bytes
+   :seon.db.protocol/configured-maximum-frame-bytes]])
 (schema/register! ::request-server :seon.db.transport.uds/request-server)
 (schema/register! ::database-name :seon.db.protocol/database-name)
 (schema/register! ::backend :seon.db.protocol/backend)
@@ -116,6 +118,8 @@
 (schema/register!
  ::request-server-options
  [:map {:closed true}
+  [::uds/maximum-frame-bytes ::uds/maximum-frame-bytes]
+  [::uds/maximum-connections ::uds/maximum-connections]
   [::uds/shutdown-timeout-ms ::uds/shutdown-timeout-ms]
   [::uds/maximum-input-bytes ::uds/maximum-input-bytes]
   [::uds/maximum-response-slots ::uds/maximum-response-slots]
@@ -3718,7 +3722,7 @@
            (assoc (d/capabilities)
                   ::protocol/version protocol/current-version
                   ::protocol/maximum-frame-bytes
-                  protocol/maximum-frame-bytes)})
+                  (::protocol/configured-maximum-frame-bytes runtime))})
 
          :seon.db.protocol.operation/resolve-head
          (let [{::registry/keys [conn database-name]}
@@ -4233,6 +4237,10 @@
                        ::interest-state interest-state
                        ::interest-lock interest-lock
                        ::deadline-executor deadline-executor
+                       ::protocol/configured-maximum-frame-bytes
+                       (get request-server-options
+                            ::uds/maximum-frame-bytes
+                            protocol/maximum-frame-bytes)
                        ::readiness-owner (Object.))
         _ (reset! runtime-ref runtime)
         _ (register-readiness! runtime)]

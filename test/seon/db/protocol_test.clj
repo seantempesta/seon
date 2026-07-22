@@ -34,8 +34,62 @@
     (transit/read
      (transit/reader (ByteArrayInputStream. (.toByteArray output)) :json))))
 
+(defn- transit-bytes
+  [value]
+  (let [output (ByteArrayOutputStream.)]
+    (transit/write (transit/writer output :json) value)
+    (.size output)))
+
+(defn- session-shapes
+  []
+  {:request
+   (protocol/session-open-request
+    {::protocol/maximum-frame-bytes protocol/maximum-frame-bytes})
+   :success
+   (protocol/session-open-success
+    {::protocol/configured-maximum-frame-bytes 1048576
+     ::protocol/maximum-frame-bytes 1048576})
+   :incompatible-version
+   (protocol/incompatible-version-failure {::protocol/peer-version 12})
+   :connection-capacity
+   (protocol/connection-capacity-failure
+    {::protocol/maximum-connections 12})
+   :session-open-required
+   (protocol/session-open-required-failure
+    {::protocol/request-id "ordinary/request"})
+   :oversized-inbound
+   (protocol/frame-too-large-failure
+    {::protocol/request-id protocol/session-control-request-id
+     ::protocol/maximum-frame-bytes 65536})
+   :oversized-response
+   (protocol/frame-too-large-failure
+    {::protocol/request-id "ordinary/request"
+     ::protocol/maximum-frame-bytes 65536})})
+
+(deftest session-opening-shapes-are-closed-transit-data-below-bootstrap-ceiling
+  (is (= 13 protocol/current-version))
+  (is (= "session/open" protocol/session-open-request-id))
+  (is (= "session/control" protocol/session-control-request-id))
+  (doseq [[shape value] (session-shapes)]
+    (is ((if (= shape :request)
+           protocol/valid-request?
+           protocol/valid-response?)
+         value)
+        (str shape " is canonical protocol data"))
+    (is (= value (transit-roundtrip value))
+        (str shape " survives Transit JSON"))
+    (is (< (transit-bytes value)
+           protocol/session-open-maximum-frame-bytes)
+        (str shape " fits the fixed session-open ceiling")))
+  (is (false? (protocol/valid-request?
+               (assoc (:request (session-shapes))
+                      ::protocol/version 12))))
+  (is (false? (protocol/valid-response?
+               (dissoc (:connection-capacity (session-shapes))
+                       ::protocol/configuration-key)))))
+
 (deftest database-values-are-complete-closed-and-temporally-unambiguous
-  (is (= 12 protocol/current-version))
+  (is (= 13 protocol/current-version))
   (is (protocol/database-value? db))
   (is (protocol/database-value? (assoc db :as-of 536870928)))
   (is (protocol/database-value? (assoc db :since #inst "2026-07-16")))

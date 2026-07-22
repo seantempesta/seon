@@ -72,13 +72,16 @@
     "typed-eof"
     {::context/pool-size 1}
     (fn [_server session]
-      (with-open [channel (uds/connect!
-                           (::context/writer-socket-path session))]
-        (with-redefs [uds/read-frame (fn [_input] nil)]
+      (let [database-session
+            (uds/open-session! (::context/writer-socket-path session))]
+        (try
+        (with-redefs [uds/read-frame (fn
+                                      ([_input] nil)
+                                      ([_input _maximum-frame-bytes] nil))]
           (let [request-id "pool/typed-eof"
                 failure
                 (try
-                  (uds/call! {::uds/channel channel
+                  (uds/call! {::uds/session database-session
                               ::uds/message
                               (protocol/ping-request
                                {::protocol/request-id request-id})})
@@ -86,7 +89,9 @@
                   (catch clojure.lang.ExceptionInfo exception
                     (ex-data exception)))]
             (is (= {::uds/eof true ::protocol/request-id request-id}
-                   failure))))))))
+                   failure))))
+          (finally
+            (uds/close-session! database-session)))))))
 
 (deftest a-slow-call-does-not-hold-the-other-member
   (with-writer-session
@@ -148,7 +153,8 @@
                   (is (= :call-deadline
                          (get-in outcome [:seon/error :seon.error/data
                                           ::context/pool-reason])))
-                  (is (not (.isOpen ^SocketChannel (::context/channel victim))))
+                  (is (not (.isOpen ^SocketChannel
+                                    (::uds/channel (::context/session victim)))))
                   (let [replacement (first (pool-members session))]
                     (is (some? replacement))
                     (is (not= (::context/member-id victim)
@@ -194,18 +200,18 @@
             lose-once? (atom true)]
         (is (::protocol/success? seed))
         (with-redefs [uds/call!
-                      (fn [{::uds/keys [channel message] :as input}]
+                      (fn [{::uds/keys [session message] :as input}]
                         (when (= protocol/transact-operation
                                  (::protocol/operation message))
                           (swap! attempts conj
                                  [::protocol/request-id
                                   (::protocol/request-id message)
-                                  ::channel channel]))
+                                  ::session session]))
                         (let [response (original-call input)]
                           (if (and (= target-id (::protocol/request-id message))
                                    (compare-and-set! lose-once? true false))
                             (do (reset! first-response response)
-                                (.close ^SocketChannel channel)
+                                (uds/close-session! session)
                                 (throw (ex-info "simulated lost acknowledgement"
                                                 {:test/lost-response true})))
                             response)))]
@@ -325,6 +331,43 @@
                   (is (::protocol/success? (deref first-call 5000 {})))
                   (is (::protocol/success? (deref second-call 5000 {}))))))))))))
 
+(deftest a-local-oversize-is-not-retried-or-evicted
+  (with-writer-session
+    "local-oversize"
+    {::context/pool-size 1 ::context/call-deadline-ms 5000}
+    (fn [_server session]
+      (context/resolve-head! session)
+      (let [request-id "pool/local-oversize"
+            failure (protocol/frame-too-large-failure
+                     {::protocol/request-id request-id
+                      ::protocol/maximum-frame-bytes 65536})
+            member-before (first (pool-members session))
+            attempts (atom 0)]
+        (with-redefs [uds/call!
+                      (fn [_]
+                        (swap! attempts inc)
+                        (throw (ex-info (::protocol/error failure) failure)))]
+          (is (= failure
+                 (writer-call!
+                  session
+                  (protocol/ping-request
+                   {::protocol/request-id request-id}))))
+          (is (= 1 @attempts))
+          (is (identical? (::context/session member-before)
+                          (::context/session (first (pool-members session))))))))))
+
+(deftest a-frame-failure-retains-its-configuration-data
+  (let [protocol-error-value (var-get #'context/protocol-error-value)
+        response (protocol/frame-too-large-failure
+                  {::protocol/request-id "pool/oversized-response"
+                   ::protocol/maximum-frame-bytes 65536})]
+    (is (= {::protocol/error-kind protocol/frame-too-large-error
+            ::protocol/configuration-key
+            :seon.config.database.transport/maximum-frame-bytes
+            ::protocol/maximum-frame-bytes 65536}
+           (get-in (protocol-error-value response)
+                   [:seon/error :seon.error/data])))))
+
 (deftest close-session-closes-every-member-and-a-fresh-session-admits
   (with-writer-session
     "close"
@@ -356,7 +399,8 @@
           (is (= 2 (count members)))
           (context/close-session! session)
           (is (empty? (pool-members session)))
-          (is (every? #(not (.isOpen ^SocketChannel (::context/channel %)))
+          (is (every? #(not (.isOpen ^SocketChannel
+                                     (::uds/channel (::context/session %))))
                       members)))
         (let [fresh (context/writer-session
                      {::context/writer-socket-path

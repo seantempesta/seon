@@ -7,6 +7,7 @@
             [seon.db.executor :as executor]
             [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds]
+            [seon.db.writer-test-support :as writer-test]
             [seon.db.writer :as writer])
   (:import [java.io File]
            [java.nio.channels Channels SocketChannel]
@@ -31,7 +32,7 @@
 
 (defn- call!
   [channel request]
-  (uds/call! {::uds/channel channel ::uds/message request}))
+  (writer-test/call-channel! channel request))
 
 (defn- database-value
   [database-name native]
@@ -138,8 +139,8 @@
           ::writer/backend :memory
           ::writer/selected-processors 3
           ::writer/request-socket-path request-path})
-        ^SocketChannel quiet (uds/connect! request-path)
-        ^SocketChannel writer-channel (uds/connect! request-path)]
+        ^SocketChannel quiet (writer-test/open-channel! request-path)
+        ^SocketChannel writer-channel (writer-test/open-channel! request-path)]
     (try
       (let [quiet-acquired (acquire! quiet database-name "quiet" false)
             writer-acquired (acquire! writer-channel database-name "writer")
@@ -186,8 +187,8 @@
           ::writer/backend :memory
           ::writer/selected-processors 3
           ::writer/request-socket-path request-path})
-        ^SocketChannel listener (uds/connect! request-path)
-        ^SocketChannel writer-channel (uds/connect! request-path)
+        ^SocketChannel listener (writer-test/open-channel! request-path)
+        ^SocketChannel writer-channel (writer-test/open-channel! request-path)
         request-id "duplicate/listen"]
     (try
       (let [acquired (acquire! listener database-name "duplicate/listener")
@@ -293,9 +294,9 @@
           ::writer/backend :memory
           ::writer/selected-processors 3
           ::writer/request-socket-path request-path})
-        ^SocketChannel a (uds/connect! request-path)
-        ^SocketChannel b (uds/connect! request-path)
-        ^SocketChannel writer-channel (uds/connect! request-path)]
+        ^SocketChannel a (writer-test/open-channel! request-path)
+        ^SocketChannel b (writer-test/open-channel! request-path)
+        ^SocketChannel writer-channel (writer-test/open-channel! request-path)]
     (try
       (let [acquired-a (acquire! a database-name "interest/a")
             acquired-b (acquire! b database-name "interest/b")
@@ -540,8 +541,8 @@
             ::writer/backend :memory
             ::writer/selected-processors 3
             ::writer/request-socket-path request-path})
-          ^SocketChannel listener (uds/connect! request-path)
-          ^SocketChannel healthy (uds/connect! request-path)
+          ^SocketChannel listener (writer-test/open-channel! request-path)
+          ^SocketChannel healthy (writer-test/open-channel! request-path)
           closed? (atom false)]
       (try
         (let [listener-acquired

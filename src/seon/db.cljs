@@ -528,6 +528,22 @@
             _ (when-not (::protocol/success? capabilities-response)
                 (throw (ex-info "Database capability negotiation failed."
                                 capabilities-response)))
+            capabilities (::protocol/capabilities capabilities-response)
+            _ (when-not
+                (and (= (::uds/version session)
+                        (::protocol/version capabilities))
+                     (= (::uds/configured-maximum-frame-bytes session)
+                        (::protocol/maximum-frame-bytes capabilities)))
+                (throw
+                 (ex-info
+                  "Database capabilities disagree with session admission."
+                  {::protocol/version (::protocol/version capabilities)
+                   ::protocol/maximum-frame-bytes
+                   (::protocol/maximum-frame-bytes capabilities)
+                   ::uds/version (::uds/version session)
+                   ::uds/configured-maximum-frame-bytes
+                   (::uds/configured-maximum-frame-bytes session)
+                   :seon.error/kind :configuration})))
             acquire-response
             (await (ensure-and-acquire! session selection initialization))
             _ (doseq [[request-id entry] (::interest-handlers @!session)]
@@ -567,8 +583,7 @@
                              ::selection selection
                              ::session session
                              ::database-name database-name
-                             ::capabilities
-                             (::protocol/capabilities capabilities-response))
+                             ::capabilities capabilities)
                       (dissoc ::opening ::opening-initialization)
                       (cache-database (::db acquire-response)))]
         (swap! !session

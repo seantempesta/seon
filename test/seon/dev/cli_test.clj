@@ -912,26 +912,55 @@
             :publish]
            @effects))))
 
-(deftest carried-config-changes-decline-with-w1-5-steering
+(deftest session-admission-config-changes-reconstruct-the-writer
   (let [loaded (:seon.dev.config/operational-envelope
-                (config-apply-configuration {} 1))]
+                (config-apply-configuration {} 1))
+        result {:seon.runtime.state/ok? true
+                :seon.runtime.state/changed? true
+                :seon.runtime.state/operations 1
+                :seon.runtime.state/attempts 1}]
     (doseq [[attribute value]
             [[:seon.config.database.transport/maximum-frame-bytes 1048576]
              [:seon.config.database.transport/maximum-connections 12]]]
-      (testing (str attribute " remains carried")
+      (testing (str attribute " reconstructs the writer")
         (let [candidate
               (config-apply-configuration
                {:seon.config/database {attribute value}}
-               2)]
+               2)
+              effects (atom [])]
           (with-redefs-fn
-            {#'cli/ready-config-target!
-             (constantly {:seon.dev.target/url "http://pod"})
+            {#'cli/ready-config-target! (constantly {:seon.dev.target/url "http://pod"})
              #'cli/loaded-writer-envelope (constantly loaded)
              #'cli/post-config-control!
-             (fn [& _] (throw (ex-info "pod control was reached" {})))}
+             (fn [_ request]
+               (let [operation (::launch/config-apply-operation request)]
+                 (swap! effects conj operation)
+                 (case operation
+                   :enter-writer-replacement
+                   {:seon.client/writer-replacement-entered? true}
+                   :resume-writer-replacement
+                   {:seon.client/writer-replacement-resumed? true
+                    :seon.client/config-result result})))
+             #'cli/stop-processes!
+             (fn [_ operation targets]
+               (swap! effects conj [operation targets])
+               (stop-result operation targets))
+             #'cli/selected-manifest (constantly {:seon.dev.artifact/id "artifact"})
+             #'process/specs
+             (fn [_ _] {process/writer-id {:seon.dev.process/id process/writer-id}})
+             #'process/ensure!
+             (fn [_ specification]
+               (swap! effects conj [:ensure (:seon.dev.process/id specification)]))
+             #'config/publish-applied-manifest!
+             (fn [_] (swap! effects conj :publish))}
             (fn []
-              (is (thrown-with-msg? Exception #"W1.5"
-                                    (#'cli/apply-live-config! candidate))))))))))
+              (is (= result (#'cli/apply-live-config! candidate)))))
+          (is (= [:enter-writer-replacement
+                  [:seon.dev.process.operation/config-apply #{process/writer-id}]
+                  [:ensure process/writer-id]
+                  :resume-writer-replacement
+                  :publish]
+                 @effects)))))))
 
 (deftest legacy-database-layout-is-never-silently-replaced
   (let [root (fs/create-temp-dir {:prefix "seon-cli-legacy-db-"})

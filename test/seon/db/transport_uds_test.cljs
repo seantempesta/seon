@@ -123,21 +123,39 @@
      ::handler !handler
      ::socket !socket
      ::options !options
+     ::accepted-counts !accepted-counts
      ::writes !writes
      ::close-count !close-count}))
+
+(declare inject!)
 
 (defn- with-fake-bun
   ([accepted-counts body]
    (with-fake-bun accepted-counts {} body))
   ([accepted-counts options body]
    (let [prior-connect @!connect-native
-         fixture (fake-bun accepted-counts)]
+         fixture (fake-bun [])]
      (reset! !connect-native (aget (::bun fixture) "connect"))
-     (-> (uds/connect! options)
-         (.then (fn [session] (body session fixture)))
+     (let [opening (uds/connect! options)]
+       (js/setTimeout
+        (fn []
+          (inject!
+           fixture
+           (encode-frame
+            (protocol/session-open-success
+             {::protocol/configured-maximum-frame-bytes
+              protocol/maximum-frame-bytes
+              ::protocol/maximum-frame-bytes protocol/maximum-frame-bytes})
+            protocol/session-open-maximum-frame-bytes)))
+        0)
+       (-> opening
+         (.then (fn [session]
+                  (reset! (::writes fixture) [])
+                  (reset! (::accepted-counts fixture) accepted-counts)
+                  (body session fixture)))
          (.finally
           (fn []
-            (reset! !connect-native prior-connect)))))))
+            (reset! !connect-native prior-connect))))))))
 
 (defn- inject! [fixture bytes]
   ((aget @(::handler fixture) "data")
@@ -182,6 +200,125 @@
        #"Invalid database frame length"
        (consume-chunk (fresh-parser)
                       (frame-header (inc maximum-frame-bytes))))))
+
+(deftest parser-enforces-the-selected-session-ceiling
+  (is (thrown-with-msg?
+       js/Error
+       #"Invalid database frame length"
+       (consume-chunk
+        (fresh-parser protocol/session-open-maximum-frame-bytes)
+        (frame-header (inc protocol/session-open-maximum-frame-bytes))))))
+
+(deftest admitted-session-retains-the-opening-agreement
+  (async done
+    (-> (with-fake-bun
+          []
+          (fn [session _]
+            (is (= protocol/current-version (::uds/version session)))
+            (is (= protocol/maximum-frame-bytes
+                   (::uds/configured-maximum-frame-bytes session)))
+            (is (= protocol/maximum-frame-bytes
+                   (::uds/maximum-frame-bytes session)))
+            (uds/close! session)))
+        (.then (fn [_] (done)))
+        (.catch (fn [error]
+                  (is false (str "session agreement failed: " error))
+                  (done))))))
+
+(deftest opening-success-must-carry-the-exact-minimum-agreement
+  (let [valid-opening-success? @#'uds/valid-opening-success?
+        configured 65536
+        response (protocol/session-open-success
+                  {::protocol/configured-maximum-frame-bytes configured
+                   ::protocol/maximum-frame-bytes configured})]
+    (is (valid-opening-success? response protocol/maximum-frame-bytes))
+    (is (false?
+         (valid-opening-success?
+          (assoc response ::protocol/maximum-frame-bytes (inc configured))
+          protocol/maximum-frame-bytes)))))
+
+(deftest opening-rejection-settles-connect-with-structured-data
+  (async done
+    (let [prior-connect @!connect-native
+          fixture (fake-bun [])
+          rejection
+          (protocol/connection-capacity-failure
+           {::protocol/maximum-connections 1})]
+      (reset! !connect-native (aget (::bun fixture) "connect"))
+      (let [opening (uds/connect! {})]
+        (js/setTimeout
+         #(inject! fixture
+                   (encode-frame
+                    rejection protocol/session-open-maximum-frame-bytes))
+         0)
+        (-> opening
+            (.then (fn [_] (is false "rejected opening unexpectedly resolved")))
+            (.catch
+             (fn [error]
+               (is (= rejection (ex-data error)))
+               (is (= 1 @(::close-count fixture)))))
+            (.finally #(reset! !connect-native prior-connect))
+            (.then (fn [_] (done)))
+            (.catch
+             (fn [error]
+               (reset! !connect-native prior-connect)
+               (is false (str "opening rejection failed: " error))
+               (done))))))))
+
+(deftest local-oversize-is-a-structured-correlated-failure
+  (async done
+    (-> (with-fake-bun
+          []
+          (fn [session _]
+            (-> (uds/request!
+                 {::uds/session session
+                  ::uds/message
+                  {::protocol/operation protocol/ping-operation
+                   ::protocol/request-id "oversize/local"
+                   ::protocol/result
+                   (apply str (repeat (inc protocol/maximum-frame-bytes) "x"))}})
+                (.then (fn [_] (is false "oversize request unexpectedly sent")))
+                (.catch
+                 (fn [error]
+                   (let [data (ex-data error)]
+                     (is (= "oversize/local" (::protocol/request-id data)))
+                     (is (= protocol/frame-too-large-error
+                            (::protocol/error-kind data)))
+                     (is (= :seon.config.database.transport/maximum-frame-bytes
+                            (::protocol/configuration-key data)))
+                     (is (= protocol/maximum-frame-bytes
+                            (::protocol/maximum-frame-bytes data)))
+                     (uds/close! session)))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [error]
+                  (is false (str "local oversize failure failed: " error))
+                  (done))))))
+
+(deftest session-control-failure-rejects-every-pending-request
+  (async done
+    (-> (with-fake-bun
+          []
+          (fn [session fixture]
+            (let [a (uds/request! {::uds/session session
+                                   ::uds/message (request-message "pending/a")})
+                  b (uds/request! {::uds/session session
+                                   ::uds/message (request-message "pending/b")})
+                  control
+                  (protocol/frame-too-large-failure
+                   {::protocol/request-id protocol/session-control-request-id
+                    ::protocol/maximum-frame-bytes
+                    protocol/maximum-frame-bytes})]
+              (inject! fixture (encode-frame control))
+              (-> (js/Promise.all
+                   #js [(.catch a ex-data) (.catch b ex-data)])
+                  (.then
+                   (fn [failures]
+                     (is (= [control control] (vec (array-seq failures))))
+                     (is (false? (uds/connected? session)))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [error]
+                  (is false (str "control settlement failed: " error))
+                  (done))))))
 
 (deftest multiplexed-session-correlates-out-of-order-responses
   (async done
@@ -465,7 +602,7 @@
       (let [socket-path (str "tmp/seon-bun-uds-test-" (random-uuid) ".sock")
             response (response-message "native-roundtrip" :native)
             response-frame (encode-frame response)
-            !responded? (atom false)
+            !requests (atom 0)
             listener
             (js-invoke
              js/Bun
@@ -476,9 +613,18 @@
               (js-obj
                "binaryType" "uint8array"
                "data" (fn [socket _chunk]
-                        (when-not @!responded?
-                          (reset! !responded? true)
-                          (js-invoke socket "write" response-frame))))))]
+                        (case (swap! !requests inc)
+                          1 (js-invoke
+                             socket "write"
+                             (encode-frame
+                              (protocol/session-open-success
+                               {::protocol/configured-maximum-frame-bytes
+                                protocol/maximum-frame-bytes
+                                ::protocol/maximum-frame-bytes
+                                protocol/maximum-frame-bytes})
+                              protocol/session-open-maximum-frame-bytes))
+                          2 (js-invoke socket "write" response-frame)
+                          nil)))))]
         (-> (uds/connect! {::uds/socket-path socket-path})
             (.then
              (fn [session]

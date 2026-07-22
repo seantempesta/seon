@@ -117,7 +117,9 @@
                            ::executor/maximum-queued 118
                            ::executor/maximum-queued-by-database 119}}))
         expected-request-server-options
-        {::uds/maximum-input-bytes 201
+        {::uds/maximum-frame-bytes 209
+         ::uds/maximum-connections 210
+         ::uds/maximum-input-bytes 201
          ::uds/maximum-response-slots 202
          ::uds/maximum-session-response-slots 203
          ::uds/maximum-output-bytes 204
@@ -138,12 +140,6 @@
       (is (= expected-capacity (::executor/capacity @captured)))
       (is (= expected-request-server-options
              (::writer/request-server-options @captured)))
-      (is (not (contains? (::writer/request-server-options @captured)
-                          ::uds/maximum-connections))
-          "maximum connections remains carried")
-      (is (not (contains? (::writer/request-server-options @captured)
-                          ::uds/maximum-frame-bytes))
-          "maximum frame bytes remains carried")
       (finally
         (delete-tree! directory)))))
 

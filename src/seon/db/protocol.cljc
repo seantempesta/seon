@@ -20,6 +20,7 @@
 ;;; Protocol vocabulary
 
 (def ping-operation :seon.db.protocol.operation/ping)
+(def session-open-operation :seon.db.protocol.operation/session-open)
 (def capabilities-operation :seon.db.protocol.operation/capabilities)
 (def resolve-head-operation :seon.db.protocol.operation/resolve-head)
 (def query-operation :seon.db.protocol.operation/query)
@@ -81,6 +82,14 @@
 (def non-ancestor-error :seon.db.protocol.error/non-ancestor)
 (def ambiguous-history-error
   :seon.db.protocol.error/ambiguous-history)
+(def incompatible-version-error
+  :seon.db.protocol.error/incompatible-version)
+(def connection-capacity-error
+  :seon.db.protocol.error/connection-capacity)
+(def session-open-required-error
+  :seon.db.protocol.error/session-open-required)
+(def frame-too-large-error
+  :seon.db.protocol.error/frame-too-large)
 
 (def lifecycle-error-kinds
   #{duplicate-route-error duplicate-connection-id-error connection-id-mismatch-error
@@ -95,7 +104,11 @@
 (def unknown-status :seon.db.protocol.status/unknown)
 (def feed-behind-status :seon.db.protocol.status/feed-behind)
 
-(def current-version 12)
+(def current-version 13)
+
+(def session-open-request-id "session/open")
+(def session-control-request-id "session/control")
+(def session-open-maximum-frame-bytes 4096)
 
 ;; One wire contract must reject the same legal frame on every host. Paging and
 ;; operation-level result bounds remain the preferred way to stay well below it.
@@ -176,6 +189,7 @@
 (schema/register!
  ::operation
  [:enum ping-operation
+  session-open-operation
   capabilities-operation
   resolve-head-operation
   query-operation
@@ -200,6 +214,10 @@
 (schema/register! ::pong? :boolean)
 (schema/register! ::capabilities :map)
 (schema/register! ::maximum-frame-bytes [:int {:min 1}])
+(schema/register! ::configured-maximum-frame-bytes [:int {:min 1}])
+(schema/register! ::maximum-connections [:int {:min 1}])
+(schema/register! ::peer-version [:int {:min 1}])
+(schema/register! ::configuration-key :qualified-keyword)
 ;; Datahike query and pull values are intentionally polymorphic data. The
 ;; canonical request/response validators apply `ordinary-wire-value?`
 ;; recursively while preserving native result shapes and legitimate bare keys.
@@ -376,6 +394,19 @@
   branch-missing-error protected-main-branch-error active-branch-error
   initializer-error release-error cleanup-required-error
   stale-branch-roster-error restore-divergence-error non-ancestor-error
+  ambiguous-history-error incompatible-version-error connection-capacity-error
+  session-open-required-error frame-too-large-error])
+(schema/register!
+ ::ordinary-error-kind
+ [:enum protocol-error database-error internal-error not-found-error
+  request-conflict-error stale-database-value-error
+  generated-candidate-conflict-error
+  duplicate-route-error duplicate-connection-id-error connection-id-mismatch-error
+  stale-source-head-error stale-target-head-error missing-commit-error
+  unsupported-history-error cut-not-branchable-error branch-exists-error
+  branch-missing-error protected-main-branch-error active-branch-error
+  initializer-error release-error cleanup-required-error
+  stale-branch-roster-error restore-divergence-error non-ancestor-error
   ambiguous-history-error])
 (schema/register! ::error [:string {:min 1}])
 (schema/register!
@@ -443,6 +474,13 @@
  [:map {:closed true}
   [::operation [:= ping-operation]]
   [::request-id ::request-id]])
+(schema/register!
+ ::session-open-request
+ [:map {:closed true}
+  [::operation [:= session-open-operation]]
+  [::request-id [:= session-open-request-id]]
+  [::version [:= current-version]]
+  [::maximum-frame-bytes ::maximum-frame-bytes]])
 (schema/register!
  ::capabilities-request
  [:map {:closed true}
@@ -725,6 +763,7 @@
 (schema/register!
  ::request
  [:multi {:dispatch ::operation}
+  [session-open-operation ::session-open-request]
   [ping-operation ::ping-request]
   [capabilities-operation ::capabilities-request]
   [resolve-head-operation ::resolve-head-request]
@@ -753,12 +792,58 @@
  [:map
   [::success? [:= false]]
  [::request-id ::request-id]
- [::error-kind ::error-kind]
+ [::error-kind ::ordinary-error-kind]
  [::error ::error]
   [:seon.error/kind {:optional true} :keyword]
   [::generated-candidate {:optional true} ::generated-candidate]
   [:seon.db/expected-db {:optional true} :seon.db/expected-db]
   [:seon.db/current-db {:optional true} :seon.db/current-db]])
+(schema/register!
+ ::session-open-response
+ [:map {:closed true}
+  [::success? [:= true]]
+  [::request-id [:= session-open-request-id]]
+  [::version [:= current-version]]
+  [::configured-maximum-frame-bytes ::configured-maximum-frame-bytes]
+  [::maximum-frame-bytes ::maximum-frame-bytes]])
+(schema/register!
+ ::incompatible-version-response
+ [:map {:closed true}
+  [::success? [:= false]]
+  [::request-id [:= session-open-request-id]]
+  [::error-kind [:= incompatible-version-error]]
+  [::error ::error]
+  [:seon.error/kind [:= :configuration]]
+  [::version [:= current-version]]
+  [::peer-version ::peer-version]])
+(schema/register!
+ ::connection-capacity-response
+ [:map {:closed true}
+  [::success? [:= false]]
+  [::request-id [:= session-open-request-id]]
+  [::error-kind [:= connection-capacity-error]]
+  [::error ::error]
+  [:seon.error/kind [:= :configuration]]
+  [::configuration-key
+   [:= :seon.config.database.transport/maximum-connections]]
+  [::maximum-connections ::maximum-connections]])
+(schema/register!
+ ::session-open-required-response
+ [:map {:closed true}
+  [::success? [:= false]]
+  [::request-id ::request-id]
+  [::error-kind [:= session-open-required-error]]
+  [::error ::error]])
+(schema/register!
+ ::frame-too-large-response
+ [:map {:closed true}
+  [::success? [:= false]]
+  [::request-id ::request-id]
+  [::error-kind [:= frame-too-large-error]]
+  [::error ::error]
+  [::configuration-key
+   [:= :seon.config.database.transport/maximum-frame-bytes]]
+  [::maximum-frame-bytes ::maximum-frame-bytes]])
 (schema/register!
  ::ping-response
  [:map {:closed true}
@@ -949,6 +1034,11 @@
 (schema/register!
  ::response
  [:or
+  ::session-open-response
+  ::incompatible-version-response
+  ::connection-capacity-response
+  ::session-open-required-response
+  ::frame-too-large-response
   ::failed-response
   ::ping-response
   ::capabilities-response
@@ -982,6 +1072,32 @@
   [::error ::error]
   [:seon.error/kind {:optional true} :keyword]
   [::body {:optional true} ::body]])
+(schema/register!
+ ::session-open-request-input
+ [:map {:closed true}
+  [::maximum-frame-bytes ::maximum-frame-bytes]])
+(schema/register!
+ ::session-open-success-input
+ [:map {:closed true}
+  [::configured-maximum-frame-bytes ::configured-maximum-frame-bytes]
+  [::maximum-frame-bytes ::maximum-frame-bytes]])
+(schema/register!
+ ::peer-version-input
+ [:map {:closed true}
+  [::peer-version ::peer-version]])
+(schema/register!
+ ::maximum-connections-input
+ [:map {:closed true}
+  [::maximum-connections ::maximum-connections]])
+(schema/register!
+ ::session-open-required-input
+ [:map {:closed true}
+  [::request-id ::request-id]])
+(schema/register!
+ ::frame-too-large-input
+ [:map {:closed true}
+  [::request-id ::request-id]
+  [::maximum-frame-bytes ::maximum-frame-bytes]])
 (schema/register!
  ::ensure-request-input
  [:map {:closed true}
@@ -1171,6 +1287,80 @@
   [::entity-ids {:optional true} ::knn-entity-ids]])
 
 ;;; Pure constructors and validation
+
+(declare success failure)
+
+(defn session-open-request
+  "Construct the fixed-identity database session opening request."
+  {:malli/schema [:=> [:cat ::session-open-request-input]
+                  ::session-open-request]}
+  [{::keys [maximum-frame-bytes]}]
+  {::operation session-open-operation
+   ::request-id session-open-request-id
+   ::version current-version
+   ::maximum-frame-bytes maximum-frame-bytes})
+
+(defn session-open-success
+  "Construct the successful database session opening response."
+  {:malli/schema [:=> [:cat ::session-open-success-input]
+                  ::session-open-response]}
+  [{::keys [configured-maximum-frame-bytes maximum-frame-bytes]}]
+  (success
+   {::request-id session-open-request-id
+    ::version current-version
+    ::configured-maximum-frame-bytes configured-maximum-frame-bytes
+    ::maximum-frame-bytes maximum-frame-bytes}))
+
+(defn incompatible-version-failure
+  "Construct the exact-version database session rejection."
+  {:malli/schema [:=> [:cat ::peer-version-input]
+                  ::incompatible-version-response]}
+  [{::keys [peer-version]}]
+  (failure
+   {::error-kind incompatible-version-error
+    ::error "The database protocol version is incompatible."
+    :seon.error/kind :configuration
+    ::body {::request-id session-open-request-id
+            ::version current-version
+            ::peer-version peer-version}}))
+
+(defn connection-capacity-failure
+  "Construct the database writer connection-capacity rejection."
+  {:malli/schema [:=> [:cat ::maximum-connections-input]
+                  ::connection-capacity-response]}
+  [{::keys [maximum-connections]}]
+  (failure
+   {::error-kind connection-capacity-error
+    ::error "The database writer is at its connection capacity."
+    :seon.error/kind :configuration
+    ::body {::request-id session-open-request-id
+            ::configuration-key
+            :seon.config.database.transport/maximum-connections
+            ::maximum-connections maximum-connections}}))
+
+(defn session-open-required-failure
+  "Construct the correlated mandatory session-opening rejection."
+  {:malli/schema [:=> [:cat ::session-open-required-input]
+                  ::session-open-required-response]}
+  [{::keys [request-id]}]
+  (failure
+   {::error-kind session-open-required-error
+    ::error
+    "The session must open with session-open before ordinary requests."
+    ::body {::request-id request-id}}))
+
+(defn frame-too-large-failure
+  "Construct the bounded database session frame-ceiling failure."
+  {:malli/schema [:=> [:cat ::frame-too-large-input]
+                  ::frame-too-large-response]}
+  [{::keys [request-id maximum-frame-bytes]}]
+  (failure
+   {::error-kind frame-too-large-error
+    ::error "The database protocol frame is too large."
+    ::body {::request-id request-id
+            ::configuration-key
+            :seon.config.database.transport/maximum-frame-bytes
+            ::maximum-frame-bytes maximum-frame-bytes}}))
 
 (defn ping-request
   "Construct the writer readiness request."

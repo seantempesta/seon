@@ -51,8 +51,7 @@
             [seon.repair.candidates :as candidates]
             [seon.schema :as schema]
             [seon.time :as time])
-  (:import [java.nio.channels SocketChannel]
-           [java.util.concurrent Callable ExecutorService Executors]
+  (:import [java.util.concurrent Callable ExecutorService Executors]
            [java.util.concurrent.locks Condition ReentrantLock]))
 
 (set! *warn-on-reflection* true)
@@ -89,6 +88,7 @@
 (schema/register! ::call-executor 'some?)
 (schema/register! ::eval-generator 'some?)
 (schema/register! ::projection-state 'some?)
+(schema/register! ::session 'some?)
 (schema/register! ::committed-basis :int)
 (schema/register!
  ::writer
@@ -263,16 +263,16 @@
                               ::pool (pool-snapshot writer)}
                              data)}}))
 
-(defn- close-channel!
-  [channel]
-  (when channel
-    (try (.close ^SocketChannel channel)
+(defn- close-member-session!
+  [session]
+  (when session
+    (try (uds/close-session! session)
          (catch Throwable _)))
   nil)
 
 (defn- member-present?
-  [state {::keys [member-id channel]}]
-  (identical? channel (get-in state [::members member-id ::channel])))
+  [state {::keys [member-id session]}]
+  (identical? session (get-in state [::members member-id ::session])))
 
 (defn- release-member!
   [{::keys [pool-state pool-condition] :as writer} member]
@@ -289,7 +289,7 @@
                     true)
                 false))))]
     (when-not retain?
-      (close-channel! (::channel member)))
+      (close-member-session! (::session member)))
     nil))
 
 (defn- evict-member!
@@ -307,14 +307,14 @@
                                (filterv #(not= (::member-id member) %)
                                         member-ids))))))
         (.signalAll ^Condition pool-condition))))
-  (close-channel! (::channel member))
+  (close-member-session! (::session member))
   nil)
 
 (declare protocol-error-value)
 
 (defn- handshake-request!
-  [channel request]
-  (uds/call! {::uds/channel channel ::uds/message request}))
+  [session request]
+  (uds/call! {::uds/session session ::uds/message request}))
 
 (defn- open-member!
   [{::keys [writer-socket-path database-name backend database-path]
@@ -322,10 +322,10 @@
   ;; The host registers no listen interests today. If it does, the pool recipe
   ;; requires pinning them to one designated member and re-registering them
   ;; whenever that member is replaced.
-  (let [channel (atom nil)]
+  (let [session (atom nil)]
     (try
-      (let [connected (uds/connect! writer-socket-path)
-            _ (reset! channel connected)
+      (let [connected (uds/open-session! writer-socket-path)
+            _ (reset! session connected)
             ensure-response
             (when backend
               (handshake-request!
@@ -350,15 +350,19 @@
                                      (not (::protocol/success? resolve-response)))
                             (protocol-error-value resolve-response))]
         (if-let [error (or ensure-error resolve-error)]
-          (do (close-channel! connected) error)
-          {::member-id (random-uuid) ::channel connected}))
+          (do (close-member-session! connected) error)
+          {::member-id (random-uuid) ::session connected}))
       (catch Throwable throwable
-        (close-channel! @channel)
-        (if (::uds/eof (ex-data throwable))
+        (close-member-session! @session)
+        (if (= protocol/connection-capacity-error
+               (::protocol/error-kind (ex-data throwable)))
           (pool-error writer :writer-capacity
                       "The database writer is at its connection capacity."
-                      {::protocol/request-id
-                       (::protocol/request-id (ex-data throwable))})
+                      (select-keys
+                       (ex-data throwable)
+                       [::protocol/request-id ::protocol/error-kind
+                        ::protocol/configuration-key
+                        ::protocol/maximum-connections]))
           (pool-error writer :connect-failed
                       "The host could not open a database writer connection."
                       {::failure (str throwable)}))))))
@@ -379,7 +383,7 @@
     (cond
       (:seon/error result) result
       installed? result
-      :else (do (close-channel! (::channel result))
+      :else (do (close-member-session! (::session result))
                 (pool-error writer :session-closed
                             "The database writer session is closed.")))))
 
@@ -452,7 +456,7 @@
                      ::closed? true ::members {} ::available [])
               (.signalAll ^Condition pool-condition)
               members)))]
-    (run! #(close-channel! (::channel %)) members)
+    (run! #(close-member-session! (::session %)) members)
     (.shutdownNow ^ExecutorService call-executor))
   nil)
 
@@ -465,7 +469,7 @@
   (let [task (.submit ^ExecutorService call-executor
                       ^Callable
                       (fn []
-                        (uds/call! {::uds/channel (::channel member)
+                        (uds/call! {::uds/session (::session member)
                                     ::uds/message request})))
         timeout ::deadline]
     (try
@@ -476,9 +480,16 @@
           (do (release-member! writer member)
               {::call-outcome :response ::response response})))
       (catch Throwable throwable
-        (evict-member! writer member)
-        {::call-outcome :failure
-         ::failure (throwable-cause throwable)}))))
+        (let [failure (throwable-cause throwable)
+              data (ex-data failure)]
+          (if (= protocol/frame-too-large-error
+                 (::protocol/error-kind data))
+            (do
+              (release-member! writer member)
+              {::call-outcome :response ::response data})
+            (do
+              (evict-member! writer member)
+              {::call-outcome :failure ::failure failure})))))))
 
 (defn- call-attempt!
   [writer request budget-ms]
@@ -616,7 +627,10 @@
       (str "The database writer rejected the call: "
            (or (::protocol/error response) (::protocol/error-kind response)))
       :seon.error/kind :agent
-      :seon.error/data (select-keys response [::protocol/error-kind])}}))
+      :seon.error/data
+      (select-keys response [::protocol/error-kind
+                             ::protocol/configuration-key
+                             ::protocol/maximum-frame-bytes])}}))
 
 (defn- ensure-database!
   "Ensure the configured database on the writer; explicit config only.

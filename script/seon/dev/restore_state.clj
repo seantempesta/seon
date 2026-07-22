@@ -211,9 +211,12 @@
 (defn- writer-call! [descriptor request response-schema]
   (let [socket (get-in descriptor
                        [::launch/writer-owner ::launch/request-socket-path])
+        session (uds/open-session! socket)
         response
-        (with-open [channel (uds/connect! socket)]
-          (uds/call! {::uds/channel channel ::uds/message request}))]
+        (try
+          (uds/call! {::uds/session session ::uds/message request})
+          (finally
+            (uds/close-session! session)))]
     (when-not (::protocol/success? response)
       (throw (ex-info "The database writer rejected a restore operation."
                       {:seon.dev.restore-state/request request

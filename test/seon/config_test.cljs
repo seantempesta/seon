@@ -34,25 +34,36 @@
    :seon.hardware/system-memory-bytes (* 32 1024 1024 1024)
    :seon.hardware/fd-soft-limit 2048})
 
-(deftest operational-envelope-records-the-w1-5a-enforcement-boundary
+(deftest operational-envelope-enforces-every-operational-key
   (let [dispositions
         (:seon.launch.envelope/dispositions
-         (resolve/resolve-envelope {} fixed-hardware 1))
-        carried-keys
-        #{:seon.config.database.transport/maximum-frame-bytes
-          :seon.config.database.transport/maximum-connections}]
-    (is (= carried-keys
+         (resolve/resolve-envelope {} fixed-hardware 1))]
+    (is (= #{}
            (into #{}
                  (keep (fn [[attribute disposition]]
                          (when (= :carried disposition) attribute)))
                  dispositions))
-        "only the two W1.5b transport attributes remain carried")
-    (is (= (set (remove carried-keys resolve/operational-keys))
+        "no operational attribute remains carried")
+    (is (= (set resolve/operational-keys)
            (into #{}
                  (keep (fn [[attribute disposition]]
                          (when (= :enforced disposition) attribute)))
                  dispositions))
-        "every constructor-backed operational attribute is enforced")))
+        "every operational attribute is enforced")))
+
+(deftest maximum-frame-bytes-covers-the-session-open-bootstrap
+  (is (thrown-with-msg?
+       js/Error #"session-open bootstrap ceiling"
+       (resolve/resolve-operational-values
+        {:seon.config/database
+         {:seon.config.database.transport/maximum-frame-bytes 4095}}
+        fixed-hardware)))
+  (is (= 4096
+         (:seon.config.database.transport/maximum-frame-bytes
+          (resolve/resolve-operational-values
+           {:seon.config/database
+            {:seon.config.database.transport/maximum-frame-bytes 4096}}
+           fixed-hardware)))))
 
 (deftest shared-resolver-is-pure-and-delegated
   (let [manifest {:seon.config/repl-mode :batch}

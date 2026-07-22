@@ -69,7 +69,11 @@
    [::executor/classes :hnsw ::executor/maximum-queued-by-database]})
 
 (def ^:private request-server-option-attributes
-  {:seon.config.database.transport/maximum-input-bytes
+  {:seon.config.database.transport/maximum-frame-bytes
+   ::uds/maximum-frame-bytes
+   :seon.config.database.transport/maximum-connections
+   ::uds/maximum-connections
+   :seon.config.database.transport/maximum-input-bytes
    ::uds/maximum-input-bytes
    :seon.config.database.transport/maximum-response-slots
    ::uds/maximum-response-slots

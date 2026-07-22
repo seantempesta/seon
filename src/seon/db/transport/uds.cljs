@@ -40,6 +40,11 @@
 (schema/register! ::queued-bytes 'fn?)
 (schema/register! ::pending-event-count 'fn?)
 (schema/register! ::queued-event-bytes 'fn?)
+(schema/register! ::version :seon.db.protocol/version)
+(schema/register! ::configured-maximum-frame-bytes
+                  :seon.db.protocol/configured-maximum-frame-bytes)
+(schema/register! ::maximum-frame-bytes
+                  :seon.db.protocol/maximum-frame-bytes)
 (schema/register!
  ::session
  [:map {:closed true}
@@ -49,7 +54,10 @@
   [::pending-count ::pending-count]
   [::queued-bytes ::queued-bytes]
   [::pending-event-count ::pending-event-count]
-  [::queued-event-bytes ::queued-event-bytes]])
+  [::queued-event-bytes ::queued-event-bytes]
+  [::version ::version]
+  [::configured-maximum-frame-bytes ::configured-maximum-frame-bytes]
+  [::maximum-frame-bytes ::maximum-frame-bytes]])
 (schema/register! ::failure :keyword)
 (schema/register! ::frame-bytes [:int {:min 0}])
 (schema/register!
@@ -85,9 +93,27 @@
   ([message kind data]
    (ex-info message (assoc data ::failure kind))))
 
-(defn- fresh-parser []
-  {::header (js/Uint8Array. 4)
-   ::header-offset 0})
+(defn- valid-opening-success?
+  [response client-maximum-frame-bytes]
+  (let [configured (::protocol/configured-maximum-frame-bytes response)
+        agreed (::protocol/maximum-frame-bytes response)]
+    (and (::protocol/success? response)
+         (= protocol/session-open-request-id
+            (::protocol/request-id response))
+         (= protocol/current-version (::protocol/version response))
+         (protocol/valid-response? response)
+         (int? configured)
+         (<= protocol/session-open-maximum-frame-bytes
+             configured
+             protocol/maximum-frame-bytes)
+         (= agreed (min client-maximum-frame-bytes configured)))))
+
+(defn- fresh-parser
+  ([] (fresh-parser maximum-frame-bytes))
+  ([maximum-frame-bytes]
+   {::header (js/Uint8Array. 4)
+    ::header-offset 0
+    ::maximum-frame-bytes maximum-frame-bytes}))
 
 (defn- uint32-be [^js header]
   (+ (* (aget header 0) 16777216)
@@ -116,7 +142,7 @@
               next-payload-offset (+ payload-offset copied)]
           (copy-bytes! payload payload-offset chunk chunk-offset copied)
           (if (= next-payload-offset (.-byteLength payload))
-            (recur (fresh-parser)
+            (recur (fresh-parser (::maximum-frame-bytes parser))
                    (+ chunk-offset copied)
                    (conj payloads payload))
             (recur (assoc parser ::payload-offset next-payload-offset)
@@ -131,7 +157,7 @@
           (if (= next-header-offset 4)
             (let [payload-bytes (uint32-be header)]
               (when (or (zero? payload-bytes)
-                        (> payload-bytes maximum-frame-bytes))
+                        (> payload-bytes (::maximum-frame-bytes parser)))
                 (throw
                  (failure
                   (str "Invalid database frame length: " payload-bytes
@@ -140,6 +166,7 @@
                   {::frame-bytes payload-bytes})))
               (recur {::header header
                       ::header-offset 4
+                      ::maximum-frame-bytes (::maximum-frame-bytes parser)
                       ::payload (js/Uint8Array. payload-bytes)
                       ::payload-offset 0}
                      (+ chunk-offset copied)
@@ -148,7 +175,9 @@
                    (+ chunk-offset copied)
                    payloads)))))))
 
-(defn- text-frame [text]
+(defn- text-frame
+  ([text] (text-frame text maximum-frame-bytes))
+  ([text maximum-frame-bytes]
   (let [^js payload (.encode text-encoder ^String text)
         payload-bytes (.-byteLength payload)]
     (when (or (zero? payload-bytes)
@@ -163,10 +192,12 @@
       (aset frame 2 (bit-and (unsigned-bit-shift-right payload-bytes 8) 255))
       (aset frame 3 (bit-and payload-bytes 255))
       (.set frame payload 4)
-      frame)))
+      frame))))
 
-(defn- encode-frame [message]
-  (text-frame (t/write transit-writer message)))
+(defn- encode-frame
+  ([message] (encode-frame message maximum-frame-bytes))
+  ([message maximum-frame-bytes]
+   (text-frame (t/write transit-writer message) maximum-frame-bytes)))
 
 (defn- payload-text [^js payload]
   (.decode text-decoder payload))
@@ -285,7 +316,11 @@
            !pending (atom {})
            !output (atom (empty-output))
            !events (atom (empty-events))
-           !parser (atom (fresh-parser))
+           !maximum-frame-bytes
+           (atom protocol/session-open-maximum-frame-bytes)
+           !opening? (atom true)
+           !opening-response (atom nil)
+           !parser (atom (fresh-parser protocol/session-open-maximum-frame-bytes))
            !deadline-timer (atom nil)
            !event-timer (atom nil)]
        (letfn [(as-error [reason]
@@ -413,7 +448,8 @@
                         (encode-frame
                          {::protocol/operation protocol/cancel-operation
                           ::protocol/request-id cancel-request-id
-                          ::protocol/target-request-id target-request-id}))
+                          ::protocol/target-request-id target-request-id}
+                         @!maximum-frame-bytes))
                        (catch :default error
                          (terminate! error))))))
                (expire-deadlines! []
@@ -454,7 +490,41 @@
                (deliver-message! [message frame-bytes]
                  (let [request-id (::protocol/request-id message)
                        event (::protocol/event message)]
-                   (if event
+                   (cond
+                     @!opening?
+                     (if (and (= protocol/session-open-request-id request-id)
+                              (protocol/valid-response? message))
+                       (if (::protocol/success? message)
+                         (if (valid-opening-success?
+                              message protocol/maximum-frame-bytes)
+                           (let [ceiling (::protocol/maximum-frame-bytes message)]
+                             (reset! !maximum-frame-bytes ceiling)
+                             (reset! !parser (fresh-parser ceiling))
+                             (reset! !opening? false)
+                             (reset! !opening-response message)
+                             (settle-connect! nil (session-map)))
+                           (throw
+                            (failure
+                             "Database session received an inconsistent opening agreement."
+                             :seon.db.transport.uds.failure/protocol
+                             {::protocol/response message})))
+                         (terminate!
+                          (ex-info (::protocol/error message) message)))
+                       (throw
+                        (failure
+                         "Database session received an invalid opening response."
+                         :seon.db.transport.uds.failure/protocol
+                         {::protocol/response message
+                          ::protocol/explanation
+                          (protocol/explain-response message)})))
+
+                     (and (= protocol/session-control-request-id request-id)
+                          (= protocol/frame-too-large-error
+                             (::protocol/error-kind message))
+                          (protocol/valid-response? message))
+                     (terminate! (ex-info (::protocol/error message) message))
+
+                     event
                      (if (and (contains? #{protocol/datoms-event
                                           protocol/resynchronization-event
                                           protocol/database-advanced-event}
@@ -467,6 +537,7 @@
                                  {::protocol/response message
                                   ::protocol/explanation
                                   (protocol/explain-response message)})))
+                     :else
                      (do
                        (when-not (string? request-id)
                          (throw
@@ -516,7 +587,20 @@
                      (js/Promise.
                       (fn [resolve reject]
                         (try
-                          (let [frame (encode-frame message)
+                           (let [frame
+                                 (try
+                                   (encode-frame message @!maximum-frame-bytes)
+                                   (catch :default error
+                                     (if (= :seon.db.transport.uds.failure/too-large
+                                            (::failure (ex-data error)))
+                                       (throw
+                                        (ex-info
+                                         "The database protocol frame is too large."
+                                         (protocol/frame-too-large-failure
+                                          {::protocol/request-id request-id
+                                           ::protocol/maximum-frame-bytes
+                                           @!maximum-frame-bytes})))
+                                       (throw error))))
                                 entry (cond-> {::resolve resolve
                                                ::reject reject
                                                ::protocol/operation
@@ -546,7 +630,12 @@
                   ::pending-count #(count @!pending)
                   ::queued-bytes #(::queued-bytes @!output)
                   ::pending-event-count #(count (::events @!events))
-                  ::queued-event-bytes #(::queued-event-bytes @!events)})
+                  ::queued-event-bytes #(::queued-event-bytes @!events)
+                  ::version (or (::protocol/version @!opening-response)
+                                protocol/current-version)
+                  ::configured-maximum-frame-bytes
+                  (::protocol/configured-maximum-frame-bytes @!opening-response)
+                  ::maximum-frame-bytes @!maximum-frame-bytes})
                (opened! [socket]
                  (when (and (not @!terminal?) (not @!connected?))
                    (reset! !socket socket)
@@ -555,9 +644,12 @@
                      (reset! !deadline-timer
                              (js/setInterval expire-deadlines!
                                              deadline-tick-ms)))
-                   (let [session (session-map)]
-                     (settle-connect! nil session)
-                     (flush-output!))))]
+                   (enqueue-frame!
+                    (encode-frame
+                     (protocol/session-open-request
+                      {::protocol/maximum-frame-bytes
+                       protocol/maximum-frame-bytes})
+                     protocol/session-open-maximum-frame-bytes))))]
          (let [handler
                (js-obj
                 "binaryType" "uint8array"

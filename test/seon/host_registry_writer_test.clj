@@ -18,6 +18,7 @@
             [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds]
             [seon.db.writer :as writer]
+            [seon.db.writer-test-support :as writer-test-support]
             [seon.host :as host]
             [seon.host.context :as context])
   (:import [java.io File]
@@ -181,21 +182,23 @@
       ;; with the same op-id replays the receipt; the effect happened
       ;; exactly once.
       (let [head (context/resolve-head! session)
-            ^SocketChannel raw (uds/connect! request-path)
+            raw-session (writer-test-support/open-session! request-path)
+            ^SocketChannel raw (writer-test-support/channel raw-session)
             raw-output (Channels/newOutputStream raw)]
-        (uds/call! {::uds/channel raw
-                    ::uds/message
-                    (protocol/ensure-database-request
-                     {::protocol/request-id "op-crash/ensure"
-                      ::protocol/database-name database-name
-                      ::protocol/backend :memory})})
+        (writer-test-support/call!
+         raw-session
+         (protocol/ensure-database-request
+          {::protocol/request-id "op-crash/ensure"
+           ::protocol/database-name database-name
+           ::protocol/backend :memory}))
         (uds/write-frame!
          raw-output
          (protocol/transaction-request
           {::protocol/request-id "op-crash"
            :seon.db/db head
            ::protocol/transaction-data
-           [{:seon.host-registry-writer-test/note "crash"}]}))
+           [{:seon.host-registry-writer-test/note "crash"}]})
+         (::protocol/maximum-frame-bytes raw-session))
         ;; Wait until the fact is committed (observed over the surviving
         ;; wrapper connection), then kill the raw connection so the
         ;; acknowledgement is lost mid-call.

@@ -112,6 +112,7 @@
 (schema/register! ::maximum-output-bytes [:int {:min 1}])
 (schema/register! ::maximum-session-output-bytes [:int {:min 1}])
 (schema/register! ::maximum-connections [:int {:min 1}])
+(schema/register! ::maximum-frame-bytes [:int {:min 1}])
 (schema/register! ::codec-workers [:int {:min 1}])
 (schema/register! ::codec-worker-queue-capacity [:int {:min 1}])
 (schema/register! ::graceful? :boolean)
@@ -120,6 +121,14 @@
 (schema/register! ::workers-stopped? :boolean)
 (schema/register! ::cleanup-stopped? :boolean)
 (schema/register! ::channel 'some?)
+(schema/register!
+ ::session
+ [:map {:closed true}
+  [::channel ::channel]
+  [::protocol/version ::protocol/version]
+  [::protocol/configured-maximum-frame-bytes
+   ::protocol/configured-maximum-frame-bytes]
+  [::protocol/maximum-frame-bytes ::protocol/maximum-frame-bytes]])
 (schema/register! ::output-stream 'some?)
 (schema/register! ::connections 'some?)
 (schema/register! ::selector 'some?)
@@ -160,15 +169,15 @@
   [::maximum-output-bytes {:optional true} ::maximum-output-bytes]
   [::maximum-session-output-bytes {:optional true}
    ::maximum-session-output-bytes]
+  [::maximum-frame-bytes {:optional true} ::maximum-frame-bytes]
   [::maximum-connections {:optional true} ::maximum-connections]
   [::codec-workers {:optional true} ::codec-workers]
   [::codec-worker-queue-capacity {:optional true}
    ::codec-worker-queue-capacity]])
 (schema/register!
  ::call-input
- [:map [::channel ::channel] [::message ::message]])
+ [:map {:closed true} [::session ::session] [::message ::message]])
 
-(def ^:private maximum-frame-bytes protocol/maximum-frame-bytes)
 (def ^:private default-codec-worker-queue-capacity 256)
 (def ^:private default-shutdown-timeout-ms 5000)
 (def ^:private default-maximum-input-bytes (* 32 1024 1024))
@@ -217,51 +226,71 @@
 
 (defn write-frame!
   "Write and flush one bounded length-prefixed Transit map."
-  {:malli/schema [:=> [:catn [::output-stream ::output-stream]
-                            [::message ::message]] ::nil-result]}
-  [^OutputStream output message]
-  (let [^bytes payload (encode message)
-        length (alength payload)
-        framed (DataOutputStream. output)]
-    (when (> length maximum-frame-bytes)
-      (throw (ex-info "Database protocol frame is too large."
-                      {::frame-bytes length
-                       ::maximum-frame-bytes maximum-frame-bytes})))
-    (.writeInt framed length)
-    (.write framed payload 0 length)
-    (.flush framed)
-    nil))
+  {:malli/schema [:function
+                  [:=> [:catn [::output-stream ::output-stream]
+                               [::message ::message]] ::nil-result]
+                  [:=> [:catn [::output-stream ::output-stream]
+                               [::message ::message]
+                               [::maximum-frame-bytes ::maximum-frame-bytes]]
+                   ::nil-result]]}
+  ([output message]
+   (write-frame! output message protocol/maximum-frame-bytes))
+  ([^OutputStream output message maximum-frame-bytes]
+   (let [^bytes payload (encode message)
+         length (alength payload)
+         framed (DataOutputStream. output)]
+     (when (> length maximum-frame-bytes)
+       (throw (ex-info "Database protocol frame is too large."
+                       {::frame-bytes length
+                        ::protocol/configuration-key
+                        :seon.config.database.transport/maximum-frame-bytes
+                        ::protocol/maximum-frame-bytes maximum-frame-bytes})))
+     (.writeInt framed length)
+     (.write framed payload 0 length)
+     (.flush framed)
+     nil)))
 
 (defn- message-frame
   "Encode one complete length-prefixed frame into a fresh buffer."
-  ^ByteBuffer [message]
-  (let [^bytes payload (encode message)
-        length (alength payload)]
-    (when (> length maximum-frame-bytes)
-      (throw (ex-info "Database protocol frame is too large."
-                      {::frame-bytes length
-                       ::maximum-frame-bytes maximum-frame-bytes})))
-    (doto (ByteBuffer/allocate (+ Integer/BYTES length))
-      (.putInt length)
-      (.put payload)
-      (.flip))))
+  (^ByteBuffer [message]
+   (message-frame message protocol/maximum-frame-bytes))
+  (^ByteBuffer [message maximum-frame-bytes]
+   (let [^bytes payload (encode message)
+         length (alength payload)]
+     (when (> length maximum-frame-bytes)
+       (throw (ex-info "Database protocol frame is too large."
+                       {::frame-bytes length
+                        ::protocol/configuration-key
+                        :seon.config.database.transport/maximum-frame-bytes
+                        ::protocol/maximum-frame-bytes maximum-frame-bytes})))
+     (doto (ByteBuffer/allocate (+ Integer/BYTES length))
+       (.putInt length)
+       (.put payload)
+       (.flip)))))
 
 (defn read-frame
   "Read one length-prefixed Transit map, or nil at EOF."
-  {:malli/schema [:=> [:catn [:seon.db.transport.uds/input-stream :any]]
-                  :any]}
-  [^InputStream input]
-  (let [framed (DataInputStream. input)
-        length (try (.readInt framed)
-                    (catch java.io.EOFException _ nil))]
-    (when length
-      (when (or (neg? length) (> length maximum-frame-bytes))
-        (throw (ex-info "Database protocol frame length is invalid."
-                        {::frame-bytes length
-                         ::maximum-frame-bytes maximum-frame-bytes})))
-      (let [payload (byte-array length)]
-        (.readFully framed payload 0 length)
-        (decode payload)))))
+  {:malli/schema [:function
+                  [:=> [:catn [:seon.db.transport.uds/input-stream :any]] :any]
+                  [:=> [:catn [:seon.db.transport.uds/input-stream :any]
+                               [::maximum-frame-bytes ::maximum-frame-bytes]]
+                   :any]]}
+  ([input]
+   (read-frame input protocol/maximum-frame-bytes))
+  ([^InputStream input maximum-frame-bytes]
+   (let [framed (DataInputStream. input)
+         length (try (.readInt framed)
+                     (catch java.io.EOFException _ nil))]
+     (when length
+       (when (or (neg? length) (> length maximum-frame-bytes))
+         (throw (ex-info "Database protocol frame length is invalid."
+                         {::frame-bytes length
+                          ::protocol/configuration-key
+                          :seon.config.database.transport/maximum-frame-bytes
+                          ::protocol/maximum-frame-bytes maximum-frame-bytes})))
+       (let [payload (byte-array length)]
+         (.readFully framed payload 0 length)
+         (decode payload))))))
 
 (defn connect!
   "Open a Unix-domain SocketChannel. The caller owns it."
@@ -272,16 +301,79 @@
     (.connect channel address)
     channel))
 
+(defn- valid-opening-success?
+  [response client-maximum-frame-bytes]
+  (let [configured (::protocol/configured-maximum-frame-bytes response)
+        agreed (::protocol/maximum-frame-bytes response)]
+    (and (::protocol/success? response)
+         (= protocol/session-open-request-id
+            (::protocol/request-id response))
+         (= protocol/current-version (::protocol/version response))
+         (protocol/valid-response? response)
+         (int? configured)
+         (<= protocol/session-open-maximum-frame-bytes
+             configured
+             protocol/maximum-frame-bytes)
+         (= agreed (min client-maximum-frame-bytes configured)))))
+
+(defn open-session!
+  "Open and admit one database session over a raw Unix channel."
+  {:malli/schema [:=> [:catn [::socket-path ::socket-path]] ::session]}
+  [socket-path]
+  (let [channel (connect! socket-path)]
+    (try
+      (let [input (Channels/newInputStream channel)
+            output (Channels/newOutputStream channel)
+            opening
+            (protocol/session-open-request
+             {::protocol/maximum-frame-bytes protocol/maximum-frame-bytes})]
+        (write-frame! output opening protocol/session-open-maximum-frame-bytes)
+        (let [response
+              (read-frame input protocol/session-open-maximum-frame-bytes)]
+          (if (valid-opening-success?
+               response (::protocol/maximum-frame-bytes opening))
+            {::channel channel
+             ::protocol/version (::protocol/version response)
+             ::protocol/configured-maximum-frame-bytes
+             (::protocol/configured-maximum-frame-bytes response)
+             ::protocol/maximum-frame-bytes
+             (::protocol/maximum-frame-bytes response)}
+            (throw (ex-info (or (::protocol/error response)
+                                "Database session opening failed.")
+                            (or response {::eof true}))))))
+      (catch Throwable throwable
+        (try (.close channel) (catch Throwable _))
+        (throw throwable)))))
+
+(defn close-session!
+  "Close one admitted database session."
+  {:malli/schema [:=> [:catn [::session ::session]] ::nil-result]}
+  [session]
+  (.close ^SocketChannel (::channel session))
+  nil)
+
 (defn call!
-  "Send one request and synchronously read one response on an open channel."
+  "Send one request and synchronously read one admitted-session response."
   {:malli/schema [:=> [:catn [::call-input ::call-input]] ::message]}
-  [{::keys [channel message]}]
-  (let [input (Channels/newInputStream ^SocketChannel channel)
+  [{::keys [session message]}]
+  (let [channel (::channel session)
+        maximum-frame-bytes (::protocol/maximum-frame-bytes session)
+        input (Channels/newInputStream ^SocketChannel channel)
         output (Channels/newOutputStream ^SocketChannel channel)
         request-id (::protocol/request-id message)]
-    (write-frame! output message)
+    (try
+      (write-frame! output message maximum-frame-bytes)
+      (catch clojure.lang.ExceptionInfo exception
+        (if (::frame-bytes (ex-data exception))
+          (throw
+           (ex-info
+            "Database protocol frame is too large."
+            (protocol/frame-too-large-failure
+             {::protocol/request-id request-id
+              ::protocol/maximum-frame-bytes maximum-frame-bytes})))
+          (throw exception))))
     (loop []
-      (let [response (read-frame input)]
+      (let [response (read-frame input maximum-frame-bytes)]
         (cond
           (nil? response)
           (throw
@@ -564,9 +656,12 @@
 
 (declare abandon-pending-encodes! finish-event!)
 
-(defn- close-session!
+(defn- close-server-session!
   [connections workers close-connection! session]
   (when (.compareAndSet ^AtomicReference (::closed? session) false true)
+    (when (and (= ::unopened @(::owner session))
+               (not= ::owner-opening @(::phase session)))
+      (.set ^AtomicReference (::opening? session) false))
     (swap! (::paused-read-sessions session) disj session)
     (reset! (::paused-frame-length session) nil)
     (when-let [key @(::key session)]
@@ -597,7 +692,7 @@
 (defn- close-drained-session!
   [connections workers close-connection! shutting-down? session]
   (when (and @shutting-down? (drained-session? session))
-    (close-session! connections workers close-connection! session)))
+    (close-server-session! connections workers close-connection! session)))
 
 (defn- accept-encoded-response!
   [connections workers close-connection! shutting-down? session frame slot]
@@ -701,7 +796,9 @@
             (.set ^AtomicReference (::encoding? slot) true)
             (let [encoded
                   (try
-                    {::frame (message-frame message)}
+                    {::frame
+                     (message-frame message
+                                    @(::maximum-frame-bytes-state session))}
                     (catch Throwable throwable
                       {::encode-error throwable}))]
               (.set ^AtomicReference (::encoding? slot) false)
@@ -715,8 +812,8 @@
                   (finish-event! session pending send-encode-failed)
                   (enqueue-selector!
                    (::selector session) (::commands session)
-                   #(close-session! connections workers close-connection!
-                                    session))))))]
+                   #(close-server-session! connections workers close-connection!
+                                           session))))))]
       (reset! (::event-state session) {::phase ::encoding ::pending pending})
       (try
         (.execute workers ^Runnable encode!)
@@ -769,7 +866,7 @@
   (.set ^AtomicReference (::encoding-active? session) false)
   (enqueue-selector!
    (::selector session) (::commands session)
-   #(close-session! connections workers close-connection! session)))
+   #(close-server-session! connections workers close-connection! session)))
 
 (defn- fail-session-output!
   [connections workers close-connection! session pending status]
@@ -782,7 +879,7 @@
   (.set ^AtomicReference (::encoding-active? session) false)
   (enqueue-selector!
    (::selector session) (::commands session)
-   #(close-session! connections workers close-connection! session)))
+   #(close-server-session! connections workers close-connection! session)))
 
 (defn- take-pending-encode!
   [session]
@@ -803,11 +900,22 @@
       (if pending
         (let [slot (::response-slot pending)]
           (.set ^AtomicReference (::encoding? slot) true)
-          (let [encoded
+          (let [maximum-frame-bytes @(::maximum-frame-bytes-state session)
+                encoded
                 (try
-                  {::frame (message-frame (::message pending))}
+                  {::frame (message-frame (::message pending)
+                                          maximum-frame-bytes)}
                   (catch Throwable throwable
-                    {::encode-error throwable}))]
+                    (if (::frame-bytes (ex-data throwable))
+                      {::frame
+                       (message-frame
+                        (protocol/frame-too-large-failure
+                         {::protocol/request-id
+                          (or (::protocol/request-id (::message pending))
+                              protocol/session-control-request-id)
+                          ::protocol/maximum-frame-bytes maximum-frame-bytes})
+                        maximum-frame-bytes)}
+                      {::encode-error throwable})))]
             (if-let [^ByteBuffer frame (::frame encoded)]
               (let [reservation
                     (reserve-encoded-output-result!
@@ -836,7 +944,7 @@
   (.set ^AtomicReference (::closing? session) true)
   (enqueue-selector!
    (::selector session) (::commands session)
-   #(close-session! connections workers close-connection! session)))
+   #(close-server-session! connections workers close-connection! session)))
 
 (defn- admit-response!
   [connections workers close-connection! shutting-down? session message slot
@@ -892,7 +1000,8 @@
                       "UDS request decode or handler admission failed")
            (enqueue-selector!
             (::selector session) (::commands session)
-            #(close-session! connections workers close-connection! session)))
+            #(close-server-session! connections workers close-connection!
+                                    session)))
          (finally
            (release-input-reservation! input-reservation)
            (enqueue-selector!
@@ -907,7 +1016,132 @@
       (if (rejected-execution? throwable)
         (do
           (log/error throwable "UDS request worker rejected admission")
-          (close-session! connections workers close-connection! session))
+          (close-server-session! connections workers close-connection! session))
+        (throw throwable))))
+  nil)
+
+(defn- queue-session-control!
+  [session response outcome]
+  (let [frame (message-frame response
+                             protocol/session-open-maximum-frame-bytes)]
+    (reset! (::phase session) ::opening-response)
+    (.addLast ^ArrayDeque (::outputs session)
+              {::frame frame ::opening-outcome outcome})
+    (swap! (::queued-output-bytes session) + (.remaining frame))
+    (key-interests! session op-write op-read))
+  nil)
+
+(defn- opening-response
+  [session request]
+  (cond
+    (not= protocol/session-open-operation (::protocol/operation request))
+    [(protocol/session-open-required-failure
+      {::protocol/request-id
+       (or (::protocol/request-id request)
+           protocol/session-control-request-id)})
+     ::close]
+
+    (not= protocol/current-version (::protocol/version request))
+    [(if (pos-int? (::protocol/version request))
+       (protocol/incompatible-version-failure
+        {::protocol/peer-version (::protocol/version request)})
+       (protocol/failure
+        {::protocol/error-kind protocol/protocol-error
+         ::protocol/error "The session-open request is invalid."
+         ::protocol/body
+         {::protocol/request-id protocol/session-open-request-id}}))
+     ::close]
+
+    (not (protocol/valid-request? request))
+    [(protocol/failure
+      {::protocol/error-kind protocol/protocol-error
+       ::protocol/error "The session-open request is invalid."
+       ::protocol/body
+       {::protocol/request-id protocol/session-open-request-id}})
+     ::close]
+
+    (not (and (int? (::protocol/maximum-frame-bytes request))
+              (<= protocol/session-open-maximum-frame-bytes
+                  (::protocol/maximum-frame-bytes request)
+                  protocol/maximum-frame-bytes)))
+    [(protocol/failure
+      {::protocol/error-kind protocol/protocol-error
+       ::protocol/error "The requested database frame ceiling is invalid."
+       ::protocol/body
+       {::protocol/request-id protocol/session-open-request-id}})
+     ::close]
+
+    :else
+    (let [agreed (min (::protocol/maximum-frame-bytes request)
+                      (::configured-maximum-frame-bytes session))]
+      (reset! (::maximum-frame-bytes-state session) agreed)
+      [(protocol/session-open-success
+        {::protocol/configured-maximum-frame-bytes
+         (::configured-maximum-frame-bytes session)
+         ::protocol/maximum-frame-bytes agreed})
+       ::admit])))
+
+(defn- admit-opening-payload!
+  [connections ^ThreadPoolExecutor workers close-connection! session payload]
+  (try
+    (.execute
+     workers
+     ^Runnable
+     (fn []
+       (try
+         (let [[response outcome] (opening-response session (decode payload))]
+           (enqueue-selector!
+            (::selector session) (::commands session)
+            #(queue-session-control! session response outcome)))
+         (catch Throwable throwable
+           (log/error throwable "UDS session-open decode failed")
+           (enqueue-selector!
+            (::selector session) (::commands session)
+            #(do
+               (.set ^AtomicReference (::opening? session) false)
+               (close-server-session! connections workers close-connection!
+                                      session)))))))
+    (catch Throwable throwable
+      (if (rejected-execution? throwable)
+        (do
+          (.set ^AtomicReference (::opening? session) false)
+          (close-server-session! connections workers close-connection! session))
+        (throw throwable))))
+  nil)
+
+(defn- begin-owner-opening!
+  [connections ^ThreadPoolExecutor workers close-connection! session]
+  (reset! (::phase session) ::owner-opening)
+  (try
+    (.execute
+     workers
+     ^Runnable
+     (fn []
+       (try
+         (let [owner ((::open-connection! session)
+                      (::connection-control session))]
+           (reset! (::owner session) owner)
+           (.set ^AtomicReference (::opening? session) false)
+           (if (.get ^AtomicReference (::closed? session))
+             (finish-session-close! connections close-connection! session)
+             (enqueue-selector!
+              (::selector session) (::commands session)
+              #(if (.get ^AtomicReference (::closed? session))
+                 (finish-session-close! connections close-connection! session)
+                 (do
+                   (reset! (::phase session) ::open)
+                   (key-interests! session op-read 0))))))
+         (catch Throwable _
+           (.set ^AtomicReference (::opening? session) false)
+           (enqueue-selector!
+            (::selector session) (::commands session)
+            #(close-server-session! connections workers close-connection!
+                                    session))))))
+    (catch Throwable throwable
+      (if (rejected-execution? throwable)
+        (do
+          (.set ^AtomicReference (::opening? session) false)
+          (close-server-session! connections workers close-connection! session))
         (throw throwable))))
   nil)
 
@@ -919,7 +1153,7 @@
             read-count (.read channel target)]
         (cond
           (neg? read-count)
-          (close-session! connections workers close-connection! session)
+          (close-server-session! connections workers close-connection! session)
 
           (zero? read-count)
           nil
@@ -928,10 +1162,27 @@
           nil
 
           (nil? @(::payload session))
-          (let [length (.getInt ^ByteBuffer (doto target .flip))]
+          (let [length (.getInt ^ByteBuffer (doto target .flip))
+                opening? (not= ::open @(::phase session))
+                frame-ceiling (if opening?
+                                protocol/session-open-maximum-frame-bytes
+                                @(::maximum-frame-bytes-state session))]
             (.clear target)
-            (if (or (not (pos? length)) (> length maximum-frame-bytes))
-              (close-session! connections workers close-connection! session)
+            (cond
+              (or (not (pos? length)) (> length frame-ceiling))
+              (queue-session-control!
+               session
+               (protocol/frame-too-large-failure
+                {::protocol/request-id protocol/session-control-request-id
+                 ::protocol/maximum-frame-bytes frame-ceiling})
+               ::close)
+
+              opening?
+              (do
+                (reset! (::payload session) (ByteBuffer/allocate length))
+                (recur))
+
+              :else
               (let [capacity (reserve-request-capacity! session length)]
                 (if-let [input-reservation (::input-reservation capacity)]
                   (do
@@ -945,22 +1196,27 @@
           (let [^ByteBuffer payload-buffer @(::payload session)
                 payload (.array payload-buffer)
                 input-reservation @(::input-reservation session)
-                response-slot @(::current-response-slot session)]
+                response-slot @(::current-response-slot session)
+                opening? (not= ::open @(::phase session))]
             (reset! (::payload session) nil)
             (reset! (::input-reservation session) nil)
             (reset! (::current-response-slot session) nil)
-            (reset! (::decoding? session) true)
             (key-interests! session 0 op-read)
-            (admit-payload! connections workers close-connection!
-                            shutting-down? handler session payload
-                            input-reservation response-slot)))))))
+            (if opening?
+              (admit-opening-payload! connections workers close-connection!
+                                      session payload)
+              (do
+                (reset! (::decoding? session) true)
+                (admit-payload! connections workers close-connection!
+                                shutting-down? handler session payload
+                                input-reservation response-slot)))))))))
 
 (defn- write-session!
   [connections workers close-connection! shutting-down? session]
   (let [^SocketChannel channel (::channel session)
         ^ArrayDeque outputs (::outputs session)]
     (loop []
-      (if-let [{::keys [frame response-slot pending] :as output}
+      (if-let [{::keys [frame response-slot pending opening-outcome] :as output}
                (or (.peekFirst outputs)
                    (when (= ::output (::phase @(::event-state session)))
                      @(::event-state session)))]
@@ -972,23 +1228,85 @@
               nil)
             (swap! (::queued-output-bytes session)
                    - (.limit ^ByteBuffer frame))
-            (if pending
-              (finish-event! session pending send-accepted)
-              (release-response-slot! session response-slot))
-            (remove-finished-session! connections session)
-            (recur)))
+            (cond
+              opening-outcome
+              (case opening-outcome
+                ::admit
+                (begin-owner-opening! connections workers close-connection!
+                                      session)
+
+                ::close
+                (do
+                  (.set ^AtomicReference (::opening? session) false)
+                  (close-server-session! connections workers close-connection!
+                                         session)))
+
+              pending
+              (do
+                (finish-event! session pending send-accepted)
+                (remove-finished-session! connections session)
+                (recur))
+
+              :else
+              (do
+                (release-response-slot! session response-slot)
+                (remove-finished-session! connections session)
+                (recur)))))
         (do
           (key-interests! session 0 op-write)
           (close-drained-session! connections workers close-connection!
                                   shutting-down? session))))))
 
+(defn- finish-capacity-rejection!
+  [selection-key attachment]
+  (key-cancel! selection-key)
+  (try (.close ^SocketChannel (::channel attachment)) (catch Throwable _))
+  (reset! (::rejecting-session (::server-capacity attachment)) nil)
+  (let [accept-key (::accept-key attachment)]
+    (when (and (not @(::shutting-down? attachment))
+               (key-valid? accept-key))
+      (key-interest-ops! accept-key
+                         (bit-or (key-interest-ops accept-key) op-accept))))
+  nil)
+
+(defn- write-capacity-rejection!
+  [selection-key attachment]
+  (let [^ByteBuffer frame (::frame attachment)]
+    (.write ^SocketChannel (::channel attachment) frame)
+    (when-not (.hasRemaining frame)
+      (finish-capacity-rejection! selection-key attachment))))
+
+(defn- reject-capacity!
+  [^SocketChannel channel selector accept-key shutting-down? server-capacity]
+  (.configureBlocking channel false)
+  (let [frame
+        (message-frame
+         (protocol/connection-capacity-failure
+          {::protocol/maximum-connections
+           (::maximum-connections server-capacity)})
+         protocol/session-open-maximum-frame-bytes)
+        attachment
+        {::rejection? true
+         ::channel channel
+         ::frame frame
+         ::accept-key accept-key
+         ::shutting-down? shutting-down?
+         ::server-capacity server-capacity}]
+    (key-interest-ops! accept-key
+                       (bit-and (key-interest-ops accept-key)
+                                (bit-not op-accept)))
+    (reset! (::rejecting-session server-capacity) attachment)
+    (.register channel selector op-write attachment))
+  nil)
+
 (defn- accept-session!
-  [^ServerSocketChannel server selector commands connections
-   ^ThreadPoolExecutor workers
-   close-connection! shutting-down? open-connection! server-capacity]
+  [^ServerSocketChannel server selector accept-key commands connections
+   ^ThreadPoolExecutor workers close-connection! shutting-down? open-connection!
+   server-capacity]
   (when-let [^SocketChannel channel (.accept server)]
     (if (>= (count @connections) (::maximum-connections server-capacity))
-      (.close channel)
+      (reject-capacity! channel selector accept-key shutting-down?
+                        server-capacity)
       (do
         (.configureBlocking channel false)
         (let [session-holder (atom nil)
@@ -1000,8 +1318,8 @@
                                           false true)
                       (enqueue-selector!
                        selector commands
-                       #(close-session! connections workers close-connection!
-                                        session))))))
+                       #(close-server-session! connections workers
+                                               close-connection! session))))))
               send-event!
               (fn [message callback]
                 (if-let [session @session-holder]
@@ -1017,11 +1335,13 @@
               (fn
                 ([message] (send-event! message nil))
                 ([message callback] (send-event! message callback)))
+              connection-control {::close! close! ::send! send!}
               session
               {::channel channel
                ::selector selector
                ::commands commands
                ::key (atom nil)
+               ::phase (atom ::opening)
                ::header (ByteBuffer/allocate Integer/BYTES)
                ::payload (atom nil)
                ::paused-frame-length (atom nil)
@@ -1033,24 +1353,28 @@
                ::current-response-slot (atom nil)
                ::authority-response-slot-count
                (::authority-response-slot-count server-capacity)
-               ::maximum-response-slots
-               (::maximum-response-slots server-capacity)
+               ::maximum-response-slots (::maximum-response-slots server-capacity)
                ::maximum-session-response-slots
                (::maximum-session-response-slots server-capacity)
-               ::authority-output-bytes
-               (::authority-output-bytes server-capacity)
+               ::authority-output-bytes (::authority-output-bytes server-capacity)
                ::session-output-bytes (atom 0)
                ::maximum-output-bytes (::maximum-output-bytes server-capacity)
                ::maximum-session-output-bytes
                (::maximum-session-output-bytes server-capacity)
+               ::configured-maximum-frame-bytes
+               (::maximum-frame-bytes server-capacity)
+               ::maximum-frame-bytes-state
+               (atom (::maximum-frame-bytes server-capacity))
+               ::maximum-frame-bytes (::maximum-frame-bytes server-capacity)
                ::cleanup-workers (::cleanup-workers server-capacity)
                ::shutting-down? shutting-down?
+               ::open-connection! open-connection!
+               ::connection-control connection-control
                ::pending-encodes (ArrayDeque.)
                ::encoding-active? (AtomicReference. false)
                ::outputs (ArrayDeque.)
                ::event-state (atom nil)
-               ::paused-event-sessions
-               (::paused-event-sessions server-capacity)
+               ::paused-event-sessions (::paused-event-sessions server-capacity)
                ::queued-output-bytes (atom 0)
                ::decoding? (atom false)
                ::outstanding (atom 0)
@@ -1063,38 +1387,8 @@
                ::send-lock (Object.)
                ::close! close!}]
           (reset! session-holder session)
-          (reset! (::key session) (.register channel selector 0 session))
-          (swap! connections assoc channel session)
-          (try
-            (.execute
-             workers
-             ^Runnable
-             (fn []
-               (try
-                 (let [owner (open-connection!
-                              {::close! close! ::send! send!})]
-                   (reset! (::owner session) owner)
-                   (.set ^AtomicReference (::opening? session) false)
-                   (if (.get ^AtomicReference (::closed? session))
-                     (finish-session-close! connections close-connection!
-                                            session)
-                     (enqueue-selector!
-                      selector commands
-                      (fn []
-                        (if (.get ^AtomicReference (::closed? session))
-                          (finish-session-close! connections close-connection!
-                                                 session)
-                          (key-interests! session op-read 0))))))
-                 (catch Throwable _
-                   (.set ^AtomicReference (::opening? session) false)
-                   (enqueue-selector!
-                    selector commands
-                    #(close-session! connections workers close-connection!
-                                     session))))))
-            (catch Throwable throwable
-              (if (rejected-execution? throwable)
-                (close-session! connections workers close-connection! session)
-                (throw throwable)))))))))
+          (reset! (::key session) (.register channel selector op-read session))
+          (swap! connections assoc channel session))))))
 
 (defn- drain-commands!
   [^LinkedBlockingQueue commands]
@@ -1105,9 +1399,12 @@
 
 (defn- begin-shutdown!
   [^ServerSocketChannel server connections workers close-connection!
-   shutting-down?]
+   shutting-down? rejecting-session]
   (reset! shutting-down? true)
   (try (.close server) (catch Throwable _))
+  (when-let [rejection @rejecting-session]
+    (try (.close ^SocketChannel (::channel rejection)) (catch Throwable _))
+    (reset! rejecting-session nil))
   (doseq [session (vals @connections)]
     (key-interests! session 0 op-read)
     (close-drained-session! connections workers close-connection!
@@ -1116,7 +1413,7 @@
 (defn- force-close-sessions!
   [connections workers close-connection!]
   (doseq [session (vals @connections)]
-    (close-session! connections workers close-connection! session)))
+    (close-server-session! connections workers close-connection! session)))
 
 (defn- process-selected!
   [^ServerSocketChannel server selector commands connections workers
@@ -1129,20 +1426,26 @@
         (when (key-valid? key)
           (try
             (if (key-acceptable? key)
-              (accept-session! server selector commands connections workers
+              (accept-session! server selector key commands connections workers
                                close-connection! shutting-down? open-connection!
                                server-capacity)
               (let [session (key-attachment key)]
-                (when (key-readable? key)
-                  (read-session! connections workers close-connection!
-                                 shutting-down? handler session))
-                (when (and (key-valid? key) (key-writable? key))
-                  (write-session! connections workers close-connection!
-                                  shutting-down? session))))
+                (if (::rejection? session)
+                  (when (key-writable? key)
+                    (write-capacity-rejection! key session))
+                  (do
+                    (when (key-readable? key)
+                      (read-session! connections workers close-connection!
+                                     shutting-down? handler session))
+                    (when (and (key-valid? key) (key-writable? key))
+                      (write-session! connections workers close-connection!
+                                      shutting-down? session))))))
             (catch Throwable _
               (when-let [session (key-attachment key)]
-                (close-session! connections workers close-connection!
-                                session)))))))))
+                (if (::rejection? session)
+                  (finish-capacity-rejection! key session)
+                  (close-server-session! connections workers close-connection!
+                                         session))))))))))
 
 (defn start-request-server!
   "Start one selector server with callback-complete request delivery."
@@ -1150,7 +1453,8 @@
   [{::keys [socket-path handler open-connection! close-connection!
             shutdown-timeout-ms maximum-input-bytes maximum-response-slots
             maximum-session-response-slots maximum-output-bytes
-            maximum-session-output-bytes maximum-connections]
+            maximum-session-output-bytes maximum-connections
+            maximum-frame-bytes]
     codec-worker-count ::codec-workers
     worker-queue-capacity ::codec-worker-queue-capacity
     :or {shutdown-timeout-ms default-shutdown-timeout-ms
@@ -1161,6 +1465,7 @@
          maximum-output-bytes default-maximum-output-bytes
          maximum-session-output-bytes default-maximum-session-output-bytes
          maximum-connections default-maximum-connections
+         maximum-frame-bytes protocol/maximum-frame-bytes
          worker-queue-capacity default-codec-worker-queue-capacity}}]
   (try (.delete (java.io.File. ^String socket-path)) (catch Throwable _))
   (let [^UnixDomainSocketAddress address
@@ -1185,7 +1490,9 @@
          ::authority-output-bytes (atom 0)
          ::maximum-output-bytes maximum-output-bytes
          ::maximum-session-output-bytes maximum-session-output-bytes
+         ::maximum-frame-bytes maximum-frame-bytes
          ::maximum-connections maximum-connections
+         ::rejecting-session (atom nil)
          ::cleanup-workers cleanup-pool}]
     (try
       (.bind server address)
@@ -1212,8 +1519,8 @@
                (finally
                  (try (.close server) (catch Throwable _))
                  (doseq [session (vals @connections)]
-                   (close-session! connections workers close-connection!
-                                   session)))))
+                   (close-server-session! connections workers close-connection!
+                                          session)))))
            "database-request-selector")]
       (.setDaemon selector-worker true)
       (.start selector-worker)
@@ -1231,6 +1538,7 @@
        ::authority-response-slot-count
        (::authority-response-slot-count server-capacity)
        ::authority-output-bytes (::authority-output-bytes server-capacity)
+       ::rejecting-session (::rejecting-session server-capacity)
        ::close-connection! close-connection!
        ::closed? closed?})
       (catch Throwable throwable
@@ -1260,7 +1568,8 @@
          (::connections request-server)
          workers
          (::close-connection! request-server)
-         (::shutting-down? request-server))))
+         (::shutting-down? request-server)
+         (::rejecting-session request-server))))
     (.join selector-worker shutdown-timeout-ms)
     (when (.isAlive selector-worker)
       (reset! (::forced-connections request-server)

@@ -169,11 +169,14 @@
 
 (defn- writer-call!
   [descriptor request]
-  (with-open [channel
-              (uds/connect!
-               (get-in descriptor
-                       [::launch/writer-owner ::launch/request-socket-path]))]
-    (uds/call! {::uds/channel channel ::uds/message request})))
+  (let [session
+        (uds/open-session!
+         (get-in descriptor
+                 [::launch/writer-owner ::launch/request-socket-path]))]
+    (try
+      (uds/call! {::uds/session session ::uds/message request})
+      (finally
+        (uds/close-session! session)))))
 
 (defn- branch-head
   [database-value]

@@ -6,6 +6,7 @@
             [seon.db.protocol :as protocol]
             [seon.db.registry :as registry]
             [seon.db.transport.uds :as uds]
+            [seon.db.writer-test-support :as writer-test]
             [seon.db.writer :as writer])
   (:import [java.io File]
            [java.nio.channels Channels SocketChannel]
@@ -76,7 +77,7 @@
 
 (defn- call!
   [channel message]
-  (uds/call! {::uds/channel channel ::uds/message message}))
+  (writer-test/call-channel! channel message))
 
 (defn- request
   [operation request-id body]
@@ -159,7 +160,7 @@
           ::writer/backend :memory
           ::writer/selected-processors 3
           ::writer/request-socket-path path})
-        channel (uds/connect! path)]
+        channel (writer-test/open-channel! path)]
     (doseq [database-name (rest database-names)]
       (let [response (ensure-database! channel database-name)]
         (when-not (::protocol/success? response)
@@ -863,9 +864,9 @@
         database-b (str prefix "-b")]
     (with-authority [authority "listen" [database-a database-b]]
       (let [path (::path authority)
-            ^SocketChannel listener-a (uds/connect! path)
-            ^SocketChannel listener-b (uds/connect! path)
-            ^SocketChannel mutations (uds/connect! path)
+            ^SocketChannel listener-a (writer-test/open-channel! path)
+            ^SocketChannel listener-b (writer-test/open-channel! path)
+            ^SocketChannel mutations (writer-test/open-channel! path)
             db-a (database-value database-a)
             db-b (database-value database-b)
             acquire!
@@ -978,7 +979,7 @@
       (let [path (::path authority)
             server (::server authority)
             runtime (::writer/runtime server)
-            session (multiplexed-session (uds/connect! path))
+            session (multiplexed-session (writer-test/open-channel! path))
             entered (CountDownLatch. 1)
             release-owner (CountDownLatch. 1)
             original-run d/run-q!

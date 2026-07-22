@@ -10,6 +10,7 @@
             [seon.dev.config :as config]
             [seon.dev.state :as state]
             [seon.db.protocol :as db.protocol]
+            [seon.db.transport.uds :as uds]
             [seon.launch :as launch]
             [seon.runtime.lifecycle :as runtime.lifecycle])
   (:import [java.io ByteArrayOutputStream PushbackReader RandomAccessFile
@@ -649,9 +650,12 @@
     (and (fs/regular-file? (:seon.dev.config/writer-repl-port-file config))
          (fs/exists? socket)
          (try
-           (with-open [channel (SocketChannel/open StandardProtocolFamily/UNIX)]
-             (.connect channel (UnixDomainSocketAddress/of socket)))
+           (let [session (uds/open-session! socket)]
+             (uds/close-session! session))
            true
+           (catch clojure.lang.ExceptionInfo exception
+             (= db.protocol/connection-capacity-error
+                (::db.protocol/error-kind (ex-data exception))))
            (catch Throwable _ false)))))
 
 (defn- tcp-ready? [port]
@@ -869,10 +873,12 @@
       (or
       (and request-socket
       (try
-        (with-open [channel (SocketChannel/open StandardProtocolFamily/UNIX)]
-          (.connect channel (UnixDomainSocketAddress/of
-                              request-socket)))
+        (let [session (uds/open-session! request-socket)]
+          (uds/close-session! session))
         true
+        (catch clojure.lang.ExceptionInfo exception
+          (= db.protocol/connection-capacity-error
+             (::db.protocol/error-kind (ex-data exception))))
         (catch Throwable _ false)))
       (let [published (when (and file (fs/regular-file? file))
                         (some-> (slurp file) str/trim parse-long))]

@@ -97,7 +97,10 @@
     (case (::protocol/operation request)
       :seon.db.protocol.operation/capabilities
       (success request {::protocol/capabilities
-                        {:seon.db.capability/query true}})
+                        {:seon.db.capability/query true
+                         ::protocol/version protocol/current-version
+                         ::protocol/maximum-frame-bytes
+                         protocol/maximum-frame-bytes}})
 
       :seon.db.protocol.operation/ensure-database
       (success request {::protocol/database-name name
@@ -194,7 +197,11 @@
         connection-options (atom nil)
         connect-count (atom 0)
         connected? (atom true)
-        session {::recording-session true}]
+        session {::recording-session true
+                 ::uds/version protocol/current-version
+                 ::uds/configured-maximum-frame-bytes
+                 protocol/maximum-frame-bytes
+                 ::uds/maximum-frame-bytes protocol/maximum-frame-bytes}]
     (reset! @#'db/!session nil)
     (set! uds/connect!
           (fn [options]

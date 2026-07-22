@@ -5,7 +5,7 @@
             [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds])
   (:import [com.sun.management UnixOperatingSystemMXBean]
-           [java.io File]
+           [java.io File InputStream]
            [java.lang.management ManagementFactory]
            [java.nio ByteBuffer]
            [java.nio.channels Channels SocketChannel]
@@ -81,6 +81,278 @@
             (recur)))
         (recur (+ offset length))))))
 
+(defn- one-byte-input
+  [^SocketChannel channel]
+  (let [delegate (Channels/newInputStream channel)]
+    (proxy [InputStream] []
+      (read
+        ([] (.read delegate))
+        ([bytes offset length]
+         (.read delegate bytes offset (min 1 length))))
+      (close [] (.close delegate)))))
+
+(defn- open-admitted-channel!
+  [path]
+  (let [session (uds/open-session! path)]
+    (::uds/channel session)))
+
+(deftest at-capacity-session-open-delivery-is-bounded-and-restores-admission
+  (let [path (socket-path "session-open-capacity")
+        maximum-connections 1
+        opened (atom 0)
+        closed (atom 0)
+        baseline-fds (open-file-descriptor-count)
+        server
+        (uds/start-request-server!
+         {::uds/socket-path path
+          ::uds/maximum-connections maximum-connections
+          ::uds/open-connection!
+          (fn [_control]
+            (swap! opened inc)
+            (Object.))
+          ::uds/close-connection! (fn [_owner] (swap! closed inc))
+          ;; Before admission belongs to the transport, this response lets the
+          ;; held channel reach the exact future test state. Cap+1 never reaches
+          ;; the handler in either implementation.
+          ::uds/handler
+          (fn [_owner request _frame-bytes complete!]
+            (when (= protocol/session-open-operation
+                     (::protocol/operation request))
+              (complete!
+               (protocol/session-open-success
+                {::protocol/configured-maximum-frame-bytes
+                 protocol/maximum-frame-bytes
+                 ::protocol/maximum-frame-bytes
+                 protocol/maximum-frame-bytes}))))})
+        opening
+        (protocol/session-open-request
+         {::protocol/maximum-frame-bytes protocol/maximum-frame-bytes})
+        capacity-failure
+        (protocol/connection-capacity-failure
+         {::protocol/maximum-connections maximum-connections})
+        held (uds/connect! path)
+        rejected (atom [])]
+    (try
+      (write-bytes! held (frame-bytes opening) 1)
+      (is (= (protocol/session-open-success
+              {::protocol/configured-maximum-frame-bytes
+               protocol/maximum-frame-bytes
+               ::protocol/maximum-frame-bytes
+               protocol/maximum-frame-bytes})
+             (uds/read-frame (one-byte-input held))))
+      (is (= 1 @opened))
+      (is (= 1 (count @(::uds/connections server))))
+
+      (dotimes [_ 4]
+        (swap! rejected conj (uds/connect! path)))
+      (Thread/sleep 50)
+      (is (<= (open-file-descriptor-count)
+              (+ baseline-fds (count @rejected) 7))
+          "cap+1 clients retain only their FDs plus one rejection allowance")
+      (doseq [channel @rejected]
+        (is (= capacity-failure
+               (uds/read-frame (one-byte-input channel)))
+            "each cap+1 client receives the exact fragmented rejection")
+        (.close ^SocketChannel channel))
+      (is (= 1 @opened) "rejection never calls open-connection!")
+      (is (= 1 (count @(::uds/connections server)))
+          "rejection sessions are not admitted")
+      (is (.isAlive ^Thread (::uds/worker server))
+          "the selector remains responsive after repeated rejection writes")
+      (wait-until! "capacity rejection FD release"
+                   #(<= (open-file-descriptor-count) (+ baseline-fds 7)))
+
+      (.close held)
+      (wait-until! "held admitted session cleanup" #(= 1 @closed))
+      (wait-until! "held admission release"
+                   #(empty? @(::uds/connections server)))
+      (with-open [next (uds/connect! path)]
+        (write-bytes! next (frame-bytes opening) Integer/MAX_VALUE)
+        (is (= true (::protocol/success?
+                     (uds/read-frame (one-byte-input next))))
+            "the next session admits immediately after capacity releases"))
+      (is (= 2 @opened))
+      (finally
+        (try (.close held) (catch Throwable _))
+        (run! #(try (.close ^SocketChannel %) (catch Throwable _)) @rejected)
+        (uds/close-request-server! server)
+        (.delete (File. path))))))
+
+(deftest session-open-fragmentation-and-coalescing-switches-before-semantics
+  (let [path (socket-path "session-open-phase-switch")
+        opened (atom 0)
+        handled (atom [])
+        server
+        (uds/start-request-server!
+         {::uds/socket-path path
+          ::uds/open-connection! (fn [_control] (swap! opened inc) (Object.))
+          ::uds/close-connection! (constantly nil)
+          ::uds/handler
+          (fn [_owner request _frame-bytes complete!]
+            (swap! handled conj request)
+            (complete! (protocol/success
+                        {::protocol/request-id (::protocol/request-id request)
+                         ::protocol/pong? true})))})
+        opening
+        (protocol/session-open-request
+         {::protocol/maximum-frame-bytes protocol/maximum-frame-bytes})
+        ping (protocol/ping-request {::protocol/request-id "coalesced/ping"})]
+    (try
+      (with-open [channel (uds/connect! path)]
+        (write-bytes! channel
+                      (joined-bytes (frame-bytes opening) (frame-bytes ping)) 1)
+        (let [input (one-byte-input channel)]
+          (is (= protocol/session-open-request-id
+                 (::protocol/request-id (uds/read-frame input))))
+          (is (= {::protocol/success? true
+                  ::protocol/request-id "coalesced/ping"
+                  ::protocol/pong? true}
+                 (uds/read-frame input)))))
+      (is (= 1 @opened))
+      (is (= [ping] @handled)
+          "only the post-open semantic request reaches the handler")
+      (finally
+        (uds/close-request-server! server)
+        (.delete (File. path))))))
+
+(deftest session-open-rejects-version-and-ordinary-first-without-an-owner
+  (let [path (socket-path "session-open-rejections")
+        opened (atom 0)
+        server
+        (uds/start-request-server!
+         {::uds/socket-path path
+          ::uds/open-connection! (fn [_control] (swap! opened inc) (Object.))
+          ::uds/close-connection! (constantly nil)
+          ::uds/handler (fn [_owner _request _frame-bytes _complete!] nil)})]
+    (try
+      (with-open [channel (uds/connect! path)]
+        (write-bytes!
+         channel
+         (frame-bytes
+          (assoc (protocol/session-open-request
+                  {::protocol/maximum-frame-bytes protocol/maximum-frame-bytes})
+                 ::protocol/version 12))
+         Integer/MAX_VALUE)
+        (is (= (protocol/incompatible-version-failure
+                {::protocol/peer-version 12})
+               (uds/read-frame (one-byte-input channel)))))
+      (with-open [channel (uds/connect! path)]
+        (let [request (protocol/ping-request
+                       {::protocol/request-id "ordinary/first"})]
+          (write-bytes! channel (frame-bytes request) Integer/MAX_VALUE)
+          (is (= (protocol/session-open-required-failure
+                  {::protocol/request-id "ordinary/first"})
+                 (uds/read-frame (one-byte-input channel))))))
+      (doseq [request [(assoc (protocol/session-open-request
+                               {::protocol/maximum-frame-bytes
+                                protocol/maximum-frame-bytes})
+                              ::protocol/request-id "session/wrong")
+                       (assoc (protocol/session-open-request
+                               {::protocol/maximum-frame-bytes
+                                protocol/maximum-frame-bytes})
+                              ::unexpected true)]]
+        (with-open [channel (uds/connect! path)]
+          (write-bytes! channel (frame-bytes request) Integer/MAX_VALUE)
+          (let [response (uds/read-frame (one-byte-input channel))]
+            (is (false? (::protocol/success? response)))
+            (is (= protocol/protocol-error
+                   (::protocol/error-kind response))))))
+      (is (zero? @opened))
+      (finally
+        (uds/close-request-server! server)
+        (.delete (File. path))))))
+
+(deftest opening-success-must-carry-the-exact-minimum-agreement
+  (let [valid-opening-success? (var-get #'uds/valid-opening-success?)
+        configured 65536
+        response (protocol/session-open-success
+                  {::protocol/configured-maximum-frame-bytes configured
+                   ::protocol/maximum-frame-bytes configured})]
+    (is (valid-opening-success? response protocol/maximum-frame-bytes))
+    (is (false?
+         (valid-opening-success?
+          (assoc response ::protocol/maximum-frame-bytes (inc configured))
+          protocol/maximum-frame-bytes)))))
+
+(deftest negotiated-session-ceiling-governs-both-directions
+  (let [path (socket-path "session-frame-ceiling")
+        ceiling 65536
+        legal (apply str (repeat 60000 "x"))
+        oversized (apply str (repeat 70000 "x"))
+        server
+        (uds/start-request-server!
+         {::uds/socket-path path
+          ::uds/maximum-frame-bytes ceiling
+          ::uds/open-connection! (fn [_control] (Object.))
+          ::uds/close-connection! (constantly nil)
+          ::uds/handler
+          (fn [_owner request _frame-bytes complete!]
+            (complete!
+             {::protocol/request-id (::protocol/request-id request)
+              ::response (if (= :oversized (::response request))
+                           oversized
+                           (::response request))}))})
+        session (uds/open-session! path)]
+    (try
+      (is (= ceiling (::protocol/configured-maximum-frame-bytes session)))
+      (is (= ceiling (::protocol/maximum-frame-bytes session)))
+      (is (= legal
+             (::response
+              (uds/call! {::uds/session session
+                          ::uds/message
+                          {::protocol/request-id "frame/legal"
+                           ::response legal}}))))
+      (let [failure
+            (try
+              (uds/call! {::uds/session session
+                          ::uds/message
+                          {::protocol/request-id "frame/outbound"
+                           ::response oversized}})
+              nil
+              (catch clojure.lang.ExceptionInfo exception
+                (ex-data exception)))]
+        (is (= :seon.config.database.transport/maximum-frame-bytes
+               (::protocol/configuration-key failure))))
+      (is (= (protocol/frame-too-large-failure
+              {::protocol/request-id "frame/response"
+               ::protocol/maximum-frame-bytes ceiling})
+             (uds/call! {::uds/session session
+                         ::uds/message
+                         {::protocol/request-id "frame/response"
+                          ::response :oversized}})))
+      (finally
+        (uds/close-session! session)
+        (uds/close-request-server! server)
+        (.delete (File. path))))))
+
+(deftest oversized-inbound-length-returns-session-control-and-closes
+  (let [path (socket-path "session-inbound-ceiling")
+        ceiling 65536
+        server
+        (uds/start-request-server!
+         {::uds/socket-path path
+          ::uds/maximum-frame-bytes ceiling
+          ::uds/open-connection! (fn [_control] (Object.))
+          ::uds/close-connection! (constantly nil)
+          ::uds/handler (fn [_owner _request _frame-bytes _complete!] nil)})
+        session (uds/open-session! path)
+        channel (::uds/channel session)]
+    (try
+      (write-bytes! channel
+                    (.array (doto (ByteBuffer/allocate Integer/BYTES)
+                              (.putInt (inc ceiling))))
+                    Integer/MAX_VALUE)
+      (is (= (protocol/frame-too-large-failure
+              {::protocol/request-id protocol/session-control-request-id
+               ::protocol/maximum-frame-bytes ceiling})
+             (uds/read-frame (one-byte-input channel)
+                             protocol/session-open-maximum-frame-bytes)))
+      (is (nil? (uds/read-frame (Channels/newInputStream channel))))
+      (finally
+        (try (uds/close-session! session) (catch Throwable _))
+        (uds/close-request-server! server)
+        (.delete (File. path))))))
+
 (deftest transit-roundtrip-preserves-native-protocol-values
   (let [request-id (str (UUID/randomUUID))
         instant (Date. 1720000000000)
@@ -150,7 +422,7 @@
         request (protocol/execute-many-request
                  {::protocol/request-id "many-1"
                   ::protocol/members members})]
-    (is (= 12 protocol/current-version))
+    (is (= 13 protocol/current-version))
     (is (protocol/valid-request? request))
     (is (= request (uds/decode (uds/encode request))))
     (is (= [database database database]
@@ -303,12 +575,14 @@
            (complete! response))
          (constantly nil))]
     (try
-      (with-open [channel (uds/connect! path)]
-        (let [actual
-              (uds/call! {::uds/channel channel ::uds/message request})]
+      (let [session (uds/open-session! path)]
+        (try
+          (let [actual
+                (uds/call! {::uds/session session ::uds/message request})]
           (is (= [request] @seen))
           (is (= response actual))
-          (is (protocol/valid-response? actual))))
+            (is (protocol/valid-response? actual)))
+          (finally (uds/close-session! session))))
       (finally
         (uds/close-request-server! server)
         (.delete (File. path))))))
@@ -326,16 +600,18 @@
                         ::protocol/pong? true})))
          (constantly nil))]
     (try
-      (with-open [channel (uds/connect! path)]
-        (let [request (protocol/ping-request
-                       {::protocol/request-id "transport/ping"})
-              response (uds/call! {::uds/channel channel
-                                   ::uds/message request})]
+      (let [session (uds/open-session! path)]
+        (try
+          (let [request (protocol/ping-request
+                         {::protocol/request-id "transport/ping"})
+                response (uds/call! {::uds/session session
+                                     ::uds/message request})]
           (is (= [request] @seen))
           (is (= {::protocol/success? true
                   ::protocol/request-id "transport/ping"
                   ::protocol/pong? true}
-                 response))))
+                   response)))
+          (finally (uds/close-session! session))))
       (finally
         (uds/close-request-server! server)
         (.delete (File. path))))))
@@ -374,8 +650,8 @@
             (deliver seen-frame-bytes frame-bytes)
             (complete! {::response :ok}))})]
     (try
-      (with-open [first (uds/connect! path)
-                  second (uds/connect! path)]
+      (with-open [first (open-admitted-channel! path)
+                  second (open-admitted-channel! path)]
         (write-bytes! first
                       (.array (doto (ByteBuffer/allocate Integer/BYTES)
                                 (.putInt (alength payload))))
@@ -418,8 +694,10 @@
          (constantly nil))
         client
         (future
-          (with-open [channel (uds/connect! path)]
-            (uds/call! {::uds/channel channel ::uds/message request})))]
+          (let [session (uds/open-session! path)]
+            (try
+              (uds/call! {::uds/session session ::uds/message request})
+              (finally (uds/close-session! session)))))]
     (try
       (is (= request (deref entered 2000 ::handler-not-entered)))
       (let [close (future (uds/close-request-server! server))]
@@ -435,7 +713,7 @@
                 ::uds/workers-stopped? true
                 ::uds/cleanup-stopped? true}
                (deref close 2000 ::close-timeout)))
-        (is (thrown? Throwable (uds/connect! path))
+        (is (thrown? Throwable (open-admitted-channel! path))
             "a closed request server accepts no later connection"))
       (finally
         (deliver release-handler true)
@@ -455,7 +733,7 @@
           ::uds/handler
           (fn [_owner request _frame-bytes _complete!]
             (deliver entered request))})
-        channel (uds/connect! path)]
+        channel (open-admitted-channel! path)]
     (try
       (write-bytes! channel (frame-bytes {::request :never-completes})
                     Integer/MAX_VALUE)
@@ -487,7 +765,7 @@
            (complete! {::response (::request request)}))
          (constantly nil))]
     (try
-      (with-open [channel (uds/connect! path)]
+      (with-open [channel (open-admitted-channel! path)]
         (write-bytes! channel (frame-bytes {::request :fragmented}) 1)
         (write-bytes!
          channel
@@ -527,7 +805,7 @@
             (swap! entered conj (::request request))
             (swap! completions assoc (::request request) complete!))})]
     (try
-      (with-open [channel (uds/connect! path)]
+      (with-open [channel (open-admitted-channel! path)]
         (write-bytes! channel
                       (apply joined-bytes (map frame-bytes requests))
                       Integer/MAX_VALUE)
@@ -571,7 +849,7 @@
            (swap! completions assoc (::request request) complete!))
          (constantly nil))]
     (try
-      (with-open [channel (uds/connect! path)]
+      (with-open [channel (open-admitted-channel! path)]
         (write-bytes!
          channel
          (joined-bytes (frame-bytes {::request :first})
@@ -604,15 +882,17 @@
           ::uds/close-connection! (constantly nil)
           ::uds/handler
           (fn [_owner _request _frame-bytes _complete!] nil)})
-        channel (uds/connect! path)
+        channel (open-admitted-channel! path)
         {close! ::uds/close! send! ::uds/send!}
         (deref control 2000 ::not-opened)]
     (try
       (with-redefs-fn
         {#'seon.db.transport.uds/message-frame
-         (fn [message]
+         (fn [message & [ceiling]]
            (.await release-encode)
-           (original-frame message))}
+           (if ceiling
+             (original-frame message ceiling)
+             (original-frame message)))}
         (fn []
           (let [first-result (send! {::event 1})]
             (is (= uds/send-accepted (::uds/send-status first-result)))
@@ -663,7 +943,7 @@
           ::uds/handler
           (fn [_owner message _frame-bytes complete!]
             (complete! {::response (::request message)}))})
-        channel (uds/connect! path)
+        channel (open-admitted-channel! path)
         {send! ::uds/send!} (deref control 2000 ::not-opened)
         input (Channels/newInputStream channel)]
     (try
@@ -704,25 +984,31 @@
           ::uds/close-connection! (constantly nil)
           ::uds/handler
           (fn [_owner _request _frame-bytes _complete!] nil)})
-        channel (uds/connect! path)
+        channel (open-admitted-channel! path)
         {send! ::uds/send!} (deref control 2000 ::not-opened)]
     (try
       (with-redefs-fn
         {#'seon.db.transport.uds/message-frame
-         (fn [message]
+         (fn [message & [ceiling]]
            (case (::event message)
              :first
              (do
                (deliver first-entered (Thread/currentThread))
                (.await release-first)
-               (original-frame message))
+               (if ceiling
+                 (original-frame message ceiling)
+                 (original-frame message)))
 
              :second
              (do
                (deliver second-entered (Thread/currentThread))
-               (original-frame message))
+               (if ceiling
+                 (original-frame message ceiling)
+                 (original-frame message)))
 
-             (original-frame message)))}
+             (if ceiling
+               (original-frame message ceiling)
+               (original-frame message))))}
         (fn []
           (let [first-result (send! {::event :first})]
             (is (= uds/send-accepted (::uds/send-status first-result)))
@@ -805,15 +1091,18 @@
           ::uds/close-connection! (constantly nil)
           ::uds/handler
           (fn [_owner _request _frame-bytes _complete!] nil)})
-        channels [(uds/connect! path) (uds/connect! path)]]
+        channels [(open-admitted-channel! path)
+                  (open-admitted-channel! path)]]
     (try
       (wait-until! "two physical session controls" #(= 2 (count @controls)))
       (with-redefs-fn
         {#'seon.db.transport.uds/message-frame
-         (fn [message]
+         (fn [message & [ceiling]]
            (.countDown both-entered)
            (.await release-encodes)
-           (original-frame message))}
+           (if ceiling
+             (original-frame message ceiling)
+             (original-frame message)))}
         (fn []
           (let [results
                 (mapv (fn [control n]
@@ -859,7 +1148,7 @@
         channels
         (reduce
          (fn [channels index]
-           (let [channel (uds/connect! path)]
+           (let [channel (open-admitted-channel! path)]
              (wait-until! (str "physical session control " index)
                           #(= (inc index) (count @controls)))
              (conj channels channel)))
@@ -868,9 +1157,11 @@
       (wait-until! "64 physical session controls" #(= 64 (count @controls)))
       (with-redefs-fn
         {#'seon.db.transport.uds/message-frame
-         (fn [message]
+         (fn [message & [ceiling]]
            (.await release-encodes)
-           (original-frame message))}
+           (if ceiling
+             (original-frame message ceiling)
+             (original-frame message)))}
         (fn []
           (let [results
                 (mapv (fn [control index]
@@ -916,7 +1207,8 @@
           ::uds/close-connection! #(swap! closed conj (::connection-id %))
           ::uds/handler
           (fn [_owner _request _frame-bytes _complete!] nil)})
-        channels [(uds/connect! path) (uds/connect! path)]]
+        channels [(open-admitted-channel! path)
+                  (open-admitted-channel! path)]]
     (try
       (wait-until! "two exact-pressure sessions" #(= 2 (count @controls)))
       (let [[oversized healthy] @controls
@@ -969,18 +1261,21 @@
           ::uds/close-connection! #(swap! closed conj (::connection-id %))
           ::uds/handler
           (fn [_owner _request _frame-bytes _complete!] nil)})
-        channels [(uds/connect! path) (uds/connect! path)]]
+        channels [(open-admitted-channel! path)
+                  (open-admitted-channel! path)]]
     (try
       (wait-until! "two session owners" #(= 2 (count @controls)))
       (let [[slow healthy] @controls
             [slow-channel healthy-channel] channels]
         (with-redefs-fn
           {#'seon.db.transport.uds/message-frame
-           (fn [message]
+           (fn [message & [ceiling]]
              (when (= :slow (::event message))
                (deliver slow-entered true)
                (.await release-slow))
-             (original-frame message))}
+             (if ceiling
+               (original-frame message ceiling)
+               (original-frame message)))}
           (fn []
             (is (= uds/send-accepted
                    (::uds/send-status ((::uds/send! slow)
@@ -1039,7 +1334,8 @@
           ::uds/close-connection! (fn [_owner] (swap! closed inc))
           ::uds/handler
           (fn [_owner _request _frame-bytes _complete!] nil)})
-        channels [(uds/connect! path) (uds/connect! path)]]
+        channels [(open-admitted-channel! path)
+                  (open-admitted-channel! path)]]
     (try
       (wait-until! "two authority-pressure sessions"
                    #(= 2 (count @controls)))
@@ -1047,11 +1343,13 @@
             [first-channel current-channel] channels]
         (with-redefs-fn
           {#'seon.db.transport.uds/message-frame
-           (fn [message]
+           (fn [message & [ceiling]]
              (when (= :occupies-authority (::event message))
                (deliver first-entered true)
                (.await release-first))
-             (original-frame message))}
+             (if ceiling
+               (original-frame message ceiling)
+               (original-frame message)))}
           (fn []
             (is (= uds/send-accepted
                    (::uds/send-status
@@ -1100,12 +1398,13 @@
           ::uds/close-connection! (fn [_owner] (swap! closed inc))
           ::uds/handler
           (fn [_owner _request _frame-bytes _complete!] nil)})
-        channel (uds/connect! path)
+        channel (open-admitted-channel! path)
         {send! ::uds/send!} (deref control 2000 ::not-opened)]
     (try
       (with-redefs-fn
         {#'seon.db.transport.uds/message-frame
-         (fn [_message] (throw (ex-info "deliberate encode failure" {})))}
+         (fn [_message & _]
+           (throw (ex-info "deliberate encode failure" {})))}
         (fn []
           (let [result (send! {::event :broken})]
             (is (= uds/send-accepted (::uds/send-status result))
@@ -1137,7 +1436,7 @@
           ::uds/close-connection! (constantly nil)
           ::uds/handler
           (fn [_owner _request _frame-bytes _complete!] nil)})
-        channel (uds/connect! path)
+        channel (open-admitted-channel! path)
         {send! ::uds/send!} (deref control 2000 ::not-opened)]
     (try
       (.shutdownNow ^java.util.concurrent.ThreadPoolExecutor (::uds/workers server))
@@ -1186,7 +1485,7 @@
                       (::uds/workers server))
         heavy-entered (java.util.concurrent.CountDownLatch. worker-count)
         _ (reset! heavy-entered-holder heavy-entered)
-        channels (mapv (fn [_] (uds/connect! path))
+        channels (mapv (fn [_] (open-admitted-channel! path))
                        (range (inc worker-count)))]
     (try
       (doseq [[channel n] (map vector (take worker-count channels)
@@ -1236,7 +1535,7 @@
          (fn [_owner _request _frame-bytes complete!] (complete! response))
          (constantly nil))]
     (try
-      (with-open [channel (uds/connect! path)]
+      (with-open [channel (open-admitted-channel! path)]
         (write-bytes! channel (frame-bytes {::request :large})
                       Integer/MAX_VALUE)
         (is (= response (uds/read-frame (Channels/newInputStream channel)))
@@ -1261,7 +1560,7 @@
               owner))
           ::uds/close-connection! #(swap! closed conj %)
           ::uds/handler (fn [_owner _request _frame-bytes _complete!] nil)})
-        channel (uds/connect! path)
+        channel (open-admitted-channel! path)
         owner (deref opened 2000 ::not-opened)]
     (try
       ((::close! owner))
@@ -1297,7 +1596,7 @@
                   (swap! closed inc)))))
           ::uds/handler
           (fn [_owner _request _frame-bytes _complete!] nil)})
-        channels (mapv (fn [_] (uds/connect! path)) (range 8))]
+        channels (mapv (fn [_] (open-admitted-channel! path)) (range 8))]
     (try
       (wait-until! "all bounded connections"
                    #(= 8 (count @(::uds/connections server))))
@@ -1340,12 +1639,12 @@
           ::uds/handler
           (fn [_owner _request _frame-bytes complete!]
             (complete! {::response :blocked-encode}))})
-        channel (uds/connect! path)
+        channel (open-admitted-channel! path)
         {send! ::uds/send!} (deref control 2000 ::not-opened)]
     (try
       (with-redefs-fn
         {#'seon.db.transport.uds/message-frame
-         (fn [message]
+         (fn [message & [ceiling]]
            (deliver encode-entered true)
            (loop []
              (when-not @release-encode
@@ -1353,7 +1652,9 @@
                  (Thread/sleep 5)
                  (catch InterruptedException _))
                (recur)))
-           (original-frame message))}
+           (if ceiling
+             (original-frame message ceiling)
+             (original-frame message)))}
         (fn []
           (write-bytes! channel (frame-bytes {::request :encode})
                         Integer/MAX_VALUE)

@@ -4,6 +4,7 @@
             [datahike.api :as d]
             [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds]
+            [seon.db.writer-test-support :as writer-test]
             [seon.db.writer :as writer])
   (:import [java.io File]
            [java.nio.channels SocketChannel]))
@@ -51,7 +52,7 @@
 
 (defn- call!
   [channel request]
-  (uds/call! {::uds/channel channel ::uds/message request}))
+  (writer-test/call-channel! channel request))
 
 (defn- database-value
   [channel database-name]
@@ -124,7 +125,8 @@
                                  ::writer/backend :memory
                                  ::writer/selected-processors selected-processors
                                  ::writer/request-socket-path path})
-          channels (mapv (fn [_] (uds/connect! path)) (range channel-count))]
+          channels (mapv (fn [_] (writer-test/open-channel! path))
+                         (range channel-count))]
       (try
         (body channels (database-value (first channels) database-name))
         (finally

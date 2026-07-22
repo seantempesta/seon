@@ -183,6 +183,8 @@
     :seon.config.database.executor.hnsw/maximum-active
     :seon.config.database.executor.hnsw/maximum-queued
     :seon.config.database.executor.hnsw/maximum-queued-by-database
+    :seon.config.database.transport/maximum-frame-bytes
+    :seon.config.database.transport/maximum-connections
     :seon.config.database.transport/maximum-input-bytes
     :seon.config.database.transport/maximum-response-slots
     :seon.config.database.transport/maximum-session-response-slots
@@ -926,6 +928,11 @@
       (throw (ex-info "Configured frame bytes exceed the protocol ceiling."
                       {:seon.config.database.transport/maximum-frame-bytes maximum-frame-bytes
                        :seon.db.protocol/maximum-frame-bytes protocol/maximum-frame-bytes})))
+    (when (< maximum-frame-bytes protocol/session-open-maximum-frame-bytes)
+      (throw (ex-info "Configured frame bytes are below the session-open bootstrap ceiling."
+                      {:seon.config.database.transport/maximum-frame-bytes maximum-frame-bytes
+                       :seon.db.protocol/session-open-maximum-frame-bytes
+                       protocol/session-open-maximum-frame-bytes})))
     {:seon.config.database.writer/jvm-heap-mb heap-mb
      :seon.config.database.executor/selected-processors processors
      :seon.config.database.executor/maximum-queued-request-bytes

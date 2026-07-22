@@ -23,6 +23,51 @@
 
 (defrecord HostOwner [value])
 
+(def ^:private transit-writer (transit/writer :json))
+
+(defn- transit-bytes
+  [value]
+  (.-byteLength (.encode (js/TextEncoder.)
+                         (transit/write transit-writer value))))
+
+(defn- session-shapes
+  []
+  {:request
+   (protocol/session-open-request
+    {::protocol/maximum-frame-bytes protocol/maximum-frame-bytes})
+   :success
+   (protocol/session-open-success
+    {::protocol/configured-maximum-frame-bytes 1048576
+     ::protocol/maximum-frame-bytes 1048576})
+   :incompatible-version
+   (protocol/incompatible-version-failure {::protocol/peer-version 12})
+   :connection-capacity
+   (protocol/connection-capacity-failure
+    {::protocol/maximum-connections 12})
+   :session-open-required
+   (protocol/session-open-required-failure
+    {::protocol/request-id "ordinary/request"})
+   :oversized-inbound
+   (protocol/frame-too-large-failure
+    {::protocol/request-id protocol/session-control-request-id
+     ::protocol/maximum-frame-bytes 65536})
+   :oversized-response
+   (protocol/frame-too-large-failure
+    {::protocol/request-id "ordinary/request"
+     ::protocol/maximum-frame-bytes 65536})})
+
+(deftest session-opening-shapes-fit-the-fixed-cross-host-bootstrap-ceiling
+  (is (= 13 protocol/current-version))
+  (doseq [[shape value] (session-shapes)]
+    (is ((if (= shape :request)
+           protocol/valid-request?
+           protocol/valid-response?)
+         value)
+        (str shape " is canonical protocol data"))
+    (is (< (transit-bytes value)
+           protocol/session-open-maximum-frame-bytes)
+        (str shape " fits the fixed session-open ceiling"))))
+
 (deftest database-values-have-one-cross-host-ordinary-shape
   (is (protocol/database-value? db))
   (is (protocol/database-value? (assoc db :as-of 536870928)))
