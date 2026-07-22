@@ -1356,16 +1356,23 @@
 (defn- recovered-temporary-ids
   [db transaction]
   (into {}
-        (map (fn [[key-edn entity]]
-               [(edn/read-string key-edn) entity]))
-        (d/q '[:find ?key-edn ?entity
-               :in $ ?transaction
-               :where
-               [?marker :seon.db.protocol.tempid/key-edn
-                ?key-edn ?transaction]
-               [?marker :seon.db.protocol.tempid/entity
-                ?entity ?transaction]]
-             db transaction)))
+        (concat
+         (d/q '[:find ?key ?entity
+                :in $ ?transaction
+                :where
+                [?marker :seon.db.protocol.tempid/string-key
+                 ?key ?transaction]
+                [?marker :seon.db.protocol.tempid/entity
+                 ?entity ?transaction]]
+              db transaction)
+         (d/q '[:find ?key ?entity
+                :in $ ?transaction
+                :where
+                [?marker :seon.db.protocol.tempid/int-key
+                 ?key ?transaction]
+                [?marker :seon.db.protocol.tempid/entity
+                 ?entity ?transaction]]
+              db transaction))))
 
 (defn- recovered-generated-entity-ids
   [datoms candidates]

@@ -371,7 +371,7 @@
                         (:seon.agent.ctx.transcript/usage-history-omitted?
                          result)))
                    (is (every? #(not (str/includes? (pr-str %)
-                                                    "llm-usage"))
+                                                    "seon.agent.turn.usage/"))
                                @main-patterns)
                        "hostile usage is absent from every bulk pull")))
           (.catch (fn [error] (is false (str error))))
@@ -484,15 +484,14 @@
   (let [actual {:seon.agent.ctx.transcript/turn-idx 0
                 :seon.agent.turn/at (js/Date. 1)
                 :seon.agent.turn/evals []
-                :seon.agent.turn/llm-usage
-                (pr-str {:prompt_tokens 9000
-                         :completion_tokens 200
-                         :prompt_tokens_details {:cached_tokens 8400}})}
+                :seon.agent.turn.usage/prompt-tokens 9000
+                :seon.agent.turn.usage/completion-tokens 200
+                :seon.agent.turn.usage/cached-tokens 8400}
         estimated {:seon.agent.ctx.transcript/turn-idx 1
                    :seon.agent.turn/at (js/Date. 2)
                    :seon.agent.turn/evals []
-                   :seon.agent.turn/llm-usage
-                   (pr-str {:prompt_tokens 120 :completion_tokens 8})
+                   :seon.agent.turn.usage/prompt-tokens 120
+                   :seon.agent.turn.usage/completion-tokens 8
                    :seon.agent.turn/usage-estimated? true}
         hiccup (@#'transcript/format-transcript-html
                  (assoc acquired-empty

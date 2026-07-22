@@ -166,12 +166,14 @@
           first-response
           (transact!
            runtime database-name request-id
-           [{:db/id -1 :receipt/value "only-once"}]
+           [{:db/id -1 :receipt/value "only-once"}
+            {:db/id "named-tempid" :receipt/value "string-once"}]
            frozen-database)
           recovered-response
           (transact!
            runtime database-name request-id
-           [(array-map :receipt/value "only-once" :db/id -1)]
+           [(array-map :receipt/value "only-once" :db/id -1)
+            (array-map :receipt/value "string-once" :db/id "named-tempid")]
            frozen-database)]
       (is (true? (::protocol/success? first-response)))
       (is (true? (::protocol/success? recovered-response)))
@@ -180,6 +182,8 @@
              (::protocol/branch-head recovered-response)))
       (is (= (:tempids first-response)
              (:tempids recovered-response)))
+      (is (= #{-1 "named-tempid"}
+             (set (keys (:tempids recovered-response)))))
       (is (empty?
            (filter protocol/reserved-attributes
                    (map second (::protocol/transaction-data first-response))))

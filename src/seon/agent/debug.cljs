@@ -192,14 +192,16 @@
       :else
       (let [pulled (await (db/pull {:seon.db/db database
                                     :seon.db/pull-pattern
-                                    [:seon.agent.turn/id :seon.agent.turn/at
-                                     :seon.agent.turn/status
-                                     :seon.agent.turn/rendered-tx
-                                     :seon.agent.turn/error
-                                     :seon.agent.turn/llm-usage
-                                     :seon.agent.turn/usage-estimated?
-                                     {:seon.agent.turn/prompt-blob [:my.blob/hash]}
-                                     {:seon.agent.turn/reply-blob  [:my.blob/hash]}]
+                                    (into
+                                     [:seon.agent.turn/id :seon.agent.turn/at
+                                      :seon.agent.turn/status
+                                      :seon.agent.turn/rendered-tx
+                                      :seon.agent.turn/error
+                                      :seon.agent.turn/usage-estimated?]
+                                     (concat
+                                      usage/turn-attributes
+                                      [{:seon.agent.turn/prompt-blob [:my.blob/hash]}
+                                       {:seon.agent.turn/reply-blob [:my.blob/hash]}]))
                                     :seon.db/ref eid}))]
         (if (:seon.error/message pulled)
           {::ok? false

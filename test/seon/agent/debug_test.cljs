@@ -90,10 +90,9 @@
                (js/Promise.resolve
                 {:seon.agent.turn/id "turn-1"
                  :seon.agent.turn/status :done
-                 :seon.agent.turn/llm-usage
-                 (pr-str {:prompt_tokens 9000
-                          :completion_tokens 200
-                          :prompt_tokens_details {:cached_tokens 8400}})
+                 :seon.agent.turn.usage/prompt-tokens 9000
+                 :seon.agent.turn.usage/completion-tokens 200
+                 :seon.agent.turn.usage/cached-tokens 8400
                  :seon.agent.turn/rendered-tx {:db/id 40}}))
               ([_selector _eid] (js/Promise.resolve nil))
               ([_database _selector _eid] (js/Promise.resolve nil))))

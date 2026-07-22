@@ -466,7 +466,8 @@
  ::writer-terminal-result
  [:or ::completed-writer-terminal-result ::failed-writer-terminal-result])
 
-(schema/register! :seon.db.protocol.tempid/key-edn :string)
+(schema/register! :seon.db.protocol.tempid/string-key :string)
+(schema/register! :seon.db.protocol.tempid/int-key :int)
 (schema/register! :seon.db.protocol.tempid/entity :seon.db/ref)
 
 (schema/register!
@@ -1651,7 +1652,8 @@
 ;;; Durable idempotency receipt
 
 (def receipt-attributes
-  #{:seon.db.protocol.tempid/key-edn
+  #{:seon.db.protocol.tempid/string-key
+    :seon.db.protocol.tempid/int-key
     :seon.db.protocol.tempid/entity})
 
 (def reserved-attributes
@@ -1687,8 +1689,12 @@
                  (if (contains? used candidate)
                    (recur (inc salt))
                    candidate)))]
-         {:db/id marker-id
-          :seon.db.protocol.tempid/key-edn (pr-str tempid)
-          :seon.db.protocol.tempid/entity tempid}))
+         (cond->
+           {:db/id marker-id
+            :seon.db.protocol.tempid/entity tempid}
+           (string? tempid)
+           (assoc :seon.db.protocol.tempid/string-key tempid)
+           (int? tempid)
+           (assoc :seon.db.protocol.tempid/int-key tempid))))
      (range)
      tempids)))

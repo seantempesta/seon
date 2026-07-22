@@ -23,6 +23,16 @@
 
 (defrecord HostOwner [value])
 
+(deftest tempid-receipts-name-string-and-integer-alternatives
+  (let [[string-receipt int-receipt]
+        (protocol/tempid-receipts "receipt/named" ["person" -1])]
+    (is (= "person" (:seon.db.protocol.tempid/string-key string-receipt)))
+    (is (not (contains? string-receipt :seon.db.protocol.tempid/int-key)))
+    (is (= -1 (:seon.db.protocol.tempid/int-key int-receipt)))
+    (is (not (contains? int-receipt :seon.db.protocol.tempid/string-key)))
+    (is (every? #(not (contains? % :seon.db.protocol.tempid/key-edn))
+                [string-receipt int-receipt]))))
+
 (def ^:private transit-writer (transit/writer :json))
 
 (defn- transit-bytes

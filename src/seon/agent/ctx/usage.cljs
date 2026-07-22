@@ -1,15 +1,13 @@
 (ns seon.agent.ctx.usage
   "Derive normalized token usage from captured LLM responses.
 
-   This namespace reads provider-specific usage maps stored on turns and
+   This namespace reads provider-specific named attributes stored on turns and
    projects comparable input, cached-input, and output counts without storing
-   another normalized representation. Missing or malformed usage yields no
+   another normalized representation. Missing or incomplete usage yields no
    projection rather than disrupting context rendering."
   (:require
-    [cljs.reader :as reader]
     [seon.schema :as schema]))
 
-(schema/register! ::usage-edn :string)
 (schema/register! ::token-count [:int {:min 0}])
 (schema/register! ::total ::token-count)
 (schema/register! ::cached ::token-count)
@@ -33,7 +31,13 @@
 
 (schema/register! ::turn
   [:map
-   [:seon.agent.turn/llm-usage {:optional true} :string]
+   [:seon.agent.turn.usage/prompt-tokens {:optional true} :int]
+   [:seon.agent.turn.usage/completion-tokens {:optional true} :int]
+   [:seon.agent.turn.usage/cached-tokens {:optional true} :int]
+   [:seon.agent.turn.usage/input-tokens {:optional true} :int]
+   [:seon.agent.turn.usage/output-tokens {:optional true} :int]
+   [:seon.agent.turn.usage/cache-read-input-tokens {:optional true} :int]
+   [:seon.agent.turn.usage/cache-creation-input-tokens {:optional true} :int]
    [:seon.agent.turn/usage-estimated? {:optional true} :boolean]])
 
 (schema/register! ::turn-projection
@@ -42,15 +46,20 @@
    [::diagnostic {:optional true} ::diagnostic]
    [::line {:optional true} ::line]])
 
-(defn- parse-edn
-  "Read the EDN usage string into a keywordized map, or nil on any
-   failure (absent / garbage). Errors-as-values."
-  [s]
-  (when (and (string? s) (seq s))
-    (try
-      (let [m (reader/read-string s)]
-        (when (map? m) m))
-      (catch :default _ nil))))
+(def turn-attributes
+  [:seon.agent.turn.usage/prompt-tokens
+   :seon.agent.turn.usage/completion-tokens
+   :seon.agent.turn.usage/cached-tokens
+   :seon.agent.turn.usage/input-tokens
+   :seon.agent.turn.usage/output-tokens
+   :seon.agent.turn.usage/cache-read-input-tokens
+   :seon.agent.turn.usage/cache-creation-input-tokens])
+
+(defn captured?
+  "True when a turn carries at least one named usage attribute."
+  {:malli/schema [:=> [:catn [::turn ::turn]] :boolean]}
+  [turn]
+  (boolean (some #(contains? turn %) turn-attributes)))
 
 (defn- token-count?
   [x]
@@ -65,52 +74,45 @@
 
 (defn- openai-analysis
   [m]
-  (let [prompt (:prompt_tokens m)
-        output (:completion_tokens m)
-        direct? (contains? m :prompt_cache_hit_tokens)
-        nested-map (:prompt_tokens_details m)
-        nested? (and (map? nested-map) (contains? nested-map :cached_tokens))
-        direct (:prompt_cache_hit_tokens m)
-        nested (:cached_tokens nested-map)
+  (let [prompt (:seon.agent.turn.usage/prompt-tokens m)
+        output (:seon.agent.turn.usage/completion-tokens m)
+        cached? (contains? m :seon.agent.turn.usage/cached-tokens)
+        cached (:seon.agent.turn.usage/cached-tokens m)
         invalid (cond-> []
-                  (not (token-count? prompt)) (conj :prompt_tokens)
-                  (not (token-count? output)) (conj :completion_tokens)
-                  (and direct? (not (token-count? direct)))
-                  (conj :prompt_cache_hit_tokens)
-                  (and nested? (not (token-count? nested)))
-                  (conj :prompt_tokens_details.cached_tokens))]
+                  (not (token-count? prompt))
+                  (conj :seon.agent.turn.usage/prompt-tokens)
+                  (not (token-count? output))
+                  (conj :seon.agent.turn.usage/completion-tokens)
+                  (and cached? (not (token-count? cached)))
+                  (conj :seon.agent.turn.usage/cached-tokens))]
     (cond
       (seq invalid)
       (invalid-counts "OpenAI-compatible" invalid)
-
-      (and direct? nested? (not= direct nested))
-      {::diagnostic
-       (str "OpenAI-compatible cache fields disagree: "
-            ":prompt_cache_hit_tokens=" direct " and "
-            ":prompt_tokens_details/:cached_tokens=" nested)}
 
       :else
       {::usage
        (cond-> {::total prompt
                 ::output output
                 ::provider-shape :openai-compat}
-         (or direct? nested?) (assoc ::cached (if direct? direct nested)))})))
+         cached? (assoc ::cached cached))})))
 
 (defn- anthropic-analysis
   [m]
-  (let [input (:input_tokens m)
-        output (:output_tokens m)
-        read? (contains? m :cache_read_input_tokens)
-        create? (contains? m :cache_creation_input_tokens)
-        read* (:cache_read_input_tokens m)
-        create (:cache_creation_input_tokens m)
+  (let [input (:seon.agent.turn.usage/input-tokens m)
+        output (:seon.agent.turn.usage/output-tokens m)
+        read? (contains? m :seon.agent.turn.usage/cache-read-input-tokens)
+        create? (contains? m :seon.agent.turn.usage/cache-creation-input-tokens)
+        read* (:seon.agent.turn.usage/cache-read-input-tokens m)
+        create (:seon.agent.turn.usage/cache-creation-input-tokens m)
         invalid (cond-> []
-                  (not (token-count? input)) (conj :input_tokens)
-                  (not (token-count? output)) (conj :output_tokens)
+                  (not (token-count? input))
+                  (conj :seon.agent.turn.usage/input-tokens)
+                  (not (token-count? output))
+                  (conj :seon.agent.turn.usage/output-tokens)
                   (and read? (not (token-count? read*)))
-                  (conj :cache_read_input_tokens)
+                  (conj :seon.agent.turn.usage/cache-read-input-tokens)
                   (and create? (not (token-count? create)))
-                  (conj :cache_creation_input_tokens))]
+                  (conj :seon.agent.turn.usage/cache-creation-input-tokens))]
     (if (seq invalid)
       (invalid-counts "Anthropic" invalid)
       {::usage
@@ -120,31 +122,30 @@
          read? (assoc ::cached read*))})))
 
 (defn analyze
-  "Normalize one persisted provider usage string or explain its rejection."
-  {:malli/schema [:=> [:catn [::usage-edn ::usage-edn]] ::analysis]}
-  [edn-str]
-  (if-let [m (parse-edn edn-str)]
-    (cond
-      (contains? m :prompt_tokens) (openai-analysis m)
-      (contains? m :input_tokens) (anthropic-analysis m)
-      :else {::diagnostic
-             "Unknown usage shape: expected :prompt_tokens or :input_tokens."})
-    {::diagnostic "Malformed usage EDN: expected a non-empty map."}))
+  "Normalize one turn's named usage attributes or explain rejection."
+  {:malli/schema [:=> [:catn [::turn ::turn]] ::analysis]}
+  [turn]
+  (cond
+    (contains? turn :seon.agent.turn.usage/prompt-tokens)
+    (openai-analysis turn)
+    (contains? turn :seon.agent.turn.usage/input-tokens)
+    (anthropic-analysis turn)
+    :else {::diagnostic
+           "Unknown usage shape: expected prompt-tokens or input-tokens."}))
 
 (defn extract
-  "Normalize one persisted provider usage string, or return nil."
-  {:malli/schema [:=> [:catn [::usage-edn ::usage-edn]] [:or :nil ::usage]]}
-  [edn-str]
-  (::usage (analyze edn-str)))
+  "Normalize one turn's named usage attributes, or return nil."
+  {:malli/schema [:=> [:catn [::turn ::turn]] [:or :nil ::usage]]}
+  [turn]
+  (::usage (analyze turn)))
 
 (defn turn-projection
   "Derive normalized usage, diagnostic, and compact line from one turn."
   {:malli/schema [:=> [:catn [::turn ::turn]] ::turn-projection]}
-  [{usage-edn :seon.agent.turn/llm-usage
-    estimated? :seon.agent.turn/usage-estimated?}]
-  (if-not (string? usage-edn)
+  [{estimated? :seon.agent.turn/usage-estimated? :as turn}]
+  (if-not (captured? turn)
     {}
-    (let [{normalized ::usage :as analysis} (analyze usage-edn)]
+    (let [{normalized ::usage :as analysis} (analyze turn)]
       (if-not normalized
         analysis
         (let [{::keys [total cached output]} normalized]

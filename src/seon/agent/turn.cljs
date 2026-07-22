@@ -83,13 +83,21 @@
 ;; Honest record of the bounded LLM transport retry (the retry COUNT when
 ;; present; ABSENT = no retry — optional-is-absent).
 (schema/register! :seon.agent.turn/llm-retries  :int)
-;; Tier-2 provider telemetry, EDN-stringified (:map is unbridgeable — a :map
-;; close-tx fails the schema bridge): only the finite numeric provider fields
-;; consumed by usage derivation. Unrecognized raw fields are not persisted.
-(schema/register! :seon.agent.turn/llm-usage    :string)
+;; Finite provider usage telemetry is stored as ordinary long attributes on
+;; the turn. The two provider dialects remain presence patterns; no dialect
+;; discriminator is stored. Unrecognized raw fields are not persisted.
+(schema/register! :seon.agent.turn.usage/prompt-tokens [:int {:min 0}])
+(schema/register! :seon.agent.turn.usage/completion-tokens [:int {:min 0}])
+(schema/register! :seon.agent.turn.usage/cached-tokens [:int {:min 0}])
+(schema/register! :seon.agent.turn.usage/input-tokens [:int {:min 0}])
+(schema/register! :seon.agent.turn.usage/output-tokens [:int {:min 0}])
+(schema/register! :seon.agent.turn.usage/cache-read-input-tokens [:int {:min 0}])
+(schema/register! :seon.agent.turn.usage/cache-creation-input-tokens [:int {:min 0}])
+;; Provider fields are the deliberately open remainder of a response object,
+;; so this is honestly EDN rather than a hidden closed shape.
 (schema/register! :seon.agent.turn/llm-meta     :string)
 ;; repl-mode telemetry. In `:stream`, the turn's
-;; `:seon.agent.turn/llm-usage` numbers are
+;; `:seon.agent.turn.usage/*` numbers are
 ;; CLIENT-SIDE estimates (the aborted stream lost the provider's usage
 ;; chunk) — marked so a reader never treats them as provider-reported.
 (schema/register! :seon.agent.turn/usage-estimated? :boolean)
@@ -101,34 +109,50 @@
     (when (and (int? value) (not (neg? value))) value)))
 
 (defn- persisted-usage
-  "Project provider usage to the finite numeric fields consumed by readers."
+  "Project provider usage to finite ordinary turn attributes."
   [usage]
   (cond
     (contains? usage :prompt_tokens)
-    (cond-> {}
-      (usage-count usage :prompt_tokens)
-      (assoc :prompt_tokens (usage-count usage :prompt_tokens))
-      (usage-count usage :completion_tokens)
-      (assoc :completion_tokens (usage-count usage :completion_tokens))
-      (usage-count usage :prompt_cache_hit_tokens)
-      (assoc :prompt_cache_hit_tokens
-             (usage-count usage :prompt_cache_hit_tokens))
-      (usage-count (:prompt_tokens_details usage) :cached_tokens)
-      (assoc :prompt_tokens_details
-             {:cached_tokens
-              (usage-count (:prompt_tokens_details usage) :cached_tokens)}))
+    (let [direct (usage-count usage :prompt_cache_hit_tokens)
+          nested (usage-count (:prompt_tokens_details usage) :cached_tokens)
+          conflict? (and (some? direct) (some? nested) (not= direct nested))
+          cached (when-not conflict? (or direct nested))]
+      (cond->
+        {::usage-attributes
+         (cond-> {}
+           (usage-count usage :prompt_tokens)
+           (assoc :seon.agent.turn.usage/prompt-tokens
+                  (usage-count usage :prompt_tokens))
+           (usage-count usage :completion_tokens)
+           (assoc :seon.agent.turn.usage/completion-tokens
+                  (usage-count usage :completion_tokens))
+           cached
+           (assoc :seon.agent.turn.usage/cached-tokens cached))}
+        conflict?
+        (assoc ::usage-error
+               {:seon.error/message
+                (str "Provider cache usage fields disagree: " direct
+                     " direct versus " nested " nested.")})))
 
     (contains? usage :input_tokens)
-    (into {}
-          (keep (fn [key]
-                  (when-some [value (usage-count usage key)] [key value])))
-          [:input_tokens :output_tokens :cache_read_input_tokens
-           :cache_creation_input_tokens])
+    {::usage-attributes
+     (into {}
+           (keep (fn [key]
+                   (when-some [value (usage-count usage key)]
+                     [(get {:input_tokens
+                            :seon.agent.turn.usage/input-tokens
+                            :output_tokens
+                            :seon.agent.turn.usage/output-tokens
+                            :cache_read_input_tokens
+                            :seon.agent.turn.usage/cache-read-input-tokens
+                            :cache_creation_input_tokens
+                            :seon.agent.turn.usage/cache-creation-input-tokens}
+                           key)
+                      value])))
+           [:input_tokens :output_tokens :cache_read_input_tokens
+            :cache_creation_input_tokens])}
 
-    :else {}))
-
-(defn- persisted-usage-edn [usage]
-  (pr-str (persisted-usage usage)))
+    :else {::usage-attributes {}}))
 
 ;; One bounded, queryable transport fact per provider attempt. The turn owns
 ;; these component rows; the effective config remains derived from the parent
@@ -210,7 +234,20 @@
    [:seon.agent.turn/reply-blob   {:optional true} :seon.agent.turn/reply-blob]
    [:seon.agent.turn/error        {:optional true} :seon.agent.turn/error]
    [:seon.agent.turn/llm-retries  {:optional true} :seon.agent.turn/llm-retries]
-   [:seon.agent.turn/llm-usage    {:optional true} :seon.agent.turn/llm-usage]
+   [:seon.agent.turn.usage/prompt-tokens {:optional true}
+    :seon.agent.turn.usage/prompt-tokens]
+   [:seon.agent.turn.usage/completion-tokens {:optional true}
+    :seon.agent.turn.usage/completion-tokens]
+   [:seon.agent.turn.usage/cached-tokens {:optional true}
+    :seon.agent.turn.usage/cached-tokens]
+   [:seon.agent.turn.usage/input-tokens {:optional true}
+    :seon.agent.turn.usage/input-tokens]
+   [:seon.agent.turn.usage/output-tokens {:optional true}
+    :seon.agent.turn.usage/output-tokens]
+   [:seon.agent.turn.usage/cache-read-input-tokens {:optional true}
+    :seon.agent.turn.usage/cache-read-input-tokens]
+   [:seon.agent.turn.usage/cache-creation-input-tokens {:optional true}
+    :seon.agent.turn.usage/cache-creation-input-tokens]
    [:seon.agent.turn/llm-meta     {:optional true} :seon.agent.turn/llm-meta]
    [:seon.agent.turn/usage-estimated? {:optional true} :seon.agent.turn/usage-estimated?]
    [:seon.agent.turn/evals        {:optional true} :seon.agent.turn/evals]
@@ -528,7 +565,13 @@
                       [(merge {:seon.agent.turn/id id-of-turn :seon.agent.turn/status :done}
                               (select-keys result [:seon.agent.turn/status
                                                    :seon.agent.turn/llm-retries
-                                                   :seon.agent.turn/llm-usage
+                                                   :seon.agent.turn.usage/prompt-tokens
+                                                   :seon.agent.turn.usage/completion-tokens
+                                                   :seon.agent.turn.usage/cached-tokens
+                                                   :seon.agent.turn.usage/input-tokens
+                                                   :seon.agent.turn.usage/output-tokens
+                                                   :seon.agent.turn.usage/cache-read-input-tokens
+                                                   :seon.agent.turn.usage/cache-creation-input-tokens
                                                    :seon.agent.turn/llm-meta
                                                    :seon.agent.turn/usage-estimated?
                                                    :seon.agent.turn/llm-attempts
@@ -987,6 +1030,9 @@
         attempts (:seon.agent.turn/llm-attempts resp)
         raw     (:seon.ai/raw resp)
         usage   (:seon.ai/usage raw)
+        usage-projection (persisted-usage usage)
+        usage-attributes (::usage-attributes usage-projection)
+        usage-error (::usage-error usage-projection)
         estimated? (:seon.ai/estimated? raw)
         pfields (:seon.ai/provider-fields raw)]
     (if-let [err (:seon.ai/error resp)]
@@ -1002,16 +1048,16 @@
            :seon.agent.turn/error  (turn-error-str err)
            :seon.agent.turn/llm-attempts attempts}
           retries (assoc :seon.agent.turn/llm-retries retries)
-          (seq usage) (assoc :seon.agent.turn/llm-usage
-                             (persisted-usage-edn usage))
+          (seq usage-attributes) (merge usage-attributes)
+          usage-error (assoc ::usage-error usage-error)
           estimated? (assoc :seon.agent.turn/usage-estimated? true)
           (seq pfields) (assoc :seon.agent.turn/llm-meta (pr-str pfields))))
       (cond-> (await (ask-and-eval-reply! resp id id-of-turn run-id
                                           (boolean stream?) start-ns database))
         true        (assoc :seon.agent.turn/llm-attempts attempts)
         retries     (assoc :seon.agent.turn/llm-retries retries)
-        (seq usage) (assoc :seon.agent.turn/llm-usage
-                           (persisted-usage-edn usage))
+        (seq usage-attributes) (merge usage-attributes)
+        usage-error (assoc ::usage-error usage-error)
         estimated?  (assoc :seon.agent.turn/usage-estimated? true)
         (seq pfields) (assoc :seon.agent.turn/llm-meta (pr-str pfields))))))
 

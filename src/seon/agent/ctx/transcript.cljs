@@ -895,7 +895,7 @@
      [:db/id {:seon.agent.run/agent [:seon.agent/id]}]}])
 
 (def ^:private usage-pull-pattern
-  '[:db/id :seon.agent.turn/llm-usage])
+  (into [:db/id] usage/turn-attributes))
 
 (def ^:private turn-scan-page-size 64)
 (def ^:private max-turn-scan-pages 4)
@@ -923,7 +923,7 @@
      (boolean (:seon.agent.turn/scheduled? turn))
      (:db/id run)
      (:seon.agent.run/id run)
-     (or (:seon.agent.turn/llm-usage usage) "")
+     (select-keys usage usage/turn-attributes)
      (boolean (:seon.agent.turn/usage-estimated? turn))]))
 
 (defn- matching-agent-turn? [agent-id turn]
@@ -1131,7 +1131,7 @@
             turns (->> newest-rows
                        (map-indexed
                          (fn [offset [turn at scheduled? run-eid row-run-id
-                                     usage-edn usage-estimated?]]
+                                     usage-attributes usage-estimated?]]
                            (cond->
                              {::turn-idx (+ first-index offset)
                               :db/id turn
@@ -1139,8 +1139,8 @@
                               :seon.agent.turn/scheduled? scheduled?
                               :seon.agent.turn/run
                               {:db/id run-eid :seon.agent.run/id row-run-id}}
-                             (seq usage-edn)
-                             (assoc :seon.agent.turn/llm-usage usage-edn)
+                             (seq usage-attributes)
+                             (merge usage-attributes)
                              usage-estimated?
                              (assoc :seon.agent.turn/usage-estimated? true))))
                        vec)
@@ -1458,7 +1458,7 @@
   [{turns ::turns :as input}]
   (let [usage-events
         (keep (fn [turn]
-                (when (:seon.agent.turn/llm-usage turn)
+                (when (usage/captured? turn)
                   {::at (or (some->> (:seon.agent.turn/evals turn)
                                      (keep :seon.eval/at)
                                      last)

@@ -4,15 +4,37 @@
    [clojure.string :as str]
    [cljs.test :refer [async deftest is testing]]
    [seon.agent.turn :as turn]
+   [seon.db :as db]
    [seon.db.branch :as db.branch]
    [seon.execution :as execution]
-   [seon.execution.host :as execution.host]))
+   [seon.execution.host :as execution.host]
+   [seon.schema :as schema]))
 
 (def ^:private database-value
   {::db.branch/store-id #uuid "00000000-0000-4000-8000-000000000081"
    ::db.branch/name :db
    ::db.branch/commit-id #uuid "00000000-0000-4000-8000-000000000082"
    ::db.branch/basis-t 42})
+
+(deftest turn-usage-schemas-are-seven-native-long-attributes
+  (let [attributes
+        [:seon.agent.turn.usage/prompt-tokens
+         :seon.agent.turn.usage/completion-tokens
+         :seon.agent.turn.usage/cached-tokens
+         :seon.agent.turn.usage/input-tokens
+         :seon.agent.turn.usage/output-tokens
+         :seon.agent.turn.usage/cache-read-input-tokens
+         :seon.agent.turn.usage/cache-creation-input-tokens]
+        facets (db/malli->datahike-schema attributes)]
+    (is (nil? (schema/schema-definition :seon.agent.turn/llm-usage))
+        "the old encoded usage attribute cannot silently survive")
+    (is (= :string
+           (schema/schema-definition :seon.agent.turn/llm-meta))
+        "open provider metadata remains honestly EDN")
+    (is (= (set attributes) (set (map :db/ident facets))))
+    (is (every? #(= :db.type/long (:db/valueType %)) facets))
+    (is (every? #(schema/valid-candidate-value? % 0) attributes))
+    (is (every? #(not (schema/valid-candidate-value? % -1)) attributes))))
 
 (def ^:private base-resolution
   {:seon.ai/resolved-config
@@ -251,8 +273,9 @@
           (.then
            (fn [result]
              (is (= :error (:seon.agent.turn/status result)))
-             (is (= (pr-str (dissoc usage :total_tokens))
-                    (:seon.agent.turn/llm-usage result)))
+             (is (= 3 (:seon.agent.turn.usage/prompt-tokens result)))
+             (is (= 4093 (:seon.agent.turn.usage/completion-tokens result)))
+             (is (not (contains? result :seon.agent.turn/llm-usage)))
              (let [attempt (first (:seon.agent.turn/llm-attempts result))]
                (is (= :provider-error (:seon.ai.attempt/outcome attempt)))
                (is (= "length" (:seon.ai.attempt/finish-reason attempt)))
@@ -274,7 +297,22 @@
                :prompt_tokens_details {:cached_tokens 8
                                        :hostile hostile}
                :hostile hostile}
-        stored (@#'turn/persisted-usage-edn usage)]
-    (is (= "{:prompt_tokens 10, :completion_tokens 2, :prompt_tokens_details {:cached_tokens 8}}"
-           stored))
+        stored (@#'turn/persisted-usage usage)]
+    (is (= {:seon.agent.turn.usage/prompt-tokens 10
+            :seon.agent.turn.usage/completion-tokens 2
+            :seon.agent.turn.usage/cached-tokens 8}
+           (:seon.agent.turn/usage-attributes stored)))
     (is (false? @walked?))))
+
+(deftest persisted-usage-rejects-disagreeing-cache-fields-as-data
+  (let [stored (@#'turn/persisted-usage
+                {:prompt_tokens 10
+                 :completion_tokens 2
+                 :prompt_cache_hit_tokens 7
+                 :prompt_tokens_details {:cached_tokens 8}})]
+    (is (= {:seon.agent.turn.usage/prompt-tokens 10
+            :seon.agent.turn.usage/completion-tokens 2}
+           (:seon.agent.turn/usage-attributes stored)))
+    (is (string? (get-in stored
+                         [:seon.agent.turn/usage-error
+                          :seon.error/message])))))
