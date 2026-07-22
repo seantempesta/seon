@@ -22,7 +22,6 @@
    bundle) AND agent-defined fns (written by `cljs.js/eval-str` at the
    same munged paths). Single path, no boot-time wire-up needed."
   (:require
-    [cljs.pprint :as pprint]
     [clojure.string :as str]
     [seon.config :as config]
     [seon.db :as db]
@@ -717,6 +716,40 @@
                         {:seon.render/custom-symbol custom-symbol}
                         e))))))
 
+(defn- generic-sample-options [catalog-row]
+  (if-some [id-attr (:seon.schema.catalog/id-attr catalog-row)]
+    {:preferred-keys #{id-attr}}
+    {}))
+
+(defn- generic-data-projection
+  [configuration render-request x]
+  (let [projection (or (:seon.schema/projection render-request)
+                       (schema/current-projection)
+                       (schema/build-projection (schema/snapshot)))
+        catalog-row (when (map? x) (entity-primary-schema x))]
+    (value/render-html-data-in
+      configuration "" projection x (generic-sample-options catalog-row))))
+
+(defn- generic-ai-render
+  "Render generic data as metadata first, one bounded sample, then continuation."
+  [configuration x projection]
+  (let [catalog-row (when (map? x) (entity-primary-schema x))
+        schema-key (or (:seon.schema.catalog/key catalog-row)
+                       (some-> projection :seon.render.value/schemas first
+                               :seon.schema/key))
+        id-attr (:seon.schema.catalog/id-attr catalog-row)
+        identity-value (when (and id-attr (contains? x id-attr))
+                         (get x id-attr))]
+    (str "; schema " (if schema-key (pr-str schema-key) "unregistered")
+         (when id-attr
+           (str " · identity " (pr-str id-attr) " "
+                (if (some? identity-value)
+                  (tokens/bounded-pr-str identity-value 40)
+                  "absent")))
+         " · " (:seon.render.value/summary projection)
+         "\n"
+         (value/render-ai-data configuration "" projection))))
+
 (defn block
   "THE typed-block renderer for a tagged value in `:html` or `:ai`.
 
@@ -751,7 +784,10 @@
                                                   :html :seon.render/html
                                                   :ai :seon.render/ai))))
           property (case view :html :seon.render/html :ai :seon.render/ai)
-          sample (when custom-candidate? (value/sample configuration x {}))
+          catalog-row (when (map? x) (entity-primary-schema x))
+          sample (when custom-candidate?
+                   (value/sample configuration x
+                                 (generic-sample-options catalog-row)))
           complete? (and sample (value/complete-sample? sample))
           override (when (and complete? (contains? x property))
                      (db/decode-edn-value property (get x property)))
@@ -764,7 +800,7 @@
                                           (schema/build-projection
                                             (schema/snapshot)))]
                        (value/render-html-sample-data-in
-                         "inline" projection x sample)))
+                         "" projection x sample)))
           selected-custom (when prepared
                             (custom-render-selection
                               view render-request prepared override))
@@ -789,7 +825,8 @@
           prepared           (data-panel configuration render-request nil prepared)
           :else              (data-panel
                                configuration render-request nil
-                               (value/render-html-data configuration "inline" x)))
+                               (generic-data-projection
+                                 configuration render-request x)))
 
         :ai
         (cond
@@ -808,8 +845,11 @@
           (error-value? x)   (:seon.error/message x)
           (canvas/valid-hiccup? x) (hiccup-text x)
           custom             (invoke-custom-render view configuration render-request x custom)
-          prepared           (value/render-ai-data configuration "inline" prepared)
-          :else              (value/render-ai configuration "inline" x))))
+          prepared           (generic-ai-render configuration x prepared)
+          :else              (generic-ai-render
+                               configuration x
+                               (generic-data-projection
+                                 configuration render-request x)))))
     (catch :default e
       ;; `block` dispatches to CORE renderers (md->hiccup, clj->hiccup, the
       ;; value panels) — a throw is our machinery (:core). Record BEFORE
@@ -888,9 +928,10 @@
    reference or override it. Never a stored :seon.render/id."
   {:malli/schema [:=> [:cat :any] :any]}
   [node]
-  (or (:seon.agent.message/id node)
-      (:seon.eval/id node)
-      (:my.plan/id node)
+  (or (when-let [id-attr (some-> (and (map? node)
+                                      (entity-primary-schema node))
+                                 :seon.schema.catalog/id-attr)]
+        (get node id-attr))
       (:seon.agent.ctx/name node)
       (:db/id node)))
 
@@ -898,21 +939,22 @@
 
 (defn- generic-default-renderer
   "The GENERIC default — renders ANY structure when there is no slot and no
-   schema match. AI: readable Clojure (id header + pprint, control attrs
-   stripped). HTML: a monospace edn dump (the recursive data-tree is a P2
-   refinement). This is what makes \"all data is viewable by both\" free."
+   schema match. Both views use the same prepared `render.value` projection;
+   AI orders schema/identity/type before the sample and continuation."
   [view]
   (case view
     :seon.render/ai
-    (fn [{:seon.render/keys [node]}]
-      (str ";; " (renderable-id node) "\n"
-           (str/trimr
-             (with-out-str
-               (pprint/pprint (apply dissoc node render-control-attrs))))))
+    (fn [{:seon.render/keys [node] :as input}]
+      (let [configuration (:seon.config/configuration input)
+            node (apply dissoc node render-control-attrs)
+            projection (generic-data-projection configuration input node)]
+        (generic-ai-render configuration node projection)))
     :seon.render/html
-    (fn [{:seon.render/keys [node]}]
-      [:pre {:class "p-2 text-xs font-mono bg-base-900 text-text-200 overflow-auto"}
-       (with-out-str (pprint/pprint (apply dissoc node render-control-attrs)))])))
+    (fn [{:seon.render/keys [node] :as input}]
+      (let [configuration (:seon.config/configuration input)
+            node (apply dissoc node render-control-attrs)
+            projection (generic-data-projection configuration input node)]
+        (data-panel configuration input nil projection)))))
 
 (defn- schema-default-renderer
   "resolve-render step 4 — the renderer the node's primary `:seon.schema`

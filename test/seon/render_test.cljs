@@ -9,10 +9,21 @@
    [seon.error :as error]
    [seon.render :as render]
    [seon.render.value :as value]
+   [seon.schema :as schema]
    [seon.ui.html :as html]))
 
 (def ^:private configuration (config/resolve-config-singleton {}))
 (def ^:private render-request {})
+
+(defn- with-active-projection [forms body]
+  (let [before (schema/snapshot-state)]
+    (try
+      (let [projection (schema/build-projection forms)]
+        (schema/activate-projection! projection)
+        (body projection))
+      (finally
+        (schema/restore-state! before)
+        (schema/relink-registry!)))))
 
 (deftest literal-hiccup-is-already-resolved-render-data
   (let [hiccup [:div {:class "surface"} [:span "ready"]]]
@@ -54,17 +65,18 @@
 
 (deftest render-failure-is-guarded-or-thrown-by-the-single-strict-dial
   (let [ordinary {:seon.test/value 42}
-        throw-render (fn [& _] (throw (js/Error. "projection failed")))]
+        throw-render (fn ([_ _ _ _] (throw (js/Error. "projection failed")))
+                       ([_ _ _ _ _] (throw (js/Error. "projection failed"))))]
     (testing "strict off keeps the failure visible"
       (with-redefs [config/render-strict? (constantly false)
-                    value/render-html-data throw-render]
+                    value/render-html-data-in throw-render]
         (let [html (error/expecting-core-fault!
                     #(render/block :html configuration render-request ordinary))]
           (is (vector? html))
           (is (str/includes? (pr-str html) "projection failed")))))
     (testing "strict on throws the same failure with render context"
       (with-redefs [config/render-strict? (constantly true)
-                    value/render-ai throw-render]
+                    value/render-html-data-in throw-render]
         (let [caught
               (try
                 (error/expecting-core-fault!
@@ -91,7 +103,7 @@
               (swap! policies conj (:seon.config/on-core-error selected))
               (original-policy selected)))
       (with-redefs [config/render-strict? (constantly false)
-                    value/render-ai
+                    value/render-ai-data
                     (fn [& _] (throw (js/Error. "generic render fixture")))]
         (let [rendered
               (error/expecting-core-fault!
@@ -113,3 +125,45 @@
       (finally
         (set! config/on-core-error original-policy)
         (error/set-db-hooks! {})))))
+
+(deftest recursive-generic-fallback-is-bounded-and-metadata-first
+  (let [rendered (render/render
+                   :seon.render/ai
+                   {:seon.config/configuration configuration}
+                   configuration)
+        schema-at (str/index-of rendered "; schema :seon.config/singleton")
+        identity-at (str/index-of rendered "identity :seon.config/id")
+        summary-at (str/index-of rendered (str "map " (count configuration) " keys"))
+        sample-at (str/index-of rendered "\n{")
+        continuation-at (str/index-of rendered "partial view")]
+    (is (every? some? [schema-at identity-at summary-at sample-at continuation-at]))
+    (is (< schema-at identity-at summary-at sample-at continuation-at))
+    (is (str/includes? rendered "no live continuation"))
+    (is (not (str/includes? rendered "result/")))
+    (is (< (count rendered) 2000) "the recursive 80-key-class value is bounded")))
+
+(deftest generic-header-uses-the-registered-custom-identity-attribute
+  (let [id-attr :render-test.widget/slug
+        title-attr :render-test.widget/title
+        entity-shape :render-test.widget/entity
+        forms (assoc (schema/snapshot)
+                     id-attr [:string {:seon.db/identity true}]
+                     title-attr :string
+                     entity-shape
+                     [:map {:seon.db/entity true}
+                      [id-attr id-attr]
+                      [title-attr title-attr]])
+        entity {id-attr "widget-42" title-attr "Honest widget"}]
+    (with-active-projection
+      forms
+      (fn [projection]
+        (let [rendered (render/render
+                         :seon.render/ai
+                         {:seon.config/configuration configuration
+                          :seon.schema/projection projection}
+                         entity)]
+          (is (str/starts-with? rendered
+                                "; schema :render-test.widget/entity"))
+          (is (str/includes? rendered
+                             "identity :render-test.widget/slug \"widget-42\""))
+          (is (= "widget-42" (render/renderable-id entity))))))))

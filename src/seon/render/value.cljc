@@ -31,9 +31,8 @@
    - navigation paths — admitted map keys + vector indices stay intact
      (`get-in`/`nth`); display-only map keys are marked non-drillable
    - per-node TYPE + COUNT — `{…12 keys}`, `[…96 items]`, `#{…5 items}`
-   - elision markers — `… +129 more`, plus, for a HOMOGENEOUS collection of
-     maps, the shared key-set: `… +129 more each {:a :b :c}` (the column
-     set of a 137-row query result, without scrolling 137 rows)
+   - elision markers — `… +129 more`, plus, for sampled map rows, their
+     actual key intersection: `… +129 more sampled columns {:a :b :c}`
    - lazy-safe HEAD sampling — never realizes more than `max-items`+1 of a
      lazy/infinite seq
    - opaque handles — a datahike DB/Datom/Entity, a record, or a raw JS
@@ -62,6 +61,7 @@
    projection logic lives ONLY here; `seon.eval` requires this ns for both
    `render-ai` and `project-plain` — see ns-end note.)"
   (:require
+    [clojure.set :as set]
     [clojure.string :as str]
     [malli.error :as me]
     [seon.ai.tokens :as tokens]
@@ -516,13 +516,37 @@
   (when (counted? coll) (count coll)))
 
 (defn- shared-keys
-  "Sorted UNION of the keys of the first `shape-sample` items WHEN they are
-   all maps — the column set a homogeneous collection of rows shares. nil
-   otherwise. Bounded: never realizes past `shape-sample` items."
+  "Sorted key intersection of the first `shape-sample` map items.
+
+   Returns nil when the sample is empty, contains a non-map, or has no common
+   keys. Bounded: never realizes past `shape-sample` items. The emitter calls
+   these sampled columns rather than claiming anything about unseen rows."
   [items shape-sample]
   (let [sample (take shape-sample items)]
     (when (and (seq sample) (every? map? sample))
-      (->> sample (map (comp set keys)) (reduce into #{}) (sort-by str) vec))))
+      (let [common (reduce set/intersection (map (comp set keys) sample))]
+        (when (seq common)
+          (vec (sort-by str common)))))))
+
+(defn- field-preference-tier
+  "Semantic retention tier for one bounded map candidate.
+
+   An exact registered identity attr supplied in `preferred-keys` wins, then
+   conventional identity, status, title/summary, error, and transaction
+   provenance fields. Printed size breaks ties only inside a tier. This is a
+   preference within the sampler's bounded candidate window, never an
+   unbounded search through the map."
+  [preferred-keys k]
+  (let [field (when (or (keyword? k) (symbol? k) (string? k)) (name k))]
+    (cond
+      (contains? preferred-keys k) 0
+      (or (= k :db/id) (= field "id") (str/ends-with? (or field "") "-id")) 1
+      (contains? #{"status" "state" "phase" "outcome"} field) 2
+      (contains? #{"title" "summary" "name" "label" "purpose"} field) 3
+      (or (str/includes? (or field "") "error")
+          (str/includes? (or field "") "fault")) 4
+      (contains? #{:seon.db/user :seon.db/process :db/txInstant} k) 5
+      :else 6)))
 
 (defn- clip-string [s max-string]
   (if (> (count s) max-string)
@@ -690,7 +714,8 @@
           shape           (assoc :seon.render.value/shape shape))))))
 
 (defn- sample*
-  [x {:keys [max-depth max-keys max-map-visits max-string] :as opts} depth]
+  [x {:keys [max-depth max-keys max-map-visits max-string preferred-keys]
+      :as opts} depth]
   (cond
     ;; opaque handles FIRST — a datahike DB is also map?/coll?.
     (opaque? x) (opaque-marker x #(sample* % opts (inc depth)))
@@ -723,8 +748,10 @@
                            (let [[display-key projected?] (map-key-projection k opts)]
                              [display-key (sample* v opts (inc depth)) projected?]))
                          candidates)
-          ranked   (sort-by (fn [[i [_ sv _]]]
-                              [(count (tokens/bounded-pr-str sv 20)) i])
+          preferred-keys (or preferred-keys #{})
+          ranked   (sort-by (fn [[i [k sv _]]]
+                              [(field-preference-tier preferred-keys k)
+                               (count (tokens/bounded-pr-str sv 20)) i])
                             (map-indexed vector sampled))
           keep-idx (into #{} (map first) (take max-keys ranked))
           kept     (into []
@@ -880,7 +907,9 @@
          [(cond (nil? elided) nil
                 (= :more elided) "… +more"
                 :else (str "… +" elided " more"))
-          (when shape (str "each {" (str/join " " (map pr-str shape)) "}"))]))]))
+          (when shape
+            (str "sampled columns {"
+                 (str/join " " (map pr-str shape)) "}"))]))]))
 
 (declare emit)
 
@@ -1079,6 +1108,22 @@
          ::render-error-message
          (or (some-> e .-message) (str e))})))))
 
+(defn partial-continuation
+  "Describe honest continuation for one partial value."
+  {:malli/schema [:=> [:catn [::eval-id ::eval-id]
+                             [::top-type-size ::top-type-size]] :string]}
+  [eval-id top-type-size]
+  (if (str/blank? eval-id)
+    (str "; ‹partial view"
+         (when-not (str/blank? top-type-size) (str " of " top-type-size))
+         "; no live continuation›")
+    (str "; ‹partial view"
+         (when-not (str/blank? top-type-size) (str " of " top-type-size))
+         "› — the COMPLETE value is result/" eval-id
+         " · keep: (my.blob/put! result/" eval-id ")"
+         "  (get-in result/" eval-id
+         " […]) · filter · count · take/drop")))
+
 (defn format-ai
   "Format immutable prepared render data under one allocated eval id.
 
@@ -1091,27 +1136,22 @@
       (contains? prepared ::render-error-message)
       (str body
            "\n; ‹value threw on render: " (::render-error-message prepared)
-           "› — the live value is result/" eval-id)
+           (if (str/blank? eval-id)
+             "; no live continuation›"
+             (str "› — the live value is result/" eval-id)))
 
       (contains? prepared ::string-token-estimate)
-      (str body
-           "\n; ‹partial view of " (::string-token-estimate prepared)
-           " tokens› — the COMPLETE value is result/" eval-id)
+      (str body "\n"
+           (partial-continuation
+             eval-id (str (::string-token-estimate prepared) " tokens")))
 
       (contains? prepared ::drill-hint)
-      (let [tsz (get-in prepared [::drill-hint ::top-type-size])
-            id? (not (str/blank? eval-id))]
+      (let [tsz (or (get-in prepared [::drill-hint ::top-type-size]) "")]
         ;; The drill hint teaches BOTH recovery (navigate the live var) AND
         ;; durability (`keep:` promotes the whole value to a content-addressed
         ;; blob that survives turns/prune). The keep idiom only renders when
         ;; an eval id names a live var to promote.
-        (str body
-             "\n; ‹partial view"
-             (when tsz (str " of " tsz)) "› — the COMPLETE value is "
-             "result/" eval-id
-             (when id? (str " · keep: (my.blob/put! result/" eval-id ")"))
-             "  (get-in result/" eval-id
-             " […]) · filter · count · take/drop"))
+        (str body "\n" (partial-continuation eval-id tsz)))
 
       :else body)))
 
@@ -1757,15 +1797,24 @@
    This is the prepared universal projection used at dispatch boundaries:
    callers may inspect `::truncated?` without touching the raw value again,
    then reuse these exact bytes for the generic fallback."
-  {:malli/schema [:=> [:catn [:seon.config/configuration
-                              :seon.config/singleton]
-                             [:seon.render.value/eval-id :string]
-                             [:seon.schema/projection :seon.schema/projection]
-                             [:seon.render.value/value :any]]
-                  :map]}
-  [configuration eval-id projection value]
-  (render-html-sample-data-in eval-id projection value
-                              (sample configuration value {}))))
+  {:malli/schema
+   [:function
+    [:=> [:catn [:seon.config/configuration :seon.config/singleton]
+                [:seon.render.value/eval-id :string]
+                [:seon.schema/projection :seon.schema/projection]
+                [:seon.render.value/value :any]]
+     :map]
+    [:=> [:catn [:seon.config/configuration :seon.config/singleton]
+                [:seon.render.value/eval-id :string]
+                [:seon.schema/projection :seon.schema/projection]
+                [:seon.render.value/value :any]
+                [:seon.render.value/sample-options :map]]
+     :map]]}
+  ([configuration eval-id projection value]
+   (render-html-data-in configuration eval-id projection value {}))
+  ([configuration eval-id projection value sample-options]
+   (render-html-sample-data-in eval-id projection value
+                               (sample configuration value sample-options)))))
 
 #?(:cljs
    (defn render-html-data

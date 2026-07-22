@@ -902,12 +902,20 @@
            (v/render-ai configuration "n" {:a 1 :b [1 2 3]})))))
 
 (deftest homogeneous-collection-shows-shared-keys
-  (testing "a big collection of uniform maps carries its shared key-set"
-    (let [rows (mapv (fn [i] {:seon.fn/name (str "f" i) :seon.fn/arity (mod i 3)})
+  (testing "sampled columns are the actual intersection, never a union called each"
+    (let [rows (mapv (fn [i]
+                       (cond-> {:row/id i}
+                         (even? i) (assoc :row/name (str "f" i))
+                         (odd? i) (assoc :row/arity (mod i 3))))
                      (range 40))
-          skel (v/sample configuration rows {:max-items 5})]
-      (is (= [:seon.fn/arity :seon.fn/name] (:seon.render.value/shape skel)))
-      (is (= 35 (:seon.render.value/elided skel))))))
+          skel (v/sample configuration rows {:max-items 5})
+          rendered (v/render-ai-data
+                     configuration ""
+                     (v/render-html-data configuration "" rows))]
+      (is (= [:row/id] (:seon.render.value/shape skel)))
+      (is (= 35 (:seon.render.value/elided skel)))
+      (is (str/includes? rendered "sampled columns {:row/id}"))
+      (is (not (str/includes? rendered "each {"))))))
 
 ;; ============================================================
 ;; opaque handles + long strings.
@@ -1059,25 +1067,36 @@
       (is (str/includes? out "result/xyz123"))
       (is (str/includes? out "get-in")))))
 
-(deftest map-elision-keeps-smallest-load-bearing-keys
-  (testing "over the key bound, tiny keys (hashes/counts) survive and the bulk
-            payload strings are elided — ranked by rendered size, not first-N"
-    (let [big  (apply str (repeat 400 "X"))   ; huge payload
-          mid  (apply str (repeat 30 "m"))    ; medium filler (> a hash)
-          m    (into {:seon.agent.shell/out-blob "c4685deadbeefc4685deadbeef"
-                      :seon.agent.shell/err-tokens 17}
-                     (concat [[:payload-a big] [:payload-b big] [:payload-c big]]
-                             (for [i (range 8)] [(keyword (str "f" i)) mid])))
-          out  (v/render-ai configuration "eid1" m)]
-      ;; the two tiny load-bearing keys survive
-      (is (str/includes? out "c4685deadbeefc4685deadbeef"))
-      (is (str/includes? out "err-tokens"))
-      ;; the huge payloads are elided (never rendered whole)
-      (is (not (str/includes? out big)))
-      ;; honest elision marker
-      (is (str/includes? out "more keys"))
-      ;; every retained key still resolves against the live value (path valid)
-      (is (str/includes? out "out-blob")))))
+(deftest map-elision-preserves-the-documented-semantic-field-tiers
+  (let [m (array-map
+            :noise/a 1
+            :semantic/id "entity-1"
+            :semantic/status :running
+            :semantic/title "A deliberately longer title"
+            :semantic/error "A deliberately longer error"
+            :seon.db/user 42
+            :noise/b 2
+            :noise/c 3)
+        skel (v/sample configuration m {:max-keys 5
+                                        :max-map-visits 8
+                                        :preferred-keys #{:semantic/id}})
+        retained (set (map first (:seon.render.value/map-entries skel)))]
+    (is (= #{:semantic/id :semantic/status :semantic/title
+             :semantic/error :seon.db/user}
+           retained))
+    (is (= 3 (:seon.render.value/elided-keys skel)))))
+
+(deftest partial-continuation-requires-a-real-retained-selector
+  (let [honest (v/partial-continuation "" "map 80 keys")
+        retained (v/partial-continuation "eval-42" "map 80 keys")]
+    (is (= "; ‹partial view of map 80 keys; no live continuation›" honest))
+    (is (not (str/includes? honest (str "result/" "inline"))))
+    (is (not (str/includes? honest "result/")))
+    (is (str/includes? retained "result/eval-42"))))
+
+(deftest unchanged-complete-eval-values-remain-byte-stable
+  (is (= "{:a 1, :b [1 2 3]}"
+         (v/render-ai configuration "stable-eval" {:a 1 :b [1 2 3]}))))
 
 (deftest dominant-string-renders-as-body-not-stub
   (testing "a map whose payload is ONE dominant string (a read function's content)
