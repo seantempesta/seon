@@ -997,6 +997,39 @@ non-fragile bridges between runtimes.
   throughout (it manufactures statelessness). Remaining: 4b context
   maps, (5) render-fn identity split, then Stage-2 DAG residents.
 
+### Session state (2026-07-22 evening, orchestrator resumed at P1)
+
+P1 research COMPLETE, both reports accepted after citation
+spot-checks:
+- `research/p1-jvm-host-rationale-audit-2026-07-22.md` — the JVM
+  rationale does NOT structurally block P3; the one BLOCKS-P3 item is
+  the missing deadline→exact-generation worker-kill bridge (host-lane
+  kill! is a UDS close-stream stub, execution/host.cljs:589-600 —
+  verified). Six explicit P3 gates enumerated; W3 series transfers
+  except Thread-interrupt semantics and the U3 JVM graduated root.
+- `research/p1-seam-grounding-2026-07-22.md` — full call-shape +
+  drift + effect-class inventory across all seven families; drift far
+  beyond the known three (omitted arities, db→`head` rename, missing
+  resource caps, three co-existing error envelopes).
+- `research/p1-capability-seam-design-2026-07-22.md` — THE SEAM
+  (orchestrator design, P1b DONE): per-family pure .cljc core → one
+  platform leaf per tier → entry fns as the only reader-conditional
+  site. RULINGS recorded there: FOUR effect classes
+  (:pure/:read/:idempotent/:external — resolves the taxonomy collision
+  with the recovery ruling), ambient context acquired once at the
+  leaf, operation identity minted at the entry boundary, one flat
+  error shape, per-fn package effect metadata, home-dir contract bug
+  to the fs lane, missing db Malli schemas to the exemplar.
+
+Lanes in flight: `p1c-db-exemplar` (seon.db core to .cljc above the
+seam, both-tier .cljc test, deletes the drifted host wrappers) ·
+`p3a-bun-worker` (supervised same-artifact Bun execution worker +
+the kill bridge; audit gates 1-2 only) · `normalize-4b` (context
+maps → entities; still running). All specs in `tmp/orchestrator/`;
+diffs left uncommitted for orchestrator review. Next after returns:
+review diffs → P2 fan-out (message/lifecycle · my.* · blob · fs/shell
+· web) once the exemplar proves the seam.
+
 ### Session close state (2026-07-22 ~17:00)
 
 Cluster HEALTHY on `668689a7` (acquisition-shape class closed, reset

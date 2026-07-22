@@ -54,6 +54,33 @@ the anchor stays the state ledger.
 - **Call shapes are the contract.** When porting, the existing child
   (.cljs) signature/options/error-envelope is authoritative; a port
   that resolves but differs is worse than one that's missing.
+- **Inventory effects from the child inward, not the host wrapper
+  outward.** Start at the census LEFT symbol, record every arity and
+  closed-map key, follow it through its internal choke point to the
+  exact native binding, then compare the host counterpart. This exposed
+  drift beyond the familiar three cases: omitted database arities and
+  resource caps, `db` renamed to host-only `head`, host-only op-id keys,
+  and missing surface functions.
+- **The replay taxonomy currently has a fourth word.** The seam ruling
+  says pure/idempotent/external, while the recovery ruling separately
+  says READ-ONLY (`program-synthesis-2026-07-21.md:1679-1685`). A query,
+  file read, env read, or process-table read is replay-safe but not
+  referentially pure. Flag it as a design decision; never silently call
+  reads pure merely to fit three labels.
+- **The JVM writer session is a retained connection pool now, not one
+  retained channel.** `host/context.clj:192-235,237-447` lazily opens,
+  leases, evicts, and replaces pool members; `writer-call!` owns one
+  roundtrip and reconnect behavior. Preserve request identity across a
+  retry, but do not design the seam around the superseded single-channel
+  description.
+- **WP-S2 kill recovery is not invocation cancellation.** It can
+  TERM→KILL an exact managed generation, but the current host-lane
+  `kill!` closes only its UDS stream and `ensure host` preserves a live,
+  converged workload (`src/seon/execution/host.cljs:589-605`,
+  `script/seon/dev/process.clj:2645-2658`). A shared Bun worker needs an
+  explicit deadline → exact-generation drain/force → interrupted-receipt
+  recovery path; “both kill modes” means workload- and owner-death
+  recovery, not in-thread hot-loop preemption.
 
 ## Testing/proof recipes
 
