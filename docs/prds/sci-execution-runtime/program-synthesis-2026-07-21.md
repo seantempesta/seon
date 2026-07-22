@@ -416,6 +416,7 @@ an explicit "when" — never chat-only.
 | q15 | `seon.web.serve` is the second god-file (2,113 lines) | W10 decomposition unit modeled on NS-4 | after NS-3 settles the render/web layering (its split lines depend on D1) |
 | q16 | 16 duplicate-limit bugs (two invocation deadlines, 16384-vs-8192 result caps, divergent repair policies, canvas cap bypassing its accessor, …) | W1 step 3 (unify duplicate owners) | early in W1 — these are correctness bugs, not just hygiene |
 | q17 | fresh-boot config circularity: writer needs heap/frame/executor limits before the pod can commit facts | W1 step 1 (two-phase boot authority: aero-resolve pre-launch → launch envelope → reconcile → equality proof) | FIRST W1 step; everything else in W1 builds on it |
+| q27 | supervised-host teardown classifies its containment result as `forced reason=incomplete-application` despite clean absence proofs (WP-S1a live transcript) — classification wrinkle, not a leak | WP-S2 lazy-respawn unit (same containment surfaces) | with WP-S2 |
 | q26 | codex lanes' MCP eval calls are auto-cancelled ("user cancelled MCP tool call") — has degraded live evidence in three read-only audits (q21 grounding, config floors, renderer quality); lanes fall back to source/compiled evidence honestly but live proofs shift to the orchestrator | investigate the codex→MCP approval path (script/seon/dev/mcp.clj vs codex exec approval policy) | next tooling slot; not blocking (fallbacks work) but taxing every audit |
 | q25 | KB semantic recall is STRUCTURALLY DEAD: default-embeddables indexes only :seon.fn/source while my.kb/recall scopes KNN to KB eids — empty intersection by construction (renderer audit finding 3; embed.clj:468,486 ∩ kb.cljc:300,397) | R3 of the renderer ladder: wire owner-approved KB attributes (title/claim/summary) into the one default-embeddables pipeline, then judge search quality | with the renderer series — the owner's embedding-returns-great-data direction depends on it |
 | q24 | interrupted containment owners leak their UDS control sockets under `tmp/seon-containment/` (three stale entries found; the owner has `finally` cleanup but no orphan-sweep exists for crash paths) | WP-S supervision / q2 host-supervisor work | with WP-S — supervision owns process-artifact hygiene; harmless until then |
@@ -1120,6 +1121,21 @@ Pod-state audit dispatched (read-only, logs
 pod-resident agent/run/turn state → the post-W5 "virtual agents" unit
 series; U12 remains its graduation proof. Sequenced AFTER the W5
 cutover (which shrinks the question first).
+
+### TRANCHE 2 LEDGER (2026-07-22 evening)
+
+DONE today: NS-0.5c+W1.6 `9bc00982` (parse rename, zero-allowlist gate,
+manifest-owned v4-pro default, explicit-adoption reconcile) · W3b-fix
+`77d11745` (built-ins instrument watchless via the privileged seam) ·
+R1 `7eee64f3` (ONE bounded generic renderer, identity-first, honest
+continuations, result/inline dead) · D13+WP-S1a `05a13dd4` (repair
+under the parser as one namespace; FOUR supervised processes; cutover
+= one config dial, default OFF, live-proven cycle). Cluster ready.
+IN FLIGHT: crash-proof feasibility research (high, logs
+`tmp/orchestrator/crashproof-feasibility-*`). NEXT dispatches: W1.7
+footgun floors (config files free) → D15 workers → D16 blob.internal →
+WP-S2 respawn → W5-0 → W5. Owner north-star docs: pod-state audit +
+(pending) feasibility report drive the post-W5 virtual-agents series.
 
 ### NO PENDING OWNER DECISIONS
 
