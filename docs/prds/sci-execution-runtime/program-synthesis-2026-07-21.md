@@ -839,6 +839,32 @@ door (additive with `seon.demo`) is the COMPLETE answer; no release
 artifact seam is designed or built. Revisit only if diffusion ever
 graduates from experimental.
 
+### OVERNIGHT RUN PLAN (owner-approved 2026-07-21 late night)
+
+- **Lane A spine: W3 host parity** (owner picked) — units cut against
+  `research/error-quality-u6-w3-design-2026-07-21.md` + the NS-4 split:
+  W3a typed interrupt classification + output-capture parity; W3b
+  instrumentation over sci vars; W3c host-side run-fence CAS +
+  repair/preflight parity; W3d authored-function invocation on the
+  host tier (the hard U11 blocker). Grounding research pass first,
+  then spec → sol → review cycles.
+- **Lane B rotating queue:** q21 bounded committed-program acquisition
+  → W1 config-facts sweep (`research/w1-config-limits-inventory…`,
+  incl. host pool literals) → `seon.ns.source` extraction → oldest W10
+  rows (B8/B11, branch-qualified eval-cljs hang).
+- **LLM budget:** small capped DeepSeek drives OK for W3 proofs; no
+  benchmarks/batch runs.
+- **q20 ruling (orchestrator default, owner may overrule):** accept +
+  document the ~1s window during automatic writer replacement;
+  request-parking deferred until it bites.
+- **Owner ruling: repl-autosuggest is EXPERIMENTAL** — parked, not
+  linked/compiled into main's active work, preserved for later owner
+  work. NS-0.5c stays HELD; overnight lanes must not touch
+  repl/plan/typeahead surfaces.
+- Standing overnight rules: owner-taste decisions batch for morning;
+  live drives on isolated clusters only; path-limited commits; anchor
+  updated every cycle.
+
 ### NO PENDING OWNER DECISIONS
 
 The 4 W1-boot decisions were folded as recommendations into the shipped
