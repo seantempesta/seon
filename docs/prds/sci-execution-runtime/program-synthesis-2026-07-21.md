@@ -1170,7 +1170,14 @@ storage (base-ref + pinned transformation, lazy materialization) —
 seam, konserve node engine + atomic multi-key publication, the
 vector-type slice, derivation layer placement, EDN-slot/blob/q22-paging
 interplay, cost probes, staged unit cut. Feeds the post-W5 series
-alongside the virtual-agents closures.
+alongside the virtual-agents closures. DESIGN LANDED
+(`research/structured-values-design-2026-07-22.md`): tuples already
+exist in the fork — Stage 1 is Seon-only exposure; Stage-0 probes
+measuring per-node filestore cost in flight; EDN-SLOT INVENTORY AUDIT
+in flight (owner-ordered, `tmp/orchestrator/edn-slot-audit-*`) —
+computes every EDN-encoded attribute, samples real values, classifies
+tuple/cardinality-many/normalize/DAG/honestly-EDN, ranked upgrade
+order: Stage 1's work-list.
 
 ### OWNER DESIGN INSIGHT (2026-07-22 night): EFFECT-CLASSIFIED REPLAY
 
