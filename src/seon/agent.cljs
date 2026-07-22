@@ -140,7 +140,13 @@
 ;; (no merge over a separate default set). The one slot attr is
 ;; :seon.render/ai. (Turns are NOT owned here — a turn points UP to its run;
 ;; runs point UP to the agent via :seon.agent.run/agent.)
-(schema/register! :seon.agent/ctx    [:vector {:seon.db/component true} :seon.db/ref])
+(schema/register! :seon.agent/ctx
+  [:vector
+   {:seon.db/component true}
+   [:or
+    {:seon.db/value-type :db.type/ref}
+    :seon.db/ref
+    :seon.agent.ctx/block]])
 
 ;; ============================================================
 ;; Program graph. :seon.ns owns the namespace source; :seon.fn /

@@ -33,6 +33,10 @@ the anchor stays the state ledger.
 - **Datahike rejects retyping an installed attribute.** Migrations are
   RESET-BOUNDED under the no-lock-in ruling: same names, native types,
   no dual-read, no backfill. The reset installs fresh schema.
+- **Wildcard-pulled component trees are not seed transaction data.**
+  Pull adds `:db/id` to owners and children; strip both at the consumer
+  boundary before copying, or births rekey/link config-owned blocks
+  (`src/seon/config.cljs:1051-1103`, `src/seon/agent.cljs:143-149`).
 - **:inherit-style sentinels are stored nils in costume.** Absence
   means inherit/default. Reject explicit sentinels with steering.
 

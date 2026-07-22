@@ -164,12 +164,12 @@
   [database]
   (let [row (await
               (db/pull database
-                       [:seon.config/context-profiles]
+                       [:seon.config/id :seon.config/context-profiles]
                        [:seon.config/id config/cluster-config-id]))]
     (if (:seon.error/message row)
       row
-      (some->> (:seon.config/context-profiles row)
-               (db/decode-edn-value :seon.config/context-profiles)
+      (some->> (db/decode-edn-values row)
+               config/context-profiles
                :autocomplete
                seq
                vec))))

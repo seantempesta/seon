@@ -1021,8 +1021,7 @@ spot-checks:
   error shape, per-fn package effect metadata, home-dir contract bug
   to the fs lane, missing db Malli schemas to the exemplar.
 
-### Wind-down state (2026-07-22 late evening — session ended in wrong
-### mount; restart from ~/src/seon)
+### Wind-down state (2026-07-22 late evening; restart from ~/src/seon)
 
 Committed this session: `45db94a3` (the three P1 research/design docs
 + wiki appends + anchor). P1(a) and P1(b) are DONE — do not re-run the
@@ -1052,6 +1051,21 @@ Lane states at wind-down:
   gates 1-2): STOPPED CLEANLY during read-only grounding, zero edits.
   Re-dispatch from `tmp/orchestrator/p3a-bun-worker-spec.md` (or
   resume thread `019f8bbe-4cb6-7663-aa95-1602a21650fb`).
+
+### Restart state (2026-07-22, orchestrator resumed in ~/src/seon)
+
+- normalize-4b: lane died mid-gate (second full bin/test-cljs run after
+  a genuine ctx_test fixture fix; no summary written). Diff intact.
+  Orchestrator skeptic review PASSED: autocomplete edits verified as
+  genuine consumer edits (owned under "consumers"); full boot-path
+  regression present incl. seed-copy component independence; priority
+  is the order fact; one ref union with the explicit facet; superseded
+  merge fns deleted in place. Codex thread resumed in background to
+  finish full cljs+writer gates + reset-boundary live proof + wiki
+  append + summary (`tmp/orchestrator/normalize-4b-resume-events.jsonl`).
+- p1c/p3a re-dispatch HELD until 4b commits: their owned edits
+  (src/seon/db.*, execution/**, process.clj) would land inside 4b's
+  full-gate compile window (source-freeze rule).
 
 Next-session queue, in order: (1) settle normalize-4b (review →
 gates → live proof → path-limited commit); (2) re-dispatch

@@ -415,34 +415,47 @@
          [:seon.config/model-variant :seon.config/model-variant]]
         agent-model-config-entries))
 
-(schema/register! :seon.config/agent-context
-  [:or
-   (into
-    [:map
-     ;; Persisted agent datoms — override-only (no default; consumer owns it).
-     [:seon.agent.lifecycle/wake? {:optional true} :boolean]
-     [:seon.eval/home-requires {:optional true} [:vector :any]]
-     [:seon.agent/ctx {:optional true :default []} [:vector :map]]]
-    agent-model-config-entries)
-   :nil])
+;; Manifest declarations use the block's existing attribute vocabulary. The
+;; dependency leaf intentionally validates the structural identity + ordering
+;; fields here; every additional block attribute is validated by its owning
+;; registration when the resolved component tree reaches `seon.db/transact!`.
+(schema/register! :seon.config/context-block-spec
+  [:map
+   [:seon.agent.ctx/name :keyword]
+   [:seon.agent.ctx/priority :int]])
 
-;; The ROOT override — a SPARSE agent-context merged over `:seon.config/agent-context`
-;; by [[context-config-for]] (block upsert-by-name). Its `:canvas` block sets
-;; root's canvas = `system-view`, REPLACING the hardcoded client.cljs root branch.
-;; NOT decoded through the transformer directly (it's a partial override layer);
-;; only the MERGED result is decoded. Same loose `[:vector :map]` leaf shape.
-(schema/register! :seon.config/root-context
-  [:or
-   (into
-    [:map
-     ;; root can override its home-ns require list (e.g. add `[seon.agent :as agent]`
-     ;; so root additionally shows the orchestration card). Same leaf shape +
-     ;; override-only semantics as `:seon.config/agent-context` — merged by
-     ;; [[context-config-for]] onto the defaulted base for id "root".
-     [:seon.eval/home-requires {:optional true} [:vector :any]]
-     [:seon.agent/ctx {:optional true} [:vector :map]]]
-    agent-model-config-entries)
-   :nil])
+(schema/register! :seon.config/context-block-patch-spec
+  [:map
+   [:seon.agent.ctx/name :keyword]
+   [:seon.agent.ctx/priority {:optional true} :int]])
+
+(def ^:private agent-context-entries
+  (into
+   [;; Persisted agent datoms — override-only (no default; consumer owns it).
+    [:seon.agent.lifecycle/wake? {:optional true} :boolean]
+    [:seon.eval/home-requires {:optional true} [:vector :any]]
+    [:seon.agent/ctx
+     {:optional true :default []}
+     [:vector :seon.config/context-block-spec]]]
+   agent-model-config-entries))
+
+(schema/register! :seon.config/agent-context-spec
+  (into [:map] agent-context-entries))
+
+;; The ROOT declaration is a SPARSE overlay. Resolution merges it over the
+;; ordinary declaration before persistence, so the database stores one complete
+;; effective context entity while manifests retain their convenient patch form.
+(schema/register! :seon.config/root-context-spec
+  (into
+   [:map
+    [:seon.eval/home-requires {:optional true} [:vector :any]]
+    [:seon.agent/ctx
+     {:optional true}
+     [:vector :seon.config/context-block-patch-spec]]]
+   agent-model-config-entries))
+
+(schema/register! :seon.config/context-profiles-spec
+  [:map-of :keyword [:vector :seon.config/context-block-spec]])
 
 ;; The core-fault escalation dial (error-blame-strict-gate, RULED
 ;; 2026-07-04): what a `:core`-fault `seon.error/record!` does BEYOND
@@ -606,17 +619,47 @@
 ;; the shipped default. The value is the literal prompt string (a manifest
 ;; keeps it inline; `config/minimal.edn` is the worked example).
 (schema/register! :seon.config/system-text :string)
-;; Named context RENDER PROFILES — `{profile-kw → [block-patch …]}`, each
-;; patch a `:seon.agent.ctx/profile` entry (block name + per-block config
-;; overrides) that the compiled prompt child renders as a curated subset of
-;; the agent's blocks. Config-through-DB so an as-of render
-;; regenerates under the profile IN FORCE at that t (the byte-exact
-;; contract — `seon.repl.autocomplete` reads its `:autocomplete` profile
-;; off the passed db value, code default when absent). OPTIONAL, no
-;; default (absent ⇒ not seeded ⇒ consumers use their code defaults).
-;; EDN-slot bridged (mixed `:or`, the ::home-requires pattern).
+;; Effective agent/root context values are anonymous component entities. Their
+;; attributes are the SAME agent facts a birth transaction receives, including
+;; the existing `:seon.agent/ctx` connection to block entities. The one ref
+;; union admits both transaction refs and wildcard-pulled child maps; its
+;; explicit storage facet keeps the bridge on :db.type/ref.
+(schema/register! :seon.config/context
+  [:and {:seon.db/identity true} :keyword])
+(schema/register! :seon.config/context-entity
+  (into [:map {:seon.db/entity true}
+         [:seon.config/context :seon.config/context]]
+        agent-context-entries))
+(schema/register! :seon.config/context-ref
+  [:or
+   {:seon.db/value-type :db.type/ref}
+   :seon.db/ref
+   :seon.config/context-entity])
+(schema/register! :seon.config/agent-context
+  [:vector {:max 1 :seon.db/component true} :seon.config/context-ref])
+(schema/register! :seon.config/root-context
+  [:vector {:max 1 :seon.db/component true} :seon.config/context-ref])
+
+;; Named context render profiles are identified component entities. Each owns
+;; its ordered block patches through the existing `:seon.agent/ctx` connection;
+;; `:seon.agent.ctx/priority` is the order fact, never vector position.
+(schema/register! :seon.config/context-profile
+  [:and {:seon.db/identity true} :keyword])
+(schema/register! :seon.config/context-profile-entity
+  [:map {:seon.db/entity true}
+   [:seon.config/context-profile :seon.config/context-profile]
+   [:seon.agent/ctx
+    {:optional true}
+    [:vector :seon.config/context-block-spec]]])
+(schema/register! :seon.config/context-profile-ref
+  [:or
+   {:seon.db/value-type :db.type/ref}
+   :seon.db/ref
+   :seon.config/context-profile-entity])
 (schema/register! :seon.config/context-profiles
-  [:or [:map-of :keyword [:vector :map]] :nil])
+  [:vector
+   {:seon.db/component true}
+   :seon.config/context-profile-ref])
 ;; Named launch-time model configurations. Each child is identified by its
 ;; variant keyword and owned by the singleton through this component ref. The
 ;; one registered value shape admits transaction refs and acquired child maps;
@@ -720,7 +763,8 @@
    [:seon.config/routes        {:optional true} [:vector :seon.config/route-spec]]
    [:seon.config/render        {:optional true} :seon.config/render]
    [:seon.config/system-text   {:optional true} :seon.config/system-text]
-   [:seon.config/context-profiles {:optional true} :seon.config/context-profiles]
+   [:seon.config/context-profiles
+    {:optional true} :seon.config/context-profiles-spec]
    [:seon.config/ai             {:optional true} :seon.config/ai]
    [:seon.config/model-variants {:optional true} :seon.config/model-variants-spec]
    [:seon.config/on-core-error {:optional true} :seon.config/on-core-error]
@@ -732,8 +776,10 @@
    [:seon.config/root              {:optional true} :seon.config/root]
    [:seon.config/reactive          {:optional true} :seon.config/reactive]
    [:seon.config/database          {:optional true} :seon.config/database]
-   [:seon.config/agent-context {:optional true} :seon.config/agent-context]
-   [:seon.config/root-context  {:optional true} :seon.config/root-context]])
+   [:seon.config/agent-context
+    {:optional true} :seon.config/agent-context-spec]
+   [:seon.config/root-context
+    {:optional true} :seon.config/root-context-spec]])
 
 ;;; Function arg/return shapes — leaf `[:vector :map]` (full shapes validated
 ;;; downstream); registered once + referenced so the resolver specs don't
@@ -801,6 +847,19 @@
              (merge-home-requires
                (:seon.eval/home-requires base)
                (:seon.eval/home-requires override))))))
+
+(defn- upsert-context-blocks
+  "Merge block patches by name while preserving one deterministic tree."
+  [base additions]
+  (let [by-name (into {} (map (juxt :seon.agent.ctx/name identity)) additions)
+        base-names (into #{} (map :seon.agent.ctx/name) base)
+        merged (mapv (fn [block]
+                       (merge block
+                              (get by-name (:seon.agent.ctx/name block))))
+                     base)]
+    (into merged
+          (remove #(contains? base-names (:seon.agent.ctx/name %)))
+          additions)))
 
 (defn- merge-manifest-pair
   "Shallow-merge `override` over `base`, then re-combine the nested
@@ -902,6 +961,71 @@
   "The one recursive schema-default resolver for config sections. Optional
    keys carrying Malli defaults are materialized before singleton flattening."
   (mt/default-value-transformer {:malli.transform/add-optional-keys true}))
+
+(defn- order-context-blocks
+  [context]
+  (update context :seon.agent/ctx
+          (fn [blocks]
+            (->> blocks
+                 (sort-by (juxt :seon.agent.ctx/priority
+                                (comp str :seon.agent.ctx/name)))
+                 vec))))
+
+(defn- resolve-agent-context-entity
+  [declaration]
+  (-> (m/decode :seon.config/agent-context-spec
+                declaration
+                default-transformer)
+      order-context-blocks))
+
+(defn- resolve-root-context-entity
+  [agent-context declaration]
+  (let [base (or (some-> agent-context (dissoc :seon.config/context))
+                 (resolve-agent-context-entity {}))
+        root-requires (:seon.eval/home-requires declaration)
+        merged
+        (-> base
+            (merge (dissoc declaration :seon.agent/ctx
+                           :seon.eval/home-requires))
+            (cond-> (contains? declaration :seon.eval/home-requires)
+              (assoc :seon.eval/home-requires
+                     (merge-home-requires
+                      (:seon.eval/home-requires base)
+                      root-requires)))
+            (assoc :seon.agent/ctx
+                   (upsert-context-blocks
+                    (:seon.agent/ctx base)
+                    (:seon.agent/ctx declaration))))]
+    (resolve-agent-context-entity merged)))
+
+(defn- resolve-context-entities
+  [manifest]
+  (let [agent-declaration (:seon.config/agent-context manifest)
+        root-declaration (:seon.config/root-context manifest)
+        agent-context
+        (when (contains? manifest :seon.config/agent-context)
+          (assoc (resolve-agent-context-entity agent-declaration)
+                 :seon.config/context :seon.config.context/agent))]
+    (cond-> {}
+      agent-context
+      (assoc :seon.config/agent-context [agent-context])
+
+      (contains? manifest :seon.config/root-context)
+      (assoc :seon.config/root-context
+             [(assoc (resolve-root-context-entity agent-context root-declaration)
+                     :seon.config/context :seon.config.context/root)])
+
+      (seq (:seon.config/context-profiles manifest))
+      (assoc :seon.config/context-profiles
+             (into []
+                   (map (fn [[profile blocks]]
+                          {:seon.config/context-profile profile
+                           :seon.agent/ctx
+                           (:seon.agent/ctx
+                            (order-context-blocks
+                             {:seon.agent/ctx blocks}))}))
+                   (sort-by (comp str key)
+                            (:seon.config/context-profiles manifest)))))))
 
 (defn default-run-policy
   "The run section with every schema default materialized.
@@ -1238,6 +1362,7 @@
         reactive (get manifest :seon.config/reactive {})
         execution (get manifest :seon.config/execution {})
         database (get manifest :seon.config/database {})
+        contexts (resolve-context-entities manifest)
         _ (validate-liveness-relations! manifest environment run)
         nsp (resolve-namespaces manifest)
         host-respawn-backoff-ms
@@ -1349,8 +1474,6 @@
       (contains? transport :seon.config.model-transport/endpoint-cap)
       (assoc :seon.config.model-transport/endpoint-cap
              (:seon.config.model-transport/endpoint-cap transport))
-      (contains? manifest :seon.config/context-profiles)
-      (assoc :seon.config/context-profiles (:seon.config/context-profiles manifest))
       (seq (:seon.config/model-variants manifest))
       (assoc :seon.config/model-variants
              (into []
@@ -1361,13 +1484,9 @@
                             (:seon.config/model-variants manifest))))
       (contains? manifest :seon.config/skills-dir)
       (assoc :seon.config/skills-dir (:seon.config/skills-dir manifest))
-      (contains? manifest :seon.config/agent-context)
-      (assoc :seon.config/agent-context (:seon.config/agent-context manifest))
-      (contains? manifest :seon.config/root-context)
-      (assoc :seon.config/root-context (:seon.config/root-context manifest))
-
       true
-      (merge (into {}
+      (merge contexts
+             (into {}
                    (keep (fn [[class enabled?]]
                            (when-let [attribute
                                       (get repair-class-attributes class)]

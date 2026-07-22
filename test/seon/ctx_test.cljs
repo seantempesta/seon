@@ -149,15 +149,16 @@
       (let [configuration
             {:seon.config/id config/cluster-config-id
              :seon.config/agent-context
-             {:seon.agent/ctx
-              [{:seon.agent.ctx/name      :notes
-                :seon.agent.ctx/priority  30
-                :seon.agent.ctx/file-path path
-                :seon.render/ai   'seon.agent.ctx/file-block-ai
-                :seon.render/html 'seon.agent.ctx/file-block-html}
-               {:seon.agent.ctx/name     :tail
-                :seon.agent.ctx/priority 100
-                :seon.render/ai          "tail body"}]}}
+             [{:seon.config/context :seon.config.context/agent
+               :seon.agent/ctx
+               [{:seon.agent.ctx/name      :notes
+                 :seon.agent.ctx/priority  30
+                 :seon.agent.ctx/file-path path
+                 :seon.render/ai   'seon.agent.ctx/file-block-ai
+                 :seon.render/html 'seon.agent.ctx/file-block-html}
+                {:seon.agent.ctx/name     :tail
+                 :seon.agent.ctx/priority 100
+                 :seon.render/ai          "tail body"}]}]}
             resolved (config/resolve-agent-context
                        "worker-fb" nil configuration)
             [fb tail] (:seon.agent/ctx resolved)

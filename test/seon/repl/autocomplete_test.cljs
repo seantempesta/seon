@@ -74,6 +74,46 @@
           (.catch #(is false (str %)))
           (.finally #(do (set! turn/render-prompt original) (done)))))))
 
+(deftest context-consumes-the-acquired-profile-entity
+  (async done
+    (let [saved (saved-functions)
+          calls (atom [])]
+      (set! db/pull
+            (fn
+              ([_request] (js/Promise.resolve {}))
+              ([_selector _eid] (js/Promise.resolve {}))
+              ([_database _selector _eid]
+               (js/Promise.resolve
+                {:seon.config/id "cluster"
+                 :seon.config/context-profiles
+                 [{:db/id 40
+                   :seon.config/context-profile :autocomplete
+                   :seon.agent/ctx
+                   [{:db/id 42 :seon.agent.ctx/name :transcript
+                     :seon.agent.ctx/priority 100}
+                    {:db/id 41 :seon.agent.ctx/name :plan
+                     :seon.agent.ctx/priority 45}]}]}))))
+      (set! turn/render-prompt
+            (fn
+              ([_agent-id supplied-db]
+               (js/Promise.resolve
+                {:seon.render/text (str "unprofiled-" (:t supplied-db))}))
+              ([_agent-id supplied-db profile]
+               (swap! calls conj [supplied-db profile])
+               (js/Promise.resolve {:seon.render/text "profiled"}))))
+      (-> (auto/context {:seon.agent/id "agent-1"
+                         :seon.db/db database})
+          (.then
+           (fn [text]
+             (is (= "profiled" text))
+             (let [[supplied-db profile] (first @calls)]
+               (is (= database supplied-db))
+               (is (= [:plan :transcript]
+                      (mapv :seon.agent.ctx/name profile)))
+               (is (not-any? :db/id profile)))))
+          (.catch #(is false (str %)))
+          (.finally #(do (restore! saved) (done)))))))
+
 (deftest export-uses-rendered-transaction-and-one-application-digest
   (async done
     (let [saved (saved-functions)

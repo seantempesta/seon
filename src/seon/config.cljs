@@ -107,21 +107,6 @@
 ;;; deliberately drops the base home-requires to fall back to the consumer
 ;;; default) is untouched. ONE merge rule, applied at the ONE composition seam.
 
-(defn- merge-home-requires
-  "Overlay additional home requires on the base vector by namespace identity."
-  [base additions]
-  (reduce
-   (fn [requires spec]
-     (let [target (first spec)]
-       (if-let [index (first (keep-indexed
-                              (fn [i current]
-                                (when (= target (first current)) i))
-                              requires))]
-         (assoc requires index spec)
-         (conj requires spec))))
-   (vec (or base []))
-   (or additions [])))
-
 (defn- read-config-file
   "Read + resolve `path` via aero. The ONE reader seam — the manifest shape is
    reader-independent, so a fallback to `cljs.reader/read-string` would swap only
@@ -1030,32 +1015,6 @@
   [configuration]
   (get configuration :seon.config.root/recent-limit 12))
 
-(defn- upsert-by-name
-  "Layer `additions` over `base` by `:seon.agent.ctx/name`, MERGING an
-   addition's attrs OVER the matching base block IN PLACE — so a sparse
-   override that sets ONE sub-key (e.g. root/acme's `:canvas` setting
-   only `:seon.render.canvas/content`) KEEPS the default block's other
-   attrs (`:seon.agent.ctx/priority`, `:seon.render/ai`, ...). This is the
-   third-party-first contract: a manifest overriding a block need only name
-   the sub-keys it changes, never re-specify the whole block. A name absent
-   from `base` is a brand-new block, appended in `additions` order. Used by
-   [[context-config-for]] to layer the root-context override over the base,
-   by [[context-config-for]]."
-  [base additions]
-  (let [by-name  (into {} (map (juxt :seon.agent.ctx/name identity)) additions)
-        seen     (atom #{})
-        ;; existing blocks: merge any same-name addition over them, in place.
-        merged   (mapv (fn [b]
-                         (let [nm (:seon.agent.ctx/name b)]
-                           (if-let [add (get by-name nm)]
-                             (do (swap! seen conj nm)
-                                 (merge b add))
-                             b)))
-                       base)
-        ;; additions with no base counterpart: append in original order.
-        appended (filterv #(not (@seen (:seon.agent.ctx/name %))) additions)]
-    (into merged appended)))
-
 (defn resolve-routes
   "Curate the seeded `routes` by the manifest's `:seon.config/routes`.
 
@@ -1089,56 +1048,59 @@
    block map to fill its per-block defaults."
   default-transformer)
 
+(defn- context-value
+  "Return one acquired context component as independent seed data."
+  [configuration attribute]
+  (some-> (first (get configuration attribute))
+          (dissoc :db/id :seon.config/context)
+          (update :seon.agent/ctx
+                  (fn [blocks]
+                    (->> blocks
+                         (map #(dissoc % :db/id))
+                         (sort-by (juxt :seon.agent.ctx/priority
+                                        (comp str :seon.agent.ctx/name)))
+                         vec)))))
+
 (defn- context-config-for
-  "Select the FULLY-DEFAULTED agent-context map for `id` from `manifest`
-   (decision 11) — by IDENTITY, not a `:kind`. Decodes `:seon.config/agent-context`
-   through the default transformer FIRST, then for
-   `\"root\"` upserts the sparse `:seon.config/root-context` blocks over it by
-   `:seon.agent.ctx/name`. Any other id gets the decoded agent-context unchanged.
-   Both manifest keys default to `{}` when absent; the context vector then defaults
-   to empty. Decoding before the root upsert keeps scalar defaults and block-value
-   decoding on one path."
-  [id manifest]
-  (let [base (m/decode :seon.config/agent-context
-                       (get manifest :seon.config/agent-context {})
-                       ctx-default-transformer)]
-    (if (= id "root")
-      (let [override      (get manifest :seon.config/root-context {})
-            root-requires (:seon.eval/home-requires override)]
-        (-> base
-            ;; Root's home requires are an additive capability overlay. Every
-            ;; base/downstream namespace remains visible; a repeated namespace
-            ;; refines its require spec by identity. Other scalar keys still
-            ;; override normally. The block vector merges by name below.
-            (merge (dissoc override :seon.agent/ctx
-                           :seon.eval/home-requires))
-            (cond-> (contains? override :seon.eval/home-requires)
-              (assoc :seon.eval/home-requires
-                     (merge-home-requires
-                       (:seon.eval/home-requires base)
-                       root-requires)))
-            (assoc :seon.agent/ctx
-                   (upsert-by-name (:seon.agent/ctx base)
-                                   (:seon.agent/ctx override)))))
-      base)))
+  "Select the effective stored context entity for one agent identity."
+  [id configuration]
+  (or (when (= id "root")
+        (context-value configuration :seon.config/root-context))
+      (context-value configuration :seon.config/agent-context)
+      {}))
 
 (defn resolve-agent-context
   "Resolve the FULLY-DEFAULTED nested agent-context map for `id`.
 
-   §3.1 — two
-   explicit key-level merge layers — `agent-context ← root-context` (in
-   [[context-config-for]], by identity, already defaulted) ← per-mint `override`
-   — then a final recursive `m/decode` fills any key the override left absent.
+   Manifest resolution has already materialized the effective ordinary/root
+   component trees. This boundary selects by identity, removes acquisition ids
+   so a birth receives independent components, merges the per-mint `override`,
+   then fills any key the override left absent.
    Returns `{… agent scalars … :seon.agent/ctx [block …]}`; the caller transacts
    it as ONE nested component-ref tx. An explicit `:seon.agent/ctx` is the
    complete seed tree; absent config resolves to an empty tree."
   {:malli/schema [:=> [:catn [::agent-id ::agent-id]
                        [::override [:maybe :map]]
                        [::configuration :seon.config/singleton]]
-                  :seon.config/agent-context]}
+                  :seon.config/agent-context-spec]}
   [id override configuration]
   (let [merged (merge (context-config-for id configuration) override)]
-    (m/decode :seon.config/agent-context merged ctx-default-transformer)))
+    (m/decode :seon.config/agent-context-spec merged ctx-default-transformer)))
+
+(defn context-profiles
+  "The named render-profile block patches in `configuration`."
+  {:malli/schema [:=> [:cat :seon.config/singleton]
+                  :seon.config/context-profiles-spec]}
+  [configuration]
+  (into {}
+        (map (fn [profile]
+               [(:seon.config/context-profile profile)
+                (->> (:seon.agent/ctx profile)
+                     (map #(dissoc % :db/id))
+                     (sort-by (juxt :seon.agent.ctx/priority
+                                    (comp str :seon.agent.ctx/name)))
+                     vec)]))
+        (or (:seon.config/context-profiles configuration) [])))
 
 (defn model-variants
   "The named launch-time model attribute maps in `configuration`."

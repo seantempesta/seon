@@ -1631,7 +1631,7 @@
    and dials commit atomically. Existing agents never call this function during
    resume; their database facts remain authoritative."
   {:malli/schema
-   [:=> [:cat ::initial-context-request] :seon.config/agent-context]}
+   [:=> [:cat ::initial-context-request] :seon.config/agent-context-spec]}
   [{:seon.agent/keys [id] :seon.agent.ctx/keys [override]
     configuration :seon.config/configuration}]
   (config/resolve-agent-context id override configuration))

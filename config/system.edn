@@ -391,9 +391,11 @@
 
  ;; ── CONTEXT RENDER PROFILES (repl-autosuggest A1) — named curated-subset
  ;; renders through the ONE producer (seon.agent.ctx/render-context takes
- ;; :seon.agent.ctx/profile). Config-through-DB: this map seeds the
- ;; :seon.config/context-profiles singleton datom, so an as-of export
- ;; regenerates under the profile IN FORCE at that t. The :autocomplete
+ ;; :seon.agent.ctx/profile). Config-through-DB: resolution creates
+ ;; identified profile component entities whose existing :seon.agent/ctx
+ ;; children carry explicit :seon.agent.ctx/priority; as-of acquisition
+ ;; reconstructs that tree, so an as-of export regenerates under the
+ ;; profile IN FORCE at that t. The :autocomplete
  ;; profile is the byte-exact encoder input for the tiny form-prediction
  ;; model (docs/prds/repl-autosuggest/design.md): plan window + the
  ;; recent-tail transcript with every wall-clock/process-identity byte OFF
@@ -423,10 +425,11 @@
     :seon.agent.ctx.transcript/result-handles? false
     :seon.agent.ctx/escape-clipping? true}]}
 
- ;; ── ROOT-CONTEXT — a SPARSE override merged over :seon.config/agent-context
- ;; by IDENTITY (id "root"), block upsert-by-:seon.agent.ctx/name. The :canvas
- ;; block sets root's canvas = the system/fleet dashboard, the config-driven
- ;; replacement for the hardcoded client.cljs root branch.
+ ;; ── ROOT-CONTEXT — a SPARSE declaration merged by :seon.agent.ctx/name over
+ ;; the :seon.config/agent-context declaration during resolve-config-singleton,
+ ;; then persisted as the complete :seon.config.context/root component entity.
+ ;; The :canvas block sets root's canvas = the system/fleet dashboard, the
+ ;; config-driven replacement for the hardcoded client.cljs root branch.
  ;;
  ;; `:seon.eval/home-requires` — root's ADDITIONAL capability namespaces merge
  ;; by namespace identity over the complete ordinary/downstream toolbelt. Root
@@ -434,9 +437,10 @@
  ;; tools while referring the small orchestration surface directly into its
  ;; safe `my.agent.root` home namespace. Root-authored definitions never land
  ;; in framework namespaces.
- ;; `context-config-for` merges this capability overlay over the base; the
- ;; `:seon.agent/ctx` block vector below
- ;; is upserted by name (not overwritten). Every entry must carry `:as`/`:refer`
+ ;; Resolution merges this capability overlay over the base and upserts the
+ ;; `:seon.agent/ctx` block vector below by name (not overwritten);
+ ;; `context-config-for` only selects and detaches the effective stored tree.
+ ;; Every entry must carry `:as`/`:refer`
  ;; (bare `[ns]` is rejected by `seon.agent.home/require-spec`).
  :seon.config/root-context
  {:seon.eval/home-requires
