@@ -523,11 +523,8 @@
 (defn skills-dir
   "The skills corpus directory for explicit configuration data.
 
-   The manifest's `:seon.config/skills`
-   `:seon.config/dirs` first entry when present, else `SEON_SKILLS_DIR`, else
-   `.claude/skills` (the standard Claude-Code layout humans edit too). This is
-   where `:seon.config/dirs` is finally consumed — the last hardcoded env read
-   folded into the config seam.
+   Returns the ordinary `:seon.config/skills-dir` value, or nil when this
+   configuration declares no corpus.
 
    The corpus is a CHECKOUT ARTIFACT (a skills dir in the seon tree), so a
    RELATIVE value resolves via `seon.platform/artifact-path` — under
@@ -535,12 +532,9 @@
    its own data root), else CWD-relative (seon's own usage, byte-identical).
    An absolute value is used as-is."
   {:malli/schema
-   [:=> [:catn [::configuration :map]] :string]}
+   [:=> [:catn [::configuration :map]] [:maybe :string]]}
   [configuration]
-  (let [dir (or (some-> configuration :seon.config/skills
-                         :seon.config/dirs first)
-                (env "SEON_SKILLS_DIR")
-                ".claude/skills")]
+  (when-let [dir (:seon.config/skills-dir configuration)]
     (if (.startsWith dir "/")
       dir
       (platform/artifact-path dir))))

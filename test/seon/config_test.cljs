@@ -13,6 +13,7 @@
      (cljs.test/run-tests 'seon.config-test)"
   (:require
     [cljs.test :refer [async deftest is testing]]
+    [clojure.string :as str]
     [malli.core :as m]
     [my.skills :as skills]
     [seon.agent :as agent]
@@ -438,7 +439,7 @@
 (deftest manifest-schema-validity
   (testing "a representative manifest validates against :seon.config/manifest"
     (is (m/validate :seon.config/manifest
-                    {:seon.config/skills        {:seon.config/dirs ["seon-skills"]}
+                    {:seon.config/skills-dir    "seon-skills"
                      :seon.config/routes        [{:seon.config/removes [:seon.route/agent-call]}]
                      :seon.config/run           {:seon.config.run/batch-turn-limit 100
                                                  :seon.config.run/stream-form-limit 300
@@ -507,6 +508,16 @@
            (first (db/malli->datahike-schema
                     [:seon.agent.web/allowed-domains])))
         "the existing web allowlist remains cardinality-many strings"))
+  (is (= {:db/ident :seon.config/always
+          :db/valueType :db.type/symbol
+          :db/cardinality :db.cardinality/many}
+         (first (db/malli->datahike-schema [:seon.config/always])))
+      "the always-source policy stores native cardinality-many symbols")
+  (is (= {:db/ident :seon.config/skills-dir
+          :db/valueType :db.type/string
+          :db/cardinality :db.cardinality/one}
+         (first (db/malli->datahike-schema [:seon.config/skills-dir])))
+      "the optional skill corpus input stores one ordinary string")
   (is (= {:db/ident :seon.config/model-variants
           :db/valueType :db.type/string
           :db/cardinality :db.cardinality/one}
@@ -517,18 +528,36 @@
   (testing "the {} manifest leaves the route seed untouched"
     (is (= routes (config/resolve-routes routes {})))))
 
-(deftest host-tier-policy-is-one-default-off-config-fact
+(deftest execution-policy-is-one-defaulted-config-fact-set
   (is (m/validate :seon.config/manifest
                   {:seon.config/execution
-                   {:seon.config.execution/host-tier? true}}))
-  (is (false?
-       (:seon.config.execution/host-tier?
-        (config/resolve-config-singleton {}))))
-  (is (true?
-       (:seon.config.execution/host-tier?
+                   {:seon.config.execution/host-tier? true
+                    :seon.config.execution/host-respawn-backoff-ms 1000}}))
+  (let [defaults (config/resolve-config-singleton {})
+        selected
         (config/resolve-config-singleton
          {:seon.config/execution
-          {:seon.config.execution/host-tier? true}}))))
+          {:seon.config.execution/host-tier? true
+           :seon.config.execution/host-respawn-backoff-ms 2500}})]
+    (is (false? (:seon.config.execution/host-tier? defaults)))
+    (is (= 1000
+           (resolve/execution-host-respawn-backoff-ms defaults)))
+    (is (true? (:seon.config.execution/host-tier? selected)))
+    (is (= 2500
+           (resolve/execution-host-respawn-backoff-ms selected))))
+  (let [error
+        (try
+          (config/resolve-config-singleton
+           {:seon.config/execution
+            {:seon.config.execution/host-respawn-backoff-ms 999}})
+          nil
+          (catch js/Error exception exception))]
+    (is (= 999 (get (ex-data error)
+                    :seon.config.execution/host-respawn-backoff-ms)))
+    (is (= 1000 (:seon.config/floor (ex-data error))))
+    (is (string? (:seon.config/reason (ex-data error))))
+    (is (re-find #"host-respawn-backoff-ms"
+                 (:seon.config/steering (ex-data error)))))
   (is (not
        (m/validate :seon.config/manifest
                    {:seon.config/execution
@@ -1126,8 +1155,8 @@
                         :seon.config/reactive-max-latency-ms 800}
                        (:seon.config/reactive manifest)))))))))))
 
-;;; ENV KNOBS — the few knobs that stay env-only (launch/process). These tests
-;;; pin the COERCION + the :seon.config/dirs precedence, not live env values.
+;;; CONFIG ACCESSORS — process-only env coercion plus the explicit,
+;;; singleton-owned corpus directory contract.
 ;;; ([[with-env]] is defined above with the soul-block tests.)
 
 (deftest env-int-coerces-positive-or-default
@@ -1154,15 +1183,33 @@
     #(is (thrown? js/Error (config/load-manifest)))))
 
 (deftest skills-dir-precedence
-  (testing "manifest :seon.config/dirs wins over env, which wins over the default"
+  (testing "one declared string wins and absence means no corpus"
     (is (= "from/manifest"
            (config/skills-dir
-            {:seon.config/skills
-             {:seon.config/dirs ["from/manifest"]}})))
-    (with-env "SEON_SKILLS_DIR" "from/env"
-      #(is (= "from/env" (config/skills-dir {}))))
-    (with-env "SEON_SKILLS_DIR" nil
-      #(is (= ".claude/skills" (config/skills-dir {}))))))
+            {:seon.config/skills-dir "from/manifest"})))
+    (with-env "SEON_SKILLS_DIR" "ignored"
+      #(is (nil? (config/skills-dir {}))))))
+
+(deftest native-config-declarations-reject-explicit-nil-or-empty
+  (doseq [[label manifest]
+          [["nil skills directory" {:seon.config/skills-dir nil}]
+           ["empty skills directory" {:seon.config/skills-dir ""}]
+           ["nil always policy"
+            {:seon.config/namespaces {:seon.config/always nil}}]
+           ["empty always policy"
+            {:seon.config/namespaces {:seon.config/always []}}]]]
+    (is (false? (m/validate :seon.config/manifest manifest)) label)
+    (let [path (write-tmp! (str "invalid-native-config-"
+                                (str/replace label #" " "-") ".edn")
+                           (pr-str manifest))
+          error (try
+                  (manifest-via-config path)
+                  nil
+                  (catch js/Error exception exception))]
+      (is (some? error) (str label " fails at the declaration door"))
+      (is (= :user-input (:seon.error/kind (ex-data error))))
+      (is (re-find #"omit|must contain" (ex-message error))
+          "the validation error steers toward absence or a non-empty value"))))
 
 ;;; ============================================================
 ;;; CONFIG → DB (config-db-migration 2026-07-10). `resolve-config-singleton` is
@@ -1217,7 +1264,7 @@
                          [{:seon.agent.ctx/name :transcript}]}
           root-context {:seon.agent/ctx
                         [{:seon.agent.ctx/name :canvas}]}
-          skills {:seon.config/dirs ["seon-skills"]}
+          skills-dir "seon-skills"
           s (config/resolve-config-singleton
               {:seon.config/render
                {:seon.config.render/eval-cap 42
@@ -1233,7 +1280,7 @@
                 :seon.config.model-transport/endpoint-cap 29}
                :seon.config/on-core-error :log
                :seon.config/system-text "you are a helpful agent"
-               :seon.config/skills skills
+               :seon.config/skills-dir skills-dir
                :seon.config/agent-context agent-context
                :seon.config/root-context root-context})]
       (is (= 42 (:seon.config.render/eval-cap s)))
@@ -1248,9 +1295,40 @@
       (is (= 29 (:seon.config.model-transport/endpoint-cap s)))
       (is (= :log (:seon.config/on-core-error s)))
       (is (= "you are a helpful agent" (:seon.config/system-text s)))
-      (is (= skills (:seon.config/skills s)))
+      (is (= skills-dir (:seon.config/skills-dir s)))
       (is (= agent-context (:seon.config/agent-context s)))
       (is (= root-context (:seon.config/root-context s))))))
+
+(deftest native-config-values-never-enter-the-edn-slot-encoder
+  (let [singleton (config/resolve-config-singleton
+                   {:seon.config/skills-dir "seon-skills"
+                    :seon.config/namespaces
+                    {:seon.config/always '[my.kb seon.agent.message]}})
+        native-values (select-keys singleton
+                                   [:seon.config/id
+                                    :seon.config/always
+                                    :seon.config/skills-dir])]
+    (is (= native-values
+           (first (db/encode-edn-slot-values [native-values]))))
+    (is (= #{'my.kb 'seon.agent.message}
+           (:seon.config/always singleton)))
+    (is (= "seon-skills" (:seon.config/skills-dir singleton)))))
+
+(deftest reconcile-replaces-the-always-source-set-exactly
+  (let [identity [:seon.config/id config/cluster-config-id]
+        installed {:seon.config/always
+                   {:db/valueType :db.type/symbol
+                    :db/cardinality :db.cardinality/many}}
+        current {:seon.config/id config/cluster-config-id
+                 :seon.config/always #{'my.kb 'my.ui 'old.ns}}
+        desired {:seon.config/id config/cluster-config-id
+                 :seon.config/always #{'my.kb 'my.ui 'new.ns}}
+        tx-data (#'state/entity-exact-tx
+                 {} {} installed identity desired current)]
+    (is (= [[:db.fn/retractAttribute identity :seon.config/always]
+            desired]
+           tx-data)
+        "one reconcile retracts the old many attr before asserting the exact set")))
 
 (deftest agent-context-is-derived-from-explicit-config-data
   (let [stored {:seon.config/id config/cluster-config-id

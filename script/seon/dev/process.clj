@@ -1559,6 +1559,7 @@
 (def ^:private lifecycle-reserve-ms 120000)
 (def ^:private operations
   #{:seon.dev.process.operation/down
+    :seon.dev.process.operation/ensure-host
     :seon.dev.process.operation/recover
     :seon.dev.process.operation/restart
     :seon.dev.process.operation/rebuild-readers
@@ -1838,6 +1839,7 @@
           (and (= :seon.dev.process.containment.trigger/requested trigger)
                (case id
                  :seon.dev.process/watcher true
+                 :seon.dev.process/host true
                  :seon.dev.process/pod
                  (true? (get-in result [:seon.dev.process/application-result
                                         :seon.client/quiesced?]))
@@ -1913,6 +1915,95 @@
      :seon.dev.process/budget-ms budget
      :seon.dev.process/elapsed-ms (- (monotonic-ms) started)
      :seon.dev.process/results results}))
+
+(defn- host-containment-descriptor-paths
+  [configuration]
+  (let [directory
+        (fs/path (fs/parent (state-file configuration host-id))
+                 "containment" (id-name host-id))]
+    (if (fs/directory? directory)
+      (->> (fs/list-dir directory)
+           (filter fs/directory?)
+           (map #(fs/path % "descriptor.json"))
+           (filter fs/regular-file?)
+           vec)
+      [])))
+
+(defn- containment-socket-directory
+  [configuration]
+  (fs/path
+   (or (:seon.dev.config/containment-socket-dir configuration)
+       (fs/path (:seon.dev.config/root configuration)
+                "tmp" "seon-containment"))))
+
+(defn- host-containment-candidate
+  [configuration descriptor-path]
+  (try
+    (let [descriptor (json/parse-string (slurp (str descriptor-path)) true)
+          generation (:generation descriptor)
+          directory-generation (str (fs/file-name (fs/parent descriptor-path)))
+          expected
+          (when (and (string? generation)
+                     (parse-uuid generation)
+                     (= generation directory-generation))
+            (str (fs/path (containment-socket-directory configuration)
+                          (control-socket-file generation))))]
+      (when (and expected (= expected (:control_socket descriptor)))
+        {:seon.dev.process.containment/generation generation
+         :seon.dev.process.containment/control-socket expected}))
+    (catch Throwable _ nil)))
+
+(defn sweep-orphaned-host-containment-sockets!
+  "Delete dead control sockets attributable to old host descriptors only.
+
+   The operator stack lock serializes normal publishers. A descriptor-visible
+   but not-yet-recorded containment owner is still preserved by its responding
+   generation-bound control socket."
+  {:malli/schema
+   [:=> [:cat map?]
+    [:map {:closed true}
+     [:seon.dev.process/swept-containment-sockets [:vector :string]]
+     [:seon.dev.process/uncertain-containment-sockets [:vector :string]]]]}
+  [configuration]
+  (let [record (read-process configuration host-id)
+        recorded-generation
+        (some-> record :seon.dev.process/containment
+                :seon.dev.process.containment/generation str)
+        recorded-live?
+        (= :seon.dev.process.status/alive (process-status record))]
+    (->> (host-containment-descriptor-paths configuration)
+         (keep #(host-containment-candidate configuration %))
+         (reduce
+          (fn [result
+               {:seon.dev.process.containment/keys
+                [generation control-socket]}]
+            (if-not (fs/exists? control-socket)
+              result
+              (let [recorded? (= recorded-generation generation)
+                    responding?
+                    (or (and recorded? recorded-live?)
+                        (try
+                          (socket-line! control-socket
+                                        (str "probe " generation))
+                          true
+                          (catch Throwable _ false)))]
+                (cond
+                  (and responding? (not recorded?))
+                  (update result
+                          :seon.dev.process/uncertain-containment-sockets
+                          conj control-socket)
+
+                  responding?
+                  result
+
+                  :else
+                  (do
+                    (fs/delete-if-exists control-socket)
+                    (update result
+                            :seon.dev.process/swept-containment-sockets
+                            conj control-socket))))))
+          {:seon.dev.process/swept-containment-sockets []
+           :seon.dev.process/uncertain-containment-sockets []}))))
 
 (defn- contained-one-shot-spec
   [{:seon.dev.process/keys
@@ -2334,6 +2425,77 @@
         (try
           (.removeShutdownHook runtime shutdown-hook)
           (catch IllegalStateException _))))))
+
+(def ensure-host-result-schema
+  [:map {:closed true}
+   [:seon.dev.process/id [:= host-id]]
+   [:seon.runtime.state/changed? :boolean]
+   [:seon.dev.process/status [:= :seon.dev.process.status/alive]]
+   [:seon.dev.process/ready? [:= true]]
+   [:seon.dev.process/pid pos-int?]
+   [:seon.dev.process/swept-containment-sockets [:vector :string]]])
+
+(defn ensure-host!
+  "Reconcile exactly the source-checkout host member of the managed graph."
+  {:malli/schema
+   [:=> [:catn [:configuration map?] [:manifest map?]]
+    ensure-host-result-schema]}
+  [configuration manifest]
+  (let [spec-map (specs configuration manifest)
+        spec (get spec-map host-id)
+        _ (when-not spec
+            (throw
+             (ex-info
+              "The selected artifact has no operator-owned host member."
+              {:seon.dev.process/id host-id
+               :seon.dev.config/source-checkout?
+               (:seon.dev.config/source-checkout? configuration)})))
+        unavailable
+        (->> (:seon.dev.process/dependencies spec)
+             (remove
+              (fn [id]
+                (when-let [dependency (get spec-map id)]
+                  (converged? configuration dependency))))
+             vec)
+        _ (when (seq unavailable)
+            (throw
+             (ex-info
+              "The host's existing operator-owned dependencies are unavailable."
+              {:seon.dev.process/id host-id
+               :seon.dev.process/unavailable-processes unavailable})))
+        socket-reconcile
+        (sweep-orphaned-host-containment-sockets! configuration)
+        swept (:seon.dev.process/swept-containment-sockets socket-reconcile)
+        uncertain
+        (:seon.dev.process/uncertain-containment-sockets socket-reconcile)
+        _ (when (seq uncertain)
+            (throw
+             (ex-info
+              "A live unrecorded host containment owner blocks replacement."
+              {:seon.dev.process/id host-id
+               :seon.dev.process/status
+               :seon.dev.process.status/containment-uncertain
+               :seon.dev.process/uncertain-containment-sockets uncertain})))
+        exact? (converged? configuration spec)
+        record-before (read-process configuration host-id)
+        _ (when (and (not exact?) record-before)
+            (clean-or-force!
+             {:seon.dev.process/configuration configuration
+              :seon.dev.process/operation
+              :seon.dev.process.operation/ensure-host
+              :seon.dev.process/targets #{host-id}}))
+        record
+        (if exact?
+          record-before
+          (with-startup-ownership
+           configuration
+           #(ensure! configuration spec %)))]
+    {:seon.dev.process/id host-id
+     :seon.runtime.state/changed? (boolean (or (not exact?) (seq swept)))
+     :seon.dev.process/status :seon.dev.process.status/alive
+     :seon.dev.process/ready? true
+     :seon.dev.process/pid (:seon.dev.process/pid record)
+     :seon.dev.process/swept-containment-sockets swept}))
 
 (defn reported-process-status
   "Derive one managed generation's containment-aware operator status."

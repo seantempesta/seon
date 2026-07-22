@@ -36,7 +36,7 @@
   (config/resolve-config-singleton {}))
 
 (def stored-configuration
-  (update configuration :seon.config/always pr-str))
+  configuration)
 
 (defn- finish!
   [promise done restorations]

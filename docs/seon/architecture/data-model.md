@@ -1015,7 +1015,7 @@ concern = ONE `:seon.config/<section>` schema + one resolver fn + one key here:
    [:seon.config/schedule-breaker {:optional true} :seon.config/schedule-breaker]
    [:seon.config/model-variants   {:optional true} :seon.config/model-variants-spec] ; named sparse birth-time agent model attrs
    [:seon.config/agent-context    {:optional true} :seon.config/agent-context]     ; the per-agent block tree + dials
-   [:seon.config/skills           {:optional true} :seon.config/skills]            ; importable SKILL.md corpus input
+   [:seon.config/skills-dir       {:optional true} :seon.config/skills-dir]        ; importable SKILL.md corpus directory
    [:seon.config/root-context     {:optional true} :seon.config/root-context]])    ; root block reconciliation + complete home-require scalar
 ```
 

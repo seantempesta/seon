@@ -8,7 +8,7 @@ description: "How the Seon REPL reads, repairs, and evaluates the Clojure forms 
 Every reply you write is split into top-level forms by a **real reader**
 (rewrite-clj), not string-splitting. Knowing how it segments and repairs your
 text lets you write forms that land on the first try. The segmenter is
-`seon.repl.internal/parse-forms`; the repair layer is `seon.repair`.
+`seon.repl.parse/parse-forms`; the repair layer is `seon.repl.parse.repair`.
 
 ## What EVALUATES vs what is DROPPED (forms-and-prose-only)
 

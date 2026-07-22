@@ -23,7 +23,7 @@ Pod boot calls `my.skills/seed-skills-tx-data` and reconciles the selected
 directory into the database by identity. Rows absent from the desired import
 set are retracted. The selected directory is, in order:
 
-1. the first `:seon.config/dirs` entry under `:seon.config/skills`;
+1. the `:seon.config/skills-dir` string;
 2. `SEON_SKILLS_DIR`; or
 3. `.claude/skills` when neither is supplied.
 

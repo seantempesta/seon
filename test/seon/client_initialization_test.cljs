@@ -243,7 +243,7 @@
           original-resolve config/resolve-config-singleton
           retained (assoc configuration
                           :seon.config/always #{'custom.core})
-          stored (update retained :seon.config/always pr-str)
+          stored retained
           cleanup!
           (fn []
             (set! client/open-database-session! original-open)
@@ -808,11 +808,9 @@
       (set! db/entity
             (fn
               ([_entity-id]
-               (js/Promise.resolve
-                (update configuration :seon.config/always pr-str)))
+               (js/Promise.resolve configuration))
               ([_database _entity-id]
-               (js/Promise.resolve
-                (update configuration :seon.config/always pr-str)))))
+               (js/Promise.resolve configuration))))
       (set! admission/begin-publication!
             (fn [] (swap! effects conj :close) true))
       (set! client/open-database-session!

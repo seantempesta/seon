@@ -168,6 +168,22 @@
           (is (string? (:seon.config/reason (ex-data error))))
           (is (str/includes? (:seon.config/steering (ex-data error))
                              (str attribute)))))
+      (let [attribute :seon.config.execution/host-respawn-backoff-ms
+            path (fs/path root "host-respawn-backoff.edn")
+            _ (spit (str path)
+                    (pr-str {:seon.config/execution {attribute 999}}))
+            error
+            (with-redefs-fn
+              {#'config/hardware-observations (constantly hardware)}
+              (fn []
+                (try
+                  (config/select-manifest configuration (str path))
+                  nil
+                  (catch Exception exception exception))))]
+        (is (= 999 (get (ex-data error) attribute)))
+        (is (= 1000 (:seon.config/floor (ex-data error))))
+        (is (str/includes? (:seon.config/steering (ex-data error))
+                           (str attribute))))
       (finally
         (fs/delete-tree root {:force true})))))
 

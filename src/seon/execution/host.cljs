@@ -18,6 +18,7 @@
    Bun child until the U11 seam moves it. Absence of the fact keeps today's child for
    everything (sci-execution-runtime design §9 step 1)."
   (:require
+   [seon.config.resolve :as config.resolve]
    [seon.db :as db]
    [seon.db.branch :as branch]
    [seon.db.protocol :as db.protocol]
@@ -30,6 +31,8 @@
 
 (def ^:private default-ready-timeout-ms 10000)
 (def ^:private default-idle-timeout-ms 300000)
+(def ^:private ensure-host-timeout-ms 240000)
+(def ^:private ensure-host-output-limit-bytes (* 64 1024))
 (def ^:private maximum-tail-characters (* 16 1024))
 
 ;; Tier assignment as data: an agent entity carrying this host coordinate
@@ -39,6 +42,8 @@
 (schema/register! ::eval-socket-path [:string {:min 1}])
 (schema/register! ::javascript-runtime [:string {:min 1}])
 (schema/register! ::eval-host-coordinate! 'fn?)
+(schema/register! ::ensure-host! 'fn?)
+(schema/register! ::now-fn 'fn?)
 (schema/register! ::ready-timeout-ms [:int {:min 1}])
 (schema/register! ::idle-timeout-ms [:int {:min 1}])
 (schema/register! ::cancel-grace-ms [:int {:min 1}])
@@ -96,7 +101,9 @@
   [::cancel-grace-ms {:optional true} ::cancel-grace-ms]
   [::spawn! {:optional true} ::spawn!]
   [::run-fence-current? {:optional true} ::run-fence-current?]
-  [::eval-host-coordinate! {:optional true} ::eval-host-coordinate!]])
+  [::eval-host-coordinate! {:optional true} ::eval-host-coordinate!]
+  [::ensure-host! {:optional true} ::ensure-host!]
+  [::now-fn {:optional true} ::now-fn]])
 
 ;; One state atom, two transport lanes with identical entry shapes. The
 ;; lane keyword is the top-level key selecting the entry map.
@@ -104,7 +111,10 @@
 (def ^:private host-lane ::host-sessions)
 
 (defonce ^:private !host
-  (atom {::generation 0 ::children {} ::host-sessions {}}))
+  (atom {::generation 0
+         ::children {}
+         ::host-sessions {}
+         ::ensure-state {::in-flight? false}}))
 (defonce ^:private !invocation-tails (atom {}))
 
 (defn- deferred []
@@ -634,8 +644,10 @@
          (fn [error]
            (host-error {::execution/invocation-id "startup"}
                        "The agent host session could not be opened."
-                       {::eval-socket-path socket-path
-                        :seon.error/cause (ex-message error)}))))))
+                       (cond-> {::eval-socket-path socket-path
+                                :seon.error/cause (ex-message error)}
+                         (some-> error .-code)
+                         (assoc :seon.error/code (str (.-code error))))))))))
 
 (defn- retire-child!
   [current grace-ms]
@@ -687,7 +699,7 @@
   {:malli/schema [:=> [:cat ::configure-request] :boolean]}
   [{::keys [launch-descriptor javascript-runtime ready-timeout-ms
             idle-timeout-ms cancel-grace-ms spawn! run-fence-current?
-            eval-host-coordinate!]}]
+            eval-host-coordinate! ensure-host! now-fn]}]
   (let [runtime (::launch/runtime launch-descriptor)]
     (when-not (and (::launch/execution-build-id runtime)
                    (::launch/execution-output runtime)
@@ -714,9 +726,12 @@
                                      subprocess/default-kill-grace-ms)
                ::spawn! spawn!
                ::run-fence-current? (or run-fence-current? (constantly true))
-               ::eval-host-coordinate! eval-host-coordinate!}
+               ::eval-host-coordinate! eval-host-coordinate!
+               ::ensure-host! ensure-host!
+               ::now-fn (or now-fn #(.now js/Date))}
               ::children {}
-              ::host-sessions {}}))
+              ::host-sessions {}
+              ::ensure-state {::in-flight? false}}))
     (reset! !invocation-tails {})
     true))
 
@@ -834,6 +849,69 @@
       {::coordinate-error result}
       result)))
 
+(defn- host-reconcile-failure?
+  [message]
+  (let [data (get-in message [::execution/error :seon.error/data])]
+    (or (true? (::execution/child-retired? data))
+        (contains? #{"ECONNREFUSED" "ENOENT"}
+                   (:seon.error/code data)))))
+
+(defn- claim-host-reconcile!
+  [now-ms backoff-ms]
+  (let [attempt-id (str (random-uuid))
+        decision (atom :backoff)]
+    (swap! !host
+           (fn [host]
+             (let [{::keys [in-flight? attempted-at-ms]}
+                   (::ensure-state host)]
+               (cond
+                 in-flight?
+                 (do (reset! decision :in-flight) host)
+
+                 (and attempted-at-ms
+                      (< (- now-ms attempted-at-ms) backoff-ms))
+                 host
+
+                 :else
+                 (do
+                   (reset! decision :launch)
+                   (assoc host ::ensure-state
+                          {::attempt-id attempt-id
+                           ::attempted-at-ms now-ms
+                           ::in-flight? true}))))))
+    (when (= :launch @decision) attempt-id)))
+
+(defn- default-ensure-host!
+  []
+  (subprocess/run!
+   {::subprocess/cmd ["bin/seon" "ensure" "host"]
+    ::subprocess/timeout-ms ensure-host-timeout-ms
+    ::subprocess/max-output-bytes ensure-host-output-limit-bytes}))
+
+(defn- trigger-host-reconcile!
+  []
+  (let [configuration (host-configuration)
+        now-ms ((::now-fn configuration))
+        backoff-ms
+        (config.resolve/execution-host-respawn-backoff-ms
+         (:seon.config/configuration (db/current-tx-context)))]
+    (when-let [attempt-id (claim-host-reconcile! now-ms backoff-ms)]
+      (let [completion
+            (try
+              (js/Promise.resolve
+               ((or (::ensure-host! configuration) default-ensure-host!)))
+              (catch :default error (js/Promise.reject error)))]
+        (-> completion
+            (.catch (fn [_] nil))
+            (.finally
+             (fn []
+               (swap! !host
+                      (fn [host]
+                        (if (= attempt-id
+                               (get-in host [::ensure-state ::attempt-id]))
+                          (assoc-in host [::ensure-state ::in-flight?] false)
+                          host))))))))))
+
 (defn- invoke-in-lane!
   "Run the head invocation on one lane, replacing a source-stale child once."
   [lane socket-path invocation]
@@ -849,6 +927,12 @@
                  (remove-child! lane agent-id (::generation current)
                                 (::child-id current)))
                (invoke-once! lane socket-path invocation)))))
+        (.then
+         (fn [message]
+           (when (and (= host-lane lane)
+                      (host-reconcile-failure? message))
+             (trigger-host-reconcile!))
+           message))
         (.catch
          (fn [exception]
            (let [diagnostic (get (ex-data exception) :seon.error/data)]

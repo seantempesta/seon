@@ -462,3 +462,43 @@
           (is (every? (complement string?) (vals stored))))
         (finally
           (d/release conn))))))
+
+(deftest native-config-values-round-trip-through-datahike-test
+  (let [always-attr :seon.config/always
+        skills-dir-attr :seon.config/skills-dir
+        always #{'my.kb 'my.data 'my.ui 'my.canvas
+                 'seon.render.canvas 'my.plan
+                 'seon.agent.message 'seon.agent.lifecycle}
+        entity-schema
+        [:map
+         [always-attr [:set :symbol]]
+         [skills-dir-attr {:optional true} [:string {:min 1}]]]
+        derived (dhs/malli-map->datahike-schema entity-schema)
+        cfg (mem-cfg)]
+    (is (= {:db/ident always-attr
+            :db/valueType :db.type/symbol
+            :db/cardinality :db.cardinality/many}
+           (find-attr derived always-attr)))
+    (is (= {:db/ident skills-dir-attr
+            :db/valueType :db.type/string
+            :db/cardinality :db.cardinality/one}
+           (find-attr derived skills-dir-attr)))
+    (d/create-database cfg)
+    (let [conn (d/connect cfg)]
+      (try
+        (d/transact conn derived)
+        (let [report (d/transact conn [{:db/id "config"
+                                        always-attr always
+                                        skills-dir-attr "seon-skills"}])
+              entity-id (get (:tempids report) "config")
+              entity (d/entity @conn entity-id)]
+          (is (= always (get entity always-attr))
+              "all eight symbols round-trip as one cardinality-many set")
+          (is (= "seon-skills" (get entity skills-dir-attr)))
+          (d/transact conn [[:db/retract entity-id always-attr 'my.data]])
+          (is (= (disj always 'my.data)
+                 (get (d/entity @conn entity-id) always-attr))
+              "retracting one symbol leaves exactly seven")
+          (is (= 7 (count (get (d/entity @conn entity-id) always-attr)))))
+        (finally
+          (d/release conn))))))

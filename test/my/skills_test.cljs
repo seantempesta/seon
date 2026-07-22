@@ -30,7 +30,7 @@
 
 (def ^:private configuration
   (config/resolve-config-singleton
-   {:seon.config/skills {:seon.config/dirs ["seon-skills"]}}))
+   {:seon.config/skills-dir "seon-skills"}))
 
 (def ^:private skills-dir
   (config/skills-dir configuration))
@@ -124,6 +124,7 @@
            (:seon.agent.ctx/file-path (by-name :datahike))))))
 
 (deftest seed-scan-is-empty-for-an-absent-dir
+  (is (= [] (skills/seed-skills-tx-data nil)))
   (is (= [] (skills/seed-skills-tx-data "/no/such/skills/dir"))))
 
 (deftest load-and-unload-use-one-stable-context-block-identity

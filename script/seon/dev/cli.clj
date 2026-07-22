@@ -324,6 +324,22 @@
                (reconcile-development! configuration [stopped]))))]
     (print-ready! target open?)))
 
+(defn- ensure! [configuration arguments]
+  (when-not (= ["host"] (vec arguments))
+    (throw (ex-info "`ensure` requires exactly `host`."
+                    {:seon.dev.cli/arguments (vec arguments)})))
+  (let [result
+        (state/with-lock
+         configuration :stack 300000
+         #(let [configuration (select-config configuration nil)]
+            (require-no-retained-restore! configuration :ensure-host)
+            (process/ensure-host! configuration
+                                  (selected-manifest configuration))))]
+    (println "● host ready")
+    (println (str "  changed: " (:seon.runtime.state/changed? result)))
+    (println (str "  pid: " (:seon.dev.process/pid result)))
+    result))
+
 (defn- ready-config-target!
   [configuration]
   (let [manifest (selected-manifest configuration)
@@ -1198,6 +1214,7 @@
          "  up [--open] [--config PATH] build and reconcile the complete system\n"
          "  down                     drain the complete system\n"
          "  restart [--open] [--config PATH] drain, rebuild, and reconcile\n"
+         "  ensure host               reconcile only the supervised sci host\n"
          "  config apply PATH        explicitly reconcile database config\n"
          "  status [--edn]           report live health\n"
          "  branch open|restart|close|status NAME [--edn]\n"
@@ -1227,6 +1244,7 @@
           "up" (up! configuration command-arguments)
           "down" (down! configuration command-arguments)
           "restart" (restart! configuration command-arguments)
+          "ensure" (ensure! configuration command-arguments)
           "status" (status! configuration command-arguments)
           "branch" (branch! configuration command-arguments)
           "logs" (logs! configuration command-arguments)

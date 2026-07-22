@@ -20,11 +20,11 @@
 {;; ── PULL-REFERENCE CORPUS ──
  ;; Corpus files remain available for explicit lookup. They do not install
  ;; default context blocks. This section carries only the optional directory:
- ;;   :seon.config/skills {:seon.config/dirs ["path/to/skills"]}
+ ;;   :seon.config/skills-dir "path/to/skills"
  ;; Owner rule (2026-07-02): values the manifest can own do NOT also live in
  ;; .env (env must never shadow config) — the corpus dir moved here from
  ;; SEON_SKILLS_DIR.
- :seon.config/skills {:seon.config/dirs ["seon-skills"]}
+ :seon.config/skills-dir "seon-skills"
 
  ;; ── CLUSTER-DEFAULT LLM SELECTION ──
  ;; This non-secret row is reconciled before the seed-once environment path:
@@ -69,7 +69,8 @@
  ;; starts and remains ready while this is false; W5 flips this one database
  ;; fact only after retire-while-sampling proof.
  :seon.config/execution
- {:seon.config.execution/host-tier? false}
+ {:seon.config.execution/host-tier? false
+  :seon.config.execution/host-respawn-backoff-ms 1000}
 
  ;; ── ROOT FLEET PROJECTION — bounded activity and failed-eval lookbacks. This
  ;; is a database dial, so a frozen db value reproduces exactly which recent

@@ -9,14 +9,14 @@
             [seon.db.protocol :as protocol]
             [seon.schema :as schema]))
 
-;; The skills section carries ONLY the pull-reference corpus directory. Corpus
+;; The optional pull-reference corpus directory is one ordinary string. Corpus
 ;; rows are never injected into an agent's context tree. Roots identify by id
 ;; "root", never a stored `:seon.agent/kind` / config `:role`.
-(schema/register! :seon.config/skills-spec
-  [:map
-   ;; corpus dir(s); `skills-dir` reads the first entry, else SEON_SKILLS_DIR,
-   ;; else `.claude/skills`.
-   [:seon.config/dirs {:optional true} [:vector :string]]])
+(schema/register! :seon.config/skills-dir
+  [:string
+   {:min 1
+    :error/message
+    "The skills directory must be a non-empty string; omit :seon.config/skills-dir for no corpus."}])
 
 ;;; NAMESPACE SOURCE-STORAGE policy (#42 explicit listing). The cluster manifest
 ;;; chooses the non-`my.*` namespace files whose complete source is indexed and
@@ -28,13 +28,24 @@
   [:map {:closed true}
    ;; Complete source is stored for these framework namespaces so a namespaces
    ;; block may select it later. This list does not itself render anything.
-   [:seon.config/always {:optional true} [:vector :symbol]]])
+   [:seon.config/always
+    {:optional true}
+    [:vector
+     {:min 1
+      :error/message
+      "The always-source declaration must contain symbols; omit it to use the shipped policy."}
+     :symbol]]])
 
 ;; The RESOLVED symbol policy the renderer + boot indexer read. Registered once + referenced by
 ;; [[resolve-namespaces]].
 (schema/register! :seon.config/namespaces-policy
   [:map
-   [:seon.config/always [:set :symbol]]])
+   [:seon.config/always
+    [:set
+     {:min 1
+      :error/message
+      "The resolved always-source policy must contain at least one symbol."}
+     :symbol]]])
 
 (schema/register! :seon.config/route-spec
   [:map
@@ -111,11 +122,15 @@
 (schema/register! :seon.config/reactive-structural-settle-ms :seon.config/cap)
 (schema/register! :seon.config/reactive-max-latency-ms :seon.config/cap)
 (schema/register! :seon.config.execution/host-tier? :boolean)
+(schema/register! :seon.config.execution/host-respawn-backoff-ms
+  :seon.config/cap)
 (schema/register!
  :seon.config/execution
  [:map {:closed true}
   [:seon.config.execution/host-tier?
-   {:optional true} :seon.config.execution/host-tier?]])
+   {:optional true} :seon.config.execution/host-tier?]
+  [:seon.config.execution/host-respawn-backoff-ms
+   {:optional true} :seon.config.execution/host-respawn-backoff-ms]])
 
 ;;; DATABASE READ RESOURCE POLICY — runaway-work ceilings, not pagination.
 ;;; Datahike defines `max-work` as charged execution steps, `max-results` as
@@ -533,10 +548,11 @@
 ;;; runtime read begins with one ordinary singleton row acquired by the owning
 ;;; database operation. Each knob is its OWN registered attr — a real type is the knob's
 ;;; contract, NEVER an EDN-blob dump of the whole config. The heterogeneous
-;;; collection knobs (`:seon.config/always`, `:seon.config.repair/classes`) ride
-;;; the established mixed-`:or` EDN-slot bridge. The homogeneous web allowlist
-;;; keeps its installed cardinality-many string contract; exact config
-;;; reconciliation retracts removed values before asserting the desired set. The
+;;; heterogeneous collection knobs such as `:seon.config.repair/classes` ride
+;;; the established mixed-`:or` EDN-slot bridge. The homogeneous
+;;; `:seon.config/always` and web allowlist attrs use native cardinality-many
+;;; storage; exact config reconciliation retracts removed values before asserting
+;;; the desired set. The
 ;;; singleton is ONE entity in the boot `#{:config}` `seon.runtime.state/reconcile!`
 ;;; desired set (routes/skills pattern) — upsert-by-identity keeps it current +
 ;;; retract-protected; NO second mechanism.
@@ -550,16 +566,17 @@
 ;;; The scalar/enum per-knob attrs are registered ONCE with their manifest
 ;;; section specs above (the LEAF-attr block before `:seon.config/render`) —
 ;;; the singleton entity schema below references those registrations. Only
-;;; the knobs whose DATOM shape differs from their manifest shape live here:
-;;; heterogeneous collections ride the mixed-`:or` EDN-slot bridge (a `:nil` alt
-;;; makes it a mixed `:or` so `transact!` pr-str's the value and the acquiring
-;;; operation decodes it once with `seon.db/decode-edn-value`).
+;;; the knobs whose DATOM shape differs from their manifest shape live here.
+;;; Heterogeneous collections ride the mixed-`:or` EDN-slot bridge; homogeneous
+;;; collections use native cardinality-many values.
 ;; The always-on FULL-source ns render list — the resolved symbol set
-;; (`:seon.config/namespaces` `:always`). EDN-slot bridged (mixed `:or`).
-(schema/register! :seon.config/always [:or [:set :symbol] :nil])
-;; Selected skill-corpus input. The manifest shape is a map; the database slot
-;; is cardinality-one EDN so replacement is exact and optional means absent.
-(schema/register! :seon.config/skills [:or :seon.config/skills-spec :nil])
+;; (`:seon.config/namespaces` `:always`). Native cardinality-many symbols.
+(schema/register! :seon.config/always
+  [:set
+   {:min 1
+    :error/message
+    "The always-source policy must contain symbols; omit its manifest declaration to use the shipped policy."}
+   :symbol])
 ;; The per-class repair kill-switch map `{class-kw boolean}`. EDN-slot bridged.
 (schema/register! :seon.config.repair/classes [:or [:map-of :keyword :boolean] :nil])
 ;; The web allowlist hosts (meaningful only under `:allowlist`). This established
@@ -593,13 +610,15 @@
 (schema/register! :seon.config/singleton
   (into [:map {:seon.db/entity true}
    [:seon.config/id                          :seon.config/id]
-   [:seon.config/skills             {:optional true} :seon.config/skills]
+   [:seon.config/skills-dir         {:optional true} :seon.config/skills-dir]
    [:seon.config/repl-mode          {:optional true} :seon.config/repl-mode]
    [:seon.config.run/batch-turn-limit  {:optional true} :seon.config.run/batch-turn-limit]
    [:seon.config.run/stream-form-limit {:optional true} :seon.config.run/stream-form-limit]
    [:seon.config.run/deadline-ms       {:optional true} :seon.config.run/deadline-ms]
    [:seon.config.execution/host-tier?
     {:optional true} :seon.config.execution/host-tier?]
+   [:seon.config.execution/host-respawn-backoff-ms
+    {:optional true} :seon.config.execution/host-respawn-backoff-ms]
    [:seon.config.model-transport/response-identity-cap
     {:optional true} :seon.config.model-transport/response-identity-cap]
    [:seon.config.model-transport/endpoint-cap
@@ -663,7 +682,7 @@
 
 (schema/register! :seon.config/manifest
   [:map
-   [:seon.config/skills        {:optional true} :seon.config/skills-spec]
+   [:seon.config/skills-dir    {:optional true} :seon.config/skills-dir]
    [:seon.config/repl-mode     {:optional true} :seon.config/repl-mode]
    [:seon.config/run           {:optional true} :seon.config/run]
    [:seon.config/execution     {:optional true} :seon.config/execution]
@@ -1191,7 +1210,17 @@
         execution (get manifest :seon.config/execution {})
         database (get manifest :seon.config/database {})
         _ (validate-liveness-relations! manifest environment run)
-        nsp (resolve-namespaces manifest)]
+        nsp (resolve-namespaces manifest)
+        host-respawn-backoff-ms
+        (get execution
+             :seon.config.execution/host-respawn-backoff-ms
+             1000)
+        _ (reject-floor!
+           {:seon.config.execution/host-respawn-backoff-ms
+            host-respawn-backoff-ms}
+           :seon.config.execution/host-respawn-backoff-ms
+           1000
+           "At least one second must separate failed host-reconcile attempts so repeated demand cannot spin operator subprocesses.")]
     (cond-> {:seon.config/id cluster-config-id
              :seon.config/repl-mode
              (let [d (default-repl-mode environment)]
@@ -1205,6 +1234,8 @@
              :seon.config.execution/host-tier?
              (boolean
               (get execution :seon.config.execution/host-tier? false))
+             :seon.config.execution/host-respawn-backoff-ms
+             host-respawn-backoff-ms
              :seon.config/always     (:seon.config/always nsp)
              :seon.config/on-core-error
              (coerce-enum (get manifest :seon.config/on-core-error :gate) #{:crash :gate :log} :gate)
@@ -1294,8 +1325,8 @@
       (assoc :seon.config/context-profiles (:seon.config/context-profiles manifest))
       (contains? manifest :seon.config/model-variants)
       (assoc :seon.config/model-variants (:seon.config/model-variants manifest))
-      (contains? manifest :seon.config/skills)
-      (assoc :seon.config/skills (:seon.config/skills manifest))
+      (contains? manifest :seon.config/skills-dir)
+      (assoc :seon.config/skills-dir (:seon.config/skills-dir manifest))
       (contains? manifest :seon.config/agent-context)
       (assoc :seon.config/agent-context (:seon.config/agent-context manifest))
       (contains? manifest :seon.config/root-context)
@@ -1303,6 +1334,14 @@
 
       true
       (merge (resolve-operational-values manifest hardware)))))
+
+(defn execution-host-respawn-backoff-ms
+  "The demand-triggered host reconcile backoff from one resolved singleton."
+  {:malli/schema [:=> [:cat [:maybe :seon.config/singleton]] :int]}
+  [configuration]
+  (get configuration
+       :seon.config.execution/host-respawn-backoff-ms
+       1000))
 
 (defn resolve-ai-config
   "The declared cluster-default LLM desired rows.

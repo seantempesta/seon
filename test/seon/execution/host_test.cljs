@@ -1,6 +1,7 @@
 (ns seon.execution.host-test
   (:require
    [cljs.test :refer [async deftest is testing]]
+   [seon.db :as db]
    [seon.db.transport.uds :as uds]
    [seon.execution :as execution]
    [seon.execution.host :as host]
@@ -1056,25 +1057,41 @@
             {::execution/function-symbol 'my.render/view
              ::execution/source-digest digest}))
 
-(defn- configure-with-host! [spawn!]
-  (host/configure!
-   {::host/launch-descriptor (descriptor)
-    ::host/javascript-runtime "bun"
-    ::host/ready-timeout-ms 1000
-    ::host/idle-timeout-ms 60000
-    ::host/cancel-grace-ms 5
-    ::host/eval-host-coordinate!
-    (fn [_invocation] (js/Promise.resolve "tmp/fake-agent-host.sock"))
-    ::host/spawn!
-    (fn [request]
-      (subprocess/start!
-       (assoc request ::subprocess/spawn!
-              (fn [^js options]
-                (spawn! {::host/cmd (vec (js->clj (.-cmd options)))
-                         ::host/ipc (.-ipc options)})))))}))
+(defn- configure-with-host!
+  ([spawn!]
+   (configure-with-host! spawn! (fn [] (js/Promise.resolve nil)) #(.now js/Date)))
+  ([spawn! ensure-host! now-fn]
+   (host/configure!
+    {::host/launch-descriptor (descriptor)
+     ::host/javascript-runtime "bun"
+     ::host/ready-timeout-ms 1000
+     ::host/idle-timeout-ms 60000
+     ::host/cancel-grace-ms 5
+     ::host/eval-host-coordinate!
+     (fn [_invocation] (js/Promise.resolve "tmp/fake-agent-host.sock"))
+     ::host/ensure-host! ensure-host!
+     ::host/now-fn now-fn
+     ::host/spawn!
+     (fn [request]
+       (subprocess/start!
+        (assoc request ::subprocess/spawn!
+               (fn [^js options]
+                 (spawn! {::host/cmd (vec (js->clj (.-cmd options)))
+                          ::host/ipc (.-ipc options)})))))})))
 
 (defn- turn* []
   (js/Promise. (fn [resolve-promise _] (js/setTimeout resolve-promise 10))))
+
+(deftest default-host-reconcile-uses-one-bounded-operator-subprocess
+  (let [request (atom nil)]
+    (with-redefs [subprocess/run! (fn [value]
+                                   (reset! request value)
+                                   (js/Promise.resolve nil))]
+      (@#'host/default-ensure-host!))
+    (is (= ["bin/seon" "ensure" "host"]
+           (::subprocess/cmd @request)))
+    (is (pos? (::subprocess/timeout-ms @request)))
+    (is (pos? (::subprocess/max-output-bytes @request)))))
 
 (deftest host-tier-eval-batch-rides-the-uds-stream-not-a-child
   (async done
@@ -1144,9 +1161,14 @@
   (async done
     (let [fixture (fake-host-socket)
           prior-connect @!connect-native
-          spawn! (fn [_] (:process (fake-process 402)))]
+          spawn! (fn [_] (:process (fake-process 402)))
+          ensure-count (atom 0)]
       (reset! !connect-native (::connect fixture))
-      (configure-with-host! spawn!)
+      (configure-with-host! spawn!
+                            (fn []
+                              (swap! ensure-count inc)
+                              (js/Promise.resolve nil))
+                            (constantly 1000))
       (let [completion (host/invoke! (eval-batch-invocation "host-eval-2"))]
         (-> (turn*)
             (.then
@@ -1173,7 +1195,16 @@
                  (is (true? (get-in result [::execution/error
                                             :seon.error/data
                                             ::execution/child-retired?])))
-                 (is (= database (:seon.db/db result))))
+                 (is (= database (:seon.db/db result)))
+                 (is (= 1 @ensure-count)
+                     "one detached operator reconcile is triggered")
+                 (is (= 1
+                        (count
+                         (filter #(= "host-eval-2"
+                                     (::execution/invocation-id %))
+                                 (map written-message
+                                      @(::writes fixture)))))
+                     "the interrupted invocation is never replayed"))
                (testing "the dead session is removed; the next invocation
                          reconnects instead of reusing it"
                  (is (empty? (host/processes)))
@@ -1204,6 +1235,65 @@
             (.catch
              (fn [error]
                (is false (str "host death drill failed: " error))))
+            (.finally
+             (fn []
+               (reset! !connect-native prior-connect)
+               (done))))))))
+
+(deftest refused-host-connections-trigger-one-backoff-bounded-reconcile
+  (async done
+    (let [prior-connect @!connect-native
+          now-ms (atom 1000)
+          ensure-count (atom 0)
+          ensure-resolvers (atom [])
+          refused
+          (fn [_options]
+            (let [error (js/Error. "refused")]
+              (aset error "code" "ECONNREFUSED")
+              (js/Promise.reject error)))]
+      (reset! !connect-native refused)
+      (configure-with-host!
+       (fn [_] (:process (fake-process 404)))
+       (fn []
+         (swap! ensure-count inc)
+         (js/Promise.
+          (fn [resolve-promise _]
+            (swap! ensure-resolvers conj resolve-promise))))
+       #(deref now-ms))
+      (letfn [(invoke! [id]
+                (db/with-tx-context
+                 {:seon.config/configuration
+                  {:seon.config/id :seon.config/cluster
+                   :seon.config.execution/host-respawn-backoff-ms 1000}}
+                 #(host/invoke! (eval-batch-invocation id))))]
+        (-> (invoke! "refused-1")
+            (.then
+             (fn [first-result]
+               (is (= "ECONNREFUSED"
+                      (get-in first-result [::execution/error
+                                            :seon.error/data
+                                            :seon.error/code])))
+               (is (= 1 @ensure-count))
+               (invoke! "refused-2")))
+            (.then
+             (fn [_]
+               (is (= 1 @ensure-count)
+                   "another failure settles without joining the in-flight ensure")
+               ((first @ensure-resolvers) nil)
+               (turn*)))
+            (.then
+             (fn [_]
+               (is (= 1 @ensure-count)
+                   "completion retains the attempt timestamp for backoff")
+               (reset! now-ms 2000)
+               (invoke! "refused-3")))
+            (.then
+             (fn [_]
+               (is (= 2 @ensure-count)
+                   "the exact backoff boundary admits one later launch")))
+            (.catch
+             (fn [error]
+               (is false (str "host respawn backoff drill failed: " error))))
             (.finally
              (fn []
                (reset! !connect-native prior-connect)

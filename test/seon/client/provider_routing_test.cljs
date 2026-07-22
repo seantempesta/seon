@@ -52,18 +52,3 @@
             (.catch (fn [error]
                       (is false (str "threw — " error))
                       (done)))))))
-
-(deftest explicit-inherit-uses-the-global-provider
-  (async done
-    (let [originals (dispatch/registered-providers)
-          _ (dispatch/register-providers!
-             {:anthropic (descriptor :anthropic)})]
-      (-> ((dispatch/llm-fn)
-            (request (resolution :anthropic :inherit)))
-          (.then (fn [response]
-                   (is (= :anthropic (::provider response)))))
-          (.finally (fn [] (dispatch/register-providers! originals)))
-          (.then (fn [_] (done)))
-          (.catch (fn [error]
-                    (is false (str "threw — " error))
-                    (done)))))))

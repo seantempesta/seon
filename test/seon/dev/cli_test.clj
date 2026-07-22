@@ -117,6 +117,53 @@
        (is (not (contains? checks :seon.dev.doctor/node?)))
        (is (not (contains? checks :seon.dev.doctor/npm?))))))
 
+(deftest ensure-host-resolves-and-reconciles-under-the-stack-lock
+  (let [configuration {:seon.dev.config/root "/repo"}
+        selected (assoc configuration :seon.dev.test/selected? true)
+        manifest {:manifest true}
+        calls (atom [])
+        result {:seon.dev.process/id process/host-id
+                :seon.runtime.state/changed? false
+                :seon.dev.process/status :seon.dev.process.status/alive
+                :seon.dev.process/ready? true
+                :seon.dev.process/pid 42
+                :seon.dev.process/swept-containment-sockets []}]
+    (with-redefs-fn
+      {#'state/with-lock
+       (fn [value lock-name timeout-ms transition]
+         (swap! calls conj [:lock value lock-name timeout-ms])
+         (let [result (transition)]
+           (swap! calls conj [:unlock])
+           result))
+       #'config/select-manifest
+       (fn [value path]
+         (swap! calls conj [:select value path])
+         selected)
+       #'cli/selected-manifest
+       (fn [value]
+         (swap! calls conj [:manifest value])
+         manifest)
+       #'cli/require-no-retained-restore!
+       (fn [value operation]
+         (swap! calls conj [:restore-check value operation])
+         value)
+       #'process/ensure-host!
+       (fn [value selected-manifest]
+         (swap! calls conj [:ensure value selected-manifest])
+         result)}
+      #(do
+         (is (= result (#'cli/ensure! configuration ["host"])))
+         (is (= [:lock :select :restore-check :manifest :ensure :unlock]
+                (mapv first @calls)))
+         (is (= :stack (nth (first @calls) 2)))
+         (is (= selected (second (nth @calls 2))))
+         (is (= selected (second (nth @calls 4))))
+         (is (thrown-with-msg? Exception #"exactly `host`"
+                               (#'cli/ensure! configuration [])))
+         (is (thrown-with-msg? Exception #"exactly `host`"
+                               (#'cli/ensure! configuration
+                                ["host" "pod"])))))))
+
 (deftest release-command-publishes-through-the-one-release-producer
   (let [root (fs/create-temp-dir {:prefix "seon-cli-release-"})
         configuration {:seon.dev.config/root (str root)

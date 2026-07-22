@@ -1588,8 +1588,10 @@
               :seon.dev.process/operation
               :seon.dev.process.operation/restart
               :seon.dev.process/targets
-              #{process/watcher-id process/pod-id process/writer-id}})]
-        (is (= [process/pod-id process/writer-id process/watcher-id]
+              #{process/watcher-id process/pod-id process/host-id
+                process/writer-id}})]
+        (is (= [process/pod-id process/host-id process/writer-id
+                process/watcher-id]
                @calls))
         (is (= :seon.dev.process.classification/clean
                (:seon.dev.process/classification result)))
@@ -1597,6 +1599,121 @@
         (is (every? #(= :seon.dev.process.classification/clean
                         (:seon.dev.process/classification %))
                     (:seon.dev.process/results result)))))))
+
+(deftest host-containment-sweep-is-kind-scoped-and-preserves-responders
+  (let [configuration (test-config)
+        socket-directory
+        (fs/path (:seon.dev.test/directory configuration) "control")
+        configuration
+        (assoc configuration :seon.dev.config/containment-socket-dir
+               (str socket-directory))
+        containment-root
+        (fs/path (:seon.dev.config/process-dir configuration)
+                 "processes" "containment")
+        generations {:dead (random-uuid)
+                     :live (random-uuid)
+                     :watcher (random-uuid)}
+        fixture!
+        (fn [kind label]
+          (let [generation (str (get generations label))
+                socket
+                (str (fs/path socket-directory
+                              (#'process/control-socket-file generation)))
+                directory (fs/path containment-root (name kind) generation)]
+            (fs/create-dirs directory)
+            (fs/create-dirs socket-directory)
+            (spit socket "stale socket breadcrumb")
+            (spit (str (fs/path directory "descriptor.json"))
+                  (json/generate-string
+                   {:generation generation :control_socket socket}))
+            socket))
+        dead (fixture! process/host-id :dead)
+        live (fixture! process/host-id :live)
+        watcher (fixture! process/watcher-id :watcher)]
+    (try
+      (with-redefs-fn
+        {#'process/read-process (fn [_ _] nil)
+         #'process/socket-line!
+         (fn [path _]
+           (if (= path live)
+             "generation-mismatch"
+             (throw (ex-info "absent" {}))))}
+        #(is (= {:seon.dev.process/swept-containment-sockets [dead]
+                 :seon.dev.process/uncertain-containment-sockets [live]}
+                (process/sweep-orphaned-host-containment-sockets!
+                 configuration))))
+      (is (not (fs/exists? dead)))
+      (is (fs/exists? live)
+          "a live descriptor-visible but unpublished host survives")
+      (is (fs/exists? watcher)
+          "the host sweep never touches another containment kind")
+      (finally
+        (fs/delete-tree (:seon.dev.test/directory configuration)
+                        {:force true})))))
+
+(deftest ensure-host-is-idempotent-and-reconciles-only-the-host
+  (let [host-spec (harmless-spec process/host-id ["host"])
+        manifest {:manifest true}
+        configuration (test-config)
+        live-record {:seon.dev.process/pid 101}
+        calls (atom [])]
+    (try
+      (with-redefs [process/specs (fn [_ selected]
+                                    (is (= manifest selected))
+                                    {process/host-id host-spec})
+                    process/converged? (fn [_ spec]
+                                         (= process/host-id
+                                            (:seon.dev.process/id spec)))
+                    process/read-process (fn [_ id]
+                                           (is (= process/host-id id))
+                                           live-record)
+                    process/sweep-orphaned-host-containment-sockets!
+                    (fn [_]
+                      {:seon.dev.process/swept-containment-sockets []
+                       :seon.dev.process/uncertain-containment-sockets []})
+                    process/clean-or-force!
+                    (fn [request] (swap! calls conj [:stop request]))
+                    process/with-startup-ownership
+                    (fn [& _] (swap! calls conj [:start]))]
+        (is (= {:seon.dev.process/id process/host-id
+                :seon.runtime.state/changed? false
+                :seon.dev.process/status :seon.dev.process.status/alive
+                :seon.dev.process/ready? true
+                :seon.dev.process/pid 101
+                :seon.dev.process/swept-containment-sockets []}
+               (process/ensure-host! configuration manifest)))
+        (is (empty? @calls)))
+      (reset! calls [])
+      (with-redefs [process/specs (constantly {process/host-id host-spec})
+                    process/converged? (constantly false)
+                    process/read-process (fn [_ _] live-record)
+                    process/sweep-orphaned-host-containment-sockets!
+                    (fn [_]
+                      {:seon.dev.process/swept-containment-sockets ["dead.sock"]
+                       :seon.dev.process/uncertain-containment-sockets []})
+                    process/clean-or-force!
+                    (fn [request]
+                      (swap! calls conj [:stop request])
+                      {:stopped true})
+                    process/with-startup-ownership
+                    (fn [_ transition]
+                      (transition :owned-start))
+                    process/ensure!
+                    (fn [_ spec start-owned!]
+                      (swap! calls conj [:start (:seon.dev.process/id spec)
+                                         start-owned!])
+                      {:seon.dev.process/pid 202})]
+        (let [result (process/ensure-host! configuration manifest)
+              request (second (first @calls))]
+          (is (true? (:seon.runtime.state/changed? result)))
+          (is (= 202 (:seon.dev.process/pid result)))
+          (is (= #{process/host-id}
+                 (:seon.dev.process/targets request)))
+          (is (= [process/host-id]
+                 (mapv second (rest @calls))))))
+      (finally
+        (fs/delete-tree (:seon.dev.test/directory configuration)
+                        {:force true})))))
 
 (deftest clean-or-force-retains-the-completed-prefix-on-uncertainty
   (let [configuration (operator-config)
