@@ -1105,6 +1105,22 @@ NS-0.5c+W1.6 landed `9bc00982` (explicit-adoption reconcile contract;
 zero-allowlist internal gate; manifest-owned deepseek-v4-pro default,
 live-proven).
 
+### OWNER NORTH-STAR REFINEMENT (2026-07-22 afternoon): VIRTUAL AGENTS
+
+The feels-stateful direction, sharpened by the owner: an agent IS its
+database facts; agent progression is a transaction log; the loop is a
+stateless derivable claim ("open run + unconsumed input") that ANY
+process with database access may advance. Pod restarts invisible;
+agent-to-process affinity dissolves; the pod's end-state role is web
+UI + LLM I/O + a scheduler noticing advanceable runs. Tonight's live
+evidence already demonstrates the principle (plan survived an errored
+turn, config changes, and a writer swap; agent resumed and finished).
+Pod-state audit dispatched (read-only, logs
+`tmp/orchestrator/pod-state-audit-*`): verdict inventory of every
+pod-resident agent/run/turn state → the post-W5 "virtual agents" unit
+series; U12 remains its graduation proof. Sequenced AFTER the W5
+cutover (which shrinks the question first).
+
 ### NO PENDING OWNER DECISIONS
 
 The 4 W1-boot decisions were folded as recommendations into the shipped
