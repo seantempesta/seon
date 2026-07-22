@@ -898,6 +898,29 @@ SPINE NEXT: W5-0 retirement preflight (stage15 verdict spec + q34
 surface census + wrong-arg/unresolved scenarios). Parallel: normalize-4
 (entity-shape the big config maps).
 
+### W5-0 SERIES CUT (2026-07-22 night, from the accepted census grounding)
+
+Grounding `3a236cbe`
+(`research/w50-surface-census-grounding-2026-07-22.md`): the census
+LEFT side is the program graph's `:seon.fn/agent-facing? true` rows
+(deliberate surface), never the host loader diagnostic
+(base-excluded=112 is a computed my.*-only classifier); all four
+staple families install through the ONE wrapper registry; blob is the
+sole genuine platform blocker (Node fs/crypto archive), `stat`
+writer-routeable now. Series: **W5-0a** census gate (spec `fb78d06f`,
+lane in flight — dispositions table = the work-list, red-for-new,
+cutover assertion behind a flag) → **W5-0b** seon.db parity (15 child
+fns, exact arities) → **W5-0c** message shims → **W5-0d** lifecycle
+shims (complete after message — atomic close may compose the message)
+→ **W5-0e** blob JVM port (∥ c/d, after the db wrapper contract) →
+**W5-0f** gate green + live composition drive (db/blob/message/
+wrong-arg/unresolved/complete `:completed`) → stage-1.5 retirement
+proof → W5 deletion. Normalize-4a resumed in flight (expanded to the
+host repair-policy consumers + ai.cljs fallback resolution its stop
+censused). Dispatch near-miss noted: a codex run shell-&'d inside a
+harness-backgrounded call survived by luck — the no-shell-& rule
+applies INSIDE backgrounded compounds too; watcher armed manually.
+
 ### Queue-order correction (fresh-eyes ruling, recorded)
 
 The wind-down queue serialized the EDN normalize series ahead of
