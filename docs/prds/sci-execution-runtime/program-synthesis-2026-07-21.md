@@ -773,8 +773,20 @@ decisions batch for their return.
   `frame-too-large` inbound (reserved id `"session/control"`, CLJS
   rejects all pending) and response (correlated) — all through the
   same <4096 probe; confirmed the separate database-session opener
-  beside raw `connect!`. Refill after: W1.2b graduation (owns q20) →
-  W1 config-facts sweep → packages WP-B∥WP-J.
+  beside raw `connect!`. **W1.5b DONE `2ab1ce5e`** — protocol 13,
+  mandatory session-open, all seven shapes 209–424 B both codecs,
+  negotiated ceilings both peers, all client tiers migrated, ZERO
+  operational keys remain `:carried`. Live-proven: cap-3 admission
+  across pod/sci-host/bb tiers, 4th got the exact steering value,
+  close-one-admit-next, restore + converged idempotency. The 64 KiB
+  drive surfaced q21 (unbounded committed-program acquisition) —
+  queued with owner + when. Gates: writer 353/2652, cljs 1496/7207,
+  operator 296/1656. THE W1 ENFORCEMENT CONTRACT IS WHOLE: every
+  writer operational limit is a named config fact, resolved once,
+  enforced at its real constructor, reconstruction-covered, steering
+  by key name. Refill: W1.2b graduation (owns q20+q21 floor doc) →
+  W1 config-facts sweep (remaining non-writer literals, incl. host
+  pool literals context.clj:189) → packages WP-B∥WP-J.
 - **W1.5a DONE `85cdd68e`** — 28 keys flipped :enforced (six executor
   families, transport request-server options, codec workers/queue)
   via one envelope-consumer translation into the owners' existing
