@@ -946,9 +946,18 @@ happened. Now take the next thing off the queue.
   analyzer-info; its surface now exactly the five analyzer-state fns;
   W5's deletion path cleared) ·
   **W3b IN FLIGHT** (`specs/w3b-host-instrumentation.md`, sol medium,
-  logs `tmp/orchestrator/w3b-*`: seon.host.instrument via
-  m/-instrument, registry + private-fork vars, cold/hot hooks,
-  portable coercion hints, wire-safety falsifier) ·
+  logs `tmp/orchestrator/w3b-*`; STOP 1 resolved with three rulings:
+  (i) fair read/write generation barrier in seon.host.instrument —
+  refresh publishes internally so wrappers need write-admission
+  atomicity; (ii) third hook after startup replay before READY —
+  private vars don't exist at the cold hook; (iii) LATENT BUG FOUND:
+  the pod's coercion hints have NEVER fired (hint-for indexes live
+  Schema objects against form keys, error/instrument.cljc:173) —
+  RULED repair with m/form on both tiers + paired regressions, the
+  behavior change accepted under the error-steering rulings; wrapper
+  metadata rides the root function, not var meta) ·
+  **B8-A IN FLIGHT** (`specs/b8a-query-release-ordering.md`, sol
+  medium, logs `tmp/orchestrator/b8a-*`) ·
   **W10 intermittents investigation IN FLIGHT** (read-only, B8/B11 +
   branch-qualified eval-cljs hang, logs
   `tmp/orchestrator/w10-intermittents-*`). Spine after W3b: W3c2
