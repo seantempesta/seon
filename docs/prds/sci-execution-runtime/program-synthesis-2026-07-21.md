@@ -809,6 +809,36 @@ quiet W10 slot with q23's test-infra work. Next queue item: normalize
 (2) :seon.config/always + skills → cardinality-many; spine: the WP-S2
 spec (orchestrator, in progress).
 
+### Normalize-2 + WP-S2 landed `e4117d2c` + the reset boundary's two catches (2026-07-22 evening)
+
+- Combined commit (both lanes edited resolve.cljc + config_test.cljs —
+  spec-grant overlap, named): native always/skills-dir config +
+  `bin/seon ensure host` respawn actor. Gates cljs 1535/7487, writer
+  379/2873, operator 303/1731. Skill-corpus fix re-done at the
+  CANONICAL source (q33 had patched generated adapters; drift gate
+  clean).
+- **BOOT-FIX `5fc0accd` (reset-boundary catch 1):** Datahike returns
+  cardinality-many pulls as VECTORS; the resolved [:set :symbol]
+  policy schema rejected them at instrumentation and the pod died
+  before readiness. Fixed at the one decode boundary
+  (db/decode-edn-value + computed set-valued-attr?); regression
+  encodes the exact failure. Live: reset boots clean, skills-dir/
+  always/backoff facts live, root 200.
+- **KILL-HOST DRILL (reset-boundary catch 2, WP-S2 acceptance):**
+  PASSED — pod-triggered ensure respawned a new generation with no
+  manual command; corpus replay proven (pre-kill defn evaluated 103).
+  FAILED — the ensure-published record carried the DEAD predecessor's
+  :pid; cascade observed live: status foreign → config apply refused
+  (ownership-conflict) → down/up refused (containment-uncertain,
+  classifier never probes pid liveness when result.json is missing and
+  the socket is dead) → recovery required manual record surgery.
+  WP-S2 lane RESUMED with both defects + the full-cycle operator
+  regression (thread `019f8b32…`). WP-S2 does not close until the
+  rerun drill shows status→new-pid and down reaps clean.
+- Normalize-3 (telemetry/tempid receipts) dispatched with live-lane
+  grants explicitly protected (the entanglement lesson from this
+  combined commit, now standing spec practice).
+
 ### Queue-order correction (fresh-eyes ruling, recorded)
 
 The wind-down queue serialized the EDN normalize series ahead of
