@@ -948,6 +948,65 @@ applies INSIDE backgrounded compounds too; watcher armed manually.
   units (W5-0g fs, W5-0h web, …); exclusions are owner-review-pending
   and COUNT AS PENDING for the cutover assertion. Lane resumed.
 
+## OWNER RULING + PLAN REWRITE (2026-07-22 late night): PORT-FIRST, WRAPPERS DEAD, WORKER CUTOVER
+
+Owner rulings this session (binding): NO wrapper registries — "fragile
+means we are doing the wrong solution"; the goal is the FAST SCI
+VERSION WITH STATELESS AGENTS where agents "just use functions and
+don't worry about where things are running"; packages are interop at
+the edges; the portable core comes AFTER the cutover, incrementally.
+The W5-0b wrapper spec (`c13fde7f`) is SUPERSEDED (its lane stopped
+honestly at the same conclusion: no .cljc owner exists, wrapper copies
+violate no-duplication, and the four existing wrappers already
+drifted). Fragility law: SAME-ARTIFACT or SAME-SOURCE are the only
+non-fragile bridges between runtimes.
+
+### The phase plan (supersedes the prior W5-0b..h unit letters)
+
+- **P1 THE SEAM (serialized spine; orchestrator designs, one exemplar
+  lane):** one capability/effect boundary for every effectful op
+  (db/blob/fs/web/shell/provider/packages). Four jobs, one mechanism:
+  async-vs-sync lives in the platform leaves; platform residue lives
+  there; effect-class metadata (pure/idempotent/external — the
+  effect-classified-replay ruling) is declared per capability fn;
+  package-host routing goes through the same door. Exemplar: seon.db
+  portable core proven on both tiers. PREREQ research lane: confirm
+  the ledger's JVM-host rationale doesn't block the worker path.
+- **P2 PARALLEL PORT (3-4 file-disjoint lanes AFTER P1):**
+  message/lifecycle · my.* families · blob (real platform port) ·
+  fs/shell · web. Portable .cljc above the seam; dual-tier tests by
+  construction (same .cljc test file both gates); census gate
+  (`2f1e9c6c`) is the progress meter. EVERY lane reads and appends
+  `conversion-wiki.md` (the shared stumbling-block surface — created
+  to stop lanes relearning the same lessons).
+- **P3 EXECUTION CUTOVER (parallel with P2, disjoint files):**
+  same-artifact supervised Bun execution worker under the proven
+  WP-S2 machinery kills the per-agent child sprawl NOW (surface parity
+  free by identity); sci-context execution over the portable core
+  follows as P2 fills in; JVM preemptive interrupts become an optional
+  upgrade, not a wall. Then retirement proof + child-lane deletion
+  (the original W5).
+- **P4 VIRTUAL AGENTS:** CAS-claimable runs advanced by any process;
+  recovery via the seam's effect classes; pod demotes to web UI + LLM
+  I/O + scheduler. Graduation = U12 (kill anything anytime, agents
+  don't notice).
+- **P5 POLISH:** census cutover assertion flips at zero; package hosts
+  WP-B/WP-J land as capability leaves; U10 100-agent + q18 OOME
+  drills; docs reconciled.
+- Normalize/statelessness series continues as its own disjoint lane
+  throughout (it manufactures statelessness). Remaining: 4b context
+  maps, (5) render-fn identity split, then Stage-2 DAG residents.
+
+### Session close state (2026-07-22 ~17:00)
+
+Cluster HEALTHY on `668689a7` (acquisition-shape class closed, reset
+boots clean, root 200, dial OFF converged). All lanes drained; tree
+clean except `.shadow-cljs-b2/`, `out-b2/` cruft. Today's committed
+arc: skeptic verification → fix tranche q29-q33 → WP-S2 closed (both
+kill modes live) → normalize 1/2/3/4a with live proofs → W5-0a census
+gate (106 symbols, 85 blockers) → this plan rewrite. Next session
+starts at P1's prereq research + seam design.
+
 ### Queue-order correction (fresh-eyes ruling, recorded)
 
 The wind-down queue serialized the EDN normalize series ahead of
