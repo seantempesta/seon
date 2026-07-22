@@ -379,8 +379,13 @@ or says NOT GROUNDED). Sol pushback is the safety net, not the plan.
   `.shadow-cljs-b2/` and `out-b2/` cruft; root package.json reconciled
   with per-cluster package design.
 - **W10 — bug ledger chase-down** (continuous fill-in lane): B8/B11
-  intermittents, branch-qualified eval-cljs hang, two-orderers
-  convergence, remaining audit WEAKs not covered above.
+  intermittents, two-orderers convergence, remaining audit WEAKs not
+  covered above. (The branch-qualified eval-cljs hang is RESOLVED —
+  archived issue + regression at `1076b639`; the 2026-07-22
+  investigation confirmed the ledger and struck it here. B8 splits:
+  B8-A response-before-release is deterministic and unit-dispatched;
+  B8-B needs phase-localized diagnostics; B11 fixture-isolation unit
+  ready — `research/w10-intermittents-investigation-2026-07-22.md`.)
 
 ### Weakness queue
 
