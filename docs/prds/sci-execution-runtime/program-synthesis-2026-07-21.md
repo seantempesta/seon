@@ -990,6 +990,34 @@ happened. Now take the next thing off the queue.
   `tmp/orchestrator/w10-intermittents-*`). Spine after W3b: W3c2
   repair/preflight → W3d authored invocation.
 
+### COORDINATED CHECKPOINT (2026-07-22 ~00:10, partial)
+
+- **q21 64 KiB END-TO-END PROOF: PASSED.** Applied
+  `maximum-frame-bytes 65536` to the LIVE default cluster (variant
+  manifest `tmp/orchestrator/system-64k.edn`): writer reconstructed,
+  pod completed its boot-mandatory paged acquisition under the small
+  ceiling (the exact scenario that faulted it pre-q21), root 200, live
+  config fact read back 65536 at basis 536870943. Restored to
+  `config/system.edn` (changed:true ops:2), root 200.
+- **Bonus live proof:** the orchestrator's own wrong-arg
+  `seon.db/entity` call was caught by structural instrumentation with
+  the full envelope — instrumentation demonstrably live on HEAD.
+- **LIVE AGENT DRIVE (Muse, 1 turn, 96 tokens) FOUND 3 REAL DEFECTS
+  ON HEAD** (evidence `tmp/orchestrator/drive-result.json`, agent
+  light-roses-smoke, turn va1uj4ncpg9u): (i) turn_error "v must
+  satisfy IVector" — turn closed :error with 0 evals; (ii) the
+  [namespaces] ctx block renders a :core-bug failure ("Namespace
+  selected member failed"); (iii) the [warnings] block fails
+  ("Warning acquisition failed"). Likely rename/extraction fallout
+  reaching agent-facing context — root-cause lane IN FLIGHT (logs
+  `tmp/orchestrator/live-defects-*`; authorized to fix if unambiguous
+  and prove with a clean drive). W3c1 fence + W3d1 authored-call live
+  proofs still pending — they need the sci host under supervision
+  (q2/WP-S) or a test-driven session; writer-gate socket coverage
+  remains their proof meanwhile.
+- Note: cluster config still selects Muse as provider — fine for tiny
+  drives; larger drives should route DeepSeek per the worker ruling.
+
 ### NO PENDING OWNER DECISIONS
 
 The 4 W1-boot decisions were folded as recommendations into the shipped
