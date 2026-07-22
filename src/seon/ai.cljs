@@ -408,9 +408,9 @@
 ;; ============================================================
 ;; PER-AGENT LLM overrides (config-driven-agent-init CP-1). Each is an
 ;; agent-entity attr overriding the global :seon.ai/config row for that
-;; ONE agent; `:inherit` (the default) resolves to the global row. The
-;; value arm REUSES the existing global-row value shape by keyword (the
-;; register-once rule). Every non-secret provider setting is available on the
+;; ONE agent; an absent attribute resolves to the global row. Each override
+;; REUSES the existing global-row value shape by keyword (the register-once
+;; rule). Every non-secret provider setting is available on the
 ;; agent entity; `::agent-max-retries` replaces the
 ;; SEON_AI_MAX_RETRIES env read (seon.agent.turn). The execution boundary
 ;; resolves explicit request opt → the agent's own config → the global row →
@@ -418,28 +418,20 @@
 ;; What an agent resolves to is derived evidence, never a stored stamp.
 ;; ============================================================
 
-(schema/register! ::agent-provider    [:or {:default :inherit} [:enum :inherit] ::provider])
-(schema/register! ::agent-model       [:or {:default :inherit} [:enum :inherit] ::model])
-(schema/register! ::agent-temperature [:or {:default :inherit} [:enum :inherit] ::temperature])
-(schema/register! ::agent-max-tokens  [:or {:default :inherit} [:enum :inherit] ::max-tokens])  ; OUTPUT cap
-(schema/register! ::agent-completion-limit-field
-                  [:or {:default :inherit}
-                   [:enum :inherit]
-                   ::completion-limit-field])
-(schema/register! ::agent-thinking    [:or {:default :inherit} [:enum :inherit] ::thinking])
-(schema/register! ::agent-timeout-ms  [:or {:default :inherit} [:enum :inherit] ::timeout-ms])
-(schema/register! ::agent-base-url    [:or {:default :inherit} [:enum :inherit] ::base-url])
-(schema/register! ::agent-api-key-env [:or {:default :inherit} [:enum :inherit] ::api-key-env])
-(schema/register! ::agent-dg-backend  [:or {:default :inherit} [:enum :inherit] ::dg-backend])
-(schema/register! ::agent-extra-body-edn
-                  [:or {:default :inherit} [:enum :inherit] ::extra-body-edn])
-(schema/register! ::agent-max-retries [:or {:default :inherit} [:enum :inherit] [:int {:min 0}]])
-(schema/register! ::agent-attempt-timeout-ms
-                  [:or {:default :inherit} [:enum :inherit] ::timeout-ms])
-(schema/register! ::agent-fallback-variant
-                  [:or {:default :inherit}
-                   [:enum :inherit]
-                   :seon.config/model-variant])
+(schema/register! ::agent-provider ::provider)
+(schema/register! ::agent-model ::model)
+(schema/register! ::agent-temperature ::temperature)
+(schema/register! ::agent-max-tokens ::max-tokens) ; OUTPUT cap
+(schema/register! ::agent-completion-limit-field ::completion-limit-field)
+(schema/register! ::agent-thinking ::thinking)
+(schema/register! ::agent-timeout-ms ::timeout-ms)
+(schema/register! ::agent-base-url ::base-url)
+(schema/register! ::agent-api-key-env ::api-key-env)
+(schema/register! ::agent-dg-backend ::dg-backend)
+(schema/register! ::agent-extra-body-edn ::extra-body-edn)
+(schema/register! ::agent-max-retries [:int {:min 0}])
+(schema/register! ::agent-attempt-timeout-ms ::timeout-ms)
+(schema/register! ::agent-fallback-variant :seon.config/model-variant)
 (schema/register!
  ::agent-config
  [:map {:seon.db/entity true}
@@ -559,10 +551,9 @@
     {}
     env-var-specs))
 
-;; The per-agent LLM override attrs (each `:inherit` by default) mapped to the
-;; GLOBAL config-row attr they override (config-driven agent-init, move 10).
-;; `:inherit` (the default) → use the global row's value = byte-parity for a
-;; no-override agent.
+;; The optional per-agent LLM override attrs mapped to the GLOBAL config-row
+;; attr they override (config-driven agent-init, move 10). An absent attr uses
+;; the global row's value = byte-parity for a no-override agent.
 (def ^:private agent-override-attrs
   {::agent-provider    ::provider
    ::agent-model       ::model
@@ -584,39 +575,29 @@
          ::agent-fallback-variant]
         (keys agent-override-attrs)))
 
-(defn- decode-agent-override
-  [value]
-  (if (string? value)
-    (try (reader/read-string value)
-         (catch :default _ value))
-    value))
-
 (defn- agent-row-override-values
   [agent]
   (reduce-kv
     (fn [m agent-attr global-attr]
-      (let [v (some-> (get agent agent-attr) decode-agent-override)]
-        (if (or (nil? v) (= :inherit v))
-          m
-          (assoc m global-attr v))))
+      (if (contains? agent agent-attr)
+        (assoc m global-attr (get agent agent-attr))
+        m))
     {}
     agent-override-attrs))
 
 (defn- agent-row-max-retries
   [agent]
-  (let [value (some-> (::agent-max-retries agent) decode-agent-override)]
+  (let [value (::agent-max-retries agent)]
     (when (int? value) value)))
 
 (defn- agent-row-attempt-timeout-ms
   [agent]
-  (let [value (some-> (::agent-attempt-timeout-ms agent)
-                      decode-agent-override)]
+  (let [value (::agent-attempt-timeout-ms agent)]
     (when (int? value) value)))
 
 (defn- agent-row-fallback-variant
   [agent]
-  (let [value (some-> (::agent-fallback-variant agent)
-                      decode-agent-override)]
+  (let [value (::agent-fallback-variant agent)]
     (when (keyword? value) value)))
 
 (schema/register! ::agent-id [:string {:min 1}])

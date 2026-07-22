@@ -737,7 +737,7 @@
   "The backoff strategy for an LLM provider retry: exponential (base ×2),
    jittered, per-wait-clamped, capped at the agent's effective max-retries and
    a total-duration ceiling. The retry count comes from the same immutable
-   ordinary config resolution as the provider request; absent/`:inherit`
+   ordinary config resolution as the provider request; an absent override
    retains the established default of four retries."
   ([resolution]
    (llm-retry-strategy resolution 0))

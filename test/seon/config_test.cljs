@@ -732,7 +732,6 @@
 (deftest per-agent-model-config-resolves-through-the-birth-context
   (let [base {:seon.ai/agent-provider :openai-compat
               :seon.ai/agent-model "kimi-k3"
-              :seon.ai/agent-temperature :inherit
               :seon.ai/agent-max-tokens 16384
               :seon.ai/agent-completion-limit-field :max-completion-tokens
               :seon.ai/agent-thinking "false"
@@ -740,7 +739,6 @@
               :seon.ai/agent-attempt-timeout-ms 240000
               :seon.ai/agent-base-url "https://api.moonshot.ai/v1"
               :seon.ai/agent-api-key-env "MOONSHOT_API_KEY"
-              :seon.ai/agent-dg-backend :inherit
               :seon.ai/agent-extra-body-edn "{:planner true}"
               :seon.ai/agent-max-retries 1}
         configuration {:seon.config/id config/cluster-config-id
@@ -907,6 +905,30 @@
   (let [env (.. js/globalThis -process -env) old (aget env "SEON_CONFIG")]
     (try (aset env "SEON_CONFIG" path) (config/load-manifest)
          (finally (if (nil? old) (js-delete env "SEON_CONFIG") (aset env "SEON_CONFIG" old))))))
+
+(deftest explicit-inherit-is-a-guided-agent-override-error
+  (doseq [[label manifest]
+          [["agent-context"
+            {:seon.config/agent-context
+             {:seon.ai/agent-max-tokens :inherit}}]
+           ["root-context"
+            {:seon.config/root-context
+             {:seon.ai/agent-max-tokens :inherit}}]
+           ["model-variant"
+            {:seon.config/model-variants
+             {:planning {:seon.ai/agent-max-tokens :inherit}}}]]]
+    (is (false? (m/validate :seon.config/manifest manifest))
+        (str label " rejects the removed sentinel"))
+    (let [path (write-tmp! (str "invalid-inherit-" label ".edn")
+                           (pr-str manifest))
+          error (try
+                  (manifest-via-config path)
+                  nil
+                  (catch js/Error exception exception))]
+      (is (some? error) (str label " fails at the manifest declaration door"))
+      (is (= :user-input (:seon.error/kind (ex-data error))))
+      (is (re-find #"absence means inherit" (ex-message error))
+          "the steering error names the omission rule"))))
 
 (deftest merge-agent-context-inherits-or-replaces-block-tree
   (let [base-blocks [{:seon.agent.ctx/name :namespaces :seon.agent.ctx/priority 20}

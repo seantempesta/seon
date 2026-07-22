@@ -423,3 +423,42 @@
                                        :seon.db.datahike.schema-test/name "Bob"}]))))
           (finally
             (d/release conn)))))))
+
+(deftest per-agent-ai-numeric-overrides-round-trip-natively-test
+  (let [entity-schema
+        [:map
+         [:seon.ai/agent-temperature :double]
+         [:seon.ai/agent-max-tokens :int]
+         [:seon.ai/agent-timeout-ms :int]
+         [:seon.ai/agent-max-retries [:int {:min 0}]]
+         [:seon.ai/agent-attempt-timeout-ms :int]]
+        derived (dhs/malli-map->datahike-schema entity-schema)
+        cfg (mem-cfg)
+        values {:seon.ai/agent-temperature 0.25
+                :seon.ai/agent-max-tokens 8192
+                :seon.ai/agent-timeout-ms 180000
+                :seon.ai/agent-max-retries 2
+                :seon.ai/agent-attempt-timeout-ms 240000}
+        attributes (vec (keys values))]
+    (is (= :db.type/double
+           (:db/valueType (find-attr derived :seon.ai/agent-temperature))))
+    (doseq [attribute (remove #{:seon.ai/agent-temperature} attributes)]
+      (is (= :db.type/long (:db/valueType (find-attr derived attribute)))
+          (str attribute " installs as a native long")))
+    (d/create-database cfg)
+    (let [conn (d/connect cfg)]
+      (try
+        (d/transact conn derived)
+        (let [report (d/transact conn [(assoc values :db/id "agent")])
+              entity-id (get (:tempids report) "agent")
+              stored (select-keys (d/pull @conn attributes entity-id)
+                                  attributes)]
+          (is (= values stored)
+              "all five overrides round-trip without an EDN decoder")
+          (is (double? (:seon.ai/agent-temperature stored)))
+          (doseq [attribute (remove #{:seon.ai/agent-temperature} attributes)]
+            (is (integer? (get stored attribute))
+                (str attribute " reads back as an untyped native integer")))
+          (is (every? (complement string?) (vals stored))))
+        (finally
+          (d/release conn))))))

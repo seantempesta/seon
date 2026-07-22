@@ -37,6 +37,46 @@
     (is (= (set (ai/agent-config-pull-pattern)) entity-attributes)
         "every pulled agent configuration attribute is installed by the entity schema")))
 
+(deftest agent-override-schemas-are-native-and-reject-inherit
+  (let [expected
+        {::ai/agent-provider ::ai/provider
+         ::ai/agent-model ::ai/model
+         ::ai/agent-temperature ::ai/temperature
+         ::ai/agent-max-tokens ::ai/max-tokens
+         ::ai/agent-completion-limit-field ::ai/completion-limit-field
+         ::ai/agent-thinking ::ai/thinking
+         ::ai/agent-timeout-ms ::ai/timeout-ms
+         ::ai/agent-base-url ::ai/base-url
+         ::ai/agent-api-key-env ::ai/api-key-env
+         ::ai/agent-dg-backend ::ai/dg-backend
+         ::ai/agent-extra-body-edn ::ai/extra-body-edn
+         ::ai/agent-max-retries [:int {:min 0}]
+         ::ai/agent-attempt-timeout-ms ::ai/timeout-ms
+         ::ai/agent-fallback-variant :seon.config/model-variant}
+        facets (into {}
+                     (map (juxt :db/ident :db/valueType))
+                     (db/malli->datahike-schema (keys expected)))]
+    (doseq [[attribute definition] expected]
+      (is (= definition (schema/schema-definition attribute))
+          (str attribute " has one ordinary native schema"))
+      (is (false? (schema/valid-candidate-value? attribute :inherit))
+          (str attribute " rejects explicit :inherit")))
+    (is (= :db.type/double (facets ::ai/agent-temperature)))
+    (doseq [attribute [::ai/agent-max-tokens
+                       ::ai/agent-timeout-ms
+                       ::ai/agent-max-retries
+                       ::ai/agent-attempt-timeout-ms]]
+      (is (= :db.type/long (facets attribute))
+          (str attribute " installs as a native long")))
+    (let [entity {:seon.agent/id "native-agent"
+                  ::ai/agent-temperature 0.25
+                  ::ai/agent-max-tokens 8192
+                  ::ai/agent-timeout-ms 180000
+                  ::ai/agent-max-retries 2
+                  ::ai/agent-attempt-timeout-ms 240000}]
+      (is (= [entity] (db/encode-edn-slot-values [entity]))
+          "native scalar overrides never enter the EDN-slot encoder"))))
+
 (deftest sync-tx-data-seeds-once-then-db-owns
   (is (= [] (ai/sync-tx-data {::ai/env {}}))
       "no env + no row → nothing to seed (adapter defaults at call time)")
@@ -241,19 +281,18 @@
           ::ai/timeout-ms 1111
           :seon.config.model-transport/response-identity-cap 31}
          {:seon.agent/id "agent-1"
-          ::ai/agent-provider (pr-str :openai-compat)
-          ::ai/agent-model (pr-str "agent-model")
-          ::ai/agent-temperature (pr-str 0.0)
-          ::ai/agent-completion-limit-field
-          (pr-str :max-completion-tokens)
-          ::ai/agent-timeout-ms (pr-str 2222)
-          ::ai/agent-attempt-timeout-ms (pr-str 3333)
-          ::ai/agent-base-url (pr-str "https://agent.example/v1")
-          ::ai/agent-api-key-env (pr-str "AGENT_API_KEY")
-          ::ai/agent-dg-backend (pr-str :vllm)
-          ::ai/agent-extra-body-edn (pr-str "{:agent-option true}")
-          ::ai/agent-max-retries (pr-str 2)
-          ::ai/agent-thinking (pr-str :inherit)})
+          ::ai/agent-provider :openai-compat
+          ::ai/agent-model "agent-model"
+          ::ai/agent-temperature 0.0
+          ::ai/agent-max-tokens 4096
+          ::ai/agent-completion-limit-field :max-completion-tokens
+          ::ai/agent-timeout-ms 2222
+          ::ai/agent-attempt-timeout-ms 3333
+          ::ai/agent-base-url "https://agent.example/v1"
+          ::ai/agent-api-key-env "AGENT_API_KEY"
+          ::ai/agent-dg-backend :vllm
+          ::ai/agent-extra-body-edn "{:agent-option true}"
+          ::ai/agent-max-retries 2})
         config (::ai/resolved-config resolution)]
     (is (= :deepseek
            (get-in default-resolution [::ai/resolved-config ::ai/provider])))
@@ -261,6 +300,7 @@
     (is (= :openai-compat (::ai/provider config)))
     (is (= "agent-model" (::ai/model config)))
     (is (= 0.0 (::ai/temperature config)))
+    (is (= 4096 (::ai/max-tokens config)))
     (is (= :max-completion-tokens (::ai/completion-limit-field config)))
     (is (= 2222 (::ai/timeout-ms config)))
     (is (= 3333 (::ai/agent-attempt-timeout-ms resolution)))
@@ -272,7 +312,7 @@
     (is (= 2 (::ai/agent-max-retries resolution)))
     (is (= 31
            (:seon.config.model-transport/response-identity-cap config)))
-    (doseq [attr [::ai/provider ::ai/model ::ai/temperature
+    (doseq [attr [::ai/provider ::ai/model ::ai/temperature ::ai/max-tokens
                   ::ai/completion-limit-field ::ai/timeout-ms
                   ::ai/base-url ::ai/api-key-env ::ai/dg-backend
                   ::ai/extra-body-digest]]
@@ -282,6 +322,22 @@
            (get-in resolution
                    [::ai/provenance
                     :seon.config.model-transport/response-identity-cap])))))
+
+(deftest absent-agent-override-inherits-the-global-row
+  (let [resolution
+        (ai/resolved-config-from-rows
+         {::ai/provider :openai-compat
+          ::ai/model "global-model"
+          ::ai/max-tokens 2048}
+         {:seon.agent/id "agent-with-no-overrides"})]
+    (is (= "global-model"
+           (get-in resolution [::ai/resolved-config ::ai/model])))
+    (is (= 2048
+           (get-in resolution [::ai/resolved-config ::ai/max-tokens])))
+    (is (= :config-row
+           (get-in resolution [::ai/provenance ::ai/model])))
+    (is (= :config-row
+           (get-in resolution [::ai/provenance ::ai/max-tokens])))))
 
 (deftest resolution-carries-the-attempt-cap-once-at-acquisition
   ;; I6 (frozen-turn-inputs): the per-attempt wall-clock cap is resolved by
@@ -298,7 +354,7 @@
       (is (= 3333
              (::ai/agent-attempt-timeout-ms
               (ai/resolved-config-from-rows
-               {} {::ai/agent-attempt-timeout-ms (pr-str 3333)})))
+               {} {::ai/agent-attempt-timeout-ms 3333})))
           "the agent's own override wins over the process default")
       (finally
         (if (some? saved)
@@ -310,21 +366,20 @@
                 ::ai/model "deepseek-v4-pro"}
         kimi (ai/resolved-config-from-rows
                global
-               {::ai/agent-provider (pr-str :openai-compat)
-                ::ai/agent-model (pr-str "kimi-k3")
-                ::ai/agent-completion-limit-field
-                (pr-str :max-completion-tokens)
-                ::ai/agent-base-url (pr-str "https://api.moonshot.ai/v1")
-                ::ai/agent-api-key-env (pr-str "MOONSHOT_API_KEY")
-                ::ai/agent-timeout-ms (pr-str 180000)
-                ::ai/agent-attempt-timeout-ms (pr-str 240000)})
+               {::ai/agent-provider :openai-compat
+                ::ai/agent-model "kimi-k3"
+                ::ai/agent-completion-limit-field :max-completion-tokens
+                ::ai/agent-base-url "https://api.moonshot.ai/v1"
+                ::ai/agent-api-key-env "MOONSHOT_API_KEY"
+                ::ai/agent-timeout-ms 180000
+                ::ai/agent-attempt-timeout-ms 240000})
         muse (ai/resolved-config-from-rows
                global
-               {::ai/agent-provider (pr-str :openai-compat)
-                ::ai/agent-model (pr-str "muse-spark-1.1")
-                ::ai/agent-base-url (pr-str "https://api.meta.ai/v1")
-                ::ai/agent-api-key-env (pr-str "META_API_KEY")
-                ::ai/agent-thinking (pr-str "minimal")})
+               {::ai/agent-provider :openai-compat
+                ::ai/agent-model "muse-spark-1.1"
+                ::ai/agent-base-url "https://api.meta.ai/v1"
+                ::ai/agent-api-key-env "META_API_KEY"
+                ::ai/agent-thinking "minimal"})
         kimi-config (::ai/resolved-config kimi)
         muse-config (::ai/resolved-config muse)]
     (is (= ["kimi-k3" "https://api.moonshot.ai/v1"

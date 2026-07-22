@@ -343,7 +343,7 @@ Every non-secret provider field has a per-agent mirror:
 `agent-base-url`, `agent-api-key-env`, `agent-dg-backend`, and
 `agent-extra-body-edn`; `agent-max-retries` controls retries and
 `agent-attempt-timeout-ms` optionally replaces the process-default outer bound.
-Absent or `:inherit` values fall through to the global row or process default.
+Absent values fall through to the global row or process default; there is no stored `:inherit` sentinel (a declared `:inherit` is rejected with steering).
 These attributes can be transacted onto an existing agent, supplied through
 the manifest's ordinary/root agent context for atomic birth, or included in a
 per-mint context override. Prefer named birth variants when the same role is

@@ -24,8 +24,9 @@ LLM call sits in the turn), `observability.md` (what of the request/response
   `/agent-max-tokens`, `/agent-completion-limit-field`, `/agent-thinking`,
   `/agent-timeout-ms`, `/agent-attempt-timeout-ms`, `/agent-base-url`,
   `/agent-api-key-env`, `/agent-dg-backend`, and `/agent-extra-body-edn`.
-  Each absent or `:inherit` value falls through to the cluster row. Secrets
-  remain in the named process environment variable. This is how independent
+  Each absent value falls through to the cluster row. Explicit `:inherit` is
+  invalid; absence means inherit. Secrets remain in the named process
+  environment variable. This is how independent
   agents use different providers and compatible gateways; never add
   call-site provider conditionals. Named launch variants may also carry the
   existing `:seon.config/repl-mode`; prompt acquisition resolves the agent's

@@ -309,43 +309,45 @@
    These logical values are validated again by `:seon.ai/agent-config` when
    transacted. `:seon.ai/agent-api-key-env` stores only an environment-variable
    name; credentials never enter config or the database."
-  [[:seon.ai/agent-provider
-    {:optional true}
-    [:or [:enum :inherit]
-     [:enum :deepseek :anthropic :openai-compat :diffusiongemma :typeahead]]]
-   [:seon.ai/agent-model
-    {:optional true} [:or [:enum :inherit] [:string {:min 1}]]]
-   [:seon.ai/agent-temperature
-    {:optional true} [:or [:enum :inherit] :double]]
-   [:seon.ai/agent-max-tokens
-    {:optional true} [:or [:enum :inherit] :int]]
-   [:seon.ai/agent-completion-limit-field
-    {:optional true}
-    [:or [:enum :inherit]
-     [:enum :max-tokens :max-completion-tokens]]]
-   [:seon.ai/agent-thinking
-    {:optional true} [:or [:enum :inherit] [:string {:min 1}]]]
-   [:seon.ai/agent-timeout-ms
-    {:optional true} [:or [:enum :inherit] :int]]
-   [:seon.ai/agent-base-url
-    {:optional true} [:or [:enum :inherit] [:string {:min 1}]]]
-   [:seon.ai/agent-api-key-env
-    {:optional true} [:or [:enum :inherit] [:string {:min 1}]]]
-   [:seon.ai/agent-dg-backend
-    {:optional true} [:or [:enum :inherit] [:enum :vllm :control]]]
-   [:seon.ai/agent-extra-body-edn
-    {:optional true} [:or [:enum :inherit] [:string {:min 1}]]]
-   [:seon.ai/agent-max-retries
-    {:optional true} [:or [:enum :inherit] [:int {:min 0}]]]
-   [:seon.ai/agent-attempt-timeout-ms
-    {:optional true} [:or [:enum :inherit] [:int {:min 1}]]]
-   [:seon.ai/agent-fallback-variant
-    {:optional true} [:or [:enum :inherit] :keyword]]
-   ;; Turn grammar is launch-role data too. A planning or generated repair
-   ;; agent must be able to consume one multi-namespace batch without changing
-   ;; the cluster default used by ordinary agents.
-   [:seon.config/repl-mode
-    {:optional true} [:or [:enum :inherit] :seon.config/repl-mode]]])
+  (let [inherit-error
+        {:error/message
+         "Explicit :inherit is invalid for a per-agent AI override; absence means inherit."}]
+    [[:seon.ai/agent-provider
+      {:optional true}
+      [:enum inherit-error
+       :deepseek :anthropic :openai-compat :diffusiongemma :typeahead]]
+     [:seon.ai/agent-model
+      {:optional true} [:string (assoc inherit-error :min 1)]]
+     [:seon.ai/agent-temperature
+      {:optional true} [:double inherit-error]]
+     [:seon.ai/agent-max-tokens
+      {:optional true} [:int inherit-error]]
+     [:seon.ai/agent-completion-limit-field
+      {:optional true}
+      [:enum inherit-error :max-tokens :max-completion-tokens]]
+     [:seon.ai/agent-thinking
+      {:optional true} [:string (assoc inherit-error :min 1)]]
+     [:seon.ai/agent-timeout-ms
+      {:optional true} [:int inherit-error]]
+     [:seon.ai/agent-base-url
+      {:optional true} [:string (assoc inherit-error :min 1)]]
+     [:seon.ai/agent-api-key-env
+      {:optional true} [:string (assoc inherit-error :min 1)]]
+     [:seon.ai/agent-dg-backend
+      {:optional true} [:enum inherit-error :vllm :control]]
+     [:seon.ai/agent-extra-body-edn
+      {:optional true} [:string (assoc inherit-error :min 1)]]
+     [:seon.ai/agent-max-retries
+      {:optional true} [:int (assoc inherit-error :min 0)]]
+     [:seon.ai/agent-attempt-timeout-ms
+      {:optional true} [:int (assoc inherit-error :min 1)]]
+     [:seon.ai/agent-fallback-variant
+      {:optional true} [:and inherit-error :seon.config/model-variant]]
+     ;; Turn grammar is launch-role data too. A planning or generated repair
+     ;; agent must be able to consume one multi-namespace batch without changing
+     ;; the cluster default used by ordinary agents.
+     [:seon.config/repl-mode
+      {:optional true} [:or [:enum :inherit] :seon.config/repl-mode]]]))
 
 (def ^:private agent-model-config-schema
   (into [:map {:closed true}] agent-model-config-entries))
@@ -376,7 +378,8 @@
 (schema/register! :seon.config/ai-rows
   [:vector {:max 1} :seon.config/ai-row])
 
-(schema/register! :seon.config/model-variant :keyword)
+(schema/register! :seon.config/model-variant
+                  [:and :keyword [:not= :inherit]])
 (schema/register! :seon.config/model-variants-spec
                   [:map-of :seon.config/model-variant
                    agent-model-config-schema])

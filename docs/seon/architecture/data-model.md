@@ -525,7 +525,8 @@ capability scoring.
 **Per-agent config = intent, one chain.** The agent entity carries optional
 `:seon.ai/agent-provider`/`-model`/`-temperature`/`-max-tokens`/`-thinking`/
 `-timeout-ms`/`-base-url`/`-api-key-env`/`-dg-backend`/`-extra-body-edn`
-override attrs (absent/`:inherit` = inherit). The credential attribute stores
+override attrs (absence = inherit; each attr is its ordinary native
+value — there is no stored sentinel). The credential attribute stores
 only an environment-variable name; its secret remains process-local.
 `seon.ai/current` lays the
 CALLING agent's overrides over the global row per call: **explicit call opts

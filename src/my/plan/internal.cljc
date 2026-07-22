@@ -7,7 +7,6 @@
    out of the agent-facing teaching surface and uses fully qualified
    `:my.plan/*` attributes across the namespace boundary."
   (:require
-    [cljs.reader :as edn]
     [clojure.string :as str]
     [clojure.walk :as walk]
     [my.plan.generation :as generation]
@@ -1360,13 +1359,12 @@
    :order-by '[?eval-tx :asc ?eval :asc]})
 
 (def ^:private planner-candidates-query
-  {:find '[?id ?provider]
+  {:find '[(pull ?agent [:seon.agent/id :seon.ai/agent-provider]) ...]
    :in '[$ ?worker-id]
    :where '[[?agent :seon.agent/id ?id]
             [?agent :seon.eval/home-requires _]
             [(not= ?id ?worker-id)]
-            (not-join [?agent] [?agent :seon.agent/terminated-at _])
-            [(get-else $ ?agent :seon.ai/agent-provider :inherit) ?provider]]
+            (not-join [?agent] [?agent :seon.agent/terminated-at _])]
    :order-by '[?id :asc]})
 
 (def ^:private planner-authors-query
@@ -1503,14 +1501,10 @@
         authors (set author-ids)
         candidates
         (->> candidate-rows
-             (keep (fn [[id raw-provider]]
-                     (let [override
-                           (if (string? raw-provider)
-                             (edn/read-string raw-provider)
-                             raw-provider)
-                           provider (if (= :inherit override)
-                                      global-provider
-                                      override)]
+             (keep (fn [candidate]
+                     (let [id (:seon.agent/id candidate)
+                           provider (or (:seon.ai/agent-provider candidate)
+                                        global-provider)]
                        (when (and (not= worker-id id)
                                   (ai-provider/frontier-provider? provider))
                          id))))
