@@ -852,3 +852,135 @@
         (writer/stop! server)
         (.delete (File. request-path))
         nil))))
+
+(deftest fenced-retract-and-replacement-is-atomic-through-the-real-writer
+  (let [database-name (str "writer-reconcile-atomicity-" (random-uuid))
+        request-path (socket-path "atomicity")
+        server
+        (writer-test/start!
+         {::writer/dependencies (dependencies)
+          ::writer/database-name database-name
+          ::writer/backend :memory
+          ::writer/request-socket-path request-path})
+        ^SocketChannel channel (writer-test/open-channel! request-path)]
+    (try
+      (let [acquired (acquire! channel database-name "reconcile-atomicity")
+            schema-response
+            (call! channel
+                   (protocol/transaction-request
+                    {::protocol/request-id "reconcile-atomicity/schema"
+                     :seon.db/db (:seon.db/db acquired)
+                     ::protocol/transaction-data
+                     [{:db/ident :writer.reconcile/id
+                       :db/valueType :db.type/string
+                       :db/cardinality :db.cardinality/one
+                       :db/unique :db.unique/identity}
+                      {:db/ident :writer.reconcile/value
+                       :db/valueType :db.type/string
+                       :db/cardinality :db.cardinality/one}
+                      {:db/ident :writer.reconcile/legacy
+                       :db/valueType :db.type/string
+                       :db/cardinality :db.cardinality/one}
+                      {:db/ident :writer.reconcile/replacement
+                       :db/valueType :db.type/string
+                       :db/cardinality :db.cardinality/one}]}))
+            seeded-response
+            (call! channel
+                   (protocol/transaction-request
+                    {::protocol/request-id "reconcile-atomicity/seed"
+                     :seon.db/db (:db-after schema-response)
+                     ::protocol/transaction-data
+                     [{:writer.reconcile/id "config"
+                       :writer.reconcile/value "original"
+                       :writer.reconcile/legacy "must-remain-on-failure"}]}))
+            frozen (:db-after seeded-response)
+            original {:writer.reconcile/id "config"
+                      :writer.reconcile/value "original"
+                      :writer.reconcile/legacy "must-remain-on-failure"}
+            replacement {:writer.reconcile/id "config"
+                         :writer.reconcile/value "replacement"
+                         :writer.reconcile/replacement "landed-whole"}
+            reconcile-tx
+            [[:db.fn/retractAttribute
+              [:writer.reconcile/id "config"]
+              :writer.reconcile/legacy]
+             [:db.fn/retractAttribute
+              [:writer.reconcile/id "config"]
+              :writer.reconcile/value]
+             replacement]
+            advanced-response
+            (call! channel
+                   (protocol/transaction-request
+                    {::protocol/request-id "reconcile-atomicity/advance"
+                     :seon.db/db frozen
+                     ::protocol/transaction-data
+                     [{:writer.reconcile/id "unrelated"
+                       :writer.reconcile/value "advances-the-head"}]}))
+            advanced (:db-after advanced-response)
+            failed-response
+            (call! channel
+                   (protocol/transaction-request
+                    {::protocol/request-id "reconcile-atomicity/stale"
+                     :seon.db/db frozen
+                     :seon.db/expected-db frozen
+                     ::protocol/transaction-data reconcile-tx}))
+            connection
+            (::registry/conn
+             (registry/lookup-connection
+              {::registry/database-name (keyword database-name)}))
+            selector
+            '[:writer.reconcile/id
+              :writer.reconcile/value
+              :writer.reconcile/legacy
+              :writer.reconcile/replacement]
+            lookup-ref [:writer.reconcile/id "config"]
+            pull-row (fn [db-value]
+                       (d/pull db-value selector lookup-ref))
+            head-after-failure (d/db connection)
+            corrected-response
+            (call! channel
+                   (protocol/transaction-request
+                    {::protocol/request-id "reconcile-atomicity/corrected"
+                     :seon.db/db advanced
+                     :seon.db/expected-db advanced
+                     ::protocol/transaction-data reconcile-tx}))
+            replacement-head (d/db connection)
+            domain-transaction-ids
+            (->> (:tx-data corrected-response)
+                 (filter (fn [[_ attribute]]
+                           (contains? #{:writer.reconcile/value
+                                        :writer.reconcile/legacy
+                                        :writer.reconcile/replacement}
+                                      attribute)))
+                 (map (fn [[_ _ _ transaction]]
+                        (Math/abs (long transaction))))
+                 set)
+            rows-at-every-basis
+            (mapv (fn [basis]
+                    (pull-row (d/as-of replacement-head basis)))
+                  (range (:t frozen)
+                         (inc (:t (:db-after corrected-response)))))]
+        (is (every? (comp true? ::protocol/success?)
+                    [schema-response seeded-response advanced-response]))
+        (is (protocol/valid-response? failed-response))
+        (is (false? (::protocol/success? failed-response))
+            "the failed reconcile is returned as an error value")
+        (is (= protocol/stale-database-value-error
+               (::protocol/error-kind failed-response)))
+        (is (= advanced (:seon.db/current-db failed-response)))
+        (is (= original (pull-row head-after-failure))
+            "the rejected retract-plus-replace leaves every original fact intact")
+        (is (= (:t advanced) (:max-tx head-after-failure))
+            "the rejected request creates no transaction or receipt")
+        (is (true? (::protocol/success? corrected-response)))
+        (is (= replacement (pull-row replacement-head))
+            "the corrected retract-plus-replace applies as one whole replacement")
+        (is (= 1 (count domain-transaction-ids))
+            "all replacement retractions and assertions share one transaction")
+        (is (= [original original replacement] rows-at-every-basis)
+            "no committed database basis exposes a retracted-only entity"))
+      (finally
+        (try (.close channel) (catch Throwable _))
+        (writer/stop! server)
+        (.delete (File. request-path))
+        nil))))
