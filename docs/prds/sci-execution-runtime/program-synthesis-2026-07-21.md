@@ -1063,9 +1063,25 @@ Lane states at wind-down:
   merge fns deleted in place. Codex thread resumed in background to
   finish full cljs+writer gates + reset-boundary live proof + wiki
   append + summary (`tmp/orchestrator/normalize-4b-resume-events.jsonl`).
-- p1c/p3a re-dispatch HELD until 4b commits: their owned edits
-  (src/seon/db.*, execution/**, process.clj) would land inside 4b's
-  full-gate compile window (source-freeze rule).
+- normalize-4b SETTLED + COMMITTED `da15f3cb`: resumed lane finished
+  all gates (full cljs 1546/7559 green, writer 382/2906 green,
+  reset-boundary live proof on isolated cluster `normalize-4b`, clean
+  down; logs `tmp/orchestrator/normalize-4b-*`). Wiki gained the
+  wildcard-pull/seed-copy `:db/id` scar. Orchestrator applied the
+  reported config/system.edn comment edits (no value edits needed);
+  acme.edn needed nothing. Normalize remaining: (5) render-fn identity
+  split, then Stage-2 DAG residents.
+- LIVE LANES (dispatched after the 4b commit lifted the freeze):
+  `p1c-db-exemplar` (spec + orchestrator dispatch note; summary →
+  `tmp/orchestrator/p1c-db-exemplar-summary.txt`) ∥ `p3a-bun-worker`
+  (summary → `tmp/orchestrator/p3a-bun-worker-summary.txt`).
+  File-disjoint; each spec names the other's grants PROTECTED.
+- Earliest unsettled contract: the seam exemplar (P1c) proving one
+  same-source seon.db definition on both tiers. Its integrated proof =
+  the dual-tier .cljc test file + census delta + live isolated-cluster
+  turn. Next refill on exemplar acceptance: P2 fan-out
+  (message/lifecycle · my.* · blob · fs/shell · web). Graduation gate
+  unchanged: census 106 symbols / 85 blockers → zero, then U12.
 
 Next-session queue, in order: (1) settle normalize-4b (review →
 gates → live proof → path-limited commit); (2) re-dispatch
