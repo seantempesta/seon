@@ -7,6 +7,7 @@
             [seon.host.context :as context]
             [seon.host.eval :as eval]
             [seon.host.graduate :as graduate]
+            [seon.host.instrument :as instrument]
             [seon.host.invoke :as invoke]
             [seon.host.sample :as sample]
             [seon.host.session :as session]
@@ -63,29 +64,34 @@
           (session/startup-error session
                          (get-in head [:seon/error :seon.error/message]))
           (let [agent-id (:seon.execution/agent-id startup)
-                existing? (contains? @(::session/contexts session) agent-id)
-                ctx (-> (swap! (::session/contexts session)
-                               (fn [contexts]
-                                 (if (contains? contexts agent-id)
-                                   contexts
-                                   (assoc contexts agent-id
-                                          (context/fork-context
-                                           (::base host))))))
-                        (get agent-id))]
+                instrument-state (::instrument/state host)
+                ctx
+                (instrument/call-with-write-admission
+                 instrument-state
+                 (fn []
+                   (if-let [existing (get @(::session/contexts session) agent-id)]
+                     existing
+                     (let [created (context/fork-context (::base host))]
             ;; Restore = fork the shared base + replay the agent's corpus
             ;; defs (design §2): a context is a cache of database facts,
             ;; so a fresh fork rebuilds the agent's home namespace from
             ;; its recorded `:seon.fn/source` rows. Replay failures are
             ;; values; a failed corpus read leaves an honest empty
             ;; context rather than refusing the session.
-            (when-not existing?
-              (binding [context/*agent-id* agent-id]
-                (context/restore-context-defs!
-                 (::writer host) ctx (eval/agent-home-ns agent-id)))
-              (context/install-registered-wrappers!
-               {::context/registry (get-in host [::base ::context/registry])
-                ::context/ctx ctx
-                ::context/lib (eval/agent-home-ns agent-id)}))
+                       (binding [context/*agent-id* agent-id]
+                         (context/restore-context-defs!
+                          (::writer host) created (eval/agent-home-ns agent-id)))
+                       (context/install-registered-wrappers!
+                        {::context/registry (get-in host [::base ::context/registry])
+                         ::context/ctx created
+                         ::context/lib (eval/agent-home-ns agent-id)})
+                       ;; Exact startup insertion: replay private defs, link
+                       ;; shared registry vars, reconcile wrappers, publish the
+                       ;; complete context population, then send READY.
+                       (instrument/reconcile-current-context!
+                        instrument-state created)
+                       (swap! (::session/contexts session) assoc agent-id created)
+                       created))))]
             (reset! (::session/startup session) startup)
             (session/send-frame!
              session
@@ -107,7 +113,8 @@
 (defn- serve-session!
   "Run one pod session: startup handshake, then the message loop."
   [host ^SocketChannel channel]
-  (let [session (session/session-map host channel)
+  (let [session (assoc (session/session-map host channel)
+                       ::instrument/state (::instrument/state host))
         input (::session/input session)]
     (let [startup-timed-out? (atom false)
           timeout-task
@@ -219,13 +226,22 @@
                  :seon.host/projection-error
                  (:seon/error acquired-projection)})))
         projection-state (atom acquired-projection)
+        contexts (atom {})
         base (context/build-base! writer)
         graduation-report
         (graduate/rebuild!
          {::context/base base
           ::context/registry (::context/registry base)
           ::context/writer writer})
-        contexts (atom {})
+        instrument-state
+        (instrument/state
+         {::context/registry (::context/registry base)
+          ::context/projection-state projection-state
+          ::contexts contexts})
+        _ (instrument/call-with-write-admission
+           instrument-state
+           #(instrument/apply-projection!
+             instrument-state (::context/projection acquired-projection)))
         eval-pool (Executors/newFixedThreadPool
                    (int (or eval-threads default-eval-threads)))
         watchdog (Executors/newScheduledThreadPool 2)
@@ -236,6 +252,7 @@
                     {::writer writer
                      ::server server
                      ::base base
+                     ::instrument/state instrument-state
                      ::projection-state projection-state
                      ::graduation-report graduation-report
                      ::contexts contexts

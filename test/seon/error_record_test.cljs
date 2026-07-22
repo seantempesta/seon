@@ -69,6 +69,18 @@
 ;; Pure pieces — no conn needed.
 ;; ---------------------------------------------------------------------------
 
+(deftest instrumentation-coercion-hints-use-the-leaf-schema-form
+  (let [payload
+        (ei/explain-payload
+         :malli.core/invalid-input
+         {:input (m/schema [:cat :int])
+          :args ["42"]
+          :schema (m/schema [:=> [:cat :int] :int])
+          :fn-name 'my.hint/needs-int})]
+    (is (= :seon.error.kind/malli-instrument-input
+           (:seon.error/kind payload)))
+    (is (string? (:seon.error.malli/hint payload)))))
+
 (deftest fault-discriminator-is-what-were-we-calling
   (testing "agent-authored namespaces → :agent"
     (is (= :agent (error/fault-for 'my.plan/add!)))

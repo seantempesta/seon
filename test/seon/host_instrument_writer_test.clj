@@ -1,0 +1,335 @@
+(ns seon.host-instrument-writer-test
+  "JVM-host SCI instrumentation generation and wire proofs."
+  (:require [clojure.test :refer [deftest is]]
+            [malli.core :as m]
+            [sci.core :as sci]
+            [seon.db.transport.uds :as uds]
+            [seon.error.instrument :as error.instrument]
+            [seon.host :as host]
+            [seon.host.context :as context]
+            [seon.host.eval :as host.eval]
+            [seon.host.instrument :as instrument]
+            [seon.host-registry-writer-test :as registry-test]
+            [seon.db.writer :as writer]
+            [seon.schema :as schema])
+  (:import [java.io File]
+           [java.nio.channels SocketChannel]))
+
+(def ^:private corpus-schema-rows
+  (var-get #'registry-test/corpus-schema-rows))
+(def ^:private value-sampling-policy
+  (var-get #'registry-test/value-sampling-policy))
+(def ^:private dependencies
+  (var-get #'registry-test/dependencies))
+(def ^:private host-session!
+  (var-get #'registry-test/host-session!))
+(def ^:private invoke-batch!
+  (var-get #'registry-test/invoke-batch!))
+(def ^:private socket-path
+  (var-get #'registry-test/socket-path))
+
+(defn- unconnected-writer []
+  (context/writer-session
+   {::context/writer-socket-path "tmp/unused-instrument-test.sock"
+    ::context/database-name "instrument-test"}))
+
+(defn- fixture []
+  (let [base (context/build-base! (unconnected-writer))
+        ctx (context/fork-context base)
+        projection (schema/build-projection {} {})
+        projection-state
+        (atom {::context/database {:db-name "instrument-test" :t 1}
+               ::context/projection projection})
+        contexts (atom {"agent" ctx})
+        state (instrument/state
+               {::context/registry (::context/registry base)
+                ::context/projection-state projection-state
+                :seon.host/contexts contexts})]
+    {::base base ::ctx ctx ::projection-state projection-state
+     ::contexts contexts ::state state}))
+
+(defn- projection [contracts]
+  (schema/build-projection {} contracts))
+
+(defn- install-projection! [{::keys [state projection-state]} generation]
+  (reset! projection-state
+          {::context/database {:db-name "instrument-test" :t 2}
+           ::context/projection generation})
+  (instrument/call-with-write-admission
+   state #(instrument/apply-projection! state generation)))
+
+(defn- thrown-data [f]
+  (try
+    (f)
+    nil
+    (catch Throwable throwable
+      (loop [current throwable
+             deepest nil]
+        (if current
+          (recur (.getCause current) (or (ex-data current) deepest))
+          deepest)))))
+
+(deftest multi-arity-private-var-reconciles-and-survives-redefinition
+  (let [{::keys [ctx state] :as live} (fixture)
+        sym 'my.instrument/multi
+        generation
+        (projection
+         {sym [:function
+               [:=> [:cat] :int]
+               [:=> [:cat :int] :int]]})]
+    (sci/eval-string*
+     ctx
+     "(ns my.instrument) (defn multi ([] 0) ([x] x))")
+    (install-projection! live generation)
+    (is (= 0 (instrument/call-with-read-admission
+              state #(sci/eval-string* ctx "(my.instrument/multi)"))))
+    (is (= 7 (instrument/call-with-read-admission
+              state #(sci/eval-string* ctx "(my.instrument/multi 7)"))))
+    (is (= :seon.error.kind/malli-instrument-input
+           (:seon.error/kind
+            (thrown-data #(sci/eval-string* ctx
+                                            "(my.instrument/multi \"bad\")")))))
+    (is (= :seon.error.kind/malli-instrument-arity
+           (:seon.error/kind
+            (thrown-data #(sci/eval-string* ctx
+                                            "(my.instrument/multi 1 2)")))))
+    ;; SCI defn calls bindRoot; the installed watch must immediately wrap the
+    ;; fresh root against the still-current contract.
+    (instrument/call-with-read-admission
+     state #(sci/eval-string*
+             ctx "(in-ns 'my.instrument) (defn multi ([] 1) ([x] (inc x)))"))
+    (is (= :seon.error.kind/malli-instrument-input
+           (:seon.error/kind
+            (thrown-data #(sci/eval-string* ctx
+                                            "(my.instrument/multi \"bad\")")))))))
+
+(deftest shared-registry-and-private-context-vars-are-both-targeted
+  (let [{::keys [base ctx] :as live} (fixture)
+        registry (::context/registry base)
+        shared-sym 'my.shared/answer
+        private-sym 'my.private/answer
+        generation
+        (projection
+         {shared-sym [:=> [:cat :int] :int]
+          private-sym [:=> [:cat :int] :int]})]
+    (context/register-wrappers!
+     {::context/registry registry
+      ::context/lib 'my.shared
+      ::context/wrappers
+      {'answer {::context/wrapper-fn identity}}})
+    (sci/eval-string* ctx "(ns my.private) (defn answer [x] x)")
+    (install-projection! live generation)
+    (context/install-registered-wrappers!
+     {::context/registry registry ::context/ctx ctx ::context/lib 'my.shared})
+    (is (= :seon.error.kind/malli-instrument-input
+           (:seon.error/kind
+            (thrown-data #(sci/eval-string* ctx "(my.shared/answer \"bad\")")))))
+    (is (= :seon.error.kind/malli-instrument-input
+           (:seon.error/kind
+            (thrown-data #(sci/eval-string* ctx "(my.private/answer \"bad\")")))))))
+
+(deftest removed-contract-does-not-resurrect-through-the-root-watch
+  (let [{::keys [ctx] :as live} (fixture)
+        sym 'my.removal/echo]
+    (sci/eval-string* ctx "(ns my.removal) (defn echo [x] x)")
+    (install-projection! live (projection {sym [:=> [:cat :int] :int]}))
+    (is (= :seon.error.kind/malli-instrument-input
+           (:seon.error/kind
+            (thrown-data #(sci/eval-string* ctx "(my.removal/echo \"ok\")")))))
+    (install-projection! live (projection {}))
+    (sci/eval-string* ctx "(in-ns 'my.removal) (defn echo [x] [:new x])")
+    (sci/eval-string* ctx "(in-ns 'my.removal) (defn echo [x] [:newer x])")
+    (is (= [:newer "ok"]
+           (sci/eval-string* ctx "(my.removal/echo \"ok\")")))))
+
+(deftest generation-admission-excludes-a-mixed-refresh-window
+  (let [{::keys [ctx state projection-state] :as live} (fixture)
+        sym 'my.generation/echo
+        old-projection (projection {sym [:=> [:cat :int] :int]})
+        new-projection (projection {sym [:=> [:cat :string] :string]})
+        _ (sci/eval-string* ctx "(ns my.generation) (defn echo [x] x)")
+        _ (install-projection! live old-projection)
+        _ (is (= 1 (sci/eval-string* ctx "(my.generation/echo 1)")))
+        writer-entered (promise)
+        release-writer (promise)
+        observed (promise)
+        writer
+        (future
+          (instrument/call-with-write-admission
+           state
+           (fn []
+             (reset! projection-state
+                     {::context/database {:db-name "instrument-test" :t 3}
+                      ::context/projection new-projection})
+             (instrument/apply-projection! state new-projection)
+             (deliver writer-entered true)
+             @release-writer)))
+        _ @writer-entered
+        reader
+        (future
+          (deliver observed
+                   (instrument/call-with-read-admission
+                    state
+                    (fn []
+                      [(get-in @projection-state
+                               [::context/projection
+                                :seon.schema.projection/fingerprint])
+                       (sci/eval-string* ctx
+                                         "(my.generation/echo \"new\")")]))))]
+    (is (= ::blocked (deref observed 100 ::blocked)))
+    (deliver release-writer true)
+    (is (= [(:seon.schema.projection/fingerprint new-projection) "new"]
+           (deref observed 1000 ::timed-out)))
+    (is (= :seon.error.kind/malli-instrument-input
+           (:seon.error/kind
+            (thrown-data #(sci/eval-string* ctx "(my.generation/echo 1)")))))
+    @reader
+    @writer))
+
+(deftest classified-input-envelope-is-wire-safe-and-hints-on-the-jvm
+  (let [wrapped
+        (m/-instrument
+         {:schema [:=> [:cat :int] :int]
+          :report (fn [report-type data]
+                    (error.instrument/report-fn
+                     report-type (assoc data :fn-name 'my.wire/needs-int)))}
+         identity)
+        classified (thrown-data #(wrapped "bad"))
+        wire-safe ((var-get #'host.eval/wire-safe-value)
+                   {:seon.eval/ok? false
+                    :seon/error {:seon.error/data classified}})
+        round-tripped (uds/decode (uds/encode wire-safe))]
+    (is (= wire-safe round-tripped))
+    (is (= :seon.error.kind/malli-instrument-input
+           (get-in round-tripped
+                   [:seon/error :seon.error/data :seon.error/kind])))
+    (is (= 'my.wire/needs-int
+           (get-in round-tripped
+                   [:seon/error :seon.error/data :seon.error.malli/fn-sym])))
+    (is (string?
+         (get-in round-tripped
+                 [:seon/error :seon.error/data :seon.error.malli/hint])))))
+
+(deftest new-private-specced-var-fails-next-form-and-next-batch
+  (let [database-name (str "host-instrument-" (random-uuid))
+        request-path (socket-path "instrument-writer")
+        host-socket (socket-path "instrument-host")
+        agent-id "instrument-agent"
+        server (writer/start! {::writer/dependencies (dependencies)
+                               ::writer/database-name database-name
+                               ::writer/backend :memory
+                               ::writer/request-socket-path request-path})
+        session (context/writer-session
+                 {::context/writer-socket-path request-path
+                  ::context/database-name database-name
+                  ::context/backend :memory})
+        base (context/build-base! session)
+        seed-ctx (context/fork-context base)]
+    (try
+      (let [seeded
+            (sci/eval-string*
+             seed-ctx
+             (str "(require 'seon.db)"
+                  "(seon.db/transact! {:seon.db/tx-data "
+                  (pr-str (into corpus-schema-rows
+                                [value-sampling-policy
+                                 {:seon.agent/id agent-id}
+                                 {:seon.db.process/id :seon.db.process/repl}
+                                 {:seon.agent.turn/id "turn-parity"}]))
+                  "})"))]
+        (is (true? (:seon.db/ok? seeded)) (pr-str seeded)))
+      ;; Install optional corpus attributes that exact-set terminal recording
+      ;; may retract, matching a real cluster's genesis population.
+      (let [probe
+            (sci/eval-string*
+             seed-ctx
+             (str "(seon.db/transact! {:seon.db/tx-data "
+                  (pr-str [{:seon.db/user [:seon.agent/id agent-id]
+                            :seon.db/process
+                            [:seon.db.process/id :seon.db.process/repl]}
+                           {:seon.fn/sym "seed/install-probe"
+                            :seon.fn/agent-facing? true
+                            :seon.fn/spec "[:=> [:cat :int] :int]"
+                            :seon.fn/schema-error "none"
+                            :seon.fn/read-attrs [:seed/attr]}])
+                  "})"))]
+        (is (true? (:seon.db/ok? probe)) (pr-str probe)))
+      (let [started
+            (host/start! {::host/socket-path host-socket
+                          ::context/writer-socket-path request-path
+                          ::context/database-name database-name
+                          ::context/backend :memory})
+            live (host-session! host-socket agent-id database-name)]
+        (try
+          (let [head (context/resolve-head! session)
+                definition
+                (str "(defn private-multi\n"
+                     "  {:malli/schema [:function\n"
+                     "                   [:=> [:cat] :int]\n"
+                     "                   [:=> [:cat :int] :int]]}\n"
+                     "  ([] 0) ([x] x))")
+                first-response
+                (invoke-batch!
+                 live agent-id "instrument-first" head
+                 [{:seon.repl/kind :form :seon.repl/source definition}
+                  {:seon.repl/kind :form
+                   :seon.repl/source "(private-multi \"bad\")"}])
+                first-result (:seon.execution/result first-response)
+                first-error (get-in first-result
+                                    [:seon.host/results 1 :seon/error])]
+            (is (= 1 (:seon.eval/n-ok first-result)) (pr-str first-response))
+            (is (= 1 (:seon.eval/n-fail first-result)) (pr-str first-response))
+            (is (= :schema-input
+                   (get-in first-error
+                           [:seon.error/data :seon.error.sci/class])))
+            (let [next-response
+                  (invoke-batch!
+                   live agent-id "instrument-next"
+                   (context/resolve-head! session)
+                   [{:seon.repl/kind :form
+                     :seon.repl/source "(private-multi \"still-bad\")"}])
+                  next-error
+                  (get-in next-response
+                          [:seon.execution/result :seon.host/results 0
+                           :seon/error])]
+              (is (= :schema-input
+                     (get-in next-error
+                             [:seon.error/data :seon.error.sci/class]))))
+            ;; A fresh host has no live private contexts at cold apply time.
+            ;; Session startup must replay, link, reconcile, publish, then READY.
+            (.close ^SocketChannel (::registry-test/channel live))
+            (host/stop! started)
+            (let [restarted
+                  (host/start! {::host/socket-path host-socket
+                                ::context/writer-socket-path request-path
+                                ::context/database-name database-name
+                                ::context/backend :memory})
+                  restored-live
+                  (host-session! host-socket agent-id database-name)]
+              (try
+                (let [response
+                      (invoke-batch!
+                       restored-live agent-id "instrument-restored"
+                       (context/resolve-head! session)
+                       [{:seon.repl/kind :form
+                         :seon.repl/source
+                         "(private-multi \"restored-bad\")"}])]
+                  (is (= :schema-input
+                         (get-in response
+                                 [:seon.execution/result :seon.host/results 0
+                                  :seon/error :seon.error/data
+                                  :seon.error.sci/class]))))
+                (finally
+                  (try (.close ^SocketChannel
+                               (::registry-test/channel restored-live))
+                       (catch Throwable _))
+                  (host/stop! restarted)))))
+          (finally
+            (try (.close ^SocketChannel (::registry-test/channel live))
+                 (catch Throwable _))
+            (host/stop! started))))
+      (finally
+        (context/close-session! session)
+        (writer/stop! server)
+        (.delete (File. ^String request-path))
+        (.delete (File. ^String host-socket))))))

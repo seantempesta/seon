@@ -5,6 +5,7 @@
             [seon.db.transport.uds :as uds]
             [seon.error.sci :as error.sci]
             [seon.host.context :as context]
+            [seon.host.instrument :as instrument]
             [seon.host.record :as record]
             [seon.host.sample :as sample]
             [seon.host.session :as session]
@@ -40,22 +41,41 @@
            (error.sci/steering-head
             classified error.sci/default-error-head-token-cap))))
 
+(defn- transit-safe-value
+  [value]
+  (try
+    (uds/encode {::probe value})
+    value
+    (catch Throwable _
+      (cond
+        (map? value) (into (empty value)
+                           (map (fn [[k v]] [(transit-safe-value k)
+                                             (transit-safe-value v)]))
+                           value)
+        (vector? value) (mapv transit-safe-value value)
+        (set? value) (into #{} (map transit-safe-value) value)
+        (list? value) (apply list (map transit-safe-value value))
+        (seq? value) (doall (map transit-safe-value value))
+        :else (pr-str value)))))
+
 (defn- wire-safe-value
   "Keep a transit-encodable value; project anything else to its print form.
 
    sci vars (every `def`'s return) and other host objects cannot cross the
    protocol; their envelope keeps `:seon.eval/value-display` instead."
   [envelope]
-  (if-not (contains? envelope :seon.eval/value)
-    envelope
-    (let [value (:seon.eval/value envelope)]
-      (try
-        (uds/encode {::probe value})
-        envelope
-        (catch Throwable _
-          (-> envelope
-              (dissoc :seon.eval/value)
-              (assoc :seon.eval/value-display (pr-str value))))))))
+  (let [envelope
+        (if-not (contains? envelope :seon.eval/value)
+          envelope
+          (let [value (:seon.eval/value envelope)]
+            (try
+              (uds/encode {::probe value})
+              envelope
+              (catch Throwable _
+                (-> envelope
+                    (dissoc :seon.eval/value)
+                    (assoc :seon.eval/value-display (pr-str value)))))))]
+    (transit-safe-value envelope)))
 (defn- output-capture [database-edn-cap]
   (let [limit (max 0 (- database-edn-cap
                         (count output-truncation-marker)))
@@ -140,9 +160,10 @@
                      interrupted? (= :interrupt
                                      (get-in error [:seon.error/data
                                                     :seon.error.sci/class]))]
-                 {:seon.eval/ok? false
-                  :seon.eval/interrupted? interrupted?
-                  :seon/error error})))
+                 (wire-safe-value
+                  {:seon.eval/ok? false
+                   :seon.eval/interrupted? interrupted?
+                   :seon/error error}))))
            envelope (finish-evaluation! session envelope)
            output (output-text)]
        (cond-> envelope
@@ -263,10 +284,13 @@
                       (schema/call-with-registration-delta
                         schema-delta
                         #(if (= :form kind)
-                           (eval-form! session ctx (agent-home-ns agent-id)
-                                       (str "(in-ns '" current-ns ")\n"
-                                            source)
-                                       database-edn-cap)
+                           (instrument/call-with-read-admission
+                            (::instrument/state session)
+                            (fn []
+                              (eval-form! session ctx (agent-home-ns agent-id)
+                                          (str "(in-ns '" current-ns ")\n"
+                                               source)
+                                          database-edn-cap)))
                            (read-error-envelope entry)))
                       ok? (boolean (:seon.eval/ok? raw-envelope))
                       ;; A failed eval must not leave half a registration:
@@ -309,9 +333,9 @@
                       (true? (::context/projection-changed? recorded))
                       projection-refresh
                       (when projection-change?
-                        (context/refresh-committed-projection!
-                          writer (::session/projection-state session)
-                          (get-in recorded [:db-after :t])))
+                        (instrument/refresh-and-reconcile!
+                         (::instrument/state session) writer
+                         (get-in recorded [:db-after :t])))
                       _ (when (:seon/error projection-refresh)
                           (throw
                             (ex-info

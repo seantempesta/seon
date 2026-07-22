@@ -158,11 +158,13 @@
 (def ^:private coercion-hints
   "Leaf-schema → suggested coercion when the value is a string mismatched
    to a non-string schema. Five common types; expand as patterns emerge."
-  {:int     "use (js/parseInt x 10) to convert string→int"
+  {:int     #?(:clj "use (parse-long x) to convert string→int"
+              :cljs "use (js/parseInt x 10) to convert string→int")
    :keyword "use (keyword x) to convert string→keyword"
    :symbol  "use (symbol x)"
    :set     "use (set x) to convert vector→set"
-   :inst    "use (js/Date.) or coerce via #inst"})
+   :inst    #?(:clj "use an instant parser or a #inst literal"
+              :cljs "use (js/Date.) or coerce via #inst")})
 
 (defn- hint-for
   "Compute a one-line hint for a leaf error. Returns nil when no hint
@@ -187,8 +189,8 @@
                " — the key is " (pr-str missing))
           (str "did you mean " (pr-str missing) "?"))))
 
-    (and (string? value) (get coercion-hints schema))
-    (get coercion-hints schema)))
+    (and (string? value) (get coercion-hints (m/form schema)))
+    (get coercion-hints (m/form schema))))
 
 ;; ============================================================
 ;; Envelope builder
