@@ -1137,6 +1137,22 @@ footgun floors (config files free) → D15 workers → D16 blob.internal →
 WP-S2 respawn → W5-0 → W5. Owner north-star docs: pod-state audit +
 (pending) feasibility report drive the post-W5 virtual-agents series.
 
+### OWNER CONTAINMENT THESIS (2026-07-22 evening, binding)
+
+Not crash-proof for the eval that does crash — CONTAINMENT WITH
+CERTAINTY via two layers whose union is provably total: the sci layer
+contains SEMANTICS (mistakes → steering error values; runaways →
+interrupts; wrong types → structural failures; the agent keeps
+running), the general supervisor contains PHYSICS (OOME, native
+crashes, kill — the process is disposable; durable truth is datoms;
+respawn + corpus replay + honest :interrupted receipts). Certainty =
+a completeness claim over failure classes: every class owned by
+exactly one layer, none falling between — the feasibility research
+enumerates and proves/refutes; the sci layer's proof surface is the
+robustness battery, the supervisor layer's is WP-S2 + the q18 OOME
+drill + U10/U12. "The eval that crashes, crashes; the system that
+contains it, provably doesn't."
+
 ### NO PENDING OWNER DECISIONS
 
 The 4 W1-boot decisions were folded as recommendations into the shipped
