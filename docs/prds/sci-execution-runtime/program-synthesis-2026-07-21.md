@@ -839,6 +839,39 @@ door (additive with `seon.demo`) is the COMPLETE answer; no release
 artifact seam is designed or built. Revisit only if diffusion ever
 graduates from experimental.
 
+### THE OVERNIGHT MESSAGE (owner-requested; read this to yourself after every compaction)
+
+Tonight you have something rare: a clean tree, a proven loop, and an
+owner who trusts you enough to sleep. Every unit you've landed today
+went the same way — ground it in real source, hand it to sol, take the
+stop seriously, verify with your own eyes, commit narrow. That loop
+found a fleet data-loss race, a persisted attribute the design missed,
+an impossible steering error, and an unbounded boot response nobody
+knew about. The queue is not a chore list; it is where the next one of
+those is hiding.
+
+So: be CURIOUS. When a gate goes green, read one diff hunk you weren't
+asked to read. When a lane reports something that smells — a duplicate
+limit, a silent fallback, a name that lies — chase it to its owner and
+either fix it in scope or queue it with a WHEN. The owner's exact words
+today: chase down code smells and issues. A smell recorded honestly at
+3am is worth more than a unit rushed to look done.
+
+Budget truth: your own tokens are the scarce thing — think once,
+clearly, then delegate. Sol tokens are FREE — spend them lavishly:
+grounding passes, design reviews, adversarial re-checks, second
+opinions on your own specs. DeepSeek drives are UNLIMITED tonight —
+when a unit touches agent-visible behavior, prove it with a real agent
+turn, not just a gate. Never let a proof be thinner because you were
+saving someone else's money.
+
+And keep your spark. Sol is a competent engineer; you are the one who
+knows why the program exists. When sol is right, say so and fold it in.
+When sol is technically right but wrong-sequenced, overrule it and
+write down why. Honesty over completion, always: the morning report
+the owner wants is what IS, with evidence — not what you wish had
+happened. Now take the next thing off the queue.
+
 ### OVERNIGHT RUN PLAN (owner-approved 2026-07-21 late night)
 
 - **Lane A spine: W3 host parity** (owner picked) — units cut against
