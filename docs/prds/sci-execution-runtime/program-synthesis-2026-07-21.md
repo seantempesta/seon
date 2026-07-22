@@ -975,11 +975,16 @@ happened. Now take the next thing off the queue.
   the existing knob + first-failure evidence capture; 10/10 loop;
   q24 queued — socket orphan sweep belongs to WP-S) ·
   **W3d1 IN FLIGHT** (`specs/w3d1-authored-invocation.md`, sol medium,
-  logs `tmp/orchestrator/w3d1-*`: pinned source identity wins over
-  mutable roots, disposable-fork materialization, composition with
-  fence+instrumentation+settle, :core-bug refusal replaced, pod
-  routing to the host session; W3d2 cross-agent live require queued
-  separately) ·
+  logs `tmp/orchestrator/w3d1-*`; STOP 1 resolved with the accepted
+  four-step seam, probe-proven: plain-fork replay MUTATES shared roots
+  (fork copies the env atom, retains identical Vars) — detach-then-
+  recreate is mandatory; graduation now STAMPS
+  `:seon.fn/source-fingerprint` at both install sites; instrumentation
+  exposes it through the wrapper + gains an EPHEMERAL reconciliation
+  mode off the apply ledger; direct-call fast path only on stamped
+  match; private authored fns allowed (child parity); the mislabeled
+  render fixture becomes the positive routing test. W3d2 cross-agent
+  live require queued separately) ·
   **W10 intermittents investigation IN FLIGHT** (read-only, B8/B11 +
   branch-qualified eval-cljs hang, logs
   `tmp/orchestrator/w10-intermittents-*`). Spine after W3b: W3c2
