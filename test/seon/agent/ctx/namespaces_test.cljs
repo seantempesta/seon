@@ -265,13 +265,8 @@
 
 (deftest remote-acquisition-is-bounded-and-selection-scoped
   (let [initial (@#'nss/initial-acquisition-members agent-id)
-        selected (@#'nss/selected-acquisition-members
-                   ['my.agent.tst-2606260000 'my.helper])
-        generated-selected (@#'nss/selected-acquisition-members
-                            ['my.agent.tst-2606260000 'my.helper] true)
         [pull-member latest-member assignment-member
-         generated-assignment-member] initial
-        [pull-many-member tx-member] selected]
+         generated-assignment-member] initial]
     (testing "initial discovery batches agent, namespace, and assignment reads"
       (is (= [protocol/pull-operation protocol/query-operation
               protocol/query-operation protocol/query-operation]
@@ -297,30 +292,115 @@
         (is (contains? selector-values
                        :seon.agent.ctx.namespaces/compact))
         (is (contains? selector-values
-                       :seon.agent.ctx.namespaces/full-source))))
-    (testing "selected rows use one pull-many and one selected tx query"
-      (is (= [protocol/pull-many-operation protocol/query-operation]
-             (mapv ::protocol/operation selected)))
-      (is (= [[:seon.ns/name 'my.agent.tst-2606260000]
-              [:seon.ns/name 'my.helper]]
-             (::protocol/entity-ids pull-many-member)))
-      (let [selector-values
-            (set (tree-seq coll? seq (::protocol/selector pull-many-member)))]
-        (is (contains? selector-values :seon.test/last-passed-at))
-        (is (contains? selector-values :seon.test/last-failed-at))
-        (is (contains? selector-values :seon.test/last-failure-summary)))
-      (is (= [['my.agent.tst-2606260000 'my.helper]]
-             (::protocol/arguments tx-member)))
-      (is (not-any? #{'?all-names}
-                    (tree-seq coll? seq (::protocol/query-form tx-member)))))
-    (testing "generated selection adds the one summary catalog query"
-      (is (= [protocol/pull-many-operation protocol/query-operation
-              protocol/query-operation]
-             (mapv ::protocol/operation generated-selected)))
-      (is (some #{:seon.ns/summary}
-                (tree-seq coll? seq
-                          (::protocol/query-form
-                           (last generated-selected))))))))
+                       :seon.agent.ctx.namespaces/full-source)))
+      (is (every? #(<= (:datahike.resource/max-result-weight %) 60000)
+                  initial)))))
+
+(deftest selected-namespace-acquisition-pages-to-completion
+  (async done
+    (let [original-index-page db/index-page
+          original-pull-many db/pull-many
+          original-query db/query
+          requests (atom [])
+          ns-page (atom 0)]
+      (set! db/index-page
+            (fn
+              ([request]
+              (swap! requests conj request)
+              (let [components (::db/components request)
+                    response
+                    (cond
+                      (= [:seon.ns/name] components)
+                      (if (zero? (swap! ns-page inc))
+                        nil
+                        (if (= 1 @ns-page)
+                          {:datahike.index-page/datoms
+                           [[1 :seon.ns/name cur-ns 10 true]]
+                           :datahike.index-page/complete? false
+                           :datahike.index-page/cursor
+                           [1 :seon.ns/name cur-ns 10 true]}
+                          {:datahike.index-page/datoms
+                           [[2 :seon.ns/name 'my.helper 11 true]
+                            [9 :seon.ns/name 'my.unselected 12 true]]
+                           :datahike.index-page/complete? true}))
+
+                      (= [1 :seon.ns/require-edges] components)
+                      {:datahike.index-page/datoms
+                       [[1 :seon.ns/require-edges 11 10 true]]
+                       :datahike.index-page/complete? true}
+
+                      (= [:seon.fn/ns 1] components)
+                      {:datahike.index-page/datoms
+                       [[21 :seon.fn/ns 1 10 true]]
+                       :datahike.index-page/complete? true}
+
+                      (= [:seon.fn/ns 2] components)
+                      {:datahike.index-page/datoms
+                       [[22 :seon.fn/ns 2 11 true]]
+                       :datahike.index-page/complete? true}
+
+                      :else {:datahike.index-page/datoms []
+                             :datahike.index-page/complete? true})]
+                (js/Promise.resolve response)))
+              ([_database _options]
+               (js/Promise.reject (js/Error. "unexpected index-page arity")))))
+      (set! db/pull-many
+            (fn
+              ([request]
+              (swap! requests conj request)
+              (js/Promise.resolve
+               (case (::db/refs request)
+                 [1] [{:seon.ns/name cur-ns}]
+                 [2] [{:seon.ns/name 'my.helper}]
+                 [11] [{:seon.ns.require/target 'my.helper}]
+                 [21] [{:seon.fn/sym "my.agent.tst-2606260000/plan"}]
+                 [22] [{:seon.fn/sym "my.helper/assist"}]
+                 [])))
+              ([_selector _refs]
+               (js/Promise.reject (js/Error. "unexpected pull-many arity")))
+              ([_database _selector _refs]
+               (js/Promise.reject (js/Error. "unexpected pull-many arity")))))
+      (set! db/query
+            (fn
+              ([request]
+               (swap! requests conj request)
+               (js/Promise.resolve
+                (case (first (::db/args request))
+                  1 "(ns current)"
+                  2 "(ns helper)"
+                  nil)))
+              ([_query & _inputs]
+               (js/Promise.reject (js/Error. "unexpected query arity")))))
+      (-> (js/Promise.resolve
+           ((deref #'nss/acquire-selected-namespace-rows!)
+            database [cur-ns 'my.helper 'my.missing] false))
+          (.then
+           (fn [acquired]
+             (let [rows (:seon.agent.ctx.namespaces/namespace-rows acquired)]
+               (is (= [cur-ns 'my.helper 'my.missing]
+                      (mapv :seon.ns/name rows)))
+               (is (= #{"my.agent.tst-2606260000/plan" "my.helper/assist"}
+                      (into #{} (mapcat #(map :seon.fn/sym (:seon.fn/_ns %)))
+                            rows)))
+               (is (= [{:seon.ns.require/target 'my.helper}]
+                      (:seon.ns/require-edges (first rows))))
+               (is (every? #(identical? database (::db/db %)) @requests))
+               (is (every? #(<= (::db/max-result-weight %) 60000)
+                           (filter #(not= 1048576
+                                          (::db/max-result-weight %))
+                                   @requests)))
+               (is (= #{16 32}
+                      (set (map ::db/limit (filter ::db/index @requests)))))
+               (is (every? #(= [12000] (subvec (::db/args %) 2))
+                           (filter #(= 1048576 (::db/max-result-weight %))
+                                   @requests))))))
+          (.catch (fn [e] (is false (str "threw: " (.-message e)))))
+          (.finally
+           (fn []
+             (set! db/index-page original-index-page)
+             (set! db/pull-many original-pull-many)
+             (set! db/query original-query)
+             (done)))))))
 
 (deftest remote-namespace-failures-keep-member-evidence
   (async done
@@ -347,6 +427,31 @@
             (fn []
               (set! db/execute-many original-execute-many)
               (done)))))))
+
+(deftest namespace-render-preserves-top-level-database-error
+  (async done
+    (let [original-execute-many db/execute-many
+          frame-error {:seon.error/message "Database response exceeds frame."
+                       :seon.error/kind :core-bug
+                       :seon.error/data
+                       {:seon.db.protocol/error-kind
+                        :seon.db.protocol.error/frame-too-large
+                        :seon.db.protocol/request-id "namespaces-frame"}}]
+      (set! db/execute-many (fn [_] (js/Promise.resolve frame-error)))
+      (-> (nss/namespaces-block {:seon.agent/id agent-id
+                                 ::db/db database} nil)
+          (.then
+           (fn [result]
+             (let [out (:seon.render/ai result)]
+               (is (str/includes? out "[namespaces] render failed:"))
+               (is (str/includes? out "namespaces-frame"))
+               (is (str/includes? out "frame-too-large"))
+               (is (not (str/includes? out ":seon.error/data nil"))))))
+          (.catch (fn [e] (is false (str "threw: " (.-message e)))))
+          (.finally
+           (fn []
+             (set! db/execute-many original-execute-many)
+             (done)))))))
 
 (deftest generated-density-overlay-replaces-warm-assignment-selections
   (let [block {:seon.agent.ctx.namespaces/compact
@@ -433,7 +538,7 @@
                   (is (identical? database (::db/db request)))
                   (is (= 500000 (::db/max-work request)))
                   (is (= 256 (::db/max-results request)))
-                  (is (= 262144 (::db/max-result-weight request)))))))
+                  (is (= 60000 (::db/max-result-weight request)))))))
           (.catch (fn [e] (is false (str "threw: " (.-message e)))))
           (.finally (fn [] (set! db/query original-query) (done)))))))
 

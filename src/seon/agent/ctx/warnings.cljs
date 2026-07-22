@@ -12,109 +12,261 @@
     [seon.instrument :as instrument]
     [seon.warn :as warn]))
 
-(def ^:private function-rows-query
-  '[:find ?sym ?nm ?spec ?fnvar ?priv ?err
-    :where
-    [?f :seon.fn/sym ?sym]
-    [?f :seon.fn/ns ?ns]
-    [?ns :seon.ns/name ?nm]
-    [(get-else $ ?f :seon.fn/spec "") ?spec]
-    [(get-else $ ?f :seon.fn/fn-var? true) ?fnvar]
-    [(get-else $ ?f :seon.fn/private? false) ?priv]
-    [(get-else $ ?f :seon.fn/schema-error "") ?err]])
-
 (def ^:private schema-provenance-query
-  '[:find ?key ?process-id
+  '[:find ?requested ?process-id
+    :in $ [?requested ...]
     :where
-    [?schema :seon.schema/key ?key ?tx]
+    [?schema :seon.schema/key ?requested ?tx]
     [?tx :seon.db/process ?process]
     [?process :seon.db.process/id ?process-id]])
-
-(def ^:private schema-forms-query
-  '[:find ?key ?form
-    :where
-    [?schema :seon.schema/key ?key]
-    [?schema :seon.schema/form ?form]])
-
-(def ^:private attribute-counts-query
-  '[:find ?attr (count-distinct ?entity)
-    :where
-    [?schema :seon.schema/key ?attr]
-    [?entity ?attr _]])
 
 (def ^:private database-instant-query
   '[:find (max ?instant) .
     :where
     [?transaction :db/txInstant ?instant]])
 
-(defn- since-query
-  [find where cutoff]
-  (if cutoff
-    {:find find
-     :in '[$ ?cutoff]
-     :where (conj where '[(> ?at ?cutoff)])}
-    {:find find :where where}))
+(def ^:private attribute-counts-query
+  '[:find ?requested (count-distinct ?entity)
+    :in $ [?requested ...]
+    :where
+    [?entity ?requested _]])
 
 (declare query-member member-result latest-user-query)
 
-(defn- runtime-members
-  [cutoff now]
-  [(query-member
-     (since-query '[?eid ?err]
-                  '[[?e :seon.eval/ok? false]
-                    [?e :seon.eval/at ?at]
-                    [?e :seon.eval/id ?eid]
-                    [(get-else $ ?e :seon.eval/error "") ?err]]
-                  cutoff)
-     (cond-> [] cutoff (conj cutoff)) 3000000 65536 2097152)
-   (query-member
-     (since-query '[?eid ?edn ?at]
-                  '[[?e :seon.eval/result-edn ?edn]
-                    [?e :seon.eval/at ?at]
-                    [?e :seon.eval/id ?eid]]
-                  cutoff)
-     (cond-> [] cutoff (conj cutoff)) 3000000 65536 2097152)
-   (query-member
-     (since-query '[?mid ?hops ?at ?fid ?tid]
-                  '[[?m :seon.agent.message/hops ?hops]
-                    [(>= ?hops 4)]
-                    [?m :seon.agent.message/id ?mid]
-                    [?m :seon.agent.message/at ?at]
-                    [?m :seon.agent.message/from ?f]
-                    [?m :seon.agent.message/to ?t]
-                    [(get-else $ ?f :seon.agent/id "user") ?fid]
-                    [(get-else $ ?t :seon.agent/id "user") ?tid]]
-                  cutoff)
-     (cond-> [] cutoff (conj cutoff)) 3000000 65536 2097152)
-   (query-member
-     '[:find ?eid ?dur
-       :in $ ?threshold ?cutoff
-       :where
-       [?e :seon.eval/duration-ms ?dur]
-       [(>= ?dur ?threshold)]
-       [?e :seon.eval/at ?at]
-       [(> ?at ?cutoff)]
-       [?e :seon.eval/id ?eid]]
-     [warn/slow-eval-threshold-ms
-      (js/Date. (- (.getTime ^js now) (* 60 60 1000)))]
-     3000000 65536 1048576)
-   (query-member
-     '[:find ?sym
-       :where
-       [?test :seon.test/sym ?sym]
-       [?test :seon.test/last-failed-at ?failed-at]
-       (or-join [?test ?failed-at]
-                (and (not [?test :seon.test/last-passed-at _])
-                     [(identity ?failed-at) _])
-                (and [?test :seon.test/last-passed-at ?passed-at]
-                     [(> ?failed-at ?passed-at)]))]
-     [] 2000000 65536 1048576)
-   (query-member
-     '[:find ?agent-id ?content
-       :where
-       [?agent :seon.agent/id ?agent-id]
-       [?agent :seon.render.canvas/content ?content]]
-     [] 2000000 65536 1048576)])
+(def ^:private acquisition-page-size 16)
+(def ^:private acquisition-page-max-result-weight 60000)
+
+(defn- database-error
+  [value]
+  (when (and (map? value) (string? (:seon.error/message value))) value))
+
+(defn- ^:async pull-page!
+  [database pull-pattern refs]
+  (if (seq refs)
+    (await
+     (db/pull-many
+      {::db/db database
+       ::db/pull-pattern pull-pattern
+       ::db/refs (vec refs)
+       ::db/max-result-weight acquisition-page-max-result-weight}))
+    []))
+
+(defn- ^:async query-page!
+  [database query arguments]
+  (await
+   (db/query
+    {::db/db database
+     ::db/query query
+     ::db/args arguments
+     ::db/max-results acquisition-page-size
+     ::db/max-result-weight acquisition-page-max-result-weight})))
+
+(defn- ^:async acquire-identity-pages!
+  [database identity-attr initial combine-page acquire-page!]
+  (loop [cursor nil
+         acquired initial]
+    (let [page
+          (await
+           (db/index-page
+            (cond-> {::db/db database
+                     ::db/index :aevt
+                     ::db/components [identity-attr]
+                     ::db/direction :forward
+                     ::db/limit acquisition-page-size
+                     ::db/max-result-weight
+                     acquisition-page-max-result-weight}
+              cursor (assoc ::db/cursor cursor))))]
+      (if-let [error (database-error page)]
+        error
+        (let [page-value (await (acquire-page! page))]
+          (if-let [error (database-error page-value)]
+            error
+            (let [next-acquired (combine-page acquired page-value)]
+              (if (:datahike.index-page/complete? page)
+                next-acquired
+                (recur (:datahike.index-page/cursor page)
+                       next-acquired)))))))))
+
+(defn- ^:async attribute-counts!
+  [database attributes]
+  (loop [remaining (vec attributes)
+         counts {}]
+    (if (empty? remaining)
+      counts
+      (let [page-attributes (subvec remaining 0
+                                    (min acquisition-page-size
+                                         (count remaining)))
+            rows
+            (await
+             (db/query
+              {::db/db database
+               ::db/query attribute-counts-query
+               ::db/args [page-attributes]
+               ::db/max-work 5000000
+               ::db/max-results 65536
+               ::db/max-result-weight acquisition-page-max-result-weight}))]
+        (if-let [error (database-error rows)]
+          error
+          (recur (subvec remaining (count page-attributes))
+                 (into counts rows)))))))
+
+(defn- function-row
+  [entity]
+  [(get entity :seon.fn/sym)
+   (get-in entity [:seon.fn/ns :seon.ns/name])
+   (or (:seon.fn/spec entity) "")
+   (if (contains? entity :seon.fn/fn-var?)
+     (:seon.fn/fn-var? entity) true)
+   (if (contains? entity :seon.fn/private?)
+     (:seon.fn/private? entity) false)
+   (or (:seon.fn/schema-error entity) "")])
+
+(defn- after-cutoff?
+  [at cutoff]
+  (and at (or (nil? cutoff) (> (.getTime ^js at) (.getTime ^js cutoff)))))
+
+(defn- eval-page-data
+  [entities cutoff now]
+  (reduce
+   (fn [data entity]
+     (let [{:seon.eval/keys [id ok? at error result-edn duration-ms]} entity]
+       (cond-> data
+         (and (false? ok?) (after-cutoff? at cutoff))
+         (update ::warn/failed-evals conj [id (or error "")])
+
+         (and (contains? entity :seon.eval/result-edn)
+              (after-cutoff? at cutoff))
+         (update ::warn/fs-results conj [id result-edn at])
+
+         (and duration-ms at
+              (>= duration-ms warn/slow-eval-threshold-ms)
+              (> (.getTime ^js at)
+                 (- (.getTime ^js now) (* 60 60 1000))))
+         (update ::warn/slow-evals conj [id duration-ms]))))
+   {::warn/failed-evals [] ::warn/fs-results [] ::warn/slow-evals []}
+   entities))
+
+(defn- message-page-data
+  [entities]
+  (into []
+        (keep
+         (fn [{:seon.agent.message/keys [id hops at from to]}]
+           (when (and hops (>= hops 4))
+              [id hops at
+              (or (:seon.agent/id from) (:seon.user/id from) "user")
+              (or (:seon.agent/id to) (:seon.user/id to) "user")])))
+        entities))
+
+(defn- test-page-data
+  [entities]
+  (into []
+        (keep
+         (fn [{:seon.test/keys [sym last-failed-at last-passed-at]}]
+           (when (and last-failed-at
+                      (or (nil? last-passed-at)
+                          (> (.getTime ^js last-failed-at)
+                             (.getTime ^js last-passed-at))))
+             [sym])))
+        entities))
+
+(defn- canvas-page-data
+  [entities]
+  (into []
+        (keep
+         (fn [{:seon.agent/keys [id] :as entity}]
+           (when (contains? entity :seon.render.canvas/content)
+             [id (:seon.render.canvas/content entity)])))
+        entities))
+
+(def ^:private function-pull-pattern
+  '[:seon.fn/sym :seon.fn/spec :seon.fn/fn-var? :seon.fn/private?
+    :seon.fn/schema-error {:seon.fn/ns [:seon.ns/name]}])
+
+(def ^:private schema-pull-pattern
+  '[:seon.schema/key :seon.schema/form])
+
+(def ^:private eval-pull-pattern
+  '[:seon.eval/id :seon.eval/ok? :seon.eval/at :seon.eval/error
+    :seon.eval/result-edn :seon.eval/duration-ms])
+
+(def ^:private message-pull-pattern
+  '[:seon.agent.message/id :seon.agent.message/hops :seon.agent.message/at
+    {:seon.agent.message/from [:seon.agent/id :seon.user/id]}
+    {:seon.agent.message/to [:seon.agent/id :seon.user/id]}])
+
+(def ^:private test-pull-pattern
+  '[:seon.test/sym :seon.test/last-failed-at :seon.test/last-passed-at])
+
+(def ^:private canvas-pull-pattern
+  '[:seon.agent/id :seon.render.canvas/content])
+
+(defn- ^:async acquire-entities!
+  [database identity-attr pull-pattern page-fn initial combine-page]
+  (await
+   (acquire-identity-pages!
+    database identity-attr initial combine-page
+    (fn ^:async acquire-page [page]
+      (let [entities
+            (await
+             (pull-page! database pull-pattern
+                         (mapv first (:datahike.index-page/datoms page))))]
+        (if-let [error (database-error entities)]
+          error
+          (page-fn entities)))))))
+
+(defn- merge-schema-data
+  [left right]
+  (-> left
+      (update ::warn/installed-schema merge (::warn/installed-schema right))
+      (update ::warn/schema-provenance into (::warn/schema-provenance right))
+      (update ::warn/schema-forms into (::warn/schema-forms right))
+      (update ::warn/attribute-counts merge (::warn/attribute-counts right))))
+
+(defn- ^:async acquire-schema-data!
+  [database]
+  (await
+   (acquire-identity-pages!
+    database :seon.schema/key
+    {::warn/installed-schema {}
+     ::warn/schema-provenance []
+     ::warn/schema-forms []
+     ::warn/attribute-counts {}}
+    merge-schema-data
+    (fn ^:async acquire-page [page]
+      (let [datoms (:datahike.index-page/datoms page)
+            entity-ids (mapv first datoms)
+            keys (mapv #(nth % 2) datoms)
+            schemas (await (pull-page! database schema-pull-pattern entity-ids))]
+        (if-let [error (database-error schemas)]
+          error
+          (let [installed
+                (await (pull-page! database '[*]
+                                   (mapv #(vector :db/ident %) keys)))]
+            (if-let [error (database-error installed)]
+              error
+              (let [provenance
+                    (await (query-page! database schema-provenance-query [keys]))]
+                (if-let [error (database-error provenance)]
+                  error
+                  (let [installed-attributes (into [] (keep :db/ident) installed)
+                        counts
+                        (await (attribute-counts! database installed-attributes))]
+                    (if-let [error (database-error counts)]
+                      error
+                      {::warn/installed-schema
+                       (into {}
+                             (keep (fn [entity]
+                                     (when entity [(:db/ident entity) entity])))
+                             installed)
+                       ::warn/schema-provenance provenance
+                       ::warn/schema-forms
+                       (into []
+                             (keep (fn [entity]
+                                     (when (contains? entity :seon.schema/form)
+                                       [(:seon.schema/key entity)
+                                        (:seon.schema/form entity)])))
+                             schemas)
+                       ::warn/attribute-counts counts}))))))))))))
 
 (defn ^:async ^:private acquire-warnings
   [agent-id agent database]
@@ -125,60 +277,79 @@
              ::db/members
              [(query-member latest-user-query)
               (query-member home/latest-successful-ns-query
-                            [agent-id] 1000000 32768 262144)
+                            [agent-id] 1000000 32768
+                            acquisition-page-max-result-weight)
               (query-member home/namespace-assignment-query
-                            [agent-id] 100000 64 4096)
-              (query-member function-rows-query [] 5000000 65536 2097152)
-              {::protocol/operation protocol/schema-operation}
-              (query-member schema-provenance-query [] 3000000 65536 2097152)
-              (query-member schema-forms-query [] 3000000 65536 2097152)
-              (query-member attribute-counts-query [] 5000000 65536 2097152)
-              ;; The (max ?instant) scalar still counts its SCANNED relation
-              ;; against the results budget — one row per transaction — so the
-              ;; budget must cover the transaction count, not the scalar output
-              ;; (a 1-row budget failed closed on any grown database and took
-              ;; the whole warnings block down with it).
-              (query-member database-instant-query [] 2000000 65536 1048576)]
-             ::db/max-result-weight 3670016}))
+                            [agent-id] 100000 64
+                            acquisition-page-max-result-weight)
+              (query-member database-instant-query [] 2000000 65536
+                            acquisition-page-max-result-weight)]
+             ::db/max-result-weight acquisition-page-max-result-weight}))
         first-members (::db/results first-result)]
-    (if-not (and (not (:seon.error/message first-result))
-                 (every? #(true? (::protocol/success? %)) first-members))
-      {:seon.error/message "Warning acquisition failed."
-       :seon.error/data first-members}
-      (let [[cutoff-member eval-ns-member assignment-member fn-member
-             schema-member provenance-member
-             forms-member counts-member instant-member] first-members
+    (cond
+      (database-error first-result) first-result
+      (not-every? #(true? (::protocol/success? %)) first-members)
+      (let [failed (first (remove #(true? (::protocol/success? %))
+                                  first-members))]
+        {:seon.error/message "Warning acquisition member failed."
+         :seon.error/data failed
+         :seon.error/kind :core-bug})
+      :else
+      (let [[cutoff-member eval-ns-member assignment-member instant-member]
+            first-members
             cutoff (ffirst (member-result cutoff-member))
             now (member-result instant-member)
-            runtime-result
-            (await (db/execute-many
-                     {::db/db database
-                      ::db/members (runtime-members cutoff now)
-                      ::db/max-result-weight 3145728}))
-            runtime (::db/results runtime-result)]
-        (if-not (and (not (:seon.error/message runtime-result))
-                     (every? #(true? (::protocol/success? %)) runtime))
-          {:seon.error/message "Warning runtime acquisition failed."
-           :seon.error/data runtime}
-          (let [[failed fs-results hops slow failing canvases]
-                (map member-result runtime)]
-            {::warn/current-ns
-             (home/current-ns
-              agent-id agent
-              (some-> (member-result eval-ns-member) first)
-              (some-> (member-result assignment-member) first))
-             ::warn/data
-             {::warn/function-rows (member-result fn-member)
-              ::warn/installed-schema (::protocol/schema schema-member)
-              ::warn/schema-provenance (member-result provenance-member)
-              ::warn/schema-forms (member-result forms-member)
-              ::warn/attribute-counts (into {} (member-result counts-member))
-              ::warn/failed-evals failed
-              ::warn/fs-results fs-results
-              ::warn/hop-messages hops
-              ::warn/slow-evals slow
-              ::warn/failing-tests failing
-              ::warn/canvases canvases}}))))))
+            functions
+            (await
+             (acquire-entities! database :seon.fn/sym function-pull-pattern
+                                #(mapv function-row %) [] into))]
+        (if-let [error (database-error functions)]
+          error
+          (let [schema-data (await (acquire-schema-data! database))]
+            (if-let [error (database-error schema-data)]
+              error
+              (let [eval-data
+                    (await
+                     (acquire-entities!
+                      database :seon.eval/id eval-pull-pattern
+                      #(eval-page-data % cutoff now)
+                      {::warn/failed-evals [] ::warn/fs-results []
+                       ::warn/slow-evals []}
+                      (partial merge-with into)))]
+                (if-let [error (database-error eval-data)]
+                  error
+                  (let [hops
+                        (await
+                         (acquire-entities!
+                          database :seon.agent.message/id message-pull-pattern
+                          message-page-data [] into))]
+                    (if-let [error (database-error hops)]
+                      error
+                      (let [failing
+                            (await
+                             (acquire-entities!
+                              database :seon.test/sym test-pull-pattern
+                              test-page-data [] into))]
+                        (if-let [error (database-error failing)]
+                          error
+                          (let [canvases
+                                (await
+                                 (acquire-entities!
+                                  database :seon.agent/id canvas-pull-pattern
+                                  canvas-page-data [] into))]
+                            (if-let [error (database-error canvases)]
+                              error
+                              {::warn/current-ns
+                               (home/current-ns
+                                agent-id agent
+                                (some-> (member-result eval-ns-member) first)
+                                (some-> (member-result assignment-member) first))
+                               ::warn/data
+                               (merge schema-data eval-data
+                                      {::warn/function-rows functions
+                                       ::warn/hop-messages hops
+                                       ::warn/failing-tests failing
+                                       ::warn/canvases canvases})})))))))))))))))
 
 (defn ^:async warnings-block
   "Current problems as a `WARNINGS` comment-block, or empty when clean.
@@ -208,9 +379,8 @@
                    (some? override)            override
                    :else (or (::warn/current-ns acquired)
                              (home/home-ns id)))]
-    (if-let [message (:seon.error/message acquired)]
-      (str "[warnings] render failed: " message " "
-           (pr-str (:seon.error/data acquired)))
+    (if (:seon.error/message acquired)
+      (str "[warnings] render failed: " (pr-str acquired))
       (warn/render-warnings
         (cond-> {::warn/data (::warn/data acquired)}
           (some? scope) (assoc :seon.warn/ns

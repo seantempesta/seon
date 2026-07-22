@@ -203,17 +203,23 @@
     :seon.ns.require/refer-all?
     :seon.ns.require/as-alias?])
 
-(def ^:private namespace-selector
-  `[:seon.ns/name
-    :seon.ns/source
-    {:seon.ns/require-edges ~require-edge-selector}
-    {:seon.fn/_ns [:seon.fn/sym :seon.fn/arglists :seon.fn/doc
-                   :seon.fn/source :seon.fn/spec :seon.fn/private?
-                   :seon.fn/fn-var? :seon.fn/schema-error]}
-    {:seon.schema/_ns [:seon.schema/key :seon.schema/form]}
-    {:seon.test/_ns [:seon.test/sym :seon.test/source
-                     :seon.test/last-passed-at :seon.test/last-failed-at
-                     :seon.test/last-failure-summary]}])
+(def ^:private namespace-base-selector
+  '[:seon.ns/name])
+
+(def ^:private function-selector
+  '[:seon.fn/sym :seon.fn/arglists :seon.fn/doc :seon.fn/source
+    :seon.fn/spec :seon.fn/private? :seon.fn/fn-var?
+    :seon.fn/schema-error])
+
+(def ^:private schema-selector
+  '[:seon.schema/key :seon.schema/form])
+
+(def ^:private test-selector
+  '[:seon.test/sym :seon.test/source :seon.test/last-passed-at
+    :seon.test/last-failed-at :seon.test/last-failure-summary])
+
+(def ^:private catalog-selector
+  '[:seon.ns/name :seon.ns/summary])
 
 (def ^:private agent-selector
   `[:seon.agent/id
@@ -240,12 +246,6 @@
            ['?step :my.plan/message '?message]
            ['?step :my.plan/namespace '?namespace]]})
 
-(def ^:private namespace-catalog-query
-  '{:find [?name ?summary]
-    :where [[?namespace :seon.ns/name ?name]
-            [(get-else $ ?namespace :seon.ns/summary "") ?summary]]
-    :order-by [?name :asc]})
-
 (defn- initial-acquisition-members
   [id]
   [{::protocol/operation protocol/pull-operation
@@ -253,7 +253,7 @@
     ::protocol/entity-id [:seon.agent/id id]
     :datahike.resource/max-work 100000
     :datahike.resource/max-results 2048
-    :datahike.resource/max-result-weight 262144}
+    :datahike.resource/max-result-weight 60000}
    {::protocol/operation protocol/query-operation
     ::protocol/query-form home/latest-successful-ns-query
     ::protocol/arguments [id]
@@ -261,7 +261,7 @@
     ;; Datahike counts intermediate relation rows before order/limit. This
     ;; admits roughly 8,000 successful evals and fails explicitly beyond it.
     :datahike.resource/max-results 32768
-    :datahike.resource/max-result-weight 262144}
+    :datahike.resource/max-result-weight 60000}
    {::protocol/operation protocol/query-operation
     ::protocol/query-form home/namespace-assignment-query
     ::protocol/arguments [id]
@@ -273,37 +273,23 @@
     ::protocol/arguments [id]
     :datahike.resource/max-work 1000000
     :datahike.resource/max-results 64
-    :datahike.resource/max-result-weight 65536}])
+    :datahike.resource/max-result-weight 60000}])
 
-(defn- selected-acquisition-members
-  ([names] (selected-acquisition-members names false))
-  ([names include-catalog?]
-   (cond->
-    [{::protocol/operation protocol/pull-many-operation
-      ::protocol/selector namespace-selector
-      ::protocol/entity-ids
-      (mapv (fn [nm] [:seon.ns/name nm]) names)
-      :datahike.resource/max-work 2000000
-      :datahike.resource/max-results 50000
-      :datahike.resource/max-result-weight 3145728}
-     {::protocol/operation protocol/query-operation
-      ::protocol/query-form
-      '[:find ?name ?tx
-        :in $ [?name ...]
-        :where
-        [?namespace :seon.ns/name ?name ?tx]]
-      ::protocol/arguments [names]
-      :datahike.resource/max-work 500000
-      :datahike.resource/max-results 256
-      :datahike.resource/max-result-weight 8192}]
-     include-catalog?
-     (conj
-      {::protocol/operation protocol/query-operation
-       ::protocol/query-form namespace-catalog-query
-       ::protocol/arguments []
-       :datahike.resource/max-work 2000000
-       :datahike.resource/max-results 8192
-       :datahike.resource/max-result-weight 524288}))))
+(def ^:private acquisition-page-size 32)
+(def ^:private acquisition-pull-page-size 16)
+(def ^:private acquisition-page-max-result-weight 60000)
+(def ^:private source-chunk-chars 12000)
+(def ^:private source-query-max-result-weight (* 1024 1024))
+
+(def ^:private source-chunk-query
+  '[:find ?chunk .
+    :in $ ?entity ?start ?limit
+    :where
+    [?entity :seon.ns/source ?source]
+    [(clojure.core/count ?source) ?length]
+    [(clojure.core/+ ?start ?limit) ?requested-end]
+    [(clojure.core/min ?length ?requested-end) ?end]
+    [(clojure.core/subs ?source ?start ?end) ?chunk]])
 
 (defn- member-result
   [member]
@@ -316,6 +302,179 @@
   {:seon.error/message (str "Namespace " stage " failed.")
    :seon.error/data value
    :seon.error/kind :core-bug})
+
+(defn- database-error
+  [value]
+  (when (and (map? value) (string? (:seon.error/message value))) value))
+
+(defn- ^:async pull-page!
+  [database pull-pattern refs]
+  (if (seq refs)
+    (await
+     (db/pull-many
+      {::db/db database
+       ::db/pull-pattern pull-pattern
+       ::db/refs (vec refs)
+       ::db/max-result-weight acquisition-page-max-result-weight}))
+    []))
+
+(defn- ^:async acquire-namespace-source!
+  [database namespace-id]
+  (loop [start 0
+         chunks []]
+    (let [chunk
+          (await
+           (db/query
+            {::db/db database
+             ::db/query source-chunk-query
+             ::db/args [namespace-id start source-chunk-chars]
+             ::db/max-results 8
+             ;; The query engine accounts for the full bound source before
+             ;; projecting `subs`; the wire result remains one bounded chunk.
+             ::db/max-result-weight source-query-max-result-weight}))]
+      (if-let [error (database-error chunk)]
+        error
+        (cond
+          (nil? chunk) {}
+          (< (count chunk) source-chunk-chars)
+          {:seon.ns/source (apply str (conj chunks chunk))}
+          :else
+          (recur (+ start source-chunk-chars) (conj chunks chunk)))))))
+
+(defn- ^:async acquire-index-entities!
+  [database index components ref-fn pull-pattern]
+  (loop [cursor nil
+         entities []]
+    (let [page
+          (await
+           (db/index-page
+            (cond-> {::db/db database
+                     ::db/index index
+                     ::db/components components
+                     ::db/direction :forward
+                     ::db/limit acquisition-pull-page-size
+                     ::db/max-result-weight
+                     acquisition-page-max-result-weight}
+              cursor (assoc ::db/cursor cursor))))]
+      (if-let [error (database-error page)]
+        error
+        (let [pulled
+              (await
+               (pull-page! database pull-pattern
+                           (mapv ref-fn
+                                 (:datahike.index-page/datoms page))))]
+          (if-let [error (database-error pulled)]
+            error
+            (let [next-entities (into entities pulled)]
+              (if (:datahike.index-page/complete? page)
+                next-entities
+                (recur (:datahike.index-page/cursor page)
+                       next-entities)))))))))
+
+(defn- ^:async acquire-namespace-identities!
+  [database selected-names include-catalog?]
+  (loop [cursor nil
+         selected []
+         catalog []]
+    (let [page
+          (await
+           (db/index-page
+            (cond-> {::db/db database
+                     ::db/index :aevt
+                     ::db/components [:seon.ns/name]
+                     ::db/direction :forward
+                     ::db/limit acquisition-page-size
+                     ::db/max-result-weight
+                     acquisition-page-max-result-weight}
+              cursor (assoc ::db/cursor cursor))))]
+      (if-let [error (database-error page)]
+        error
+        (let [datoms (:datahike.index-page/datoms page)
+              matching (filterv #(contains? selected-names (nth % 2)) datoms)
+              catalog-entities
+              (if include-catalog?
+                (await (pull-page! database catalog-selector (mapv first datoms)))
+                [])]
+          (if-let [error (database-error catalog-entities)]
+            error
+            (let [next-selected (into selected matching)
+                  next-catalog
+                  (into catalog
+                        (keep (fn [entity]
+                                (when entity
+                                  [(:seon.ns/name entity)
+                                   (or (:seon.ns/summary entity) "")])))
+                        catalog-entities)]
+              (if (:datahike.index-page/complete? page)
+                {::selected-identities next-selected
+                 ::catalog-rows (vec (sort-by (comp name first) next-catalog))}
+                (recur (:datahike.index-page/cursor page)
+                       next-selected next-catalog)))))))))
+
+(defn- ^:async acquire-one-namespace-row!
+  [database [namespace-id _attr namespace-name tx _added?]]
+  (let [base (await (pull-page! database namespace-base-selector [namespace-id]))]
+    (if-let [error (database-error base)]
+      error
+      (let [source (await (acquire-namespace-source! database namespace-id))]
+        (if-let [error (database-error source)]
+          error
+          (let [edges
+                (await
+                 (acquire-index-entities!
+                  database :eavt [namespace-id :seon.ns/require-edges]
+                  #(nth % 2) require-edge-selector))]
+            (if-let [error (database-error edges)]
+              error
+              (let [functions
+                    (await
+                     (acquire-index-entities!
+                      database :avet [:seon.fn/ns namespace-id]
+                      first function-selector))]
+                (if-let [error (database-error functions)]
+                  error
+                  (let [schemas
+                        (await
+                         (acquire-index-entities!
+                          database :avet [:seon.schema/ns namespace-id]
+                          first schema-selector))]
+                    (if-let [error (database-error schemas)]
+                      error
+                      (let [tests
+                            (await
+                             (acquire-index-entities!
+                              database :avet [:seon.test/ns namespace-id]
+                              first test-selector))]
+                        (if-let [error (database-error tests)]
+                          error
+                          (merge
+                           (or (first base) {:seon.ns/name namespace-name})
+                           source
+                           {:seon.db/tx tx
+                            :seon.ns/require-edges edges
+                            :seon.fn/_ns functions
+                            :seon.schema/_ns schemas
+                            :seon.test/_ns tests}))))))))))))))
+
+(defn- ^:async acquire-selected-namespace-rows!
+  [database names include-catalog?]
+  (let [identities
+        (await
+         (acquire-namespace-identities! database (set names) include-catalog?))]
+    (if-let [error (database-error identities)]
+      error
+      (loop [remaining (::selected-identities identities)
+             rows-by-name {}]
+        (if (empty? remaining)
+          {::namespace-rows
+           (mapv #(get rows-by-name % {:seon.ns/name %}) names)
+           ::catalog-rows (::catalog-rows identities)}
+          (let [row (await (acquire-one-namespace-row! database
+                                                       (first remaining)))]
+            (if-let [error (database-error row)]
+              error
+              (recur (subvec remaining 1)
+                     (assoc rows-by-name (:seon.ns/name row) row)))))))))
 
 (defn- effective-selections
   "Stored density pins plus this active generated assignment's exact overlay.
@@ -351,7 +510,8 @@
                   (await (db/execute-many
                            {::db/db database
                             ::db/members (initial-acquisition-members id)
-                            ::db/max-result-weight 786432})))]
+                            ::db/max-result-weight
+                            acquisition-page-max-result-weight})))]
     (if (:seon.error/message initial)
       (acquisition-error "initial acquisition" initial)
       (let [[agent-member eval-ns-member assignment-member
@@ -375,7 +535,8 @@
                                  ::db/ref [:seon.ns/name cur-ns]
                                  ::db/max-work 100000
                                  ::db/max-results 512
-                                 ::db/max-result-weight 65536}))]
+                                 ::db/max-result-weight
+                                 acquisition-page-max-result-weight}))]
             (if (and (map? current-row) (:seon.error/message current-row))
               (acquisition-error "require-edge acquisition" current-row)
               (let [block (some (fn [candidate]
@@ -407,38 +568,22 @@
                                (sort-by name)
                                vec)
                     selected
-                    (await (db/execute-many
-                             {::db/db database
-                              ::db/members
-                              (selected-acquisition-members
-                               names (some? generated-assignment))
-                              ;; Leave 448 KiB beneath the 4 MiB frame ceiling
-                              ;; for the protocol response.
-                              ::db/max-result-weight 3735552}))
-                    [rows-member tx-member catalog-member]
-                    (::db/results selected)]
-                (if-not (and (true? (::protocol/success? rows-member))
-                             (true? (::protocol/success? tx-member))
-                             (or (nil? generated-assignment)
-                                 (true? (::protocol/success? catalog-member))))
-                  (acquisition-error "selected member" (::db/results selected))
-                  (let [rows (member-result rows-member)
-                        txs (into {} (member-result tx-member))]
-                    {::db/db database
-                     :seon.agent/id id
-                     :seon.agent.ctx.render-fns/current-ns cur-ns
-                     ::compact compact-cfg
-                     ::full-source full-source-cfg
-                     ::with-tests with-tests-cfg
-                     ::current-full? current-full?
-                     ::current-tests? current-tests?
-                     ::generated-assignment generated-assignment
-                     ::catalog-rows (vec (member-result catalog-member))
-                     ::namespace-rows
-                     (mapv (fn [nm row]
-                             (cond-> (or row {:seon.ns/name nm})
-                               (get txs nm) (assoc :seon.db/tx (get txs nm))))
-                           names rows)}))))))))))
+                    (await
+                     (acquire-selected-namespace-rows!
+                      database names (some? generated-assignment)))]
+                (if-let [error (database-error selected)]
+                  (acquisition-error "selected acquisition" error)
+                  {::db/db database
+                   :seon.agent/id id
+                   :seon.agent.ctx.render-fns/current-ns cur-ns
+                   ::compact compact-cfg
+                   ::full-source full-source-cfg
+                   ::with-tests with-tests-cfg
+                   ::current-full? current-full?
+                   ::current-tests? current-tests?
+                   ::generated-assignment generated-assignment
+                   ::catalog-rows (::catalog-rows selected)
+                   ::namespace-rows (::namespace-rows selected)})))))))))
 
 (def ^:private schema-frontier-query
   '[:find ?requested ?form
@@ -456,11 +601,7 @@
    ::db/args [frontier]
    ::db/max-work 500000
    ::db/max-results 256
-   ::db/max-result-weight 262144})
-
-(defn- database-error
-  [value]
-  (when (and (map? value) (string? (:seon.error/message value))) value))
+   ::db/max-result-weight acquisition-page-max-result-weight})
 
 (defn ^:async ^:private acquire-one-schema-closure!
   [database row state]
