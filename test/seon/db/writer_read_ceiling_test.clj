@@ -1,6 +1,7 @@
 (ns seon.db.writer-read-ceiling-test
   "Writer-enforced read ceiling and deadline tests."
   (:require [clojure.test :refer [deftest is testing]]
+            [clojure.string :as str]
             [datahike.api :as d]
             [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds]
@@ -108,12 +109,32 @@
    ::writer/read-deadline-ms deadline-ms})
 
 (defn- budget-error?
-  [response budget-name allowed]
+  [response budget-name configuration-key allowed]
   (and (false? (::protocol/success? response))
        (= protocol/database-error (::protocol/error-kind response))
+       (= :user-input (:seon.error/kind response))
+       (= configuration-key (::protocol/configuration-key response))
        (true? (:datahike/budget-exceeded response))
        (= budget-name (:datahike.budget/name response))
        (= allowed (:datahike.budget/allowed response))))
+
+(deftest every-datahike-read-budget-names-its-governing-config-key
+  (doseq [[budget-name configuration-key]
+          [[:query-work :seon.config.database.read/max-work]
+           [:query-results :seon.config.database.read/max-results]
+           [:result-weight :seon.config.database.read/max-result-weight]]]
+    (let [response
+          (#'writer/request-failure-response
+           (ex-info "structured budget decline"
+                    {:datahike/budget-exceeded true
+                     :datahike.budget/name budget-name
+                     :datahike.budget/observed 7
+                     :datahike.budget/allowed 5}))]
+      (is (budget-error? response budget-name configuration-key 5))
+      (is (= 7 (:datahike.budget/observed response)))
+      (is (str/includes? (::protocol/error response) (str configuration-key)))
+      (is (str/includes? (::protocol/error response) "observed 7"))
+      (is (str/includes? (::protocol/error response) "allowed 5")))))
 
 (defn- with-writer
   [label defaults selected-processors channel-count body]
@@ -143,7 +164,13 @@
         (let [limited (call! channel
                              (unbounded-query database "capless/hostile"))
               healthy (call! channel (quick-query database "capless/healthy"))]
-          (is (budget-error? limited :query-results 100))
+          (is (budget-error? limited :query-results
+                             :seon.config.database.read/max-results 100))
+          (is (= 101 (:datahike.budget/observed limited)))
+          (is (str/includes? (::protocol/error limited)
+                             ":seon.config.database.read/max-results"))
+          (is (str/includes? (::protocol/error limited) "observed 101"))
+          (is (str/includes? (::protocol/error limited) "allowed 100"))
           (is (::protocol/success? healthy))
           (is (integer? (:datahike.query/result healthy))))))))
 
@@ -159,7 +186,9 @@
                               (slow-query database "deadline/hostile" -1))
               elapsed-ms (/ (double (- (System/nanoTime) started)) 1000000.0)
               healthy (call! channel (quick-query database "deadline/healthy"))]
-          (is (budget-error? response :deadline deadline-ms))
+          (is (budget-error? response :deadline
+                             :seon.config.database.read/deadline-ms
+                             deadline-ms))
           (is (<= 50.0 elapsed-ms 2500.0))
           (is (::protocol/success? healthy)))))))
 
@@ -172,7 +201,8 @@
               (call! channel
                      (assoc (unbounded-query database "client/lower")
                             :datahike.resource/max-results 7))]
-          (is (budget-error? response :query-results 7))
+          (is (budget-error? response :query-results
+                             :seon.config.database.read/max-results 7))
           (is (= 8 (:datahike.budget/observed response))))))))
 
 (deftest client-read-ceiling-above-server-maximum-is-clamped
@@ -184,7 +214,8 @@
               (call! channel
                      (assoc (unbounded-query database "client/higher")
                             :datahike.resource/max-results 1000))]
-          (is (budget-error? response :query-results 50))
+          (is (budget-error? response :query-results
+                             :seon.config.database.read/max-results 50))
           (is (not= 1000 (:datahike.budget/allowed response))))))))
 
 (deftest hostile-capless-read-does-not-block-a-parallel-quick-read
@@ -207,4 +238,6 @@
               (is (not= ::timeout quick-response))
               (is (::protocol/success? quick-response)))
             (is (not= ::timeout hostile-response))
-            (is (budget-error? hostile-response :deadline deadline-ms))))))))
+            (is (budget-error? hostile-response :deadline
+                               :seon.config.database.read/deadline-ms
+                               deadline-ms))))))))

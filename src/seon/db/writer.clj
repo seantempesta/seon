@@ -45,6 +45,12 @@
    :datahike.resource/max-results
    :datahike.resource/max-result-weight])
 
+(def ^:private read-budget-configuration-keys
+  {:query-work :seon.config.database.read/max-work
+   :query-results :seon.config.database.read/max-results
+   :result-weight :seon.config.database.read/max-result-weight
+   :deadline :seon.config.database.read/deadline-ms})
+
 (schema/register! ::read-deadline-ms [:int {:min 1}])
 (schema/register!
  ::read-defaults
@@ -877,24 +883,42 @@
             #(mapv (partial clamp-read-resources read-defaults) %))
     (clamp-read-resources read-defaults request)))
 
-(defn- budget-error-body
+(defn- budget-decline
   [throwable]
-  (let [data (ex-data throwable)]
-    (when (true? (:datahike/budget-exceeded data))
-      (select-keys data [:datahike/budget-exceeded
-                         :datahike.budget/name
-                         :datahike.budget/observed
-                         :datahike.budget/allowed]))))
+  (let [data (ex-data throwable)
+        budget-name (:datahike.budget/name data)
+        configuration-key (get read-budget-configuration-keys budget-name)]
+    (when (and (true? (:datahike/budget-exceeded data))
+               configuration-key)
+      (let [{:datahike.budget/keys [observed allowed]} data]
+        {::protocol/error
+         (str "The database read exceeded " budget-name
+              " (observed " observed ", allowed " allowed "). "
+              "Narrow the query, page the read, or raise "
+              configuration-key ".")
+         :seon.error/kind :user-input
+         ::protocol/body
+         (assoc (select-keys data [:datahike/budget-exceeded
+                                   :datahike.budget/name
+                                   :datahike.budget/observed
+                                   :datahike.budget/allowed])
+                ::protocol/configuration-key configuration-key)}))))
 
 (defn- budget-failure
   [budget-name allowed]
-  (protocol/failure
-   {::protocol/error-kind protocol/database-error
-    ::protocol/error "The database read exceeded its resource budget."
-    ::protocol/body
-    {:datahike/budget-exceeded true
-     :datahike.budget/name budget-name
-     :datahike.budget/allowed allowed}}))
+  (let [configuration-key (get read-budget-configuration-keys budget-name)]
+    (protocol/failure
+     {::protocol/error-kind protocol/database-error
+      ::protocol/error
+      (str "The database read exceeded " budget-name
+           " (allowed " allowed "). Narrow the query, page the read, or raise "
+           configuration-key ".")
+      :seon.error/kind :user-input
+      ::protocol/body
+      {:datahike/budget-exceeded true
+       :datahike.budget/name budget-name
+       :datahike.budget/allowed allowed
+       ::protocol/configuration-key configuration-key}})))
 
 (defn- read-response-base
   [request]
@@ -1141,15 +1165,15 @@
 (defn- member-failure
   [throwable]
   (let [kind (:seon.error/kind (ex-data throwable))
-        body (budget-error-body throwable)]
+        decline (budget-decline throwable)]
     (protocol/failure
      (cond->
       {::protocol/error-kind
        (or (::failure-kind (ex-data throwable)) protocol/database-error)
        ::protocol/error (or (.getMessage ^Throwable throwable)
                             "The database read failed.")}
-       body (assoc ::protocol/body body)
-       kind (assoc :seon.error/kind kind)))))
+       decline (merge decline)
+       (and kind (nil? decline)) (assoc :seon.error/kind kind)))))
 
 (declare cancel-query-caller!)
 
@@ -2288,7 +2312,7 @@
 (defn- request-failure-response
   [^Throwable throwable]
   (let [kind (:seon.error/kind (ex-data throwable))
-        body (budget-error-body throwable)]
+        decline (budget-decline throwable)]
     (protocol/failure
      (cond->
       {::protocol/error-kind
@@ -2306,8 +2330,8 @@
          :else protocol/database-error)
        ::protocol/error
        (str (.getMessage throwable) " " (pr-str (ex-data throwable)))}
-       body (assoc ::protocol/body body)
-       kind (assoc :seon.error/kind kind)))))
+       decline (merge decline)
+       (and kind (nil? decline)) (assoc :seon.error/kind kind)))))
 
 (declare claim-request!)
 

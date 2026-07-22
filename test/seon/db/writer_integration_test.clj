@@ -51,6 +51,15 @@
     (is (protocol/valid-response?
          (assoc member ::protocol/request-id "query/user-input")))))
 
+(deftest unknown-writer-failures-remain-unkinded-for-the-client-default
+  (let [throwable (ex-info "unknown database failure" {:unknown/data true})
+        response (#'writer/request-failure-response throwable)
+        member (#'writer/member-failure throwable)]
+    (is (nil? (:seon.error/kind response)))
+    (is (nil? (:seon.error/kind member)))
+    (is (protocol/valid-response?
+         (assoc member ::protocol/request-id "query/unknown")))))
+
 (defn- acquire!
   [channel database-name label]
   (call! channel
