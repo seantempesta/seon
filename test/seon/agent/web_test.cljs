@@ -32,7 +32,7 @@
     [clojure.string :as str]
     [my.blob :as blob]
     [seon.agent.web :as web]
-    [seon.agent.web.internal :as int]
+    [seon.agent.web.pod :as int]
     [seon.ai.tokens :as tokens]
     [seon.config :as config]
     [seon.db :as db]

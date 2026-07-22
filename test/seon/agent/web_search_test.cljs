@@ -22,6 +22,7 @@
     [clojure.string :as str]
     [seon.agent.web :as web]
     [seon.agent.web.internal :as int]
+    [seon.agent.web.pod :as pod]
     [seon.ai.tokens :as tokens]
     [seon.config :as config]
     [seon.db :as db]
@@ -132,7 +133,7 @@
              ;; each test starts from the granted/keyed/gemini baseline
              (set-env! "SEON_WEB" "1")
              (set-env! "GEMINI_API_KEY" "test-key-not-real"))
-   :after  (fn [] (reset! int/!gemini-impl nil) (reset! int/!serper-impl nil))})
+   :after  (fn [] (reset! pod/!gemini-impl nil) (reset! pod/!serper-impl nil))})
 
 (defn- run-test [chain done]
   (-> (js/Promise.resolve
@@ -228,7 +229,7 @@
 
 (deftest search-success-assembles-response
   (async done
-    (reset! int/!gemini-impl (fake-gemini grounding-body))
+    (reset! pod/!gemini-impl (fake-gemini grounding-body))
     (run-test
       (fn [_]
         (-> (web/search {:seon.agent.web/query "current stable Clojure version"})
@@ -257,7 +258,7 @@
   (testing "grounding declined (empty ::results): the hint must NOT advertise
             fetchable ::url values it doesn't have; ::answer still surfaces (O5)"
     (async done
-      (reset! int/!gemini-impl (fake-gemini no-grounding-body))
+      (reset! pod/!gemini-impl (fake-gemini no-grounding-body))
       (run-test
         (fn [_]
           (-> (web/search {:seon.agent.web/query "observer pattern reactive python"})
@@ -279,7 +280,7 @@
 
 (deftest search-honors-max-results-cap
   (async done
-    (reset! int/!gemini-impl (fake-gemini grounding-body))
+    (reset! pod/!gemini-impl (fake-gemini grounding-body))
     (run-test
       (fn [_]
         (-> (web/search {:seon.agent.web/query       "clojure"
@@ -293,7 +294,7 @@
 (deftest search-ungranted-is-an-error-value
   (async done
     (set-env! "SEON_WEB" "0")
-    (reset! int/!gemini-impl (fn [& _] (throw (js/Error. "backend must not run when ungranted"))))
+    (reset! pod/!gemini-impl (fn [& _] (throw (js/Error. "backend must not run when ungranted"))))
     (run-test
       (fn [_]
         (-> (web/search {:seon.agent.web/query "anything"})
@@ -308,7 +309,7 @@
 (deftest search-no-key-is-an-error-value
   (async done
     (set-env! "GEMINI_API_KEY" nil)
-    (reset! int/!gemini-impl (fn [& _] (throw (js/Error. "backend must not run with no key"))))
+    (reset! pod/!gemini-impl (fn [& _] (throw (js/Error. "backend must not run with no key"))))
     (run-test
       (fn [_]
         (-> (web/search {:seon.agent.web/query "anything"})
@@ -390,7 +391,7 @@
 (deftest search-serper-branch-assembles-response
   (async done
     (set-env! "SERPER_API_KEY" "test-serper-key")
-    (reset! int/!serper-impl (fake-serper serper-body))
+    (reset! pod/!serper-impl (fake-serper serper-body))
     (run-test
       (fn [_]
         (with-web-configuration
@@ -420,7 +421,7 @@
 (deftest search-serper-no-key-is-an-error-value
   (async done
     (set-env! "SERPER_API_KEY" nil)
-    (reset! int/!serper-impl (fn [& _] (throw (js/Error. "serper must not run with no key"))))
+    (reset! pod/!serper-impl (fn [& _] (throw (js/Error. "serper must not run with no key"))))
     (run-test
       (fn [_]
         (with-web-configuration
@@ -435,7 +436,7 @@
 
 (deftest search-backend-transport-error-passes-through
   (async done
-    (reset! int/!gemini-impl
+    (reset! pod/!gemini-impl
             (fn [q & _] (js/Promise.resolve (int/search-err q "gemini grounding HTTP 429 — quota"))))
     (run-test
       (fn [_]

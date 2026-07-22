@@ -5,14 +5,18 @@
    content-addressed blob tier, and returns a token-bounded preview with honest
    metadata and links. It does not render JavaScript or create another paging
    mechanism; transport, redirects, and reachability checks are internal."
-  (:refer-clojure :exclude [fetch])
+  #?(:clj (:refer-clojure :exclude [await fetch])
+     :cljs (:refer-clojure :exclude [fetch]))
   (:require
     [clojure.string :as str]
-    [my.blob :as blob]
+    #?(:cljs [my.blob :as blob])
     [seon.agent.web.internal :as int]
+    #?(:cljs [seon.agent.web.pod :as pod])
     [seon.ai.tokens :as tokens]
-    [seon.db :as db]
+    #?(:cljs [seon.db :as db])
     [seon.schema :as schema]))
+
+#?(:clj (defmacro await [value] value))
 
 ;; ============================================================
 ;; Schemas — every key registered; shared shapes referenced, not inlined.
@@ -63,7 +67,7 @@
 ;; this capability and owns the database configuration entity.
 
 (schema/register! ::fetch-request
-  [:map
+  [:map {:closed true}
    [::url                ::url]
    [:seon.config/configuration {:optional true} :seon.config/singleton]
    [::timeout-ms         {:optional true} ::timeout-ms]
@@ -121,7 +125,7 @@
 (schema/register! ::result-count   [:int {:min 0}])     ; honest pre-cap total
 
 (schema/register! ::search-request
-  [:map
+  [:map {:closed true}
    [::query       ::query]
    [:seon.config/configuration {:optional true} :seon.config/singleton]
    [::max-results {:optional true} ::max-results]
@@ -162,7 +166,7 @@
 ;; is host-owned config the agent CANNOT widen at runtime).
 ;; ============================================================
 
-(defn ^:seon.fn/agent-facing? grants
+(defn ^{:seon.fn/agent-facing? true :seon.capability/effect :read} grants
   "What web access do I have? The SEON_WEB grant, reachability, search.
 
    Returns the live truth every function enforces: `:seon.agent.web/enabled?`
@@ -177,63 +181,30 @@
    the pod can loosen them."
   {:malli/schema [:=> [:cat ::grants-request] ::grants-response]}
   [{configuration :seon.config/configuration}]
-  (let [p (int/policy configuration)
-        {::keys [search-backend]} (int/search-config configuration)
+  #?(:cljs
+     (let [p (pod/policy configuration)
+        {::keys [search-backend]} (pod/search-config configuration)
         has-key? (case search-backend
-                   :gemini-grounding (some? (int/gemini-key))
-                   :serper           (some? (int/serper-key))
+                   :gemini-grounding (some? (pod/gemini-key))
+                   :serper           (some? (pod/serper-key))
                    false)]
-    {::enabled?        (int/granted?)
+    {::enabled?        (pod/granted?)
      ::policy          (::policy p)
      ::allowed-domains (::allowed-domains p)
-     ::search-backend  (if has-key? search-backend :none)}))
+       ::search-backend  (if has-key? search-backend :none)})
+     :clj
+     {::enabled? false
+      ::policy :public-only
+      ::allowed-domains []
+      ::search-backend :none}))
 
 ;; ============================================================
 ;; fetch — the one ^:async function.
 ;; ============================================================
 
-(defn- extract-content
-  "Lane dispatch over the transport's body → {:md s :title t :extractor k
-   :links v}. HTML runs the readability/regex pipeline; json/text/markdown
-   pass through with honest extractor provenance."
-  [lane body final-url]
-  (case lane
-    :html (let [{:keys [text title extractor]} (int/extract body final-url)]
-            {:md text :title title :extractor extractor
-             :links (int/extract-links text final-url int/default-links-cap)})
-    :markdown {:md body :extractor :markdown-passthrough
-               :links (int/extract-links body final-url int/default-links-cap)}
-    :json {:md (try (.stringify js/JSON (.parse js/JSON body) nil 2)
-                    (catch :default _ body))
-           :extractor :json}
-    :text {:md body :extractor :text}))
-
-(defn- projection->response
-  "Re-derive a full fetch-response from a stored projection entity + its
-   blob (the max-age cache path) — the preview re-derives, never stored."
-  [e max-preview-tokens]
-  (let [hash    (::blob-hash e)
-        content (or (:my.blob/content (blob/get {:my.blob/hash hash})) "")
-        total   (::total-tokens e)
-        preview (if (> total max-preview-tokens)
-                  (str (subs content 0 (tokens/estimate-chars max-preview-tokens)) "…")
-                  content)]
-    (cond-> {::ok?            true
-             ::url            (::url e)
-             ::final-url      (::final-url e)
-             ::status         (::status e)
-             ::content-type   (::content-type e)
-             ::extractor      (::extractor e)
-             ::preview        preview
-             ::preview-tokens (tokens/estimate preview)
-             ::total-tokens   total
-             ::truncated?     false
-             ::blob-hash      hash
-             ::fetched-at     (::fetched-at e)
-             ::cached?        true}
-      (::title e) (assoc ::title (::title e)))))
-
-(defn ^{:async true :seon.fn/agent-facing? true} fetch
+(defn ^{:async #?(:cljs true :clj false)
+        :seon.fn/agent-facing? true
+        :seon.capability/effect :external} fetch
   "Fetch a web page as markdown: a preview now, the full text as a blob.
 
    The request map's keys live in THIS ns: the URL key is
@@ -266,20 +237,21 @@
     :or {timeout-ms         int/default-timeout-ms
          max-preview-tokens int/default-max-preview-tokens
          max-age-ms         0}}]
-  (try
+  #?(:cljs
+     (try
     (cond
-      (not (int/granted?))
+      (not (pod/granted?))
       (int/ungranted url)
 
       (or (nil? url) (str/blank? url))
       (int/err url ":seon.agent.web/url is required and must be non-blank.")
 
       :else
-      (let [policy (int/policy configuration)]
+      (let [policy (pod/policy configuration)]
         (if-let [cached (and (pos? max-age-ms)
-                             (await (int/fresh-projection url max-age-ms)))]
-          (projection->response cached max-preview-tokens)
-          (let [res (await (int/transport policy url timeout-ms
+                             (await (pod/fresh-projection url max-age-ms)))]
+          (pod/projection->response cached max-preview-tokens)
+          (let [res (await (pod/transport policy url timeout-ms
                                           int/default-max-bytes
                                           int/default-max-redirects))]
           (cond
@@ -296,7 +268,7 @@
             :else
             (let [final-url (::final-url res)
                   {:keys [md title extractor links]}
-                  (extract-content (::lane res) (::body res) final-url)
+                  (pod/extract-content (::lane res) (::body res) final-url)
                   md        (or md "")
                   total     (tokens/estimate md)
                   {bok? :my.blob/ok? hash :my.blob/hash berr :my.blob/error}
@@ -339,7 +311,9 @@
                                                         "needed for JS-built content.")))))))))))
     (catch :default e
       (int/err url (str "unexpected error in seon.agent.web/fetch: "
-                        (or (some-> e .-message) (str e)))))))
+                        (or (some-> e .-message) (str e))))))
+     :clj
+     (int/err url "No web platform leaf is installed.")))
 
 ;; ============================================================
 ;; search — the one ^:async grounded-search function.
@@ -368,7 +342,9 @@
        "there are NO ::url values to fetch. Rephrase toward a concrete "
        "fact-lookup query (or retry) if you need citable web sources."))
 
-(defn ^{:async true :seon.fn/agent-facing? true} search
+(defn ^{:async #?(:cljs true :clj false)
+        :seon.fn/agent-facing? true
+        :seon.capability/effect :external} search
   "Search the web; ranked result rows plus a grounded answer.
 
    The request map's keys live in THIS ns: :seon.agent.web/query (required,
@@ -407,9 +383,10 @@
     configuration :seon.config/configuration
     :or {max-results int/default-search-results
          timeout-ms  int/default-timeout-ms}}]
-  (try
+  #?(:cljs
+     (try
     (cond
-      (not (int/granted?))
+      (not (pod/granted?))
       (int/search-ungranted query)
 
       (or (nil? query) (str/blank? query))
@@ -417,17 +394,17 @@
 
       :else
       (let [{backend ::search-backend model ::search-model}
-            (int/search-config configuration)
+            (pod/search-config configuration)
             n (max 1 (min max-results int/max-search-results))]
         (case backend
           :gemini-grounding
-          (let [key (int/gemini-key)]
+          (let [key (pod/gemini-key)]
             (if (or (nil? key) (str/blank? key))
               (int/search-err query
                               (str "no search backend key — GEMINI_API_KEY is unset "
                                    "in the pod's env; the :gemini-grounding backend "
                                    "cannot run. Inspect with (seon.agent.web/grants {})."))
-              (let [res (await (int/gemini-request query model key timeout-ms))]
+              (let [res (await (pod/gemini-request query model key timeout-ms))]
                 (if-not (::ok? res)
                   res
                   (let [{::keys [results result-count queries answer]}
@@ -462,13 +439,13 @@
                           (assoc ::answer-tokens (tokens/estimate answer)))))))))
 
           :serper
-          (let [key (int/serper-key)]
+          (let [key (pod/serper-key)]
             (if (or (nil? key) (str/blank? key))
               (int/search-err query
                               (str "no search backend key — SERPER_API_KEY is unset "
                                    "in the pod's env; the :serper backend cannot run. "
                                    "Inspect with (seon.agent.web/grants {})."))
-              (let [res (await (int/serper-request query n timeout-ms))]
+              (let [res (await (pod/serper-request query n timeout-ms))]
                 (if-not (::ok? res)
                   res
                   (let [{::keys [results result-count]} (int/parse-serper (::body res) n)
@@ -500,4 +477,6 @@
                                ":seon.agent.web/search-backend in config/system.edn.")))))
     (catch :default e
       (int/search-err query (str "unexpected error in seon.agent.web/search: "
-                                 (or (some-> e .-message) (str e)))))))
+                                 (or (some-> e .-message) (str e))))))
+     :clj
+     (int/search-err query "No web platform leaf is installed.")))

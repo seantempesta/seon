@@ -1,4 +1,4 @@
-(ns seon.agent.web.internal
+(ns seon.agent.web.pod
   "Implement web reachability, transport, and content extraction.
 
    This internal namespace enforces host-owned target policy across redirects,
@@ -30,6 +30,46 @@
 
 (def max-html-chars     "Skip the DOM parse above this HTML size (fall back to regex)." 1000000)
 (def max-nesting-depth  "Skip the DOM parse above this estimated tag nesting." 3000)
+
+(declare extract extract-links)
+
+(defn extract-content
+  "Extract one transport body into portable content data."
+  [lane body final-url]
+  (case lane
+    :html (let [{:keys [text title extractor]} (extract body final-url)]
+            {:md text :title title :extractor extractor
+             :links (extract-links text final-url default-links-cap)})
+    :markdown {:md body :extractor :markdown-passthrough
+               :links (extract-links body final-url default-links-cap)}
+    :json {:md (try (.stringify js/JSON (.parse js/JSON body) nil 2)
+                    (catch :default _ body))
+           :extractor :json}
+    :text {:md body :extractor :text}))
+
+(defn projection->response
+  "Rebuild a cached public response from its projection and blob."
+  [entity max-preview-tokens]
+  (let [hash (::web/blob-hash entity)
+        content (or (:my.blob/content (blob/get {:my.blob/hash hash})) "")
+        total (::web/total-tokens entity)
+        preview (if (> total max-preview-tokens)
+                  (str (subs content 0 (tokens/estimate-chars max-preview-tokens)) "…")
+                  content)]
+    (cond-> {::web/ok? true
+             ::web/url (::web/url entity)
+             ::web/final-url (::web/final-url entity)
+             ::web/status (::web/status entity)
+             ::web/content-type (::web/content-type entity)
+             ::web/extractor (::web/extractor entity)
+             ::web/preview preview
+             ::web/preview-tokens (tokens/estimate preview)
+             ::web/total-tokens total
+             ::web/truncated? false
+             ::web/blob-hash hash
+             ::web/fetched-at (::web/fetched-at entity)
+             ::web/cached? true}
+      (::web/title entity) (assoc ::web/title (::web/title entity)))))
 
 ;; ============================================================
 ;; The SEON_WEB grant — host-owned, read live, default-deny.
