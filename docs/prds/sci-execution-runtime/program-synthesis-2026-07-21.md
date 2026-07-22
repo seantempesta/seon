@@ -1021,14 +1021,47 @@ spot-checks:
   error shape, per-fn package effect metadata, home-dir contract bug
   to the fs lane, missing db Malli schemas to the exemplar.
 
-Lanes in flight: `p1c-db-exemplar` (seon.db core to .cljc above the
-seam, both-tier .cljc test, deletes the drifted host wrappers) ·
-`p3a-bun-worker` (supervised same-artifact Bun execution worker +
-the kill bridge; audit gates 1-2 only) · `normalize-4b` (context
-maps → entities; still running). All specs in `tmp/orchestrator/`;
-diffs left uncommitted for orchestrator review. Next after returns:
-review diffs → P2 fan-out (message/lifecycle · my.* · blob · fs/shell
-· web) once the exemplar proves the seam.
+### Wind-down state (2026-07-22 late evening — session ended in wrong
+### mount; restart from ~/src/seon)
+
+Committed this session: `45db94a3` (the three P1 research/design docs
++ wiki appends + anchor). P1(a) and P1(b) are DONE — do not re-run the
+research or re-derive the seam; execute it.
+
+Lane states at wind-down:
+- `normalize-4b` (context-profiles/agent-context/root-context →
+  entity-shaped facts): was IN FLIGHT through its final gates when the
+  session wound down; codex thread
+  `019f8bb2-ccb7-71c3-a370-106b15b2e617`. Its uncommitted diff (at
+  wind-down: agent.cljs, agent/ctx.cljs, config.cljs, config/
+  resolve.cljc, autocomplete.cljs + config/autocomplete tests) is in
+  the shared tree. NEXT SESSION: check
+  `tmp/orchestrator/normalize-4b-summary.txt` first; if absent, the
+  lane died mid-gate — resume the codex thread by id (cd ~/src/seon;
+  codex exec resume <id> --dangerously-bypass-approvals-and-sandbox)
+  or review the diff directly. The autocomplete edits were not in the
+  spec's owned paths — verify they are genuine consumer edits before
+  accepting. Skeptic review + full gates + reset-boundary live proof
+  required before commit (spec:
+  `tmp/orchestrator/normalize-4b-context-maps-spec.md`).
+- `p1c-db-exemplar` (seon.db core to .cljc; the seam exemplar):
+  STOPPED CLEANLY during read-only grounding, zero edits. Re-dispatch
+  from `tmp/orchestrator/p1c-db-exemplar-spec.md` (or resume thread
+  `019f8bbe-4587-7b21-85cd-d8eee8ba3691`).
+- `p3a-bun-worker` (same-artifact Bun worker + kill bridge, audit
+  gates 1-2): STOPPED CLEANLY during read-only grounding, zero edits.
+  Re-dispatch from `tmp/orchestrator/p3a-bun-worker-spec.md` (or
+  resume thread `019f8bbe-4cb6-7663-aa95-1602a21650fb`).
+
+Next-session queue, in order: (1) settle normalize-4b (review →
+gates → live proof → path-limited commit); (2) re-dispatch
+p1c-db-exemplar and p3a-bun-worker in parallel (file-disjoint;
+PROTECTED grants already in the specs); (3) on exemplar acceptance,
+P2 fan-out (message/lifecycle · my.* families · blob · fs/shell ·
+web), each lane applying the seam design per its family's section of
+`research/p1-seam-grounding-2026-07-22.md`; the fs/shell lane also
+fixes the `home-dir` contract bug (ruling 7). The census gate stays
+the progress meter.
 
 ### Session close state (2026-07-22 ~17:00)
 
