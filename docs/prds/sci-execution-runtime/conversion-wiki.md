@@ -58,6 +58,13 @@ the anchor stays the state ledger.
 - **Call shapes are the contract.** When porting, the existing child
   (.cljs) signature/options/error-envelope is authoritative; a port
   that resolves but differs is worse than one that's missing.
+- **Replay identity must exist in the frozen public call shape.** The P1c
+  exemplar cannot simultaneously keep the child transaction request closed
+  (`src/seon/db.cljs:71-80,909-947`), reject its internal request-id as a
+  public option, and prove two-call op-id replay: minting at each entry proves
+  only an ambiguous-delivery retry, while accepting `:seon.capability/op-id`
+  changes the child contract. Settle the public identity key or narrow the
+  replay gate before extracting the shared entry function.
 - **Inventory effects from the child inward, not the host wrapper
   outward.** Start at the census LEFT symbol, record every arity and
   closed-map key, follow it through its internal choke point to the
@@ -105,6 +112,18 @@ the anchor stays the state ledger.
 
 ## Process/operator
 
+- **A same-artifact worker needs two explicit owner-level control decisions.**
+  The current managed graph is closed over watcher/writer/host/pod and the
+  launch descriptor publishes only the JVM host eval socket
+  (`script/seon/dev/process.clj:28-31,200-223`,
+  `src/seon/launch.cljc:102-104`). A NEW Bun worker therefore cannot be wired
+  only in `process.clj`: its UDS coordinate/generation must enter the launch
+  contract consumed by the pod. Likewise, WP-S2's exact-generation drain is a
+  private JVM operator path (`process.clj:1249-1294,1510-1566,1621-1660`);
+  the pod has no typed way to invoke it. Settle whether the bridge is an
+  operator command/service or another existing authority extension before
+  implementation—never expose the containment socket path and let the pod
+  speak its private line protocol directly.
 - **status shows owner AND workload pids** — kill drills target the
   WORKLOAD; killing the owner tests a different (also real) mode.
   Process identity is (pid, start-instant); pid alone lies (macOS

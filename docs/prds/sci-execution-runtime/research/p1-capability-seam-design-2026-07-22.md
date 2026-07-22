@@ -166,6 +166,26 @@ eight decisions; ruled here (each traces to the tiebreaker):
 7. **`seon.agent.fs/home-dir` is a contract bug** (throws instead of
    the family error envelope, fs.cljs:537-546) — fixed by the P2
    fs/shell lane as part of its port, not silently preserved.
+8a. **Operation identity is a PUBLIC optional entry key (ruling 9,
+   2026-07-22, resolves the P1c early stop).** The P1c falsifier
+   exposed a real contradiction: the child `::transact-request`
+   (db.cljs:71-80) is closed with no identity key, yet the op-id
+   replay gate requires a second call to address the first call's
+   receipt — and ruling 4's "mints (or accepts)" cannot be satisfied
+   by minting alone across invocations. Ruled: `:seon.capability/op-id`
+   is added to the child request schema as an OPTIONAL public key — an
+   intentional, recorded contract extension (not drift): absent → the
+   entry mints; present → the entry threads it to the receipt
+   mechanism, and a repeated op-id returns the recorded outcome with
+   `:seon.capability/replayed? true`. This is the one idempotency-key
+   vocabulary for every `:idempotent` capability fn (transact!,
+   blob-put!, package-reconcile) on both tiers, and it is what P4
+   crash recovery uses: replay is a NEW invocation addressing the SAME
+   receipt. Strictly distinct from `::protocol/request-id`, which
+   stays internal per-roundtrip transport identity and must never
+   become public (the grounding rule stands). Gate: two-call replay
+   asserted on BOTH tiers in the dual-tier test file.
+
 8. **Missing Malli schemas on public db vars** (`query-with-evidence`,
    `pull-many`, `entity`, `installed-schema`, `execute-many`,
    `index-page`) are added by the exemplar — schema is part of the

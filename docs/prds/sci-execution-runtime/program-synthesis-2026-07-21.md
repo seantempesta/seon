@@ -1076,6 +1076,32 @@ Lane states at wind-down:
   `tmp/orchestrator/p1c-db-exemplar-summary.txt`) ∥ `p3a-bun-worker`
   (summary → `tmp/orchestrator/p3a-bun-worker-summary.txt`).
   File-disjoint; each spec names the other's grants PROTECTED.
+- BOTH first dispatches stopped early with REAL contract findings
+  (the stops were right, again). Rulings recorded (2026-07-22, batch
+  for owner review):
+  - **Ruling 9 (P1c op-id):** `:seon.capability/op-id` becomes an
+    OPTIONAL public key on the child `::transact-request` — the one
+    idempotency-key vocabulary for every `:idempotent` capability fn;
+    absent → entry mints, present → addresses the same receipt,
+    repeat → recorded outcome + `:seon.capability/replayed? true`.
+    Distinct from internal `::protocol/request-id` (never public).
+    Full text in the seam design doc §8a. P1c re-dispatched with it.
+  - **Ruling 10 (P3a worker coordinates):** the Bun execution worker
+    is a FIFTH managed member with its own process id; the launch
+    descriptor (the path authority) advertises its worker UDS
+    coordinate — `src/seon/launch.cljc`, `script/seon/dev/cli.clj`,
+    and descriptor/operator fixtures granted to the p3a lane.
+  - **Ruling 11 (P3a control edge):** the pod requests
+    exact-generation drain/force by invoking the operator CLI with a
+    new typed subcommand (member id + expected generation → existing
+    `process/stop!` then ensure → typed observed-terminal evidence +
+    replacement generation/readiness result). The CLI is the
+    operator's one public command surface (bin/seon down precedent);
+    no new resident service; Bun never speaks detach.py's private
+    containment protocol.
+  - **Ruling 12 (P3a entry):** `seon.client/-main` is authorized for
+    thin argv/mode dispatch so the SAME artifact serves pod and
+    worker; mode selection is process-spec argv data.
 - Earliest unsettled contract: the seam exemplar (P1c) proving one
   same-source seon.db definition on both tiers. Its integrated proof =
   the dual-tier .cljc test file + census delta + live isolated-cluster
