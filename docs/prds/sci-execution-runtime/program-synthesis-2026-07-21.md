@@ -542,6 +542,72 @@ the named boundaries.
 - **Three surfaces only**: `bin/test-cljs`, `bin/test-writer` +
   `bin/seon test operator`, and `src-inspect-ai/`. No new runners.
 
+## WIND-DOWN RESTART ANCHOR (2026-07-22 night) — READ THIS FIRST
+
+Owner ordered wind-down + compaction. Complete state:
+
+### Done 2026-07-22 (all committed, gates green, live-proven where noted)
+
+`9bc00982` NS-0.5c+W1.6 (repl.parse rename, zero-allowlist internal
+gate; manifest-owned deepseek-v4-pro default via the EXPLICIT-ADOPTION
+reconcile contract, live drift-repair proven) · `77d11745` W3b-fix
+(built-ins instrument watchless, privileged seam) · `7eee64f3` R1
+(ONE bounded generic renderer, identity-first, honest continuations,
+result/inline dead) · `05a13dd4` D13+WP-S1a (repair merged under the
+parser as seon.repl.parse.repair; sci host = 4th SUPERVISED process;
+cutover = :seon.config.execution/host-tier? dial, default OFF,
+live-proven on/off cycle) · `f58da873` W1.7 (35 keys manifest-
+declarable, resolve-time floors incl. relational ones, one schema
+owner, writer read-ceilings into config, operator runbook at
+docs/seon/reference/config-operations.md, live 35-key drive) ·
+research accepted+persisted: renderer-quality audit, pod-state
+virtualization audit (four-closure gap; multi-driver UNSAFE today),
+crashproof feasibility (crash-SURVIVABLE achievable; commit-grained
+time travel; blob copies whole; q28), structured-values staged design
+(TUPLES ALREADY EXIST in the fork — Stage 1 = exposure), Stage-0
+probes partial (hashing+publication pass; per-key cost pending).
+
+### The day's owner rulings (all recorded in sections above + memory)
+
+Tranche: WP-S → W5 → packages. DeepSeek v4-pro seeded default.
+NS-0.5c handed off (done). Org sheet: D13 merged-repair (done), D15
+worker.parse/eval + D16 blob.internal (in flight), D17 HELD, D14/D18/
+D19/D21 post-W5, D22-29 no-change. Diffusion dev-only (D12 closed).
+Repair = migration-only, best-effort semantics kept. Cutover dial not
+side effect. Effect-classified replay (binding for virtual-agents).
+CONTAINMENT THESIS, DESIGN TIEBREAKER, DATA INVARIANT ("every aspect
+has an attribute name and an explicit ref") — the three laws, sections
+above. Autosuggest-as-dynamic-context vision → repl-autosuggest memory.
+CLJC-maximization clarified (portable canon; platform at edges).
+
+### IN FLIGHT at wind-down (handle on return, then STOP dispatching)
+
+1. D15 workers→diffusion tree (resumed `tmp/orchestrator/d15-*`):
+   on return verify zero old tokens + both worker bundles compile +
+   fence path-set shrunk, commit its owned files.
+2. D16 blob.internal (`tmp/orchestrator/d16-*`): verify conformance
+   gate green with zero allowlist + full cljs, commit.
+3. Stage-0 probes resumed w/ workspace-write to tmp/sv-probes only
+   (`tmp/orchestrator/sv-probes-resume*`): persist verdict into
+   research/structured-values-design addendum; the headline = per-key
+   filestore cost decides Stage 2.
+4. EDN-slot inventory (`tmp/orchestrator/edn-slot-audit-*`): persist
+   as research/, it is Stage 1's work-list + the data-invariant
+   violation census; NORMALIZE class dispatches FIRST (owner: modeling
+   before new types).
+
+### Next-tranche queue (in order, nothing blocked on owner)
+
+Normalize-class EDN upgrades (post-audit) · Stage 1 tuple exposure ·
+WP-S2 lazy respawn (shape pre-ruled by decision 6; owns q20/q27) ·
+W5-0 retirement proof (spec-ready from stage15 verdict) · W5 cutover
+(D20 move-set; flips the host-tier dial after W5-0) · then packages
+WP-B∥WP-J, post-W5 splits D14/D18/D19/D21, virtual-agents four-closure
+series (feasibility doc = design), structured-values Stage 2+.
+Pending live proofs at next checkpoint: none outstanding (q21 64KiB
+PASSED; W3c1/W3d1 host-tier live proof PASSED via WP-S1a's gated
+drive). Weakness queue rows current through q28.
+
 ## Execution state (2026-07-21 evening, restart anchor)
 
 READ THIS FIRST on restart. Nothing is running; the tree is clean
