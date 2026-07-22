@@ -1,25 +1,34 @@
 (ns seon.test.source-scan
   "Shared source and namespace-form scanning for conformance tests."
   (:require
-    ["node:fs" :as fs]
-    ["node:path" :as np]))
+    #?(:clj [clojure.java.io :as io]
+       :cljs ["node:fs" :as fs])
+    #?(:cljs ["node:path" :as np])))
 
 (defn source-files
   "Clojure source paths recursively beneath `dir`."
   [dir]
-  (mapcat
-    (fn [entry]
-      (let [path (.join np dir (.-name entry))]
-        (cond
-          (.isDirectory entry) (source-files path)
-          (re-find #"\.clj[sc]?$" path) [path]
-          :else [])))
-    (.readdirSync fs dir #js {:withFileTypes true})))
+  #?(:clj
+     (->> (file-seq (io/file dir))
+          (filter #(.isFile ^java.io.File %))
+          (map #(.getPath ^java.io.File %))
+          (filter #(re-find #"\.clj[sc]?$" %)))
+     :cljs
+     (mapcat
+       (fn [entry]
+         (let [path (.join np dir (.-name entry))]
+           (cond
+             (.isDirectory entry) (source-files path)
+             (re-find #"\.clj[sc]?$" path) [path]
+             :else [])))
+       (.readdirSync fs dir #js {:withFileTypes true}))))
 
 (defn sanitized-ns-form
   "The raw first `ns` form with strings and comments replaced by spaces."
   [source]
-  (let [start (.search source #"\(ns(?:\s|$)")]
+  (let [start #?(:clj (let [matcher (re-matcher #"\(ns(?:\s|$)" source)]
+                              (if (.find matcher) (.start matcher) -1))
+                 :cljs (.search source #"\(ns(?:\s|$)"))]
     (when-not (neg? start)
       (loop [i start depth 0 in-string? false escaped? false in-comment? false out ""]
         (when (< i (count source))
