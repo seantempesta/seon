@@ -3,6 +3,7 @@
   (:require [clojure.test :refer [deftest is]]
             [sci.core :as sci]
             [seon.content-hash :as content-hash]
+            [seon.db.writer-test-support :as writer-test]
             [seon.db.writer :as writer]
             [seon.host :as host]
             [seon.host.context :as context]
@@ -113,7 +114,7 @@
         host-socket (socket-path "u3-host")
         agent-id "graduate-agent"
         fn-sym "my.agent.graduate-agent/sum-squares"
-        server (writer/start! {::writer/dependencies (dependencies)
+        server (writer-test/start! {::writer/dependencies (dependencies)
                                ::writer/database-name database-name
                                ::writer/backend :memory
                                ::writer/request-socket-path request-path})

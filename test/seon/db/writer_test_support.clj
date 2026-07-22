@@ -1,6 +1,19 @@
 (ns seon.db.writer-test-support
   "Shared admitted database-session fixtures for JVM writer tests."
-  (:require [seon.db.transport.uds :as uds]))
+  (:require [seon.db.transport.uds :as uds]
+            [seon.db.writer :as writer]))
+
+(def read-defaults
+  "Generous finite read limits for writer tests not exercising read policy."
+  {:datahike.resource/max-work 2000000000
+   :datahike.resource/max-results 10000000
+   :datahike.resource/max-result-weight 100000000
+   ::writer/read-deadline-ms 600000})
+
+(defn start!
+  "Start a test writer with the shared finite read limits."
+  [request]
+  (writer/start! (assoc request ::writer/read-defaults read-defaults)))
 
 (def ^:private sessions-by-channel
   (java.util.Collections/synchronizedMap (java.util.WeakHashMap.)))

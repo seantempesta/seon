@@ -4,6 +4,7 @@
             [malli.core :as m]
             [sci.core :as sci]
             [seon.db.transport.uds :as uds]
+            [seon.db.writer-test-support :as writer-test]
             [seon.error.instrument :as error.instrument]
             [seon.host :as host]
             [seon.host.context :as context]
@@ -243,7 +244,7 @@
         request-path (socket-path "instrument-writer")
         host-socket (socket-path "instrument-host")
         agent-id "instrument-agent"
-        server (writer/start! {::writer/dependencies (dependencies)
+        server (writer-test/start! {::writer/dependencies (dependencies)
                                ::writer/database-name database-name
                                ::writer/backend :memory
                                ::writer/request-socket-path request-path})

@@ -5,6 +5,7 @@
             [sci.ctx-store]
             [seon.content-hash :as content-hash]
             [seon.db.transport.uds :as uds]
+            [seon.db.writer-test-support :as writer-test]
             [seon.db.writer :as writer]
             [seon.host :as host]
             [seon.host.context :as context]
@@ -134,7 +135,7 @@
   (let [database-name (str "host-authored-" (random-uuid))
         request-path (socket-path "authored-writer")
         host-socket (socket-path "authored-host")
-        server (writer/start! {::writer/dependencies (dependencies)
+        server (writer-test/start! {::writer/dependencies (dependencies)
                                ::writer/database-name database-name
                                ::writer/backend :memory
                                ::writer/request-socket-path request-path})

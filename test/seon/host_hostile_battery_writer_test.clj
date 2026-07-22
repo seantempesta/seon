@@ -6,6 +6,7 @@
             [seon.ai.tokens :as tokens]
             [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds]
+            [seon.db.writer-test-support :as writer-test]
             [seon.db.writer :as writer]
             [seon.error.sci :as error.sci]
             [seon.host :as host]
@@ -237,7 +238,7 @@
         {#'context/writer-pool-defaults pool-defaults}
         (fn []
           (let [server
-                (writer/start!
+                (writer-test/start!
                  {::writer/dependencies ((registry-value 'dependencies))
                   ::writer/database-name database-name
                   ::writer/backend :memory

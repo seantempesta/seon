@@ -3,6 +3,7 @@
   (:require [clojure.test :refer [deftest is use-fixtures]]
             [sci.core :as sci]
             [seon.db.transport.uds :as uds]
+            [seon.db.writer-test-support :as writer-test]
             [seon.db.writer :as writer]
             [seon.host :as host]
             [seon.host.context :as context]
@@ -157,7 +158,7 @@
     (let [database-name (str "host-cancel-" (random-uuid))
           request-path (socket-path "cancel-writer")
           host-socket (socket-path "cancel-host")
-          server (writer/start!
+          server (writer-test/start!
                   {::writer/dependencies ((registry-value 'dependencies))
                    ::writer/database-name database-name
                    ::writer/backend :memory

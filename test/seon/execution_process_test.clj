@@ -7,6 +7,7 @@
    [datahike.api :as d]
    [seon.db.protocol :as protocol]
    [seon.db.registry :as registry]
+   [seon.db.writer-test-support :as writer-test]
    [seon.db.writer :as writer])
   (:import
    [java.io File]
@@ -157,7 +158,7 @@
   (let [database-name (str "execution-proof-" (random-uuid))
         socket (socket-path database-name)
         server
-        (writer/start!
+        (writer-test/start!
          {::writer/dependencies (dependencies)
           ::writer/database-name database-name
           ::writer/backend :memory

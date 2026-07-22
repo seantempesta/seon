@@ -154,7 +154,7 @@
   [label database-names authority-dependencies]
   (let [path (socket-path label)
         server
-        (writer/start!
+        (writer-test/start!
          {::writer/dependencies authority-dependencies
           ::writer/database-name (first database-names)
           ::writer/backend :memory

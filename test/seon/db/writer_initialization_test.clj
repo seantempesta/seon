@@ -1,10 +1,14 @@
 (ns seon.db.writer-initialization-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is]]
             [datahike.api :as d]
             [seon.db.branch :as branch]
+            [seon.db.executor :as executor]
             [seon.db.protocol :as protocol]
             [seon.db.registry :as registry]
-            [seon.db.writer :as writer])
+            [seon.db.writer-test-support :as writer-test]
+            [seon.db.writer :as writer]
+            [seon.schema :as schema])
   (:import [java.io File]))
 
 (defn- dependencies []
@@ -16,6 +20,33 @@
    ::writer/revalidate-embedding-assertions (fn [_db-value _assertions] [])
    ::writer/query-vec (fn [_] {:seon.embed/vector [0.0]})
    ::writer/knn (fn [_db-value _vector _k _eids] [])})
+
+(deftest start-rejects-missing-read-defaults-before-executor-allocation
+  (let [executor-starts (atom 0)
+        result
+        (with-redefs [executor/start!
+                      (fn [_request]
+                        (swap! executor-starts inc)
+                        (throw (ex-info "executor must not start" {})))]
+          (writer/start!
+           {::writer/dependencies (dependencies)
+            ::writer/database-name "missing-read-defaults"
+            ::writer/backend :memory
+            ::writer/request-socket-path
+            "tmp/missing-read-defaults.sock"}))
+        error (:seon/error result)
+        validation-errors
+        (get-in error [:seon.error/data ::writer/validation-errors])]
+    (is (zero? @executor-starts))
+    (is (schema/valid-candidate-value? ::writer/start-response result))
+    (is (= :user-input (:seon.error/kind error)))
+    (is (str/includes? (:seon.error/message error)
+                       ":seon.db.writer/read-defaults"))
+    (is (some (fn [validation-error]
+                (= {::writer/validation-input-path [::writer/read-defaults]
+                    ::writer/validation-type :malli.core/missing-key}
+                   validation-error))
+              validation-errors))))
 
 (def schema-forms
   {:seon.db/lookup-ref-value "[:or :string :uuid :keyword :symbol :int]"
@@ -81,7 +112,7 @@
   (let [database-name (str "writer-initialization-" (random-uuid))
         socket-file (File. "tmp" (str database-name ".sock"))
         server
-        (writer/start!
+        (writer-test/start!
          {::writer/dependencies (dependencies)
           ::writer/database-name database-name
           ::writer/backend :memory
@@ -172,7 +203,7 @@
   (let [database-name (str "writer-additive-index-" (random-uuid))
         socket-file (File. "tmp" (str database-name ".sock"))
         server
-        (writer/start!
+        (writer-test/start!
          {::writer/dependencies (dependencies)
           ::writer/database-name database-name
           ::writer/backend :memory
@@ -243,7 +274,7 @@
   (let [database-name (str "writer-implicit-index-" (random-uuid))
         socket-file (File. "tmp" (str database-name ".sock"))
         server
-        (writer/start!
+        (writer-test/start!
          {::writer/dependencies (dependencies)
           ::writer/database-name database-name
           ::writer/backend :memory
@@ -282,7 +313,7 @@
         branch-name (str "writer-initialization-branch-" (random-uuid))
         socket-file (File. "tmp" (str database-name ".sock"))
         server
-        (writer/start!
+        (writer-test/start!
          {::writer/dependencies (dependencies)
           ::writer/database-name database-name
           ::writer/backend :memory
@@ -343,7 +374,7 @@
         branch-name (str "writer-missing-branch-" (random-uuid))
         socket-file (File. "tmp" (str database-name ".sock"))
         server
-        (writer/start!
+        (writer-test/start!
          {::writer/dependencies (dependencies)
           ::writer/database-name database-name
           ::writer/backend :memory
@@ -375,7 +406,7 @@
   (let [database-name (str "writer-entity-schema-" (random-uuid))
         socket-file (File. "tmp" (str database-name ".sock"))
         server
-        (writer/start!
+        (writer-test/start!
          {::writer/dependencies (dependencies)
           ::writer/database-name database-name
           ::writer/backend :memory

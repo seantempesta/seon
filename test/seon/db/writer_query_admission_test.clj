@@ -6,6 +6,7 @@
             [seon.db.protocol :as protocol]
             [seon.db.registry :as registry]
             [seon.db.transport.uds :as uds]
+            [seon.db.writer-test-support :as writer-test]
             [seon.db.writer :as writer])
   (:import [java.io File]
            [java.util.concurrent CountDownLatch TimeUnit]))
@@ -66,7 +67,7 @@
   (let [database-a (str "query-admission-a-" (random-uuid))
         database-b (str "query-admission-b-" (random-uuid))
         request-path (socket-path "request")
-        server (writer/start! {::writer/dependencies (dependencies)
+        server (writer-test/start! {::writer/dependencies (dependencies)
                                ::writer/database-name database-a
                                ::writer/backend :memory
                                ::writer/selected-processors 4
@@ -147,7 +148,7 @@
   (let [database-a (str "query-many-a-" (random-uuid))
         database-b (str "query-many-b-" (random-uuid))
         request-path (socket-path "many-request")
-        server (writer/start! {::writer/dependencies (dependencies)
+        server (writer-test/start! {::writer/dependencies (dependencies)
                                ::writer/database-name database-a
                                ::writer/backend :memory
                                ::writer/selected-processors 4
@@ -238,7 +239,7 @@
 (deftest execute-many-result-limit-bounds-a-slow-position-gap
   (let [database-name (str "many-result-limit-" (random-uuid))
         request-path (socket-path "mlr")
-        server (writer/start! {::writer/dependencies (dependencies)
+        server (writer-test/start! {::writer/dependencies (dependencies)
                                ::writer/database-name database-name
                                ::writer/backend :memory
                                ::writer/selected-processors 3
@@ -391,7 +392,7 @@
 (deftest final-unstarted-cancel-removes-the-exact-owner-job
   (let [database-name (str "query-cancel-" (random-uuid))
         request-path (socket-path "cancel-request")
-        server (writer/start! {::writer/dependencies (dependencies)
+        server (writer-test/start! {::writer/dependencies (dependencies)
                                ::writer/database-name database-name
                                ::writer/backend :memory
                                ::writer/selected-processors 4
@@ -448,7 +449,7 @@
 (deftest detached-owner-retains-its-database-until-joined-computation-finishes
   (let [database-name (str "query-owner-release-" (random-uuid))
         request-path (socket-path "rel-req")
-        server (writer/start! {::writer/dependencies (dependencies)
+        server (writer-test/start! {::writer/dependencies (dependencies)
                                ::writer/database-name database-name
                                ::writer/backend :memory
                                ::writer/selected-processors 4

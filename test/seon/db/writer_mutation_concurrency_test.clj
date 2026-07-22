@@ -4,6 +4,7 @@
             [datahike.api :as d]
             [seon.db.protocol :as protocol]
             [seon.db.registry :as registry]
+            [seon.db.writer-test-support :as writer-test]
             [seon.db.writer :as writer])
   (:import [java.io File]
            [java.util.concurrent CountDownLatch TimeUnit]))
@@ -46,7 +47,7 @@
         database-a (str "mutation-a-" (random-uuid))
         database-b (str "mutation-b-" (random-uuid))
         path (request-path "request")
-        server (writer/start! {::writer/dependencies (dependencies)
+        server (writer-test/start! {::writer/dependencies (dependencies)
                                ::writer/database-name database-a
                                ::writer/backend :memory
                                ::writer/selected-processors 4

@@ -18,7 +18,7 @@
             [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds]
             [seon.db.writer :as writer]
-            [seon.db.writer-test-support :as writer-test-support]
+            [seon.db.writer-test-support :as writer-test]
             [seon.host :as host]
             [seon.host.context :as context])
   (:import [java.io File]
@@ -132,7 +132,7 @@
 (deftest transact-through-the-registry-is-exactly-once-by-op-id-receipt
   (let [database-name (str "host-registry-" (random-uuid))
         request-path (socket-path "writer")
-        server (writer/start! {::writer/dependencies (dependencies)
+        server (writer-test/start! {::writer/dependencies (dependencies)
                                ::writer/database-name database-name
                                ::writer/backend :memory
                                ::writer/request-socket-path request-path})
@@ -182,10 +182,10 @@
       ;; with the same op-id replays the receipt; the effect happened
       ;; exactly once.
       (let [head (context/resolve-head! session)
-            raw-session (writer-test-support/open-session! request-path)
-            ^SocketChannel raw (writer-test-support/channel raw-session)
+            raw-session (writer-test/open-session! request-path)
+            ^SocketChannel raw (writer-test/channel raw-session)
             raw-output (Channels/newOutputStream raw)]
-        (writer-test-support/call!
+        (writer-test/call!
          raw-session
          (protocol/ensure-database-request
           {::protocol/request-id "op-crash/ensure"
@@ -415,7 +415,7 @@
         host-socket (socket-path "u4-host")
         agent-id "parity-agent"
         caller-agent-id "parity-caller"
-        server (writer/start! {::writer/dependencies (dependencies)
+        server (writer-test/start! {::writer/dependencies (dependencies)
                                ::writer/database-name database-name
                                ::writer/backend :memory
                                ::writer/request-socket-path request-path})
@@ -666,7 +666,7 @@
   ;; (issue eval-host-tier-pull-fails-on-uninstalled-schema).
   (let [database-name (str "host-registry-" (random-uuid))
         request-path (socket-path "uninstalled")
-        server (writer/start! {::writer/dependencies (dependencies)
+        server (writer-test/start! {::writer/dependencies (dependencies)
                                ::writer/database-name database-name
                                ::writer/backend :memory
                                ::writer/request-socket-path request-path})

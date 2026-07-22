@@ -97,7 +97,7 @@
   [::revalidate-embedding-assertions ::revalidate-embedding-assertions]
   [::query-vec ::query-vec]
   [::knn ::knn]
-  [::read-defaults {:optional true} ::read-defaults]
+  [::read-defaults ::read-defaults]
   [::executor ::executor]
   [::active-requests {:optional true} ::active-requests]
   [::query-jobs {:optional true} ::query-jobs]
@@ -133,9 +133,27 @@
   [::database-path {:optional true} ::database-path]
   [::selected-processors {:optional true} ::selected-processors]
   [::executor/capacity {:optional true} ::executor/capacity]
-  [::read-defaults {:optional true} ::read-defaults]
+  [::read-defaults ::read-defaults]
   [::request-server-options {:optional true} ::request-server-options]
   [::request-socket-path ::request-socket-path]])
+(schema/register! ::validation-input-path [:vector :keyword])
+(schema/register! ::validation-type :keyword)
+(schema/register!
+ ::validation-error
+ [:map {:closed true}
+  [::validation-input-path ::validation-input-path]
+  [::validation-type ::validation-type]])
+(schema/register! ::validation-errors [:vector ::validation-error])
+(schema/register!
+ ::start-error
+ [:map {:closed true}
+  [:seon/error
+   [:map {:closed true}
+    [:seon.error/message :string]
+    [:seon.error/kind [:= :user-input]]
+    [:seon.error/data
+     [:map {:closed true}
+      [::validation-errors ::validation-errors]]]]]])
 (schema/register!
  ::server
  [:map
@@ -143,6 +161,7 @@
   [::executor ::executor]
   [::runtime ::runtime]
   [::database-name ::database-name]])
+(schema/register! ::start-response [:or ::server ::start-error])
 (schema/register! ::stopped? :boolean)
 (schema/register! ::release-result :seon.db.protocol/writer-release-result)
 (schema/register! ::release-results :seon.db.protocol/writer-release-results)
@@ -4228,98 +4247,125 @@
 
 ;;; Explicit server lifecycle
 
+(defn- start-validation-error
+  [request]
+  (when-let [explanation (schema/explain-candidate-value
+                          ::start-request request)]
+    (let [validation-errors
+          (mapv (fn [{:keys [in type]}]
+                  {::validation-input-path in
+                   ::validation-type type})
+                (:errors explanation))
+          missing-keys
+          (into []
+                (keep (fn [{::keys [validation-input-path validation-type]}]
+                        (when (= :malli.core/missing-key validation-type)
+                          (last validation-input-path))))
+                validation-errors)]
+      {:seon/error
+       {:seon.error/message
+        (if (seq missing-keys)
+          (str "The writer start request is invalid; missing required key(s): "
+               (str/join ", " missing-keys) ".")
+          "The writer start request is invalid.")
+        :seon.error/kind :user-input
+        :seon.error/data {::validation-errors validation-errors}}})))
+
 (defn start!
   "Start the addressed request server for one writer runtime."
-  {:malli/schema [:=> [:cat ::start-request] ::server]}
-  [{::keys [dependencies database-name backend database-path selected-processors
-            read-defaults request-socket-path request-server-options]
-    executor-capacity ::executor/capacity}]
-  (let [active-requests (atom {})
-        interest-state (atom (empty-interest-state))
-        interest-lock (Object.)
-        runtime-ref (atom nil)
-        deadline-executor
-        (java.util.concurrent.Executors/newSingleThreadScheduledExecutor
-         (reify java.util.concurrent.ThreadFactory
-           (newThread [_ runnable]
-             (doto (Thread. ^Runnable runnable "seon-database-read-deadline")
-               (.setDaemon true)))))
-        dispatcher
-        (executor/start!
-         {::executor/capacity (or executor-capacity
-                                  (if selected-processors
-                                    (executor/capacity selected-processors)
-                                    (executor/capacity)))
-          ::executor/execute
-          {:read (fn [request] (execute-read! @runtime-ref request))
-           :provider (partial execute-provider! dependencies)
-           :knn (partial execute-knn! dependencies)
-           :delivery (fn [request]
-                       (execute-delivery! @runtime-ref request))
-           :mutation (fn [request]
-                       (execute-mutation! @runtime-ref request))}
-          ::executor/complete!
-          (fn [completion]
-            (complete-executor! @runtime-ref completion))})
-        query-jobs (atom {::by-owner {} ::by-job {}})
-        runtime (cond->
-                 (assoc dependencies
-                        ::executor dispatcher
-                        ::active-requests active-requests
-                        ::query-jobs query-jobs
-                        ::interest-state interest-state
-                        ::interest-lock interest-lock
-                        ::deadline-executor deadline-executor
-                        ::protocol/configured-maximum-frame-bytes
-                        (get request-server-options
-                             ::uds/maximum-frame-bytes
-                             protocol/maximum-frame-bytes)
-                        ::readiness-owner (Object.))
-                  read-defaults (assoc ::read-defaults read-defaults))
-        _ (reset! runtime-ref runtime)
-        _ (register-readiness! runtime)]
-    (try
-      (let [ensure-response
-            (handle-request
-             runtime
-             (protocol/ensure-database-request
-              (cond->
-               {::protocol/database-name database-name
-                ::protocol/request-id "writer/start"
-                ::protocol/backend backend}
-                database-path
-                (assoc ::protocol/database-path database-path))))]
-        (when-not (::protocol/success? ensure-response)
-          (throw
-           (ex-info "Initial database ensure failed."
-                    {::ensure-response ensure-response})))
-        {::request-server
-         (uds/start-request-server!
-          (merge
-           request-server-options
-           {::uds/socket-path request-socket-path
-            ::uds/open-connection! transport-connection
-            ::uds/close-connection!
-            (partial close-transport-connection! runtime)
-            ::uds/handler (partial handle-request! runtime)}))
-         ::executor dispatcher
-         ::runtime runtime
-         ::database-name database-name})
-      (catch Throwable throwable
-        (let [release
-              (registry/release-database!
-               {::registry/database-name (keyword database-name)})]
-          (unregister-readiness! runtime)
-          (.shutdownNow ^java.util.concurrent.ScheduledExecutorService
-                        deadline-executor)
-          (executor/stop! {::executor/executor dispatcher})
-          (if (::registry/release-error release)
+  {:malli/schema [:=> [:cat :map] ::start-response]}
+  [request]
+  (if-let [validation-error (start-validation-error request)]
+    validation-error
+    (let [{::keys [dependencies database-name backend database-path
+                   selected-processors read-defaults request-socket-path
+                   request-server-options]
+          executor-capacity ::executor/capacity} request
+          active-requests (atom {})
+          interest-state (atom (empty-interest-state))
+          interest-lock (Object.)
+          runtime-ref (atom nil)
+          deadline-executor
+          (java.util.concurrent.Executors/newSingleThreadScheduledExecutor
+           (reify java.util.concurrent.ThreadFactory
+             (newThread [_ runnable]
+               (doto (Thread. ^Runnable runnable "seon-database-read-deadline")
+                 (.setDaemon true)))))
+          dispatcher
+          (executor/start!
+           {::executor/capacity (or executor-capacity
+                                    (if selected-processors
+                                      (executor/capacity selected-processors)
+                                      (executor/capacity)))
+            ::executor/execute
+            {:read (fn [request] (execute-read! @runtime-ref request))
+             :provider (partial execute-provider! dependencies)
+             :knn (partial execute-knn! dependencies)
+             :delivery (fn [request]
+                         (execute-delivery! @runtime-ref request))
+             :mutation (fn [request]
+                         (execute-mutation! @runtime-ref request))}
+            ::executor/complete!
+            (fn [completion]
+              (complete-executor! @runtime-ref completion))})
+          query-jobs (atom {::by-owner {} ::by-job {}})
+          runtime (assoc dependencies
+                         ::executor dispatcher
+                         ::active-requests active-requests
+                         ::query-jobs query-jobs
+                         ::interest-state interest-state
+                         ::interest-lock interest-lock
+                         ::deadline-executor deadline-executor
+                         ::protocol/configured-maximum-frame-bytes
+                         (get request-server-options
+                              ::uds/maximum-frame-bytes
+                              protocol/maximum-frame-bytes)
+                         ::read-defaults read-defaults
+                         ::readiness-owner (Object.))
+          _ (reset! runtime-ref runtime)
+          _ (register-readiness! runtime)]
+      (try
+        (let [ensure-response
+              (handle-request
+               runtime
+               (protocol/ensure-database-request
+                (cond->
+                 {::protocol/database-name database-name
+                  ::protocol/request-id "writer/start"
+                  ::protocol/backend backend}
+                  database-path
+                  (assoc ::protocol/database-path database-path))))]
+          (when-not (::protocol/success? ensure-response)
             (throw
-             (ex-info "Writer start failed and database release was unproved."
-                      {::release-failures [release]
-                       ::start-error (.toString throwable)}
-                      throwable))
-            (throw throwable)))))))
+             (ex-info "Initial database ensure failed."
+                      {::ensure-response ensure-response})))
+          {::request-server
+           (uds/start-request-server!
+            (merge
+             request-server-options
+             {::uds/socket-path request-socket-path
+              ::uds/open-connection! transport-connection
+              ::uds/close-connection!
+              (partial close-transport-connection! runtime)
+              ::uds/handler (partial handle-request! runtime)}))
+           ::executor dispatcher
+           ::runtime runtime
+           ::database-name database-name})
+        (catch Throwable throwable
+          (let [release
+                (registry/release-database!
+                 {::registry/database-name (keyword database-name)})]
+            (unregister-readiness! runtime)
+            (.shutdownNow ^java.util.concurrent.ScheduledExecutorService
+                          deadline-executor)
+            (executor/stop! {::executor/executor dispatcher})
+            (if (::registry/release-error release)
+              (throw
+               (ex-info "Writer start failed and database release was unproved."
+                        {::release-failures [release]
+                         ::start-error (.toString throwable)}
+                        throwable))
+              (throw throwable))))))))
 
 (defn stop!
   "Close one writer server and report every database release."

@@ -133,7 +133,7 @@
   (let [database-name (str "writer-no-database-advanced-" (random-uuid))
         request-path (socket-path "no-database-advanced")
         server
-        (writer/start!
+        (writer-test/start!
          {::writer/dependencies (dependencies)
           ::writer/database-name database-name
           ::writer/backend :memory
@@ -181,7 +181,7 @@
   (let [database-name (str "writer-interest-duplicate-" (random-uuid))
         request-path (socket-path "duplicate-request")
         server
-        (writer/start!
+        (writer-test/start!
          {::writer/dependencies (dependencies)
           ::writer/database-name database-name
           ::writer/backend :memory
@@ -288,7 +288,7 @@
   (let [database-name (str "writer-interest-" (random-uuid))
         request-path (socket-path "request")
         server
-        (writer/start!
+        (writer-test/start!
          {::writer/dependencies (dependencies)
           ::writer/database-name database-name
           ::writer/backend :memory
@@ -535,7 +535,7 @@
     (let [database-name (str "writer-paused-reader-" (random-uuid))
           request-path (socket-path "paused-reader")
           server
-          (writer/start!
+          (writer-test/start!
            {::writer/dependencies (dependencies)
             ::writer/database-name database-name
             ::writer/backend :memory

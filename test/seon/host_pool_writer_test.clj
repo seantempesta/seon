@@ -3,6 +3,7 @@
   (:require [clojure.test :refer [deftest is]]
             [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds]
+            [seon.db.writer-test-support :as writer-test]
             [seon.db.writer :as writer]
             [seon.host.context :as context])
   (:import [java.io File]
@@ -35,7 +36,7 @@
     (with-redefs-fn
       {#'context/writer-pool-defaults defaults}
       (fn []
-        (let [server (writer/start! {::writer/dependencies (dependencies)
+        (let [server (writer-test/start! {::writer/dependencies (dependencies)
                                      ::writer/database-name database-name
                                      ::writer/backend :memory
                                      ::writer/selected-processors 3

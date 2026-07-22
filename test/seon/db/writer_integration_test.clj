@@ -85,7 +85,7 @@
   (let [database-name (str "writer-control-" (random-uuid))
         request-path (socket-path "control-request")
         server
-        (writer/start!
+        (writer-test/start!
          {::writer/dependencies (dependencies)
           ::writer/database-name database-name
           ::writer/backend :memory
@@ -145,7 +145,7 @@
   (let [database-name (str "writer-acquisition-" (random-uuid))
         request-path (socket-path "acquisition-request")
         server
-        (writer/start!
+        (writer-test/start!
          {::writer/dependencies (dependencies)
           ::writer/database-name database-name
           ::writer/backend :memory
@@ -297,7 +297,7 @@
         finish (java.util.concurrent.CountDownLatch. 1)
         calls (atom 0)
         server
-        (writer/start!
+        (writer-test/start!
          {::writer/dependencies (dependencies)
           ::writer/database-name database-name
           ::writer/backend :memory
@@ -370,7 +370,7 @@
         database-keyword (keyword database-name)
         request-path (socket-path "release-failure-request")
         server
-        (writer/start!
+        (writer-test/start!
          {::writer/dependencies (dependencies)
           ::writer/database-name database-name
           ::writer/backend :memory
@@ -437,7 +437,7 @@
         database-keyword (keyword database-name)
         request-path (socket-path "release-success-request")
         server
-        (writer/start!
+        (writer-test/start!
          {::writer/dependencies (dependencies)
           ::writer/database-name database-name
           ::writer/backend :memory
@@ -487,7 +487,7 @@
         (is (thrown-with-msg?
              clojure.lang.ExceptionInfo
              #"Initial database ensure failed"
-             (writer/start!
+             (writer-test/start!
               {::writer/dependencies (dependencies)
                ::writer/database-name database-name
                ::writer/backend :memory
@@ -505,7 +505,7 @@
         branch-name (str "writer-branch-route-" (random-uuid))
         request-path (socket-path "branch-request")
         server
-        (writer/start!
+        (writer-test/start!
          {::writer/dependencies (dependencies)
           ::writer/database-name database-name
           ::writer/backend :memory
@@ -557,7 +557,7 @@
         request-path (socket-path "proximum-branch-request")
         initializer-calls (atom [])
         server
-        (writer/start!
+        (writer-test/start!
          {::writer/dependencies
           (dependencies
            (fn [connection initialized-database-name]
@@ -611,7 +611,7 @@
   (let [database-name (str "writer-integration-" (random-uuid))
         request-path (socket-path "request")
         server
-        (writer/start!
+        (writer-test/start!
          {::writer/dependencies (dependencies)
           ::writer/database-name database-name
           ::writer/backend :memory
@@ -737,7 +737,7 @@
   (let [database-name (str "writer-fence-" (random-uuid))
         request-path (socket-path "fence-request")
         server
-        (writer/start!
+        (writer-test/start!
          {::writer/dependencies (dependencies)
           ::writer/database-name database-name
           ::writer/backend :memory
