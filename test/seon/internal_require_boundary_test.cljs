@@ -4,7 +4,8 @@
     ["node:fs" :as fs]
     ["node:path" :as np]
     [cljs.test :refer [deftest is]]
-    [clojure.string :as str]))
+    [clojure.string :as str]
+    [seon.test.source-scan :as source-scan]))
 
 (def ^:private internal-require-pattern
   #"\[\s*([A-Za-z0-9_.-]+\.internal)(?=[\s\]\}:])")
@@ -16,55 +17,6 @@
    {::required-ns "my.plan.internal"
     ::date "2026-07-21"
     ::reason "NS-0.5c held — owner ruling: repl-autosuggest is experimental/parked; rename+seam-repairs land at the owner's explicit handoff"}])
-
-(defn- source-files
-  [dir]
-  (mapcat
-    (fn [entry]
-      (let [path (.join np dir (.-name entry))]
-        (cond
-          (.isDirectory entry) (source-files path)
-          (re-find #"\.clj[sc]?$" path) [path]
-          :else [])))
-    (.readdirSync fs dir #js {:withFileTypes true})))
-
-(defn- sanitized-ns-form
-  "The raw first `ns` form with strings and comments replaced by spaces."
-  [source]
-  (let [start (.search source #"\(ns(?:\s|$)")]
-    (when-not (neg? start)
-      (loop [i start depth 0 in-string? false escaped? false in-comment? false out ""]
-        (when (< i (count source))
-          (let [c (subs source i (inc i))]
-            (cond
-              in-comment?
-              (recur (inc i) depth false false (not= c "\n") (str out " "))
-
-              in-string?
-              (cond
-                escaped? (recur (inc i) depth true false false (str out " "))
-                (= c "\\") (recur (inc i) depth true true false (str out " "))
-                (= c "\"") (recur (inc i) depth false false false (str out " "))
-                :else (recur (inc i) depth true false false (str out " ")))
-
-              (= c ";")
-              (recur (inc i) depth false false true (str out " "))
-
-              (= c "\"")
-              (recur (inc i) depth true false false (str out " "))
-
-              (= c "(")
-              (recur (inc i) (inc depth) false false false (str out c))
-
-              (= c ")")
-              (let [next-depth (dec depth)
-                    next-out (str out c)]
-                (if (zero? next-depth)
-                  next-out
-                  (recur (inc i) next-depth false false false next-out)))
-
-              :else
-              (recur (inc i) depth false false false (str out c)))))))))
 
 (defn- declared-ns
   [ns-form]
@@ -79,9 +31,10 @@
 (defn- namespace-records
   []
   (let [cwd (.cwd js/process)]
-    (->> (source-files (.join np cwd "src"))
+    (->> (source-scan/source-files (.join np cwd "src"))
          (keep (fn [path]
-                 (let [ns-form (sanitized-ns-form (.readFileSync fs path "utf-8"))]
+                 (let [ns-form (source-scan/sanitized-ns-form
+                                 (.readFileSync fs path "utf-8"))]
                    (when-let [namespace (declared-ns ns-form)]
                      {::file (str/replace (.relative np cwd path) #"\\" "/")
                       ::namespace namespace
@@ -109,7 +62,7 @@
                           ::namespace namespace
                           ::required-ns required-ns
                           ::expected-parent expected-parent})))
-                   (re-seq internal-require-pattern ns-form))))
+                   (source-scan/require-matches internal-require-pattern ns-form))))
          vec)))
 
 (defn- violation-message

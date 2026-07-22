@@ -4,7 +4,8 @@
     ["node:fs" :as fs]
     ["node:path" :as np]
     [cljs.test :refer [deftest is]]
-    [clojure.string :as str]))
+    [clojure.string :as str]
+    [seon.test.source-scan :as source-scan]))
 
 (def ^:private fenced-require-pattern
   #"\[\s*(seon\.(?:diffusion(?:\.[A-Za-z0-9_.-]+)+|worker-eval|worker-validator))(?=[\s\]\}:])")
@@ -18,58 +19,11 @@
     ::date "2026-07-21"
     ::reason "dies at W5 (deletion inventory); remove this row with that band"}])
 
-(defn- source-files
-  [dir]
-  (mapcat
-    (fn [entry]
-      (let [path (.join np dir (.-name entry))]
-        (cond
-          (.isDirectory entry) (source-files path)
-          (re-find #"\.clj[sc]?$" path) [path]
-          :else [])))
-    (.readdirSync fs dir #js {:withFileTypes true})))
-
-(defn- sanitized-ns-form
-  "The raw first `ns` form with strings and comments replaced by spaces."
-  [source]
-  (let [start (.search source #"\(ns(?:\s|$)")]
-    (when-not (neg? start)
-      (loop [i start depth 0 in-string? false escaped? false in-comment? false out ""]
-        (when (< i (count source))
-          (let [c (subs source i (inc i))]
-            (cond
-              in-comment?
-              (recur (inc i) depth false false (not= c "\n") (str out " "))
-
-              in-string?
-              (cond
-                escaped? (recur (inc i) depth true false false (str out " "))
-                (= c "\\") (recur (inc i) depth true true false (str out " "))
-                (= c "\"") (recur (inc i) depth false false false (str out " "))
-                :else (recur (inc i) depth true false false (str out " ")))
-
-              (= c ";")
-              (recur (inc i) depth false false true (str out " "))
-
-              (= c "\"")
-              (recur (inc i) depth true false false (str out " "))
-
-              (= c "(")
-              (recur (inc i) (inc depth) false false false (str out c))
-
-              (= c ")")
-              (let [next-depth (dec depth)
-                    next-out (str out c)]
-                (if (zero? next-depth)
-                  next-out
-                  (recur (inc i) next-depth false false false next-out)))
-
-              :else
-              (recur (inc i) depth false false false (str out c)))))))))
-
 (defn- fenced-requires
   [source]
-  (mapv second (re-seq fenced-require-pattern (or (sanitized-ns-form source) ""))))
+  (mapv second (source-scan/require-matches
+                 fenced-require-pattern
+                 (source-scan/sanitized-ns-form source))))
 
 (defn- allowed-tree-path?
   [file]
@@ -79,7 +33,7 @@
 (defn- fence-edges
   []
   (let [cwd (.cwd js/process)]
-    (->> (source-files (.join np cwd "src"))
+    (->> (source-scan/source-files (.join np cwd "src"))
          (mapcat
            (fn [path]
              (let [file (str/replace (.relative np cwd path) #"\\" "/")]
