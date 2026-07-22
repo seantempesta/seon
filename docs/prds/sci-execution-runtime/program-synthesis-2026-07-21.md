@@ -1138,6 +1138,19 @@ Lane states at wind-down:
   STANDS — receipts/recovery are topology-independent and P4 needs
   them. The two p3a stop reports remain the grounded map for that
   future decision.
+- **SPEED RULING (owner, 2026-07-22): P2 unserialized.** The grounding
+  report already carries every family's inventory and the seam design
+  is frozen — only the `seon.capability` installer namespace is
+  exemplar-output. So the db-independent P2 lanes run NOW, parallel
+  with p1c, each instructed to STOP at the installer boundary if it
+  hasn't landed (core + leaves + effect metadata + tests are the
+  deliverable either way). LIVE: `p2-fs-shell` (incl. ruling-7
+  home-dir fix; spec `tmp/orchestrator/p2-fs-shell-spec.md`) ∥
+  `p2-web` (`tmp/orchestrator/p2-web-spec.md`) ∥ `p1c-db-exemplar`.
+  Specs now pre-rule known decisions to kill stop-cycles. On p1c
+  acceptance: message/lifecycle · my.* · blob fan out with the
+  exemplar as the worked pattern. P3a stays closed per the ruling
+  above; no relitigation without invalidating evidence.
 - Earliest unsettled contract: the seam exemplar (P1c) proving one
   same-source seon.db definition on both tiers. Its integrated proof =
   the dual-tier .cljc test file + census delta + live isolated-cluster
