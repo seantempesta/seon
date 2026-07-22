@@ -737,11 +737,38 @@ continuing the queue. Results:
   reclamation, ACME desired+adoption derivation, stateful
   post-migration-failure retry). Fifth (writer-backed atomicity
   injection) queued behind q31's file ownership.
-- q31 read-defaults constructor floor: lane in flight.
-- Pending at next coordinated checkpoint (after q31): `bin/seon up`
-  rebuild, q30 live decline probe, q29 live drive under the dial
-  (unresolved symbol + registered wrong-arg both survive per-eval, run
-  completes), restore dial OFF.
+- **q31 DONE `28b79365`** — `writer/start!` validates its whole
+  request; `::read-defaults` REQUIRED (omission was Long/MAX_VALUE
+  ceilings + unarmed deadline); ONE shared generous-finite fixture in
+  writer-test-support routes all 39 omitting test callers; regression:
+  omission fails closed, zero executors. Writer 376/2844 (one
+  non-reproducing first-run intermittent, name lost — W10 family).
+- **q32 gap 2 DONE `3047851f`** — fenced retract+replace atomicity
+  through the REAL writer (stale fence → error value, original intact,
+  no receipt; retry lands whole; no historical basis ever
+  retracted-only). All five W1.6 review gaps closed. Writer 377/2855.
+- **COORDINATED CHECKPOINT DONE (2026-07-22 ~14:30):** restart on the
+  fix tranche (fresh writer jar). **q30 live proof PASSED** — live
+  over-budget query returns `:seon.error/kind :user-input` naming
+  `:seon.config.database.read/max-results` with observed/allowed.
+  **q29 live proof PASSED** — dial ON: unresolved symbol and
+  wrong-typed instrumented call BOTH return per-eval error values
+  (structural `malli-instrument-input` envelope; steering
+  unable-to-resolve message), good/bad/good batch = 2/error/4, and a
+  REAL DeepSeek drive ran 8 turns all `:done` with zero turn errors
+  where pre-fix turn 1 died. Dial restored OFF, converged (0 ops),
+  root 200.
+- **q34 (NEW, W5-0 SCOPE, evidence from the q29 drive):** under the
+  dial the agent could not reach `message/user` OR
+  `seon.agent.lifecycle/complete` (unresolved on the host base) — it
+  burned 8 turns retrying spellings and closed `:no-forms`. Host-tier
+  agents currently CANNOT message the human or complete tasks. The
+  W5-0 parity census must enumerate the full agent-facing surface
+  (`my.*`, `seon.agent.message`, `seon.agent.lifecycle`, `seon.db`,
+  `my.blob`, …) resolved on the host, with the census gate green
+  BEFORE any cutover drive. Recorded in
+  `docs/seon/issues/host-preflight-candidate-ranking-crashes.md`'s
+  parity section; owner = W5-0.
 
 ### Queue-order correction (fresh-eyes ruling, recorded)
 
