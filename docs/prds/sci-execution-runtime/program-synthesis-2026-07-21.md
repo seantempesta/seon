@@ -587,10 +587,11 @@ CLJC-maximization clarified (portable canon; platform at edges).
    fence path-set shrunk, commit its owned files.
 2. D16 blob.internal (`tmp/orchestrator/d16-*`): verify conformance
    gate green with zero allowlist + full cljs, commit.
-3. Stage-0 probes resumed w/ workspace-write to tmp/sv-probes only
-   (`tmp/orchestrator/sv-probes-resume*`): persist verdict into
-   research/structured-values-design addendum; the headline = per-key
-   filestore cost decides Stage 2.
+3. Stage-0 probes DONE `88984a3b`
+   (`research/structured-values-stage0-probes-2026-07-22.md`):
+   one-file-per-node FAILS (8.5 ms/node); crash/GC/purity PASS;
+   mutation economics excellent — Stage 2 requires packed segments or
+   a batched durable backend (Stage 4 tune-or-replace pulls forward).
 4. EDN-slot inventory (`tmp/orchestrator/edn-slot-audit-*`): persist
    as research/, it is Stage 1's work-list + the data-invariant
    violation census; NORMALIZE class dispatches FIRST (owner: modeling
