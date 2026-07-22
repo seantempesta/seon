@@ -1424,17 +1424,26 @@
   [tx-data]
   (internal/encode-edn-slot-values tx-data))
 
+(declare decode-edn-values)
+
 (defn decode-edn-value
   "Decode one mixed-schema attribute value returned by the database.
 
    Also reconstructs the registered shape for native cardinality-many
-   set schemas: Datahike materializes them as vectors on pull/entity,
-   and the registry — not the wire shape — owns the value's form."
+   values. Datahike materializes sets as vectors and expands component refs to
+   child maps on pull/entity; the registry — not the wire shape — owns the
+   acquired value's form."
   {:malli/schema [:=> [:cat :keyword :any] :any]}
   [attr value]
   (cond
     (and (string? value) (internal/edn-encoded-attr? attr))
     (reader/read-string value)
+
+    (and (sequential? value) (internal/component-children-attr? attr))
+    (let [children (mapv #(if (map? %) (decode-edn-values %) %) value)]
+      (if (internal/set-valued-attr? attr)
+        (into #{} children)
+        children))
 
     (and (sequential? value) (internal/set-valued-attr? attr))
     (into #{} value)
@@ -1442,7 +1451,7 @@
     :else value))
 
 (defn decode-edn-values
-  "Decode every attribute value in one flat pulled entity map."
+  "Decode every attribute value in one pulled entity tree."
   {:malli/schema [:=> [:cat :map] :map]}
   [values]
   (reduce-kv

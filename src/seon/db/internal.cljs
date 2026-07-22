@@ -149,13 +149,17 @@
       (= :and head)
       (form->datahike-value-type (first (form-children resolved)))
       (= :or head)
-      (let [types (into #{} (map #(try
+      (let [explicit (:seon.db/value-type
+                      (schema.form/attr-form-properties resolved))
+            types (into #{} (map #(try
                                     (form->datahike-value-type %)
                                     (catch :default _ ::unmappable)))
                         (form-children resolved))]
-        (if (and (= 1 (count types)) (not (contains? types ::unmappable)))
-          (first types)
-          :db.type/string))
+        (or explicit
+            (when (and (= 1 (count types))
+                       (not (contains? types ::unmappable)))
+              (first types))
+            :db.type/string))
       (schema.form/nilable-value-schema? resolved)
       (throw (ex-info (str "Stored attributes cannot use `:maybe`. Register the "
                            "non-nil base shape, then omit an absent key or mark "
@@ -246,6 +250,62 @@
     (let [form (resolve-malli-form (schema/schema-definition attr))]
       (and (vector? form) (= :set (first form))))))
 
+(defn- admits-ref-value?
+  "True when a Malli value form structurally admits a database ref."
+  [form]
+  (let [resolved (resolve-malli-form form)
+        head (form-head resolved)]
+    (cond
+      (= :seon.db/ref resolved) true
+      (= :and head) (boolean
+                     (some-> resolved form-children first admits-ref-value?))
+      (= :or head) (boolean (some admits-ref-value? (form-children resolved)))
+      :else false)))
+
+(defn ref-value-form?
+  "True when a Malli value form both admits and stores a database ref."
+  [form]
+  (let [resolved (resolve-malli-form form)]
+    (and (admits-ref-value? resolved)
+         (= :db.type/ref
+            (try
+              (form->datahike-value-type resolved)
+              (catch :default _ nil))))))
+
+(defn- admits-entity-value?
+  "True when a Malli value form structurally admits an entity map."
+  [form]
+  (let [resolved (resolve-malli-form form)
+        head (form-head resolved)]
+    (cond
+      (schema.form/map-shape? resolved) true
+      (= :and head) (boolean (some admits-entity-value? (form-children resolved)))
+      (= :or head) (boolean (some admits-entity-value? (form-children resolved)))
+      :else false)))
+
+(defn component-children-attr?
+  "True when a registered attribute owns acquired component child maps.
+
+   The rule is derived from the one registered Malli form: a cardinality-many
+   component collection whose child value is stored as a ref."
+  [attr]
+  (when (and (keyword? attr) (schema/registered? attr))
+    (let [form (resolve-malli-form (schema/schema-definition attr))
+          head (form-head form)
+          props (schema.form/attr-form-properties form)
+          child (some-> form form-children first)]
+      (and (#{:vector :set :sequential} head)
+           (:seon.db/component props)
+           (ref-value-form? child)))))
+
+(defn- acquired-component-schema?
+  "True when a component ref attr also declares its acquired entity shape."
+  [attr]
+  (when (component-children-attr? attr)
+    (let [form (resolve-malli-form (schema/schema-definition attr))
+          child (some-> form form-children first)]
+      (admits-entity-value? child))))
+
 (defn encode-edn-slot-values
   "Encode mixed-union attribute values before transport."
   [tx-data]
@@ -282,10 +342,9 @@
   (let [resolved (resolve-malli-form form)
         head (form-head resolved)]
     (cond
-      (= :seon.db/ref resolved) :one
+      (ref-value-form? resolved) :one
       (and (#{:vector :set :sequential} head)
-           (= :seon.db/ref
-              (some-> resolved form-children first resolve-malli-form))) :many
+           (some-> resolved form-children first ref-value-form?)) :many
       :else nil)))
 
 (defn ref-slot?
@@ -357,6 +416,18 @@
   [entity]
   (doseq [[attr value] entity
           :when (and (not (system-attr? attr)) (schema/registered? attr))]
+    (when (and (acquired-component-schema? attr)
+               (not (schema/valid-candidate-value? attr value)))
+      (throw (ex-info
+               (str "Transaction data fails its registered component schema "
+                    (pr-str (schema/schema-definition attr)) ". "
+                    "Transact identified child entities or entity refs; for "
+                    "example "
+                    (transaction-form
+                      [{attr 'value-matching-registered-schema}]) ".")
+                      {::db/attr attr ::db/actual-value value
+                       ::db/expected-schema (schema/schema-definition attr)
+                       :seon.error/kind :user-input})))
     (case (ref-attr-arity (schema/schema-definition attr))
       :one (validate-ref! attr value)
       :many (doseq [child value] (validate-ref! attr child))

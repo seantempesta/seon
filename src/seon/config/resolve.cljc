@@ -618,9 +618,16 @@
 (schema/register! :seon.config/context-profiles
   [:or [:map-of :keyword [:vector :map]] :nil])
 ;; Named launch-time model configurations. Each child is identified by its
-;; variant keyword and owned by the singleton through this component ref.
+;; variant keyword and owned by the singleton through this component ref. The
+;; one registered value shape admits transaction refs and acquired child maps;
+;; the explicit storage facet keeps both database bridges on :db.type/ref.
 (schema/register! :seon.config/model-variants
-  [:vector {:seon.db/component true} :seon.db/ref])
+  [:vector
+   {:seon.db/component true}
+   [:or
+    {:seon.db/value-type :db.type/ref}
+    :seon.db/ref
+    :seon.config/model-variant-entity]])
 
 ;; The singleton entity schema — every knob optional (a `{}` manifest seeds the
 ;; resolved defaults; `:seon.config/id` is the only required key).

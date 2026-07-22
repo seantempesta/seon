@@ -14,6 +14,7 @@
   (:require
     [cljs.test :refer [async deftest is testing]]
     [clojure.string :as str]
+    [datahike.api :as d]
     [malli.core :as m]
     [my.skills :as skills]
     [seon.agent :as agent]
@@ -1406,6 +1407,97 @@
     (is (= {:seon.config/always #{'my.kb 'seon.agent.message}}
            (config/namespaces-policy decoded))
         "the decoded singleton satisfies the resolved policy schema")))
+
+(deftest acquired-config-singleton-validates-before-policy-access
+  (async done
+    (let [manifest
+          {:seon.config/namespaces
+           {:seon.config/always '[my.kb seon.agent.message seon.db]}
+           :seon.config/model-variants
+           {:planning {:seon.ai/agent-model "planner"
+                       :seon.ai/agent-fallback-variant :muse}
+            :muse {:seon.ai/agent-model "muse"
+                   :seon.ai/agent-thinking "minimal"}
+            :execution {:seon.ai/agent-provider :deepseek
+                        :seon.ai/agent-model "executor"}}}
+          singleton
+          (resolve/resolve-config-singleton manifest {} fixed-hardware)
+          model-children (:seon.config/model-variants singleton)
+          attributes
+          (into (set (keys singleton))
+                (mapcat keys)
+                model-children)
+          datahike-schema (db/malli->datahike-schema (sort-by str attributes))
+          installed (into {} (map (juxt :db/ident identity)) datahike-schema)
+          stored
+          (->> (first (db/encode-edn-slot-values [singleton]))
+               (remove
+                (fn [[attribute value]]
+                  (and (= :db.cardinality/many
+                          (:db/cardinality (get installed attribute)))
+                       (empty? value))))
+               (into {}))
+          memory-config
+          {:store {:backend :memory :id (random-uuid)}
+           :schema-flexibility :write
+           :keep-history? true}
+          connection (atom nil)]
+      (-> (db/transact!
+           {::db/tx-data
+            [{:seon.config/id config/cluster-config-id
+              :seon.config/model-variants
+              [{:seon.ai/agent-model "missing-variant-identity"}]}]})
+          (.then
+           (fn [error]
+             (is (= :user-input (:seon.error/kind error))
+                 "an unidentified component child is rejected before submission")
+             (is (= :seon.config/model-variants
+                    (get-in error [:seon.error/data ::db/attr])))
+             (is (str/includes? (:seon.error/message error)
+                                "registered component schema"))))
+          (.then (fn [_] (d/create-database memory-config)))
+          (.then (fn [_] (d/connect memory-config)))
+          (.then
+           (fn [conn]
+             (reset! connection conn)
+             (-> (d/transact! conn datahike-schema)
+                 (.then (fn [_] (d/transact! conn [stored])))
+                 (.then
+                  (fn [_]
+                    (let [acquired
+                          (d/pull @conn '[*]
+                                  [:seon.config/id config/cluster-config-id])
+                          raw-children
+                          (:seon.config/model-variants acquired)]
+                      (is (vector? raw-children)
+                          "wildcard pull materializes cardinality-many refs as a vector")
+                      (is (= 3 (count raw-children)))
+                      (is (every? map? raw-children)
+                          "component refs acquire as child maps")
+                      (is (every? #(int? (:db/id %)) raw-children)
+                          "every acquired component carries its Datahike entity id")
+                      (let [decoded (db/decode-edn-values acquired)]
+                        (is (= #{'my.kb 'seon.agent.message 'seon.db}
+                               (:seon.config/always decoded))
+                            "the full acquisition also restores registered set values")
+                        (is (schema/valid-candidate-value?
+                             :seon.config/singleton decoded)
+                            "the decoded raw singleton validates before any accessor runs")
+                        (is (= config/default-database-pull-policy
+                               (config/database-pull-policy decoded))
+                            "the boot policy consumer accepts the acquired singleton")
+                        (is (= :muse
+                               (get-in (config/model-variants decoded)
+                                       [:planning
+                                        :seon.ai/agent-fallback-variant]))
+                            "a declared fallback variant survives acquisition"))))))))
+          (.finally
+           (fn []
+             (-> (if-let [conn @connection]
+                   (d/release conn)
+                   (js/Promise.resolve nil))
+                 (.then (fn [_] (d/delete-database memory-config))))))
+          (test.async/settle! done 30000)))))
 
 (deftest reconcile-replaces-the-always-source-set-exactly
   (let [identity [:seon.config/id config/cluster-config-id]
