@@ -302,6 +302,53 @@
                          (::instrument/state started))
                        tokens-var)))
               "cold startup instruments the real stamped host wrapper")
+          (let [response
+                (invoke-batch!
+                 live agent-id "instrument-built-in-parity"
+                 (context/resolve-head! session)
+                 [{:seon.repl/kind :form
+                   :seon.repl/source
+                   "(seon.ai.tokens/estimate-chars 4)"}
+                  {:seon.repl/kind :form
+                   :seon.repl/source
+                   "(seon.ai.tokens/estimate-chars \"bad\")"}
+                  {:seon.repl/kind :form
+                   :seon.repl/source
+                   "(seon.ai.tokens/estimate-chars 8)"}])
+                result (:seon.execution/result response)
+                results (:seon.host/results result)
+                error (get-in results [1 :seon/error])]
+            (is (= :seon.execution.message/result
+                   (:seon.execution/message response))
+                (pr-str response))
+            (is (nil? (:seon.execution/error response)) (pr-str response))
+            (is (= 2 (:seon.eval/n-ok result)) (pr-str response))
+            (is (= 1 (:seon.eval/n-fail result)) (pr-str response))
+            (is (= 3 (count (:seon.eval/ids result))) (pr-str response))
+            (is (= 3 (count results)) (pr-str response))
+            (is (= [true false true] (mapv :seon.eval/ok? results)))
+            (is (= [16 32]
+                   (mapv :seon.eval/value [(first results) (last results)])))
+            (is (= :seon.error.kind/malli-instrument-input
+                   (get-in error [:seon.error/data :seon.error/kind])))
+            (is (= :schema-input
+                   (get-in error
+                           [:seon.error/data :seon.error.sci/class])))
+            (is (= 'seon.ai.tokens/estimate-chars
+                   (get-in error
+                           [:seon.error/data :seon.error.malli/fn-sym])))
+            (is (= ":int"
+                   (get-in error
+                           [:seon.error/data :seon.error.malli/expected])))
+            (is (= "\"bad\""
+                   (get-in error
+                           [:seon.error/data :seon.error.malli/got-edn])))
+            (is (seq (get-in error
+                             [:seon.error/data
+                              :seon.error.malli/humanized])))
+            (is (string? (get-in error
+                                 [:seon.error/data
+                                  :seon.error.malli/hint]))))
           (let [head (context/resolve-head! session)
                 definition
                 (str "(defn private-multi\n"

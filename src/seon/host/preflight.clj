@@ -151,16 +151,17 @@
 
 (defn- candidate-names
   [ctx registry ns-sym token]
-  (if-let [target (resolved-prefix ctx ns-sym token)]
-    (into (namespace-var-names ctx target)
-          (map (comp str key))
-          (if registry
-            (get-in @registry [target :seon.host.context/vars])
-            {}))
-    (-> (namespace-var-names ctx ns-sym)
-        (into (namespace-var-names ctx 'clojure.core))
-        (into (registry-var-names registry))
-        vec)))
+  (->> (if-let [target (resolved-prefix ctx ns-sym token)]
+         (into (namespace-var-names ctx target)
+               (map (comp str key))
+               (if registry
+                 (get-in @registry [target :seon.host.context/vars])
+                 {}))
+         (-> (namespace-var-names ctx ns-sym)
+             (into (namespace-var-names ctx 'clojure.core))
+             (into (registry-var-names registry))))
+       sort
+       vec))
 
 (defn- contains-loader-form?
   [form]

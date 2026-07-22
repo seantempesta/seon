@@ -2,8 +2,13 @@
   "JVM-host repair policy and disposable symbol-preflight proofs."
   (:require [clojure.test :refer [deftest is testing]]
             [sci.core :as sci]
+            [seon.host.context :as context]
+            [seon.host.eval :as host.eval]
+            [seon.host.instrument :as instrument]
             [seon.host.preflight :as preflight]
-            [seon.repl.parse.repair :as candidates]))
+            [seon.host.session :as session]
+            [seon.repl.parse.repair :as candidates]
+            [seon.schema :as schema]))
 
 (defn- context-with-known-symbols []
   (let [ctx (sci/init {})]
@@ -24,6 +29,95 @@
    :seon.config.repair/classes {}
    :seon.config.repair/max-fixes-per-form 1
    :seon.config.repair/budget-ms 50})
+
+(defn- registry-with-candidates []
+  (let [registry (context/registry)]
+    (context/register-wrappers!
+     {::context/registry registry
+      ::context/lib 'my.registry
+      ::context/wrappers
+      {'known {::context/wrapper-fn (constantly :known)}
+       'thing-aa {::context/wrapper-fn (constantly :aa)}
+       'thing-ab {::context/wrapper-fn (constantly :ab)}}})
+    registry))
+
+(defn- batch-session [ctx registry]
+  (let [projection (schema/build-projection {} {})
+        projection-state
+        (atom {::context/database {:db-name "preflight-test" :t 1}
+               ::context/projection projection})
+        contexts (atom {"preflight" ctx})
+        instrument-state
+        (instrument/state
+         {::context/registry registry
+          ::context/projection-state projection-state
+          :seon.host/contexts contexts})]
+    {::session/ctx ctx
+     ::session/writer nil
+     ::session/startup (atom {:seon.execution/agent-id "preflight"})
+     ::session/interrupt-lock (Object.)
+     ::session/interrupt-fired? (atom false)
+     ::session/worker-phase (atom :idle)
+     ::session/contexts contexts
+     ::instrument/state instrument-state}))
+
+(deftest qualified-registry-resolution-has-a-stable-suggestion
+  (let [ctx (context-with-known-symbols)
+        registry (registry-with-candidates)
+        result
+        (preflight/preflight!
+         ctx registry home-ns home-ns
+         (assoc default-policy
+                :seon.config.repair/classes
+                {:seon.repl.parse.repair/undeclared-var false})
+         "(my.registry/thing-ac)")
+        error (get-in result [:seon.host.preflight/envelope :seon/error])
+        suggestions
+        (get-in error
+                [:seon.error/data :seon.repl.parse.repair/suggestions])]
+    (is (= :terminal (:seon.host.preflight/status result)))
+    (is (= :resolution
+           (get-in error [:seon.error/data :seon.error.sci/class])))
+    (is (= ["my.registry/thing-aa" "my.registry/thing-ab"]
+           (mapv :seon.repl.parse.repair/to suggestions)))
+    (is (re-find #"Did you mean my\.registry/thing-aa\?"
+                 (:seon.error/message error)))))
+
+(deftest qualified-resolution-failure-is-contained-per-form
+  (let [ctx (context-with-known-symbols)
+        registry (registry-with-candidates)
+        result
+        (host.eval/eval-batch-result
+         (batch-session ctx registry)
+         {:seon.eval/parsed
+          [{:seon.repl/kind :form :seon.repl/source "(+ 1 2)"}
+           {:seon.repl/kind :form
+            :seon.repl/source "(my.registry/knwon)"}
+           {:seon.repl/kind :form :seon.repl/source "(+ 3 4)"}]
+          :seon.eval/starting-ns home-ns}
+         (assoc default-policy
+                :seon.config.render/database-edn-cap 16384
+                :seon.config.repair/classes
+                {:seon.repl.parse.repair/undeclared-var false})
+         {:db-name "preflight-test" :t 1}
+         {})
+        results (:seon.host/results result)]
+    (is (= 2 (:seon.eval/n-ok result)) (pr-str result))
+    (is (= 1 (:seon.eval/n-fail result)) (pr-str result))
+    (is (= [] (:seon.eval/ids result)) (pr-str result))
+    (is (= 3 (count results)) (pr-str result))
+    (is (= [true false true] (mapv :seon.eval/ok? results)))
+    (is (= [3 7]
+           (mapv :seon.eval/value [(first results) (last results)])))
+    (is (= :resolution
+           (get-in results
+                   [1 :seon/error :seon.error/data
+                    :seon.error.sci/class])))
+    (is (= "my.registry/known"
+           (get-in results
+                   [1 :seon/error :seon.error/data
+                    :seon.repl.parse.repair/suggestions 0
+                    :seon.repl.parse.repair/to])))))
 
 (deftest pick-winner-is-synchronous-on-the-jvm
   (let [near {:seon.repl.parse.repair/to "near" :seon.repl.parse.repair/distance 1}
