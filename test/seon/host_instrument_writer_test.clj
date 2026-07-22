@@ -128,6 +128,34 @@
            (:seon.error/kind
             (thrown-data #(sci/eval-string* ctx "(my.private/answer \"bad\")")))))))
 
+(deftest built-in-specced-var-instruments-without-a-redefinition-watch
+  (let [{::keys [base ctx state] :as live} (fixture)
+        registry (::context/registry base)
+        sym 'my.protected/echo
+        generation (projection {sym [:=> [:cat :int] :int]})]
+    (context/register-host-wrappers!
+     {::context/registry registry
+      ::context/lib 'my.protected
+      ::context/wrappers
+      {'echo {::context/wrapper-fn identity}}})
+    (context/install-registered-wrappers!
+     {::context/registry registry ::context/ctx ctx ::context/lib 'my.protected})
+    (let [sci-var (sci/resolve ctx sym)]
+      (is (true? (:sci/built-in (meta sci-var))))
+      (install-projection! live generation)
+      (is (= :seon.error.kind/malli-instrument-input
+             (:seon.error/kind
+              (thrown-data #(sci/eval-string* ctx
+                                              "(my.protected/echo \"bad\")")))))
+      (is (= :sci/built-in
+             (::instrument/redefinition-protection
+              (get @(::instrument/apply-ledger state) sci-var))))
+      ;; A privileged host root replacement would synchronously trigger any
+      ;; installed watch. Remaining unwrapped proves this protected var has no
+      ;; meaningless redefinition watch.
+      (sci/alter-var-root sci-var (constantly identity))
+      (is (= "bad" (sci/eval-string* ctx "(my.protected/echo \"bad\")"))))))
+
 (deftest removed-contract-does-not-resurrect-through-the-root-watch
   (let [{::keys [ctx] :as live} (fixture)
         sym 'my.removal/echo]
@@ -251,7 +279,9 @@
                             :seon.fn/agent-facing? true
                             :seon.fn/spec "[:=> [:cat :int] :int]"
                             :seon.fn/schema-error "none"
-                            :seon.fn/read-attrs [:seed/attr]}])
+                            :seon.fn/read-attrs [:seed/attr]}
+                           {:seon.fn/sym "seon.ai.tokens/estimate-chars"
+                            :seon.fn/spec "[:=> [:cat :int] :int]"}])
                   "})"))]
         (is (true? (:seon.db/ok? probe)) (pr-str probe)))
       (let [started
@@ -259,8 +289,19 @@
                           ::context/writer-socket-path request-path
                           ::context/database-name database-name
                           ::context/backend :memory})
+            tokens-var
+            (get-in @(::context/registry (::host/base started))
+                    ['seon.ai.tokens ::context/vars 'estimate-chars])
             live (host-session! host-socket agent-id database-name)]
         (try
+          (is (true? (:sci/built-in (meta tokens-var)))
+              "the cold-start base retains W0.2 wrapper protection")
+          (is (= :sci/built-in
+                 (::instrument/redefinition-protection
+                  (get @(::instrument/apply-ledger
+                         (::instrument/state started))
+                       tokens-var)))
+              "cold startup instruments the real stamped host wrapper")
           (let [head (context/resolve-head! session)
                 definition
                 (str "(defn private-multi\n"

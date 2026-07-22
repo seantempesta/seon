@@ -116,14 +116,23 @@
   ([instrument-state projection sym sci-var current-root]
    (let [fingerprint (:seon.schema.projection/fingerprint projection)
          desired (desired-root projection sym current-root)
-         instrumented? (some? (::projection-fingerprint (meta desired)))]
-     (install-watch! instrument-state sym sci-var)
-     ;; Desired generation reaches the ledger before bindRoot notifies its
-     ;; watch. The marked desired root makes that nested notification a no-op.
+         instrumented? (some? (::projection-fingerprint (meta desired)))
+         redefinition-protected? (:sci/built-in (meta sci-var))]
+     ;; Built-in vars are already protected from agent redefinition, and SCI
+     ;; refuses watch mutation on them. Their roots remain installable through
+     ;; the public privileged `sci/alter-var-root` host seam below.
+     (when-not redefinition-protected?
+       (install-watch! instrument-state sym sci-var))
+     ;; Desired generation reaches the ledger before a writable var's bindRoot
+     ;; notifies its watch. The marked desired root makes that notification a
+     ;; no-op. Built-ins retain their protection class in the same ledger.
      (swap! (::apply-ledger instrument-state)
             assoc sci-var
-            {::symbol sym
-             ::projection-fingerprint (when instrumented? fingerprint)})
+            (cond-> {::symbol sym
+                     ::projection-fingerprint
+                     (when instrumented? fingerprint)}
+              redefinition-protected?
+              (assoc ::redefinition-protection :sci/built-in)))
      (when-not (identical? current-root desired)
        (sci/alter-var-root sci-var (constantly desired))))))
 
