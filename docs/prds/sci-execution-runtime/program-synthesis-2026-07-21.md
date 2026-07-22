@@ -1175,6 +1175,20 @@ Lane states at wind-down:
   deliberate opt-in per-family mechanism for stateful cross-boundary
   references; pull forward only if the my.* inventory shows a real
   present need. P2 lanes enforce (b) in their interpreters/tests.
+- **Ruling 16 (owner, 2026-07-22): package wrapper namespaces are
+  platform-segregated by NAME** — `seon.packages.js.<pkg>` /
+  `seon.packages.jvm.<pkg>`. The prefix IS the computed
+  platform-locality and build-separation rule: the JS build includes
+  only `seon.packages.js.**`, the JVM classpath only
+  `seon.packages.jvm.**`; loader doors filter by prefix; no locality
+  metadata, no hand lists. Ecosystem details stay in the native
+  manifests (package.json/deps.edn, WP-K unchanged); the wrapper
+  namespace is the package's leaf; portable call surfaces stay in
+  family cores above. Pin once at WP-B/WP-J: (a) one deterministic
+  byte-stable npm-name↔ns munge rule (`@scope/pkg` →
+  `seon.packages.js.scope.pkg`); (b) per-cluster wrappers live in the
+  cluster's corpus (db-backed `:seon.ns` from the cluster's
+  `packages/` tree), never Seon `src/`.
 - **P2 first wave RETURNED, reviewed, HELD for the serial gate**:
   `p2-web` (web.cljc + internal.cljc + pod leaf; effects
   grants :read / fetch :external / search :external; no :idempotent
