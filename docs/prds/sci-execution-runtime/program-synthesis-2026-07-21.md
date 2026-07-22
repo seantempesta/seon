@@ -792,6 +792,23 @@ retains. Declaration-path rejection of explicit :inherit stays. The
 reset boundary, ACME coordination, and live proof are the
 orchestrator's at integration. Lane resumed (thread `019f8b17-…`).
 
+### Normalize-1 DONE `da8a4fce` + reset boundary + live proof (2026-07-22)
+
+All 14 override attrs are ordinary native schemas; decode sites
+deleted; declared :inherit rejected with steering; architecture +
+adapter docs reconciled. Gates cljs 1530/7449 + writer 378/2867 with a
+real-Datahike native round-trip regression. `cluster reset default`
+clean (4 fresh processes, root 200). LIVE PROOF: native double/long
+override transact + pull round-trip (0.7/8192 as numbers — the deleted
+decode path would have surfaced strings), clean value-level retraction,
+absence restored. Notes: (i) ACME picks up the reset-bounded schema at
+its own next reset — coordinate at the next downstream update, default
+proven first; (ii) my.plan-test has a pre-existing focused-build
+schema load-order hole (2f/4e isolated, integrated run green) — next
+quiet W10 slot with q23's test-infra work. Next queue item: normalize
+(2) :seon.config/always + skills → cardinality-many; spine: the WP-S2
+spec (orchestrator, in progress).
+
 ### Queue-order correction (fresh-eyes ruling, recorded)
 
 The wind-down queue serialized the EDN normalize series ahead of
