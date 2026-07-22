@@ -1064,6 +1064,23 @@ Lanes at tranche open: Stage 1.5 investigation (read-only,
 W5 (pending the Stage 1.5 verdict) → packages WP-B∥WP-J; tail units
 (q22c/q22d, W1 sweep, W1.2b, W8/W9 crumbs) fill free slots.
 
+### OWNER RULINGS (2026-07-22 morning, tranche 2 additions)
+
+- **Extension convention:** platform splits are `.clj`+`.cljs`; `.cljc`
+  only for genuinely mixed files (bb reader-conditional case is
+  legitimate). Audit lane running; wrong-suffix renames follow.
+- **`seon.repair` is parser repair** and moves under the parser
+  namespace — execute immediately AFTER NS-0.5c lands `seon.repl.parse`
+  (exact target from the organization review's recommendation).
+- **Fresh namespace-organization review dispatched** (read-only, high):
+  current-tree top-level map + D-numbered decision sheet for owner
+  taste; builds on the executed prior designs; zero effort on W5
+  death-row files. Logs `tmp/orchestrator/ns-org-review-*`.
+- W1.6 stop resolved: acme gets an explicit override preserving its
+  Typeahead selection (system.edn inheritance); model corrected to
+  `deepseek-v4-pro` (deepseek-chat approaching retirement — my stale
+  pick, caught by the lane).
+
 ### NO PENDING OWNER DECISIONS
 
 The 4 W1-boot decisions were folded as recommendations into the shipped
