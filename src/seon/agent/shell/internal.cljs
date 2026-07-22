@@ -7,6 +7,7 @@
   (:require
     [clojure.string :as str]
     [seon.agent.fs :as fs]
+    [seon.agent.shell.core :as core]
     [seon.agent.shell :as-alias shell]
     [seon.agent.testrun :as testrun]
     [seon.ai.tokens :as tokens]
@@ -20,7 +21,7 @@
 
 (def default-timeout-ms
   "SIGTERM the child after this long when the request doesn't say."
-  30000)
+  core/default-timeout-ms)
 
 (def max-output-bytes
   "The full-capture ceiling for a foreground [[run]],
@@ -39,7 +40,7 @@
   "Deterministic exit sentinel for a SIGTERM-killed child (timeout or
    output-buffer overflow): 128 + SIGTERM(15), the POSIX-shell
    convention. The agent keys off ::shell/timed-out?, not the sentinel."
-  143)
+  core/killed-exit)
 
 ;; ============================================================
 ;; Envelope helpers — errors are values, never a throw.
@@ -48,11 +49,8 @@
 (defn fail
   "ok?-false envelope on the shared :seon.error/* shape. `data`
    (optional map) carries structured detail."
-  ([msg] (fail msg nil))
-  ([msg data]
-   (cond-> {::shell/ok?         false
-            :seon.error/message msg}
-     (seq data) (assoc :seon.error/data data))))
+  ([msg] (core/fail msg))
+  ([msg data] (core/fail msg data)))
 
 ;; ============================================================
 ;; The SEON_SHELL grant — host-owned, read live, default-deny.
@@ -69,10 +67,7 @@
 (defn ungranted
   "The guiding default-deny envelope."
   []
-  (fail (str "shell access is not granted (default-deny) — the host must "
-             "set the SEON_SHELL env var (any value but \"0\") before the "
-             "pod starts; nothing inside the pod can grant it. Inspect "
-             "with (seon.agent.shell/grants).")))
+  (core/ungranted))
 
 ;; ============================================================
 ;; cwd gate — delegate to seon.agent.fs, never reimplement.
@@ -114,22 +109,7 @@
    guard, not display economy: bytes beyond it were dropped and a
    ::shell/hint points at run-bg! for unbounded streams."
   [exit out err timed-out? buffer-truncated?]
-  (let [out (str out)
-        err (str err)]
-    (cond-> {::shell/ok?        true
-             ::shell/exit       exit
-             ::shell/out        out
-             ::shell/err        err
-             ::shell/out-tokens (tokens/estimate out)
-             ::shell/err-tokens (tokens/estimate err)
-             ::shell/timed-out? (boolean timed-out?)
-             ::shell/truncated? (boolean buffer-truncated?)}
-      buffer-truncated?
-      (assoc ::shell/hint
-             (str "output reached the hard capture ceiling; later output was "
-                  "dropped (a RAM guard, not display). For an unbounded or "
-                  "long-running stream use "
-                  "(seon.agent.shell/run-bg! …) and page it with job-output.")))))
+  (core/ran-envelope exit out err timed-out? buffer-truncated?))
 
 (defn exec
   "Run `cmd` with `args` (vector of argv strings — NEVER a shell string;
@@ -137,11 +117,9 @@
    subprocess result. String stdin is closed so readers see EOF."
   [cmd args cwd stdin timeout-ms]
   (subprocess/run!
-   (cond-> {::subprocess/cmd (into [cmd] args)
-            ::subprocess/timeout-ms timeout-ms
-            ::subprocess/max-output-bytes max-output-bytes}
-     cwd (assoc ::subprocess/cwd cwd)
-     (some? stdin) (assoc ::subprocess/stdin stdin))))
+   (core/run-request {::shell/cmd cmd ::shell/args args ::shell/cwd cwd
+                      ::shell/stdin stdin ::shell/timeout-ms timeout-ms}
+                     max-output-bytes)))
 
 ;; ============================================================
 ;; Background jobs — a VOLATILE process-lifetime table (globalThis tier,
@@ -323,9 +301,4 @@
    plus ::shell/since (clamped, echoed) and ::shell/next-since (the new end
    offset to pass as ::since next time to fetch only new output)."
   [s since]
-  (let [s     (str s)
-        total (count s)
-        from  (min (max 0 (or since 0)) total)]
-    {::shell/content    (subs s from)
-     ::shell/since      from
-     ::shell/next-since total}))
+  (core/slice-since s since))

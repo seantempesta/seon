@@ -8,6 +8,7 @@
   (:require
     ["node:fs" :as fs]
     [clojure.string :as str]
+    [seon.agent.fs.core :as core]
     [seon.agent.fs.internal :as int]
     [seon.agent.fs.match :as match]
     [seon.code :as code]
@@ -164,6 +165,15 @@
    [:seon.agent.fs/denial {:optional true} :seon.agent.fs/denial]
    [:seon.agent.fs/error  {:optional true} :string]])
 
+(schema/register! :seon.agent.fs/home-response
+  [:or
+   [:string {:min 1}]
+   [:map {:closed true}
+    [:seon.agent.fs/ok? [:= false]]
+    [:seon.error/message :string]
+    [:seon.error/kind :keyword]
+    [:seon.error/data :map]]])
+
 (schema/register! :seon.agent.fs/match-ext   :string)
 (schema/register! :seon.agent.fs/glob        :string) ; e.g. "*.py" or "src/**/*.cljs"
 (schema/register! :seon.agent.fs/skip-hidden :boolean)
@@ -311,7 +321,7 @@
       (reset! int/!config next)
       (assoc next :seon.agent.fs/ok? true))))
 
-(defn ^:seon.fn/agent-facing? grants
+(defn ^{:seon.fn/agent-facing? true :seon.capability/effect :read} grants
   "What am I allowed to touch?
 
    Returns the CONFIGURED grant — the exact
@@ -337,7 +347,7 @@
 ;; Reads + writes — map-in / map-out, sync, never throw.
 ;; ============================================================
 
-(defn ^:seon.fn/agent-facing? read-file
+(defn ^{:seon.fn/agent-facing? true :seon.capability/effect :read} read-file
   "Read a file's text, whole or as a paged line window.
 
    Sync. Returns:
@@ -388,7 +398,7 @@
         (str "refused malformed Clojure source; prior file unchanged: "
              (ex-message error))))))
 
-(defn ^:seon.fn/agent-facing? write-file
+(defn ^{:seon.fn/agent-facing? true :seon.capability/effect :external} write-file
   "Write `:seon.agent.fs/content` to `:seon.agent.fs/path` (sync).
    Overwrites. Returns:
      {:seon.agent.fs/ok? true  :seon.agent.fs/path <p>}                           ; ok
@@ -436,7 +446,7 @@
                      (int/edit-context-window new-lines from-line to)))))))
     (catch :default e (int/->err path e))))
 
-(defn ^:seon.fn/agent-facing? edit-file
+(defn ^{:seon.fn/agent-facing? true :seon.capability/effect :external} edit-file
   "Edit a file in place: line-range or unique exact-match replace.
 
    Two modes, ONE result envelope — pass exactly one:
@@ -494,7 +504,7 @@
       (int/denied path (str "no edit given — pass from-line/to-line/content "
                             "(line range) or old-string/new-string (exact match)")))))
 
-(defn ^:seon.fn/agent-facing? list-dir
+(defn ^{:seon.fn/agent-facing? true :seon.capability/effect :read} list-dir
   "List the filenames in one directory, without recursion.
 
    Sync; entries are names only, not full paths."
@@ -509,7 +519,7 @@
                :seon.agent.fs/entries (vec arr)})
             (catch :default e (int/->err path e)))))
 
-(defn ^:seon.fn/agent-facing? stat
+(defn ^{:seon.fn/agent-facing? true :seon.capability/effect :read} stat
   "Check a path's type and mtime without reading it.
 
    Sync stat: returns `mtime` plus `dir?`/`file?` booleans."
@@ -526,7 +536,7 @@
                :seon.agent.fs/mtime  (.-mtime s)})
             (catch :default e (int/->err path e)))))
 
-(defn ^:seon.fn/agent-facing? file-exists?
+(defn ^{:seon.fn/agent-facing? true :seon.capability/effect :read} file-exists?
   "Check whether a path exists; false on any error.
 
    Soft-fails to false. Named to avoid shadowing `cljs.core/exists?`."
@@ -534,18 +544,17 @@
   [req]
   (:seon.agent.fs/ok? (stat req)))
 
-(defn ^:seon.fn/agent-facing? home-dir
-  "The user's home directory as a string.
+(defn ^{:seon.fn/agent-facing? true :seon.capability/effect :read} home-dir
+  "Return the user's home directory or a steering error value.
 
-   Throws when neither HOME nor USERPROFILE is set (absent = error, never nil)."
-  {:malli/schema [:=> [:cat] :string]}
+   Absence is the flat family error envelope and names the governing config
+   key; this function never throws into the agent loop."
+  {:malli/schema [:=> [:cat] :seon.agent.fs/home-response]}
   []
-  (or (.. js/process -env -HOME)
-      (.. js/process -env -USERPROFILE)
-      (throw (ex-info "home-dir: neither HOME nor USERPROFILE is set"
-                      {:seon.agent.fs/op :home-dir}))))
+  (core/home-response (.. js/process -env -HOME)
+                      (.. js/process -env -USERPROFILE)))
 
-(defn ^:seon.fn/agent-facing? walk-dir
+(defn ^{:seon.fn/agent-facing? true :seon.capability/effect :read} walk-dir
   "Recursively walk `:seon.agent.fs/path` (sync), return matching files.
    Returns:
      {:seon.agent.fs/ok? true :seon.agent.fs/path <p>
@@ -614,7 +623,7 @@
    into context, so an unbounded view is never the default."
   100)
 
-(defn ^:seon.fn/agent-facing? view
+(defn ^{:seon.fn/agent-facing? true :seon.capability/effect :read} view
   "A line-numbered, bounded window of a file, with its content SHA.
 
    The read surface you aim an edit with: `:seon.agent.fs/content` carries
@@ -716,7 +725,7 @@
       (seq (:seon.agent.fs.match/normalizations decision))
       (assoc :seon.agent.fs/normalizations (:seon.agent.fs.match/normalizations decision)))))
 
-(defn ^:seon.fn/agent-facing? replace!
+(defn ^{:seon.fn/agent-facing? true :seon.capability/effect :external} replace!
   "Replace exact `:seon.agent.fs/find` text in a file, deterministically.
 
    The safe anchored editor. The pure cascade (seon.agent.fs.match) tries,
@@ -782,7 +791,7 @@
                         (cascade-fail path decision)))))
         (catch :default e (->anchored-fail (int/->err path e)))))))
 
-(defn ^:seon.fn/agent-facing? insert!
+(defn ^{:seon.fn/agent-facing? true :seon.capability/effect :external} insert!
   "Insert `:seon.agent.fs/content` into a file at one line anchor.
 
    Pass EXACTLY ONE of `:seon.agent.fs/after-line` / `:seon.agent.fs/before-line`

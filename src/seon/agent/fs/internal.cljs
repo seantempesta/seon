@@ -5,11 +5,11 @@
    synchronous file operations, and builds the public result envelopes. Agents
    use `seon.agent.fs`; none of these helpers form a taught capability surface."
   (:require
-    ["node:crypto" :as crypto]
     ["node:fs" :as fs]
     ["node:path" :as np]
     [clojure.string :as str]
     [seon.ai.tokens :as tokens]
+    [seon.agent.fs.core :as core]
     [seon.config :as config]))
 
 ;; ============================================================
@@ -23,9 +23,7 @@
    edit against a stale read: read → sha → the agent echoes it back on
    the next replace!, a mismatch means the file moved under them."
   [content]
-  (-> (.createHash crypto "sha256")
-      (.update content "utf8")
-      (.digest "hex")))
+  (core/file-sha content))
 
 ;; ============================================================
 ;; Error / denial envelopes — errors are values, never a throw.
@@ -125,20 +123,7 @@
    totals — what range came back of how many total lines — so a partial
    read never looks complete."
   [content from-line max-lines]
-  (let [lines (str/split content #"\n" -1)
-        ;; a trailing newline yields a final "" pseudo-line — drop it so
-        ;; total-lines matches what an editor shows
-        lines (if (and (seq lines) (= "" (peek lines))) (pop lines) lines)
-        total (count lines)
-        from  (max 1 (or from-line 1))
-        start (min (dec from) total)
-        end   (if max-lines
-                (min total (+ start (max 0 max-lines)))
-                total)]
-    {:seon.agent.fs/content        (str/join "\n" (subvec lines start end))
-     :seon.agent.fs/from-line      from
-     :seon.agent.fs/lines-returned (- end start)
-     :seon.agent.fs/total-lines    total}))
+  (core/page-lines content from-line max-lines))
 
 ;; ============================================================
 ;; edit-file plumbing — pure line/string surgery over file content.
