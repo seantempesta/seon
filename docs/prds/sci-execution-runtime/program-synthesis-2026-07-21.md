@@ -1198,6 +1198,17 @@ This is also derivation-storage's purity precondition made checkable:
 unit design with the phase cursor (where death occurred) + effect log
 (what the dead form already did).
 
+### OWNER DATA INVARIANT (2026-07-22 night, binding)
+
+"Every aspect has an attribute name and an explicit ref." All stored
+data is named and connected — no anonymous opacity. The three-rung
+ladder (hand-modeled entities > generic EDN→entities with content-hash
+identity > the structured DAG type below the datom floor) is three
+ways to satisfy the one invariant at different scales. Enforceable:
+an opaque EDN string in a datom is an aspect without a name — the
+EDN-slot inventory is the violation list; a conformance gate can hold
+it at zero once the upgrades land.
+
 ### OWNER DESIGN TIEBREAKER (2026-07-22 night, standing)
 
 At every seam needing a design decision, choose what supports the
