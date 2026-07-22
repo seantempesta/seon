@@ -928,10 +928,17 @@ happened. Now take the next thing off the queue.
   Order: W3a → W3c1 → W3b → W3c2 → W3d, `host/eval.clj` hooks
   serialized. SCI checkout is `8fac6e88`, not the design's `be4021d`.
   WP-D stays adjacent-open; W3d must serve ALL authored consumers) ·
-  **W3a IN FLIGHT** (`specs/w3a-interrupt-output-closure.md`, sol
-  medium, logs `tmp/orchestrator/w3a-*`: late-interrupt timeout
-  identity, host output-cap → config authority (q16-class duplicate
-  limit), concurrent-bleed proof, flood regression guard).
+  **W3a DONE `bb0e499a`** (output cap converged on
+  `database-edn-cap` via the one per-invocation policy query — its W1
+  IOU comment retired; late interrupts carry :interrupt AND :timeout;
+  new concurrent attribution proof; writer 354/2670) ·
+  **W3c1 IN FLIGHT** (`specs/w3c1-host-run-fence.md`, sol medium, logs
+  `tmp/orchestrator/w3c1-*`: consume `:seon.execution/run-fence`, one
+  CAS at the invocation database via the strengthened transact seam,
+  fenced batches create zero receipts) ·
+  **q23 IN FLIGHT** (`specs/q23-conformance-scan-helper.md`, sol low,
+  logs `tmp/orchestrator/q23-*`). Spine after W3c1: W3b instrumentation
+  (m/-instrument) → W3c2 repair/preflight → W3d authored invocation.
 
 ### NO PENDING OWNER DECISIONS
 
