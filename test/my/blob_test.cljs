@@ -7,6 +7,7 @@
    [cljs.test :refer [async deftest is use-fixtures]]
    [clojure.string :as str]
    [my.blob :as blob]
+   [my.blob.internal :as internal]
    [seon.ai.tokens :as tokens]
    [seon.db :as db]
    [seon.schema :as schema]))
@@ -35,13 +36,13 @@
 (defonce ^:private !projections (atom {}))
 
 (def ^:private put-with-publication-effects!
-  @#'blob/put-with-publication-effects!)
+  internal/put-with-publication-effects!)
 
 (def ^:private node-publication-effects
-  @#'blob/node-publication-effects)
+  internal/node-publication-effects)
 
 (def ^:private materialize-retained-with-effects!
-  @#'blob/materialize-retained-with-effects!)
+  internal/materialize-retained-with-effects!)
 
 (def ^:private concat-with-effects!
   @#'blob/concat-with-effects!)
@@ -57,19 +58,16 @@
    :my.blob/read-only-dirs (vec read-only-dirs)})
 
 (use-fixtures
- :once
- {:before #(reset! !saved-storage-view @blob/!storage-view)
-  :after #(reset! blob/!storage-view @!saved-storage-view)})
-
-(use-fixtures
  :each
  {:before
   (fn []
     (.rmSync nfs fixture-dir #js {:recursive true :force true})
-    (reset! blob/!storage-view (storage-view fixture-dir))
+    (reset! !saved-storage-view
+            (blob/configure-storage-view! (storage-view fixture-dir)))
     (reset! !projections {}))
   :after
   (fn []
+    (blob/configure-storage-view! @!saved-storage-view)
     (.rmSync nfs fixture-dir #js {:recursive true :force true}))})
 
 (defn- content-hash [content]

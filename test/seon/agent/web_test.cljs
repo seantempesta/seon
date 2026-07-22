@@ -85,11 +85,11 @@
              (instrument/instrument-delta!
               {::instrument/changed-syms
                '#{seon.agent.web/fetch seon.agent.web/grants}
-               ::instrument/targets instrumented-web-targets})
+             ::instrument/targets instrumented-web-targets})
              (reset! !saved-transact db/transact!)
              (set! db/transact! fake-transact!)
-             (reset! !saved-storage-view @blob/!storage-view)
-             (reset! blob/!storage-view (storage-view fixture-dir))
+             (reset! !saved-storage-view
+                     (blob/configure-storage-view! (storage-view fixture-dir)))
              (.rmSync nfs fixture-dir #js {:recursive true :force true})
              (reset! !saved-env (aget (.-env js/process) "SEON_WEB"))
              (aset (.-env js/process) "SEON_WEB" "1"))
@@ -97,9 +97,9 @@
              (instrument/instrument-delta!
               {::instrument/changed-syms
                '#{seon.agent.web/fetch seon.agent.web/grants}
-               ::instrument/targets []})
+              ::instrument/targets []})
              (set! db/transact! @!saved-transact)
-             (reset! blob/!storage-view @!saved-storage-view)
+             (blob/configure-storage-view! @!saved-storage-view)
              (.rmSync nfs fixture-dir #js {:recursive true :force true})
              (if-some [v @!saved-env]
                (aset (.-env js/process) "SEON_WEB" v)
