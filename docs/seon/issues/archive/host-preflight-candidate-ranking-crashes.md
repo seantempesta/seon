@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: closed
 tags: [issue, agent, architecture]
 ---
 
@@ -41,7 +41,18 @@ becomes an unresolved-symbol preflight miss. This is a DESIGN-owned
 parity unit, sequenced into W5-0's retirement preflight; it is NOT part
 of the crash fix.
 
-## Fix in flight
+## CLOSED (2026-07-22)
+
+Fixed `16a040e6` (candidate-names returns a sorted vector; regressions:
+red-before/green-after suggestion ordering, good/unresolved/good
+containment, instrument-parity envelope; writer 375/2839). LIVE-PROVEN
+the same day under the dial: unresolved symbol and wrong-typed call
+both return per-eval error values, good/bad/good batch = 2/error/4, and
+a real DeepSeek drive ran 8 turns all `:done` where pre-fix turn 1
+died. The base-parity finding moved to its own issue:
+`docs/seon/issues/host-base-agent-surface-parity.md` (q34, W5-0).
+
+## Fix lane (historical)
 
 Sol lane (resumed thread `019f8a26-f97c…`): candidate-names returns an
 ordered vector at the producer; rank-candidates validation strengthened

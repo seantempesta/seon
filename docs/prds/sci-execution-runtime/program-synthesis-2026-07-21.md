@@ -394,6 +394,15 @@ an explicit "when" — never chat-only.
 
 | # | Weakness | Owner package | When / why then |
 |---|---|---|---|
+| q37 | UNGATED SURFACES class: the bb tooling surface has no gate — `bin/test-parser` was silently broken for two days (bare classpath bypassed bb.edn when malli entered the corpus) and `bin/oracle-server` since D13 (parinferish under grammar.cljc); both found only by the q33 sweep | one smoke gate that LOADS every bin/ bb script's requires under bb.edn (cheap, red on the next dependency drift) | next quiet W10/tooling slot |
+| q36 | writer gate intermittent: one non-reproducing failure at 376/2844 (2026-07-22, q31 acceptance run); test name LOST to a truncated pipe — lesson: always capture full gate logs to a file | W10 intermittents family (B8/B11 precedent) | next W10 slot; gate-log capture discipline immediate |
+| q35 | D13's repair merge broke the bare-babashka loadability the candidates half had (grammar.cljc consumers now drag parinferish+malli); bb.edn patched in-repo (`9ca35886`), deployed-bare question open — accept bb.edn as contract + fix two stale docstrings, or re-split (owner call vs D13 one-namespace ruling) | issue `d13-merge-broke-bare-babashka-loading.md` | with W9's parinferish audit |
+| q34 | the host base does not resolve the agent-facing surface: `seon.db`/`my.blob` unresolved (base-excluded=112 unaudited), and the post-q29 live drive proved agents under the dial cannot reach `message/user` or `lifecycle/complete` — computed, ran 8 clean turns, could not deliver or finish (`:no-forms`) | issue `host-base-agent-surface-parity.md`: census-as-conformance-gate + full end-to-end host-tier drive | W5-0 HARD GATE, before any cutover drive |
+| q33 | CLOSED `9ca35886` — lying `repl.internal`/`seon.repair` prose retired; parse-test renamed; bb tooling repaired (test-parser 47/379 green) | — | done 2026-07-22 |
+| q32 | CLOSED `bfe2fa21`+`3047851f` — all five explicit-adoption regression gaps closed, incl. fenced retract+replace atomicity through the real writer (377/2855) | — | done 2026-07-22 |
+| q31 | CLOSED `28b79365` — `writer/start!` validates its whole request; `::read-defaults` required (omission was unbounded reads + unarmed deadline); one shared finite fixture for 39 test callers | — | done 2026-07-22 |
+| q30 | CLOSED `41110a9a` — read-budget declines steer `:user-input` naming the governing config key (structural ex-data classification); live-proven post-restart | — | done 2026-07-22 |
+| q29 | CLOSED `16a040e6` — preflight candidate ranking crash (set→sequential) fixed at the producer; live-proven: real drive 8 turns `:done` where pre-fix turn 1 died; instrument parity was never broken (falsified attribution archived in the issue) | — | done 2026-07-22 |
 | q1 | `host.clj` god-file; lane contention proves it | namespace-hierarchy design → its WP cut | after W0.4/WP-A/W0.6 land (same file); design lane running |
 | q2 | `seon.host` has no supervisor spec (launched by tests/manual `-main`) | W6 WP-S (one recorded-child mechanism for sci host + package hosts) | with WP-S; must precede U10 kill/restart drills |
 | q3 | `wire-safe-value`/`bounded-result` realize O(value) before bounding | PARTIAL: W0.6 fixed terminal `pr-str` (capped JVM writer); `wire-safe-value`/`bounded-result` transit probes STILL realize | remaining half → W10; before U12 (100-agent heap pressure) |
@@ -617,7 +626,8 @@ WP-B∥WP-J, post-W5 splits D14/D18/D19/D21, virtual-agents four-closure
 series (feasibility doc = design), structured-values Stage 2+.
 Pending live proofs at next checkpoint: none outstanding (q21 64KiB
 PASSED; W3c1/W3d1 host-tier live proof PASSED via WP-S1a's gated
-drive). Weakness queue rows current through q28.
+drive). Weakness queue rows current through q37 (q29–q33 CLOSED
+2026-07-22; q34 is the W5-0 hard gate; q35 W9; q36/q37 W10).
 
 ## SKEPTIC RESTART VERIFICATION (2026-07-22 midday) — Phase-1 fresh-eyes pass
 
