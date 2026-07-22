@@ -129,6 +129,86 @@
           (assoc configuration :seon.dev.config/writer-max-heap "unbounded")
          descriptor)))))
 
+(deftest config-apply-resolution-rejects-operational-footguns-with-steering
+  (let [root (fs/create-temp-dir {:prefix "seon-config-floors-"})
+        process-dir (fs/path root "processes")
+        configuration {:seon.dev.config/root (str root)
+                       :seon.dev.config/cluster-dir (str (fs/path root "cluster"))
+                       :seon.dev.config/process-dir (str process-dir)
+                       :seon.dev.config/environment {}}
+        hardware {:seon.hardware/cores 8
+                  :seon.hardware/system-memory-bytes (* 32 1024 1024 1024)
+                  :seon.hardware/fd-soft-limit 2048}]
+    (try
+      (doseq [[attribute value floor]
+              [[:seon.config.database.writer/jvm-heap-mb 1 2]
+               [:seon.config.database.read/max-result-weight 59999 60000]
+               [:seon.config.database.transport/maximum-frame-bytes 65535 65536]
+               [:seon.config.database.transport/maximum-connections 1 2]
+               [:seon.config.database.executor/maximum-queued-request-bytes 65539 65540]
+               [:seon.config.database.transport/maximum-input-bytes 65539 65540]
+               [:seon.config.database.transport/maximum-output-bytes 65535 65536]
+               [:seon.config.database.transport/maximum-session-output-bytes 65535 65536]]]
+        (let [path (fs/path root (str (name attribute) ".edn"))
+              manifest {:seon.config/database
+                        (assoc {:seon.config.database.transport/maximum-frame-bytes 65536}
+                               attribute
+                               value)}
+              _ (spit (str path) (pr-str manifest))
+              error
+              (with-redefs-fn
+                {#'config/hardware-observations (constantly hardware)}
+                (fn []
+                  (try
+                    (config/select-manifest configuration (str path))
+                    nil
+                    (catch Exception error error))))]
+          (is (= value (get (ex-data error) attribute)))
+          (is (= floor (:seon.config/floor (ex-data error))))
+          (is (string? (:seon.config/reason (ex-data error))))
+          (is (str/includes? (:seon.config/steering (ex-data error))
+                             (str attribute)))))
+      (finally
+        (fs/delete-tree root {:force true})))))
+
+(deftest config-apply-resolution-enforces-liveness-horizons
+  (let [root (fs/create-temp-dir {:prefix "seon-config-horizons-"})
+        configuration {:seon.dev.config/root (str root)
+                       :seon.dev.config/cluster-dir (str (fs/path root "cluster"))
+                       :seon.dev.config/process-dir (str (fs/path root "processes"))
+                       :seon.dev.config/environment
+                       {"SEON_TURN_TIMEOUT_MS" "900000"}}
+        hardware {:seon.hardware/cores 8
+                  :seon.hardware/system-memory-bytes (* 32 1024 1024 1024)
+                  :seon.hardware/fd-soft-limit 2048}
+        cases
+        [["deadline.edn"
+          {:seon.config/run {:seon.config.run/deadline-ms 359999}
+           :seon.config/model-variants
+           {:planning {:seon.ai/agent-attempt-timeout-ms 360000}}}
+          :seon.config.run/deadline-ms 360000]
+         ["watchdog.edn"
+          {:seon.config/watchdog {:seon.config.watchdog/stale-ms 900000}}
+          :seon.config.watchdog/stale-ms 900001]]]
+    (try
+      (doseq [[filename manifest attribute floor] cases]
+        (let [path (fs/path root filename)
+              _ (spit (str path) (pr-str manifest))
+              error
+              (with-redefs-fn
+                {#'config/hardware-observations (constantly hardware)}
+                (fn []
+                  (try
+                    (config/select-manifest configuration (str path))
+                    nil
+                    (catch Exception error error))))]
+          (is (= floor (:seon.config/floor (ex-data error))))
+          (is (contains? (ex-data error) attribute))
+          (is (str/includes? (:seon.config/steering (ex-data error))
+                             (str attribute)))))
+      (finally
+        (fs/delete-tree root {:force true})))))
+
 (deftest manifest-selection-publishes-immutable-generation-named-envelopes
   (let [root (fs/create-temp-dir {:prefix "seon-config-envelope-"})
         manifest-path (fs/path root "selected.edn")

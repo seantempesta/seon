@@ -51,19 +51,103 @@
                  dispositions))
         "every operational attribute is enforced")))
 
-(deftest maximum-frame-bytes-covers-the-session-open-bootstrap
+(deftest maximum-frame-bytes-covers-proven-boot-pages
   (is (thrown-with-msg?
-       js/Error #"session-open bootstrap ceiling"
+       js/Error #"proven boot floor"
        (resolve/resolve-operational-values
         {:seon.config/database
-         {:seon.config.database.transport/maximum-frame-bytes 4095}}
+         {:seon.config.database.transport/maximum-frame-bytes 65535}}
         fixed-hardware)))
-  (is (= 4096
+  (is (= 65536
          (:seon.config.database.transport/maximum-frame-bytes
           (resolve/resolve-operational-values
            {:seon.config/database
-            {:seon.config.database.transport/maximum-frame-bytes 4096}}
+            {:seon.config.database.transport/maximum-frame-bytes 65536}}
            fixed-hardware)))))
+
+(deftest every-operational-key-is-manifest-declarable
+  (let [operational (resolve/resolve-operational-values {} fixed-hardware)
+        manifest {:seon.config/database operational}]
+    (is (= (set resolve/operational-keys) (set (keys operational))))
+    (is (m/validate :seon.config/manifest manifest))
+    (is (= operational
+           (select-keys
+            (resolve/resolve-config-singleton manifest {} fixed-hardware)
+            resolve/operational-keys)))))
+
+(deftest operational-footguns-reject-with-key-floor-and-reason
+  (doseq [[attribute value expected-floor]
+          [[:seon.config.database.writer/jvm-heap-mb 1 2]
+           [:seon.config.database.read/max-result-weight 59999 60000]
+           [:seon.config.database.transport/maximum-frame-bytes 65535 65536]
+           [:seon.config.database.transport/maximum-connections 1 2]
+           [:seon.config.database.executor/maximum-queued-request-bytes 65539 65540]
+           [:seon.config.database.transport/maximum-input-bytes 65539 65540]
+           [:seon.config.database.transport/maximum-output-bytes 65535 65536]
+           [:seon.config.database.transport/maximum-session-output-bytes 65535 65536]]]
+    (let [error
+          (try
+            (resolve/resolve-operational-values
+             {:seon.config/database
+              {:seon.config.database.transport/maximum-frame-bytes 65536
+               attribute value}}
+             fixed-hardware)
+            nil
+            (catch js/Error error error))]
+      (is (some? error) (str attribute " rejects its footgun value"))
+      (is (= value (get (ex-data error) attribute)))
+      (is (= expected-floor (:seon.config/floor (ex-data error))))
+      (is (string? (:seon.config/reason (ex-data error))))
+      (is (re-find (re-pattern (str attribute))
+                   (:seon.config/steering (ex-data error))))))
+  (doseq [[smaller-key smaller larger-key larger]
+          [[:seon.config.database.transport/maximum-session-response-slots 3
+            :seon.config.database.transport/maximum-response-slots 2]
+           [:seon.config.database.transport/maximum-session-output-bytes 65537
+            :seon.config.database.transport/maximum-output-bytes 65536]]]
+    (let [error
+          (try
+            (resolve/resolve-operational-values
+             {:seon.config/database
+              {:seon.config.database.transport/maximum-frame-bytes 65536
+               smaller-key smaller
+               larger-key larger}}
+             fixed-hardware)
+            nil
+            (catch js/Error error error))]
+      (is (= smaller (get (ex-data error) smaller-key)))
+      (is (= larger (get (ex-data error) larger-key)))
+      (is (string? (:seon.config/reason (ex-data error)))))))
+
+(deftest liveness-relations-reject-zero-turn-configurations
+  (let [deadline-error
+        (try
+          (resolve/resolve-config-singleton
+           {:seon.config/run {:seon.config.run/deadline-ms 359999}
+            :seon.config/model-variants
+            {:planning {:seon.ai/agent-attempt-timeout-ms 360000}}}
+           {}
+           fixed-hardware)
+          nil
+          (catch js/Error error error))
+        watchdog-error
+        (try
+          (resolve/resolve-config-singleton
+           {:seon.config/watchdog {:seon.config.watchdog/stale-ms 900000}}
+           {"SEON_TURN_TIMEOUT_MS" "900000"}
+           fixed-hardware)
+          nil
+          (catch js/Error error error))]
+    (is (= 360000 (:seon.config/floor (ex-data deadline-error))))
+    (is (= 900001 (:seon.config/floor (ex-data watchdog-error))))
+    (is (m/validate
+         :seon.config/manifest
+         {:seon.config/run {:seon.config.run/batch-turn-limit 1
+                            :seon.config.run/stream-form-limit 1}
+          :seon.config/schedule-breaker
+          {:seon.config.breaker/crash-count 1
+           :seon.config.breaker/window-ms 1}})
+        "taste-sensitive liveness values retain their structural floor of one")))
 
 (deftest shared-resolver-is-pure-and-delegated
   (let [manifest {:seon.config/repl-mode :batch}

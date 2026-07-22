@@ -117,23 +117,23 @@
 
 (defn- with-writer
   [label defaults selected-processors channel-count body]
-  (with-redefs [writer/read-defaults defaults]
-    (let [database-name (str "writer-read-ceiling-" label "-" (random-uuid))
-          path (socket-path label)
-          server (writer/start! {::writer/dependencies (dependencies)
-                                 ::writer/database-name database-name
-                                 ::writer/backend :memory
-                                 ::writer/selected-processors selected-processors
-                                 ::writer/request-socket-path path})
-          channels (mapv (fn [_] (writer-test/open-channel! path))
-                         (range channel-count))]
-      (try
-        (body channels (database-value (first channels) database-name))
-        (finally
-          (doseq [^SocketChannel channel channels]
-            (try (.close channel) (catch Throwable _)))
-          (writer/stop! server)
-          (.delete (File. path)))))))
+  (let [database-name (str "writer-read-ceiling-" label "-" (random-uuid))
+        path (socket-path label)
+        server (writer/start! {::writer/dependencies (dependencies)
+                               ::writer/database-name database-name
+                               ::writer/backend :memory
+                               ::writer/selected-processors selected-processors
+                               ::writer/read-defaults defaults
+                               ::writer/request-socket-path path})
+        channels (mapv (fn [_] (writer-test/open-channel! path))
+                       (range channel-count))]
+    (try
+      (body channels (database-value (first channels) database-name))
+      (finally
+        (doseq [^SocketChannel channel channels]
+          (try (.close channel) (catch Throwable _)))
+        (writer/stop! server)
+        (.delete (File. path))))))
 
 (deftest capless-read-is-limited-and-connection-remains-healthy
   (let [defaults (test-defaults {:max-results 100})]

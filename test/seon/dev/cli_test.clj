@@ -922,7 +922,8 @@
                 :seon.runtime.state/attempts 1}]
     (doseq [[attribute value]
             [[:seon.config.database.transport/maximum-frame-bytes 1048576]
-             [:seon.config.database.transport/maximum-connections 12]]]
+             [:seon.config.database.transport/maximum-connections 12]
+             [:seon.config.database.read/max-work 200000000]]]
       (testing (str attribute " reconstructs the writer")
         (let [candidate
               (config-apply-configuration

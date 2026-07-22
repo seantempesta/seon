@@ -40,30 +40,19 @@
 
 ;;; Runtime and server resources
 
-(def read-defaults
-  "Writer-enforced ceilings for every database read.
-
-   W1's config-facts sweep will relocate these values into the
-   aero-to-database configuration pipeline. The deadline includes one
-   30-second allowance for each full read-queue wave exposed by the existing
-   executor capacity map, so queued work is bounded without shortening any
-   current client deadline."
-  (let [capacity (executor/capacity)
-        maximum-active (get-in capacity [::executor/classes :read
-                                         ::executor/maximum-active])
-        maximum-queued (get-in capacity [::executor/classes :read
-                                         ::executor/maximum-queued])
-        queue-waves (max 1 (quot (+ maximum-queued (dec maximum-active))
-                                 maximum-active))]
-    {:datahike.resource/max-work 100000000
-     :datahike.resource/max-results 1000000
-     :datahike.resource/max-result-weight 3000000
-     ::read-deadline-ms (* 30000 queue-waves)}))
-
 (def ^:private read-resource-keys
   [:datahike.resource/max-work
    :datahike.resource/max-results
    :datahike.resource/max-result-weight])
+
+(schema/register! ::read-deadline-ms [:int {:min 1}])
+(schema/register!
+ ::read-defaults
+ [:map {:closed true}
+  [:datahike.resource/max-work :datahike.resource/max-work]
+  [:datahike.resource/max-results :datahike.resource/max-results]
+  [:datahike.resource/max-result-weight :datahike.resource/max-result-weight]
+  [::read-deadline-ms ::read-deadline-ms]])
 
 (schema/register! ::connection :any)
 (schema/register! ::database-initializer 'fn?)
@@ -102,6 +91,7 @@
   [::revalidate-embedding-assertions ::revalidate-embedding-assertions]
   [::query-vec ::query-vec]
   [::knn ::knn]
+  [::read-defaults {:optional true} ::read-defaults]
   [::executor ::executor]
   [::active-requests {:optional true} ::active-requests]
   [::query-jobs {:optional true} ::query-jobs]
@@ -137,6 +127,7 @@
   [::database-path {:optional true} ::database-path]
   [::selected-processors {:optional true} ::selected-processors]
   [::executor/capacity {:optional true} ::executor/capacity]
+  [::read-defaults {:optional true} ::read-defaults]
   [::request-server-options {:optional true} ::request-server-options]
   [::request-socket-path ::request-socket-path]])
 (schema/register!
@@ -869,20 +860,22 @@
            (:datahike.resource/max-result-weight request))))
 
 (defn- clamp-read-resources
-  [request]
-  (reduce (fn [bounded key]
-            (assoc bounded key (min (long (get request key Long/MAX_VALUE))
-                                    (long (get read-defaults key)))))
-          request
-          read-resource-keys))
+  [read-defaults request]
+  (let [ceilings (or read-defaults
+                     (zipmap read-resource-keys (repeat Long/MAX_VALUE)))]
+    (reduce (fn [bounded key]
+              (assoc bounded key (min (long (get request key Long/MAX_VALUE))
+                                      (long (get ceilings key)))))
+            request
+            read-resource-keys)))
 
 (defn- bounded-read-request
-  [request]
+  [read-defaults request]
   (if (= protocol/execute-many-operation (::protocol/operation request))
-    (-> request
-        clamp-read-resources
-        (update ::protocol/members #(mapv clamp-read-resources %)))
-    (clamp-read-resources request)))
+    (update (clamp-read-resources read-defaults request)
+            ::protocol/members
+            #(mapv (partial clamp-read-resources read-defaults) %))
+    (clamp-read-resources read-defaults request)))
 
 (defn- budget-error-body
   [throwable]
@@ -4018,7 +4011,9 @@
 
 (defn- arm-read-deadline!
   [runtime request-id owner]
-  (let [deadline-ms (::read-deadline-ms read-defaults)
+  (when-let [deadline-ms
+             (get-in runtime [::read-defaults ::read-deadline-ms])]
+    (let [
         ^java.util.concurrent.ScheduledExecutorService scheduler
         (::deadline-executor runtime)
         ^java.util.concurrent.ScheduledFuture task
@@ -4031,7 +4026,7 @@
     (locking active
       (if (identical? owner (get-in @active [request-id ::owner]))
         (swap! active assoc-in [request-id ::deadline-task] task)
-        (.cancel task false)))))
+        (.cancel task false))))))
 
 (defn- close-transport-connection!
   [runtime transport-connection]
@@ -4115,7 +4110,9 @@
      (let [read-request? (or (read-operations (::protocol/operation request))
                              (= protocol/execute-many-operation
                                 (::protocol/operation request)))
-           request (if read-request? (bounded-read-request request) request)
+           request (if read-request?
+                     (bounded-read-request (::read-defaults runtime) request)
+                     request)
            request-id (::protocol/request-id request)]
        (if-let [owner
                 (claim-connection-request!
@@ -4211,7 +4208,7 @@
   "Start the addressed request server for one writer runtime."
   {:malli/schema [:=> [:cat ::start-request] ::server]}
   [{::keys [dependencies database-name backend database-path selected-processors
-            request-socket-path request-server-options]
+            read-defaults request-socket-path request-server-options]
     executor-capacity ::executor/capacity}]
   (let [active-requests (atom {})
         interest-state (atom (empty-interest-state))
@@ -4241,18 +4238,20 @@
           (fn [completion]
             (complete-executor! @runtime-ref completion))})
         query-jobs (atom {::by-owner {} ::by-job {}})
-        runtime (assoc dependencies
-                       ::executor dispatcher
-                       ::active-requests active-requests
-                       ::query-jobs query-jobs
-                       ::interest-state interest-state
-                       ::interest-lock interest-lock
-                       ::deadline-executor deadline-executor
-                       ::protocol/configured-maximum-frame-bytes
-                       (get request-server-options
-                            ::uds/maximum-frame-bytes
-                            protocol/maximum-frame-bytes)
-                       ::readiness-owner (Object.))
+        runtime (cond->
+                 (assoc dependencies
+                        ::executor dispatcher
+                        ::active-requests active-requests
+                        ::query-jobs query-jobs
+                        ::interest-state interest-state
+                        ::interest-lock interest-lock
+                        ::deadline-executor deadline-executor
+                        ::protocol/configured-maximum-frame-bytes
+                        (get request-server-options
+                             ::uds/maximum-frame-bytes
+                             protocol/maximum-frame-bytes)
+                        ::readiness-owner (Object.))
+                  read-defaults (assoc ::read-defaults read-defaults))
         _ (reset! runtime-ref runtime)
         _ (register-readiness! runtime)]
     (try

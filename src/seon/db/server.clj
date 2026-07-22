@@ -90,6 +90,13 @@
    :seon.config.database.transport/codec-worker-queue-capacity
    ::uds/codec-worker-queue-capacity})
 
+(def ^:private read-default-attributes
+  {:seon.config.database.read/max-work :datahike.resource/max-work
+   :seon.config.database.read/max-results :datahike.resource/max-results
+   :seon.config.database.read/max-result-weight
+   :datahike.resource/max-result-weight
+   :seon.config.database.read/deadline-ms ::writer/read-deadline-ms})
+
 (defn- executor-capacity
   [envelope]
   (reduce-kv
@@ -106,6 +113,14 @@
      (assoc options option (get envelope attribute)))
    {}
    request-server-option-attributes))
+
+(defn- read-defaults
+  [envelope]
+  (reduce-kv
+   (fn [defaults attribute option]
+     (assoc defaults option (get envelope attribute)))
+   {}
+   read-default-attributes))
 
 (schema/register! ::arguments [:sequential :string])
 (schema/register! ::database-name :seon.db.writer/database-name)
@@ -485,6 +500,7 @@
            ::writer/selected-processors
            (:seon.config.database.executor/selected-processors envelope)
            ::executor/capacity (executor-capacity envelope)
+           ::writer/read-defaults (read-defaults envelope)
            ::writer/request-server-options (request-server-options envelope)
            ::writer/request-socket-path request-socket-path}
            database-path

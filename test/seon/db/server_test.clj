@@ -37,6 +37,10 @@
          (merge
           (zipmap config.resolve/operational-keys (repeat 1))
           {:seon.config.database.executor/selected-processors selected-processors
+           :seon.config.database.writer/jvm-heap-mb 2
+           :seon.config.database.read/max-result-weight 60000
+           :seon.config.database.transport/maximum-frame-bytes 65536
+           :seon.config.database.transport/maximum-connections 2
            :seon.launch.envelope/generation 1
            :seon.launch.envelope/hardware-observations
            {:seon.hardware/cores selected-processors
@@ -60,7 +64,7 @@
         request-socket (io/file directory "request.sock")
         selected-processors 7
         executor-overrides
-        {:seon.config.database.executor/maximum-queued-request-bytes 101
+        {:seon.config.database.executor/maximum-queued-request-bytes 65540
          :seon.config.database.executor.read/maximum-active 102
          :seon.config.database.executor.read/maximum-queued 103
          :seon.config.database.executor.read/maximum-queued-by-database 104
@@ -80,23 +84,29 @@
          :seon.config.database.executor.hnsw/maximum-queued 118
          :seon.config.database.executor.hnsw/maximum-queued-by-database 119}
         transport-overrides
-        {:seon.config.database.transport/maximum-input-bytes 201
+        {:seon.config.database.transport/maximum-input-bytes 65540
          :seon.config.database.transport/maximum-response-slots 202
-         :seon.config.database.transport/maximum-session-response-slots 203
-         :seon.config.database.transport/maximum-output-bytes 204
-         :seon.config.database.transport/maximum-session-output-bytes 205
+         :seon.config.database.transport/maximum-session-response-slots 201
+         :seon.config.database.transport/maximum-output-bytes 65538
+         :seon.config.database.transport/maximum-session-output-bytes 65537
          :seon.config.database.transport/shutdown-timeout-ms 206
          :seon.config.database.transport/codec-workers 207
          :seon.config.database.transport/codec-worker-queue-capacity 208
-         :seon.config.database.transport/maximum-frame-bytes 209
+         :seon.config.database.transport/maximum-frame-bytes 65536
          :seon.config.database.transport/maximum-connections 210}
+        read-overrides
+        {:seon.config.database.read/max-work 301
+         :seon.config.database.read/max-results 302
+         :seon.config.database.read/max-result-weight 60000
+         :seon.config.database.read/deadline-ms 304}
         envelope-file (launch-envelope-file!
                        directory selected-processors
-                       (merge executor-overrides transport-overrides))
+                       (merge executor-overrides transport-overrides
+                              read-overrides))
         captured (atom nil)
         expected-capacity
         (-> (executor/capacity selected-processors)
-            (assoc ::executor/maximum-queued-request-bytes 101)
+            (assoc ::executor/maximum-queued-request-bytes 65540)
             (assoc ::executor/classes
                    {:read {::executor/maximum-active 102
                            ::executor/maximum-queued 103
@@ -117,16 +127,21 @@
                            ::executor/maximum-queued 118
                            ::executor/maximum-queued-by-database 119}}))
         expected-request-server-options
-        {::uds/maximum-frame-bytes 209
+        {::uds/maximum-frame-bytes 65536
          ::uds/maximum-connections 210
-         ::uds/maximum-input-bytes 201
+         ::uds/maximum-input-bytes 65540
          ::uds/maximum-response-slots 202
-         ::uds/maximum-session-response-slots 203
-         ::uds/maximum-output-bytes 204
-         ::uds/maximum-session-output-bytes 205
+         ::uds/maximum-session-response-slots 201
+         ::uds/maximum-output-bytes 65538
+         ::uds/maximum-session-output-bytes 65537
          ::uds/shutdown-timeout-ms 206
          ::uds/codec-workers 207
-         ::uds/codec-worker-queue-capacity 208}]
+         ::uds/codec-worker-queue-capacity 208}
+        expected-read-defaults
+        {:datahike.resource/max-work 301
+         :datahike.resource/max-results 302
+         :datahike.resource/max-result-weight 60000
+         ::writer/read-deadline-ms 304}]
     (try
       (with-redefs-fn
         {#'server/writer-runtime (constantly {})
@@ -140,6 +155,7 @@
       (is (= expected-capacity (::executor/capacity @captured)))
       (is (= expected-request-server-options
              (::writer/request-server-options @captured)))
+      (is (= expected-read-defaults (::writer/read-defaults @captured)))
       (finally
         (delete-tree! directory)))))
 

@@ -132,6 +132,10 @@
 (def operational-keys
   "Boot-critical configuration attributes carried by every launch."
   [:seon.config.database.writer/jvm-heap-mb
+   :seon.config.database.read/max-work
+   :seon.config.database.read/max-results
+   :seon.config.database.read/max-result-weight
+   :seon.config.database.read/deadline-ms
    :seon.config.database.executor/selected-processors
    :seon.config.database.executor/maximum-queued-request-bytes
    :seon.config.database.executor.read/maximum-active
@@ -169,6 +173,10 @@
 (def enforced-keys
   "Operational attributes enforced by launch constructor surfaces."
   #{:seon.config.database.writer/jvm-heap-mb
+    :seon.config.database.read/max-work
+    :seon.config.database.read/max-results
+    :seon.config.database.read/max-result-weight
+    :seon.config.database.read/deadline-ms
     :seon.config.database.executor/selected-processors
     :seon.config.database.executor/maximum-queued-request-bytes
     :seon.config.database.executor.read/maximum-active
@@ -212,8 +220,12 @@
 (schema/register! :seon.launch.envelope/disposition [:enum :enforced :carried])
 (schema/register! :seon.launch.envelope/dispositions
   [:map-of :keyword :seon.launch.envelope/disposition])
+(def ^:private operational-manifest-entries
+  (mapv (fn [attribute] [attribute {:optional true} attribute])
+        operational-keys))
+
 (schema/register! :seon.config/database
-  [:map {:closed true}
+  (into [:map {:closed true}
    [:seon.config.database.query/max-work
     {:optional true} :seon.config.database.query/max-work]
    [:seon.config.database.query/max-results
@@ -225,11 +237,8 @@
    [:seon.config.database.pull/max-results
     {:optional true} :seon.config.database.pull/max-results]
    [:seon.config.database.pull/max-result-weight
-    {:optional true} :seon.config.database.pull/max-result-weight]
-   [:seon.config.database.writer/jvm-heap-mb {:optional true} :seon.config/cap]
-   [:seon.config.database.executor/selected-processors {:optional true} :seon.config/cap]
-   [:seon.config.database.transport/maximum-frame-bytes {:optional true} :seon.config/cap]
-   [:seon.config.database.transport/maximum-connections {:optional true} :seon.config/cap]])
+    {:optional true} :seon.config.database.pull/max-result-weight]]
+   operational-manifest-entries))
 
 ;;; RENDER BOUNDS — the GLOBAL, cluster-wide render/value display caps (#46).
 ;;; These are NOT per-agent: they bound the value/eval/message renderers for
@@ -329,7 +338,7 @@
    [:seon.ai/agent-max-retries
     {:optional true} [:or [:enum :inherit] [:int {:min 0}]]]
    [:seon.ai/agent-attempt-timeout-ms
-    {:optional true} [:or [:enum :inherit] :int]]
+    {:optional true} [:or [:enum :inherit] [:int {:min 1}]]]
    [:seon.ai/agent-fallback-variant
     {:optional true} [:or [:enum :inherit] :keyword]]
    ;; Turn grammar is launch-role data too. A planning or generated repair
@@ -579,7 +588,7 @@
 ;; The singleton entity schema — every knob optional (a `{}` manifest seeds the
 ;; resolved defaults; `:seon.config/id` is the only required key).
 (schema/register! :seon.config/singleton
-  [:map {:seon.db/entity true}
+  (into [:map {:seon.db/entity true}
    [:seon.config/id                          :seon.config/id]
    [:seon.config/skills             {:optional true} :seon.config/skills]
    [:seon.config/repl-mode          {:optional true} :seon.config/repl-mode]
@@ -646,37 +655,8 @@
     {:optional true} :seon.config/reactive-structural-settle-ms]
    [:seon.config/reactive-max-latency-ms
     {:optional true} :seon.config/reactive-max-latency-ms]
-   [:seon.config.database.writer/jvm-heap-mb {:optional true} :seon.config/cap]
-   [:seon.config.database.executor/selected-processors {:optional true} :seon.config/cap]
-   [:seon.config.database.executor/maximum-queued-request-bytes {:optional true} :seon.config/cap]
-   [:seon.config.database.executor.read/maximum-active {:optional true} :seon.config/cap]
-   [:seon.config.database.executor.read/maximum-queued {:optional true} :seon.config/cap]
-   [:seon.config.database.executor.read/maximum-queued-by-database {:optional true} :seon.config/cap]
-   [:seon.config.database.executor.knn/maximum-active {:optional true} :seon.config/cap]
-   [:seon.config.database.executor.knn/maximum-queued {:optional true} :seon.config/cap]
-   [:seon.config.database.executor.knn/maximum-queued-by-database {:optional true} :seon.config/cap]
-   [:seon.config.database.executor.provider/maximum-active {:optional true} :seon.config/cap]
-   [:seon.config.database.executor.provider/maximum-queued {:optional true} :seon.config/cap]
-   [:seon.config.database.executor.provider/maximum-queued-by-database {:optional true} :seon.config/cap]
-   [:seon.config.database.executor.mutation/maximum-active {:optional true} :seon.config/cap]
-   [:seon.config.database.executor.mutation/maximum-queued {:optional true} :seon.config/cap]
-   [:seon.config.database.executor.mutation/maximum-queued-by-database {:optional true} :seon.config/cap]
-   [:seon.config.database.executor.delivery/maximum-active {:optional true} :seon.config/cap]
-   [:seon.config.database.executor.delivery/maximum-queued {:optional true} :seon.config/cap]
-   [:seon.config.database.executor.delivery/maximum-queued-by-database {:optional true} :seon.config/cap]
-   [:seon.config.database.executor.hnsw/maximum-active {:optional true} :seon.config/cap]
-   [:seon.config.database.executor.hnsw/maximum-queued {:optional true} :seon.config/cap]
-   [:seon.config.database.executor.hnsw/maximum-queued-by-database {:optional true} :seon.config/cap]
-   [:seon.config.database.transport/maximum-frame-bytes {:optional true} :seon.config/cap]
-   [:seon.config.database.transport/maximum-connections {:optional true} :seon.config/cap]
-   [:seon.config.database.transport/maximum-input-bytes {:optional true} :seon.config/cap]
-   [:seon.config.database.transport/maximum-response-slots {:optional true} :seon.config/cap]
-   [:seon.config.database.transport/maximum-session-response-slots {:optional true} :seon.config/cap]
-   [:seon.config.database.transport/maximum-output-bytes {:optional true} :seon.config/cap]
-   [:seon.config.database.transport/maximum-session-output-bytes {:optional true} :seon.config/cap]
-   [:seon.config.database.transport/shutdown-timeout-ms {:optional true} :seon.config/cap]
-   [:seon.config.database.transport/codec-workers {:optional true} :seon.config/cap]
-   [:seon.config.database.transport/codec-worker-queue-capacity {:optional true} :seon.config/cap]])
+   ]
+  operational-manifest-entries))
 
 (schema/register! :seon.config/manifest
   [:map
@@ -924,6 +904,93 @@
    :datahike.resource/max-results 4096
    :datahike.resource/max-result-weight (* 1024 1024)})
 
+(defn- reject-floor!
+  [values key floor reason]
+  (let [value (get values key)]
+    (when (< value floor)
+      (throw
+       (ex-info
+        (str "Configured " key " is below its operational floor.")
+        {key value
+         :seon.config/floor floor
+         :seon.config/reason reason
+         :seon.config/steering
+         (str "Set " key " to at least " floor ". " reason)})))))
+
+(defn- reject-ordering!
+  [values smaller-key larger-key reason]
+  (let [smaller (get values smaller-key)
+        larger (get values larger-key)]
+    (when (> smaller larger)
+      (throw
+       (ex-info
+        (str "Configured " smaller-key " exceeds " larger-key ".")
+        {smaller-key smaller
+         larger-key larger
+         :seon.config/reason reason
+         :seon.config/steering
+         (str "Set " smaller-key " to no more than " larger-key ". " reason)})))))
+
+(defn- positive-environment-int
+  [environment key fallback]
+  (let [raw (get environment key)
+        parsed (when raw
+                 (try
+                   #?(:cljs (js/parseInt raw 10)
+                      :bb (Long/parseLong raw)
+                      :clj (Long/parseLong raw))
+                   (catch #?(:cljs :default :default Throwable) _ nil)))]
+    (if (and (int? parsed) (pos? parsed)) parsed fallback)))
+
+(defn- declared-attempt-timeouts
+  [manifest]
+  (keep (fn [configuration]
+          (let [value (:seon.ai/agent-attempt-timeout-ms configuration)]
+            (when (pos-int? value) value)))
+        (concat
+         (vals (get manifest :seon.config/model-variants {}))
+         [(get manifest :seon.config/agent-context {})
+          (get manifest :seon.config/root-context {})])))
+
+(defn- validate-liveness-relations!
+  [manifest environment run]
+  (let [attempt-horizon
+        (reduce max
+                (positive-environment-int
+                 environment "SEON_LLM_ATTEMPT_TIMEOUT_MS" 120000)
+                (declared-attempt-timeouts manifest))
+        run-deadline (:seon.config.run/deadline-ms run)
+        turn-horizon
+        (positive-environment-int environment "SEON_TURN_TIMEOUT_MS" 900000)
+        watchdog-stale-ms
+        (get-in manifest
+                [:seon.config/watchdog :seon.config.watchdog/stale-ms]
+                1200000)]
+    (when (< run-deadline attempt-horizon)
+      (throw
+       (ex-info
+        "The run deadline is shorter than one resolved LLM attempt."
+        {:seon.config.run/deadline-ms run-deadline
+         :seon.ai/agent-attempt-timeout-ms attempt-horizon
+         :seon.config/floor attempt-horizon
+         :seon.config/reason
+         "A run deadline shorter than one attempt permits zero turns to complete."
+         :seon.config/steering
+         (str "Set :seon.config.run/deadline-ms to at least "
+              attempt-horizon ".")})))
+    (when (<= watchdog-stale-ms turn-horizon)
+      (throw
+       (ex-info
+        "The watchdog staleness threshold does not exceed one turn horizon."
+        {:seon.config.watchdog/stale-ms watchdog-stale-ms
+         :seon.config/turn-timeout-ms turn-horizon
+         :seon.config/floor (inc turn-horizon)
+         :seon.config/reason
+         "The watchdog must not close a run while its bounded turn can still complete."
+         :seon.config/steering
+         (str "Set :seon.config.watchdog/stale-ms to at least "
+              (inc turn-horizon) ".")})))))
+
 (defn resolve-operational-values
   "Resolve every boot-critical limit from manifest and hardware data."
   [manifest hardware]
@@ -959,26 +1026,47 @@
                  (min 1024 (quot (:seon.hardware/fd-soft-limit hardware) 4))))
         maximum-frame-bytes
         (get database :seon.config.database.transport/maximum-frame-bytes
-             protocol/maximum-frame-bytes)]
+             protocol/maximum-frame-bytes)
+        read-active
+        (get database :seon.config.database.executor.read/maximum-active
+             cpu-workers)
+        read-maximum-queued
+        (get database :seon.config.database.executor.read/maximum-queued
+             read-queue)
+        read-queue-waves
+        (max 1 (quot (+ read-maximum-queued (dec read-active)) read-active))]
     (when (> maximum-frame-bytes protocol/maximum-frame-bytes)
       (throw (ex-info "Configured frame bytes exceed the protocol ceiling."
                       {:seon.config.database.transport/maximum-frame-bytes maximum-frame-bytes
                        :seon.db.protocol/maximum-frame-bytes protocol/maximum-frame-bytes})))
-    (when (< maximum-frame-bytes protocol/session-open-maximum-frame-bytes)
-      (throw (ex-info "Configured frame bytes are below the session-open bootstrap ceiling."
+    (when (< maximum-frame-bytes 65536)
+      (throw (ex-info "Configured frame bytes are below the proven boot floor."
                       {:seon.config.database.transport/maximum-frame-bytes maximum-frame-bytes
-                       :seon.db.protocol/session-open-maximum-frame-bytes
-                       protocol/session-open-maximum-frame-bytes})))
-    {:seon.config.database.writer/jvm-heap-mb heap-mb
+                       :seon.config/floor 65536
+                       :seon.config/reason
+                       "The 4096-byte session-open exchange is distinct; committed boot pages require the proven 65536-byte end-to-end floor."
+                       :seon.config/steering
+                       "Set :seon.config.database.transport/maximum-frame-bytes to at least 65536."})))
+    (let [resolved
+          {:seon.config.database.writer/jvm-heap-mb heap-mb
+     :seon.config.database.read/max-work
+     (get database :seon.config.database.read/max-work 100000000)
+     :seon.config.database.read/max-results
+     (get database :seon.config.database.read/max-results 1000000)
+     :seon.config.database.read/max-result-weight
+     (get database :seon.config.database.read/max-result-weight 3000000)
+     :seon.config.database.read/deadline-ms
+     (get database :seon.config.database.read/deadline-ms
+          (* 30000 read-queue-waves))
      :seon.config.database.executor/selected-processors processors
      :seon.config.database.executor/maximum-queued-request-bytes
      (get database :seon.config.database.executor/maximum-queued-request-bytes
           (-> (quot heap-bytes 16) (max (* 8 1024 1024))
               (min (* 64 1024 1024))))
      :seon.config.database.executor.read/maximum-active
-     (get database :seon.config.database.executor.read/maximum-active cpu-workers)
+     read-active
      :seon.config.database.executor.read/maximum-queued
-     (get database :seon.config.database.executor.read/maximum-queued read-queue)
+     read-maximum-queued
      :seon.config.database.executor.read/maximum-queued-by-database
      (get database :seon.config.database.executor.read/maximum-queued-by-database
           read-database-queue)
@@ -1039,7 +1127,43 @@
      (get database :seon.config.database.transport/codec-workers
           (max 2 (min 8 processors)))
      :seon.config.database.transport/codec-worker-queue-capacity
-     (get database :seon.config.database.transport/codec-worker-queue-capacity 256)}))
+     (get database :seon.config.database.transport/codec-worker-queue-capacity 256)}]
+      (reject-floor!
+       resolved :seon.config.database.writer/jvm-heap-mb 2
+       "The pinned JVM refuses a one-megabyte maximum heap before the writer can start.")
+      (reject-floor!
+       resolved :seon.config.database.transport/maximum-connections 2
+       "Normal operation requires one retained pod connection and one host connection.")
+      (reject-floor!
+       resolved :seon.config.database.read/max-result-weight 60000
+       "Committed-program admission requests a 60000 result-weight page budget.")
+      (reject-floor!
+       resolved :seon.config.database.executor/maximum-queued-request-bytes
+       (+ 4 maximum-frame-bytes)
+       "The executor must admit one maximum frame plus its four-byte header.")
+      (reject-floor!
+       resolved :seon.config.database.transport/maximum-input-bytes
+       (+ 4 maximum-frame-bytes)
+       "A session otherwise pauses permanently before one maximum frame arrives.")
+      (reject-floor!
+       resolved :seon.config.database.transport/maximum-output-bytes
+       maximum-frame-bytes
+       "The authority must be able to reserve one maximum response frame.")
+      (reject-floor!
+       resolved :seon.config.database.transport/maximum-session-output-bytes
+       maximum-frame-bytes
+       "Each session must be able to reserve one maximum response frame.")
+      (reject-ordering!
+       resolved
+       :seon.config.database.transport/maximum-session-response-slots
+       :seon.config.database.transport/maximum-response-slots
+       "A session cannot reserve more response slots than the authority owns.")
+      (reject-ordering!
+       resolved
+       :seon.config.database.transport/maximum-session-output-bytes
+       :seon.config.database.transport/maximum-output-bytes
+       "A session cannot reserve more output bytes than the authority owns.")
+      resolved)))
 
 (defn resolve-config-singleton
   "The FLAT `:seon.config` singleton entity map for `manifest`.
@@ -1063,6 +1187,7 @@
         reactive (get manifest :seon.config/reactive {})
         execution (get manifest :seon.config/execution {})
         database (get manifest :seon.config/database {})
+        _ (validate-liveness-relations! manifest environment run)
         nsp (resolve-namespaces manifest)]
     (cond-> {:seon.config/id cluster-config-id
              :seon.config/repl-mode
