@@ -992,8 +992,13 @@ happened. Now take the next thing off the queue.
   typed interrupts, output parity, run fence, instrumentation,
   repair/preflight, authored invocation, live require: the U6+U11
   hard blockers are closed ·
-  **q22a IN FLIGHT** (`specs/q22a-execution-program-paging.md`, sol
-  medium, logs `tmp/orchestrator/q22a-*`) ·
+  **q22a DONE `5131d53d`** (execution child pages in 32/60k-weight
+  batches at one frozen basis; provenance catch — identity pulls alone
+  would include boot/core rows; IVector crash dead; live equality vs
+  all six legacy queries; cljs 1504/7261) ·
+  **q22b IN FLIGHT** (`specs/q22b-ctx-renderer-paging.md`, sol medium,
+  logs `tmp/orchestrator/q22b-*`: namespaces + warnings ctx renderers
+  page + preserve errors) ·
   **W10 intermittents investigation IN FLIGHT** (read-only, B8/B11 +
   branch-qualified eval-cljs hang, logs
   `tmp/orchestrator/w10-intermittents-*`). Spine after W3b: W3c2
