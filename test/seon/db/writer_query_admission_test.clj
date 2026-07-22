@@ -496,15 +496,15 @@
                     runtime transport
                     (protocol/cancel-request
                      {::protocol/request-id "release/cancel-owner"
-                      ::protocol/target-request-id "release/owner"}))
-                  owner-response (deref owner 2000 ::timeout)]
+                      ::protocol/target-request-id "release/owner"}))]
               (is (::protocol/canceled? cancel))
-              (is (not= ::timeout owner-response))
-              (is (not (::protocol/success? owner-response)))
+              (is (not (realized? owner))
+                  "detached owner waits for its physical query job cleanup")
               (is (empty? @releases)
                   "logical owner cancellation cannot release physical query data")
               (.countDown release-run)
               (is (::protocol/success? (deref waiter 5000 {})))
+              (is (not (::protocol/success? (deref owner 2000 {}))))
               (wait-until!
                #(= 2 (count @releases))
                "owner and waiter databases were not released exactly once")
@@ -517,15 +517,38 @@
                      (zero? (:datahike.single-flight/active-callers
                              (d/query-cache-evidence))))
                "detached owner retained physical or logical state")
-              (with-redefs [d/release-materialized-db
-                            (fn [_]
-                              (throw (ex-info "injected release failure" {})))]
-                (is (::protocol/success?
-                     (deref
-                      (request! runtime transport
-                                (query-request database-name head
-                                               "release/failure-does-not-wedge"))
-                      2000 {}))))))))
+              (let [release-entered (CountDownLatch. 1)
+                    allow-release (CountDownLatch. 1)]
+                (try
+                  (with-redefs
+                    [d/release-materialized-db
+                     (fn [_]
+                       (.countDown release-entered)
+                       (when-not (.await allow-release 5 TimeUnit/SECONDS)
+                         (throw (ex-info "database release was not allowed" {})))
+                       (throw (ex-info "injected release failure" {})))]
+                    (let [response
+                          (request!
+                           runtime transport
+                           (query-request database-name head
+                                          "release/failure-does-not-wedge"))]
+                      (is (.await release-entered 2 TimeUnit/SECONDS))
+                      (is (not (realized? response))
+                          "terminal response waits for database value release")
+                      (.countDown allow-release)
+                      (is (::protocol/success? (deref response 2000 {})))
+                      (is (empty? @(::writer/active-requests runtime)))
+                      (is (empty? (get @(::writer/query-jobs runtime)
+                                       ::writer/by-owner)))
+                      (is (empty? (get @(::writer/query-jobs runtime)
+                                       ::writer/by-job)))
+                      (is (zero? (::executor/retained-identities
+                                  (executor/evidence
+                                   (::writer/executor server)))))
+                      (is (zero? (:datahike.single-flight/active-callers
+                                  (d/query-cache-evidence))))))
+                  (finally
+                    (.countDown allow-release))))))))
       (finally
         (.countDown release-run)
         (#'writer/close-transport-connection! runtime transport)

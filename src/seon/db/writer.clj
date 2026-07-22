@@ -3055,22 +3055,30 @@
 
 (declare complete-execute-many-query!)
 
+(defn- retain-query-terminal-response!
+  [runtime request-id owner response]
+  (let [active (::active-requests runtime)]
+    (locking active
+      (when (identical? owner (get-in @active [request-id ::owner]))
+        (swap! active assoc-in [request-id ::query-terminal-response] response)
+        true))))
+
 (defn- complete-query-call!
   [runtime request-id owner job-id request execute-many?
    release-on-callback? resolved-values completion]
   (if execute-many?
     (complete-execute-many-query! runtime request-id owner job-id completion)
-    (try
-      (let [limit-response
-            (locking (::active-requests runtime)
-              (get-in @(::active-requests runtime)
-                      [request-id ::limit-response]))]
-        (deliver-active-request! runtime request-id owner
-                                 (or limit-response
-                                     (query-response request completion))))
-      (finally
-        (when release-on-callback?
-          (release-resolved-database-values! resolved-values))))))
+    (let [limit-response
+          (locking (::active-requests runtime)
+            (get-in @(::active-requests runtime)
+                    [request-id ::limit-response]))
+          response (or limit-response (query-response request completion))]
+      (if release-on-callback?
+        (do
+          (release-resolved-database-values! resolved-values)
+          (deliver-active-request! runtime request-id owner
+                                   response))
+        (retain-query-terminal-response! runtime request-id owner response)))))
 
 (defn- acquire-query-call!
   [runtime {::keys [request database-value caller-id job-id query-plan
@@ -3679,7 +3687,10 @@
       (when entry
         (if (::execute-many? entry)
           (complete-execute-many! runtime request-id (::owner entry) job-id outcome)
-          (when-not (::query-callback? entry)
+          (if (::query-callback? entry)
+            (when-let [response (::query-terminal-response entry)]
+              (deliver-active-request! runtime request-id (::owner entry)
+                                       response))
             (let [request (::request entry)
                   response (single-outcome-response entry outcome)]
               (deliver-active-request! runtime request-id (::owner entry) response)
