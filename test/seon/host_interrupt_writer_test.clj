@@ -211,6 +211,10 @@
         (is (= :seon.execution.message/result
                (get-in defined [:response :seon.execution/message]))
             (pr-str defined)))
+      (let [defined (invoke! session agent-id "(defn toll [row] row)" 2000)]
+        (is (= :seon.execution.message/result
+               (get-in defined [:response :seon.execution/message]))
+            (pr-str defined)))
       (let [resolution (eval-error session agent-id "(totl {:amount 1})")
             arity (eval-error session agent-id "(total)")
             refusal (eval-error

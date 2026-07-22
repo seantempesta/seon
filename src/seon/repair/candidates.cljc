@@ -140,6 +140,14 @@
     (let [min-d (:seon.repair/distance (first cands))]
       (vec (take-while #(= min-d (:seon.repair/distance %)) cands)))))
 
+(defn- winner-result
+  [passers over?]
+  (cond
+    (over?)               {:seon.repair/budget? true}
+    (= 1 (count passers)) {:seon.repair/winner (first passers)}
+    (seq passers)         {:seon.repair/ambiguous passers}
+    :else                 {:seon.repair/none? true}))
+
 (defn ^:async pick-winner
   "Trial ONLY the nearest-distance tier of `:seon.repair/cands`.
 
@@ -159,14 +167,18 @@
     {:seon.repair/none? true}
     (let [tier (nearest-tier cands)
           passers
-          (loop [cs tier acc []]
-            (if (or (empty? cs) (over?))
-              acc
-              (let [c (first cs)
-                    p (await (passes? c))]
-                (recur (rest cs) (if p (conj acc c) acc)))))]
-      (cond
-        (over?)               {:seon.repair/budget? true}
-        (= 1 (count passers)) {:seon.repair/winner (first passers)}
-        (seq passers)         {:seon.repair/ambiguous passers}
-        :else                 {:seon.repair/none? true}))))
+          #?(:clj
+             (loop [cs tier acc []]
+               (if (or (empty? cs) (over?))
+                 acc
+                 (let [c (first cs)
+                       passed? (passes? c)]
+                   (recur (rest cs) (if passed? (conj acc c) acc)))))
+             :cljs
+             (loop [cs tier acc []]
+               (if (or (empty? cs) (over?))
+                 acc
+                 (let [c (first cs)
+                       passed? (await (passes? c))]
+                   (recur (rest cs) (if passed? (conj acc c) acc))))))]
+      (winner-result passers over?))))

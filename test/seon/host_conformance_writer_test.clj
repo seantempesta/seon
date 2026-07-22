@@ -18,6 +18,7 @@
             [seon.host.context :as context]
             [seon.host.eval :as host.eval]
             [seon.host.invoke :as host.invoke]
+            [seon.host.preflight :as host.preflight]
             [seon.host.sample :as host.sample]
             [seon.host.session :as host.session]
             [seon.render.value :as render.value])
@@ -67,7 +68,7 @@
       (let [query-form (::protocol/query-form request)
             result (cond
                      (some #{:seon.config/id} (flatten (vec query-form)))
-                     [32 4096 1024 3 80 2 12 16384]
+                     [32 4096 1024 3 80 2 12 16384 :symbols "{}" 1 50]
 
                      (= query-form db.id/generator-policy-query)
                      [[:seon.eval/id :seon.db.id.generator/compact]]
@@ -225,6 +226,12 @@
 
 (defn- form [source] {:seon.repl/kind :form :seon.repl/source source})
 
+(defn- read-failure [source]
+  {:seon.repl/kind :read
+   :seon.repl/ok? false
+   :seon.repl/source source
+   :seon.repl/message "Unexpected EOF."})
+
 (def ^:private sample-limits
   {:seon.config.render/value-max-path-segments 32
    :seon.config.render/value-max-path-bytes 4096
@@ -274,10 +281,11 @@
         acquire (var-get #'host.sample/acquire-sampling-policy!)
         invalid [nil
                  [32 4096 1024 3 80 2 12]
-                 [32 4096 1024 3 80 2 12 16384 99]
-                 [32 4096 1024 3 80 2 12 "16384"]
-                 [[32 4096 1024 3 80 2 12 16384]
-                  [32 4096 1024 3 80 2 12 16384]]
+                 [32 4096 1024 3 80 2 12 16384 :symbols "{}" 1]
+                 [32 4096 1024 3 80 2 12 "16384" :symbols "{}" 1 50]
+                 [32 4096 1024 3 80 2 12 16384 :unknown "{}" 1 50]
+                 [[32 4096 1024 3 80 2 12 16384 :symbols "{}" 1 50]
+                  [32 4096 1024 3 80 2 12 16384 :symbols "{}" 1 50]]
                  {:seon/error {:seon.error/kind :core-bug}}]]
     (doseq [response invalid]
       (with-redefs-fn
@@ -476,6 +484,105 @@
                         [:seon.execution/result :seon.host/results 0
                          :seon.eval/value])))
       (finally (close! session)))))
+
+(deftest unresolved-preflight-is-receipt-first-and-terminal
+  (reset! transaction-requests [])
+  (let [[session _ready] (open-session! "preflight-terminal-agent")]
+    (try
+      (send! session
+             (invoke-value
+              "preflight-terminal-agent" "preflight-seed"
+              [(form "(defn thing-aa [] :aa)")
+               (form "(defn thing-ab [] :ab)")]
+              :turn-id nil))
+      (let [seed-response (recv! session)]
+        (is (= 2 (get-in seed-response
+                         [:seon.execution/result :seon.eval/n-ok]))
+            (pr-str seed-response)))
+      (reset! transaction-requests [])
+      (let [eval-calls (atom 0)
+            receipt-seen? (atom false)
+            original-eval (var-get #'host.eval/eval-form!)
+            original-preflight (var-get #'host.preflight/preflight!)]
+        (with-redefs-fn
+          {#'host.eval/eval-form!
+           (fn [& arguments]
+             (swap! eval-calls inc)
+             (apply original-eval arguments))
+           #'host.preflight/preflight!
+           (fn [& arguments]
+             (reset! receipt-seen?
+                     (boolean
+                      (some #(and (map? %)
+                                  (= :running (:seon.eval/status %)))
+                            (mapcat #(tree-seq coll? seq %)
+                                    (recorded-tx-data)))))
+             (apply original-preflight arguments))}
+          (fn []
+            (send! session
+                   (invoke-value "preflight-terminal-agent"
+                                 "preflight-ambiguous"
+                                 [(form "(thing-ac)")]))
+            (let [result (:seon.execution/result (recv! session))
+                  envelope (first (:seon.host/results result))]
+              (is (true? @receipt-seen?)
+                  "the running receipt commits before symbol preflight")
+              (is (zero? @eval-calls)
+                  "an ambiguous resolution never reaches eval-form!")
+              (is (= 0 (:seon.eval/n-ok result)))
+              (is (= 1 (:seon.eval/n-fail result)))
+              (is (= :resolution
+                     (get-in envelope [:seon/error :seon.error/data
+                                       :seon.error.sci/class])))
+              (is (= 2
+                     (count
+                      (get-in envelope [:seon/error :seon.error/data
+                                        :seon.repair/suggestions]))))))))
+      (finally (close! session)))))
+
+(deftest repaired-read-redispatches-through-the-ordinary-recorded-path
+  (letfn [(run-case [agent-id invocation-id first-entry]
+            (reset! transaction-requests [])
+            (let [[session _ready] (open-session! agent-id)]
+              (try
+                (send! session
+                       (invoke-value
+                        agent-id invocation-id
+                        [first-entry
+                         (form "(do (print \"repair-output\") (def answer 42))")
+                         (form "answer")]))
+                (let [result (:seon.execution/result (recv! session))]
+                  {:result result
+                   :tx-data (vec (recorded-tx-data))})
+                (finally (close! session)))))]
+    (let [broken (run-case "repair-broken-agent" "repair-broken"
+                           (read-failure "(ns my.repair-equivalence"))
+          correct (run-case "repair-correct-agent" "repair-correct"
+                            (form "(ns my.repair-equivalence)"))
+          broken-result (:result broken)
+          correct-result (:result correct)
+          eval-sources (fn [run]
+                         (into [] (keep :seon.eval/source) (:tx-data run)))
+          outputs (fn [run]
+                    (into [] (keep :seon.eval/output) (:tx-data run)))]
+      (is (= 3 (:seon.eval/n-ok broken-result)
+             (:seon.eval/n-ok correct-result)))
+      (is (= 0 (:seon.eval/n-fail broken-result)
+             (:seon.eval/n-fail correct-result)))
+      (is (= 42 (get-in broken-result [:seon.host/results 2
+                                       :seon.eval/value])
+             (get-in correct-result [:seon.host/results 2
+                                     :seon.eval/value])))
+      (is (= ["repair-output"] (outputs broken) (outputs correct)))
+      (is (= (eval-sources correct) (eval-sources broken))
+          "the repaired source is the receipt and terminal row source")
+      (is (seq (get-in broken-result [:seon.host/results 0
+                                      :seon.repair/changes])))
+      (is (nil? (get-in correct-result [:seon.host/results 0
+                                        :seon.repair/changes])))
+      (is (= (into [] (keep :seon.ns/name) (:tx-data broken))
+             (into [] (keep :seon.ns/name) (:tx-data correct)))
+          "the repaired and correct namespace declarations tee equally"))))
 
 (deftest held-run-fence-uses-the-invocation-database-and-preserves-results
   (reset! transaction-requests [])

@@ -335,6 +335,14 @@
    {:seon.schema/key :seon.config.render/value-shape-sample
     :seon.schema/form ":seon.config/cap"}
    {:seon.schema/key :seon.config.render/value-max-items
+    :seon.schema/form ":seon.config/cap"}
+   {:seon.schema/key :seon.config.repair/level
+    :seon.schema/form "[:enum :off :safe-syntax :symbols :aggressive]"}
+   {:seon.schema/key :seon.config.repair/classes
+    :seon.schema/form "[:or [:map-of :keyword :boolean] :nil]"}
+   {:seon.schema/key :seon.config.repair/max-fixes-per-form
+    :seon.schema/form ":seon.config/cap"}
+   {:seon.schema/key :seon.config.repair/budget-ms
     :seon.schema/form ":seon.config/cap"}])
 
 (def ^:private value-sampling-policy
@@ -345,7 +353,11 @@
    :seon.config.render/value-max-depth 3
    :seon.config.render/value-max-string 80
    :seon.config.render/value-shape-sample 8
-   :seon.config.render/value-max-items 12})
+   :seon.config.render/value-max-items 12
+   :seon.config.repair/level :symbols
+   :seon.config.repair/classes "{}"
+   :seon.config.repair/max-fixes-per-form 1
+   :seon.config.repair/budget-ms 50})
 
 (def ^:private value-sampling-policy-query
   '[:find [?path-segments ?path-bytes ?realized ?depth ?string ?shape ?items]

@@ -6,15 +6,23 @@
             [seon.error.sci :as error.sci]
             [seon.host.context :as context]
             [seon.host.instrument :as instrument]
+            [seon.host.preflight :as preflight]
             [seon.host.record :as record]
             [seon.host.sample :as sample]
             [seon.host.session :as session]
+            [seon.repair :as repair]
             [seon.schema :as schema])
   (:import [java.io Writer]))
 
 (set! *warn-on-reflection* true)
 
 (def ^:private output-truncation-marker "…⟨output truncated⟩")
+
+(def ^:private repair-policy-keys
+  [:seon.config.repair/level
+   :seon.config.repair/classes
+   :seon.config.repair/max-fixes-per-form
+   :seon.config.repair/budget-ms])
 
 (defn agent-home-ns
   "The deterministic home-ns symbol for an agent id.
@@ -237,7 +245,9 @@
         database-edn-cap
         (:seon.config.render/database-edn-cap sampling-limits)
         value-sampling-limits
-        (dissoc sampling-limits :seon.config.render/database-edn-cap)
+        (apply dissoc sampling-limits
+               (conj repair-policy-keys
+                     :seon.config.render/database-edn-cap))
         fence-result
         (when (seq run-fence)
           (context/transact-writer!
@@ -254,13 +264,21 @@
           (if (empty? entries)
             (batch-summary ids results)
             (let [entry (first entries)
-                  kind (:seon.repl/kind entry)]
-              (if-not (contains? #{:form :read} kind)
+                  kind (:seon.repl/kind entry)
+                  repaired
+                  (when (= :read kind)
+                    (preflight/repair-read-entry
+                     ctx current-ns sampling-limits entry))]
+              (if repaired
+                (recur (into (vec (:seon.host.preflight/entries repaired))
+                             (rest entries))
+                       current-ns ids results)
+                (if-not (contains? #{:form :read} kind)
             ;; comment/prose entries evaluate and record nothing.
-                (recur (rest entries) current-ns ids
-                       (conj results {:seon.eval/ok? true
-                                      :seon.eval/skipped? true}))
-                (let [source (or (entry-source entry) "")
+                  (recur (rest entries) current-ns ids
+                         (conj results {:seon.eval/ok? true
+                                        :seon.eval/skipped? true}))
+                  (let [source (or (entry-source entry) "")
                       narration (or (:seon.repl/narration entry) "")
                       at (java.util.Date.)
                       start-ms (session/now-ms)
@@ -279,11 +297,37 @@
                     (recur (rest entries) current-ns ids
                            (conj results {:seon.eval/ok? false
                                           :seon/error (:seon/error started)}))
-                    (let [schema-delta (schema/begin-registration-delta)
+                    (let [preflight-result
+                          (when (= :form kind)
+                            (preflight/preflight!
+                             ctx
+                             (:seon.host.instrument/registry
+                              (::instrument/state session))
+                             (agent-home-ns agent-id)
+                             current-ns sampling-limits source))
+                          fixed? (= :fixed
+                                    (:seon.host.preflight/status
+                                     preflight-result))
+                          source (if fixed?
+                                   (:seon.repair/source preflight-result)
+                                   source)
+                          narration
+                          (if fixed?
+                            (str (when (seq narration) (str narration "\n"))
+                                 (repair/fix-note
+                                  {:seon.repair/fixes
+                                   (:seon.repair/fixes preflight-result)}))
+                            narration)
+                          schema-delta (schema/begin-registration-delta)
                       raw-envelope
                       (schema/call-with-registration-delta
                         schema-delta
-                        #(if (= :form kind)
+                        #(cond
+                           (= :terminal
+                              (:seon.host.preflight/status preflight-result))
+                           (:seon.host.preflight/envelope preflight-result)
+
+                           (= :form kind)
                            (instrument/call-with-read-admission
                             (::instrument/state session)
                             (fn []
@@ -291,7 +335,21 @@
                                           (str "(in-ns '" current-ns ")\n"
                                                source)
                                           database-edn-cap)))
+
+                           :else
                            (read-error-envelope entry)))
+                      raw-envelope
+                      (cond-> raw-envelope
+                        (seq (:seon.repair/changes entry))
+                        (assoc :seon.repair/changes
+                               (:seon.repair/changes entry))
+
+                        (seq (:seon.repair/fixes preflight-result))
+                        (assoc :seon.repair/fixes
+                               (:seon.repair/fixes preflight-result)
+                               :seon.repair/applied-class
+                               (:seon.repair/applied-class
+                                preflight-result)))
                       ok? (boolean (:seon.eval/ok? raw-envelope))
                       ;; A failed eval must not leave half a registration:
                       ;; discard only this form's isolated registration delta.
@@ -362,7 +420,7 @@
                       (if (:seon.eval/interrupted? envelope)
                         (batch-summary ids (conj results envelope))
                         (recur (rest entries) next-ns ids
-                               (conj results envelope))))))))))))))
+                               (conj results envelope)))))))))))))))
 
 (defn interrupted-batch?
   "Whether an eval-batch result contains an interrupted form."

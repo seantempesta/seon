@@ -58,7 +58,8 @@
   ;; IMPLICATION: :local/root is not a publishable coordinate — production
   ;; cutover needs a git dep on a pushed mirror (seantempesta model).
   :host
-  {:extra-deps {org.babashka/sci {:local/root "reference-code/sci"}}}
+  {:extra-deps {org.babashka/sci {:local/root "reference-code/sci"}
+                parinferish/parinferish {:mvn/version "0.8.0"}}}
 
   ;; Focused writer tests add source only; clojure.test already rides Clojure.
   ;; bin/test-writer selects exact retained namespaces without booting the

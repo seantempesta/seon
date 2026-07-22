@@ -1,6 +1,7 @@
 (ns seon.host.sample
   "Serve retained value sampling for one JVM host session."
-  (:require [seon.db.protocol :as db.protocol]
+  (:require [clojure.edn :as edn]
+            [seon.db.protocol :as db.protocol]
             [seon.host.context :as context]
             [seon.host.session :as session]
             [seon.render.value :as render.value]
@@ -209,7 +210,8 @@
 
 (def ^:private sampling-policy-query
   '[:find [?path-segments ?path-bytes ?realized ?depth ?string ?shape ?items
-           ?database-edn-cap]
+           ?database-edn-cap ?repair-level ?repair-classes ?repair-max-fixes
+           ?repair-budget-ms]
     :in $ ?id
     :where
     [?config :seon.config/id ?id]
@@ -221,15 +223,20 @@
     [?config :seon.config.render/value-shape-sample ?shape]
     [?config :seon.config.render/value-max-items ?items]
     [(get-else $ ?config :seon.config.render/database-edn-cap 16384)
-     ?database-edn-cap]])
+     ?database-edn-cap]
+    [(get-else $ ?config :seon.config.repair/level :symbols) ?repair-level]
+    [(get-else $ ?config :seon.config.repair/classes "{}") ?repair-classes]
+    [(get-else $ ?config :seon.config.repair/max-fixes-per-form 1)
+     ?repair-max-fixes]
+    [(get-else $ ?config :seon.config.repair/budget-ms 50) ?repair-budget-ms]])
 
 (defn acquire-sampling-policy!
-  "Acquire the value-sampling policy at an invocation database value."
+  "Acquire sampling and repair policy at an invocation database value."
   {:malli/schema [:=> [:cat :any :seon.db/db] :map]}
   [writer database]
   (let [row (context/query-writer-at! writer database
                                       sampling-policy-query ["cluster"])
-        policy (when (and (vector? row) (= 8 (count row)))
+        policy (when (and (vector? row) (= 12 (count row)))
                  (zipmap
                   [:seon.config.render/value-max-path-segments
                    :seon.config.render/value-max-path-bytes
@@ -238,10 +245,31 @@
                    :seon.config.render/value-max-string
                    :seon.config.render/value-shape-sample
                    :seon.render.value/page-size
-                   :seon.config.render/database-edn-cap]
+                   :seon.config.render/database-edn-cap
+                   :seon.config.repair/level
+                   :seon.config.repair/classes
+                   :seon.config.repair/max-fixes-per-form
+                   :seon.config.repair/budget-ms]
                   row))
-        sampling-limits (dissoc policy :seon.config.render/database-edn-cap)]
+        policy
+        (if (string? (:seon.config.repair/classes policy))
+          (try
+            (update policy :seon.config.repair/classes edn/read-string)
+            (catch Throwable _ policy))
+          policy)
+        sampling-limits
+        (apply dissoc policy
+               [:seon.config.render/database-edn-cap
+                :seon.config.repair/level
+                :seon.config.repair/classes
+                :seon.config.repair/max-fixes-per-form
+                :seon.config.repair/budget-ms])]
     (if (and (pos-int? (:seon.config.render/database-edn-cap policy))
+             (contains? #{:off :safe-syntax :symbols :aggressive}
+                        (:seon.config.repair/level policy))
+             (map? (:seon.config.repair/classes policy))
+             (pos-int? (:seon.config.repair/max-fixes-per-form policy))
+             (pos-int? (:seon.config.repair/budget-ms policy))
              (render.value/effective-limits-within? sampling-limits
                                                     sampling-limits))
       policy
