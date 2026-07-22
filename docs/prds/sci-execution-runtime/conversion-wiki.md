@@ -112,6 +112,24 @@ the anchor stays the state ledger.
 
 ## Process/operator
 
+- **The CLJS UDS transport has no public server-side framed-text seam.**
+  `seon.db.transport.uds/connect-stream!` exposes the existing four-byte
+  text-payload codec only as a client; its parser and frame encoder are private
+  (`src/seon/db/transport/uds.cljs:112-200,716-824`). A supervised Bun worker
+  cannot serve the execution protocol over that codec from an owned
+  `src/seon/execution/**` namespace without either duplicating framing or
+  changing the protected transport owner. Grant the transport owner a public
+  server-session seam (or explicitly grant the worker unit that extraction)
+  before implementation; never copy the parser/encoder into the worker.
+- **Same-artifact identity and execution-request identity are distinct today.**
+  The authorized worker argv executes `out/client/main.js`, whose process
+  record can prove the client/application artifact digest, while protocol-v3
+  startup and `ready-message-valid?` currently exchange the separate execution
+  build id/digest (`src/seon/execution.cljs:83-142`,
+  `src/seon/execution/host.cljs:401-416`). A worker-ready contract must name
+  which descriptor fields prove the serving artifact and which digest pins a
+  compiled invocation; silently echoing the child execution digest from the
+  client artifact does not prove same-artifact identity.
 - **A same-artifact worker needs two explicit owner-level control decisions.**
   The current managed graph is closed over watcher/writer/host/pod and the
   launch descriptor publishes only the JVM host eval socket

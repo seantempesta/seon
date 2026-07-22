@@ -1102,6 +1102,28 @@ Lane states at wind-down:
   - **Ruling 12 (P3a entry):** `seon.client/-main` is authorized for
     thin argv/mode dispatch so the SAME artifact serves pod and
     worker; mode selection is process-spec argv data.
+- P3a SECOND grounded stop (correct again; summary
+  `tmp/orchestrator/p3a-bun-worker-summary.txt` — keep: it is the
+  settled operator implementation map for the third dispatch).
+  Blocker: the CLJS UDS text-frame parser/encoder are PRIVATE
+  (`uds.cljs:112-200`, client-only `connect-stream!` at 716-824); a
+  Bun worker listener cannot reuse the codec without a public
+  server-side seam, and `src/seon/db/transport/**` is inside p1c's
+  live grant. Rulings:
+  - **Ruling 13 (artifact identity):** the worker's startup/READY
+    carries EXPLICIT serving-client artifact-identity descriptor
+    fields, distinct from (coexisting with) the execution build
+    digest that pins compiled child invocations — never echo the
+    child execution digest as the same-artifact proof.
+  - **Ruling 14 (transport server seam):** ONE public server-side
+    framed-text session constructor is extracted beside
+    `connect-stream!` in `uds.cljs` — native Bun socket in, bounded
+    in-order four-byte UTF-8 frames, `send-text!`/`close!`, the exact
+    current parser/frame limits, NO database session-open negotiation
+    (the execution protocol owns the text payload). SEQUENCING: lands
+    only after p1c returns (its grant covers db/**) — either as a
+    p1c follow-up micro-unit or granted to p3a's third dispatch with
+    an explicit uds.cljs carve-out. p3a slot HELD until then.
 - Earliest unsettled contract: the seam exemplar (P1c) proving one
   same-source seon.db definition on both tiers. Its integrated proof =
   the dual-tier .cljc test file + census delta + live isolated-cluster
