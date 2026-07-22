@@ -1715,6 +1715,108 @@
         (fs/delete-tree (:seon.dev.test/directory configuration)
                         {:force true})))))
 
+(deftest ensure-host-replaces-a-hard-killed-generation-and-down-reaps-it
+  (let [base (test-config)
+        directory (:seon.dev.test/directory base)
+        control-directory
+        (str (fs/path (:seon.dev.config/root base) "tmp"
+                      (str "host-cycle-" (random-uuid))))
+        configuration
+        (assoc (target-config base directory)
+               :seon.dev.config/containment-socket-dir
+               control-directory)
+        spec (harmless-spec process/host-id ["sleep" "300"])
+        manifest {:manifest true}
+        fixtures (atom [])]
+    (try
+      (with-redefs [process/specs (constantly {process/host-id spec})]
+        (let [first-result (process/ensure-host! configuration manifest)
+              first-record (process/read-process configuration process/host-id)
+              first-containment (:seon.dev.process/containment first-record)
+              first-generation
+              (:seon.dev.process.containment/generation first-containment)
+              first-identity
+              (select-keys first-record [:seon.dev.process/pid
+                                         :seon.dev.process/start-instant])
+              anchor (:seon.dev.process.containment/anchor-pid
+                      first-containment)
+              result-path (:seon.dev.process.containment/result-path
+                           first-containment)]
+          (swap! fixtures conj first-record)
+          (is (= (:seon.dev.process/pid first-record)
+                 (:seon.dev.process/pid first-result)))
+          (is (= first-identity
+                 {:seon.dev.process/pid
+                  (:seon.dev.process.containment/owner-pid first-containment)
+                  :seon.dev.process/start-instant
+                  (:seon.dev.process.containment/owner-start-instant
+                   first-containment)}))
+          (is (zero? (:exit (shell/sh
+                             {:continue true
+                              :cmd ["/bin/kill" "-KILL" "--"
+                                    (str "-" anchor)]})))
+              "the anchored KILL removes the host workload and anchor")
+          (loop [remaining 500]
+            (when (and (pos? remaining)
+                       (not= :seon.dev.process.status/dead-stale
+                             (process/reported-process-status first-record)))
+              (Thread/sleep 10)
+              (recur (dec remaining))))
+          (is (= :seon.dev.process.status/dead-stale
+                 (process/reported-process-status first-record)))
+          (is (not (fs/exists? result-path))
+              "SIGKILL leaves no fabricated terminal receipt")
+          (let [replacement-result
+                (process/ensure-host! configuration manifest)
+                replacement
+                (process/read-process configuration process/host-id)
+                replacement-containment
+                (:seon.dev.process/containment replacement)
+                replacement-identity
+                (select-keys replacement [:seon.dev.process/pid
+                                          :seon.dev.process/start-instant])
+                target (process/status configuration manifest)
+                host-status
+                (get-in target [:seon.dev.target/processes process/host-id])]
+            (swap! fixtures conj replacement)
+            (is (not= first-generation
+                      (:seon.dev.process.containment/generation
+                       replacement-containment)))
+            (is (not= first-identity replacement-identity)
+                "replacement publication carries a new owner identity")
+            (is (= replacement-identity
+                   {:seon.dev.process/pid
+                    (:seon.dev.process.containment/owner-pid
+                     replacement-containment)
+                    :seon.dev.process/start-instant
+                    (:seon.dev.process.containment/owner-start-instant
+                     replacement-containment)}))
+            (is (= (:seon.dev.process/pid replacement)
+                   (:seon.dev.process/pid replacement-result)
+                   (:seon.dev.process/pid host-status)))
+            (is (= :seon.dev.process.status/alive
+                   (:seon.dev.process/status host-status)))
+            (is (true? (:seon.dev.process/ready? host-status)))
+            (is (= :seon.dev.target.status/ready
+                   (:seon.dev.target/status target)))
+            (let [down
+                  (process/clean-or-force!
+                   {:seon.dev.process/configuration configuration
+                    :seon.dev.process/operation
+                    :seon.dev.process.operation/down
+                    :seon.dev.process/targets #{process/host-id}})]
+              (is (= :seon.dev.process.classification/clean
+                     (:seon.dev.process/classification down)))
+              (is (nil? (process/read-process configuration
+                                             process/host-id)))
+              (is (not-any? state/process-identity-alive?
+                            (containment-identities replacement)))))))
+      (finally
+        (doseq [record @fixtures]
+          (hard-clean-containment-fixture! record))
+        (fs/delete-tree control-directory {:force true})
+        (fs/delete-tree directory {:force true})))))
+
 (deftest clean-or-force-retains-the-completed-prefix-on-uncertainty
   (let [configuration (operator-config)
         calls (atom [])]
@@ -1997,7 +2099,44 @@
                 "replacement starts only after the terminal result"))))
       (finally (cleanup! configuration [id])))))
 
-(deftest missing-owner-result-is-containment-uncertain
+(deftest missing-terminal-classifier-requires-every-pid-and-control-absent
+  (let [generation (random-uuid)
+        record
+        {:seon.dev.process/id process/host-id
+         :seon.dev.process/pid 101
+         :seon.dev.process/start-instant "owner-start"
+         :seon.dev.process/process-group 102
+         :seon.dev.process/containment
+         {:seon.dev.process.containment/generation generation
+          :seon.dev.process.containment/owner-pid 101
+          :seon.dev.process.containment/owner-start-instant "owner-start"
+          :seon.dev.process.containment/anchor-pid 102
+          :seon.dev.process.containment/anchor-start-instant "anchor-start"
+          :seon.dev.process.containment/process-group 102
+          :seon.dev.process.containment/workload-pid 103
+          :seon.dev.process.containment/workload-start-instant "workload-start"
+          :seon.dev.process.containment/control-socket "/missing/control.sock"
+          :seon.dev.process.containment/adoption-path "/missing/adopted.json"
+          :seon.dev.process.containment/result-path "/missing/result.json"}}]
+    (with-redefs [state/process-start-instant (constantly nil)
+                  process/socket-line!
+                  (fn [& _] (throw (ex-info "control absent" {})))]
+      (is (= :seon.dev.process.status/dead-stale
+             (process/reported-process-status record))))
+    (with-redefs [state/process-start-instant
+                  (fn [pid] (when (= 103 pid) "live-workload"))
+                  process/socket-line!
+                  (fn [& _] (throw (ex-info "control absent" {})))]
+      (is (= :seon.dev.process.status/containment-uncertain
+             (process/reported-process-status record))
+          "one present recorded PID preserves uncertainty"))
+    (with-redefs [state/process-start-instant (constantly nil)
+                  process/socket-line! (constantly "generation-mismatch")]
+      (is (= :seon.dev.process.status/containment-uncertain
+             (process/reported-process-status record))
+          "any control response preserves uncertainty"))))
+
+(deftest missing-owner-result-with-an-absent-subtree-is-dead-stale
   (let [configuration (test-config)
         id :seon.dev.process/missing-result
         spec (harmless-spec id ["sleep" "300"])
@@ -2005,22 +2144,26 @@
     (try
       (let [record (process/ensure! configuration spec)
             containment (:seon.dev.process/containment record)
-            owner (:seon.dev.process.containment/owner-pid containment)
             anchor (:seon.dev.process.containment/anchor-pid containment)]
         (reset! fixture record)
-        (shell/sh {:cmd ["/bin/kill" "-KILL" (str owner)]})
+        (shell/sh {:cmd ["/bin/kill" "-KILL" "--" (str "-" anchor)]})
         (loop [remaining 500]
           (when (and (pos? remaining)
-                     (some? (state/process-start-instant anchor)))
+                     (not= :seon.dev.process.status/dead-stale
+                           (process/reported-process-status record)))
             (Thread/sleep 10)
             (recur (dec remaining))))
-        (is (thrown-with-msg?
-             clojure.lang.ExceptionInfo
-             #"disappeared without a terminal result"
-             (process/stop! configuration id)))
-        (is (some? (process/read-process configuration id)))
-        (is (thrown? clojure.lang.ExceptionInfo
-                     (process/ensure! configuration spec))))
+        (is (= :seon.dev.process.status/dead-stale
+               (process/reported-process-status record)))
+        (is (= :seon.dev.process.reason/dead-stale
+               (:seon.dev.process/reason
+                (process/stop! configuration id))))
+        (is (nil? (process/read-process configuration id)))
+        (is (not (fs/exists?
+                  (:seon.dev.process.containment/control-socket containment))))
+        (is (not (fs/exists?
+                  (fs/parent
+                   (:seon.dev.process.containment/result-path containment))))))
       (finally
         (when @fixture
           (is (not-any? true? (hard-clean-containment-fixture! @fixture))
@@ -2059,6 +2202,8 @@
             "anchor death alone does not prove or silently lose the workload")
         (is (not (fs/exists?
                   (:seon.dev.process.containment/result-path containment))))
+        (is (= :seon.dev.process.status/containment-uncertain
+               (process/reported-process-status record)))
         (is (thrown-with-msg?
              clojure.lang.ExceptionInfo
              #"disappeared without a terminal result"

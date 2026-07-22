@@ -1301,6 +1301,50 @@
            (contains? #{"requested" "workload-exit"} (:trigger result)))
        (= -9 (:anchor_exit result))))
 
+(defn- containment-control-responsive?
+  [containment]
+  (let [generation
+        (str (:seon.dev.process.containment/generation containment))]
+    (try
+      (socket-line!
+       (:seon.dev.process.containment/control-socket containment)
+       (str "probe " generation))
+      true
+      (catch Throwable _ false))))
+
+(defn- dead-stale-containment?
+  [record]
+  (let [containment (:seon.dev.process/containment record)
+        owner-pid (:seon.dev.process.containment/owner-pid containment)
+        anchor-pid (:seon.dev.process.containment/anchor-pid containment)
+        process-group (:seon.dev.process.containment/process-group containment)
+        workload-pid (:seon.dev.process.containment/workload-pid containment)
+        recorded-pids
+        (distinct [(:seon.dev.process/pid record)
+                   owner-pid anchor-pid process-group workload-pid])]
+    (and containment
+         (= (:seon.dev.process/pid record) owner-pid)
+         (= (:seon.dev.process/start-instant record)
+            (:seon.dev.process.containment/owner-start-instant containment))
+         (= anchor-pid process-group)
+         (every? pos-int? recorded-pids)
+         (every? #(nil? (state/process-start-instant %)) recorded-pids)
+         (not (containment-control-responsive? containment)))))
+
+(defn- containment-status
+  [record]
+  (let [recorded (process-status record)
+        containment (:seon.dev.process/containment record)]
+    (cond
+      (nil? record) recorded
+      (containment-live? record) :seon.dev.process.status/alive
+      (and (matching-terminal? containment (terminal-result containment))
+           (not (state/process-identity-alive?
+                 (containment-identity containment :owner))))
+      :seon.dev.process.status/drained
+      (dead-stale-containment? record) :seon.dev.process.status/dead-stale
+      :else :seon.dev.process.status/containment-uncertain)))
+
 (defn- normalized-terminal [containment result]
   (cond->
    {:seon.dev.process.containment/generation
@@ -1510,6 +1554,18 @@
 (def ^:private no-process-expectation
   ::no-process-expectation)
 
+(defn- clear-contained-record!
+  [config id record]
+  (clear-process! config id)
+  (when-let [control-socket
+             (get-in record [:seon.dev.process/containment
+                             :seon.dev.process.containment/control-socket])]
+    (fs/delete-if-exists control-socket))
+  (when-let [result-path
+             (get-in record [:seon.dev.process/containment
+                             :seon.dev.process.containment/result-path])]
+    (fs/delete-tree (fs/parent result-path) {:force true})))
+
 (defn stop!
   "Drain one exact containment generation and return its terminal evidence."
   ([config id] (stop! config id no-process-expectation nil))
@@ -1533,19 +1589,20 @@
                   :seon.dev.process/id id})))
      (let [result
            (when record
-             (let [containment (:seon.dev.process/containment record)
-                   terminal (drain-containment! record operation-deadline)]
-               (merge
-                {:seon.dev.process/id id
-                 :seon.dev.process/terminal
-                 (normalized-terminal containment terminal)}
-                (writer-application-evidence containment terminal))))]
+             (if (= :seon.dev.process.status/dead-stale
+                    (containment-status record))
+               {:seon.dev.process/id id
+                :seon.dev.process/reason
+                :seon.dev.process.reason/dead-stale}
+               (let [containment (:seon.dev.process/containment record)
+                     terminal (drain-containment! record operation-deadline)]
+                 (merge
+                  {:seon.dev.process/id id
+                   :seon.dev.process/terminal
+                   (normalized-terminal containment terminal)}
+                  (writer-application-evidence containment terminal)))))]
       (when record
-        (clear-process! config id)
-        (when-let [result-path
-                   (get-in record [:seon.dev.process/containment
-                                   :seon.dev.process.containment/result-path])]
-          (fs/delete-tree (fs/parent result-path) {:force true})))
+        (clear-contained-record! config id record))
       ;; A missing/reused state record is not authority over a live listener.
       ;; Preserve its breadcrumb so the next reconciliation can report the
       ;; ownership conflict instead of unlinking evidence it does not own.
@@ -1852,12 +1909,14 @@
                  :seon.dev.process.classification/forced))
         (not clean?)
         (assoc :seon.dev.process/reason
-               (cond
-                 (= :seon.dev.process.containment.trigger/workload-exit trigger)
-                 :seon.dev.process.reason/unexpected-exit
-                 (:seon.dev.process/application-error result)
-                 (:seon.dev.process/application-error result)
-                 :else :seon.dev.process.reason/incomplete-application))))))
+               (or
+                (:seon.dev.process/reason result)
+                (cond
+                  (= :seon.dev.process.containment.trigger/workload-exit trigger)
+                  :seon.dev.process.reason/unexpected-exit
+                  (:seon.dev.process/application-error result)
+                  (:seon.dev.process/application-error result)
+                  :else :seon.dev.process.reason/incomplete-application)))))))
 
 (defn- stop-selected! [configuration deadline ordered]
   (loop [remaining ordered
@@ -2504,18 +2563,10 @@
     [:enum :seon.dev.process.status/absent
      :seon.dev.process.status/alive
      :seon.dev.process.status/drained
+     :seon.dev.process.status/dead-stale
      :seon.dev.process.status/containment-uncertain]]}
   [record]
-  (let [recorded (process-status record)
-        containment (:seon.dev.process/containment record)]
-    (cond
-      (nil? record) recorded
-      (containment-live? record) :seon.dev.process.status/alive
-      (and (matching-terminal? containment (terminal-result containment))
-           (not (state/process-identity-alive?
-                 (containment-identity containment :owner))))
-      :seon.dev.process.status/drained
-      :else :seon.dev.process.status/containment-uncertain)))
+  (containment-status record))
 
 (defn status
   "Derive process and application health from live probes."

@@ -123,8 +123,13 @@ not add another process registry or supervisor.
 - The containment owner is addressed by PID plus start instant and publishes a
   generation-matched terminal result only after the anchor is reaped.
 - Missing owner, missing anchor, partial descriptor, or missing terminal result
-  retains the exact record and reports degraded `containment-uncertain`; it
-  never starts a replacement or releases/deletes a retained branch.
+  retains the exact record and reports degraded `containment-uncertain` —
+  UNLESS every recorded pid is provably absent by (pid, start-instant)
+  identity AND the generation-bound control socket does not respond, which
+  downgrades to `dead-stale` and permits exact-record cleanup (ruling
+  2026-07-22, WP-S2 kill-drill: an all-dead SIGKILLed generation is the
+  physics case the supervisor exists to recover; the conservative branch
+  stays whenever ANY recorded pid is alive or the socket answers).
 - Real fixtures prove stale/reused PID and PGID values never signal innocent
   processes, startup SIGINT retains its current inverse guarantees, and a
   converged process remains unclaimed.
