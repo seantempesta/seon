@@ -8,11 +8,7 @@
     [seon.test.source-scan :as source-scan]))
 
 (def ^:private fenced-require-pattern
-  #"\[\s*(seon\.(?:diffusion(?:\.[A-Za-z0-9_.-]+)+|worker-eval|worker-validator))(?=[\s\]\}:])")
-
-(def ^:private allowed-source-paths
-  #{"src/seon/worker_eval.cljs"
-    "src/seon/worker_validator.cljs"})
+  #"\[\s*(seon\.diffusion(?:\.[A-Za-z0-9_.-]+)+)(?=[\s\]\}:])")
 
 (def ^:private allowlist
   [{::file "src/seon/eval.cljs"
@@ -25,11 +21,6 @@
                  fenced-require-pattern
                  (source-scan/sanitized-ns-form source))))
 
-(defn- allowed-tree-path?
-  [file]
-  (or (str/starts-with? file "src/seon/diffusion/")
-      (contains? allowed-source-paths file)))
-
 (defn- fence-edges
   []
   (let [cwd (.cwd js/process)]
@@ -37,7 +28,7 @@
          (mapcat
            (fn [path]
              (let [file (str/replace (.relative np cwd path) #"\\" "/")]
-               (when-not (allowed-tree-path? file)
+               (when-not (str/starts-with? file "src/seon/diffusion/")
                  (map (fn [required-ns]
                         {::file file ::required-ns required-ns})
                       (fenced-requires (.readFileSync fs path "utf-8")))))))

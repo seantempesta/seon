@@ -60,7 +60,7 @@
 (defn validate
   "Pure: code-string -> the Node-validator-IDENTICAL result map
    {:forms n :tier \"parse\" :errors [{:error-kind name :span [s e] :source s}]}.
-   Mirrors seon.worker-validator/validate + ->js (keywords flattened to NAME
+   Mirrors seon.diffusion.worker.parse/validate + ->js (keywords flattened to NAME
    strings at this boundary, exactly as the Node bundle does).
 
    `strip-fences?` (default true) controls markdown fence stripping. Pass

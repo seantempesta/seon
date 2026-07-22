@@ -190,7 +190,7 @@
   ;; validates a partial canvas every checkpoint; co-located this is a
   ;; ~0.4ms local Bun call instead of a ~100ms internet round-trip.
   ;;
-  ;; ONLY compiles seon.worker-validator + its minimal transitive deps
+  ;; ONLY compiles seon.diffusion.worker.parse + its minimal transitive deps
   ;; (seon.repl.internal → clojure.string + rewrite-clj — pure CLJC, NO
   ;; datahike / malli / pod state). A SINGLE standalone bundle the Python
   ;; worker spawns as a subprocess: code on stdin → one JSON line on
@@ -208,7 +208,7 @@
   :worker-validator
   {:target           :node-script
    :output-to        "out/worker-validator/main.js"
-   :main             seon.worker-validator/-main
+   :main             seon.diffusion.worker.parse/-main
    :devtools         {:enabled false}
    :compiler-options {:warnings-as-errors false
                       :optimizations      :simple
@@ -245,7 +245,7 @@
   :worker-oracle-eval
   {:target           :node-script
    :output-to        "out/worker-oracle-eval/main.js"
-   :main             seon.worker-eval/-main
+   :main             seon.diffusion.worker.eval/-main
    :devtools         {:enabled false}
    :compiler-options {:warnings-as-errors false
                       :optimizations      :simple

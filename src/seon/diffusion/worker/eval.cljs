@@ -1,4 +1,4 @@
-(ns seon.worker-eval
+(ns seon.diffusion.worker.eval
   "Evaluate generated CLJS beside the diffusion worker.
 
    ## What this answers
@@ -62,7 +62,7 @@
 
    Per line out:
 
-       {\"op\":\"eval\",\"id\":7,\"tier\":\"eval\",\"ok\":true,\"value\":\"#'seon.worker-eval.user/mean\"}
+       {\"op\":\"eval\",\"id\":7,\"tier\":\"eval\",\"ok\":true,\"value\":\"#'seon.diffusion.worker.eval.user/mean\"}
        {\"op\":\"eval\",\"id\":8,\"tier\":\"eval\",\"ok\":false,\"error\":{\"kind\":\"compile\",\"message\":\"Use of undeclared Var ...\"}}
        {\"op\":\"eval\",\"id\":9,\"tier\":\"eval\",\"ok\":false,\"error\":{\"kind\":\"interrupt\",\"message\":\"Script execution timed out.\"}}
 
@@ -268,7 +268,7 @@
           (do
             (vreset! !warnings [])
             (try
-              (cljs/eval-str state code 'seon.worker-eval.user
+              (cljs/eval-str state code 'seon.diffusion.worker.eval.user
                 {:eval          (if compile-only?
                                   (fn [_] nil)   ; trial: analyze/compile, execute NOTHING
                                   (bounded-eval-fn (or budget-ms default-budget-ms)))

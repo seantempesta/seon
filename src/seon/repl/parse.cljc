@@ -1152,7 +1152,7 @@
                                       ;; The ONE :seon/error value shape —
                                       ;; classified kind + the parser message
                                       ;; (same hand-built form as
-                                      ;; seon.worker-eval/classify-error).
+                                      ;; seon.diffusion.worker.eval/classify-error).
                                       :seon/error
                                       {:seon.error/kind    error-kind
                                        :seon.error/message (str (::error token))}

@@ -297,7 +297,7 @@
     (cond
       (nil? retained)
       (do
-        (reset! blob/!storage-view view)
+        (blob/configure-storage-view! view)
         (swap! !state assoc ::blob-storage-view view)
         view)
 

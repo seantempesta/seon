@@ -1,4 +1,4 @@
-(ns seon.worker-validator
+(ns seon.diffusion.worker.parse
   "Validate generated syntax beside the diffusion worker.
 
    The eval-renoise loop validates a PARTIAL code-buffer every diffusion

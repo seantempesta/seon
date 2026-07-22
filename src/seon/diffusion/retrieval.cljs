@@ -17,7 +17,7 @@
       references (call-position + every used var, minus locals/specials/core),
       char-span each, and keep the ones that do NOT resolve in the program
       graph. This is the offline, graph-membership equivalent of the analyzer's
-      `:undeclared-var` warning that `seon.worker-eval` collects on the GPU.
+      `:undeclared-var` warning that `seon.diffusion.worker.eval` collects on the GPU.
    2. RETRIEVE — `retrieve-candidates`: for an unresolved name, return the
       nearest REAL `:seon.fn` candidates. The GRAPH path (always on): exact
       name match + near-name (Levenshtein) over `:seon.fn/sym`. The SEMANTIC

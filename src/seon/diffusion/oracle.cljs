@@ -9,7 +9,7 @@
    - RETRIEVE — `seon.diffusion.retrieval/retrieve-for-code-buffer`. Yields the
      hallucinated-symbol corrections (`{span,replacement,spec_text}`) — each a
      clamp-toward-the-real-API.
-   - EVAL — `seon.worker-eval` (a SEPARATE node self-host bundle; NOT pod- or
+   - EVAL — `seon.diffusion.worker.eval` (a SEPARATE node self-host bundle; NOT pod- or
      bb-loadable). Where a form is syntactically clean but semantically wrong
      (undeclared var, def-vs-defn, arity, throw, non-termination), its verdict
      folds into either a renoise-span or (when retrieval already named the real

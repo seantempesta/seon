@@ -5,13 +5,13 @@ Preservation means its builds and tests stay working; it is not part of the
 main program gates.
 
 The require fence is directional: the main system never requires
-`seon.diffusion.*`, `seon.worker-eval`, or `seon.worker-validator`. Diffusion
-may require main-system namespaces. Diffusion-backed providers are
+`seon.diffusion.*`. Diffusion may require main-system namespaces.
+Diffusion-backed providers are
 explicit-configuration opt-in only and never activate as a side effect.
 
 Logical membership is `seon.diffusion.gemma`, `.grammar`, `.retrieval`,
-`.oracle`, and `.scaffold`, plus the `seon.worker-eval` and
-`seon.worker-validator` entry namespaces. Gemma self-registers its provider
+`.oracle`, `.scaffold`, `.worker.eval`, and `.worker.parse`. Gemma
+self-registers its provider
 descriptor and the typeahead step backing when explicitly loaded.
 
 The subsystem owns the `:worker-validator` and `:worker-oracle-eval` builds.
