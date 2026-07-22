@@ -897,6 +897,14 @@ happened. Now take the next thing off the queue.
 - Standing overnight rules: owner-taste decisions batch for morning;
   live drives on isolated clusters only; path-limited commits; anchor
   updated every cycle.
+- **Overnight lanes at start:** W3 grounding (read-only, logs
+  `tmp/orchestrator/w3-grounding-*`) · q21 grounding (read-only,
+  `tmp/orchestrator/q21-grounding-*`) · **NS-0.5d** internal-require
+  conformance gate (curiosity-pass finding: the require law had no
+  checked-in gate and `internal_boundary_test.cljs` hand-maintains its
+  ns list against the computed-rules rule; spec
+  `specs/ns-0.5d-internal-require-gate.md`, test-only, sol low,
+  logs `tmp/orchestrator/ns-05d-*`).
 
 ### NO PENDING OWNER DECISIONS
 
