@@ -979,13 +979,13 @@ non-fragile bridges between runtimes.
   (`2f1e9c6c`) is the progress meter. EVERY lane reads and appends
   `conversion-wiki.md` (the shared stumbling-block surface — created
   to stop lanes relearning the same lessons).
-- **P3 EXECUTION CUTOVER (parallel with P2, disjoint files):**
-  same-artifact supervised Bun execution worker under the proven
-  WP-S2 machinery kills the per-agent child sprawl NOW (surface parity
-  free by identity); sci-context execution over the portable core
-  follows as P2 fills in; JVM preemptive interrupts become an optional
-  upgrade, not a wall. Then retirement proof + child-lane deletion
-  (the original W5).
+- **P3 EXECUTION CUTOVER (SUPERSEDED 2026-07-22 — owner ruling, see
+  restart-state):** the interim supervised-Bun-worker tier is PARKED;
+  the working per-agent Bun children stay until the P2 portable core
+  is real, then the cutover to sci-context execution is ONE decision
+  with real information. The two p3a stop reports are the grounded
+  map for that decision. Retirement proof + child-lane deletion (the
+  original W5) still closes the phase.
 - **P4 VIRTUAL AGENTS:** CAS-claimable runs advanced by any process;
   recovery via the seam's effect classes; pod demotes to web UI + LLM
   I/O + scheduler. Graduation = U12 (kill anything anytime, agents
@@ -1124,6 +1124,20 @@ Lane states at wind-down:
     only after p1c returns (its grant covers db/**) — either as a
     p1c follow-up micro-unit or granted to p3a's third dispatch with
     an explicit uds.cljs carve-out. p3a slot HELD until then.
+- **OWNER RULING (2026-07-22, in session): P3a PARKED; rulings 10-14
+  RESCINDED.** "The existing CLJS code runs fine in the bun child
+  spawn version and we are getting rid of it" — the per-agent Bun
+  children already provide preemption (process kill) and memory
+  isolation, and W0 closed the containment contract. A shared worker
+  tier is intermediate scaffolding the P2/P4 end state deletes;
+  building its process plumbing now (fifth member, CLI kill bridge,
+  artifact-identity fields, UDS server seam) is thrown-away work —
+  which is why every grounding pass minted new contracts. The
+  execution cutover is ONE decision taken when the P2 portable core
+  is real, not speculative infrastructure now. Ruling 9 (op-id)
+  STANDS — receipts/recovery are topology-independent and P4 needs
+  them. The two p3a stop reports remain the grounded map for that
+  future decision.
 - Earliest unsettled contract: the seam exemplar (P1c) proving one
   same-source seon.db definition on both tiers. Its integrated proof =
   the dual-tier .cljc test file + census delta + live isolated-cluster
