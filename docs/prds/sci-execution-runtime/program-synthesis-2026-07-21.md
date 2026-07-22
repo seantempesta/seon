@@ -839,6 +839,36 @@ spec (orchestrator, in progress).
   grants explicitly protected (the entanglement lesson from this
   combined commit, now standing spec practice).
 
+### Normalize-3 DONE `0c0e6027` + WP-S2 drill round 2 (2026-07-22 night)
+
+- **Normalize-3 landed with live proof:** seven native
+  `:seon.agent.turn.usage/*` long attrs (presence-inferred provider
+  dialects, no discriminator; inconsistent cache counts → error value);
+  llm-meta + attempt raw usage stay honestly-EDN WITH EVIDENCE (open
+  shapes, zero readers); tempid receipts string-key/int-key native,
+  pr-str pair deleted, wire frames untouched. Gates cljs 1539/7500 +
+  writer 380/2879. LIVE: reset clean; two real DeepSeek turns wrote
+  native usage datoms queryable directly in Datalog (42917/18,
+  42931/79).
+- **WP-S2 defect-fix landed `5bd19361`** (dead-stale classification,
+  (pid,start-instant) identity, full-cycle regression; the round-1
+  cascade root-caused to macOS PID REUSE defeating pid-only identity —
+  my stale-publication attribution falsified by the lane).
+- **DRILL ROUND 2 — HONESTY CORRECTION + third defect class:**
+  `bin/seon status` displays the OWNER pid, so BOTH live rounds killed
+  the containment owner, never the JVM workload. Round-1's
+  corpus-replay claim is STRUCK (the workload likely never died); the
+  workload-kill respawn path is NOT yet live-proven. Round 2 proved
+  the owner-death mode: anchor+workload keep serving, status "foreign
+  <owner-pid> not-ready", manual `ensure host` refuses with a
+  MISLEADING "writer unavailable" (writer alive), operator cannot
+  manage the orphaned generation; manual surgery again. Lane resumed
+  (owner-death adopt-or-replace design, dependency-check fix, status
+  legibility, owner-kill regression, and the exact workload-kill
+  recipe for the close drill). **WP-S2 close gate: BOTH kill modes
+  drilled live — workload kill → respawn+replay; owner kill → managed
+  replace — with status correct and clean reap, zero manual surgery.**
+
 ### Queue-order correction (fresh-eyes ruling, recorded)
 
 The wind-down queue serialized the EDN normalize series ahead of
