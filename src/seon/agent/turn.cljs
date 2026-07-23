@@ -20,6 +20,7 @@
     [seon.execution.host :as execution.host]
     [seon.agent.ctx.driver :as ctx.driver]
     [seon.log :as seon-log]
+    [seon.render :as render]
     [seon.schema :as schema]))
 
 ;; ============================================================
@@ -370,18 +371,6 @@
 
 (declare invoke-prompt-calls!)
 
-(def ^:private authored-prompt-symbols-query
-  '[:find [?requested ...]
-    :in $ [?requested ...]
-    :where
-    [?function :seon.fn/sym ?requested]
-    [?function :seon.fn/source _ ?tx]
-    (or-join [?function ?tx]
-      (and [?tx :seon.db/process ?process]
-           [?process :seon.db.process/id :seon.db.process/repl])
-      (and [?function :seon.packages/package ?package]
-           [?package :seon.packages/as _]))])
-
 (defn- supports-arity?
   "Read the original CLJS callable through Malli's instrumentation wrapper."
   [function-value arity]
@@ -398,11 +387,31 @@
           (and (fn? variadic) (>= arity max-fixed)))
       (= arity (.-length function-value)))))
 
+(defn ^:async ^:private invoke-authored-render!
+  "Invoke one authored render through the guarded host door."
+  [database agent-id
+   {function-symbol ::render/function-symbol
+    arguments ::render/arguments}]
+  (try
+    (let [invocations
+          (await
+           (execution/prepare-invocations!
+            {:seon.db/db database
+             ::execution/invocation-plans
+             [(execution/invocation-plan
+               agent-id function-symbol arguments)]}))
+          result (await (execution.host/invoke! (first invocations)))]
+      (if (::execution/ok? result)
+        (::execution/value result)
+        (::execution/error result)))
+    (catch :default exception
+      (error/->map exception))))
+
 (defn ^:async ^:private invoke-prompt-call!
-  "Run compiled prompt functions in the pod; retain the authored child door."
-  [database agent-id authored-symbols call]
+  "Run a core prompt directly or an authored render through its seam."
+  [database agent-id render-door call]
   (let [function-symbol (::execution/function-symbol call)]
-    (if-not (contains? authored-symbols function-symbol)
+    (if-not (error/agent-authored-sym? function-symbol)
       (try
         (if-let [function-value (seval/lookup-value function-symbol)]
           (let [base-arguments (::execution/arguments call)
@@ -411,7 +420,8 @@
                   (and (::execution/invoke-selected? call)
                        (supports-arity?
                         function-value (inc (count base-arguments))))
-                  (conj #(invoke-prompt-calls! database agent-id %)))
+                  (conj #(invoke-prompt-calls!
+                          database agent-id render-door %)))
                 value (await (apply function-value arguments))]
             {::execution/ok? true ::execution/value value})
           {::execution/ok? false
@@ -425,29 +435,21 @@
           (error/record! {::error/raw exception ::error/fault :core})
           {::execution/ok? false
            ::execution/error (error/->map exception)}))
-      (first
+      {::execution/ok? true
+       ::execution/value
        (await
-        (execution.host/invoke-plans!
-         database
-         [(execution/invocation-plan
-           agent-id function-symbol (::execution/arguments call))]))))))
+        ((::render/invoke-authored! render-door)
+         {::render/function-symbol function-symbol
+          ::render/arguments (::execution/arguments call)}))})))
 
 (defn ^:async ^:private invoke-prompt-calls!
-  [database agent-id calls]
-  (let [symbols (mapv ::execution/function-symbol calls)
-        authored
-        (await
-         (db/query
-          {::db/db database
-           ::db/query authored-prompt-symbols-query
-           ::db/args [symbols]}))
-        authored-symbols (set (map symbol authored))
-        results
+  [database agent-id render-door calls]
+  (let [results
         (await
          (js/Promise.all
           (clj->js
            (mapv #(invoke-prompt-call!
-                   database agent-id authored-symbols %)
+                   database agent-id render-door %)
                  calls))))]
     (vec (array-seq results))))
 
@@ -480,14 +482,15 @@
                    run-id
                    (assoc :seon.agent.run/id run-id))
          invoke-authored!
-         ;; Trusted compiled prompt functions are pod-owned. Agent-authored
-         ;; render symbols retain their existing execution-child door.
-         #(invoke-prompt-calls! database agent-id %)
+         {::render/invoke-authored!
+          #(invoke-authored-render! database agent-id %)}
+         invoke-selected!
+         #(invoke-prompt-calls! database agent-id invoke-authored! %)
          rendered
          (await
           (ctx.driver/render-prompt!
            (assoc request ::db/db database)
-           invoke-authored!))
+           invoke-selected!))
          response {:seon.db/db (:seon.db/db rendered)
                    ::execution/message execution/result-message
                    ::execution/result (dissoc rendered :seon.db/db)}]

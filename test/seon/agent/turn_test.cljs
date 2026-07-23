@@ -9,6 +9,7 @@
    [seon.error :as error]
    [seon.execution :as execution]
    [seon.execution.host :as execution.host]
+   [seon.render :as render]
    [seon.schema :as schema]))
 
 (def database
@@ -103,6 +104,63 @@
                   (filter #(= :form (:seon.repl/kind %)))
                   first)]
     (is (= "" (:seon.repl/narration form)))))
+
+(deftest authored-prompt-render-uses-the-guarded-single-call-door
+  (async done
+    (let [original-prepare execution/prepare-invocations!
+          original-invoke execution.host/invoke!
+          observed (atom nil)
+          invocation {::execution/invocation-id "authored-render"}]
+      (set! execution/prepare-invocations!
+            (fn [request]
+              (reset! observed request)
+              (js/Promise.resolve [invocation])))
+      (set! execution.host/invoke!
+            (fn [selected]
+              (is (= invocation selected))
+              (js/Promise.resolve
+               {::execution/ok? true
+                ::execution/value "authored block"})))
+      (-> (js/Promise.resolve
+           (@#'turn/invoke-authored-render!
+            database "agent-1"
+            {::render/function-symbol 'my.prompt/block
+             ::render/arguments [{:seon.agent/id "agent-1"}]}))
+          (.then
+           (fn [value]
+             (is (= "authored block" value))
+             (is (= 'my.prompt/block
+                    (get-in @observed
+                            [::execution/invocation-plans 0
+                             ::execution/function-symbol])))))
+          (.catch (fn [exception] (is false (str exception))))
+          (.finally
+           (fn []
+             (set! execution/prepare-invocations! original-prepare)
+             (set! execution.host/invoke! original-invoke)
+             (done)))))))
+
+(deftest authored-guard-steering-value-remains-the-render-slot
+  (async done
+    (let [steering {:seon.error/message "guarded"
+                    :seon.error/kind :budget
+                    :seon.error/data
+                    {:seon.host.guard/config-key
+                     :seon.config.guard/authored-render-fuel}}
+          door
+          {::render/invoke-authored!
+           (fn [_] (js/Promise.resolve steering))}
+          call {::execution/function-symbol 'my.hostile/render
+                ::execution/arguments [{}]}]
+      (-> (js/Promise.resolve
+           (@#'turn/invoke-prompt-calls!
+            database "agent-1" door [call]))
+          (.then
+           (fn [results]
+             (is (true? (::execution/ok? (first results))))
+             (is (= steering (::execution/value (first results))))))
+          (.catch (fn [exception] (is false (str exception))))
+          (.finally done)))))
 
 (deftest prompt-is-the-database-value-pinned-child-result
   (async done

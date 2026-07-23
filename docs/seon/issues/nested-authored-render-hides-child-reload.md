@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 tags: [issue, agent, web, cljs]
 severity: friction
 ---
@@ -108,3 +108,24 @@ render functions, and canvas twins (boundary items 1–4) therefore still use
 option A. Replacing that callback requires a change in the protected turn/host
 spine, so U7 stopped at the consumer contract instead of adding another host
 surface or editing the protected owner.
+
+## Resolution — guarded pod render door complete, 2026-07-23
+
+Commit `8bd19774e` established the render-owned
+`:seon.render/invoke-authored!` contract. The claim-driver follow-up now binds
+that seam at `seon.agent.turn/render-prompt` and sends each authored call
+through the single guarded host invocation entry. The temporary
+`invoke-prompt-calls! → execution.host/invoke-plans!` arm, its authored-symbol
+database classification, and its option-A comment are deleted.
+
+Trusted core prompt functions remain direct compiled calls. Structurally
+authored symbols—including stored blocks, whole-prompt functions, derived
+render functions, and canvas twins—cross the render seam and the U1
+`:authored-render` guard. A guard steering value is returned as the render
+slot value, preserving its kind and governing config key.
+
+Focused regressions prove a normal authored symbol renders through the
+single-call door, a hostile authored symbol retains its `:budget` steering
+value in the slot, and the restart-stable default-context byte oracle remains
+identical. The option-A window is closed; the pod render containment path is
+door-complete.
