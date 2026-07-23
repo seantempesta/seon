@@ -659,3 +659,28 @@ the anchor stays the state ledger.
   Shadow and the writer test runner. Pair it with fresh JVM require gates and
   the existing nonempty stage-5 context-byte gate; none substitutes for the
   others.
+
+## U8a native-leaf and host-binding scars (2026-07-23)
+
+- **Re-read a recorded block with its namespace alias table.** Raw source
+  retains reader conditionals and auto-resolved keywords. Selecting the JVM
+  branch without binding the source aliases can turn `::db/db` into a keyword
+  in the reader's ambient namespace, while printing the already parsed form
+  leaves `#?` syntax for SCI. Bind `tools.reader/*alias-map*`, select `:clj`,
+  and only then hand the resulting form to the host interpreter.
+- **A computed registry census needs literal wrapper declarations.** Runtime
+  construction from a map of names can serve calls correctly but cannot be
+  proven by the source census. Declare each promoted public symbol literally
+  in `register-host-capabilities!`, load the real landed implementation
+  closure, and reinstall those same shared read-only vars through
+  `install-registered-wrappers!`.
+- **Acquire config before normalizing a native request.** The JVM shell and
+  web wrappers read the invocation's already-acquired
+  `:seon.config/configuration`; the pure core turns that singleton plus the
+  child request into native request data. A platform leaf must not retain an
+  old numeric default after the core promotes that value to a database fact.
+- **Content identity crosses tiers; archive mechanics do not.** The JVM blob
+  leaf uses the portable SHA-256 result as both lookup identity and
+  idempotency receipt, writes the same `<first-two>/<hash>` archive path, and
+  transacts the same projection. Durable channel force and atomic rename are
+  platform mechanics, not a second blob contract.
