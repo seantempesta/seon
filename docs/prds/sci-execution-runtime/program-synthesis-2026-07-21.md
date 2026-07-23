@@ -137,6 +137,26 @@ COMPLETELY before dispatching anything.
   U5 resumed for live up/status/down + gzip parity transcripts. Full
   writer-gate noise attributed to U3's in-flight files (existing
   integration issue; frozen-tree checkpoint pending).
+- U3 stop #1 verified + RULED (2026-07-23 overnight): Datahike
+  LocalWriter rewinds uncommitted :max-tx → two same-expected-basis
+  txs both commit under pipelining (direct dependency probe; issue
+  datahike-local-writer-rewinds-uncommitted-basis). FORK FIX GRANTED
+  (reference-code/datahike is the first-party fork; protection ≠
+  protecting a proven defect); U3 resumed: minimal LocalWriter fix +
+  fork regression + submodule pin bump + then commit its complete
+  Seon-side work (pipelining 30.96x at depth 64 within-run; kill
+  recovery green; wait-for-original duplicate semantics). MORNING
+  ITEM: push the fork commit to seantempesta/datahike. Probe C
+  shared-file scaling gap (1.55-1.96x vs 4x) recorded as its own
+  issue — capacity finding, not a blocker.
+- SECOND fork defect queued to U3 on return (found by U5's live
+  attempt; issue config-schema-alias-blocks-fresh-cluster-open):
+  datahike.schema/malli-form->datahike-attribute cannot store a bare
+  registered-alias form (:seon.config.render-context/sha-256 →
+  :seon.content-hash/digest); the bridge already receives the forms
+  map — dereference recursively (fix the bridge, never inline
+  copies). Blocks U5 live graduation + will block U4's live proof;
+  rejection site writer.clj:442 is U3-owned.
 - U2 THE SPINE DISPATCHED (spec tmp/orchestrator/
   u2-claim-driver-spec.md, effort=high): both tiers run the one
   portable claim-native driver as phase-limited claimants (pod:
