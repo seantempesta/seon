@@ -157,6 +157,20 @@ COMPLETELY before dispatching anything.
   map — dereference recursively (fix the bridge, never inline
   copies). Blocks U5 live graduation + will block U4's live proof;
   rejection site writer.clj:442 is U3-owned.
+- U4 ACCEPTED ON RETAINED GATES (2026-07-23 overnight): byte-identity
+  gate GREEN (cross-process, empty diff, 938-byte renders) — the
+  unit's core falsifier; missing-db :core-bug regression green;
+  my.canvas + all R1 namespaces load on the JVM; full CLJS run's
+  residual failures attributed to U2's concurrent legacy-loop
+  deletion (expected R28 breakage). Residual: the live restart byte
+  comparison — DEFERRED into the orchestrator's post-U2 integration
+  checkpoint (u4render could not launch while the shared :test build
+  is broken by the in-flight spine). context-purity issue stays open
+  for exactly that live acceptance; my.canvas issue resolved.
+- U3 Seon-side work COMMITTED (observed in log: 3b63b2393 fork pin,
+  a6f45ee01 pipelining, + regressions); lane still running post-fix
+  gates; second fork defect (schema-alias bridge) hands to it on
+  return.
 - U2 THE SPINE DISPATCHED (spec tmp/orchestrator/
   u2-claim-driver-spec.md, effort=high): both tiers run the one
   portable claim-native driver as phase-limited claimants (pod:
