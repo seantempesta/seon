@@ -5,9 +5,9 @@
    #?(:cljs ["node:crypto" :as crypto]))
   #?(:clj
      (:import
+      [java.math BigInteger]
       [java.nio.charset StandardCharsets]
-      [java.security MessageDigest]
-      [java.util HexFormat])))
+      [java.security MessageDigest])))
 
 (schema/register! ::content :string)
 (schema/register! ::digest [:re "^[0-9a-f]{64}$"])
@@ -18,9 +18,11 @@
   [content]
   #?(:clj
      (let [digest (MessageDigest/getInstance "SHA-256")]
-       (.formatHex (HexFormat/of)
-                   (.digest digest (.getBytes ^String content
-                                              StandardCharsets/UTF_8))))
+       (format "%064x"
+               (BigInteger.
+                1
+                (.digest digest (.getBytes ^String content
+                                           StandardCharsets/UTF_8)))))
      :cljs
      (-> (.createHash crypto "sha256")
          (.update content "utf8")

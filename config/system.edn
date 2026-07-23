@@ -112,7 +112,19 @@
   :seon.config.database.pull/max-results
   #long #or [#env SEON_DB_PULL_MAX_RESULTS 1000000]
   :seon.config.database.pull/max-result-weight
-  #long #or [#env SEON_DB_PULL_MAX_RESULT_WEIGHT 3000000]}
+  #long #or [#env SEON_DB_PULL_MAX_RESULT_WEIGHT 3000000]
+
+  ;; MUTATION ADMISSION CIRCUIT BREAKERS. Units are accepted requests. These
+  ;; protect writer heap and Datahike's 120000-entry LocalWriter queue; firing
+  ;; rejects loudly with the governing key and never throttles normal work.
+  ;; Default 32768 is 128x the 256-caller acceptance probe's offered P99.9,
+  ;; calibrated by U3's file-backed 2026-07-23 probe.
+  :seon.config.database.executor.mutation/maximum-active
+  #long #or [#env SEON_DB_MUTATION_MAXIMUM_ACTIVE 32768]
+  :seon.config.database.executor.mutation/maximum-queued
+  #long #or [#env SEON_DB_MUTATION_MAXIMUM_QUEUED 32768]
+  :seon.config.database.executor.mutation/maximum-queued-by-database
+  #long #or [#env SEON_DB_MUTATION_MAXIMUM_QUEUED_BY_DATABASE 32768]}
 
  ;; ── MODEL-TRANSPORT EVIDENCE BOUNDS — immutable cluster policy.
  ;; These cap non-secret provider identities and normalized endpoint evidence;

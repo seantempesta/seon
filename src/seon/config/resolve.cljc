@@ -6,6 +6,7 @@
             #?(:cljs [goog.string :as gstring])
             [malli.core :as m]
             [malli.transform :as mt]
+            [seon.content-hash :as content-hash]
             [seon.db.protocol :as protocol]
             [seon.schema :as schema]))
 
@@ -46,6 +47,33 @@
       :error/message
       "The resolved always-source policy must contain at least one symbol."}
      :symbol]]])
+
+;;; Render-context inputs resolve once at manifest selection. File bytes remain
+;;; files; the singleton stores only their exact content identities.
+(schema/register! :seon.config.render-context/host-timezone
+  [:string {:min 1}])
+(schema/register! :seon.config.render-context/soul-enabled? :boolean)
+(schema/register! :seon.config.render-context/soul-file-path
+  [:string {:min 1}])
+(schema/register! :seon.config.render-context/file-paths
+  [:vector [:string {:min 1}]])
+(schema/register! :seon.config.render-context/render-strict? :boolean)
+(schema/register! :seon.config.render-context/file-fingerprints
+  [:map-of [:string {:min 1}] :seon.content-hash/digest])
+(schema/register! :seon.config.render-context/file-contents
+  [:map-of [:string {:min 1}] :string])
+(schema/register! :seon.config/render-context
+  [:map {:closed true}
+   [:seon.config.render-context/host-timezone
+    {:optional true} :seon.config.render-context/host-timezone]
+   [:seon.config.render-context/soul-enabled?
+    {:optional true} :seon.config.render-context/soul-enabled?]
+   [:seon.config.render-context/soul-file-path
+    {:optional true} :seon.config.render-context/soul-file-path]
+   [:seon.config.render-context/file-paths
+    {:optional true} :seon.config.render-context/file-paths]
+   [:seon.config.render-context/render-strict?
+    {:optional true} :seon.config.render-context/render-strict?]])
 
 (schema/register! :seon.config/route-spec
   [:map
@@ -155,6 +183,36 @@
 (schema/register! :seon.config.database.pull/max-work :seon.config/cap)
 (schema/register! :seon.config.database.pull/max-results :seon.config/cap)
 (schema/register! :seon.config.database.pull/max-result-weight :seon.config/cap)
+
+(def mutation-admission-schemas
+  "Mutation circuit-breaker schemas with calibration and firing semantics."
+  {:seon.config.database.executor.mutation/maximum-active
+   [:int
+    {:min 1
+     :description
+     "Accepted in-flight mutation requests across databases. Default 32768; protects writer heap and the Datahike LocalWriter queue. Firing rejects loudly under :seon.config.database.executor.mutation/maximum-active. Calibrated at 128x the U3 256-caller P99.9 offered concurrency on 2026-07-23."}]
+   :seon.config.database.executor.mutation/maximum-queued
+   [:int
+    {:min 1
+     :description
+     "Queued mutation requests across databases. Default 32768; protects writer heap before Datahike admission. Firing rejects loudly under :seon.config.database.executor.mutation/maximum-queued. Calibrated at 128x the U3 256-caller P99.9 offered concurrency on 2026-07-23."}]
+   :seon.config.database.executor.mutation/maximum-queued-by-database
+   [:int
+    {:min 1
+     :description
+     "Queued mutation requests for one database. Default 32768; protects one Datahike LocalWriter queue. Firing rejects loudly under :seon.config.database.executor.mutation/maximum-queued-by-database. Calibrated at 128x the U3 256-caller P99.9 offered concurrency on 2026-07-23."}]})
+
+(doseq [[attribute form] mutation-admission-schemas]
+  (schema/register! attribute form))
+
+(def default-mutation-admission-depth
+  "The config-free mutation breaker depth, in accepted requests.
+
+   Default 32768 protects writer heap and Datahike's 120000-entry queue.
+   Firing rejects with the governing `:seon.config` key. U3 calibrated the
+   value at 128x its 256-caller P99.9 offered concurrency on 2026-07-23."
+  32768)
+
 (def operational-keys
   "Boot-critical configuration attributes carried by every launch."
   [:seon.config.database.writer/jvm-heap-mb
@@ -193,7 +251,7 @@
    :seon.config.database.transport/codec-workers
    :seon.config.database.transport/codec-worker-queue-capacity])
 
-(doseq [attribute operational-keys]
+(doseq [attribute (remove mutation-admission-schemas operational-keys)]
   (schema/register! attribute :seon.config/cap))
 
 (def enforced-keys
@@ -694,6 +752,16 @@
    [:seon.config/spawn-depth-cap    {:optional true} :seon.config/spawn-depth-cap]
    [:seon.config/always             {:optional true} :seon.config/always]
    [:seon.config/system-text        {:optional true} :seon.config/system-text]
+   [:seon.config.render-context/host-timezone
+    {:optional true} :seon.config.render-context/host-timezone]
+   [:seon.config.render-context/soul-enabled?
+    {:optional true} :seon.config.render-context/soul-enabled?]
+   [:seon.config.render-context/soul-file-path
+    {:optional true} :seon.config.render-context/soul-file-path]
+   [:seon.config.render-context/file-fingerprints
+    {:optional true} :seon.config.render-context/file-fingerprints]
+   [:seon.config.render-context/render-strict?
+    {:optional true} :seon.config.render-context/render-strict?]
    [:seon.config/context-profiles   {:optional true} :seon.config/context-profiles]
    [:seon.config/model-variants     {:optional true} :seon.config/model-variants]
    [:seon.config/agent-context      {:optional true} :seon.config/agent-context]
@@ -763,6 +831,8 @@
    [:seon.config/routes        {:optional true} [:vector :seon.config/route-spec]]
    [:seon.config/render        {:optional true} :seon.config/render]
    [:seon.config/system-text   {:optional true} :seon.config/system-text]
+   [:seon.config/render-context
+    {:optional true} :seon.config/render-context]
    [:seon.config/context-profiles
     {:optional true} :seon.config/context-profiles-spec]
    [:seon.config/ai             {:optional true} :seon.config/ai]
@@ -1186,11 +1256,9 @@
         processors (min observed-processors selected-processors)
         cpu-workers (max 1 (dec processors))
         knn (max 1 (min 2 (quot cpu-workers 2)))
-        mutation (max 1 (min 4 (quot (inc processors) 2)))
         provider (min 6 processors)
         read-queue (max 16 (* 8 cpu-workers))
         read-database-queue (min read-queue (max 16 (* 4 cpu-workers)))
-        mutation-queue (max 64 (* 16 mutation))
         system-mb (quot (:seon.hardware/system-memory-bytes hardware) (* 1024 1024))
         heap-mb (get database :seon.config.database.writer/jvm-heap-mb
                      (-> (quot system-mb 16) (max 512) (min 4096)))
@@ -1260,12 +1328,14 @@
      :seon.config.database.executor.provider/maximum-queued-by-database
      (get database :seon.config.database.executor.provider/maximum-queued-by-database 2)
      :seon.config.database.executor.mutation/maximum-active
-     (get database :seon.config.database.executor.mutation/maximum-active mutation)
+     (get database :seon.config.database.executor.mutation/maximum-active
+          default-mutation-admission-depth)
      :seon.config.database.executor.mutation/maximum-queued
-     (get database :seon.config.database.executor.mutation/maximum-queued mutation-queue)
+     (get database :seon.config.database.executor.mutation/maximum-queued
+          default-mutation-admission-depth)
      :seon.config.database.executor.mutation/maximum-queued-by-database
      (get database :seon.config.database.executor.mutation/maximum-queued-by-database
-          mutation-queue)
+          default-mutation-admission-depth)
      :seon.config.database.executor.delivery/maximum-active
      (get database :seon.config.database.executor.delivery/maximum-active cpu-workers)
      :seon.config.database.executor.delivery/maximum-queued
