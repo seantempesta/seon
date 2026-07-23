@@ -892,6 +892,21 @@ COMPLETELY before dispatching anything.
   BEFORE the checkpoint, so every live proof boots faster. Issue
   updated with the corrected breakdown.
 
+- PROCMGMT DESIGN ACCEPTED (2026-07-23 eve, graph/list mismatch
+  verified: research/process-management-design-2026-07-23.md): the
+  orphaned web-render record = clean-or-force! filtering targets
+  through a stale FOUR-MEMBER shutdown list omitting web-render (the
+  FOURTH hand list found today) while reporting success. Design:
+  records = immutable generation descriptors (R22 analog — identity
+  says which instance is meant); liveness DERIVED from
+  (pid,start-instant) observation, never stored; one reconciliation
+  mechanism over the canonical owned-process graph; requested targets
+  ≡ returned absence proofs; onExit = push while alive, never durable
+  authority (bin/seon is one-shot bb). PROCFIX LANE DISPATCHED
+  (pre-checkpoint slice: computed target derivation + derived-liveness
+  reap + kill-9 regression + live orphan proof); full reconciliation
+  redesign queues post-checkpoint.
+
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
