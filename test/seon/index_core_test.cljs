@@ -123,20 +123,20 @@
 
 (deftest first-party-privacy-is-presence-based-with-source-drill
   (let [tx @core-tx
-        private-row (by-sym tx "seon.db.protocol/ordinary-wire-value?")
-        drill-row (by-sym tx "my.kb/tokens")
+        private-row (by-sym tx "my.kb/tokens")
+        private-rows (filter #(true? (:seon.fn/private? %)) tx)
         public-row (by-sym tx "seon.db/query")
         namespace-row (first (filter #(= 'my.kb (:seon.ns/name %)) tx))]
     (is (some? private-row)
         "the build's first-party private functions remain corpus rows")
     (is (string? (:seon.fn/source private-row))
         "a private row retains its exact source")
-    (is (not (contains? private-row :seon.fn/spec))
+    (is (every? #(not (contains? % :seon.fn/spec)) private-rows)
         "private graph rows do not publish callable contracts")
     (is (not (contains? public-row :seon.fn/private?))
         "public is represented by absence, never false")
     (is (str/includes? (:seon.ns/source namespace-row)
-                       (:seon.fn/source drill-row))
+                       (:seon.fn/source private-row))
         "the full namespace drill reaches the retained private source")))
 
 (deftest my-kb-capabilities-and-recipes-stay-indexed-and-inspectable
