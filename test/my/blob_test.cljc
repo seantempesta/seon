@@ -7,7 +7,8 @@
    [cljs.test :refer [async deftest is use-fixtures]]
    [clojure.string :as str]
    [my.blob :as blob]
-   [my.blob.internal :as internal]
+   [my.blob.core :as core]
+   [my.blob.leaf :as leaf]
    [seon.ai.tokens :as tokens]
    [seon.db :as db]
    [seon.schema :as schema]))
@@ -36,13 +37,13 @@
 (defonce ^:private !projections (atom {}))
 
 (def ^:private put-with-publication-effects!
-  internal/put-with-publication-effects!)
+  leaf/put-with-publication-effects!)
 
 (def ^:private node-publication-effects
-  internal/node-publication-effects)
+  leaf/node-publication-effects)
 
 (def ^:private materialize-retained-with-effects!
-  internal/materialize-retained-with-effects!)
+  leaf/materialize-retained-with-effects!)
 
 (def ^:private concat-with-effects!
   @#'blob/concat-with-effects!)
@@ -178,15 +179,29 @@
 
 (deftest identical-content-is-idempotent
   (async done
-    (let [content "same bytes"]
+    (let [content "same bytes"
+          !publications (atom 0)
+          effects (assoc (test-publication-effects)
+                         :my.blob/atomic-rename!
+                         (fn [from to]
+                           (swap! !publications inc)
+                           ((:my.blob/atomic-rename! node-publication-effects)
+                            from to)))]
       (finish!
-       (-> (put! {:my.blob/content content})
+       (-> (js/Promise.resolve
+            (put-with-publication-effects! {:my.blob/content content} effects))
            (.then (fn [first]
-                    (-> (put! {:my.blob/content content})
+                    (-> (js/Promise.resolve
+                         (put-with-publication-effects!
+                          {:my.blob/content content} effects))
                         (.then
                          (fn [second]
                            (is (= (:my.blob/hash first)
                                   (:my.blob/hash second)))
+                           (is (= (core/sha256 content)
+                                  (:my.blob/hash second)))
+                           (is (= 1 @!publications)
+                               "content-hash replay does not republish")
                            (is (= 1 (count @!projections)))))))))
        done))))
 

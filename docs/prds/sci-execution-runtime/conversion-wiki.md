@@ -172,6 +172,16 @@ the anchor stays the state ledger.
 
 ## Process/operator
 
+- **Mixed-tier selection is per parsed eval batch, not per agent arc.** The
+  router derives Bun locality from executable symbols, loader forms, and
+  projected require edges naming `seon.packages.js.*`; ordinary quoted data
+  and strings do not select a tier (`src/seon/execution/host.cljs`). Every
+  other eval batch follows the agent's existing SCI host coordinate. Durable
+  continuity crosses tiers through corpus and database facts; `result/<id>`
+  stays process-local, so a cross-tier reference returns steering to persist
+  ordinary data or rerun its producer on the selected tier. Never add a
+  package name list or a host-to-Bun leaf to implement this routing policy.
+
 - **A cluster package corpus has no ingestion door yet.** The cluster operator
   creates only native manifests (`script/seon/dev/cluster.clj:75-95`), while
   CLJS program acquisition admits database namespace sources written by the

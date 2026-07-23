@@ -1,4 +1,4 @@
-(ns my.blob.internal
+(ns my.blob.leaf
   "Implement content-addressed blob storage and restore mechanics.
 
    The parent `my.blob` namespace owns schemas and the taught API. This
@@ -9,6 +9,7 @@
     ["node:fs" :as nfs]
     ["node:path" :as npath]
     [seon.ai.tokens :as tokens]
+    [my.blob.core :as core]
     [seon.content-hash :as content-hash]
     [seon.db :as db]
     [seon.platform :as platform]
@@ -22,6 +23,25 @@
               "/blobs")
          :my.blob/read-only-dirs []}))
 
+(def node-publication-effects
+  {:my.blob/resolve-path! (fn [path] (.resolve npath path))
+   :my.blob/join-path! (fn [& parts]
+                         (.apply (.-join npath) nil (to-array parts)))
+   :my.blob/dirname! (fn [path] (.dirname npath path))
+   :my.blob/path-exists? (fn [path] (.existsSync nfs path))
+   :my.blob/directory? (fn [path] (.. nfs (statSync path) (isDirectory)))
+   :my.blob/open-file! (fn [path mode] (.openSync nfs path mode))
+   :my.blob/close-file! (fn [fd] (.closeSync nfs fd))
+   :my.blob/create-directory! (fn [path] (.mkdirSync nfs path))
+   :my.blob/write-file! (fn [fd content] (.writeFileSync nfs fd content "utf8"))
+   :my.blob/read-file! (fn [path] (.readFileSync nfs path "utf8"))
+   :my.blob/delete-file! (fn [path] (.unlinkSync nfs path))
+   :my.blob/random-id! (fn [] (.randomUUID crypto))
+   :my.blob/now! (fn [] (js/Date.))
+   :my.blob/sync-file-descriptor! (fn [fd] (.fsyncSync nfs fd))
+   :my.blob/atomic-rename! (fn [from to] (.renameSync nfs from to))
+   :my.blob/transact! db/transact!})
+
 (defn configure-storage-view!
   "Replace the process-local storage view and return the prior view."
   [view]
@@ -29,21 +49,19 @@
     (reset! !storage-view view)
     prior))
 
-(defn sha256
-  "SHA-256 hex digest of `s` as UTF-8 bytes."
-  [s]
-  (content-hash/sha-256 s))
+(def sha256 content-hash/sha-256)
 
 (defn normalize-storage-view
   "Normalize one explicit storage view, or return an error envelope."
-  [view]
+  [effects view]
   (if-not (schema/valid-candidate-value? :my.blob/storage-view view)
     {:my.blob/ok? false
      :my.blob/error (str "invalid blob storage view — expected "
                          "{:my.blob/writable-dir string "
                          ":my.blob/read-only-dirs [string …]}")}
-    (let [writable-dir (.resolve npath (:my.blob/writable-dir view))
-          read-only-dirs (mapv #(.resolve npath %)
+    (let [writable-dir ((:my.blob/resolve-path! effects)
+                        (:my.blob/writable-dir view))
+          read-only-dirs (mapv #((:my.blob/resolve-path! effects) %)
                                (:my.blob/read-only-dirs view))
           all-dirs (into [writable-dir] read-only-dirs)]
       (if (= (count all-dirs) (count (distinct all-dirs)))
@@ -57,42 +75,31 @@
 
 (defn validated-storage-view
   "The normalized ambient storage view, or an error envelope."
-  []
-  (normalize-storage-view @!storage-view))
+  [effects]
+  (normalize-storage-view effects @!storage-view))
 
 (defn blob-path
   "Absolute path for `hash` below one archive directory."
-  [dir hash]
-  (.resolve npath (.join npath dir (subs hash 0 2) hash)))
+  [effects dir hash]
+  ((:my.blob/resolve-path! effects)
+   ((:my.blob/join-path! effects)
+    dir (first (core/blob-path-parts hash)) hash)))
 
-(defn valid-hash?
-  "True when `hash` is a lowercase SHA-256 hex string."
-  [hash]
-  (some? (re-matches #"[0-9a-f]{64}" hash)))
+(def valid-hash? core/valid-hash?)
 
-(defn bad-hash
+(def bad-hash
   "Error envelope for a value that is not a SHA-256 hash."
-  [hash]
-  {:my.blob/ok? false
-   :my.blob/hash hash
-   :my.blob/error
-   (str "not a sha-256 hex hash: " (pr-str hash)
-        " — use the :my.blob/hash a put!/stat returned")})
+  core/bad-hash)
 
-(defn not-found
+(def not-found
   "Error envelope for a well-formed hash with no stored blob."
-  [hash]
-  {:my.blob/ok? false
-   :my.blob/hash hash
-   :my.blob/error
-   (str "no blob stored under " hash
-        " — (my.blob/stat {:my.blob/hash …}) checks the DB projection")})
+  core/not-found)
 
 (defn inspect-path
   "Read one archive path through the SHA-256 verification owner."
-  [hash path]
+  [effects hash path]
   (try
-    (let [content (.readFileSync nfs path "utf8")
+    (let [content ((:my.blob/read-file! effects) path)
           actual (sha256 content)]
       (if (= hash actual)
         {:my.blob/ok? true
@@ -114,20 +121,20 @@
 
 (defn read-path
   "Read and verify one path without exposing filesystem evidence."
-  [hash path]
-  (select-keys (inspect-path hash path)
+  [effects hash path]
+  (select-keys (inspect-path effects hash path)
                [:my.blob/ok? :my.blob/hash :my.blob/content :my.blob/error]))
 
 (defn resolve-blob-evidence
   "Resolve the first existing path and retain searched paths in order."
-  [{:my.blob/keys [writable-dir read-only-dirs]} hash]
+  [effects {:my.blob/keys [writable-dir read-only-dirs]} hash]
   (reduce
     (fn [{:my.blob/keys [searched-source-paths]} dir]
-      (let [path (blob-path dir hash)
+      (let [path (blob-path effects dir hash)
             searched (conj searched-source-paths path)]
-        (if (.existsSync nfs path)
+        (if ((:my.blob/path-exists? effects) path)
           (reduced
-            (assoc (inspect-path hash path)
+            (assoc (inspect-path effects hash path)
                    :my.blob/searched-source-paths searched))
           {:my.blob/searched-source-paths searched})))
     {:my.blob/searched-source-paths []}
@@ -135,38 +142,33 @@
 
 (defn resolve-blob
   "Read the first existing path in overlay-to-base order."
-  [{:my.blob/keys [writable-dir read-only-dirs]} hash]
+  [effects {:my.blob/keys [writable-dir read-only-dirs]} hash]
   (reduce
     (fn [_ dir]
-      (let [path (blob-path dir hash)]
-        (when (.existsSync nfs path)
-          (reduced (read-path hash path)))))
+      (let [path (blob-path effects dir hash)]
+        (when ((:my.blob/path-exists? effects) path)
+          (reduced (read-path effects hash path)))))
     nil
     (into [writable-dir] read-only-dirs)))
-
-(def node-publication-effects
-  {:my.blob/sync-file-descriptor! (fn [fd] (.fsyncSync nfs fd))
-   :my.blob/atomic-rename! (fn [from to] (.renameSync nfs from to))
-   :my.blob/transact! db/transact!})
 
 (defn sync-directory!
   "Synchronize a directory entry before publication reports success."
   [effects dir]
-  (let [fd (.openSync nfs dir "r")]
+  (let [fd ((:my.blob/open-file! effects) dir "r")]
     (try
       ((:my.blob/sync-file-descriptor! effects) fd)
       (finally
-        (.closeSync nfs fd)))))
+        ((:my.blob/close-file! effects) fd)))))
 
 (defn directory-plan
   "The nearest existing ancestor and missing directories in creation order."
-  [dir]
-  (loop [candidate (.resolve npath dir)
+  [effects dir]
+  (loop [candidate ((:my.blob/resolve-path! effects) dir)
          missing ()]
-    (if (.existsSync nfs candidate)
+    (if ((:my.blob/path-exists? effects) candidate)
       {:my.blob/directory-anchor candidate
        :my.blob/missing-directories (vec missing)}
-      (let [parent (.dirname npath candidate)]
+      (let [parent ((:my.blob/dirname! effects) candidate)]
         (when (= candidate parent)
           (throw (js/Error. (str "no existing directory ancestor for " dir))))
         (recur parent (conj missing candidate))))))
@@ -175,60 +177,62 @@
   "Create each missing directory and synchronize every parent entry."
   [effects dir]
   (let [{:my.blob/keys [directory-anchor missing-directories]}
-        (directory-plan dir)
-        anchor-parent (.dirname npath directory-anchor)]
+        (directory-plan effects dir)
+        anchor-parent ((:my.blob/dirname! effects) directory-anchor)]
     (when-not (= directory-anchor anchor-parent)
       (sync-directory! effects anchor-parent))
     (reduce
       (fn [parent child]
         (try
-          (.mkdirSync nfs child)
+          ((:my.blob/create-directory! effects) child)
           (catch :default e
             (when-not (and (= "EEXIST" (.-code e))
-                           (.. nfs (statSync child) (isDirectory)))
+                           ((:my.blob/directory? effects) child))
               (throw e))))
         (sync-directory! effects parent)
         child)
       directory-anchor
       missing-directories)
-    (.resolve npath dir)))
+    ((:my.blob/resolve-path! effects) dir)))
 
 (defn sync-published!
   "Synchronize an existing verified file and its containing directory."
   [effects path]
-  (let [fd (.openSync nfs path "r")]
+  (let [fd ((:my.blob/open-file! effects) path "r")]
     (try
       ((:my.blob/sync-file-descriptor! effects) fd)
       (finally
-        (.closeSync nfs fd))))
-  (sync-directory! effects (.dirname npath path)))
+        ((:my.blob/close-file! effects) fd))))
+  (sync-directory! effects ((:my.blob/dirname! effects) path)))
 
 (defn publish!
   "Publish complete bytes through file sync, rename, and directory sync."
   [effects writable-dir hash content replace-existing?]
-  (let [path (blob-path writable-dir hash)
-        shard (.dirname npath path)
-        tmp (.join npath shard (str hash "." (.randomUUID crypto) ".new"))]
+  (let [path (blob-path effects writable-dir hash)
+        shard ((:my.blob/dirname! effects) path)
+        tmp ((:my.blob/join-path! effects)
+             shard (str hash "." ((:my.blob/random-id! effects)) ".new"))]
     (try
       (ensure-directory-durable! effects writable-dir)
       (ensure-directory-durable! effects shard)
-      (if (and (.existsSync nfs path) (not replace-existing?))
+      (if (and ((:my.blob/path-exists? effects) path)
+               (not replace-existing?))
         (sync-published! effects path)
         (do
-          (let [fd (.openSync nfs tmp "wx")]
+          (let [fd ((:my.blob/open-file! effects) tmp "wx")]
             (try
-              (.writeFileSync nfs fd content "utf8")
+              ((:my.blob/write-file! effects) fd content)
               ((:my.blob/sync-file-descriptor! effects) fd)
               (finally
-                (.closeSync nfs fd))))
+                ((:my.blob/close-file! effects) fd))))
           ((:my.blob/atomic-rename! effects) tmp path)
           (sync-directory! effects shard)))
       nil
       (catch :default e
         (or (some-> e .-message) (str e)))
       (finally
-        (when (.existsSync nfs tmp)
-          (.unlinkSync nfs tmp))))))
+        (when ((:my.blob/path-exists? effects) tmp)
+          ((:my.blob/delete-file! effects) tmp))))))
 
 (defn ^:async put-with-publication-effects!
   "Publish and project content using one immutable filesystem effect map."
@@ -238,18 +242,17 @@
         {view-ok? :my.blob/ok?
          view :my.blob/storage-view
          view-error :my.blob/error}
-        (validated-storage-view)]
+        (validated-storage-view effects)]
     (if-not view-ok?
       {:my.blob/ok? false :my.blob/hash hash :my.blob/error view-error}
-      (let [existing (resolve-blob view hash)
+      (let [existing (resolve-blob effects view hash)
             werr (cond
                    (and existing (false? (:my.blob/ok? existing)))
                    (:my.blob/error existing)
 
                    (and existing
-                        (.existsSync nfs
-                                     (blob-path (:my.blob/writable-dir view)
-                                                hash)))
+                        ((:my.blob/path-exists? effects)
+                         (blob-path effects (:my.blob/writable-dir view) hash)))
                    (publish! effects (:my.blob/writable-dir view)
                              hash content false)
 
@@ -266,7 +269,7 @@
                   {:seon.db/tx-data
                    [(cond-> {:my.blob/hash hash
                              :my.blob/tokens toks
-                             :my.blob/at (js/Date.)}
+                             :my.blob/at ((:my.blob/now! effects))}
                       media (assoc :my.blob/media media))]}))]
             (if-not (:seon.error/message report)
               {:my.blob/ok? true :my.blob/hash hash :my.blob/tokens toks}
@@ -319,8 +322,8 @@
 (defn materialize-hash!
   [effects source-view destination-dir target-branch-head frozen-digest
    hash-count counts hash]
-  (let [destination (blob-path destination-dir hash)
-        source (resolve-blob-evidence source-view hash)
+  (let [destination (blob-path effects destination-dir hash)
+        source (resolve-blob-evidence effects source-view hash)
         source-paths (:my.blob/searched-source-paths source)]
     (cond
       (not (contains? source :my.blob/ok?))
@@ -350,8 +353,8 @@
                    (:my.blob/actual-digest source)))))
 
       :else
-      (let [before (when (.existsSync nfs destination)
-                     (inspect-path hash destination))
+      (let [before (when ((:my.blob/path-exists? effects) destination)
+                     (inspect-path effects hash destination))
             replace-existing? (and before
                                    (false? (:my.blob/ok? before)))
             publish-error
@@ -367,7 +370,7 @@
                :my.blob/searched-source-paths source-paths
                :my.blob/destination-path destination
                :my.blob/expected-digest hash}))
-          (let [final (inspect-path hash destination)]
+          (let [final (inspect-path effects hash destination)]
             (if (false? (:my.blob/ok? final))
               (reduced
                 (materialization-failure
@@ -393,8 +396,8 @@
   [{:my.blob/keys [target-branch-head retained-hashes source-storage-view
                    destination-storage-view reachable-hash-digest]}
    effects]
-  (let [source-result (normalize-storage-view source-storage-view)
-        destination-result (normalize-storage-view destination-storage-view)
+  (let [source-result (normalize-storage-view effects source-storage-view)
+        destination-result (normalize-storage-view effects destination-storage-view)
         source-view (:my.blob/storage-view source-result)
         destination-view (:my.blob/storage-view destination-result)
         destination-dir (:my.blob/writable-dir destination-view)]
@@ -469,3 +472,29 @@
   "Materialize one exact retained blob set through the node effects."
   [request]
   (materialize-retained-with-effects! request node-publication-effects))
+
+(def node-leaf
+  {:my.blob/configure-storage-view! configure-storage-view!
+   :my.blob/materialize-retained! materialize-retained!
+   :my.blob/put! (fn [request]
+                   (put-with-publication-effects! request node-publication-effects))
+   :my.blob/get (fn [{:my.blob/keys [hash]}]
+                  (cond
+                    (not (valid-hash? hash)) (bad-hash hash)
+                    :else
+                    (let [{ok? :my.blob/ok? view :my.blob/storage-view
+                           error :my.blob/error}
+                          (validated-storage-view node-publication-effects)]
+                      (if-not ok?
+                        {:my.blob/ok? false :my.blob/hash hash :my.blob/error error}
+                        (if-let [{read-ok? :my.blob/ok? content :my.blob/content
+                                  :as result}
+                                 (resolve-blob node-publication-effects view hash)]
+                          (if read-ok?
+                            {:my.blob/ok? true :my.blob/hash hash
+                             :my.blob/content content
+                             :my.blob/tokens (tokens/estimate content)}
+                            result)
+                          (not-found hash))))))
+   :my.blob/current-db! db/db
+   :my.blob/query! db/query})

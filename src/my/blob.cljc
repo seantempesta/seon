@@ -6,15 +6,20 @@
    bounded text reads, and full-content access through one writable archive
    with optional ordered read-only bases. Operations use data envelopes and
    leave only compact hashes and projections in the database."
-  (:refer-clojure :exclude [get])
+  #?(:clj (:refer-clojure :exclude [get await])
+     :cljs (:refer-clojure :exclude [get]))
   (:require
-    [clojure.string :as str]
-    [my.blob.internal :as internal]
+    [my.blob.core :as core]
+    #?(:cljs [my.blob.leaf :as leaf])
     [my.blob.schema]
     [seon.ai.tokens :as tokens]
     [seon.db :as db]
-    [seon.dev.restore.schema]
+    #?(:cljs [seon.dev.restore.schema])
     [seon.schema :as schema]))
+
+#?(:clj (defmacro await [value] value))
+
+(declare put! get concat! text stat)
 
 ;;; SCHEMAS — the blob entity is its hash (identity) + a token estimate +
 ;;; an optional media hint + when it landed. Queries filter and budget on
@@ -193,25 +198,40 @@
    into context, so an unbounded read is never the default."
   100)
 
-(def ^:private node-database-effects
-  {::current-db! db/db
-   ::query! db/query})
+(def ^:dynamic *leaf* #?(:cljs leaf/node-leaf :clj nil))
+
+(defn bind-leaf
+  "Return agent-facing `blob/` functions closed over one platform leaf."
+  [platform-leaf]
+  (into {}
+        (map (fn [v] [(symbol (name (:name (meta v))))
+                      (with-meta
+                        (fn [& args]
+                          (binding [*leaf* platform-leaf] (apply @v args)))
+                        (meta v))])
+             [#'put! #'get #'concat! #'text #'stat])))
+
+(defn- leaf-fn [key]
+  (or (when (contains? *leaf* key) (*leaf* key))
+      (fn [& _]
+        {:my.blob/ok? false
+         :my.blob/error "No blob platform leaf is bound."})))
 
 (defn ^:no-doc configure-storage-view!
   "Replace the process-local blob storage view and return the prior view."
   {:malli/schema [:=> [:cat ::storage-view] ::storage-view]
    :seon.fn/agent-facing? false}
   [view]
-  (internal/configure-storage-view! view))
+  ((leaf-fn ::configure-storage-view!) view))
 
 (defn ^:no-doc observe-retained
-  "Observe one immutable database value's bounded blob-set identity."
+  "Observe one immutable database value's bounded `blob/` set identity."
   {:malli/schema
    [:=> [:cat ::retained-observation-request]
     ::retained-observation-result]
    :seon.fn/agent-facing? false}
   [request]
-  (internal/observe-retained request))
+  (core/observe-retained request))
 
 (defn ^:no-doc materialize-retained!
   "Internal restore boundary for exact retained blob reconstruction.
@@ -222,7 +242,7 @@
    [:=> [:cat ::materialization-request] ::materialization-result]
    :seon.fn/agent-facing? false}
   [request]
-  (internal/materialize-retained! request))
+  ((leaf-fn ::materialize-retained!) request))
 
 (defn ^:no-doc materialize-retained-intent!
   "Materialize one validated portable restore identity and retained hash set.
@@ -245,7 +265,7 @@
        ::destination-storage-view destination-storage-view
        ::reachable-hash-digest frozen-digest})))
 
-(defn- text-content?
+(defn text-content?
   "Whether `content` reads as text rather than binary — a COMPUTED sniff.
 
    NOT a media allowlist: `::media` is an optional hint and any hand-kept
@@ -254,34 +274,26 @@
    replacement chars from the invalid byte sequences; real text carries
    neither. Scans a bounded prefix so a huge blob is never fully walked."
   [content]
-  (let [head (subs content 0 (min (count content) 8192))]
-    (not (or (str/includes? head "\u0000")
-             (str/includes? head "\uFFFD")))))
+  (core/text-content? content))
 
-(defn- page-lines
+(defn page-lines
   "Slice `content` to a 1-based line window with honest totals.
 
    Mirrors seon.agent.fs paging: a trailing newline's empty pseudo-line is
    dropped so `total-lines` matches what an editor shows, and
    `lines-returned` < `max-lines` means you ran off the end."
   [content from-line max-lines]
-  (let [lines (str/split content #"\n" -1)
-        lines (if (and (seq lines) (= "" (peek lines))) (pop lines) lines)
-        total (count lines)
-        from  (max 1 (or from-line 1))
-        start (min (dec from) total)
-        end   (min total (+ start (max 0 max-lines)))]
-    {::content        (str/join "\n" (subvec lines start end))
-     ::from-line      from
-     ::lines-returned (- end start)
-     ::total-lines    total}))
+  (core/page-lines content from-line max-lines))
 
 ;;; FUNCTIONS — put! is ^:async (it AWAITS the datom write); reads are sync so
 ;;; they compose inside let-bindings without an await.
 
 (declare stat) ; text refuses a binary blob by naming stat's recorded media
 
-(defn ^{:async true :seon.fn/agent-facing? true} put!
+(defn ^{:async #?(:cljs true :clj false)
+        :seon.fn/agent-facing? true
+        :seon.capability/effect :idempotent
+        :seon.capability/idempotency :content-hash} put!
   "Save a long text durably; read it back page by page later.
 
    Persists `:my.blob/content` content-addressed and records its DB
@@ -300,11 +312,10 @@
    re-carry the content in datoms."
   {:malli/schema [:=> [:cat ::put-request] ::put-response]}
   [request]
-  (await
-   (internal/put-with-publication-effects!
-    request internal/node-publication-effects)))
+  #?(:cljs (await ((leaf-fn ::put!) request))
+     :clj ((leaf-fn ::put!) request)))
 
-(defn ^:seon.fn/agent-facing? get
+(defn ^{:seon.fn/agent-facing? true :seon.capability/effect :read} get
   "Fetch a stored text's full content by hash, for use in code.
 
    Sync, for CODE, never for your reply:
@@ -313,25 +324,8 @@
    `{:my.blob/ok? true :my.blob/hash h :my.blob/content s :my.blob/tokens n}`
    or the not-found/bad-hash error value."
   {:malli/schema [:=> [:cat ::get-request] ::get-response]}
-  [{::keys [hash]}]
-  (cond
-    (not (internal/valid-hash? hash))
-    (internal/bad-hash hash)
-
-    :else
-    (let [{view-ok? ::ok? view ::storage-view view-error ::error}
-          (internal/validated-storage-view)]
-      (if-not view-ok?
-        {::ok? false ::hash hash ::error view-error}
-        (if-let [{read-ok? ::ok? content ::content :as result}
-                 (internal/resolve-blob view hash)]
-          (if read-ok?
-            {::ok? true
-             ::hash hash
-             ::content content
-             ::tokens (tokens/estimate content)}
-            result)
-          (internal/not-found hash))))))
+  [request]
+  ((leaf-fn ::get) request))
 
 (defn- ^:async concat-with-effects!
   [{::keys [hashes media]} effects]
@@ -339,12 +333,14 @@
     (if-let [bad (first (remove ::ok? reads))]
       (select-keys bad [::ok? ::hash ::error])
       (await
-       (internal/put-with-publication-effects!
-        (cond-> {::content (apply str (map ::content reads))}
-          media (assoc ::media media))
-        effects)))))
+       ((leaf-fn ::put!)
+        (cond-> {::content (core/concatenate (mapv ::content reads))}
+          media (assoc ::media media)))))))
 
-(defn ^{:async true :seon.fn/agent-facing? true} concat!
+(defn ^{:async #?(:cljs true :clj false)
+        :seon.fn/agent-facing? true
+        :seon.capability/effect :idempotent
+        :seon.capability/idempotency :content-hash} concat!
   "Join stored blobs, in order, into ONE new canonical blob.
 
    Takes `:my.blob/hashes` — existing put! hashes, in order — reads
@@ -356,7 +352,8 @@
    written. The source chunks stay stored (append-only, no GC)."
   {:malli/schema [:=> [:cat ::concat-request] ::put-response]}
   [request]
-  (await (concat-with-effects! request internal/node-publication-effects)))
+  #?(:cljs (await (concat-with-effects! request *leaf*))
+     :clj (concat-with-effects! request *leaf*)))
 
 (declare stat-with-effects!)
 
@@ -383,7 +380,8 @@
              (page-lines (::content env) from-line
                          (or max-lines default-max-lines))))))
 
-(defn ^{:async true :seon.fn/agent-facing? true} text
+(defn ^{:async #?(:cljs true :clj false)
+        :seon.fn/agent-facing? true :seon.capability/effect :read} text
   "Read a stored blob page by page, as a bounded line window.
 
    Resolves with honest totals, never the whole document at once.
@@ -399,7 +397,8 @@
    [[get]] instead."
   {:malli/schema [:=> [:cat ::text-request] ::text-response]}
   [request]
-  (await (text-with-effects! request node-database-effects)))
+  #?(:cljs (await (text-with-effects! request *leaf*))
+     :clj (text-with-effects! request *leaf*)))
 
 (defn- ^:async stat-with-effects!
   [{::keys [hash] :as request} effects]
@@ -418,7 +417,8 @@
                  [?entity :my.blob/hash ?hash]
                  [?entity :my.blob/tokens ?tokens]
                  [?entity :my.blob/at ?at]
-                 [(get-else $ ?entity :my.blob/media nil) ?media]]
+                 [(get-else $ ?entity :my.blob/media
+                            :my.blob.media/absent) ?media]]
                ::db/args [hash]}))]
         (cond
           (:seon.error/message projection)
@@ -435,9 +435,10 @@
                      ::exists? true
                      ::tokens tokens
                      ::at at}
-              media (assoc ::media media))))))))
+              (not= :my.blob.media/absent media) (assoc ::media media))))))))
 
-(defn ^{:async true :seon.fn/agent-facing? true} stat
+(defn ^{:async #?(:cljs true :clj false)
+        :seon.fn/agent-facing? true :seon.capability/effect :read} stat
   "Check whether a blob exists, and its size, without reading it.
 
    The blob's DB projection — exists?, tokens, media, at; no disk
@@ -451,4 +452,5 @@
   ;; FIND by attribute presence (never a lookup-ref here: on a store no
   ;; put! has touched yet the attr isn't installed and a lookup-ref throws;
   ;; a query just returns nothing).
-  (await (stat-with-effects! request node-database-effects)))
+  #?(:cljs (await (stat-with-effects! request *leaf*))
+     :clj (stat-with-effects! request *leaf*)))
