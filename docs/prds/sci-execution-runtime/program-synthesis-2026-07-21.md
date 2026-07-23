@@ -1002,6 +1002,14 @@ COMPLETELY before dispatching anything.
   DECISIONS OPEN (§8): divergence-cache granularity, sci base-load
   fallback trigger, apply ergonomics — recommendations in the doc,
   surfaced to owner.
+- R45 §8 DECISIONS SETTLED (owner, 2026-07-23 eve, via structured
+  choices): (1) divergence cache = ONE no-history delta entity
+  updated in the mutating tx, with a loud R27 size breaker; (2) sci
+  base-context builder = ONLY on measured need (ship the precomputed
+  load plan; no speculative machinery); (3) apply policy = AUTO-apply
+  for ephemeral clusters, EXPLICIT with loud refusal + exact remedy
+  for file-backed clusters. The preprocessing design doc is now fully
+  ruled; S-ladder implementation unblocked.
 - TEST-SIMPLIFICATION AUDIT QUEUED (owner, 2026-07-23 eve): once
   fixseed proves the fixtures-are-clusters-in-miniature mechanism, a
   Sol audit sweeps the whole test surface to migrate suites onto it
