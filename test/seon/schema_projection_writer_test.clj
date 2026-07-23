@@ -30,6 +30,26 @@
     (is (= #{'projection.test/read}
            (set (keys (:seon.schema.projection/function-contracts from-set)))))))
 
+(deftest optimized-build-preserves-the-pre-refactor-fingerprint
+  (is (= 393623503
+         (:seon.schema.projection/fingerprint
+          (schema/projection-from-rows rows)))
+      "the optimized validation path is byte-identical to the old builder"))
+
+(deftest fingerprint-guarded-reuse-only-skips-an-identical-build
+  (let [fresh (schema/projection-from-rows rows)
+        reused (schema/projection-from-rows rows fresh)
+        mismatched
+        (assoc fresh :seon.schema.projection/fingerprint
+               (inc (:seon.schema.projection/fingerprint fresh)))
+        rebuilt (schema/projection-from-rows rows mismatched)]
+    (is (identical? fresh reused)
+        "equal input identity returns the retained projection object")
+    (is (not (identical? mismatched rebuilt))
+        "a fingerprint mismatch falls through to full construction")
+    (is (= (:seon.schema.projection/fingerprint fresh)
+           (:seon.schema.projection/fingerprint rebuilt)))))
+
 (deftest explicit-map-status-and-explanation-ignore-process-candidates
   (let [projection (schema/projection-from-rows rows)
         valid {:projection.test/id 1}

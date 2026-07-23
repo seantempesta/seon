@@ -790,8 +790,10 @@
              (ex-info "Database initialization requires explicit config data."
                       {:seon.error/kind :core-bug})))
           (database-initialization descriptor configuration))
+        boot-projection (some-> initialization meta ::boot-projection)
+        wire-initialization (some-> initialization (with-meta nil))
         opened (await (db/open-session!
-                       (session-selection descriptor initialization)))]
+                       (session-selection descriptor wire-initialization)))]
     (log/info-console! "seon.client/open-database-session!"
                        (str "database "
                             (::db.protocol/database-name database)
@@ -799,7 +801,9 @@
                             (::db.protocol/database-path database)
                             " (writer: "
                             (::launch/request-socket-path writer-owner) ")"))
-    opened))
+    (cond-> opened
+      boot-projection
+      (vary-meta assoc ::boot-projection boot-projection))))
 
 ;; ---------------------------------------------------------------------------
 ;; Required initial database entities.
@@ -1565,31 +1569,46 @@
              (map #(apply dissoc % compiled-program-wall-clock-attrs))
              (sort-by compiled-program-sort-key)
              vec)
-        _
+        schema-forms
+        (into {}
+              (keep (fn [row]
+                      (when-let [key (:seon.schema/key row)]
+                        [key (reader/read-string
+                              (:seon.schema/form row))])))
+              program)
+        function-contracts
+        (into {}
+              (keep (fn [row]
+                      (when-let [form (:seon.fn/spec row)]
+                        [(symbol (:seon.fn/sym row))
+                         (reader/read-string form)])))
+              program)
+        boot-admission
+        (schema/admission-from-asserting-transaction
+         {:seon.db/user {:seon.agent/id "root"}
+          :seon.db/process
+          {:seon.db.process/id :seon.db.process/boot}})
+        projection
         (schema/build-projection
-         (into {}
-               (keep (fn [row]
-                       (when-let [key (:seon.schema/key row)]
-                         [key (reader/read-string
-                               (:seon.schema/form row))])))
-               program)
-         (into {}
-               (keep (fn [row]
-                       (when-let [form (:seon.fn/spec row)]
-                         [(symbol (:seon.fn/sym row))
-                          (reader/read-string form)])))
-               program))]
+         schema-forms
+         function-contracts
+         {:seon.schema/schema-admissions
+          (zipmap (keys schema-forms) (repeat boot-admission))
+          :seon.schema/function-admissions
+          (zipmap (keys function-contracts) (repeat boot-admission))})]
     (when-not artifact-digest
       (throw
        (ex-info "The launch has no compiled execution artifact digest."
                 {:seon.error/kind :core-bug
                  ::launch/runtime (::launch/runtime descriptor)})))
-    {:seon.execution/artifact-digest artifact-digest
-     :seon.db.initialization/page-rows
-     (:seon.config.database.initialization/page-rows configuration)
-     :seon.db/attributes agent-bootstrap-attrs
-     :seon.db/program program
-     :seon.db/initial-data (vec (initial-data configuration))}))
+    (with-meta
+      {:seon.execution/artifact-digest artifact-digest
+       :seon.db.initialization/page-rows
+       (:seon.config.database.initialization/page-rows configuration)
+       :seon.db/attributes agent-bootstrap-attrs
+       :seon.db/program program
+       :seon.db/initial-data (vec (initial-data configuration))}
+      {::boot-projection projection})))
 
 (schema/register! ::llm-fn        'fn?)
 (defn ^:async ^:private rehost-agent-runtimes!
@@ -1981,8 +2000,9 @@
       (let [_ (log/info-console!
                "seon.client/start-runtime!"
                "boot phase: opening database session")
-            _session-open
+            session-open
             (await (open-startup-session! startup? selected-configuration))
+            boot-projection (-> session-open meta ::boot-projection)
             _ (await
                (validate-restore-database!
                 descriptor restore-startup restore-completion-claim))]
@@ -1990,6 +2010,9 @@
          "seon.client/start-runtime!"
          "boot phase: database session acquired")
         (when reconcile-manifest?
+          (log/info-console!
+           "seon.client/start-runtime!"
+           "boot phase: config reconciliation started")
           (let [reconciled
                 (await (reconcile-config! selected-manifest
                                           selected-configuration))]
@@ -2000,14 +2023,31 @@
                         {:seon.error/kind :core-bug
                          :seon.runtime.state/error
                          (or (:seon.runtime.state/error reconciled)
-                             (:seon.error/message reconciled))})))))
+                             (:seon.error/message reconciled))})))
+            (log/info-console!
+             "seon.client/start-runtime!"
+             "boot phase: config reconciliation completed"
+             {:seon.runtime.state/changed?
+              (:seon.runtime.state/changed? reconciled)
+              :seon.runtime.state/operations
+              (:seon.runtime.state/operations reconciled)})))
         ;; Claim leases and persisted phase cursors own ordinary restart.
         ;; The conservative recovery operation remains an explicit repair
         ;; surface; cold boot must not close work held by another claimant.
-        (let [configuration (await (acquire-configuration!))
+        (let [_ (log/info-console!
+                 "seon.client/start-runtime!"
+                 "boot phase: configuration acquisition started")
+              configuration (await (acquire-configuration!))
+              _ (log/info-console!
+                 "seon.client/start-runtime!"
+                 "boot phase: configuration acquisition completed")
               _ (when envelope
                   (await (prove-launch-configuration! envelope configuration)))
               _ (db/install-configuration-context! configuration)
+              _ (when (and autonomous? (nil? restore-startup))
+                  (log/info-console!
+                   "seon.client/start-runtime!"
+                   "boot phase: initial agent ensure started"))
               initial-result
               (when (and autonomous? (nil? restore-startup))
                 (await
@@ -2021,6 +2061,14 @@
                            (initial-agent-failure? initial-result))
                   (throw (ex-info "start-runtime!: initial agent birth failed"
                                   initial-result)))
+              _ (when (and autonomous? (nil? restore-startup))
+                  (log/info-console!
+                   "seon.client/start-runtime!"
+                   "boot phase: initial agent ensure completed"
+                   {:seon.agent/root-created?
+                    (::agent/root-created? initial-result)
+                    :seon.agent/initial-created?
+                    (::agent/initial-created? initial-result)}))
               initial-id (when (and autonomous?
                                     (nil? restore-startup)
                                     (::agent/initial-created? initial-result))
@@ -2029,7 +2077,15 @@
                             (::agent/root-created? initial-result)
                             (conj "root")
                             initial-id (conj initial-id))
+              _ (log/info-console!
+                 "seon.client/start-runtime!"
+                 "boot phase: resumable agent acquisition started")
               available-ids (await (acquire-resumable-agent-ids!))
+              _ (log/info-console!
+                 "seon.client/start-runtime!"
+                 "boot phase: resumable agent acquisition completed"
+                 {:seon.client/resumable-agent-count
+                  (count available-ids)})
               resumable-ids (if autonomous? available-ids [])
               primary (or initial-id
                           (first (remove #{"root"} available-ids))
@@ -2071,8 +2127,14 @@
                 _ (when restore-startup
                     (swap! !state assoc
                            ::restore-completion-result completion-result))
-                publication (when-not restore-startup
-                              (await (admission/publish-committed!)))
+                publication
+                (when-not restore-startup
+                  (await
+                   (admission/publish-committed!
+                    (cond-> {}
+                      boot-projection
+                      (assoc ::admission/reusable-projection
+                             boot-projection)))))
                 _ (when (and (nil? restore-startup)
                              (not (::admission/published? publication)))
                     (throw

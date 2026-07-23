@@ -221,6 +221,38 @@
              {:my.kb.shared/id "shared"}])
            (:seon.db/initial-data forward)))))
 
+(deftest fresh-boot-reuses-identical-prevalidated-projection
+  (let [function-row
+        {:seon.fn/sym "example.core/identity"
+         :seon.fn/ns [:seon.ns/name 'example.core]
+         :seon.fn/source "(defn identity [value] value)"
+         :seon.fn/spec "[:=> [:cat :example/id] :example/id]"}
+        initialization
+        (with-program-builders
+          [{:seon.ns/name 'example.core
+            :seon.ns/source "(ns example.core)"}
+           function-row]
+          [{:seon.schema/key :example/id
+            :seon.schema/form ":int"}]
+          #((deref #'client/database-initialization)
+            (descriptor) configuration))
+        boot-projection (-> initialization meta ::client/boot-projection)
+        core-transaction
+        {:seon.db/user {:seon.agent/id "root"}
+         :seon.db/process
+         {:seon.db.process/id :seon.db.process/boot}}
+        acquired-projection
+        (schema/projection-from-rows
+         {:seon.schema/schema-rows
+          [[:example/id ":int" core-transaction]]
+          :seon.schema/function-contract-rows
+          [["example.core/identity"
+            (:seon.fn/spec function-row)
+            core-transaction]]}
+         boot-projection)]
+    (is (identical? boot-projection acquired-projection)
+        "fresh boot retains the exact projection after committed-row identity")))
+
 (deftest ten-times-current-corpus-keeps-every-initialization-frame-bounded
   (let [build (deref #'client/database-initialization)
         current (build (descriptor) configuration)

@@ -24,10 +24,14 @@
 (schema/register! ::detached? :boolean)
 (schema/register! ::record-failures? :boolean)
 (schema/register! ::instrument? :boolean)
+(schema/register! ::reusable-projection :map)
 (schema/register! ::prepare-request
                   [:map {:closed true}
                    [::record-failures? {:optional true} ::record-failures?]
-                   [::instrument? {:optional true} ::instrument?]])
+                   [::instrument? {:optional true} ::instrument?]
+                   [::reusable-projection
+                    {:optional true}
+                    ::reusable-projection]])
 (schema/register! ::state
   [:map
    [::status ::status]
@@ -204,11 +208,17 @@
 
 (defn ^:no-doc committed-projection
   "Build the canonical projection from ordinary acquired rows."
-  {:malli/schema [:=> [:catn [::acquired :map]] :map]}
-  [{::keys [schema-rows function-contract-rows]}]
-  (schema/projection-from-rows
+  {:malli/schema
+   [:function
+    [:=> [:catn [::acquired :map]] :map]
+    [:=> [:catn [::acquired :map] [::reusable-projection :map]] :map]]}
+  ([acquired]
+   (committed-projection acquired {}))
+  ([{::keys [schema-rows function-contract-rows]} reusable-projection]
+   (schema/projection-from-rows
     {:seon.schema/schema-rows schema-rows
-     :seon.schema/function-contract-rows function-contract-rows}))
+     :seon.schema/function-contract-rows function-contract-rows}
+    reusable-projection)))
 
 (defn- acquisition-error!
   [stage value]
@@ -283,7 +293,7 @@
      ::function-contract-rows contracts}))
 
 (defn- ^:async reconcile-committed!
-  [old-projection instrument?]
+  [old-projection instrument? reusable-projection]
   (let [_ (log/info-console!
            "seon.runtime.admission"
            "committed projection acquisition started")
@@ -295,7 +305,7 @@
             (count (::schema-rows acquired))
             :seon.runtime.admission/function-contract-row-count
             (count (::function-contract-rows acquired))})
-        projection (committed-projection acquired)
+        projection (committed-projection acquired reusable-projection)
         _ (log/info-console!
            "seon.runtime.admission"
            "committed projection instrumentation started")
@@ -362,7 +372,9 @@
      [::generation {:optional true} ::generation]
      [::instrumentation {:optional true} :map]
      [:seon/error {:optional true} :map]]]}
-  [{::keys [record-failures?] :or {record-failures? true} :as request}]
+  [{::keys [record-failures? reusable-projection]
+    :or {record-failures? true}
+    :as request}]
   (let [current @!state
         instrument? (if (contains? request ::instrument?)
                       (::instrument? request)
@@ -376,7 +388,9 @@
             old-projection (::previous-projection @!state)]
         (try
           (let [{::keys [generation instrumentation]}
-                (await (reconcile-committed! old-projection instrument?))]
+                (await
+                 (reconcile-committed!
+                  old-projection instrument? reusable-projection))]
             (if-not (retain-prepared-generation! generation)
               ;; Another settlement (a concurrent prepare or a newer
               ;; publication) closed this window first. Losing retention is
@@ -399,7 +413,9 @@
                 {:seon.error/raw original :seon.error/fault :core}))
             (try
               (let [{::keys [generation instrumentation]}
-                    (await (reconcile-committed! old-projection instrument?))]
+                    (await
+                     (reconcile-committed!
+                      old-projection instrument? reusable-projection))]
                 (if-not (retain-prepared-generation! generation)
                   (assoc (unavailable)
                          ::prepared? false
@@ -463,15 +479,25 @@
 (defn ^:async publish-committed!
   "Reconstruct, verify, and immediately admit the committed program."
   {:malli/schema
-   [:=> [:cat]
-    [:map
-     [::published? :boolean]
-     [::recovered? :boolean]
-     [::generation {:optional true} ::generation]
-     [::instrumentation {:optional true} :map]
-     [:seon/error {:optional true} :map]]]}
-  []
-  (admit-prepared! (await (prepare-committed! {}))))
+   [:function
+    [:=> [:cat]
+     [:map
+      [::published? :boolean]
+      [::recovered? :boolean]
+      [::generation {:optional true} ::generation]
+      [::instrumentation {:optional true} :map]
+      [:seon/error {:optional true} :map]]]
+    [:=> [:cat ::prepare-request]
+     [:map
+      [::published? :boolean]
+      [::recovered? :boolean]
+      [::generation {:optional true} ::generation]
+      [::instrumentation {:optional true} :map]
+      [:seon/error {:optional true} :map]]]]}
+  ([]
+   (publish-committed! {}))
+  ([request]
+   (admit-prepared! (await (prepare-committed! request)))))
 
 (defn detach!
   "Close admission and remove the detached database's live projection.
