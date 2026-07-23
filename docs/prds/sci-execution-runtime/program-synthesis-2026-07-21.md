@@ -159,6 +159,19 @@ COMPLETELY before dispatching anything.
   integration checkpoint (pod build is R28-broken during the spine
   window). U6a adapter-core lane DISPATCHED into the freed slot
   (spec tmp/orchestrator/u6a-adapter-core-spec.md).
+- U6a ACCEPTED (ca1ad5f52, verified seon/ai/** + wiki + tests only):
+  config resolution, failure vocabulary, request builders, response
+  interpreters, usage estimation promoted to .cljc cores; SDK/
+  transport/streaming stay CLJS leaves; dual-tier fixture tests
+  identical on both runners; focused gates green. Live LLM drive
+  deferred to the integration checkpoint. U6b (JVM java.net.http
+  leaf) remains the HELD morning item.
+- POST-U2 INTEGRATION CHECKPOINT list (orchestrator, frozen tree):
+  full bin/test-cljs + bin/test-writer; U1 live u1guard proof; U4
+  live restart byte comparison (context-purity issue closes); U5
+  live graduation (up/status/down + identity + gzip transcripts);
+  U6a live LLM drive; U2's U12 drill review; then a demo bug-finder
+  run at orchestrator discretion.
 - U4 ACCEPTED ON RETAINED GATES (2026-07-23 overnight): byte-identity
   gate GREEN (cross-process, empty diff, 938-byte renders) — the
   unit's core falsifier; missing-db :core-bug regression green;
