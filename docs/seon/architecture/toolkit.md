@@ -32,6 +32,9 @@ protected implementation or invent a second tool protocol.
 - Exact contracts remain colocated with code and enter context through the
   program graph. This document owns namespace purpose and boundary, not a
   signature copy that can drift.
+- Every agent-facing entry function declares
+  `:seon.capability/effect` as `:pure`, `:read`, `:idempotent`, or `:external`.
+  Replay and recovery consume the same declaration as capability discovery.
 - Agent-callable eligibility is explicit colocated function metadata, persisted
   as the optional positive `:seon.fn/agent-facing?` program fact. Public source
   remains indexed for inspection. Function menus and program export include
@@ -77,9 +80,9 @@ The per-agent home namespace `my.agent.<id>` is a safe starting namespace, not
 a code silo or ownership scheme. An agent may author a coherent application in
 `my.orders`, `my.customers`, `my.reporting`, or any other allowed namespace.
 Those committed functions, schemas, tests, declarations, and require edges are
-one shared program graph and become available to every child through program
-deltas. Source-transaction provenance records the author independently from
-the function's namespace.
+one shared program graph and become available to every execution scope through
+program deltas. Source-transaction provenance records the author independently
+from the function's namespace.
 
 As the program grows, an ordinary database ref may assign a resident agent
 stewardship of a namespace. Stewardship means sustained attention, not
@@ -100,6 +103,30 @@ next turn's current namespace. Subsequent `in-ns` movement remains ordinary
 REPL history.
 
 ## Protected capabilities
+
+### Portable family cores and platform leaves
+
+A protected capability family has one portable `.cljc` core. Its public entry
+functions own call shapes, schemas, validation, response interpretation, and
+effect metadata. Exactly one leaf per tier supplies native work and ambient
+invocation data. Direct JavaScript or Java interop stays within that leaf or
+another tier-local function; portable logic receives ordinary values.
+
+The four effect classes describe replay behavior at the entry boundary:
+
+- `:pure` is referentially transparent for its arguments, including a read at
+  an explicit immutable database value.
+- `:read` observes mutable external state without changing it and is safe to
+  run again without a receipt.
+- `:idempotent` mutates through a durable receipt. Its request accepts the
+  optional public `:seon.capability/op-id`; an absent key is minted once at the
+  entry, while a repeated key addresses the recorded operation.
+- `:external` mutates without a durable receipt, so recovery never assumes that
+  replay is safe.
+
+The operation id is capability vocabulary, not a transport request id or a
+domain entity identity. A successful replay exposes
+`:seon.capability/replayed? true` in the family result.
 
 ### Database and program graph
 
@@ -123,6 +150,22 @@ namespaces. Their own schemas and policy checks name allowed paths, domains,
 deadlines, output bounds, and errors. An agent sees one only when its curated
 home requirements expose it. A thin editable wrapper may compose returned data,
 but never weakens the protected check.
+
+### Packages
+
+Each cluster keeps ecosystem dependencies in native manifests under its
+`packages/` tree: npm dependencies in `package.json` and JVM dependencies in
+`deps.edn`. A package's wrapper namespace is its platform leaf. JavaScript
+wrappers are named `seon.packages.js.<pkg>` and JVM wrappers are named
+`seon.packages.jvm.<pkg>`; the prefix is the computed build and locality rule,
+so loaders and builds select a tier by namespace rather than by a hand list or
+stored locality flag.
+
+Package wrappers expose native libraries as ordinary data-shaped leaf calls.
+Portable call surfaces remain in capability family cores above them, with
+effect metadata per entry function. A package host therefore installs a leaf
+through the same capability seam; it does not introduce a second registry,
+envelope, or routing protocol.
 
 ### Lifecycle, messages, schedules, and sessions
 
@@ -148,10 +191,15 @@ the toolkit standardizes every domain into a generic wrapper:
 - Namespaced request and response maps retain their domain meaning.
 - Bounded collection responses name their items, cursor, and total/remaining
   information when known; partial data never appears complete.
-- Failure responses carry an explicit `ok?` field in their owning namespace and
-  a structured `:seon/error` value or bounded message.
+- Failure responses carry the flat error keys and may also carry an explicit
+  `ok?` field in their owning namespace.
 - A large value remains addressable through its result symbol or blob hash, so
   a clipped view does not destroy the value.
+- A tier-local interop value remains addressable through its result symbol in
+  that process. Crossing a capability seam, database, or durable receipt
+  requires serializable data. An unserializable value at that boundary returns
+  the flat error shape with steering to keep it local, extract data, or call the
+  owning capability; it is never stringified, printed, or silently dropped.
 
 Function schemas are the query substrate for discovery: input and output shapes
 join functions to the data an agent holds. Namespace cards and current source
@@ -221,6 +269,12 @@ materialization, filesystem bytes, process output, network response bytes,
 render tokens, and wall-clock duration. A bound returns an addressable partial
 value or structured error; it never silently reports a partial result as the
 whole.
+
+Capability failures use one flat public shape: required
+`:seon.error/message` and `:seon.error/kind`, plus optional structured
+`:seon.error/data`. A family may retain its own `ok? false` field and request
+identity fields alongside those keys, but does not nest the error under
+`:seon/error` or invent a parallel envelope.
 
 `:seon.error/fault` is the persisted forensic blame axis:
 

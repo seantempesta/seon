@@ -11,7 +11,7 @@ tags: [architecture, schema, database, agent]
 
 The complete, concrete schema layer: every entity, attribute, type, and ref;
 the three relationship forms; how an entity's shape is identified; the
-`my.*` domain schemas; and the one general `:seon/error` value. Vocabulary is
+`my.*` domain schemas; and the one flat error value. Vocabulary is
 locked in [[architecture]] (the glossary). This doc owns the **schema**; it
 points at [[ui]] for the render/route/slot machinery, at [[agent-runtime]] for
 the loop/lifecycle that mutates these rows, and at [[toolkit]] for the functions an
@@ -42,8 +42,8 @@ carry the agent's actual data: `my.kb` (a global knowledge base — rows carry n
 agent ref), `my.plan` (a per-agent plan TREE — rows carry `:my.plan/agent` and
 `:my.plan/parent`), and `my.agent` (the agent's `:my.agent/purpose`). **Global
 vs per-agent is a property of the DATA's agent-ref**, never of the block and
-never of a stored discriminator. The **error value** is one base shape,
-`:seon/error`, specialized only where the shape genuinely diverges. Agent,
+never of a stored discriminator. The **error value** is one flat shape with a
+message, diagnostic kind, and optional structured data. Agent,
 user, provider, and guarded-boundary failures surface as values. A core
 publication/readiness fault records once and follows the configured admission
 policy.
@@ -223,7 +223,7 @@ Two storage encodings, both VALUES:
 
 The render path resolves these through ONE engine: the async outer owner
 acquires the symbol, source closure, and input at one immutable database value and asks the
-owning agent's compiled Bun child for an ordinary result. `ai-render` /
+owning agent's execution scope for an ordinary result. `ai-render` /
 `html-render` remain synchronous pure projections over that result and fall
 through to a pretty-printer when no authored symbol resolves. The render engine
 itself is owned by [[ui]].
@@ -369,7 +369,7 @@ ordinary Malli resolution continues to see the last committed immutable
 projection. After acceptance, the exact candidate becomes active atomically.
 The Datahike bridge runs at the transaction boundary for attributes present in
 the transaction.
-So an IN-MEMORY-ONLY value shape — the `:seon/error` family (§6), the derived
+So an in-memory-only value shape — the flat error value (§6), the derived
 `:seon.warn/check-response` (§7), `:seon.derive/status` — registers fine even
 though it is a `:map` the bridge cannot store: it is never transacted as an entity
 attr, so it never hits the bridge. Only transacted attributes must be
@@ -558,7 +558,7 @@ diagnostic report is a content-addressed blob:
 | `:seon.runtime.recovery/reason` | `[:enum :unexpected-exit]` | keyword / one | the observed durable cause |
 | `:seon.runtime.recovery/detail` | `[:string {:max 2048}]` | string / one | optional bounded diagnostic only when it is not derivable from transaction facts |
 | `:seon.runtime.recovery/diagnostic-blob` | `[:ref :my.blob/hash]` | ref / one | full process, invocation, sampled-stack, and output report |
-| `:seon.runtime.recovery/pid` | `:int` | long / one | failed Bun child process ID |
+| `:seon.runtime.recovery/pid` | `:int` | long / one | failed execution process ID |
 | `:seon.runtime.recovery/exit-code` | `:int` | long / one | process exit code when observed |
 | `:seon.runtime.recovery/signal` | `:string` | string / one | terminating signal when observed |
 | `:seon.runtime.recovery/cpu-user-microseconds` | `:int` | long / one | Bun `resourceUsage.cpuTime.user` terminal sample |
@@ -567,8 +567,8 @@ diagnostic report is a content-addressed blob:
 | `:seon.runtime.recovery/rss-bytes` | `:int` | long / one | Bun live `resourceUsage.rss` terminal sample |
 | `:seon.runtime.recovery/max-rss-bytes` | `:int` | long / one | Bun `resourceUsage.maxRSS` when available |
 | `:seon.runtime.recovery/elapsed-ms` | `:int` | long / one | parent-observed invocation duration |
-| `:seon.runtime.recovery/stdout-tail` | `[:string {:max 2048}]` | string / one | clipped child stdout tail |
-| `:seon.runtime.recovery/stderr-tail` | `[:string {:max 2048}]` | string / one | clipped child stderr tail |
+| `:seon.runtime.recovery/stdout-tail` | `[:string {:max 2048}]` | string / one | clipped execution stdout tail |
+| `:seon.runtime.recovery/stderr-tail` | `[:string {:max 2048}]` | string / one | clipped execution stderr tail |
 
 The anchor does **not** copy agent/run/turn refs, timestamps, prior/current
 database values, acknowledgement state, or a rendered notice. Query the
@@ -1048,46 +1048,20 @@ unioned with the ordinary agent workbench.
 - A downstream repository selects its own manifest and curates its cluster
   independently; consumer-specific paths and launch commands stay downstream.
 
-## 6. The error value — base `:seon/error`, specialized only where the shape diverges
+## 6. The flat error value
 
 Per [[architecture]], agent and boundary failures are caught at their site and
-surfaced as a structured `:seon/error` value. A core publication/readiness fault
-is recorded once and follows the configured development or production
-escalation policy. This section owns the error value's shape, not that policy.
+surfaced as ordinary flat data. A capability failure has required
+`:seon.error/message` and `:seon.error/kind`, plus optional structured
+`:seon.error/data`. Family keys such as an `ok? false` field, rejected path, or
+operation may sit beside those keys. The error is not nested under
+`:seon/error` and is never a lossy stringification of a native object.
 
-The model is ONE base shape registered at the root namespace, `:seon/error`
-(precedent: `:seon/embedding`), and a specialized error keyword is registered ONLY
-where the shape genuinely diverges, each referencing the base's shared FIELD
-shapes (the shared-shape rule — sharing is at field-shape granularity). There is
-NO `:kind`/`:type` discriminator; consumers tell errors apart by WHICH attribute
-carries the value (§3, §6.2).
-
-**The shared core — what every error guarantees.** A generic surfacer relies
-ONLY on the shared core; variant attrs are bonus.
-
-```clojure
-;; Shared FIELD shapes — registered once; the base and every specialization
-;; reference these (never re-inline [:string] across error maps).
-(schema/register! :seon.error/message :string)   ; the humanized headline
-(schema/register! :seon.error/where   :keyword)   ; the site: a block/route/fn name
-(schema/register! :seon.error/symbol  :symbol)    ; the offending fn
-(schema/register! :seon.error/hint    :string)    ; the actionable fix
-(schema/register! :seon.error/data    :map)       ; the structured payload (e.g. the malli explain)
-
-;; THE base error — every error IS one of these unless it genuinely diverges.
-(schema/register! :seon/error
-  [:map
-   [:seon.error/message :seon.error/message]               ; the one required field
-   [:seon.error/where   {:optional true} :seon.error/where]
-   [:seon.error/symbol  {:optional true} :seon.error/symbol]
-   [:seon.error/hint    {:optional true} :seon.error/hint]
-   [:seon.error/data    {:optional true} :seon.error/data]])
-```
-
-A handler written against the base — `(defn surface [{:seon.error/keys [message
-where hint]}] …)` — works on ANY error, base or specialized, because every
-specialization references these same field shapes. That is the whole point of one
-base + variant attrs over N unrelated error maps.
+The kind is a diagnostic value enum on an already identified error value; it
+does not select an entity schema or replace persisted forensic blame. A core
+publication/readiness fault records a bounded projection and follows the
+configured development or production escalation policy. This section owns the
+public error shape, not that policy.
 
 **Grounded in malli's own error model — humanize is a VIEW, data is the source.**
 `malli.core/explain` returns `{:schema :value :errors}` (and **`nil` on a valid
@@ -1100,42 +1074,14 @@ branch — malli too has no `:kind`). **Ground in** malli `core.cljc:2660`
 (the precise `:in` path + offending `:value` + violated `:schema` an AI agent
 reasons over), and `:seon.error/message` is the humanized headline. The value
 carries BOTH at once — humanize never replaces the data. A schema /
-instrumentation rejection therefore needs no new shape: it is a `:seon/error`
+instrumentation rejection therefore needs no new shape: it is a flat error
 whose `:seon.error/data` is the malli explain projection. The error's two renders
 split the emphasis: its **ai render** prints the data-as-Clojure (the explain map,
 for the prompt); its **html render** leads with the headline and offers a
 drill-down into `:seon.error/data` (the human error card).
 
-**The two specializations.** Render, eval, transact, capability, and schema
-errors all ARE a plain `:seon/error` (no distinct schema). Only two shapes
-genuinely diverge:
-
-```clojure
-;; :seon.db/error — the serialized-exception / transact-failure envelope.
-;; Diverges by carrying a captured JS exception; references the shared fields.
-(schema/register! :seon.db/error
-  [:map
-   [:seon.error/message   :seon.error/message]
-   [:seon.error/data      {:optional true} :seon.error/data]
-   [:seon.error/where     {:optional true} :seon.error/where]
-   [:seon.error/ex-data   {:optional true} :map]
-   [:seon.error/stack     {:optional true} :string]
-   [:seon.error/cause     {:optional true} :map]
-   [:seon.error/raw       {:optional true} :any]
-   [:seon.error/truncated {:optional true} :boolean]])
-
-;; :seon.ai/error — the LLM/provider envelope. Diverges by carrying the
-;; provider/transport fields that drive the retry decision.
-(schema/register! :seon.ai/error
-  [:map
-   [:seon.error/message :seon.error/message]            ; shared core
-   [:seon.ai/status     {:optional true} :int]           ; HTTP status
-   [:seon.ai/timeout?   {:optional true} :boolean]       ; wall-clock abort
-   [:seon.ai/transport? {:optional true} :boolean]       ; the retryable flag
-   [:seon.ai/raw-body   {:optional true} :string]])      ; raw provider body
-```
-
-The LLM adapters return errors as VALUES, never a rejected Promise: a
+Provider-specific status and retry fields may accompany the same flat core.
+The LLM adapters return errors as values, never a rejected Promise: a
 `:seon.ai/transport?` error gets one bounded retry; a persistent failure closes
 the turn `:seon.agent.turn/status :error`, and the render derives a system line
 from the turn status so the agent SEES the failure in its transcript. The turn
@@ -1143,8 +1089,8 @@ loop is owned by [[agent-runtime]].
 
 ### 6.1 Persistence per carrier
 
-- **Returned render / transact / capability errors** are TRANSIENT in-memory
-  `:seon/error` values—constructed at the failure site, surfaced by a render or
+- **Returned render / transact / capability errors** are transient in-memory
+  flat error values—constructed at the failure site, surfaced by a render or
   a check, gone next render (self-healing). When a catch site calls
   `seon.error/record!`, it also persists the bounded forensic projection below;
   the transient envelope itself is never stored.
@@ -1152,8 +1098,8 @@ loop is owned by [[agent-runtime]].
   `:seon.eval/error-data` (EDN of the structured payload) on the `:seon.eval`
   row (§4.9) — the durable log the runtime warn-checks query.
 
-`:seon/error`, `:seon.db/error`, and `:seon.ai/error` remain Malli value shapes;
-none is transacted directly. `record!` creates an anonymous entity identified by
+Public error maps remain Malli value shapes; none is transacted directly.
+`record!` creates an anonymous entity identified by
 the presence of `:seon.error/fault` and carrying only EDN-safe projections:
 
 | attribute | malli | datahike facet | notes |
@@ -1171,15 +1117,15 @@ The stored map is the complete ordinary database value, not a lossy projection.
 Missing lineage or temporal meaning is invalid; structured reproduction never
 guesses from bare `:t`.
 
-### 6.2 How consumers tell errors apart — structurally, never by a field
+### 6.2 How consumers tell errors apart
 
 The carrier attribute IS the identification:
 
 - A render failure arrives under the `:seon.render/error` KEY of the
   `:seon.render/html-response` map — known to be a render failure by the slot it
   came from, no `:kind` needed.
-- A transact failure arrives under the `::error` (=`:seon.db/error`) KEY of
-  `:seon.db/transact!`'s response.
+- A transaction failure is itself the flat database error value; success is the
+  native-shaped transaction report.
 - An eval failure is read from `:seon.eval/error` on a `:seon.eval` row where
   `:seon.eval/ok?` is false.
 
@@ -1207,7 +1153,7 @@ of the db). A check that THROWS becomes its own `:warn-check-error` cluster so o
 broken check can't blank the block. **Errors are just a handful of checks** among
 many — the runtime-error checks read the persisted eval-log error datoms
 (`:seon.eval/ok? false` + `:seon.eval/error`); a render-health check aggregates
-the transient render `:seon/error` values; the rest surface non-errors (perf,
+the transient render error values; the rest surface non-errors (perf,
 lint, test status, message routing, unresolved surfaces).
 
 **Failure-site → surface (by carrier).** Every site catches, names a carrier, and
@@ -1215,14 +1161,14 @@ reaches at least one agent-visible AND one human-visible surface.
 
 | failure site | carrier | agent-visible | human-visible |
 |---|---|---|---|
-| **render** (block ai/html throws, missing symbol, child deadline/exit) | transient `:seon/error` under the `:seon.render/error` key; an interrupted child invocation also has durable eval/turn/run recovery facts | warnings block (render-health check) and the next-turn recovery section | the in-place error card (siblings untouched) |
+| **render** (block ai/html throws, missing symbol, execution deadline/exit) | transient flat error under the `:seon.render/error` key; an interrupted invocation also has durable eval/turn/run recovery facts | warnings block (render-health check) and the next-turn recovery section | the in-place error card (siblings untouched) |
 | **eval** (a form throws) | PERSISTED `:seon.eval/error` + `:seon.eval/error-data` | the eval's render in the transcript + the failed-eval checks | the transcript activity/error row |
-| **transact** (a tx is rejected) | transient `:seon.db/error` under `::error` | the eval that called `transact!` records it | the transcript error row |
-| **capability denial** (fs / `/call` refuses) | the denial string in the eval result | the fs-denied check | the transcript error row |
+| **transact** (a tx is rejected) | transient flat database error value | the eval that called `transact!` records it | the transcript error row |
+| **capability denial** (fs / `/call` refuses) | flat error keys in the family result | the fs-denied check | the transcript error row |
 | **schema / instrumentation rejection** | `:seon.error/data` = the malli explain, under `:seon.eval/error-data` | the failed-eval check renders the structured error | the transcript error row |
 | **LLM / provider error** | `:seon.ai/error` → turn `:seon.agent.turn/status :error` | the transcript system line derived from the turn status | the same transcript line |
 | **throwing warn-check** | synthetic `:warn-check-error` cluster | the warnings block (that check degrades loudly) | the warnings surface |
-| **throwing layout / route handler** | transient `:seon/error` (same as render) | warnings block if the agent owns the route | a human error page / error card |
+| **throwing layout / route handler** | transient flat error (same as render) | warnings block if the agent owns the route | a human error page / error card |
 | **runaway / hung eval** | run `:seon.agent.run/closed-reason :deadline-exceeded` | derived run-status surfaces “deadline exceeded” | the run-status surface |
 
 Two invariants: no agent code ever touches an SSE connection, and an

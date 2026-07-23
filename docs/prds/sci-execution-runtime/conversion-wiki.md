@@ -148,8 +148,23 @@ the anchor stays the state ledger.
   async Bun test must install its leaf for the complete Promise lifetime and
   restore it before calling `done` (`test/seon/db/portable_test.cljc:321`).
   Never let a fake leaf escape into later namespaces.
+- **Reconcile architecture from public schemas and dual-tier tests, not old
+  envelope prose.** The landed database boundary requires flat
+  `:seon.error/message` + `:seon.error/kind` with optional data
+  (`src/seon/db.cljc:27-34`), and the shared test rejects a nested
+  `:seon/error` wrapper (`test/seon/db/portable_test.cljc:267-271`). Sweep the
+  target docs for old specialized/nested examples whenever a family is ported.
 
 ## Process/operator
+
+- **A cluster package corpus has no ingestion door yet.** The cluster operator
+  creates only native manifests (`script/seon/dev/cluster.clj:75-95`), while
+  CLJS program acquisition admits database namespace sources written by the
+  REPL process (`src/seon/execution.cljs:342-356,669-708`). A wrapper file under
+  `packages/corpus` never reaches `guarded-load*`'s authored-source map and an
+  absent require rethrows at `src/seon/eval.cljs:884-885`. Do not directly eval
+  the file to manufacture REPL provenance; WP-W must transact it through the
+  one corpus authority.
 
 - **The CLJS UDS transport has no public server-side framed-text seam.**
   `seon.db.transport.uds/connect-stream!` exposes the existing four-byte

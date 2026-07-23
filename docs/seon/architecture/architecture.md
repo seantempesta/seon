@@ -27,20 +27,22 @@ and the **root agent's** view (`/`) are each a derivation of the same blocks.
 
 It is **dual-runtime**: a CLJ **database authority** (implemented first by one
 JVM Datahike service, authoritative writer + shared indexed reads + heavy data
-processing, data-only) and a CLJS **agent and web runtime**, sharing
-the `.cljc` **schema** layer. The JVM does not carry a second application or
-renderer. The derived-state rule and transition table are CLJS (`seon.derive` /
-`seon.agent.loop`), reached from the device the same way every read is — through
-the database protocol against the authority's exact immutable database value.
+processing, data-only) and a CLJS **agent and web runtime**. Portable `.cljc`
+capability families run from the same source on both tiers; platform leaves bind
+that source to JVM or Bun effects. The JVM does not carry a second application
+or renderer. The derived-state rule and transition table are CLJS
+(`seon.derive` / `seon.agent.loop`), reached from the device the same way every
+read is — through the database protocol against the authority's exact immutable
+database value.
 
 **Client/server is the shape.** Exactly one authority owns each database's
 ordered writes, immutable indexed values, and shared query computation. The JVM
 service may host many isolated databases and execute their independent reads and
 writes concurrently while preserving one write order per database. Agent
 processes exchange ordinary protocol data rather than rebuilding Datahike
-indexes in every process. Agent children and the web UI issue requests carrying
-ordinary database values; no Bun process retains a Datahike replica. The work
-fence is arbitrated at that authority. Each persistent client session retains
+indexes in every process. Agent execution scopes and the web UI issue requests
+carrying ordinary database values; no Bun process retains a Datahike replica.
+The work fence is arbitrated at that authority. Each persistent client session retains
 the latest complete database value received from acquisition, an accepted
 transaction, or a committed-transaction interest; omitted-database operations
 use that value without a preliminary authority round trip. Explicit values
@@ -75,7 +77,7 @@ concept to `ns`/`defn`/`require`/refs/var-meta/a db value.)
    skills manual, and composition functions render their complete relevant
    value — [[laws]].)
    The program graph is cluster-shared: a committed function, schema, or test
-   authored by one agent becomes available to every execution child through
+   authored by one agent becomes available to every execution scope through
    the same database program delta. Agents build one coherent application
    across ordinary namespaces; namespace organizes code and never encodes
    process ownership. Dynamic context makes relevant shared capabilities
@@ -115,7 +117,16 @@ concept to `ns`/`defn`/`require`/refs/var-meta/a db value.)
    than mutable application state; the writer arbitrates total order and late
    writes fail the CAS work fence. Anchors: [[agent-runtime]] and
    [[observability]].
-7. **One human, one bond; local compute first.** The runtime serves ONE human;
+7. **Capabilities cross tiers without mirrors.** Each capability family has one
+   portable `.cljc` core containing its public request and response data,
+   validation, interpretation, and policy. One platform leaf per active tier
+   owns sessions, ambient invocation context, clocks, scheduling, and native
+   interop. Agent-facing entry functions compose core and leaf; their entry
+   expression is the only reader-conditional site for sync/async ceremony.
+   Cross-runtime code is either the same source or the same compiled artifact;
+   hand-mirrored wrappers are not an interface. Anchors: `seon.db`,
+   `seon.db.leaf`, [[toolkit]].
+8. **One human, one bond; local compute first.** The runtime serves ONE human;
    the canvas is the shared value the pair looks at together. Ordinary
    personal-data work executes on local models when the measured capability
    permits it. A stronger hosted model is an explicit consultant for planning,
@@ -127,7 +138,7 @@ concept to `ns`/`defn`/`require`/refs/var-meta/a db value.)
    termination, and the agent's own code as the compounding asset serving its
    human. Anchors: the root agent, [[agent-runtime]], `docs/seon/vision/` (the
    Seon premise).
-8. **The horizon: think in Clojure, translate out.** Index ANY codebase into
+9. **The horizon: think in Clojure, translate out.** Index ANY codebase into
    the same graph (LSP); plan/solve in Clojure and translate into the client's
    language — the Clojure artifact is the executable spec; seon-writes-seon
    behind the tests-and-validations publish gate. Vision tier:
@@ -149,7 +160,7 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
 - **html render** — `:seon.render/html` selects the function that produces the
   human render; its response carries `:seon.render/hiccup`, which becomes a
   surface.
-- **prompt** — the agent's assembled context: the compiled prompt child acquires
+- **prompt** — the agent's assembled context: the prompt computation acquires
   ai renders at one immutable database value and concatenates them by priority,
   prefixed by a system role resolved by
   `seon.ai/effective-system-prompt` — the per-request `:seon.ai/system-prompt`
@@ -189,12 +200,12 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
 - **warnings block** — the block surfacing current problems: an ai render to the
   agent, error cards to the human, one source. `seon.agent.ctx.warnings` + `seon.warn`.
   Self-healing — empty when clean.
-- **`:seon/error`** — the structured value an agent, user, provider, or guarded
-  runtime-boundary failure produces: one base shape
-  (`:seon.error/message`, structured `:seon.error/data`, where/symbol/hint),
-  specialized only on real shape divergence. A core publication/readiness
-  failure instead records one `:seon.error/fault :core` and fails admission in
-  development or returns the configured bounded production fallback. See
+- **error value** — the flat value an agent, user, provider, or guarded
+  runtime-boundary failure produces: required `:seon.error/message` and
+  `:seon.error/kind`, with optional structured `:seon.error/data`. It is never
+  nested under `:seon/error` at a capability boundary. A core publication/
+  readiness failure instead records one `:seon.error/fault :core` and fails
+  admission in development or returns the configured bounded production fallback. See
   [[data-model]] and [[observability]].
 - **seed-copy** — the seed/override mechanism: ALL blocks are copied into the agent's
   own `:seon.agent/ctx` at creation; render reads that COMPLETE set sorted by
@@ -233,15 +244,13 @@ pod per active cluster, with three logical roles:
   `:seon.agent/ctx`, holds the route table, and streams patches. The streamer is
   a **role, not a process**—any protocol client with the capability and interest
   can play it, so the UI host is relocatable without copying indexes.
-- **Agent execution** — active agents may run as separately supervised Bun
-  children for real CPU, heap, cancellation, and crash isolation. They query the
-  authority through ordinary data and never build one Datahike index copy per
-  child. A child is disposable: its replacement starts from the newest admitted
-  execution artifact, reconstructs current functions, schemas, tests, and
-  namespaces from database program facts, and continues durable work with an
-  explicit interruption boundary. Per-agent workers, lightweight containers,
-  or microVMs implement this same data-only execution contract; they do not move
-  database authority or change recovery semantics.
+- **Agent execution** — an execution tier evaluates admitted program source and
+  calls capability families through their portable entry functions. Its
+  isolation topology is replaceable: every implementation receives ordinary
+  data, retains no Datahike index, and reconstructs current functions, schemas,
+  tests, and namespaces from database program facts after replacement. Process,
+  worker, container, or device placement does not change the capability seam,
+  database authority, or recovery semantics.
 
 The JVM authority is one process for the installation, not one process per
 cluster. Dormant databases retain durable facts without an active Bun pod or hot
@@ -255,11 +264,9 @@ the capabilities their platform supports.
 flowchart TB
   Supervisor["Babashka supervisor\nstart · observe · stop · restart"]
 
-  subgraph Bun["Bun processes"]
+  subgraph Bun["Bun runtime"]
     Web["UI host\nroutes · demanded views · Datastar encoding"]
-    Root["root agent child\ncompiled Seon package"]
-    Agent1["task-agent child A\ncompiled Seon package"]
-    AgentN["task-agent child N\ncompiled Seon package"]
+    Execution["agent execution tier\nadmitted program · portable capabilities"]
   end
 
   subgraph JVM["One JVM Datahike authority"]
@@ -276,23 +283,16 @@ flowchart TB
   Embeddings["embedding workers\nasynchronous and restartable"]
 
   Supervisor -->|"supervise"| Web
-  Supervisor -->|"supervise"| Root
-  Supervisor -->|"supervise"| Agent1
-  Supervisor -->|"supervise"| AgentN
+  Supervisor -->|"supervise"| Execution
   Supervisor -->|"supervise"| Sessions
 
   Browser -->|"HTTP action as namespaced data"| Web
-  Web -->|"demand agent-authored render"| Root
-  Web -->|"demand agent-authored render"| Agent1
+  Web -->|"demand agent-authored render"| Execution
 
-  Root <-->|"stream model request and response"| Models
-  Agent1 <-->|"stream model request and response"| Models
-  AgentN <-->|"stream model request and response"| Models
+  Execution <-->|"stream model request and response"| Models
 
   Web -->|"database name + operation + database value"| Sessions
-  Root -->|"query · pull · transact"| Sessions
-  Agent1 -->|"query · pull · transact"| Sessions
-  AgentN -->|"query · pull · transact"| Sessions
+  Execution -->|"query · pull · transact"| Sessions
 
   Sessions --> Readers
   Readers -->|"parallel work against captured value"| DB1
@@ -308,8 +308,7 @@ flowchart TB
   Reports -->|"dependency plans wake matching registrations"| Web
   Web -->|"affected reads at exact db-after"| Sessions
   Sessions -->|"ordinary data; identical reads share Datahike work"| Web
-  Root -->|"complete stable-ID hiccup + read dependencies"| Web
-  Agent1 -->|"complete stable-ID hiccup + read dependencies"| Web
+  Execution -->|"complete stable-ID hiccup + read dependencies"| Web
   Web -->|"one render + serialization per equivalent demand"| Feed
   Feed -->|"Bun HTTP backpressure; optional measured compression"| Browser
 ```
@@ -321,7 +320,8 @@ process's no-argument `seon.db/db` returns its current database value, while
 the same multiplexed authority session. Reads that combine databases pass the
 required database values as ordinary Datalog sources. This is not a return to
 `*conn*`: connections and native Datahike values remain inside the authority,
-and every child receives only ordinary immutable descriptors and results.
+and every execution scope receives only ordinary immutable descriptors and
+results.
 
 One committed transaction report is sufficient to select every interested
 registration for one database. Datahike compares the report with the
@@ -343,8 +343,8 @@ database truth. A disconnected authority session stops new renders; after
 reacquiring the named database and its interest, every live demand receives a
 complete current view rather than a replay of UI events.
 
-Model calls execute in the requesting agent child, so a slow provider cannot
-block another agent or the database authority. Their durable inputs, partial
+Model calls execute in the requesting agent's execution scope, so a slow
+provider cannot block the database authority. Their durable inputs, partial
 status, terminal results, and faults are ordinary database transactions.
 Embedding work is deliberately downstream of committed facts: workers claim
 eligible work, compute independently, and transact vectors when ready. A
@@ -408,6 +408,23 @@ resolves the current database value and derives current truth instead of rebuild
 an index from replay. **No agent code ever touches an SSE connection**—agents
 write facts; the UI host derives and streams. Loopback SSE is uncompressed by
 default; remote compression is an explicit measured transport option.
+
+### Capability seam
+
+An agent calls an ordinary schema'd function and does not select a runtime.
+Each capability family owns one portable `.cljc` core. The core holds the
+public call shape, validation, ordinary request and response data, decoding,
+and pure retry decisions. A platform leaf implements the family's small native
+contract for one tier: sessions and sockets, blocking or async scheduling,
+ambient invocation context, clocks and UUIDs, and direct platform interop.
+
+The entry function binds those halves. Reader conditionals occur only at entry
+expressions where Bun awaits a leaf result and JVM code receives it
+synchronously; portable policy below the entry does not fork. A runtime loads
+the same source or invokes the same compiled artifact. It never reconstructs a
+parallel API with hand-written wrappers. Package hosts enter through the same
+rule: a package wrapper is a platform leaf beneath a portable family call
+surface, not another capability protocol.
 
 ### Derive everything
 
