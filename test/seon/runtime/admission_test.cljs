@@ -27,6 +27,10 @@
 
 (defonce ^:private !schema-state-before (atom nil))
 
+(defn committed-core-predicate-probe
+  ([value] value)
+  ([_ value] value))
+
 (use-fixtures :each
   {:before (fn []
              (reset! !schema-state-before (schema/snapshot-state))
@@ -663,6 +667,7 @@
   (let [core-transaction
         {:seon.db/process
          {:seon.db.process/id :seon.db.process/boot}}
+        empty-projection (schema/build-projection {})
         projection
         (admission/committed-projection
          {::admission/schema-rows
@@ -674,22 +679,31 @@
               'seon.db.protocol/ordinary-wire-value?])
             core-transaction]]
           ::admission/function-contract-rows
-          [["seon.db.protocol/ordinary-wire-value?"
-            "[:=> [:cat :seon.db.protocol/ordinary-wire-value] :boolean]"
+          [["seon.runtime.admission-test/committed-core-predicate-probe"
+            (pr-str
+             [:function
+              [:=> [:cat :seon.db.protocol/ordinary-wire-value]
+               :seon.db.protocol/ordinary-wire-value]
+              [:=> [:cat :any :seon.db.protocol/ordinary-wire-value]
+               :seon.db.protocol/ordinary-wire-value]])
             core-transaction]]})
-        prepared
-        (instrument/prepare-targets
-         [{::instrument/sym 'seon.db.protocol/ordinary-wire-value?
-           ::instrument/schema-form
-           (get-in projection
-                   [:seon.schema.projection/function-contracts
-                    'seon.db.protocol/ordinary-wire-value?])
-           ::instrument/schema-options
-           (:seon.schema.projection/compile-options projection)}])]
-    (is (= #{'seon.db.protocol/ordinary-wire-value?}
-           (::instrument/accepted-syms prepared)))
-    (is (empty? (::instrument/rejected prepared)))
-    (is (protocol/ordinary-wire-value? "resolved"))))
+        reconciled
+        (instrument/reconcile-projection!
+         {::instrument/old-projection empty-projection
+          ::instrument/new-projection projection})]
+    (try
+      (is (true? (::instrument/ok? reconciled)))
+      (is (= #{'seon.runtime.admission-test/committed-core-predicate-probe}
+             (::instrument/accepted-syms reconciled)))
+      (is (= "resolved" (committed-core-predicate-probe "resolved")))
+      (is (= {:resolved true}
+             (committed-core-predicate-probe
+              :ignored {:resolved true})))
+      (is (protocol/ordinary-wire-value? "resolved"))
+      (finally
+        (instrument/reconcile-projection!
+         {::instrument/old-projection projection
+          ::instrument/new-projection empty-projection})))))
 
 (deftest failed-publication-retries-once-and-records-once
   (async done

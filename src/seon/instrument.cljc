@@ -481,6 +481,12 @@
            (m/-function-schema-arities function-schema))))
 
 #?(:cljs
+   (defn- compiled-function-form
+     "Raw Malli dispatch form whose arities are already compiled schemas."
+     [function-schema]
+     (into [:function] (m/-function-schema-arities function-schema))))
+
+#?(:cljs
    (defn- qualified-target-parts
      "The namespace/name pair for qualified `sym`, or nil."
      [sym]
@@ -608,7 +614,13 @@
                          (and arrow? (-simple-fixed-arity-fn? the-fn))
                          (injecting-fschema schema-form sym options)
 
-                         :else schema-form)]
+                         ;; `mi/instrument!` has no separate Malli options
+                         ;; input. Passing the durable raw form here makes its
+                         ;; internal compilation lose the projection's SCI
+                         ;; bindings. Preserve Malli's required raw dispatch
+                         ;; shell while carrying compiled arity schemas across
+                         ;; this final handoff.
+                         :else (compiled-function-form function-schema))]
                    {::sym sym
                     ::ns ns-sym
                     ::name fn-sym
@@ -825,6 +837,7 @@
               [:map
                [::sym :qualified-symbol]
                [::schema-form :any]
+               [::schema-options {:optional true} :map]
                [::registry {:optional true} :any]]]]
        :map]}
      [targets]
