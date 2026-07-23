@@ -4,6 +4,7 @@
             [my.blob.schema]
             [seon.agent.driver.host :as driver.host]
             [seon.ai.http :as ai.http]
+            [seon.capability :as capability]
             [seon.db.branch :as db.branch]
             [seon.db.host :as db.host]
             [seon.db.transport.uds :as uds]
@@ -37,6 +38,8 @@
   [:my.blob/storage-view {:optional true} :my.blob/storage-view]
   [::database-pool-wait-timeout-ms
    {:optional true} ::database-pool-wait-timeout-ms]
+  [:seon.execution/artifact-inventories
+   {:optional true} ::capability/available-artifact-inventory]
   [::eval-threads {:optional true} ::eval-threads]])
 (schema/register! ::server 'some?)
 (schema/register! ::contexts 'some?)
@@ -272,6 +275,14 @@
         _ (reset! projection-state acquired-projection)
         contexts (atom {})
         base (context/build-base! writer)
+        jvm-artifact-inventory
+        (capability/installed-artifact-inventory
+         (::context/tier-inventory base))
+        artifact-inventories
+        (capability/merge-artifact-inventories
+         (cond-> [jvm-artifact-inventory]
+           (:seon.execution/artifact-inventories request)
+           (conj (:seon.execution/artifact-inventories request))))
         graduation-report
         (graduate/rebuild!
          {::context/base base
@@ -299,6 +310,8 @@
                      ::contexts contexts
                      ::eval-pool eval-pool
                      ::watchdog watchdog
+                     :seon.execution/artifact-inventories
+                     artifact-inventories
                      :seon.agent.driver/llm-transport! ai.http/complete
                      ::socket-path socket-path})
         acceptor

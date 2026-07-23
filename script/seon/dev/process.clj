@@ -575,6 +575,8 @@
                      (:seon.dev.config/cluster-name config)
                      :seon.host/database-pool-wait-timeout-ms
                      (config/claim-driver-pool-wait-timeout-ms config)
+                     :seon.execution/artifact-inventories
+                     (:seon.dev.artifact/cljs-artifact-inventory manifest)
                      :my.blob/storage-view
                      (::launch/blob-storage-view descriptor)})]
            :seon.dev.process/environment environment

@@ -224,8 +224,8 @@
 (deftest source-checkout-specs-supervise-the-host-between-writer-and-pod
   (let [base (test-config)
         configuration (target-config base (:seon.dev.test/directory base))
-        spec-map (process/specs configuration
-                                (target-manifest-for configuration))
+        manifest (target-manifest-for configuration)
+        spec-map (process/specs configuration manifest)
         host (get spec-map process/host-id)]
     (is (= [process/watcher-id process/writer-id process/host-id
             process/pod-id process/web-render-id]
@@ -241,6 +241,8 @@
              (:seon.host/socket-path request)))
       (is (= 110000
              (:seon.host/database-pool-wait-timeout-ms request)))
+      (is (= (:seon.dev.artifact/cljs-artifact-inventory manifest)
+             (:seon.execution/artifact-inventories request)))
       (is (= (::launch/blob-storage-view
               (:seon.dev.config/launch-descriptor configuration))
              (:my.blob/storage-view request))))

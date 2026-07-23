@@ -1,6 +1,7 @@
 (ns seon.program-plan-writer-test
   "Planning-projection acquisition against the real memory writer."
   (:require [clojure.test :refer [deftest is]]
+            [seon.capability :as capability]
             [seon.db :as db]
             [seon.db.host :as db.host]
             [seon.db.protocol :as protocol]
@@ -115,8 +116,15 @@
         (is (true? (::protocol/success? persisted)) (pr-str persisted)))
       (let [database (context/resolve-head! session)
             leaf (db.host/leaf session (constantly {}))
+            artifacts
+            (capability/installed-artifact-inventory
+             (capability/installed-leaf-inventory
+              :jvm
+              [{:seon.capability/binding "fixture.writer/install-terminal"
+                :seon.capability/effect :pure
+                :seon.capability/remote? false}]))
             acquired (binding [db/*leaf* leaf]
-                       (plan/acquire-planning-projection database))
+                       (plan/acquire-planning-projection database artifacts))
             reconstructed
             (get-in acquired
                     [:seon.execution/edge-bundles "fixture.writer/root"])]
@@ -127,10 +135,8 @@
         (is (= (edge/program-graph-digest
                 (vals (:seon.execution/edge-bundles acquired)))
                (:seon.execution/graph-digest acquired)))
-        (is (= :unavailable
-               (get-in acquired
-                       [:seon.execution/artifact-inventories
-                        :seon.execution.inventory/availability]))))
+        (is (= artifacts
+               (:seon.execution/artifact-inventories acquired))))
       (finally
         (context/close-session! session)
         (writer/stop! server)

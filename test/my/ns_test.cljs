@@ -241,7 +241,6 @@
            [{:seon.fn/sym "my.demo/show"
              :seon.fn/source "(defn show [x] (DEMO-BODY x))"
              :seon.fn/fn-var? true
-             :seon.fn/private? false
              :seon.fn/arglists "([x])"
              :seon.fn/spec "[:=> [:cat :int] :int]"}]}
           initial

@@ -156,11 +156,13 @@
 
 (deftest execution-plan-disposition-fails-before-dispatch-or-releases-for-handoff
   (let [inventories
-        {:jvm {:seon.execution.inventory/bindings #{}
+        {:jvm {:seon.execution.inventory/tier :jvm
+               :seon.execution.inventory/bindings #{}
                :seon.execution.inventory/remote-bindings #{}
                :seon.execution.inventory/pure-bindings #{}
                :seon.execution.inventory/digest "jvm"}
-         :bun {:seon.execution.inventory/bindings #{"bun/leaf"}
+         :bun {:seon.execution.inventory/tier :bun
+               :seon.execution.inventory/bindings #{"bun/leaf"}
                :seon.execution.inventory/remote-bindings #{}
                :seon.execution.inventory/pure-bindings #{}
                :seon.execution.inventory/digest "bun"}}
@@ -201,7 +203,8 @@
              (assoc-in [:seon.execution/capability-manifest
                         :seon.execution/required-bindings]
                        #{"missing/leaf"}))
-         {:jvm {:seon.execution.inventory/bindings #{}
+         {:jvm {:seon.execution.inventory/tier :jvm
+                :seon.execution.inventory/bindings #{}
                 :seon.execution.inventory/remote-bindings #{}
                 :seon.execution.inventory/pure-bindings #{}
                 :seon.execution.inventory/digest "jvm"}})]

@@ -44,13 +44,15 @@
 
 (def tier-inventories
   {:bun
-   {:seon.execution.inventory/bindings
+   {:seon.execution.inventory/tier :bun
+    :seon.execution.inventory/bindings
     #{"seon.db/query" "seon.packages.js.lodash/get"}
     :seon.execution.inventory/remote-bindings #{}
     :seon.execution.inventory/pure-bindings #{"clojure.core/inc"}
-    :seon.execution.inventory/digest "bun-v1"}
+   :seon.execution.inventory/digest "bun-v1"}
    :jvm
-   {:seon.execution.inventory/bindings #{"seon.db/query"}
+   {:seon.execution.inventory/tier :jvm
+    :seon.execution.inventory/bindings #{"seon.db/query"}
     :seon.execution.inventory/remote-bindings #{}
     :seon.execution.inventory/pure-bindings #{"clojure.core/inc"}
     :seon.execution.inventory/digest "jvm-v1"}})
@@ -176,6 +178,7 @@
         result (plan/plan-execution base-request)]
     (is (= #{"seon.db/query" "seon.db/as-of"}
            (:seon.execution.inventory/bindings inventory)))
+    (is (= :jvm (:seon.execution.inventory/tier inventory)))
     (is (= #{"seon.db/as-of"}
            (:seon.execution.inventory/pure-bindings inventory)))
     (is (= :jvm (:seon.execution/selected-tier result)))
@@ -183,6 +186,38 @@
          (:seon.execution/cache-key result)
          (:seon.execution/cache-key
           (plan/plan-execution changed-request))))))
+
+(deftest real-tier-artifact-inventories-place-a-compiled-terminal-exactly
+  (let [target "fixture.compiled/leaf"
+        jvm-tier
+        (capability/installed-leaf-inventory
+         :jvm
+         [{:seon.capability/binding target
+           :seon.capability/effect :external
+           :seon.capability/remote? false}])
+        artifacts
+        (capability/merge-artifact-inventories
+         [(capability/installed-artifact-inventory jvm-tier)
+          {:seon.execution.inventory/availability :available
+           :seon.execution.inventory/exports-by-tier {:bun #{target}}
+           :seon.execution.inventory/digest "fixture-cljs-inventory"}])
+        root (bundle "fixture/root" #{target} #{} #{} false #{}
+                     [(terminal target :pure)])
+        result
+        (plan/plan-execution
+         (-> (request ["fixture/root"] [root])
+             (assoc :seon.execution/tier-inventories
+                    {:jvm jvm-tier
+                     :bun (get tier-inventories :bun)})
+             (assoc-in [:seon.execution/planning-projection
+                        :seon.execution/artifact-inventories]
+                       artifacts)))]
+    (is (= :constrained (:seon.execution/placement result)))
+    (is (= #{:bun :jvm} (:seon.execution/eligible-tiers result)))
+    (is (empty? (:seon.execution/unresolved result)))
+    (is (= #{target}
+           (get-in result [:seon.execution/capability-manifest
+                           :seon.execution/artifact-exports])))))
 
 (deftest uncertainty-and-absent-artifact-inventory-fail-closed
   (testing "the dynamic keyword edge is named"

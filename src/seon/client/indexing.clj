@@ -50,6 +50,50 @@
   [d]
   (merge (:meta d) (select-keys d [:private :fn-var :file :line :test])))
 
+(declare first-party-file?)
+
+(defn- analyzed-fn-entries
+  [nss selected-namespaces]
+  (for [namespace-symbol selected-namespaces
+        [_ definition] (:defs (get nss namespace-symbol))
+        :let [metadata (def-meta definition)]
+        :when (and (:fn-var metadata) (:line metadata))]
+    {:seon.dev.program-inventory/symbol (str (:name definition))
+     :seon.dev.program-inventory/private? (true? (:private metadata))
+     :seon.dev.program-inventory/first-party?
+     (first-party-file? (:file metadata))}))
+
+(defn analyzer-fn-inventory
+  "Derive callable symbols once from a selected compiler analysis closure."
+  [nss selected-namespaces]
+  (let [entries (analyzed-fn-entries nss selected-namespaces)]
+    {:seon.dev.program-inventory/public-exports
+     (->> entries
+          (filter :seon.dev.program-inventory/first-party?)
+          (remove :seon.dev.program-inventory/private?)
+          (map :seon.dev.program-inventory/symbol)
+          distinct
+          sort
+          vec)
+     ;; R39 gives first-party private functions real private corpus rows. Only
+     ;; dependency-owned compiled terminals remain sidecar-only; enumerating
+     ;; the classpath or reparsing their source would be a second indexer.
+     :seon.dev.program-inventory/internal-terminals
+     (->> entries
+          (remove :seon.dev.program-inventory/first-party?)
+          (map :seon.dev.program-inventory/symbol)
+          distinct
+          sort
+          vec)
+     :seon.dev.program-inventory/first-party-private
+     (->> entries
+          (filter :seon.dev.program-inventory/first-party?)
+          (filter :seon.dev.program-inventory/private?)
+          (map :seon.dev.program-inventory/symbol)
+          distinct
+          sort
+          vec)}))
+
 (defn- first-party-roots
   "Roots a def's `:file` may live under to count as first-party: the
    repo root (the macroexpanding JVM's working dir) plus, when the
@@ -96,15 +140,24 @@
   []
   (let [nss   (analyzer-namespaces)
         reach (transitive-requires nss (-> &env :ns :name))
-        syms  (sort
-                (for [n     reach
-                      [_ d] (:defs (get nss n))
-                      :let  [m (def-meta d)]
-                      :when (and (:fn-var m)
-                                 (not (:private m))
-                                 (first-party-file? (:file m))
-                                 (:line m))]
-                  (:name d)))]
+        syms  (map symbol
+                   (:seon.dev.program-inventory/public-exports
+                    (analyzer-fn-inventory nss reach)))]
+    `[~@(map (fn [s] (list 'var s)) syms)]))
+
+(defmacro first-party-fn-vars
+  "Expand to every first-party function var, preserving private helpers.
+
+   R39 publishes private helpers as presence-marked corpus rows. Dependency
+   functions remain build terminals and never enter the public corpus."
+  []
+  (let [nss (analyzer-namespaces)
+        reach (transitive-requires nss (-> &env :ns :name))
+        inventory (analyzer-fn-inventory nss reach)
+        syms (map symbol
+                  (concat
+                   (:seon.dev.program-inventory/public-exports inventory)
+                   (:seon.dev.program-inventory/first-party-private inventory)))]
     `[~@(map (fn [s] (list 'var s)) syms)]))
 
 (defmacro first-party-ns-strs

@@ -16,6 +16,7 @@
   (:require [clojure.edn :as edn]
             [clojure.test :refer [deftest is]]
             [sci.core :as sci]
+            [seon.capability :as capability]
             [seon.db.host :as db.host]
             [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds]
@@ -100,7 +101,10 @@
 
 (deftest capability-installation-publishes-its-leaf-inventory
   (let [base (context/build-base! (unconnected-writer))
-        inventory (::context/tier-inventory base)]
+        inventory (::context/tier-inventory base)
+        artifact-inventory
+        (capability/installed-artifact-inventory inventory)]
+    (is (= :jvm (:seon.execution.inventory/tier inventory)))
     (is (contains? (:seon.execution.inventory/bindings inventory)
                    "seon.db/query"))
     (is (contains? (:seon.execution.inventory/bindings inventory)
@@ -108,7 +112,17 @@
     (is (contains? (:seon.execution.inventory/pure-bindings inventory)
                    "seon.db/as-of"))
     (is (re-matches #"[0-9a-f]{64}"
-                    (:seon.execution.inventory/digest inventory)))))
+                    (:seon.execution.inventory/digest inventory)))
+    (is (= #{:jvm}
+           (set
+            (keys
+             (:seon.execution.inventory/exports-by-tier
+              artifact-inventory)))))
+    (is (= (:seon.execution.inventory/bindings inventory)
+           (get-in artifact-inventory
+                   [:seon.execution.inventory/exports-by-tier :jvm])))
+    (is (= (:seon.execution.inventory/digest inventory)
+           (:seon.execution.inventory/digest artifact-inventory)))))
 
 ;;; Op-id receipts against the real writer.
 

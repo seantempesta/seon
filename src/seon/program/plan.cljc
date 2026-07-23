@@ -615,10 +615,12 @@
   acquire-planning-projection
   "Acquire the complete planning projection at one immutable database value."
   {:malli/schema
-   [:=> [:cat :seon.db/db]
+   [:=> [:catn
+         [:database :seon.db/db]
+         [:artifact-inventories :seon.execution/artifact-inventories]]
     [:or :seon.execution/planning-projection
      :seon.execution/core-error]]}
-  [database]
+  [database artifact-inventories]
   (try
     (let [function-rows
           (await
@@ -654,9 +656,7 @@
            :seon.execution/schema-fingerprint
            (:seon.schema.projection/fingerprint projection)
            :seon.execution/artifact-inventories
-           {:seon.execution.inventory/availability :unavailable
-            :seon.execution.inventory/unavailable-reason
-            :missing-artifact-export-inventory}})))
+           artifact-inventories})))
     (catch #?(:clj Throwable :cljs :default) throwable
       (core-error
        "Planning projection acquisition failed."

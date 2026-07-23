@@ -38,7 +38,7 @@
     {:seon.fn/sym      sym
      :seon.fn/ns       [:seon.ns/name ns-kw]
      :seon.fn/source   (str "(defn " nm " [x] (" body-marker " x))")
-     :seon.fn/fn-var?  true :seon.fn/private? false
+     :seon.fn/fn-var?  true
      :seon.fn/arglists "([x])"
      :seon.fn/spec     "[:=> [:cat :int] :int]"}))
 
@@ -63,7 +63,7 @@
           (fn-row "my.helper/runtime-helper" 'my.helper "RUNTIME-BODY")
           {:seon.fn/sym "my.helper/unspecced"
            :seon.fn/source "(defn unspecced [x] x)"
-           :seon.fn/fn-var? true :seon.fn/private? false
+           :seon.fn/fn-var? true
            :seon.fn/arglists "([x])"}
           {:seon.fn/sym "my.helper/secret"
            :seon.fn/source "(defn- secret [x] x)"
@@ -190,13 +190,11 @@
          [{:seon.fn/sym "seon.agent/set-purpose!"
            :seon.fn/source "(defn set-purpose! [purpose] (SET-PURPOSE-BODY purpose))"
            :seon.fn/fn-var? true
-           :seon.fn/private? false
            :seon.fn/arglists "([purpose])"
            :seon.fn/spec "[:=> [:cat :string] :boolean]"}
           {:seon.fn/sym "seon.agent/unselected-sibling!"
            :seon.fn/source "(defn unselected-sibling! [value] (SIBLING-BODY value))"
            :seon.fn/fn-var? true
-           :seon.fn/private? false
            :seon.fn/arglists "([value])"
            :seon.fn/spec "[:=> [:cat :string] :boolean]"}]}
         out (@#'nss/format-namespaces-block

@@ -227,7 +227,9 @@
   ;; below IS this macro's whole-closure var vector: every public first-party
   ;; fn the build loads, specced or not (owner directive — 'just index
   ;; everything'; never hand-list vars).
-  (:require-macros [seon.client.indexing :refer [public-fn-vars first-party-ns-strs]]))
+  (:require-macros
+   [seon.client.indexing
+    :refer [first-party-fn-vars first-party-ns-strs]]))
 
 ;; ---------------------------------------------------------------------------
 ;; Process-lifetime state. `defonce` so reloads don't reset it.
@@ -1106,21 +1108,22 @@
 ;; This produces a `:seon.fn` row IDENTICAL in shape to a detect-and-tee row
 ;; (eval.cljs/build-tee-entities) — downstream readers never branch on origin.
 ;; The agent extends the indexed surface by transacting its own fns; the core
-;; surface auto-widens — `core-vars` is the `public-fn-vars` macro output, so
-;; a new public first-party defn is seeded the moment the build loads it.
+;; surface auto-widens — `core-vars` is the `first-party-fn-vars` macro output,
+;; so every public or private first-party defn is seeded when the build loads
+;; it. Privacy is a presence attribute; default discovery omits private rows
+;; while full namespace source remains drillable.
 ;; ---------------------------------------------------------------------------
 
 (def ^:private core-vars
   "Every var indexed into the corpus at boot: the compile-time vector of
-   EVERY public first-party fn across the build's whole require closure
-   (`seon.client.indexing/public-fn-vars` — owner directive 'just index
-   everything': all functions in the cljs package become `:seon.fn` rows,
-   specced or not). No hand-curated inclusion list — the macro supplies the
-   complete vector; a new public fn is indexed the moment it loads. Each var's
+   EVERY first-party fn across the build's whole require closure
+   (`seon.client.indexing/first-party-fn-vars`). No hand-curated inclusion
+   list — the macro supplies the complete vector; a new fn is indexed the
+   moment it loads. Each var's
    spec/doc/source is read by [[var->fn-row]]; an unspecced fn simply omits
    `:seon.fn/spec` (honestly unspecced). Macro output is already
    sym-unique, so no dedup pass is needed."
-  (public-fn-vars))
+  (first-party-fn-vars))
 
 ;; Downstream extra-core vars (task #36 — SEON_EXTRA_SRC; spec:
 ;; docs/prds/lifecycle/research/extra-src-research-2026-06-12.md §d).
@@ -1497,8 +1500,8 @@
                                      (arglists-from-source src)
                                      (str (:ns m)))
                :seon.fn/doc        (or (:doc m) "")
-               :seon.fn/private?   (boolean (:private m))
                :seon.fn/created-at now}
+        (true? (:private m)) (assoc :seon.fn/private? true)
         ;; PRESENT ⇒ specced (exact contract in corpus); ABSENT ⇒ unspecced.
         (some? spec) (assoc :seon.fn/spec spec)))))
 
@@ -1638,16 +1641,17 @@
                       nm   name
                       priv (boolean (re-find #"^\(\s*defn-[\s\(]" form))
                       row  (when (and nm (not (str/blank? nm)))
-                             {:seon.fn/sym        (str ns-sym-str "/" nm)
-                              :seon.fn/ns         [:seon.ns/name ns-kw]
-                              :seon.fn/source     form
-                              :seon.fn/fn-var?    true
-                              :seon.fn/arglists   (expand-local-auto-kws
-                                                    (arglists-from-source form)
-                                                    ns-sym-str)
-                              :seon.fn/doc        (or doc "")
-                              :seon.fn/private?   priv
-                              :seon.fn/created-at now})]
+                             (cond->
+                              {:seon.fn/sym        (str ns-sym-str "/" nm)
+                               :seon.fn/ns         [:seon.ns/name ns-kw]
+                               :seon.fn/source     form
+                               :seon.fn/fn-var?    true
+                               :seon.fn/arglists
+                               (expand-local-auto-kws
+                                (arglists-from-source form) ns-sym-str)
+                               :seon.fn/doc        (or doc "")
+                               :seon.fn/created-at now}
+                               priv (assoc :seon.fn/private? true)))]
                   (recur (+ i (count form)) (if row (conj rows row) rows)))
                 ;; Not a defn — skip the whole balanced form.
                 (recur (+ i (if form (count form) 1)) rows)))
@@ -1853,6 +1857,8 @@
                 {:seon.error/kind :core-bug
                  ::launch/runtime (::launch/runtime descriptor)})))
     {:seon.execution/artifact-digest artifact-digest
+     :seon.db.initialization/page-rows
+     (:seon.config.database.initialization/page-rows configuration)
      :seon.db/attributes agent-bootstrap-attrs
      :seon.db/program program
      :seon.db/initial-data (vec (initial-data configuration))}))

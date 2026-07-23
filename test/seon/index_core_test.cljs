@@ -121,6 +121,21 @@
     (is (str/includes? (:seon.fn/spec coverage)
                        "[:set [:tuple :string :string]]"))))
 
+(deftest first-party-privacy-is-presence-based-with-source-drill
+  (let [tx @core-tx
+        private-row (by-sym tx "my.kb/tokens")
+        public-row (by-sym tx "seon.db/query")
+        namespace-row (first (filter #(= 'my.kb (:seon.ns/name %)) tx))]
+    (is (some? private-row)
+        "the build's first-party private functions remain corpus rows")
+    (is (string? (:seon.fn/source private-row))
+        "a private row retains its exact source")
+    (is (not (contains? public-row :seon.fn/private?))
+        "public is represented by absence, never false")
+    (is (str/includes? (:seon.ns/source namespace-row)
+                       (:seon.fn/source private-row))
+        "the full namespace drill reaches the retained private source")))
+
 (deftest my-kb-capabilities-and-recipes-stay-indexed-and-inspectable
   (let [tx          @core-tx
         capabilities ["my.kb/remember" "my.kb/recall"]

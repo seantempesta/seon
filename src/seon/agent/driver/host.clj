@@ -317,7 +317,9 @@
 
 (defn- parsed-reply-plan
   [host database agent-id program]
-  (let [planning-projection (plan/acquire-planning-projection database)]
+  (let [planning-projection
+        (plan/acquire-planning-projection
+         database (:seon.execution/artifact-inventories host))]
     (if (:seon.error/message planning-projection)
       planning-projection
       (let [tier-inventory (get-in host [:seon.host/base
