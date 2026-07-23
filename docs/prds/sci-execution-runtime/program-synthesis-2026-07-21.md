@@ -656,6 +656,15 @@ COMPLETELY before dispatching anything.
   flag: the lane's page-size docstring still says 4 MiB — stale
   against R40, correct at its return). Namespace load proven;
   behavioral proof = the lane's reset acceptance.
+- P1b stop RULED (2026-07-23 PM; review was 55min late — caught by
+  owner progress question): (i) the wrapper/host-binding registry
+  IS the JVM claimant's artifact inventory, explicitly (one
+  enumerator; classpath analysis only on proven gap); (ii)
+  build/digest owners granted (shadow-cljs.edn, program_artifact/
+  artifact.clj, release propagation); (iii) plan.cljc's hardcoded
+  inventories-unavailable → real acquisition granted. R39 (private
+  corpus rows) FOLDED into the same lane (owns indexing.clj); its
+  live proof sequences through the paged initialization.
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
