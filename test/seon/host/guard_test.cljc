@@ -124,8 +124,11 @@
   (let [holder (guard/holder)]
     (guard/reset! holder (policy 100 :enforce))
     (dotimes [_ 7] (guard/check! holder))
-    (let [error (guard/policy-error! holder :agent)]
+    (let [throwable (caught #(guard/stop! holder :agent))
+          error (guard/steering-error! holder throwable)]
       (is (= :agent (:seon.error/kind error)))
+      (is (= :interrupt
+             (get-in error [:seon.error/data :seon.error.sci/class])))
       (is (= output-key
              (get-in error [:seon.error/data ::guard/config-key])))
       (is (= 7 (get-in error [:seon.error/data ::guard/steps-used])))

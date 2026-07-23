@@ -119,7 +119,7 @@
              ::remaining-fuel (aget fuel-cell remaining-index)
              ::invocation-class (aget control-cell invocation-class-index)
              ::config-key config-key}
-      (contains? #{:budget :timeout} kind)
+      true
       (assoc :seon.error.sci/class :interrupt))))
 
 (defn policy-error!
@@ -138,6 +138,17 @@
     {:seon.error/message message
      :seon.error/kind kind
      :seon.error/data (dissoc data ::policy-kind)}))
+
+(defn stop!
+  "Stop the current SCI invocation through its existing interrupt marker."
+  {:malli/schema [:=> [:catn [::holder ::holder]
+                             [::policy-kind ::policy-kind]]
+                  :any]}
+  [holder kind]
+  (let [{::keys [config-key steps-used] :as data} (policy-data holder kind)]
+    (interrupt/interrupt!
+     (policy-message kind config-key steps-used)
+     (assoc data :seon.error/kind kind))))
 
 (defn- policy-throwable-data
   [throwable]
@@ -167,16 +178,10 @@
     (aset fuel-cell remaining-index remaining)
     (when (and (= 1 (aget fuel-cell enforce-index))
                (neg? remaining))
-      (let [data (policy-data holder :budget)]
-        (interrupt/interrupt!
-         (policy-message :budget (::config-key data) (::steps-used data))
-         (assoc data :seon.error/kind :budget)))))
+      (stop! holder :budget)))
   (when-let [interrupted? (aget control-cell interrupted-index)]
     (when (interrupted?)
-      (let [data (policy-data holder :timeout)]
-        (interrupt/interrupt!
-         (policy-message :timeout (::config-key data) (::steps-used data))
-         (assoc data :seon.error/kind :timeout)))))
+      (stop! holder :timeout)))
   nil)
 
 (defn check!

@@ -90,7 +90,7 @@
                     (dissoc :seon.eval/value)
                     (assoc :seon.eval/value-display (pr-str value)))))))]
     (transit-safe-value envelope)))
-(defn- output-capture [database-edn-cap]
+(defn- output-capture [holder database-edn-cap]
   (let [limit (max 0 (- database-edn-cap
                         (count output-truncation-marker)))
         text (StringBuilder.)
@@ -105,7 +105,8 @@
                          (int (+ offset retained)))
                 (.append text ^chars x (int offset) (int retained))))
             (when (> length retained)
-              (vreset! truncated? true))))
+              (vreset! truncated? true)
+              (guard/stop! holder :agent))))
         writer
         (proxy [Writer] []
           (write
@@ -155,7 +156,7 @@
    (eval-form! session ctx home-ns source 16384))
   ([session ctx home-ns source database-edn-cap]
    (let [{::keys [output-writer output-exceeded? output-text]}
-         (output-capture database-edn-cap)]
+         (output-capture (::guard/holder ctx) database-edn-cap)]
      (locking (::session/interrupt-lock session)
        (reset! (::session/worker-phase session) :evaluating))
      (let [envelope
@@ -180,7 +181,7 @@
                    :seon/error error}))))
            envelope (finish-evaluation! session envelope)
            envelope
-           (if (output-exceeded?)
+           (if (and (output-exceeded?) (:seon.eval/ok? envelope))
              {:seon.eval/ok? false
               :seon.eval/interrupted? true
               :seon/error
