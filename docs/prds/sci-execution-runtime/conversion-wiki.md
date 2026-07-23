@@ -1124,3 +1124,29 @@ the anchor stays the state ledger.
   consumers must use Datahike and `seon.db.protocol/initialization-pages`
   vocabulary (`transaction data`, rows, pages), never an orchestrator lane
   label.
+- **A complete projection build prepares one immutable validation context; it
+  never rebuilds that context per contract.** Collect predicate bindings and
+  direct predicate symbols, bind forms, construct the registry/options, compile
+  schemas and contracts, and derive dependency edges once. Then validate the
+  request vector with a bounded platform-core fold and one build-scoped
+  `[reference role admission-source]` result cache. Registration keeps the same
+  completeness entry point because its candidate population is genuinely
+  changing. A fresh boot may retain this projection only after the committed
+  rows reproduce its full forms/contracts/admissions/pure-predicate
+  fingerprint; mismatch always invokes the same builder
+  (`src/seon/schema.cljc`, `src/seon/runtime/admission.cljs`,
+  `src/seon/client.cljs`).
+## Source provenance and contract provenance are different facts
+
+A function contract row and its source row may have different asserting
+transactions. Datahike does not create a new datom when an identical
+`:seon.fn/spec` value is reasserted, so an agent can replace
+`:seon.fn/source` while the spec datom retains its earlier core transaction.
+Authorship and trust must therefore derive from the current source datom's
+asserting transaction, never from contract admission.
+
+Keep source admissions and exact compiled artifact exports in the one compiled
+projection. Include both in its fingerprint and in fingerprint-guarded reuse;
+patching them onto a reused projection afterward makes cold and reused
+classification observably different. A corpus source row decides before
+artifact membership, and absent evidence fails closed as agent-authored.
