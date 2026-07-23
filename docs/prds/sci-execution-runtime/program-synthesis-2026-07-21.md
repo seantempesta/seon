@@ -1037,6 +1037,18 @@ COMPLETELY before dispatching anything.
   builds (client AND test — r43fix proved only :test) to zero
   first-party arity/undeclared warnings + prove the v11 manifest
   publishes. Lesson sharpened: the class gate is BOTH builds.
+- CLIENTFIX RESULT: the pod shell requests now acquire the operation's
+  config singleton through the existing context-only request injection;
+  the deleted default-var residue is gone. Both canonical builds compile
+  with zero first-party arity/undeclared warnings, and the focused shell
+  suite passes 21 tests / 81 assertions. The remaining warnings are
+  dependency-owned SCI/Datahike inference warnings plus the known
+  `cljs/analyzer/api.cljc` resource warnings. V11 PUBLICATION REMAINS
+  BLOCKED by a distinct artifact-hook lifetime defect: the watch-derived
+  temporary program-row Bun process retains its Shadow devtools socket,
+  so the managed watcher times out before its first client flush. Recorded
+  as `docs/seon/issues/program-row-derivation-retains-shadow-devtools-socket.md`;
+  clientfix did not expand into that separate mechanism.
 - BREAK #1 FIXED (52124e45e, accepted): exactly one stale call site
   (exhaustive-search proven); fixtures made honest under the
   provenance classifier (incl. an adjacent stale corpus-implies-core

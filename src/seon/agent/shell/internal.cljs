@@ -19,10 +19,6 @@
 ;; Hard caps.
 ;; ============================================================
 
-(def default-timeout-ms
-  "SIGTERM the child after this long when the request doesn't say."
-  core/default-timeout-ms)
-
 (def max-output-bytes
   "The full-capture ceiling for a foreground [[run]],
    mirroring web-fetch's 2MB body cap. Per-stream output up to this is
@@ -115,10 +111,11 @@
   "Run `cmd` with `args` (vector of argv strings — NEVER a shell string;
    no `sh -c`, no injection surface). Always resolves to the ordinary shared
    subprocess result. String stdin is closed so readers see EOF."
-  [cmd args cwd stdin timeout-ms]
+  [cmd args cwd stdin timeout-ms configuration]
   (subprocess/run!
    (core/run-request {::shell/cmd cmd ::shell/args args ::shell/cwd cwd
                       ::shell/stdin stdin ::shell/timeout-ms timeout-ms}
+                     configuration
                      max-output-bytes)))
 
 ;; ============================================================

@@ -1124,6 +1124,15 @@ the anchor stays the state ledger.
   consumers must use Datahike and `seon.db.protocol/initialization-pages`
   vocabulary (`transaction data`, rows, pages), never an orchestrator lane
   label.
+- **R28 breakage can survive on a pod surface until build-time derivation
+  executes it.** The shell config-fact conversion changed portable
+  `run-request` to require the acquired configuration, but the still-alive pod
+  leaf retained both its deleted default var and old arity. Ordinary JVM gates
+  did not exercise that caller; program-row derivation did, so the watcher
+  failed loudly before publishing the v11 manifest. Any public signature
+  conversion that leaves a canonical build alive must compile both `client`
+  and `test` with zero first-party arity or undeclared-var warnings. A focused
+  suite or only one canonical build is not a class gate.
 - **A complete projection build prepares one immutable validation context; it
   never rebuilds that context per contract.** Collect predicate bindings and
   direct predicate symbols, bind forms, construct the registry/options, compile
@@ -1136,6 +1145,7 @@ the anchor stays the state ledger.
   fingerprint; mismatch always invokes the same builder
   (`src/seon/schema.cljc`, `src/seon/runtime/admission.cljs`,
   `src/seon/client.cljs`).
+
 ## Source provenance and contract provenance are different facts
 
 A function contract row and its source row may have different asserting

@@ -42,7 +42,8 @@
    [:seon.agent.shell/args              {:optional true} :seon.agent.shell/args]
    [:seon.agent.shell/cwd               {:optional true} :seon.agent.shell/cwd]
    [:seon.agent.shell/stdin             {:optional true} :seon.agent.shell/stdin]
-   [:seon.agent.shell/timeout-ms        {:optional true} :seon.agent.shell/timeout-ms]])
+   [:seon.agent.shell/timeout-ms        {:optional true} :seon.agent.shell/timeout-ms]
+   [:seon.config/configuration          {:optional true} :seon.config/singleton]])
 
 (schema/register! :seon.agent.shell/py-run-request
   [:map
@@ -50,7 +51,8 @@
    [:seon.agent.shell/cmd               {:optional true} :seon.agent.shell/cmd]
    [:seon.agent.shell/args              {:optional true} :seon.agent.shell/args]
    [:seon.agent.shell/cwd               {:optional true} :seon.agent.shell/cwd]
-   [:seon.agent.shell/timeout-ms        {:optional true} :seon.agent.shell/timeout-ms]])
+   [:seon.agent.shell/timeout-ms        {:optional true} :seon.agent.shell/timeout-ms]
+   [:seon.config/configuration          {:optional true} :seon.config/singleton]])
 
 ;; The ONE envelope — py-run returns it too (no parallel shape).
 (schema/register! :seon.agent.shell/run-response
@@ -251,7 +253,7 @@
      ; into lines, transform, db/transact!."
   {:malli/schema [:=> [:cat :seon.agent.shell/run-request] :seon.agent.shell/run-response]}
   [{:seon.agent.shell/keys [cmd args cwd stdin timeout-ms]
-    :or {timeout-ms in/default-timeout-ms}}]
+    configuration :seon.config/configuration}]
   (try
     (cond
       (not (in/granted?))
@@ -263,7 +265,8 @@
       :else
       (if-let [denied (when cwd (in/gate-cwd cwd))]
         denied
-        (let [r       (await (in/exec cmd (vec (or args [])) cwd stdin timeout-ms))
+        (let [r       (await (in/exec cmd (vec (or args [])) cwd stdin timeout-ms
+                                      configuration))
               stdout  (str (:seon.subprocess/out r))
               stderr  (str (:seon.subprocess/err r))
               spawn-error (:seon.subprocess/spawn-error r)]
@@ -320,12 +323,13 @@
      ; ⟹ «map: ::ok? true, ::exit 0, ::out \"42\\n\", ::err \"\", …»"
   {:malli/schema [:=> [:cat :seon.agent.shell/py-run-request] :seon.agent.shell/run-response]}
   [{:seon.agent.shell/keys [source cmd args cwd timeout-ms]
+    configuration :seon.config/configuration
     :or {cmd "python3"}}]
   (let [request (core/py-request {::source source ::cmd cmd ::args args
                                   ::cwd cwd ::timeout-ms timeout-ms})]
     (if (false? (::ok? request))
       request
-      (await (run request)))))
+      (await (run (assoc request :seon.config/configuration configuration))))))
 
 ;; ============================================================
 ;; Background jobs — spawn, poll, page, stop. Same SEON_SHELL gate + cwd

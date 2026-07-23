@@ -33,6 +33,7 @@
     [seon.agent.shell :as shell]
     [seon.agent.shell.internal :as shell.internal]
     [seon.ai.tokens :as tokens]
+    [seon.config :as config]
     [seon.db :as db]
     [seon.test.async :refer [settle!]]))
 
@@ -44,6 +45,15 @@
   (.resolve npath (str "tmp/shell-test-" (.-pid js/process))))
 
 (def ^:private node-bin (.-execPath js/process))
+(def ^:private configuration (config/resolve-config-singleton {}))
+
+(defn- run
+  [request]
+  (shell/run (assoc request :seon.config/configuration configuration)))
+
+(defn- py-run
+  [request]
+  (shell/py-run (assoc request :seon.config/configuration configuration)))
 
 (deftest foreground-and-background-streams-share-one-byte-ceiling
   (is (= shell.internal/max-output-bytes
@@ -86,7 +96,7 @@
 (deftest exit-zero-captures-both-streams
   (async done
     (-> (resolves!
-          (shell/run {:seon.agent.shell/cmd  node-bin
+          (run {:seon.agent.shell/cmd  node-bin
                       :seon.agent.shell/args ["-e" "process.stdout.write('hi-out'); process.stderr.write('hi-err')"]}))
         (.then (fn [{ok?    :seon.agent.shell/ok?
                      exit   :seon.agent.shell/exit
@@ -112,7 +122,7 @@
 (deftest non-zero-exit-is-ok-with-exit-as-data
   (async done
     (-> (resolves!
-          (shell/run {:seon.agent.shell/cmd  node-bin
+          (run {:seon.agent.shell/cmd  node-bin
                       :seon.agent.shell/args ["-e" "process.stdout.write('partial'); process.exit(3)"]}))
         (.then (fn [{ok?  :seon.agent.shell/ok?
                      exit :seon.agent.shell/exit
@@ -129,7 +139,7 @@
 (deftest timeout-flags-timed-out-with-sentinel-exit
   (async done
     (-> (resolves!
-          (shell/run {:seon.agent.shell/cmd        node-bin
+          (run {:seon.agent.shell/cmd        node-bin
                       :seon.agent.shell/args       ["-e" "setTimeout(function(){}, 60000)"]
                       :seon.agent.shell/timeout-ms 300}))
         (.then (fn [{ok?  :seon.agent.shell/ok?
@@ -147,7 +157,7 @@
 (deftest ungranted-is-denied-with-guiding-error
   (async done
     (js-delete (.-env js/process) "SEON_SHELL") ; fixture :after restores
-    (-> (resolves! (shell/run {:seon.agent.shell/cmd "true"}))
+    (-> (resolves! (run {:seon.agent.shell/cmd "true"}))
         (.then (fn [{ok? :seon.agent.shell/ok?
                      msg :seon.error/message}]
                  (is (false? ok?))
@@ -164,7 +174,7 @@
 (deftest cwd-outside-allowlist-is-denied
   (async done
     (-> (resolves!
-          (shell/run {:seon.agent.shell/cmd node-bin
+          (run {:seon.agent.shell/cmd node-bin
                       :seon.agent.shell/args ["-e" "1"]
                       :seon.agent.shell/cwd (.resolve npath "src")}))
         (.then (fn [{ok? :seon.agent.shell/ok?
@@ -178,7 +188,7 @@
 (deftest cwd-inside-allowlist-is-honored
   (async done
     (-> (resolves!
-          (shell/run {:seon.agent.shell/cmd  node-bin
+          (run {:seon.agent.shell/cmd  node-bin
                       :seon.agent.shell/args ["-e" "process.stdout.write(process.cwd())"]
                       :seon.agent.shell/cwd  fixture-dir}))
         (.then (fn [{ok? :seon.agent.shell/ok?
@@ -196,7 +206,7 @@
 (deftest output-is-returned-in-full-with-honest-tokens
   (async done
     (-> (resolves!
-          (shell/run {:seon.agent.shell/cmd  node-bin
+          (run {:seon.agent.shell/cmd  node-bin
                       :seon.agent.shell/args ["-e" "process.stdout.write('x'.repeat(40000))"]}))
         (.then (fn [{ok?    :seon.agent.shell/ok?
                      out    :seon.agent.shell/out
@@ -214,7 +224,7 @@
     ;; Exceed the private capture guard: the captured head is the answer,
     ;; truncated? is true, and the hint points at run-bg!.
     (-> (resolves!
-          (shell/run {:seon.agent.shell/cmd  node-bin
+          (run {:seon.agent.shell/cmd  node-bin
                       :seon.agent.shell/args ["-e" "process.stdout.write('x'.repeat(2500000))"]}))
         (.then (fn [{ok?    :seon.agent.shell/ok?
                      trunc? :seon.agent.shell/truncated?
@@ -234,7 +244,7 @@
 
 (deftest missing-binary-is-error-value
   (async done
-    (-> (resolves! (shell/run {:seon.agent.shell/cmd "seon-no-such-binary-xyz"}))
+    (-> (resolves! (run {:seon.agent.shell/cmd "seon-no-such-binary-xyz"}))
         (.then (fn [{ok? :seon.agent.shell/ok?
                      msg :seon.error/message}]
                  (is (false? ok?) "could NOT run — this is the ok? false branch")
@@ -243,7 +253,7 @@
 
 (deftest blank-cmd-is-error-value
   (async done
-    (-> (resolves! (shell/run {:seon.agent.shell/cmd " "}))
+    (-> (resolves! (run {:seon.agent.shell/cmd " "}))
         (.then (fn [{ok? :seon.agent.shell/ok?
                      msg :seon.error/message}]
                  (is (false? ok?))
@@ -256,7 +266,7 @@
 
 (deftest stdin-is-piped-and-closed
   (async done
-    (-> (resolves! (shell/run {:seon.agent.shell/cmd   "cat"
+    (-> (resolves! (run {:seon.agent.shell/cmd   "cat"
                                :seon.agent.shell/stdin "hello stdin"}))
         (.then (fn [{ok?  :seon.agent.shell/ok?
                      exit :seon.agent.shell/exit
@@ -273,7 +283,7 @@
 
 (deftest py-run-executes-source-via-stdin
   (async done
-    (-> (resolves! (shell/py-run {:seon.agent.shell/source "import sys\nprint(21 * 2)"}))
+    (-> (resolves! (py-run {:seon.agent.shell/source "import sys\nprint(21 * 2)"}))
         (.then (fn [{ok?  :seon.agent.shell/ok?
                      exit :seon.agent.shell/exit
                      out  :seon.agent.shell/out}]
@@ -284,7 +294,7 @@
 
 (deftest py-run-nonzero-exit-is-data
   (async done
-    (-> (resolves! (shell/py-run {:seon.agent.shell/source "import sys\nsys.exit(7)"}))
+    (-> (resolves! (py-run {:seon.agent.shell/source "import sys\nsys.exit(7)"}))
         (.then (fn [{ok?  :seon.agent.shell/ok?
                      exit :seon.agent.shell/exit}]
                  (is (true? ok?) "same ok?-=-RAN refinement as run")
@@ -296,7 +306,7 @@
   ;; data, never through a shell line.
   (async done
     (-> (resolves!
-          (shell/py-run {:seon.agent.shell/source "print('a;`whoami`;$(id) \"quoted\"')"}))
+          (py-run {:seon.agent.shell/source "print('a;`whoami`;$(id) \"quoted\"')"}))
         (.then (fn [{ok?  :seon.agent.shell/ok?
                      exit :seon.agent.shell/exit
                      out  :seon.agent.shell/out}]
@@ -308,7 +318,7 @@
 
 (deftest py-run-blank-source-is-error-value
   (async done
-    (-> (resolves! (shell/py-run {:seon.agent.shell/source " "}))
+    (-> (resolves! (py-run {:seon.agent.shell/source " "}))
         (.then (fn [{ok? :seon.agent.shell/ok?
                      msg :seon.error/message}]
                  (is (false? ok?))
