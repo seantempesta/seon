@@ -43,6 +43,7 @@
             [sci.interrupt :as interrupt]
             [seon.ai.provider :as ai.provider]
             [seon.ai.tokens :as tokens]
+            [seon.agent.fs.leaf :as fs.leaf]
             [seon.agent.lifecycle :as lifecycle]
             [seon.agent.lifecycle.leaf :as lifecycle.leaf]
             [seon.agent.message :as message]
@@ -469,6 +470,23 @@
                           (:seon.capability/effect source-meta)
                           (assoc ::effect (:seon.capability/effect source-meta)))])))
               functions)})))
+  (register-host-wrappers!
+   {::registry registry
+    ::lib 'seon.agent.fs
+    ::wrappers
+    {'configure! {::wrapper-fn fs.leaf/configure!}
+     'grants {::wrapper-fn fs.leaf/grants ::effect :read}
+     'read-file {::wrapper-fn fs.leaf/read-file ::effect :read}
+     'write-file {::wrapper-fn fs.leaf/write-file ::effect :external}
+     'edit-file {::wrapper-fn fs.leaf/edit-file ::effect :external}
+     'list-dir {::wrapper-fn fs.leaf/list-dir ::effect :read}
+     'stat {::wrapper-fn fs.leaf/stat ::effect :read}
+     'file-exists? {::wrapper-fn fs.leaf/file-exists? ::effect :read}
+     'home-dir {::wrapper-fn fs.leaf/home-dir ::effect :read}
+     'walk-dir {::wrapper-fn fs.leaf/walk-dir ::effect :read}
+     'view {::wrapper-fn fs.leaf/view ::effect :read}
+     'replace! {::wrapper-fn fs.leaf/replace! ::effect :external}
+     'insert! {::wrapper-fn fs.leaf/insert! ::effect :external}}})
   (register-host-wrappers!
    {::registry registry
     ::lib 'seon.db.id
