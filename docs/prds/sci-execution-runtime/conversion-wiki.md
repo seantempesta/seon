@@ -853,3 +853,34 @@ the anchor stays the state ledger.
   claiming row-only extensibility. Settle whether descriptors are
   frontier-only or admit local adapter cores before replacing the existing
   dispatch mechanism.
+
+## Streaming and provider-descriptor implementation scars (2026-07-23)
+
+- **Reply evaluation is durable policy; wire streaming is presentation.**
+  Freeze `:seon.ai/reply-evaluation` on every attempt and carry it through both
+  claim drivers. `:first-form` retains upstream abort and estimated usage;
+  `:batch` reads to natural EOF, retains terminal real usage, parses once, and
+  evaluates the existing batch. `:seon.ai/wire-stream?` changes neither run
+  accounting nor evaluator semantics.
+- **A partial publisher must be latest-wins before it reaches the database.**
+  Keep the transport fold synchronous and offer cumulative complete prefixes
+  into a non-blocking, coalescing presentation sink. A blocked or throwing
+  publication loses partials only. Fence each cardinality-one no-history write
+  against the run, turn phase, and open attempt, then retract the fact in the
+  terminal attempt transaction.
+- **Attribute wakes are an accepted bounded intermediate contract.** The pure
+  transcript query selects only its agent's open attempt and equality
+  suppression prevents unrelated morphs. Attribute-level interest still
+  recomputes the render: measured p50 was 1.094 ms for a representative
+  50,558-byte page (p95 1.478 ms). Entity-scoped writer interest is recorded as
+  a later web-tier-slice-2/C10-adjacent unit, not a streaming graduation gate.
+- **Hosted descriptors and local workers are two named mechanisms.** Hosted
+  rows are components of the config singleton and select only the fixed
+  `:openai-compat` or `:anthropic` wire core. The compiled pod-only
+  `:diffusiongemma` and `:typeahead` local-worker adapters remain explicit D12
+  experimental dispatch; they never receive hosted rows or JVM arms.
+- **Gemini's OpenAI compatibility surface is sufficient for the fixed core.**
+  A cheap live qualification proved SSE `data:` framing, `[DONE]`, multiple
+  forms, cumulative real usage, JSON-schema response format, tool calls, and
+  bounded HTTP error translation. Register Gemini as an OpenAI-compatible row;
+  do not introduce a native GenerateContent core.
