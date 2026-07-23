@@ -433,6 +433,16 @@ COMPLETELY before dispatching anything.
   full coverage (core is compiled per tier behind the seam). R35
   implementation spec writes when the execution-planning research
   returns; owner reviews before dispatch.
+- AFTERNOON LANDINGS (2026-07-23): U8a ACCEPTED — JVM leaves for
+  fs/shell/web/blob + 20 my.* plan/kb/skills bindings via the one
+  wrapper registry; census blockers 176→128; live invocation
+  deferred to the checkpoint (blocked by the transport lane's
+  transient mid-edit state — attributed, no action). SPINE DOOR SWAP
+  LANDED (cd7d3ebf8): authored prompt renders route through
+  :seon.render/invoke-authored! behind the U1 guard; the option-A
+  window is CLOSED; invoke-plans! prompt arm deleted; guarded-door
+  issue resolved; byte identity green. Pod render containment is
+  door-complete.
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
