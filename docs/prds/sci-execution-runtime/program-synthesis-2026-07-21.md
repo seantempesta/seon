@@ -737,6 +737,30 @@ COMPLETELY before dispatching anything.
   confirmed: validation-off switches die (triage #6), byte-identity
   as the one render regression, one-seeding-path for fixtures.
 
+- OWNER RULINGS R42/R43 (2026-07-23 eve): R42 DETECT, DON'T GUESS —
+  readiness/liveness is EVENT-DRIVEN detection (observe boot progress:
+  page receipts, boot-phase log advance, the readiness advertisement),
+  never a guessed wall-clock total. The only legal clock is a STALL
+  breaker (no observed progress for a bounded interval, config fact,
+  loud). Predfix's in-flight total-duration config fact gets re-ruled
+  to stall-based detection on its return (its aero/loud plumbing is
+  kept; only the condition changes). Evidence answer: the pod did NOT
+  need a reset — the 120s kill hit a HEALTHY boot mid paging + SCI
+  corpus reconstruction.
+  R43 AUTHORSHIP IS PROVENANCE, NEVER A NAME RULE OR STORED ATTRIBUTE —
+  agent-vs-core classification (fault attribution, trusted render path,
+  SCI wrapping) derives from the corpus row's asserting-transaction
+  provenance (R34 cache in the compiled projection): core provenance ⇒
+  core; agent-turn provenance ⇒ agent; compiled artifact-inventory
+  terminals (third-party) ⇒ core; unknown ⇒ agent fail-closed.
+  error/agent-authored-sym?'s prefix regex and the static renderer
+  table dissolve into this one computed rule. Owner also confirmed the
+  read-side direction: beef up the ONE datahike-parser-level extractor
+  (dependency plans) to serve every listen/register/admission consumer.
+  agent-bootstrap-attrs dies via the already-landed computed bootstrap
+  closure (paged init, writer) + R29 committed-projection acquisition
+  (client) — P3 deletes the list.
+
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
