@@ -9,7 +9,8 @@
     (let [result
           (leaf/run {:seon.agent.shell/cmd "/bin/echo"
                      :seon.agent.shell/args ["u8-shell"]
-                     :seon.agent.shell/timeout-ms 1000})]
+                     :seon.agent.shell/timeout-ms 1000}
+                    {:seon.config.shell/default-timeout-ms 30000})]
       (is (:seon.agent.shell/ok? result))
       (is (= 0 (:seon.agent.shell/exit result)))
       (is (= "u8-shell\n" (:seon.agent.shell/out result)))
@@ -22,7 +23,8 @@
     (let [result
           (leaf/run {:seon.agent.shell/cmd "/bin/sh"
                      :seon.agent.shell/args ["-c" "sleep 2"]
-                     :seon.agent.shell/timeout-ms 10})]
+                     :seon.agent.shell/timeout-ms 10}
+                    {:seon.config.shell/default-timeout-ms 30000})]
       (is (:seon.agent.shell/ok? result))
       (is (true? (:seon.agent.shell/timed-out? result)))
       (is (integer? (:seon.agent.shell/exit result))))))

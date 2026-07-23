@@ -44,8 +44,8 @@
               " is not a directory."))))))
 
 (defn- process-builder
-  [{:seon.agent.shell/keys [cmd args cwd]}]
-  (cond-> (ProcessBuilder. ^java.util.List (into [cmd] (or args [])))
+  [{:seon.subprocess/keys [cmd cwd]}]
+  (cond-> (ProcessBuilder. ^java.util.List cmd)
     cwd (.directory (io/file cwd))))
 
 (defn- capture-stream
@@ -92,14 +92,13 @@
       (.flush writer))))
 
 (defn- execute
-  [{:seon.agent.shell/keys [stdin timeout-ms] :as request}]
+  [{:seon.subprocess/keys [stdin timeout-ms] :as request}]
   (let [process (.start (process-builder request))
         out-task (capture-task (.getInputStream process))
         err-task (capture-task (.getErrorStream process))]
     (write-stdin! process stdin)
     (try
-      (let [finished? (.waitFor process
-                                (long (or timeout-ms core/default-timeout-ms))
+      (let [finished? (.waitFor process (long timeout-ms)
                                 TimeUnit/MILLISECONDS)
             timed-out? (not finished?)]
         (when timed-out?
@@ -124,25 +123,30 @@
 
 (defn run
   "Run one argv request synchronously on the invocation thread."
-  [request]
-  (cond
-    (not (granted?)) (core/ungranted)
-    (cwd-error (:seon.agent.shell/cwd request))
-    (cwd-error (:seon.agent.shell/cwd request))
-    :else
-    (try
-      (execute request)
-      (catch Throwable throwable
-        (core/fail (str "could not run subprocess: "
-                        (or (ex-message throwable) throwable)))))))
+  ([request] (run request nil))
+  ([request configuration]
+   (let [subprocess-request
+         (core/run-request request configuration max-output-bytes)]
+     (cond
+       (not (granted?)) (core/ungranted)
+       (false? (:seon.agent.shell/ok? subprocess-request)) subprocess-request
+       (cwd-error (:seon.subprocess/cwd subprocess-request))
+       (cwd-error (:seon.subprocess/cwd subprocess-request))
+       :else
+       (try
+         (execute subprocess-request)
+         (catch Throwable throwable
+           (core/fail (str "could not run subprocess: "
+                           (or (ex-message throwable) throwable)))))))))
 
 (defn py-run
   "Run Python source through the frozen child specialization."
-  [request]
-  (let [specialized (core/py-request request)]
-    (if (false? (:seon.agent.shell/ok? specialized))
-      specialized
-      (run specialized))))
+  ([request] (py-run request nil))
+  ([request configuration]
+   (let [specialized (core/py-request request)]
+     (if (false? (:seon.agent.shell/ok? specialized))
+       specialized
+       (run specialized configuration)))))
 
 (defn- runtime-ms
   [job]

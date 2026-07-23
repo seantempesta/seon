@@ -497,8 +497,16 @@
     ::lib 'seon.agent.shell
     ::wrappers
     {'grants {::wrapper-fn shell.leaf/grants ::effect :read}
-     'run {::wrapper-fn shell.leaf/run ::effect :external}
-     'py-run {::wrapper-fn shell.leaf/py-run ::effect :external}
+     'run {::wrapper-fn
+           (fn [request]
+             (shell.leaf/run
+              request (:seon.config/configuration *tx-context*)))
+           ::effect :external}
+     'py-run {::wrapper-fn
+              (fn [request]
+                (shell.leaf/py-run
+                 request (:seon.config/configuration *tx-context*)))
+              ::effect :external}
      'run-bg! {::wrapper-fn shell.leaf/run-bg! ::effect :external}
      'list-jobs {::wrapper-fn shell.leaf/list-jobs ::effect :read}
      'job-status {::wrapper-fn shell.leaf/job-status ::effect :read}
