@@ -601,6 +601,15 @@ COMPLETELY before dispatching anything.
   → JVM package leaf host (research done) → census stragglers +
   triage #10/read-cost rows. AGENTS.md gained the testing-mentality
   law (8a4dcdd1d).
+- P5 stop verified (2026-07-23 late): three P2-contract gaps — no
+  invocation-form roots (parsed replies unplannable), a REAL
+  fail-closed bug (empty roots → vacuous :anywhere), no selected
+  tier, no installed-leaf inventory producer. P2 session RESUMED
+  with all four (in-memory form analysis via the P1 fns; :no-roots
+  fail-closed; selection policy as data; the capability installer's
+  one inventory enumerator). P5 resumes after P2's extension lands;
+  its wiki entry staged at tmp/orchestrator/p5-wiki-append.md.
+  Provenance-fix commit observed (adc25b852) — review on report.
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
