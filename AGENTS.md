@@ -602,6 +602,21 @@ Parse errors may block malformed edits. Test results are advisory and never
 undo a refactor; obsolete tests may need deletion. Read the retained report and
 full log rather than rerunning just to obtain output.
 
+Tests find design issues; structure dissolves them. When a failure class
+appears, do not fence the symptom with point tests — move the invariant
+to one choke point (a total codec, an admission gate, a computed
+discovery rule, a derived classification) and keep ONE regression per
+class. Schemas generate edge cases: generative round-trips are standing
+totality properties, not test suites to enumerate. Every proof must be
+claimed by a recurring surface — a test invisible to every runner, or a
+live proof that ran once in a lane, counts as NOT COVERED. Fixture load
+paths are not the live boot path: schema, acquisition, and process
+changes always need the reset-boundary live proof, because that is a
+different failure class than any fixture can see. Before writing a
+test, ask: which class is this failure, and what construction makes the
+class unrepresentable? The test you then write is the one that proves
+the class dead.
+
 There are two testing surfaces:
 
 1. code correctness through the existing boundary runners:
