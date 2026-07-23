@@ -1028,6 +1028,17 @@ COMPLETELY before dispatching anything.
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- GUARDBATCH RESULT: DO NOT LAND (correct measure-first refusal;
+  guard restored byte-identical, 11/35 gates green): current check
+  = ~13.6 ns/step / ~9.7 ns isolated on this machine (better than
+  the 29.9 calibration baseline — conditions differ); N=1000 within
+  variance, N=32/100 slower. ROOT INSIGHT: sci invokes the guard as
+  a closure call per safepoint, so ANY counter is a mutable cell
+  access — batching cannot remove the dominant op; the orchestrator's
+  register-countdown theory was WRONG. Optimal setting = the current
+  unbatched check. Future lever if ever needed = the hook's
+  invocation frequency inside the sci fork (measured-need-only).
+  Raw data tmp/orchestrator/guardbatch-*.edn.
 - GUARDBATCH + R27 (owner): the sync interval N is an aero config
   fact (:seon.config.guard/interpreter-step-sync-interval — schema,
   docstring stating the trade with measured calibration provenance,
