@@ -274,6 +274,16 @@ the anchor stays the state ledger.
 
 ## Process/operator
 
+- **Lifecycle membership is a graph projection, never a hand list.** The
+  fourth stale member list found on 2026-07-23 omitted web-render from
+  shutdown while still reporting success. Derive membership, dependencies,
+  reverse shutdown order, reader rebuilds, log selection, and absence evidence
+  from the one owned-process graph, then require requested targets to equal
+  returned result identities. Exact recorded `(pid,start-instant)` death makes
+  a generation consumable even after PID reuse; a live exact identity remains
+  protected (`script/seon/dev/process.clj`, `script/seon/dev/cli.clj`,
+  `fe5e289b9`).
+
 - **A landed seam does not close arbitrary-result ambiguity.** Flat
   `:seon.error/message`/`:seon.error/kind` errors and portable database calls
   can coexist while collision-capable successes remain bare:

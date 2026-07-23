@@ -902,10 +902,17 @@ COMPLETELY before dispatching anything.
   (pid,start-instant) observation, never stored; one reconciliation
   mechanism over the canonical owned-process graph; requested targets
   ≡ returned absence proofs; onExit = push while alive, never durable
-  authority (bin/seon is one-shot bb). PROCFIX LANE DISPATCHED
-  (pre-checkpoint slice: computed target derivation + derived-liveness
-  reap + kill-9 regression + live orphan proof); full reconciliation
-  redesign queues post-checkpoint.
+  authority (bin/seon is one-shot bb). PROCFIX PRE-CHECKPOINT SLICE
+  LANDED in `fe5e289b9`: computed graph-derived lifecycle targets,
+  exact-identity dead-generation reap, loud target/result equality,
+  and a real-process kill-9 regression. Focused operator proof: 118
+  tests / 545 assertions green
+  (`tmp/orchestrator/procfix-gate.log`). Isolated `procfix` proof:
+  boot → kill exact web-render workload → ordinary down with all five
+  results → reset to full readiness without cleanup → final clean
+  down with all records absent
+  (`tmp/orchestrator/procfix-live.log`). Full reconciliation and
+  onExit push redesign remain queued post-checkpoint.
 
 - OWNER RULING R44 (2026-07-23 eve): (a) PERSISTENT CACHES are
   permitted as :seon.db/no-history? database attributes when the
