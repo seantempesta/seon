@@ -1126,6 +1126,18 @@ Cluster parallelism is the db model: manifests/corpus/sockets/
 processes are cluster-scoped; clusters never coordinate. WHEN: WP-J
 after the loader door lands and the JVM side has a first consumer.
 
+**pkg-loader-door RETURNED (honest partial), reviewed, HELD**:
+implementation complete (packages.cljc computed prefix/locality +
+provenance ref + install/remove corpus planning; execution.cljs
+admission joins the installed row; focused suites 9/50 + 40/185
+green). Full gate blocked by p2-msglc's test lock; live boot blocked
+by p2-msglc mid-edit (`admission is not defined`, lifecycle/resume!).
+Diff reviewed structurally sound. ACCEPT when p2-msglc lands: serial
+full gate + live require/call + ruling-15 steering + removal +
+restart proofs, then commit; issue
+`cluster-package-corpus-has-no-loader-door` closes on that proof.
+Then `seon.packages.js.bun` (ruling 17a) dispatches.
+
 **STAGED NEXT (refill on any free slot):** p2-blob · p2-my-families
 (specs in tmp/orchestrator/, exemplar commit = `f6d843ee`) ·
 agent-facing interface-guidance unit. Known open: drill-harness
