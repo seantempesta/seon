@@ -791,6 +791,23 @@ COMPLETELY before dispatching anything.
   slow on curves); juicy/surprising issues get surfaced to the owner
   as design hints as they land.
 
+- POLL/TIMEOUT CENSUS ACCEPTED (2026-07-23 eve, top claims verified
+  from source: research/poll-timeout-census-2026-07-23.md): 46 sites,
+  13 guessed-total clusters, 5 pure literals. Worst: db/host.clj:15-22
+  (110s/120s pool/call/interest literals — the exact class that killed
+  the paged boot, on EVERY db call), session.cljs:505/:540 (15s/120s
+  client-tier inline), process.clj:386/596/673 (watcher/host/writer
+  ready-timeouts — predfix's siblings, EXTEND ITS SESSION on return),
+  llm-attempt-timeout (stall-not-total candidate), execution/host.cljs
+  :32 (240s unconfigurable). Poll→push wins: ProcessHandle.onExit for
+  two liveness polls; host recovery poll → writer feed events. NEW
+  DEFECT (verified shape): writer run-readiness! busy-spin (issue
+  writer-run-readiness-busy-spins-without-runtime; Sol read-only trace
+  DISPATCHED). Legitimate sites ledgered (lease heartbeat, watchdog,
+  guard facts) — do not re-audit. CONVERSION UNIT queued post-
+  checkpoint: db/host + session deadlines → R27/R42 facts (Sol,
+  census §worst as spec base).
+
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
