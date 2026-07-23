@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 tags: [issue, agent, runtime]
 severity: blocker
 ---
@@ -60,3 +60,12 @@ entry arms under `src/seon/ai/**`.
   and advance a successful reply to `:reply-ready`.
 - U6b can prove batch and stream turns on its isolated cluster without editing
   protected `src/seon/agent/**` or `src/seon/host/**` files.
+
+## Resolution
+
+The spine landed the portable durable phase and claimant door in `e34194bf8`
+and `34f0373e8`. Commit `200e847e9` installs the pure JVM transport, and the
+focused real-socket plus real-Datahike gate is green (6 tests, 23 assertions).
+The remaining paid named-cluster run is graduation evidence, not a missing
+claimant phase seam; its first startup was blocked by unrelated uncommitted
+schema-source compilation.

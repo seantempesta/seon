@@ -684,3 +684,31 @@ the anchor stays the state ledger.
   idempotency receipt, writes the same `<first-two>/<hash>` archive path, and
   transacts the same projection. Durable channel force and atomic rename are
   platform mechanics, not a second blob contract.
+
+## U6b JVM LLM HTTP leaf scars (2026-07-23)
+
+- **An interrupt can surface while consuming the response body.** JDK
+  `HttpClient.send` declares `InterruptedException`, but an SSE
+  `InputStream.read` may instead surface `IOException` while retaining the
+  thread's interrupted flag. Check that flag and rethrow
+  `InterruptedException`; otherwise the claimant watchdog's deadline becomes
+  a generic transport failure instead of the one flat timeout envelope.
+- **SSE cancellation belongs at the portable parser predicate.** Fold decoded
+  `data:` events into provider-shaped state and invoke the same
+  `seon.repl.parse` first-top-level-close plus parsed-form confirmation used by
+  the pod. Closing the response stream immediately on confirmation cancels the
+  HTTP exchange. Because the provider's final usage event is then absent,
+  replace even partial usage with the shared estimate and flag it
+  `:seon.ai/estimated? true`.
+- **One process client makes its construction facts restart-bound.** Resolve
+  connect timeout and response-byte ceiling as cluster config facts, but build
+  the process-shared client only once. If a later request presents a different
+  connect timeout, fail loudly and require claimant restart rather than
+  silently creating a second client authority.
+- **A named cluster still consumes shared build prerequisites.** The first
+  `u6bleaf` open found a stale canonical watcher and absent writer; prerequisite
+  reconciliation then stopped on an unrelated in-flight
+  `seon.schema/runtime-predicate` CLJS compile error. Preserve the focused JVM
+  socket/CAS gate and retry the live proof only after the owning source lane
+  commits; do not patch its files or spend provider calls against a stale
+  artifact.
