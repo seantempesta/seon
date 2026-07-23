@@ -3,6 +3,7 @@
   (:require [clojure.edn :as edn]
             [my.blob.schema]
             [seon.agent.driver.host :as driver.host]
+            [seon.ai.http :as ai.http]
             [seon.db.branch :as db.branch]
             [seon.db.host :as db.host]
             [seon.db.transport.uds :as uds]
@@ -298,6 +299,7 @@
                      ::contexts contexts
                      ::eval-pool eval-pool
                      ::watchdog watchdog
+                     :seon.agent.driver/llm-transport! ai.http/complete
                      ::socket-path socket-path})
         acceptor
         (Thread.

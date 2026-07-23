@@ -167,3 +167,81 @@
     {:prompt_tokens prompt-tokens
      :completion_tokens completion-tokens
      :total_tokens (+ prompt-tokens completion-tokens)}))
+
+(defn- stream-step
+  "Fold one OpenAI-compatible SSE event into ordinary completion data."
+  [state event]
+  (let [choice (-> event :choices first)
+        delta (get-in choice [:delta :content])]
+    (cond-> state
+      (string? delta) (update :seon.ai.http/text str delta)
+      (:usage event) (assoc :seon.ai.http/usage (:usage event))
+      (:finish_reason choice)
+      (assoc :seon.ai.http/finish-reason (:finish_reason choice))
+      (:id event) (assoc :seon.ai.http/id (:id event))
+      (:model event) (assoc :seon.ai.http/model (:model event))
+      (:system_fingerprint event)
+      (assoc :seon.ai.http/system-fingerprint (:system_fingerprint event)))))
+
+(defn complete
+  "Execute one OpenAI-compatible request through a native HTTP leaf."
+  {:malli/schema
+   [:=> [:catn [::request :map] [::native-request 'fn?]] :map]}
+  [request native-request!]
+  (let [resolution (:seon.ai/config-resolution request)
+        config (:seon.ai/resolved-config resolution)
+        stream? (boolean (:seon.ai/stream? request))
+        result
+        (native-request!
+         {:seon.ai.http/endpoint
+          (ai/openai-chat-endpoint (:seon.ai/base-url config))
+          :seon.ai.http/credential-candidates
+          (ai/credential-candidates resolution)
+          :seon.ai.http/config-resolution resolution
+          :seon.ai.http/credential-header "Authorization"
+          :seon.ai.http/credential-prefix "Bearer "
+          :seon.ai.http/headers {"Content-Type" "application/json"
+                                 "Accept" (if stream?
+                                            "text/event-stream"
+                                            "application/json")}
+          :seon.ai.http/body
+          (merge (request-params request resolution)
+                 (:seon.ai/extra-body resolution)
+                 (:seon.ai/extra-body request))
+          :seon.ai.http/request-timeout-ms
+          (:seon.ai/request-timeout-ms request)
+          :seon.ai.http/connect-timeout-ms
+          (:seon.config.model-transport/connect-timeout-ms config)
+          :seon.ai.http/maximum-response-bytes
+          (:seon.config.model-transport/maximum-response-bytes config)
+          :seon.ai.http/stream? stream?
+          :seon.ai.http/stream-initial {:seon.ai.http/text ""}
+          :seon.ai.http/stream-step stream-step
+          :seon.ai.http/stream-abort?
+          #(ai/first-form-complete? (:seon.ai.http/text %))})]
+    (if (:seon.ai/error result)
+      result
+      (if stream?
+        (let [text (:seon.ai.http/text result)
+              usage (:seon.ai.http/usage result)
+              body
+              (cond->
+               {:choices
+                [{:message {:content text}
+                  :finish_reason (:seon.ai.http/finish-reason result)}]}
+                usage (assoc :usage usage)
+                (:seon.ai.http/id result) (assoc :id (:seon.ai.http/id result))
+                (:seon.ai.http/model result)
+                (assoc :model (:seon.ai.http/model result))
+                (:seon.ai.http/system-fingerprint result)
+                (assoc :system_fingerprint
+                       (:seon.ai.http/system-fingerprint result)))
+              response (parse-completion body resolution)]
+          (cond-> (merge response
+                         (select-keys result [:seon.ai/config-evidence]))
+            (or (:seon.ai.http/aborted? result) (nil? usage))
+            (assoc :seon.ai/usage (estimated-usage request text)
+                   :seon.ai/estimated? true)))
+        (merge
+         (parse-completion (:seon.ai.http/body result) resolution)
+         (select-keys result [:seon.ai/config-evidence]))))))

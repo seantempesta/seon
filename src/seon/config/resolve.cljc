@@ -210,12 +210,30 @@
   [:int {:min 1}])
 (schema/register! :seon.config.model-transport/endpoint-cap
   [:int {:min 1}])
+(def model-transport-dial-schemas
+  "JVM LLM HTTP policy, including units and R27 calibration provenance."
+  {:seon.config.model-transport/connect-timeout-ms
+   [:int
+    {:min 1
+     :description
+     "Milliseconds before HttpClient connection establishment fails. Default :seon.config.model-transport/connect-timeout-ms 300000 is a protective ceiling above the invocation request deadline."}]
+   :seon.config.model-transport/maximum-response-bytes
+   [:int
+    {:min 1
+     :description
+     "Maximum buffered or streamed provider response bytes. Default :seon.config.model-transport/maximum-response-bytes 16777216 is over 100x an expected 4096-token response."}]})
+(doseq [[attribute form] model-transport-dial-schemas]
+  (schema/register! attribute form))
 (schema/register! :seon.config/model-transport
   [:map
    [:seon.config.model-transport/response-identity-cap
     {:optional true} :seon.config.model-transport/response-identity-cap]
    [:seon.config.model-transport/endpoint-cap
-    {:optional true} :seon.config.model-transport/endpoint-cap]])
+    {:optional true} :seon.config.model-transport/endpoint-cap]
+   [:seon.config.model-transport/connect-timeout-ms
+    {:optional true} :seon.config.model-transport/connect-timeout-ms]
+   [:seon.config.model-transport/maximum-response-bytes
+    {:optional true} :seon.config.model-transport/maximum-response-bytes]])
 
 (def web-render-dial-schemas
   "JVM web-render runtime policy, including units and calibration provenance."
@@ -958,6 +976,10 @@
     {:optional true} :seon.config.model-transport/response-identity-cap]
    [:seon.config.model-transport/endpoint-cap
     {:optional true} :seon.config.model-transport/endpoint-cap]
+   [:seon.config.model-transport/connect-timeout-ms
+    {:optional true} :seon.config.model-transport/connect-timeout-ms]
+   [:seon.config.model-transport/maximum-response-bytes
+    {:optional true} :seon.config.model-transport/maximum-response-bytes]
    [:seon.config.web-render/heartbeat-interval-ms
     {:optional true} :seon.config.web-render/heartbeat-interval-ms]
    [:seon.config.web-render/mailbox-depth
@@ -1949,6 +1971,12 @@
       (contains? transport :seon.config.model-transport/endpoint-cap)
       (assoc :seon.config.model-transport/endpoint-cap
              (:seon.config.model-transport/endpoint-cap transport))
+      (contains? transport :seon.config.model-transport/connect-timeout-ms)
+      (assoc :seon.config.model-transport/connect-timeout-ms
+             (:seon.config.model-transport/connect-timeout-ms transport))
+      (contains? transport :seon.config.model-transport/maximum-response-bytes)
+      (assoc :seon.config.model-transport/maximum-response-bytes
+             (:seon.config.model-transport/maximum-response-bytes transport))
       (seq (:seon.config/model-variants manifest))
       (assoc :seon.config/model-variants
              (into []

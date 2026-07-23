@@ -5,6 +5,7 @@
    #?(:clj [clojure.edn :as reader]
       :cljs [cljs.reader :as reader])
    [seon.content-hash :as content-hash]
+   [seon.repl.parse :as repl.parse]
    [seon.schema :as schema])
   #?(:clj
      (:import
@@ -47,7 +48,8 @@
    :anthropic      {:seon.ai/model "claude-opus-4-8"
                     :seon.ai/max-tokens 16000
                     :seon.ai/thinking "false"
-                    :seon.ai/timeout-ms 60000}
+                    :seon.ai/timeout-ms 60000
+                    :seon.ai/base-url "https://api.anthropic.com/v1"}
    :diffusiongemma {:seon.ai/dg-backend :control}})
 
 (def system-boundary
@@ -69,37 +71,84 @@
   [message response-identity-cap]
   (subs message 0 (min response-identity-cap (count message))))
 
+(declare openai-chat-endpoint)
+
 (defn openai-request-endpoint
   "Return bounded, credential-free chat-completions endpoint evidence."
   [url endpoint-cap]
   (try
-    (let [parsed #?(:clj (URI. url) :cljs (js/URL. url))
-          path #?(:clj (.getPath ^URI parsed) :cljs (.-pathname parsed))
-          root-path
-          (cond
-            (str/ends-with? path "/chat/completions")
-            (subs path 0 (- (count path) (count "/chat/completions")))
-
-            (str/ends-with? path "/completions")
-            (subs path 0 (- (count path) (count "/completions")))
-
-            :else path)
-          endpoint-path
-          (str (str/replace root-path #"/+$" "") "/chat/completions")
-          endpoint
-          #?(:clj
-             (let [port (.getPort ^URI parsed)]
-               (str (.getScheme ^URI parsed) "://" (.getHost ^URI parsed)
-                    (when (not= -1 port) (str ":" port))
-                    endpoint-path))
-             :cljs
-             (str (.-protocol parsed) "//" (.-host parsed) endpoint-path))]
+    (let [endpoint (openai-chat-endpoint url)]
       (if (<= (count endpoint) endpoint-cap)
         endpoint
         {:seon.ai/msg
          "The normalized OpenAI endpoint exceeds the evidence bound."}))
     (catch #?(:clj Throwable :cljs :default) _
       {:seon.ai/msg "The configured OpenAI endpoint is not a valid URL."})))
+
+(defn openai-chat-endpoint
+  "Normalize an OpenAI-compatible base URL to its completion endpoint."
+  [url]
+  (let [parsed #?(:clj (URI. url) :cljs (js/URL. url))
+        path #?(:clj (.getPath ^URI parsed) :cljs (.-pathname parsed))
+        root-path
+        (cond
+          (str/ends-with? path "/chat/completions")
+          (subs path 0 (- (count path) (count "/chat/completions")))
+
+          (str/ends-with? path "/completions")
+          (subs path 0 (- (count path) (count "/completions")))
+
+          :else path)
+        endpoint-path
+        (str (str/replace root-path #"/+$" "") "/chat/completions")]
+    #?(:clj
+       (let [port (.getPort ^URI parsed)]
+         (str (.getScheme ^URI parsed) "://" (.getHost ^URI parsed)
+              (when (not= -1 port) (str ":" port))
+              endpoint-path))
+       :cljs
+       (str (.-protocol parsed) "//" (.-host parsed) endpoint-path))))
+
+(defn credential-candidates
+  "Ordered environment-variable names and non-secret credential classes."
+  [resolution]
+  (let [config (:seon.ai/resolved-config resolution)
+        provider (:seon.ai/provider config)
+        configured (:seon.ai/api-key-env config)]
+    (cond-> []
+      configured
+      (conj [configured :configured-env])
+
+      (= :deepseek provider)
+      (conj ["DEEPSEEK_API_KEY" :provider-default-env])
+
+      (= :anthropic provider)
+      (conj ["ANTHROPIC_API_KEY" :provider-default-env])
+
+      true
+      (conj ["SEON_AI_API_KEY" :conventional-env]))))
+
+(defn config-evidence
+  "Bounded non-secret evidence for one resolution and credential source."
+  {:malli/schema
+   [:function
+    [:=> [:catn [::resolution :map]] :map]
+    [:=> [:catn [::resolution :map] [::credential-source :map]] :map]]}
+  ([resolution]
+   (select-keys resolution
+                [:seon.ai/resolved-config :seon.ai/provenance]))
+  ([resolution credential-source]
+   (assoc (config-evidence resolution)
+          :seon.ai/credential-source credential-source)))
+
+(defn first-form-complete?
+  "Whether streamed text contains a reader-confirmed top-level form."
+  {:malli/schema [:=> [:catn [::text :string]] :boolean]}
+  [text]
+  (boolean
+   (and (repl.parse/first-top-level-close text)
+        (some #(= :form (:seon.repl/kind %))
+              (repl.parse/parse-forms text)))))
 
 (def ^:private config-attrs
   [:seon.ai/provider
@@ -129,7 +178,9 @@
 
 (def ^:private model-transport-cap-attrs
   [:seon.config.model-transport/response-identity-cap
-   :seon.config.model-transport/endpoint-cap])
+   :seon.config.model-transport/endpoint-cap
+   :seon.config.model-transport/connect-timeout-ms
+   :seon.config.model-transport/maximum-response-bytes])
 
 (defn agent-config-pull-pattern
   "Pull pattern for one agent's ordinary model overrides and phase policy."

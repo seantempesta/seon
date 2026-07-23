@@ -141,8 +141,16 @@
  :seon.config/model-transport
  {:seon.config.model-transport/response-identity-cap
   #long #or [#env SEON_MODEL_RESPONSE_IDENTITY_CAP 512]
-  :seon.config.model-transport/endpoint-cap
-  #long #or [#env SEON_MODEL_ENDPOINT_CAP 2048]}
+ :seon.config.model-transport/endpoint-cap
+  #long #or [#env SEON_MODEL_ENDPOINT_CAP 2048]
+  ;; The request deadline normally wins; this protects otherwise unbounded
+  ;; connection establishment and remains well above expected connect P99.9.
+  :seon.config.model-transport/connect-timeout-ms
+  #long #or [#env SEON_MODEL_CONNECT_TIMEOUT_MS 300000]
+  ;; 16 MiB is over 100x a normal 4096-token completion while still bounding
+  ;; malformed or hostile provider responses.
+  :seon.config.model-transport/maximum-response-bytes
+  #long #or [#env SEON_MODEL_MAXIMUM_RESPONSE_BYTES 16777216]}
 
  ;; ── JVM WEB-RENDER TIER ──
  ;; Heartbeat 15s and mailbox depth 1 port the measured pod SSE policy.
