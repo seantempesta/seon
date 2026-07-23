@@ -1027,3 +1027,8 @@ the anchor stays the state ledger.
   queries filter private rows, while explicit full-namespace source remains
   drillable. Third-party functions remain structurally outside the corpus and
   can appear only as artifact-internal terminals.
+- **Do not infer privacy from an unresolved predicate name.** The fresh paged
+  reset exposed an unresolved `seon.db.protocol/ordinary-wire-value?`, but the
+  source and build analysis both classify that function as public. Attribute
+  the failure to schema projection or SCI predicate binding from those facts;
+  changing private-row publication would conceal a separate acquisition bug.

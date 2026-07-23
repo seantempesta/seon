@@ -1,6 +1,6 @@
 ---
 type: issue
-status: active
+status: resolved
 tags: [issue, runtime, architecture]
 ---
 
@@ -20,3 +20,10 @@ preventing exact JVM placement.
   compiled terminal.
 - The inventory digest remains derived solely from installed binding
   descriptors; adding the tier field does not create another enumerator.
+
+## Resolution
+
+Commit `a332ecb5f` retains the tier on the canonical installer inventory,
+projects the JVM claimant inventory from that one registry enumerator, and
+passes the inventory to planner acquisition. The dual-tier planner regression
+places real compiled-only terminals exactly on both JVM and Bun inventories.

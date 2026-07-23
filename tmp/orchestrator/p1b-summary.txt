@@ -1,0 +1,95 @@
+P1B PER-ARTIFACT INVENTORY HANDOFF — 2026-07-23
+================================================
+
+Verdict
+-------
+
+IMPLEMENTED. Every supported CLJS artifact build publishes one deterministic
+function inventory derived from Shadow's exact build sources and analyzer
+state. The JVM claimant publishes the existing host-binding registry
+enumerator as its artifact inventory, preserving that enumerator's digest.
+Planner acquisition consumes both real tier inventories. R39 first-party
+private functions now retain source-bearing corpus rows with presence-only
+`:seon.fn/private? true`, while third-party functions remain outside the
+corpus.
+
+Commits
+-------
+
+- 3fdde32d4 feat(build): publish artifact function inventories
+- a332ecb5f feat(runtime): acquire exact artifact inventories
+- fcffcdfdf fix(index): exclude vendored dependencies from public corpus
+- 2b97ebbe1 fix(index): keep private rows out of callable contracts
+- d3fada21e test(index): prove private contracts stay absent
+- 3acb02c1c Page fresh database initialization (required paging dependency)
+
+Implemented contracts
+---------------------
+
+- Shadow flush hooks select exact `:build-sources`, reuse
+  `seon.client.indexing/analyzer-fn-inventory`, and publish sidecars for the
+  default, ACME, bench, execution, and release builds.
+- Client and execution inventory digests enter the artifact manifest and
+  application digest. Tests prove changing an export changes both inventory
+  and application identity.
+- `seon.capability/installed-artifact-inventory` is the JVM artifact authority:
+  it projects the one wrapper/host-binding registry enumerator and preserves
+  its digest. A separate JVM analyzer is allowed only after a reachable
+  compiled terminal is proven absent.
+- Host launch carries the Bun inventory, merges it with the claimant-local JVM
+  inventory, and supplies both to `acquire-planning-projection`.
+- The P2 compiled-only fixture changes from steering to exact constrained
+  placement with real inventories on both JVM and Bun tiers.
+- First-party private functions carry source and `:seon.fn/private? true` but
+  no callable contract. Public rows omit the privacy attribute. Default
+  namespace/menu projections omit private rows; full namespace source drill
+  reaches them. The source boundary is repository `src/` plus
+  `SEON_EXTRA_SRC`, so vendored `reference-code/` is structurally third-party.
+
+Evidence
+--------
+
+- Build/config/release suite: 57 tests, 302 assertions, green.
+- Planner writer suite: 11 tests, 55 assertions, green.
+- Indexing boundary JVM regression: 1 test, 3 assertions, green.
+- Focused CLJS suite: all P1b/R39/planner assertions passed; the combined run
+  finished 66 tests and 367 assertions with one failure and one error in the
+  pre-existing namespace-doc fixture because its compiled `seon.warn` row had
+  stale source metadata (`tmp/test-cljs-20260723-140301-5967.log`).
+- The broad host-registry suite currently fails its unrelated authored-eval
+  parity fixture after rejecting a schema-less saved function; the focused
+  planner writer suite is green.
+- Real rebuilt `out/client/program-inventory.edn`: 1,390 public exports,
+  6,311 internal terminals, and 1,618 first-party private functions.
+- The real sidecar classifies
+  `seon.db.protocol/ordinary-wire-value?` as a public export and contains no
+  vendored `datahike.*` public export.
+- The paged initialization dependency proved a 10x corpus population
+  (69,340 synthetic program rows, 1,092 pages, largest request 337,203 bytes)
+  below the 4 MiB frame limit.
+
+Live reset boundary
+-------------------
+
+The combined fresh reset passed the former oversized-frame boundary, accepted
+all initialization pages, committed completion, and advanced into SCI program
+reconstruction. It then stopped on:
+
+  Unable to resolve symbol: seon.db.protocol/ordinary-wire-value?
+
+Evidence is in `tmp/orchestrator/initpage-up.log` and
+`logs/operator/pod/3086e8fc-d146-4138-b96c-4d8d83405eea.log`.
+That predicate is a public `defn`, registered core predicate, and public build
+export. This is therefore a protected schema-projection/SCI predicate-binding
+bug exposed after paging, not an R39 private-row regression. It is recorded in
+`docs/seon/issues/paged-initialization-misses-public-core-predicate-binding.md`.
+The cluster was shut down through `bin/seon down`.
+
+Remaining scoped issue
+----------------------
+
+`docs/seon/issues/private-function-presence-law-incomplete.md` retains the two
+out-of-lane R39 follow-ups: authored public eval rows still store
+`:seon.fn/private? false`, and the generic namespace entity-card renderer does
+not yet omit private members. P1b's owned boot index and default agent-facing
+namespace/menu surfaces satisfy the requested presence and omission laws.
