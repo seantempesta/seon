@@ -2,6 +2,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [sci.core :as sci]
             [sci.ctx-store]
+            [seon.host.eval :as eval]
             [seon.host.guard :as guard]))
 
 (defn- policy [fuel]
@@ -47,3 +48,26 @@
         (is (= 6 (guard/steps-used holder)))
         (is (= 5 (get-in steering
                          [:seon.error/data ::guard/initial-fuel])))))))
+
+(deftest captured-output-crossing-stops-the-eval
+  (let [holder (guard/holder)
+        ctx (assoc (sci/init {:interrupt-fn (guard/interrupt-fn holder)})
+                   ::guard/holder holder
+                   :interrupt-fn (guard/interrupt-fn holder))
+        session {:seon.host.session/interrupt-lock (Object.)
+                 :seon.host.session/interrupt-fired? (atom false)
+                 :seon.host.session/worker-phase (atom :idle)}
+        envelope
+        (guard/call!
+         {::guard/holder holder
+          ::guard/policy (policy 1000)
+          ::guard/evaluate!
+          #(eval/eval-form! session ctx 'user
+                            "(do (print \"abcdefghijklmnop\") :unreached)"
+                            8)})]
+    (is (false? (:seon.eval/ok? envelope)))
+    (is (:seon.eval/interrupted? envelope))
+    (is (= :agent (get-in envelope [:seon/error :seon.error/kind])))
+    (is (= :seon.config.guard/output-cap
+           (get-in envelope
+                   [:seon/error :seon.error/data ::guard/config-key])))))
