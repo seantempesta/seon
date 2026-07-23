@@ -1084,6 +1084,21 @@ receipt layer, never by fn bodies; kept as an optional response key
 (orchestrator recommendation) — owner may demote it to
 recovery-internal later; flag any friction.
 
+**OWNER DIRECTION (2026-07-23 morning): CLJ execution is the
+destination — async does not survive onto the execution path.** The
+demo already default-routes evals to the JVM sci host (Bun only for
+seon.packages.js.* — "only the JS we can't port"). NEXT SPINE UNIT
+(dispatch after meta-strip lands; same files): **JVM leaves for
+fs/shell/web/blob** + host registry bindings so sci evals do real
+effects natively (java.nio / ProcessBuilder / http / publication —
+consumer now exists; the P2 deferral is over). Its FIRST task is the
+honesty check: verify from RECEIPTS where the demo's fs/shell/web
+"successes" actually executed (host leaves for those families do not
+exist yet — turn-JSON mentions may be rendered context, not
+execution). Acceptance: demo scenario rerun with fs/shell/web/blob
+receipts provably on the sci host tier. The pod's async ceremony
+remains only for pod-internal callers (UI/LLM/scheduler residue).
+
 Next-session queue, in order: (1) my.* porting from the MEASURED
 working set (my.plan plan!/done!/tree · my.ns/functions — receipts
 only, list in the loop-slice report); (2) seam observability
