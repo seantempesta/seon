@@ -151,6 +151,30 @@
     (is (true? (:seon.host.preflight/ok? result)))
     (is (nil? (sci/resolve ctx 'my.agent.preflight/disposable-definition)))))
 
+(deftest durable-defn-requires-a-complete-contract-before-eval
+  (let [ctx (context-with-known-symbols)
+        source "(defn uncontracted [value] value)"
+        result
+        (preflight/preflight!
+         ctx nil home-ns home-ns
+         (assoc default-policy :seon.config.repair/level :off)
+         source)]
+    (is (= :terminal (:seon.host.preflight/status result)))
+    (is (re-find #"register named data schemas first"
+                 (get-in result
+                         [:seon.host.preflight/envelope
+                          :seon/error :seon.error/message])))
+    (is (nil? (sci/resolve ctx 'my.agent.preflight/uncontracted))
+        "the terminal preflight envelope leaves the form unexecuted"))
+  (let [ctx (context-with-known-symbols)
+        result
+        (preflight/preflight!
+         ctx nil 'user 'user
+         (assoc default-policy :seon.config.repair/level :off)
+         "(defn scratch-value [value] value)")]
+    (is (= :skipped (:seon.host.preflight/status result))
+        "the tee's exact scratch namespace set remains exempt")))
+
 (deftest delimiter-repair-emits-owner-defined-changes-and-exact-source
   (let [ctx (context-with-known-symbols)
         repaired (preflight/repair-read-entry

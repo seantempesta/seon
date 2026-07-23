@@ -218,6 +218,10 @@
           [nil nil (keyword "seon.error.kind"
                             (str "malli-" (name (or report-type :unknown))))])
         exp        (when explain-schema (m/explain explain-schema explain-value))
+        exp        (when exp
+                     (me/with-spell-checking
+                       exp
+                       {:keep-likely-misspelled-of true}))
         leafs      (vec (:errors exp))
         first-leaf (first leafs)
         leaf-value (when first-leaf

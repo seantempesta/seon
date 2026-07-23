@@ -24,6 +24,28 @@
 (schema/register! ::tokens :int)
 (schema/register! ::chars :int)
 
+(defn printable-value?
+  "True when `value` can be printed as bounded diagnostic data."
+  [value]
+  (try
+    (binding [*print-level* 8
+              *print-length* 32]
+      (string? (pr-str value)))
+    (catch #?(:clj Throwable :cljs :default) _
+      false)))
+
+(schema/register-core-predicate!
+ 'seon.ai.tokens/printable-value?
+ printable-value?)
+
+(schema/register!
+ ::printable-value
+ [:fn {:error/message "must be printable diagnostic data"
+       :gen/schema
+       [:or :nil :boolean :int :double :string :keyword :symbol
+        [:vector {:max 8} [:or :nil :boolean :int :string :keyword]]]}
+  'seon.ai.tokens/printable-value?])
+
 (defn chars->tokens
   "Estimate tokens from an already-measured character count `n`.
 
@@ -218,13 +240,14 @@
    branch retains the historical bounded-output behavior. The returned flag
    reports only the character/writer cap; callers derive structural
    completeness from their bounded sampler."
-  {:malli/schema [:=> [:catn [::value :any] [::budget ::budget]]
+  {:malli/schema [:=> [:catn [::value ::printable-value] [::budget ::budget]]
                   ::bounded-print-result]}
   [v budget]
   (capped-pr-str v (estimate-chars budget)))
 
 (defn bounded-pr-str
   "Bounded printed text for `v` within token `budget`."
-  {:malli/schema [:=> [:catn [::value :any] [::budget ::budget]] ::text]}
+  {:malli/schema
+   [:=> [:catn [::value ::printable-value] [::budget ::budget]] ::text]}
   [v budget]
   (::text (bounded-pr-str-result v budget)))

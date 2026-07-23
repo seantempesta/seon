@@ -6,14 +6,18 @@
    [seon.schema :as schema]))
 
 (def ^:private schema-query
-  '[:find ?key ?form :where
+  '[:find ?key ?form (pull ?tx ?provenance-pattern)
+    :in $ ?provenance-pattern
+    :where
     [?schema :seon.schema/key ?key]
-    [?schema :seon.schema/form ?form]])
+    [?schema :seon.schema/form ?form ?tx]])
 
 (def ^:private function-contract-query
-  '[:find ?sym ?form :where
+  '[:find ?sym ?form (pull ?tx ?provenance-pattern)
+    :in $ ?provenance-pattern
+    :where
     [?function :seon.fn/sym ?sym]
-    [?function :seon.fn/spec ?form]])
+    [?function :seon.fn/spec ?form ?tx]])
 
 (defn- db-error? [value]
   (and (map? value) (string? (:seon.error/message value))))
@@ -38,9 +42,14 @@
   (let [results
         (await
          (js/Promise.all
-          #js [(db/query {::db/db database ::db/query schema-query})
+          #js [(db/query {::db/db database
+                          ::db/query schema-query
+                          ::db/args
+                          [schema/asserting-transaction-provenance-pattern]})
                (db/query {::db/db database
-                          ::db/query function-contract-query})]))
+                          ::db/query function-contract-query
+                          ::db/args
+                          [schema/asserting-transaction-provenance-pattern]})]))
         [schema-rows function-contract-rows] (array-seq results)]
     (when (some db-error? [schema-rows function-contract-rows])
       (throw (js/Error. "program projection unavailable")))

@@ -14,7 +14,140 @@
   (:require [clojure.string :as str]
             [malli.core :as m]
             [malli.registry :as mr]
+            [malli.util :as mu]
             [seon.schema.form :as form]))
+
+(def ^:private undefined-types #{:any :some :nil})
+
+(defn- contract-error!
+  [identity definition path error message data]
+  (throw
+   (ex-info
+    message
+    (merge
+     {:seon.schema/error error
+      :seon.schema/identity identity
+      :seon.schema/definition definition
+      :seon.schema/path (vec path)
+      :seon.error/kind :user-input}
+     data))))
+
+(defn- guarded-predicate-symbol
+  [schema]
+  (let [definition (m/form schema)
+        body (if (map? (second definition))
+               (drop 2 definition)
+               (rest definition))]
+    (first body)))
+
+(defn- guarded-predicate-properties-complete?
+  [properties]
+  (and (or (and (string? (:error/message properties))
+                (not (str/blank? (:error/message properties))))
+           (some? (:error/fn properties)))
+       (or (contains? properties :gen/schema)
+           (contains? properties :gen/elements)
+           (contains? properties :gen/return))))
+
+(defn- map-value-maybe?
+  [compiled path]
+  (when (seq path)
+    (some-> (mu/get-in compiled (pop (vec path)))
+            m/type
+            (= :map))))
+
+(defn assert-complete-schema!
+  "Reject incomplete positions in one compiled schema.
+
+   Canonical references are not followed here; `seon.schema` recursively
+   validates them with each referenced declaration's own admission source.
+   Returns advisory findings that remain non-terminal."
+  [{:seon.schema/keys [identity definition compiled role admission
+                       pure-predicate-symbols canonical-keys]}]
+  (let [agent-authored?
+        (= :agent (:seon.schema.admission/source admission))
+        advisories (volatile! [])
+        walk-options
+        {::m/walk-schema-refs #(not (contains? canonical-keys %))
+         ::m/walk-refs #(not (contains? canonical-keys %))}]
+    (m/walk
+     compiled
+     (fn [schema path _children _options]
+       (let [schema-type (m/type schema)
+             properties (or (m/properties schema) {})]
+         (when (and agent-authored? (contains? undefined-types schema-type))
+           (contract-error!
+            identity definition path :seon.schema/undefined-contract
+            (str identity " uses " schema-type
+                 " in an agent-authored contract. Replace the undefined slot "
+                 "with a named predicate schema, for example "
+                 "(schema/register! ::value "
+                 "[:fn {:error/message \"must be ...\" "
+                 ":gen/schema :string} 'my.domain/value?]).")
+            {:seon.schema/schema-type schema-type}))
+         (when (and agent-authored?
+                    (= :input role)
+                    (= :map schema-type)
+                    (not (true? (:closed properties))))
+           (contract-error!
+            identity definition path :seon.schema/open-argument-map
+            (str identity
+                 " has an open agent-authored argument map. Declare "
+                 "`{:closed true}` on every input map; `malli.util/closed-schema` "
+                 "shows the recursively closed shape, but admission will not "
+                 "rewrite the authored contract.")
+            {}))
+         (when (and agent-authored? (= :fn schema-type))
+           (let [predicate (guarded-predicate-symbol schema)]
+             (when-not (and (qualified-symbol? predicate)
+                            (guarded-predicate-properties-complete? properties))
+               (contract-error!
+                identity definition path
+                :seon.schema/incomplete-predicate-contract
+                (str identity
+                     " uses a predicate schema without a qualified predicate, "
+                     "a nonblank `:error/message`/`:error/fn`, and a bounded "
+                     "`:gen/schema`, `:gen/elements`, or `:gen/return`.")
+                {:seon.schema/predicate predicate}))
+             (when (and agent-authored?
+                        (not (contains? pure-predicate-symbols predicate)))
+               (contract-error!
+                identity definition path
+                :seon.schema/unproved-predicate-purity
+                (str identity " references predicate " predicate
+                     ", but its existing program-graph call edges do not yet "
+                     "prove a pure, capability-free transitive call graph. "
+                     "Keep the predicate as a separately schema'd corpus "
+                     "function, then re-register this contract after the "
+                     "execution planner admits that graph.")
+                {:seon.schema/predicate predicate}))))
+         (when (= :maybe schema-type)
+           (cond
+             (map-value-maybe? compiled path)
+             (contract-error!
+              identity definition path :seon.schema/nilable-map-value
+              (str identity
+                   " uses `[:maybe ...]` as a map value. Optional means the "
+                   "key is absent: remove `:maybe` and put "
+                   "`{:optional true}` on the map entry.")
+              {})
+
+             (and (= :output role) (empty? path))
+             (contract-error!
+              identity definition path :seon.schema/nilable-return
+              (str identity
+                   " has a bare nilable return. Return a closed result/error "
+                   "envelope, an empty collection, or an explicit named sum.")
+              {})
+
+             :else
+             (vswap! advisories conj
+                     {:seon.schema.advisory/kind :seon.schema.advisory/maybe
+                      :seon.schema/identity identity
+                      :seon.schema/path (vec path)})))
+         schema))
+     walk-options)
+    @advisories))
 
 (defn identity-attr?
   "True when the schema form for `attr-key` in `schemas` carries
@@ -87,12 +220,14 @@
    ex-info naming the key, the bad form, and common storable types.
    Requires every referenced schema to exist in the complete population,
    without depending on declaration order or Malli's process-global default."
-  [schemas k v]
-  (try
+  ([schemas k v]
+   (assert-compilable-schema! schemas k v {}))
+  ([schemas k v compile-options]
+   (try
     (let [registry (mr/composite-registry
-                     (m/default-schemas)
-                     (mr/fast-registry (assoc schemas k v)))]
-      (m/schema k {:registry registry}))
+                    (m/default-schemas)
+                    (mr/fast-registry (assoc schemas k v)))]
+      (m/schema k (assoc compile-options :registry registry)))
     nil
     (catch #?(:clj Exception :cljs :default) e
       (throw (ex-info
@@ -109,7 +244,7 @@
                 :seon.schema/key   k
                 :seon.schema/definition v
                 :seon.error/kind   :user-input}
-               e)))))
+               e))))))
 
 (defn assert-non-nilable-value-schema!
   "Projection-build gate: reject a top-level nilable value schema whose inner

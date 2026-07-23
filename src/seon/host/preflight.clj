@@ -6,6 +6,8 @@
             [sci.impl.analyzer :as analyzer]
             [seon.config.resolve :as config.resolve]
             [seon.error.sci :as error.sci]
+            [seon.host.record :as record]
+            [seon.schema :as schema]
             [seon.repl.parse.repair :as repair]))
 
 (set! *warn-on-reflection* true)
@@ -212,13 +214,69 @@
    :seon.host.preflight/envelope
    (error-envelope ctx home-ns throwable suggestions ambiguous?)})
 
+(defn- defn-contract [form]
+  (when (and (seq? form)
+             (#{'defn 'defn-} (first form))
+             (symbol? (second form)))
+    (let [fn-name (second form)
+          body (drop 2 form)
+          body (if (string? (first body)) (rest body) body)
+          attr-map (when (map? (first body)) (first body))]
+      {:seon.host.preflight/function-name fn-name
+       :seon.host.preflight/schema
+       (or (:malli/schema (meta fn-name))
+           (:malli/schema attr-map))})))
+
+(defn- durable-defn-admission
+  [retained-ctx home-ns ns-sym source]
+  (when-not (contains? record/transient-ns-syms ns-sym)
+    (let [form (try
+                 (sci/parse-string retained-ctx source)
+                 (catch Throwable _ nil))]
+      (when-let [{:seon.host.preflight/keys [function-name schema]}
+                 (defn-contract form)]
+        (if-not schema
+          (terminal
+           retained-ctx home-ns
+           (ex-info
+            (str ns-sym "/" function-name
+                 " needs a parseable `:malli/schema` before it can be saved. "
+                 "Design and register named data schemas first with "
+                 "`(schema/register! :my.domain/value ...)`, then attach a "
+                 "complete function contract and evaluate the `defn` again. "
+                 "The form did not run.")
+            {:seon.schema/error :seon.schema/missing-durable-contract
+             :seon.error/kind :user-input})
+           [] false)
+          (try
+            (let [projection (schema/current-projection)]
+              (schema/assert-complete-contract!
+               {:seon.schema/identity
+                (symbol (str ns-sym) (str function-name))
+                :seon.schema/definition schema
+                :seon.schema/forms (schema/snapshot)
+                :seon.schema/admission
+                {:seon.schema.admission/source :agent}
+                :seon.schema/admissions
+                (:seon.schema.projection/schema-admissions projection)
+                :seon.schema/pure-predicate-symbols
+                (:seon.schema.projection/pure-predicate-symbols projection)})
+              nil)
+            (catch Throwable throwable
+              (terminal retained-ctx home-ns throwable [] false))))))))
+
 (defn preflight!
   "Run budgeted symbol preflight against disposable SCI forks."
   {:malli/schema [:=> [:cat :any :any :symbol :symbol :map :string] :map]}
   [retained-ctx registry home-ns ns-sym configuration source]
-  (let [policy (repair-policy configuration)]
-    (if-not (eligible? policy retained-ctx source)
+  (let [policy (repair-policy configuration)
+        durable-terminal
+        (durable-defn-admission retained-ctx home-ns ns-sym source)]
+    (cond
+      durable-terminal durable-terminal
+      (not (eligible? policy retained-ctx source))
       {:seon.host.preflight/status :skipped}
+      :else
       (let [started-at (System/nanoTime)
             budget-ms (:seon.config.repair/budget-ms policy)
             over? #(> (/ (double (- (System/nanoTime) started-at)) 1000000.0)

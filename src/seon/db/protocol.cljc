@@ -181,6 +181,18 @@
 
 ;;; Shared schemas
 
+(schema/register-core-predicate!
+ 'seon.db.protocol/ordinary-wire-value?
+ ordinary-wire-value?)
+
+(schema/register!
+ ::ordinary-wire-value
+ [:fn {:error/message "must be eager ordinary protocol data"
+       :gen/schema
+       [:or :nil :boolean :int :double :string :keyword :symbol
+        [:vector {:max 8} [:or :nil :boolean :int :string :keyword]]]}
+  'seon.db.protocol/ordinary-wire-value?])
+
 (defn- one-temporal-bound?
   [value]
   (not (and (some? (:as-of value))
@@ -221,9 +233,9 @@
 ;; Datahike query and pull values are intentionally polymorphic data. The
 ;; canonical request/response validators apply `ordinary-wire-value?`
 ;; recursively while preserving native result shapes and legitimate bare keys.
-(schema/register! ::result :any)
-(schema/register! ::arguments [:vector :any])
-(schema/register! ::selector :any)
+(schema/register! ::result ::ordinary-wire-value)
+(schema/register! ::arguments [:vector ::ordinary-wire-value])
+(schema/register! ::selector ::ordinary-wire-value)
 (schema/register! ::entity-id :any)
 (schema/register! ::query-form
                   [:or [:vector :any] :map [:string {:min 1}]])

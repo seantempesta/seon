@@ -621,9 +621,12 @@
           test-rows
           [["my.agent.agent-1/check" "(deftest check (is true))"
             'my.agent.agent-1]]
-          schema-rows [[:my/value ":int"]]
+          asserting-tx
+          {:seon.db/process {:seon.db.process/id :seon.db.process/boot}}
+          schema-rows [[:my/value ":int" asserting-tx]]
           contract-rows
-          [["my.agent.agent-1/run" "[:=> [:cat] :keyword]"]]
+          [["my.agent.agent-1/run" "[:=> [:cat] :keyword]"
+            asserting-tx]]
           expected (execution/canonical-program
                     namespace-rows edge-rows [] function-rows test-rows
                     schema-rows contract-rows)
@@ -669,12 +672,21 @@
             (swap! requests conj request)
             (let [arguments (::db/args request)]
               (js/Promise.resolve
-               (if (= 2 (count arguments))
+               (cond
+                 (= 4 (count arguments))
+                 (let [[refs identity-attr form-attr _] arguments]
+                   (case identity-attr
+                     :seon.schema/key schema-rows
+                     :seon.fn/sym
+                     (if (some #{10} refs) contract-rows [])))
+
+                 (= 2 (count arguments))
                  (case (second arguments)
                    :seon.ns/source [1]
                    :seon.fn/source (first arguments)
                    :seon.test/source [20])
-                 [[1 100]]))))
+
+                 :else [[1 100]]))))
           pull-many-response
           (fn [request]
             (swap! requests conj request)
@@ -704,17 +716,7 @@
                  (= pattern @#'execution/test-source-pull-pattern)
                  [{:seon.test/sym "my.agent.agent-1/check"
                    :seon.test/source "(deftest check (is true))"
-                   :seon.test/ns {:seon.ns/name 'my.agent.agent-1}}]
-
-                 (= pattern @#'execution/schema-pull-pattern)
-                 [{:seon.schema/key :my/value :seon.schema/form ":int"}]
-
-                 (= pattern @#'execution/function-contract-pull-pattern)
-                 (mapv (fn [ref]
-                         (when (= 10 ref)
-                           {:seon.fn/sym "my.agent.agent-1/run"
-                            :seon.fn/spec "[:=> [:cat] :keyword]"}))
-                       refs)))))
+                   :seon.test/ns {:seon.ns/name 'my.agent.agent-1}}]))))
           pull-many
           (fn
             ([request] (pull-many-response request))

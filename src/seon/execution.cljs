@@ -400,11 +400,12 @@
 (def ^:private test-source-pull-pattern
   '[:seon.test/sym :seon.test/source {:seon.test/ns [:seon.ns/name]}])
 
-(def ^:private schema-pull-pattern
-  '[:seon.schema/key :seon.schema/form])
-
-(def ^:private function-contract-pull-pattern
-  '[:seon.fn/sym :seon.fn/spec])
+(def ^:private committed-contract-page-query
+  '[:find ?identity ?form (pull ?tx ?provenance-pattern)
+    :in $ [?e ...] ?identity-attr ?form-attr ?provenance-pattern
+    :where
+    [?e ?identity-attr ?identity]
+    [?e ?form-attr ?form ?tx]])
 
 (def ^:private invocation-source-query
   '[:find ?requested ?source
@@ -489,10 +490,10 @@
       [:sequential [:tuple :string :string :symbol]]]
      [:or [:set [:tuple :string :string :symbol]]
       [:sequential [:tuple :string :string :symbol]]]
-     [:or [:set [:tuple :keyword :string]]
-      [:sequential [:tuple :keyword :string]]]
-     [:or [:set [:tuple :string :string]]
-      [:sequential [:tuple :string :string]]]]
+     [:or [:set [:tuple :keyword :string :map]]
+      [:sequential [:tuple :keyword :string :map]]]
+     [:or [:set [:tuple :string :string :map]]
+      [:sequential [:tuple :string :string :map]]]]
     :map]}
   [namespace-source-rows require-edge-rows home-rows function-rows test-rows
    schema-rows contract-rows]
@@ -748,14 +749,27 @@
                edge-pairs)})))))
 
 (defn- ^:async entity-rows!
-  [database identity-attr pull-pattern row-fn]
+  [database identity-attr form-attr]
   (await
    (acquire-identity-pages!
     database identity-attr [] into
     (fn ^:async acquire-page [page]
       (let [entity-ids (mapv first (:datahike.index-page/datoms page))
-            entities (await (pull-page! database pull-pattern entity-ids))]
-        (into [] (keep row-fn) entities))))))
+            rows
+            (if (seq entity-ids)
+              (await
+               (db/query
+                {::db/db database
+                 ::db/query committed-contract-page-query
+                 ::db/args
+                 [entity-ids identity-attr form-attr
+                  schema/asserting-transaction-provenance-pattern]
+                 ::db/max-result-weight
+                 acquisition-page-max-result-weight}))
+              [])]
+        (when (failed-read? rows)
+          (acquisition-error! :contract-page-query rows))
+        rows)))))
 
 (defn package-source-admitted?
   "True when a package-stamped corpus row matches its installed JS namespace."
@@ -781,16 +795,6 @@
                (contains? entity :seon.test/source)
                namespace-name)
       [(:seon.test/sym entity) (:seon.test/source entity) namespace-name])))
-
-(defn- schema-row [entity]
-  (when (and (contains? entity :seon.schema/key)
-             (contains? entity :seon.schema/form))
-    [(:seon.schema/key entity) (:seon.schema/form entity)]))
-
-(defn- function-contract-row [entity]
-  (when (and (contains? entity :seon.fn/sym)
-             (contains? entity :seon.fn/spec))
-    [(:seon.fn/sym entity) (:seon.fn/spec entity)]))
 
 (defn- program-from-rows
   [namespaces edges functions tests schemas contracts]
@@ -838,12 +842,10 @@
                          test-source-pull-pattern test-row))
         schemas
         (await
-         (entity-rows! database :seon.schema/key schema-pull-pattern
-                       schema-row))
+         (entity-rows! database :seon.schema/key :seon.schema/form))
         contracts
         (await
-         (entity-rows! database :seon.fn/sym function-contract-pull-pattern
-                       function-contract-row))]
+         (entity-rows! database :seon.fn/sym :seon.fn/spec))]
     (program-from-rows namespace-sources require-edges functions tests
                        schemas contracts)))
 

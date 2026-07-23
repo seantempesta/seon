@@ -1508,16 +1508,18 @@
             [ctx target-var])))))
 
 (def ^:private committed-schema-query
-  '[:find ?key ?form
+  '[:find ?key ?form (pull ?tx ?provenance-pattern)
+    :in $ ?provenance-pattern
     :where
     [?schema :seon.schema/key ?key]
-    [?schema :seon.schema/form ?form]])
+    [?schema :seon.schema/form ?form ?tx]])
 
 (def ^:private committed-function-contract-query
-  '[:find ?sym ?form
+  '[:find ?sym ?form (pull ?tx ?provenance-pattern)
+    :in $ ?provenance-pattern
     :where
     [?function :seon.fn/sym ?sym]
-    [?function :seon.fn/spec ?form]])
+    [?function :seon.fn/spec ?form ?tx]])
 
 (def ^:private committed-projection-row-limit 4096)
 
@@ -1533,7 +1535,8 @@
                        {::protocol/operation protocol/query-operation
                         :seon.db/db database
                         ::protocol/query-form query
-                        ::protocol/arguments []
+                        ::protocol/arguments
+                        [schema/asserting-transaction-provenance-pattern]
                         :datahike.resource/max-work 1000000
                         ;; One sentinel proves the claimed complete population
                         ;; did not stop at Datahike's early-stop row limit.

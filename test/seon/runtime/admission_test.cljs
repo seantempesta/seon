@@ -222,11 +222,28 @@
   [request]
   (mapv acquisition-entities (::db/refs request)))
 
+(def ^:private core-asserting-transaction
+  {:seon.db/process {:seon.db.process/id :seon.db.process/boot}})
+
+(defn- scripted-projection-query [request]
+  (let [[entity-ids identity-attr form-attr _] (::db/args request)]
+    (into []
+          (keep
+           (fn [entity-id]
+             (let [entity (get acquisition-entities entity-id)]
+               (when (and (contains? entity identity-attr)
+                          (contains? entity form-attr))
+                 [(get entity identity-attr)
+                  (get entity form-attr)
+                  core-asserting-transaction]))))
+          entity-ids)))
+
 (defn- with-acquisition-seams
-  [{::keys [database db-fn index-page pull-many]} body]
+  [{::keys [database db-fn index-page pull-many query]} body]
   (let [original-db db/db
         original-index-page db/index-page
-        original-pull-many db/pull-many]
+        original-pull-many db/pull-many
+        original-query db/query]
     (set! db/db
           (fn
             ([] ((or db-fn
@@ -253,12 +270,17 @@
                ((or pull-many scripted-pull-many) request)))
             ([_ _] (js/Promise.resolve []))
             ([_ _ _] (js/Promise.resolve []))))
+    (set! db/query
+          (fn [request]
+            (js/Promise.resolve
+             ((or query scripted-projection-query) request))))
     (-> (js/Promise.resolve (body))
         (.finally
           (fn []
             (set! db/db original-db)
             (set! db/index-page original-index-page)
-            (set! db/pull-many original-pull-many))))))
+            (set! db/pull-many original-pull-many)
+            (set! db/query original-query))))))
 
 (defn- acquire-test-program!
   []
@@ -283,7 +305,8 @@
                                  (when (and (contains? entity :seon.schema/key)
                                             (contains? entity :seon.schema/form))
                                    [(:seon.schema/key entity)
-                                    (:seon.schema/form entity)])))
+                                    (:seon.schema/form entity)
+                                    core-asserting-transaction])))
                          set)
                     expected-contract-rows
                     (->> (vals acquisition-entities)
@@ -291,7 +314,8 @@
                                  (when (and (contains? entity :seon.fn/sym)
                                             (contains? entity :seon.fn/spec))
                                    [(:seon.fn/sym entity)
-                                    (:seon.fn/spec entity)])))
+                                    (:seon.fn/spec entity)
+                                    core-asserting-transaction])))
                          set)]
                 (is (= expected-schema-rows (set schema-rows))
                     "paged schemas equal the two-attribute presence query")
@@ -339,10 +363,10 @@
              (fn [request]
                (swap! !requests conj request)
                (scripted-index-page request))
-             ::pull-many
+             ::query
              (fn [request]
                (swap! !requests conj request)
-               (scripted-pull-many request))}
+               (scripted-projection-query request))}
             acquire-test-program!)
           (.then
             (fn [_]
@@ -354,8 +378,12 @@
                   "requests reuse the exact immutable value")
               (is (= #{[:seon.schema/key :seon.schema/form]
                        [:seon.fn/sym :seon.fn/spec]}
-                     (set (keep ::db/pull-pattern @!requests)))
-                  "pulls request only each compiler input pair")
+                     (into #{}
+                           (keep (fn [request]
+                                   (when-let [args (::db/args request)]
+                                     [(nth args 1) (nth args 2)])))
+                           @!requests))
+                  "queries request only each compiler input pair")
               (done)))
           (.catch (fn [error]
                     (is false (str "database-value reuse threw — " error))

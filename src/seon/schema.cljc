@@ -21,6 +21,7 @@
             [malli.registry :as mr]
             [seon.schema.form :as form]
             [seon.schema.internal :as internal]
+            #?(:cljs [sci.core])
             #?(:clj [clojure.edn :as edn]
                :cljs [cljs.reader :as reader])))
 
@@ -43,6 +44,48 @@
       {::m/walk-schema-refs #(not (contains? canonical-keys %))
        ::m/walk-refs #(not (contains? canonical-keys %))})
     @!references))
+
+(defn- predicate-symbols-in [value]
+  (cond
+    (and (vector? value) (= :fn (first value)))
+    (let [body (if (map? (second value)) (drop 2 value) (rest value))
+          predicate (first body)]
+      (if (qualified-symbol? predicate) #{predicate} #{}))
+
+    (map? value)
+    (into #{} (mapcat predicate-symbols-in) (concat (keys value)
+                                                    (vals value)))
+
+    (coll? value)
+    (into #{} (mapcat predicate-symbols-in) value)
+
+    :else #{}))
+
+(defn- runtime-predicate [predicate]
+  (try
+    #?(:clj (some-> (requiring-resolve predicate) deref)
+       :cljs nil)
+    (catch #?(:clj Throwable :cljs :default) _
+      nil)))
+
+(defn predicate-sci-options
+  "Build Malli SCI options from qualified predicate function bindings."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [predicate-functions]
+  {:preset :termination-safe
+   :aliases {'m 'malli.core}
+   :namespaces
+   (reduce-kv
+     (fn [namespaces predicate f]
+       (assoc-in namespaces
+                 [(symbol (namespace predicate))
+                  (symbol (name predicate))]
+                 f))
+     {'malli.core {'properties m/properties
+                   'type m/type
+                   'children m/children
+                   'entries m/entries}}
+     predicate-functions)})
 
 (defn- portable-string-hash [s]
   #?(:clj (.hashCode ^String s)
@@ -137,9 +180,59 @@
 ;; mutation. The projection remains disposable and reconstructable from facts.
 (defonce ^:private !schema-state
   (atom {:seon.schema.state/candidate-forms {}
+         :seon.schema.state/predicate-functions {}
          :seon.schema.state/projection nil}))
 
 (def ^:dynamic ^:private *candidate-forms-overlay* nil)
+(def ^:dynamic ^:private *registration-admission-source* :core)
+
+(def asserting-transaction-provenance-pattern
+  "Pull pattern for the transaction that asserted a canonical schema/contract
+   form. Producers pass this as Datalog input so admission source remains a
+   derived cache value, never another stored schema-row attribute."
+  '[{:seon.db/user [:seon.agent/id :seon.user/id]}
+    {:seon.db/process [:seon.db.process/id]}])
+
+(def ^:private core-process-identities
+  #{:seon.db.process/boot
+    :seon.db.process/config
+    :seon.db.process/core})
+
+(defn admission-from-asserting-transaction
+  "Derive strictness source from one canonical row's asserting transaction.
+
+   Missing and unrecognized provenance deliberately fail closed as
+   agent-authored. The note is projection-cache guidance, not database truth."
+  {:malli/schema [:=> [:cat [:maybe :map]] :map]}
+  [transaction]
+  (let [process-id (get-in transaction [:seon.db/process
+                                        :seon.db.process/id])
+        user (some-> (:seon.db/user transaction)
+                     (select-keys [:seon.agent/id :seon.user/id]))
+        recognized? (some? process-id)
+        source (if (contains? core-process-identities process-id)
+                 :core
+                 :agent)]
+    (cond->
+      {:seon.schema.admission/source source
+       :seon.schema.admission/process-id process-id
+       :seon.schema.admission/user (or user {})}
+      (not recognized?)
+      (assoc :seon.schema.admission/note
+             (str "The asserting transaction has no recognizable process "
+                  "provenance, so this row is admitted as agent-authored. "
+                  "Re-register it through boot/config/core reconciliation "
+                  "to claim the documented core exceptions."))
+
+      (and recognized?
+           (= :agent source)
+           (not (#{:seon.db.process/repl :seon.db.process/agent}
+                 process-id)))
+      (assoc :seon.schema.admission/note
+             (str "The asserting process is not a recognized core process, "
+                  "so this row is admitted as agent-authored. Re-register it "
+                  "through boot/config/core reconciliation to claim the "
+                  "documented core exceptions.")))))
 
 (defn- candidate-forms []
   (if *candidate-forms-overlay*
@@ -148,6 +241,21 @@
 
 (defn- active-projection []
   (:seon.schema.state/projection @!schema-state))
+
+(defn register-core-predicate!
+  "Cache one host-authored predicate function for portable Malli compilation.
+
+   The qualified symbol remains the durable schema form and admission
+   authority; this reloadable function cache only supplies Malli's SCI tier."
+  {:malli/schema [:=> [:cat :qualified-symbol 'ifn?] :qualified-symbol]}
+  [predicate f]
+  (swap! !schema-state assoc-in
+         [:seon.schema.state/predicate-functions predicate]
+         f)
+  predicate)
+
+(defn- predicate-functions []
+  (:seon.schema.state/predicate-functions @!schema-state))
 
 (defn- active-forms []
   (or (:seon.schema.projection/forms (active-projection))
@@ -173,9 +281,14 @@
   (let [defaults (mr/fast-registry (m/default-schemas))]
     (reify
       mr/Registry
-      (-schema [_ type]
+      (-schema [this type]
         (or (mr/-schema defaults type)
-            (get (active-forms) type)))
+            (when-let [form (get (active-forms) type)]
+              (m/schema
+               form
+               {:registry this
+                ::m/sci-options
+                (predicate-sci-options (predicate-functions))}))))
       (-schemas [_]
         (merge (mr/-schemas defaults) (active-forms))))))
 
@@ -229,8 +342,34 @@
 ;; genuinely opaque, hence `:any` (the documented third-party-shape exception).
 (defonce ^:private _registry-key-type
   (update-candidate-forms! assoc :seon.schema/registry-key :keyword))
+
+(defn malli-form?
+  "True when `value` is readable EDN and Malli can parse it.
+
+   Uses Seon's current
+   candidate registry. This is intentionally structural; validation remains a
+   separate operation."
+  [value]
+  (try
+    (let [encoded (pr-str value)
+          decoded (#?(:clj edn/read-string :cljs reader/read-string) encoded)]
+      (and (= value decoded)
+           (some? (m/schema value {:registry (candidate-registry)}))))
+    (catch #?(:clj Exception :cljs :default) _
+      false)))
+
+(defonce ^:private _malli-form-predicate
+  (register-core-predicate! 'seon.schema/malli-form? malli-form?))
+
+(defonce ^:private _malli-form-type
+  (update-candidate-forms!
+    assoc ::malli-form
+    [:fn {:error/message "must be a parseable, EDN-readable Malli form"
+          :gen/schema [:enum :string :int [:vector :keyword]]}
+     'seon.schema/malli-form?]))
+
 (defonce ^:private _definition-type
-  (update-candidate-forms! assoc :seon.schema/definition :any))
+  (update-candidate-forms! assoc :seon.schema/definition ::malli-form))
 (defonce ^:private _value-type
   (update-candidate-forms! assoc :seon.schema/value :any))
 (defonce ^:private _explanation-type
@@ -244,7 +383,11 @@
                            [:set :seon.schema/registry-key]))
 (defonce ^:private _projection-row-type
   (update-candidate-forms! assoc :seon.schema/projection-row
-                           [:tuple [:or :keyword :string :symbol] :string]))
+                           [:or
+                            [:tuple [:or :keyword :string :symbol] :string]
+                            [:tuple [:or :keyword :string :symbol]
+                             :string
+                             [:maybe :map]]]))
 (defonce ^:private _projection-rows-type
   (update-candidate-forms! assoc :seon.schema/projection-rows
                            [:or
@@ -255,13 +398,124 @@
     assoc :seon.schema/projection-input
     [:map {:closed true}
      [:seon.schema/schema-rows :seon.schema/projection-rows]
-     [:seon.schema/function-contract-rows :seon.schema/projection-rows]]))
+     [:seon.schema/function-contract-rows :seon.schema/projection-rows]
+     [:seon.schema/pure-predicate-symbols
+      {:optional true}
+      [:set :symbol]]]))
 (defonce ^:private _projection-type
   (update-candidate-forms! assoc :seon.schema/projection 'map?))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Registration API
 ;;; ---------------------------------------------------------------------------
+
+(defn assert-complete-contract!
+  "Assert that a schema or function contract is complete.
+
+   Uses its derived
+   admission source. Returns non-terminal advisories."
+  [{:seon.schema/keys [identity definition forms admission admissions
+                       pure-predicate-symbols predicate-functions]
+    :or {forms {}
+         admissions {}
+         pure-predicate-symbols #{}
+         predicate-functions {}}}]
+  (let [direct-predicate-symbols (predicate-symbols-in definition)
+        forms (if (and (keyword? identity) (not (contains? forms identity)))
+                (assoc forms identity definition)
+                forms)
+        predicate-symbols
+        (into direct-predicate-symbols
+              (mapcat predicate-symbols-in)
+              (vals forms))
+        predicate-functions
+        (reduce (fn [bindings predicate]
+                  (if (contains? bindings predicate)
+                    bindings
+                    (if-let [f (runtime-predicate predicate)]
+                      (assoc bindings predicate f)
+                      bindings)))
+                predicate-functions
+                predicate-symbols)
+        _ (when (= :agent (:seon.schema.admission/source
+                           (or admission
+                               {:seon.schema.admission/source :agent})))
+            (when-let [predicate
+                       (first (remove pure-predicate-symbols
+                                      (sort direct-predicate-symbols)))]
+              (throw
+               (ex-info
+                (str identity " references predicate " predicate
+                     ", but its existing program-graph call edges do not yet "
+                     "prove a pure, capability-free transitive call graph. "
+                     "Keep the predicate as a separately schema'd corpus "
+                     "function, then re-register this contract after the "
+                     "execution planner admits that graph.")
+                {:seon.schema/error
+                 :seon.schema/unproved-predicate-purity
+                 :seon.schema/identity identity
+                 :seon.schema/predicate predicate
+                 :seon.error/kind :user-input}))))
+        registry (mr/composite-registry
+                   (m/default-schemas)
+                   (mr/fast-registry forms))
+        compile-options
+        {:registry registry
+         ::m/sci-options (predicate-sci-options predicate-functions)}
+        canonical-keys (set (keys forms))
+        default-admission (or admission
+                              {:seon.schema.admission/source :agent})]
+    (letfn [(walk-schema [schema role row-identity row-definition row-admission
+                          visited]
+              (let [advisories
+                    (internal/assert-complete-schema!
+                      {:seon.schema/identity row-identity
+                       :seon.schema/definition row-definition
+                       :seon.schema/compiled schema
+                       :seon.schema/role role
+                       :seon.schema/admission row-admission
+                       :seon.schema/pure-predicate-symbols
+                       pure-predicate-symbols
+                       :seon.schema/canonical-keys canonical-keys})
+                    references (direct-references* schema canonical-keys)]
+                (into advisories
+                      (mapcat
+                        (fn [reference]
+                          (when-not (contains? visited reference)
+                            (let [reference-form (get forms reference)]
+                              (walk-schema
+                                (m/schema reference-form
+                                          compile-options)
+                                role
+                                reference
+                                reference-form
+                                (get admissions reference default-admission)
+                                (conj visited reference))))))
+                      references)))
+            (walk-function [compiled row-identity row-definition row-admission]
+              (case (m/type compiled)
+                :=>
+                (let [[input output] (m/children compiled)]
+                  (into
+                    (walk-schema input :input row-identity row-definition
+                                 row-admission #{})
+                    (walk-schema output :output row-identity row-definition
+                                 row-admission #{})))
+
+                :function
+                (into []
+                      (mapcat
+                        #(walk-function % row-identity row-definition
+                                        row-admission))
+                      (m/children compiled))
+
+                (walk-schema compiled :schema row-identity row-definition
+                             row-admission #{})))]
+      (let [compiled (if (and (vector? definition)
+                              (#{:=> :function} (first definition)))
+                       (m/function-schema definition compile-options)
+                       (m/schema definition compile-options))]
+        (walk-function compiled identity definition default-admission)))))
 
 (defn identity-attr?
   "True when the attr schema for `attr-key` carries `{:seon.db/identity true}`.
@@ -342,6 +596,20 @@
            :seon.schema/key k
            :seon.schema/definition v
            :seon.error/kind :user-input}))))
+  ;; Forward references remain declaration-order independent. Complete forms
+  ;; are gated now; an unresolved canonical reference is gated when the full
+  ;; candidate projection is constructed.
+  (try
+    (assert-complete-contract!
+      {:seon.schema/identity k
+       :seon.schema/definition v
+       :seon.schema/forms (assoc (candidate-forms) k v)
+       :seon.schema/admission
+       {:seon.schema.admission/source *registration-admission-source*}
+       :seon.schema/predicate-functions (predicate-functions)})
+    (catch #?(:clj Exception :cljs :default) e
+      (when-not (= :malli.core/invalid-schema (:type (ex-data e)))
+        (throw e))))
   (update-candidate-forms! assoc k v)
   k)
 
@@ -368,16 +636,68 @@
   {:malli/schema
    [:function
     [:=> [:catn [::forms :map]] :map]
-    [:=> [:catn [::forms :map] [::function-contracts :map]] :map]]}
-  ([forms] (build-projection forms {}))
+    [:=> [:catn [::forms :map] [::function-contracts :map]] :map]
+    [:=> [:catn [::forms :map] [::function-contracts :map]
+                   [:seon.schema/projection-options :map]]
+     :map]]}
+  ([forms]
+   (build-projection
+    forms {} {:seon.schema/predicate-functions (predicate-functions)}))
   ([forms function-contracts]
-   (let [_        (doseq [[k form] (sort-by key forms)]
-                    (internal/assert-compilable-schema! forms k form)
-                    (internal/assert-non-nilable-value-schema! forms k form))
-        registry (mr/composite-registry
-                   (m/default-schemas)
-                   (mr/fast-registry forms))
-        options  {:registry registry}
+   (build-projection
+    forms function-contracts
+    {:seon.schema/predicate-functions (predicate-functions)}))
+  ([forms function-contracts
+    {:seon.schema/keys [schema-admissions function-admissions
+                        pure-predicate-symbols predicate-functions]
+     :or {schema-admissions {}
+          function-admissions {}
+          pure-predicate-symbols #{}
+          predicate-functions {}}}]
+   (let [predicate-symbols
+         (into (into #{} (mapcat predicate-symbols-in) (vals forms))
+               (mapcat predicate-symbols-in)
+               (vals function-contracts))
+         predicate-functions
+         (reduce (fn [bindings predicate]
+                   (if (contains? bindings predicate)
+                     bindings
+                     (if-let [f (runtime-predicate predicate)]
+                       (assoc bindings predicate f)
+                       bindings)))
+                 predicate-functions
+                 predicate-symbols)
+         core-admission {:seon.schema.admission/source :core}
+         registry (mr/composite-registry
+                    (m/default-schemas)
+                    (mr/fast-registry forms))
+         options  {:registry registry
+                   ::m/sci-options
+                   (predicate-sci-options predicate-functions)}
+         _        (doseq [[k form] (sort-by key forms)]
+                    (internal/assert-compilable-schema! forms k form options)
+                    (internal/assert-non-nilable-value-schema! forms k form)
+                    (assert-complete-contract!
+                      {:seon.schema/identity k
+                       :seon.schema/definition form
+                       :seon.schema/forms forms
+                       :seon.schema/admission
+                       (get schema-admissions k core-admission)
+                       :seon.schema/admissions schema-admissions
+                       :seon.schema/pure-predicate-symbols
+                       pure-predicate-symbols
+                       :seon.schema/predicate-functions predicate-functions}))
+        _        (doseq [[sym contract] (sort-by key function-contracts)]
+                   (assert-complete-contract!
+                     {:seon.schema/identity sym
+                      :seon.schema/definition contract
+                      :seon.schema/forms forms
+                      :seon.schema/admission
+                      (get function-admissions sym core-admission)
+                      :seon.schema/admissions schema-admissions
+                      :seon.schema/pure-predicate-symbols
+                      pure-predicate-symbols
+                      :seon.schema/predicate-functions predicate-functions}))
         _        (doseq [k (sort (keys forms))]
                    (m/schema k options))
         schema-dependencies
@@ -474,9 +794,14 @@
                       vec)
         fingerprint
         (portable-string-hash
-          (canonical-data-string [forms function-contracts]))]
+          (canonical-data-string
+            [forms function-contracts schema-admissions function-admissions
+             pure-predicate-symbols]))]
     {:seon.schema.projection/forms forms
      :seon.schema.projection/registry registry
+     :seon.schema.projection/schema-admissions schema-admissions
+     :seon.schema.projection/function-admissions function-admissions
+     :seon.schema.projection/pure-predicate-symbols pure-predicate-symbols
      :seon.schema.projection/schema-dependencies schema-dependencies
      :seon.schema.projection/reverse-schema-dependencies
      reverse-schema-dependencies
@@ -496,18 +821,21 @@
    the platform reader before the one [[build-projection]] mechanism runs."
   {:malli/schema [:=> [:catn [::projection-input ::projection-input]]
                   ::projection]}
-  [{:seon.schema/keys [schema-rows function-contract-rows]}]
+  [{:seon.schema/keys [schema-rows function-contract-rows
+                       pure-predicate-symbols]
+    :or {pure-predicate-symbols #{}}}]
   (letfn [(parse-rows [rows identity-fn identity-label]
             (reduce
               (fn [parsed row]
-                (when-not (and (sequential? row) (= 2 (count row)))
+                (when-not (and (sequential? row)
+                               (#{2 3} (count row)))
                   (throw (ex-info (str "Malformed committed " identity-label
                                        " row.")
                                   {:seon.schema/error
                                    :seon.schema/malformed-projection-row
                                    :seon.schema/row row
                                    :seon.error/kind :core-bug})))
-                (let [[raw-identity form-string] row
+                (let [[raw-identity form-string asserting-transaction] row
                       identity (identity-fn raw-identity)]
                   (when-not (string? form-string)
                     (throw (ex-info (str "Malformed committed " identity-label
@@ -524,12 +852,16 @@
                                      :seon.schema/identity identity
                                      :seon.error/kind :core-bug})))
                   (assoc parsed identity
-                         (#?(:clj edn/read-string :cljs reader/read-string)
-                           form-string))))
+                         {:seon.schema.parsed/form
+                          (#?(:clj edn/read-string :cljs reader/read-string)
+                           form-string)
+                          :seon.schema.parsed/admission
+                          (admission-from-asserting-transaction
+                            asserting-transaction)})))
               {}
               rows))]
-    (build-projection
-       (parse-rows schema-rows
+    (let [schemas
+          (parse-rows schema-rows
                   (fn [identity]
                     (if (keyword? identity)
                       identity
@@ -539,7 +871,8 @@
                                        :seon.schema/identity identity
                                        :seon.error/kind :core-bug}))))
                   "schema")
-      (parse-rows function-contract-rows
+          contracts
+          (parse-rows function-contract-rows
                   (fn [identity]
                     (cond
                       (qualified-symbol? identity) identity
@@ -558,7 +891,24 @@
                                        :seon.schema/malformed-projection-identity
                                        :seon.schema/identity identity
                                        :seon.error/kind :core-bug}))))
-                   "function contract"))))
+                   "function contract")]
+      (build-projection
+        (into {} (map (fn [[k row]]
+                        [k (:seon.schema.parsed/form row)]))
+              schemas)
+        (into {} (map (fn [[k row]]
+                        [k (:seon.schema.parsed/form row)]))
+              contracts)
+        {:seon.schema/schema-admissions
+         (into {} (map (fn [[k row]]
+                         [k (:seon.schema.parsed/admission row)]))
+               schemas)
+         :seon.schema/function-admissions
+         (into {} (map (fn [[k row]]
+                         [k (:seon.schema.parsed/admission row)]))
+               contracts)
+         :seon.schema/pure-predicate-symbols pure-predicate-symbols
+         :seon.schema/predicate-functions (predicate-functions)}))))
 
 (defn activate-projection!
   "Atomically publish an already validated projection.
@@ -568,10 +918,12 @@
    facts. No validation or database read occurs here."
   {:malli/schema [:=> [:catn [::projection :map]] :map]}
   [projection]
-  (reset! !schema-state
-          {:seon.schema.state/candidate-forms
-           (:seon.schema.projection/forms projection)
-           :seon.schema.state/projection projection})
+  (swap! !schema-state
+         (fn [state]
+           (assoc state
+                  :seon.schema.state/candidate-forms
+                  (:seon.schema.projection/forms projection)
+                  :seon.schema.state/projection projection)))
   projection)
 
 (defn activate!
@@ -636,7 +988,8 @@
     :any]}
   [delta f]
   (binding [*candidate-forms-overlay*
-            (:seon.schema.delta/candidate-forms delta)]
+            (:seon.schema.delta/candidate-forms delta)
+            *registration-admission-source* :agent]
     (f)))
 
 (defn- changed-candidate-keys [before after]
@@ -987,7 +1340,11 @@
                   ::compiled-validator]}
   [schema-key]
   (m/validator
-   (m/deref-recursive schema-key {:registry (candidate-registry)})))
+   (m/deref-recursive
+    schema-key
+    {:registry (candidate-registry)
+     ::m/sci-options
+     (predicate-sci-options (predicate-functions))})))
 
 (defn candidate-explainer
   "Compile a recursively resolved explainer from current declarations."
@@ -995,7 +1352,11 @@
                   ::compiled-validator]}
   [schema-key]
   (m/explainer
-   (m/deref-recursive schema-key {:registry (candidate-registry)})))
+   (m/deref-recursive
+    schema-key
+    {:registry (candidate-registry)
+     ::m/sci-options
+     (predicate-sci-options (predicate-functions))})))
 
 (defn schemas-in-namespace
   "The `{keyword definition}` map of schemas registered under `ns-name`.

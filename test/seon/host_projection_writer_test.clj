@@ -61,7 +61,10 @@
         (protocol/success
           {::protocol/results
            [(protocol/success {:datahike.query/result
-                               #{[:projection.test/value ":int"]}})
+                               #{[:projection.test/value ":int"
+                                  {:seon.db/process
+                                   {:seon.db.process/id
+                                    :seon.db.process/boot}}]}})
             (protocol/success {:datahike.query/result #{}})]})]
     (with-redefs [context/resolve-head! (fn [_] database)]
       (with-redefs-fn
@@ -72,7 +75,11 @@
           (let [result (context/acquire-committed-projection! {})]
             (is (= 42 (get-in result [::context/database :t])))
             (is (= [database database]
-                   (mapv :seon.db/db (::protocol/members @request))))))))))
+                   (mapv :seon.db/db (::protocol/members @request))))
+            (is (= [[schema/asserting-transaction-provenance-pattern]
+                    [schema/asserting-transaction-provenance-pattern]]
+                   (mapv ::protocol/arguments
+                         (::protocol/members @request))))))))))
 
 (deftest cap-plus-one-sentinel-refuses-a-silently-partial-population
   (let [database {:db-name "projection-test" :t 42}

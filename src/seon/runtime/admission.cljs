@@ -194,11 +194,12 @@
 (def ^:private acquisition-page-size 32)
 (def ^:private acquisition-page-max-result-weight 60000)
 
-(def ^:private schema-pull-pattern
-  '[:seon.schema/key :seon.schema/form])
-
-(def ^:private function-contract-pull-pattern
-  '[:seon.fn/sym :seon.fn/spec])
+(def ^:private committed-row-query
+  '[:find ?identity ?form (pull ?tx ?provenance-pattern)
+    :in $ [?e ...] ?identity-attr ?form-attr ?provenance-pattern
+    :where
+    [?e ?identity-attr ?identity]
+    [?e ?form-attr ?form ?tx]])
 
 (defn ^:no-doc committed-projection
   "Build the canonical projection from ordinary acquired rows."
@@ -219,20 +220,8 @@
   [value]
   (and (map? value) (string? (:seon.error/message value))))
 
-(defn- schema-row
-  [entity]
-  (when (and (contains? entity :seon.schema/key)
-             (contains? entity :seon.schema/form))
-    [(:seon.schema/key entity) (:seon.schema/form entity)]))
-
-(defn- function-contract-row
-  [entity]
-  (when (and (contains? entity :seon.fn/sym)
-             (contains? entity :seon.fn/spec))
-    [(:seon.fn/sym entity) (:seon.fn/spec entity)]))
-
 (defn- ^:async acquire-identity-stream!
-  [database identity-attr pull-pattern row-fn]
+  [database identity-attr form-attr]
   (loop [cursor nil
          rows []]
     (let [page
@@ -249,18 +238,20 @@
           _ (when (failed-read? page)
               (acquisition-error! :index-page page))
           entity-ids (mapv first (:datahike.index-page/datoms page))
-          entities
+          page-rows
           (if (seq entity-ids)
             (await
-             (db/pull-many
+             (db/query
               {::db/db database
-               ::db/pull-pattern pull-pattern
-               ::db/refs entity-ids
+               ::db/query committed-row-query
+               ::db/args
+               [entity-ids identity-attr form-attr
+                schema/asserting-transaction-provenance-pattern]
                ::db/max-result-weight acquisition-page-max-result-weight}))
             [])
-          _ (when (failed-read? entities)
-              (acquisition-error! :pull-many entities))
-          next-rows (into rows (keep row-fn) entities)]
+          _ (when (failed-read? page-rows)
+              (acquisition-error! :query page-rows))
+          next-rows (into rows page-rows)]
       (if (:datahike.index-page/complete? page)
         next-rows
         (recur (:datahike.index-page/cursor page) next-rows)))))
@@ -273,12 +264,11 @@
         schemas
         (await
          (acquire-identity-stream!
-          database :seon.schema/key schema-pull-pattern schema-row))
+          database :seon.schema/key :seon.schema/form))
         contracts
         (await
          (acquire-identity-stream!
-          database :seon.fn/sym function-contract-pull-pattern
-          function-contract-row))]
+          database :seon.fn/sym :seon.fn/spec))]
     {::db/db database
      ::schema-rows schemas
      ::function-contract-rows contracts}))

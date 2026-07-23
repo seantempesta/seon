@@ -70,6 +70,19 @@
           (recur (.getCause current) (or (ex-data current) deepest))
           deepest)))))
 
+(deftest misspelled-namespaced-input-key-is-humanized
+  (let [payload
+        (error.instrument/explain-payload
+         :malli.core/invalid-input
+         {:input
+          (m/schema
+           [:cat [:map {:closed true} [:my.domain/value :int]]])
+          :args [{:my.dmoain/value 1}]})]
+    (is (re-find #"should be spelled :my.domain/value"
+                 (pr-str (:seon.error.malli/humanized payload))))
+    (is (re-find #"the key is :my.domain/value"
+                 (:seon.error.malli/hint payload)))))
+
 (deftest multi-arity-private-var-reconciles-and-survives-redefinition
   (let [{::keys [ctx state] :as live} (fixture)
         sym 'my.instrument/multi
