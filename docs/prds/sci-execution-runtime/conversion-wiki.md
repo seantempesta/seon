@@ -55,6 +55,19 @@ the anchor stays the state ledger.
 
 ## Async / platform portability
 
+- **A transport leaf cannot widen claimant phase ownership by itself.** The
+  portable eligibility predicate already recognizes `:llm`, but the JVM
+  claimant advertises only `:eval` and dispatches only eval steps
+  (`src/seon/agent/{loop/core.cljc:56-67,driver/host.clj:252-300}`).
+  Durable attempt orchestration, prompt-blob recovery, reply-blob publication,
+  and cursor advancement still live in the pod turn leaf
+  (`src/seon/agent/turn.cljs:947-1114`). Also, the existing watchdog arms only
+  inside `seon.host.invoke/execute-invocation!`; a provider call placed directly
+  on the claimant vthread would not inherit it
+  (`src/seon/host/invoke.clj:29-43,106-134`). Before implementing an isolated
+  JVM HTTP adapter, first assign one owner to expose the durable portable LLM
+  phase plus the existing deadline ceremony at the claimant step boundary;
+  otherwise the adapter is unreachable and its interrupt proof is vacuous.
 - **A portable SCI guard needs an actual SCI installation on every claimed
   tier.** The production Bun eval path still calls `cljs.js/eval-str`
   (`src/seon/eval.cljs:1185-1292`), so there is no `:interrupt-fn` installation
@@ -174,10 +187,14 @@ the anchor stays the state ledger.
 - **Env-coupled cljs tests**: a focused-build failure that's green in
   the integrated run is usually schema load-order, not your bug
   (my.plan-test precedent) — verify in the full run before chasing.
-- **Put dual-tier `.cljc` tests below a namespace directory.** The writer
-  runner discovers `test/seon/**/_test.clj[c]`, while the CLJS runner follows
-  namespaces; `test/seon/db/portable_test.cljc:1` is visible to both, unlike a
-  new root-level `.cljc` file that the retained writer discovery can miss.
+- **Retained test visibility is a union, not a directory convention.** The
+  writer runner recursively claims every `test/**/*_test.clj[c]` namespace
+  except the operator-owned `test/seon/dev` root and structurally CLJS-only
+  namespaces; Shadow claims `.cljs`/`.cljc` namespaces matching `-test$`.
+  `test/seon/dev/test_roots_test.clj` computes the union and fails with every
+  orphan, so root-level and nested portable tests are equally visible. Keep
+  exclusions structural—never add a filename list
+  (`script/seon/dev/test_roots.clj`).
 - **Public replay identity hashes logical intent, not the moving source
   database.** A second `:seon.capability/op-id` call normally starts from the
   new head, so `src/seon/db/protocol.cljc:798` excludes `:seon.db/db` from the
@@ -498,3 +515,18 @@ the anchor stays the state ledger.
   cutover. Use current symbol/file evidence for independent work, an exact
   planned unit for dissolution, and state the one live probe when neither is
   decisive.
+
+## Test-integrity widening (2026-07-23)
+
+- **Classify JVM eligibility from the selected namespace form.** The runner
+  reads `.cljc` namespace forms with the `:clj` feature, excludes the operator
+  subtree, and rejects unconditional CLJS/Google Closure or JavaScript-module
+  requires. The only current content-derived exclusion is
+  `test/my/blob_test.cljc`: its namespace unconditionally imports `node:*` and
+  `cljs.test`, and its fixture body uses Promises and `js/*` interop; Shadow's
+  `-test$` scan still owns it. Grounding: Clojure 1.12.0 reader conditionals
+  (`deps.edn`), Shadow CLJS `c98bf60f` namespace selection
+  (`reference-code/shadow-cljs/src/main/shadow/build/test_util.clj`), and the
+  existing shared consumers in `script/seon/dev/changed_test.clj:237-238,
+  282-284`. Adding another exclusion means making the file's platform coupling
+  explicit enough for this same predicate, never naming the file.
