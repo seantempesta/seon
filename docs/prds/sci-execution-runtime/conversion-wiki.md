@@ -318,6 +318,12 @@ the anchor stays the state ledger.
 - **Two lanes never own one file — including TEST files.** Specs list
   the other live lanes' grants as PROTECTED explicitly. Entangled edits
   force combined commits.
+- **A sequencing grant does not make an already-dirty shared file safe to
+  commit.** If an earlier lane has uncommitted hunks in a file that the next
+  lane must release first, a path-limited commit would absorb both units.
+  Stop at the overlap and have the earlier lane commit or hand off its exact
+  hunks; do not reverse another lane's worktree edits or substitute an
+  index-only commit for the repository's path-limited-commit rule.
 - **Path-limited commits always**; add new untracked owned files
   explicitly in the same commit (a missing test-support file made every
   intermediate writer gate unreproducible for a day).
