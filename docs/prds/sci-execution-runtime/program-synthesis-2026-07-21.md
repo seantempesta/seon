@@ -405,6 +405,21 @@ COMPLETELY before dispatching anything.
   graph-derived placement + schema/capability manifests per form
   (plan→provision→execute; absorbs the mixed-tier router; enforces
   R33 purity; plans derived-never-stored per R21).
+- R35 (owner north star, 2026-07-23): TRANSPARENT DISTRIBUTION.
+  Agents write plain Clojure with no placement awareness; the derived
+  plan (execution-planning research, running) routes every call —
+  local SCI for pure corpus logic, local leaves for installed
+  capabilities, transparent wire invocations (the one R17 pattern)
+  for calls whose plan says elsewhere. Data crosses as
+  schema-projected values; tier-local objects cross as R32
+  result-symbol HANDLES (tracked per instance, wiped on its restart,
+  steering to re-derive — transparency degrades loudly into data,
+  never silently into staleness). External effects keep full receipt
+  discipline when remoted. Same-tier calls coalesce (the existing
+  batch-routing instinct generalized). JIT schema installation =
+  R29 acquisition at the run's basis; the ahead-of-time manifest is
+  a verification artifact. Implementation unit queues behind the
+  planning research's return.
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
