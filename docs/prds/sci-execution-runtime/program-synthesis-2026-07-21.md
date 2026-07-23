@@ -1028,6 +1028,13 @@ COMPLETELY before dispatching anything.
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- INTERPRETER-STEP RENAME ACCEPTED (946e1a190, verified: zero
+  'fuel' left in src/config runtime; steering asserts 'exceeded its
+  interpreter-step budget'; no compat alias per R38; deadline/
+  output-cap untouched; AGENTS.md row updated by grant): config
+  facts are :seon.config.guard/*-interpreter-step-budget; guard
+  internals interpreter-steps-*. TWO lanes remain before the freeze:
+  fixseed (consumption) + r43trust.
 - S2 TRANSACTION-DATA ACCEPTED (4b3d32093, verified path-limited,
   58/313 green): program-rows.edn published per supported build +
   release under the grounded name — compiled index derivation, row
