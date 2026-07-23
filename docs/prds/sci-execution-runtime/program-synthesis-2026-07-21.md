@@ -1244,7 +1244,21 @@ consumers. The lane's grounded slice plan (host-lane eval-batch
 routing via the existing eval-socket fact, receipts/tee on the host,
 everything else untouched) is ACCEPTED as written.
 
-**STAGED NEXT (refill on any free slot):** p2-blob · loop-essential
+**p2-blob ACCEPTED + COMMITTED `b3d16c0d`** — portable family core
+sci-loaded on the JVM via load-portable-slice! ({:loaded 15}), live
+agent round-trip proven from :seon.eval/result-edn database evidence
+(model prose rejected as proof — keep that discipline), stat
+nil-get-else root-fixed with the :my.blob.media/absent sentinel, all
+Node ops behind the one injection map. Effect-declared running
+total: 50 entries (db 15 · msglc 7 · fs 12 · shell 8 · web 3 ·
+blob 5). The 3 remaining full-gate failures = stale acquisition-test
+fixture from the pkg-door selection change (issue
+`package-aware-program-acquisition-test-does-not-select-structural-
+pull-pattern.md`, filed by loop-slice, whose owned test files fix
+it). ONLY LIVE LANE: loop-slice — routing implementation + that test
+fix + THE DEMO drive.
+
+**STAGED NEXT (refill on any free slot):** loop-essential
 my.* (queue derived from the loop-slice measurement — the old
 p2-my-families full-port spec is superseded by the LOOP-FIRST
 narrowing) · agent-facing interface-guidance unit. Known open: drill-harness
