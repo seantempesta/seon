@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, schema, runtime, database]
 ---
@@ -55,3 +55,19 @@ infer authorship from namespace prefixes or schema names.
 - The writer never resolves or executes an agent-authored predicate.
 - Focused cold-reload tests prove both rejection and retained core admission
   through the real committed-row acquisition boundary.
+
+## Resolution
+
+Resolved by `12269fd57`. The projection compiler derives admission from the
+transaction that asserted each form/spec, carries the result only in the
+compiled projection, and defaults missing or unrecognized provenance to
+agent-authored with re-registration guidance. The JVM host, runtime admission,
+execution, and web value producers all acquire that exact asserting
+transaction.
+
+Focused proof:
+
+- `seon.schema-projection-writer-test`
+- `seon.host-projection-writer-test`
+- `seon.runtime.admission-test`
+- `seon.execution-test`

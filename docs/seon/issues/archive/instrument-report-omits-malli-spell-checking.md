@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, schema, runtime, agent]
 ---
@@ -45,3 +45,10 @@ as structured data.
   headline and preserves the structured explain data.
 - The existing same-name, wrong-namespace regression remains green.
 - No raw unbounded explain wall reaches the agent-facing message.
+
+## Resolution
+
+Resolved by `12269fd57`. Instrument explanations now pass through
+`malli.error/with-spell-checking` before `malli.error/humanize`, while the
+existing bounded steering head and wrong-namespace hint remain intact.
+`seon.host-instrument-writer-test` proves the structured spelling guidance.
