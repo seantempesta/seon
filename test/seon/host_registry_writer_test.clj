@@ -98,6 +98,18 @@
     (is (some? registered))
     (is (identical? registered resolved))))
 
+(deftest capability-installation-publishes-its-leaf-inventory
+  (let [base (context/build-base! (unconnected-writer))
+        inventory (::context/tier-inventory base)]
+    (is (contains? (:seon.execution.inventory/bindings inventory)
+                   "seon.db/query"))
+    (is (contains? (:seon.execution.inventory/bindings inventory)
+                   "seon.agent.fs/read-file"))
+    (is (contains? (:seon.execution.inventory/pure-bindings inventory)
+                   "seon.db/as-of"))
+    (is (re-matches #"[0-9a-f]{64}"
+                    (:seon.execution.inventory/digest inventory)))))
+
 ;;; Op-id receipts against the real writer.
 
 (defn- socket-path [label]

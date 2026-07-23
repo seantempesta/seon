@@ -54,6 +54,7 @@
             [seon.agent.shell.leaf :as shell.leaf]
             [seon.agent.web :as agent.web]
             [seon.agent.web.host :as web.host]
+            [seon.capability :as capability]
             [seon.content-hash :as content-hash]
             [seon.db :as db]
             [seon.db.host :as db.host]
@@ -119,6 +120,7 @@
   [::eval-generator ::eval-generator]])
 (schema/register! ::ctx 'some?)
 (schema/register! ::registry 'some?)
+(schema/register! ::tier-inventory :seon.execution.inventory/tier)
 (schema/register! ::lib :symbol)
 (schema/register! ::wrapper-fn 'fn?)
 (schema/register! ::reconcile-ephemeral! 'fn?)
@@ -197,7 +199,8 @@
  [:map {:closed true}
   [::ctx ::ctx]
   [::report ::report]
-  [::registry ::registry]])
+  [::registry ::registry]
+  [::tier-inventory ::tier-inventory]])
 (schema/register! ::def-sources [:vector :string])
 (schema/register!
  ::replay-envelope
@@ -559,14 +562,21 @@
    the compiled host functions. Restart re-registers from configuration;
    nothing here persists."
   [registry writer toolkit-delegates]
-  (register-host-wrappers!
+  (let [installed-leaves (volatile! [])
+        install!
+        (fn [{::keys [lib wrappers] :as request}]
+          (register-host-wrappers! request)
+          (vswap! installed-leaves into
+                  (capability/installation-leaves lib wrappers))
+          nil)]
+  (install!
    {::registry registry
     ::lib 'seon.ai.provider
     ::wrappers
     {'provider-locality {::wrapper-value ai.provider/provider-locality}
      'frontier-provider? {::wrapper-fn ai.provider/frontier-provider?
                           ::arglists '([provider])}}})
-  (register-host-wrappers!
+  (install!
    {::registry registry
     ::lib 'seon.db
     ::wrappers
@@ -579,9 +589,12 @@
                       (:arglists source-meta)
                       (assoc ::arglists (:arglists source-meta))
                       (:doc source-meta)
-                          (assoc ::doc (:doc source-meta)))])))
+                      (assoc ::doc (:doc source-meta))
+                      (:seon.capability/effect source-meta)
+                      (assoc ::effect
+                             (:seon.capability/effect source-meta)))])))
           (bound-database-functions writer))})
-  (register-host-wrappers!
+  (install!
    {::registry registry
     ::lib 'seon.db
     ::wrappers
@@ -595,7 +608,7 @@
               (message/bind-leaf (host-message-leaf) database-leaf)]
              ['seon.agent.lifecycle
               (lifecycle/bind-leaf (host-lifecycle-leaf) database-leaf)]]]
-      (register-host-wrappers!
+      (install!
        {::registry registry
         ::lib lib
         ::wrappers
@@ -611,7 +624,7 @@
                           (assoc ::effect (:seon.capability/effect source-meta)))])))
               functions)})))
   (let [database-leaf (db.host/leaf writer #(database-context writer))]
-    (register-host-wrappers!
+    (install!
       {::registry registry
        ::lib 'seon.agent.message
        ::wrappers
@@ -622,14 +635,14 @@
                      db/*leaf* database-leaf]
              (message/message-transaction-for database request)))
          ::arglists '([database request])}}}))
-  (register-host-wrappers!
+  (install!
    {::registry registry
     ::lib 'seon.agent.home
     ::wrappers
     {'home-ns {::wrapper-fn
                (fn [agent-id] (symbol (str "my.agent." agent-id)))
                ::arglists '([agent-id])}}})
-  (register-host-wrappers!
+  (install!
    {::registry registry
     ::lib 'seon.embed
     ::wrappers
@@ -642,7 +655,7 @@
           "Embeddings are not enabled on this JVM host."
           :seon.error/kind :user-input}})
       ::arglists '([request])}}})
-  (register-host-wrappers!
+  (install!
    {::registry registry
     ::lib 'seon.agent.fs
     ::wrappers
@@ -659,7 +672,7 @@
      'view {::wrapper-fn fs.leaf/view ::effect :read}
      'replace! {::wrapper-fn fs.leaf/replace! ::effect :external}
      'insert! {::wrapper-fn fs.leaf/insert! ::effect :external}}})
-  (register-host-wrappers!
+  (install!
    {::registry registry
     ::lib 'seon.agent.shell
     ::wrappers
@@ -691,7 +704,7 @@
          (web.host/services
           {::web.host/put! (get blob-functions 'put!)
            ::web.host/transact! (get database-functions 'transact!)}))]
-    (register-host-wrappers!
+    (install!
      {::registry registry
       ::lib 'seon.agent.web
       ::wrappers
@@ -705,7 +718,7 @@
           {::blob.host/current-db! (get database-functions 'db)
            ::blob.host/query! (get database-functions 'query)
            ::blob.host/transact! (get database-functions 'transact!)}))]
-    (register-host-wrappers!
+    (install!
      {::registry registry
       ::lib 'my.blob
       ::wrappers
@@ -715,7 +728,7 @@
                  ::effect :idempotent}
        'text {::wrapper-fn (get blob-functions 'text) ::effect :read}
        'stat {::wrapper-fn (get blob-functions 'stat) ::effect :read}}}))
-  (register-host-wrappers!
+  (install!
    {::registry registry
     ::lib 'seon.db.id
     ::wrappers
@@ -729,7 +742,7 @@
                           ::doc "Generate one validated identity-candidate manifest."}
      'generator-policy-query {::wrapper-value db.id/generator-policy-query
                               ::doc "Query for stored generated-identity policies."}}})
-  (register-host-wrappers!
+  (install!
    {::registry registry
     ::lib 'seon.db.protocol
     ::wrappers
@@ -737,7 +750,7 @@
      'pull-operation {::wrapper-value protocol/pull-operation}
      'success? {::wrapper-value ::protocol/success?}
      'result {::wrapper-value ::protocol/result}}})
-  (register-host-wrappers!
+  (install!
    {::registry registry
     ::lib 'seon.schema
     ::wrappers
@@ -766,7 +779,7 @@
      'schema-definition {::wrapper-fn schema/schema-definition
                          ::arglists '([schema-key])
                          ::doc "Return one registered schema's canonical definition."}}})
-  (register-host-wrappers!
+  (install!
    {::registry registry
     ::lib 'seon.ai.tokens
     ::wrappers
@@ -779,25 +792,25 @@
      'clip-str {::wrapper-fn tokens/clip-str
                 ::arglists '([value budget] [value budget marker])
                 ::doc "Clip text to an estimated token budget."}}})
-  (register-host-wrappers!
+  (install!
    {::registry registry
     ::lib 'seon.content-hash
     ::wrappers
     {'sha-256 {::wrapper-fn content-hash/sha-256
                ::arglists '([content])}}})
-  (register-host-wrappers!
+  (install!
    {::registry registry
     ::lib 'seon.time
     ::wrappers
     {'iso-string {::wrapper-fn time/iso-string
                   ::arglists '([instant])}}})
-  (register-host-wrappers!
+  (install!
    {::registry registry
     ::lib 'seon.repl.parse.repair
     ::wrappers
     {'rank-candidates {::wrapper-fn candidates/rank-candidates
                        ::arglists '([from names])}}})
-  (register-host-wrappers!
+  (install!
    {::registry registry
     ::lib 'seon.repl.parse
     ::wrappers
@@ -811,7 +824,7 @@
                        ::record/ns-sym (:seon.repl/current-ns options)
                        ::record/aliases (:seon.repl/aliases options)})))
                   ::arglists '([source])}}})
-  (register-host-wrappers!
+  (install!
    {::registry registry
     ::lib 'seon.agent.ctx
     ::wrappers
@@ -858,7 +871,7 @@
           (catch Throwable _ [])))
       ::arglists '([dir])
       ::doc "List the readable skill markdown files under one corpus directory."}}})
-  (register-host-wrappers!
+  (install!
    {::registry registry
     ::lib 'my.plan
     ::wrappers
@@ -877,27 +890,27 @@
      'status {::wrapper-fn (toolkit-call toolkit-delegates 'my.plan/status)}
      'step! {::wrapper-fn (toolkit-call toolkit-delegates 'my.plan/step!)}
      'tree {::wrapper-fn (toolkit-call toolkit-delegates 'my.plan/tree)}}})
-  (register-host-wrappers!
+  (install!
    {::registry registry
     ::lib 'my.kb
     ::wrappers
     {'recall {::wrapper-fn (toolkit-call toolkit-delegates 'my.kb/recall)}
      'remember {::wrapper-fn (toolkit-call toolkit-delegates 'my.kb/remember)}}})
-  (register-host-wrappers!
+  (install!
    {::registry registry
     ::lib 'my.kb.shared
     ::wrappers
     {'instructions
      {::wrapper-fn
       (toolkit-call toolkit-delegates 'my.kb.shared/instructions)}}})
-  (register-host-wrappers!
+  (install!
    {::registry registry
     ::lib 'my.skills
     ::wrappers
     {'list {::wrapper-fn (toolkit-call toolkit-delegates 'my.skills/list)}
      'load {::wrapper-fn (toolkit-call toolkit-delegates 'my.skills/load)}
      'unload {::wrapper-fn (toolkit-call toolkit-delegates 'my.skills/unload)}}})
-  (register-host-wrappers!
+  (install!
    {::registry registry
     ::lib 'seon.render.canvas
     ::wrappers
@@ -910,7 +923,8 @@
               (.getBytes ^String (str field)
                          java.nio.charset.StandardCharsets/UTF_8))))
       ::arglists '([field])
-      ::doc "Encode a qualified field keyword as a Datastar-safe signal identifier."}}}))
+      ::doc "Encode a qualified field keyword as a Datastar-safe signal identifier."}}})
+  (capability/installed-leaf-inventory :jvm @installed-leaves)))
 
 ;;; Portable `my.*` slice, loaded from the real sources.
 
@@ -1276,8 +1290,9 @@
   [writer]
   (let [wrapper-registry (registry)
         toolkit-delegates (atom {})
-        _ (register-host-capabilities! wrapper-registry writer
-                                       toolkit-delegates)
+        tier-inventory
+        (register-host-capabilities! wrapper-registry writer
+                                     toolkit-delegates)
         ctx (sci/init
              {:load-fn (registry-load-fn wrapper-registry writer)
               :namespaces {'clojure.core interrupt/clojure-core
@@ -1293,7 +1308,10 @@
         _ (load-host-toolkit-bindings! ctx wrapper-registry
                                        toolkit-delegates)
         _ (stamp-shared-base-vars! ctx)]
-    {::ctx ctx ::report report ::registry wrapper-registry}))
+    {::ctx ctx
+     ::report report
+     ::registry wrapper-registry
+     ::tier-inventory tier-inventory}))
 
 (defn fork-context
   "Fork one private agent context from the shared base."

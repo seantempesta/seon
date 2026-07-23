@@ -2,6 +2,7 @@
   (:require
    #?(:clj [clojure.test :refer [deftest is testing]]
       :cljs [cljs.test :refer [deftest is testing]])
+   [seon.capability :as capability]
    [seon.program.edge :as edge]
    [seon.program.plan :as plan]
    [seon.schema :as schema]))
@@ -75,7 +76,24 @@
   {:seon.execution/db-value database
    :seon.execution/roots roots
    :seon.execution/tier-inventories tier-inventories
+   :seon.execution/selection-policy
+   {:seon.execution.selection/invoking-tier :jvm
+    :seon.execution.selection/handoff-tier :bun}
    :seon.execution/planning-projection (projection bundles)})
+
+(def invocation-resolution
+  {::edge/namespace 'fixture.reply
+   ::edge/aliases {}
+   ::edge/refers {}
+   ::edge/current-vars #{}
+   ::edge/core-vars #{}
+   ::edge/known-namespaces
+   #{'fixture 'fixture.reply 'seon.db 'seon.packages.js.lodash}
+   ::edge/macro-symbols #{}
+   ::edge/effects
+   {'fixture/pure :pure
+    'seon.db/query :read
+    'seon.packages.js.lodash/get :external}})
 
 (deftest pure-corpus-chain-is-anywhere-and-cycle-safe
   (let [bundles [(bundle "fixture/root" #{"fixture/helper"})
@@ -86,14 +104,85 @@
     (is (empty? (:seon.execution/unresolved result)))))
 
 (deftest capabilities-and-package-prefixes-constrain-honest-tiers
-  (doseq [[target effect expected]
-          [["seon.db/query" :read #{:bun :jvm}]
-           ["seon.packages.js.lodash/get" :external #{:bun}]]]
+  (doseq [[target effect expected expected-selected]
+          [["seon.db/query" :read #{:bun :jvm} :jvm]
+           ["seon.packages.js.lodash/get" :external #{:bun} :bun]]]
     (let [root (bundle "fixture/root" #{target} #{} #{} false #{}
                        [(terminal target effect)])
           result (plan/plan-execution (request ["fixture/root"] [root]))]
       (is (= :constrained (:seon.execution/placement result)) target)
-      (is (= expected (:seon.execution/eligible-tiers result)) target))))
+      (is (= expected (:seon.execution/eligible-tiers result)) target)
+      (is (= expected-selected
+             (:seon.execution/selected-tier result)) target))))
+
+(deftest parsed-reply-forms-specialize-through-the-p1-edge-projector
+  (let [pure (bundle "fixture/pure" #{})
+        forms
+        ['(fixture/pure 1)
+         '(seon.db/query
+           '[:find ?name :where [?entity :demo/name ?name]])
+         '(seon.packages.js.lodash/get {:value 1} "value")]
+        result
+        (plan/plan-execution
+         (assoc (request forms [pure])
+                :seon.execution/root-resolution invocation-resolution))
+        release-result
+        (plan/plan-execution
+         (assoc (request forms [pure])
+                :seon.execution/root-resolution invocation-resolution
+                :seon.execution/selection-policy
+                {:seon.execution.selection/invoking-tier :jvm
+                 :seon.execution.selection/handoff-tier :jvm}))]
+    (is (= :constrained (:seon.execution/placement result)))
+    (is (= #{:bun} (:seon.execution/eligible-tiers result)))
+    (is (= :bun (:seon.execution/selected-tier result)))
+    (is (= #{"seon.db/query" "seon.packages.js.lodash/get"}
+           (get-in result [:seon.execution/capability-manifest
+                           :seon.execution/required-bindings])))
+    (is (empty? (:seon.execution/unresolved result)))
+    (is (not (contains? release-result :seon.execution/selected-tier)))))
+
+(deftest empty-roots-fail-closed-with-no-selection
+  (let [result (plan/plan-execution (request [] []))]
+    (is (= :unplannable (:seon.execution/placement result)))
+    (is (empty? (:seon.execution/eligible-tiers result)))
+    (is (not (contains? result :seon.execution/selected-tier)))
+    (is (= [:no-roots]
+           (mapv :seon.execution/reason
+                 (:seon.execution/unresolved result))))))
+
+(deftest installed-leaf-enumerator-round-trips-through-the-planner
+  (let [leaves
+        (capability/installation-leaves
+         'seon.db
+         {'query {:seon.host.context/effect :read}
+          'as-of {:seon.host.context/effect :pure}})
+        inventory (capability/installed-leaf-inventory :jvm leaves)
+        changed
+        (capability/installed-leaf-inventory
+         :jvm
+         (conj leaves
+               {:seon.capability/binding "seon.db/pull"
+                :seon.capability/effect :read
+                :seon.capability/remote? false}))
+        root (bundle "fixture/root" #{"seon.db/query"}
+                     #{} #{} false #{}
+                     [(terminal "seon.db/query" :read)])
+        base-request
+        (assoc (request ["fixture/root"] [root])
+               :seon.execution/tier-inventories {:jvm inventory})
+        changed-request
+        (assoc base-request :seon.execution/tier-inventories {:jvm changed})
+        result (plan/plan-execution base-request)]
+    (is (= #{"seon.db/query" "seon.db/as-of"}
+           (:seon.execution.inventory/bindings inventory)))
+    (is (= #{"seon.db/as-of"}
+           (:seon.execution.inventory/pure-bindings inventory)))
+    (is (= :jvm (:seon.execution/selected-tier result)))
+    (is (not=
+         (:seon.execution/cache-key result)
+         (:seon.execution/cache-key
+          (plan/plan-execution changed-request))))))
 
 (deftest uncertainty-and-absent-artifact-inventory-fail-closed
   (testing "the dynamic keyword edge is named"
@@ -177,7 +266,10 @@
                     :seon.execution.inventory/exports-by-tier {}
                     :seon.execution.inventory/digest "changed-artifacts"})
          (assoc base-request :seon.execution/invocation
-                {:fixture/argument 1})]]
+                {:fixture/argument 1})
+         (assoc base-request :seon.execution/selection-policy
+                {:seon.execution.selection/invoking-tier :bun
+                 :seon.execution.selection/handoff-tier :jvm})]]
     (doseq [mutation mutations]
       (is (not= base-key
                 (:seon.execution/cache-key

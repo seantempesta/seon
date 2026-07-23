@@ -2,6 +2,7 @@
   "Acquire one fenced planning projection, then derive execution placement."
   #?(:clj (:refer-clojure :exclude [await]))
   (:require [clojure.string :as str]
+            [seon.capability]
             [seon.content-hash :as content-hash]
             [seon.db :as db]
             [seon.program.edge :as edge]
@@ -13,7 +14,11 @@
  :seon.execution/placement
  [:enum :anywhere :constrained :unplannable])
 (schema/register! :seon.execution/tier :keyword)
-(schema/register! :seon.execution/roots [:vector :string])
+(schema/register!
+ :seon.execution/root
+ [:or :string :seon.db.protocol/ordinary-wire-value])
+(schema/register! :seon.execution/roots [:vector :seon.execution/root])
+(schema/register! :seon.execution/root-resolution ::edge/resolution)
 (schema/register! :seon.execution/invocation :seon.db.protocol/ordinary-wire-value)
 (schema/register! :seon.execution/basis-t :int)
 (schema/register! :seon.execution/commit-id [:or :string :uuid])
@@ -21,15 +26,15 @@
 (schema/register! :seon.execution/schema-fingerprint :int)
 (schema/register! :seon.execution/edge-bundles [:map-of :string ::edge/bundle])
 (schema/register!
- :seon.execution.inventory/tier
- [:map {:closed true}
-  [:seon.execution.inventory/bindings [:set :string]]
-  [:seon.execution.inventory/remote-bindings [:set :string]]
-  [:seon.execution.inventory/pure-bindings [:set :string]]
-  [:seon.execution.inventory/digest :string]])
-(schema/register!
  :seon.execution/tier-inventories
  [:map-of :seon.execution/tier :seon.execution.inventory/tier])
+(schema/register!
+ :seon.execution/selection-policy
+ [:map {:closed true}
+  [:seon.execution.selection/invoking-tier
+   {:optional true} :seon.execution/tier]
+  [:seon.execution.selection/handoff-tier
+   {:optional true} :seon.execution/tier]])
 (schema/register!
  :seon.execution/artifact-inventories
  [:or
@@ -58,8 +63,11 @@
  [:map {:closed true}
   [:seon.execution/db-value :seon.db/db]
   [:seon.execution/roots :seon.execution/roots]
+  [:seon.execution/root-resolution
+   {:optional true} :seon.execution/root-resolution]
   [:seon.execution/invocation {:optional true} :seon.execution/invocation]
   [:seon.execution/tier-inventories :seon.execution/tier-inventories]
+  [:seon.execution/selection-policy :seon.execution/selection-policy]
   [:seon.execution/planning-projection
    :seon.execution/planning-projection]])
 (schema/register!
@@ -90,6 +98,8 @@
  [:map {:closed true}
   [:seon.execution/placement :seon.execution/placement]
   [:seon.execution/eligible-tiers [:set :seon.execution/tier]]
+  [:seon.execution/selected-tier
+   {:optional true} :seon.execution/tier]
   [:seon.execution/schema-manifest :seon.execution/schema-manifest]
   [:seon.execution/capability-manifest :seon.execution/capability-manifest]
   [:seon.execution/unresolved [:vector :seon.execution/unresolved-edge]]
@@ -256,9 +266,72 @@
             :seon.execution/steering
             "Compile and publish this terminal in a claimant artifact."})}))))
 
+(declare unresolved)
+
+(defn- definition-function-symbol [form resolution]
+  (when (and (seq? form)
+             (symbol? (first form))
+             (contains? #{"defn" "defn-"} (name (first form)))
+             (symbol? (second form)))
+    (let [declared (second form)]
+      (str
+       (if (qualified-symbol? declared)
+         declared
+         (symbol (str (::edge/namespace resolution)) (name declared)))))))
+
+(defn- specialize-roots [roots resolution]
+  (reduce-kv
+   (fn [{::keys [pending bundles unresolved resolution] :as state}
+        index root]
+     (cond
+       (string? root)
+       (update state ::pending conj root)
+
+       (nil? resolution)
+       (update state ::unresolved conj
+               (unresolved
+                :missing-root-resolution nil nil
+                "Supply the retained P1 namespace resolution for in-memory form roots."))
+
+       :else
+       (let [defined-symbol (definition-function-symbol root resolution)
+             function-symbol
+             (or defined-symbol
+                 (str "seon.execution.invocation/root-"
+                      index "-" (digest root)))
+             accepted-form
+             (if defined-symbol
+               root
+               (list 'defn
+                     (symbol (str "root-" index))
+                     []
+                     root))
+             bundle
+             (edge/analyze-function
+              {::edge/function-symbol function-symbol
+               ::edge/form accepted-form
+               ::edge/resolution resolution})]
+         (cond-> (-> state
+                     (update ::pending conj function-symbol)
+                     (assoc-in [::bundles function-symbol] bundle))
+           defined-symbol
+           (update-in [::resolution ::edge/current-vars]
+                      conj (symbol (name (second root))))))))
+   {::pending []
+    ::bundles {}
+    ::unresolved
+    (cond-> []
+      (empty? roots)
+      (conj
+       (unresolved
+        :no-roots nil nil
+        "Provide at least one persisted function or in-memory form root.")))
+    ::resolution resolution}
+   roots))
+
 (defn- cache-key [{:seon.execution/keys
-                    [db-value roots invocation tier-inventories
-                     planning-projection]
+                    [db-value roots root-resolution invocation tier-inventories
+                     selection-policy planning-projection]
                    :as request}]
   [[(:db-name db-value) (:store-id db-value)]
    (:t db-value)
@@ -268,6 +341,8 @@
    (digest tier-inventories)
    (digest (:seon.execution/artifact-inventories planning-projection))
    (digest [roots
+            root-resolution
+            selection-policy
             (if (contains? request :seon.execution/invocation)
               [:present invocation]
               :absent)])])
@@ -284,7 +359,8 @@
    [:=> [:cat :seon.execution/plan-request]
     [:or :seon.execution/plan :seon.execution/core-error]]}
   [{:seon.execution/keys
-    [db-value roots tier-inventories planning-projection] :as request}]
+    [db-value roots root-resolution tier-inventories selection-policy
+     planning-projection] :as request}]
   (let [basis (:seon.execution/basis-t planning-projection)
         commit (:seon.execution/commit-id planning-projection)
         schema-projection
@@ -301,14 +377,16 @@
         :seon.execution/projection-basis-t basis
         :seon.execution/request-commit-id (:datahike/commit-id db-value)
         :seon.execution/projection-commit-id commit})
-      (let [bundles (:seon.execution/edge-bundles planning-projection)
+      (let [specialized (specialize-roots roots root-resolution)
+            bundles (merge (:seon.execution/edge-bundles planning-projection)
+                           (::bundles specialized))
             artifacts
             (:seon.execution/artifact-inventories planning-projection)
             all-tiers (set (keys tier-inventories))
             initial
-            {:pending (seq roots)
+            {:pending (seq (::pending specialized))
              :seen #{}
-             :eligible all-tiers
+             :eligible (if (seq roots) all-tiers #{})
              :restriction? false
              :schema-roots #{}
              :read-attrs #{}
@@ -320,7 +398,7 @@
              :effects {}
              :native-leaves #{}
              :artifact-exports #{}
-             :unresolved []}
+             :unresolved (vec (::unresolved specialized))}
             folded
             (loop [state initial]
               (if-let [function-symbol (first (:pending state))]
@@ -477,9 +555,20 @@
             (cond
               (or (seq unresolved-values) (empty? eligible)) :unplannable
               (:restriction? folded) :constrained
-              :else :anywhere)]
-        {:seon.execution/placement placement
-         :seon.execution/eligible-tiers eligible
+              :else :anywhere)
+            invoking-tier
+            (:seon.execution.selection/invoking-tier selection-policy)
+            handoff-tier
+            (:seon.execution.selection/handoff-tier selection-policy)
+            selected-tier
+            (when-not (= :unplannable placement)
+              (cond
+                (contains? eligible invoking-tier) invoking-tier
+                (contains? eligible handoff-tier) handoff-tier
+                :else nil))]
+        (cond->
+         {:seon.execution/placement placement
+          :seon.execution/eligible-tiers eligible
          :seon.execution/schema-manifest
          {:seon.execution/schema-keys schema-keys
           :seon.execution/predicate-functions predicates
@@ -494,7 +583,9 @@
           :seon.execution/native-leaves (:native-leaves folded)
           :seon.execution/artifact-exports (:artifact-exports folded)}
          :seon.execution/unresolved unresolved-values
-         :seon.execution/cache-key (cache-key request)}))))
+          :seon.execution/cache-key (cache-key request)}
+          selected-tier
+          (assoc :seon.execution/selected-tier selected-tier))))))
 
 (defn manifest-covered-by-projection?
   "True when a plan manifest is covered by the acquired full projection."
