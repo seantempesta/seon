@@ -7,6 +7,24 @@ tags: [issue, agent, architecture, database]
 
 # AI context is not pure over its database value
 
+## Reconciliation — 2026-07-23 (render-ctx portability audit)
+
+Current-source audit
+([[../../prds/sci-execution-runtime/research/render-ctx-portability-research-2026-07-23]])
+finds the frozen-turn-inputs rows I1-I4 LANDED (`6032f0b5` + follow-ups):
+the `result-live?` runtime-cache read is gone from the transcript (events
+always carry `::result-live?` false, transcript.cljs:557/:719), warnings and
+subagents derive `now` from the pinned value's max `:db/txInstant`, and the
+readline/host-telemetry live tail is a separate root-only terminal block.
+The triage's L sizing below is therefore stale on the input side. What
+remains for this issue's closure: I5 file-block fingerprints (ctx.cljs:118-208,
+:262-276), the SOUL env read (:248-256), the NEW host-timezone impurity in
+cacheable timestamps (ctx.cljs:297-303 → transcript.cljs:348), the 11
+ambient-db fallback doors (`(await (db/db))` tier), vestigial
+`::result-handles?` dial deletion, and the unbuilt stage-5 byte-identity
+gate. Full ledger: research doc §2; fold into the ruling-20(d) render-move
+unit (stage R0) as already ordered.
+
 ## Triage — 2026-07-23
 
 REAL+INDEPENDENT (L), owned by `seon.agent.ctx/render-context`. The P4
