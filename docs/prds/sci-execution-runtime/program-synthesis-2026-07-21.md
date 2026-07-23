@@ -1028,6 +1028,15 @@ COMPLETELY before dispatching anything.
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- INTERP-BENCH ACCEPTED (ddd3880e9): guarded sci vs compiled JVM =
+  glue 1.28x, Malli-heavy 1.34x, 10k transform 3.48x, hot loop
+  12.20x; guard = 7-15 ns/safepoint (interpretation dominates, not
+  the check). CORPUS CLASSIFICATION (computed): 69.8% glue / 22.6%
+  callback traversal / 7.6% explicit loop-recursion. VERDICT: the
+  space-for-computation trade is favorable — the common 70% pays
+  ~28% on code that mostly waits on db/LLM; the expensive 7.6% is
+  exactly P6's compiled-routing target. Bun comparison honestly
+  absent (stale v10 manifest blocks pod boot pre-checkpoint).
 - GUARDBATCH RESULT: DO NOT LAND (correct measure-first refusal;
   guard restored byte-identical, 11/35 gates green): current check
   = ~13.6 ns/step / ~9.7 ns isolated on this machine (better than
