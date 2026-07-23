@@ -8,6 +8,8 @@
   (:require
    #?(:clj [clojure.edn :as reader]
       :cljs [cljs.reader :as reader])
+   [datahike.pull-api :as datahike.pull]
+   [datahike.query :as datahike.query]
    [seon.db.branch :as db.branch]
    [seon.db.id.schema]
    [seon.db.internal :as internal]
@@ -38,6 +40,15 @@
 (schema/register! ::args [:vector :any])
 (schema/register! ::pull-pattern [:vector :any])
 (schema/register! ::refs [:vector :any])
+(schema/register!
+ ::read-attribute-dependencies-request
+ [:or
+  [:map {:closed true}
+   [::query ::query-form]
+   [::args {:optional true} ::args]]
+  [:map {:closed true}
+   [::pull-pattern ::pull-pattern]
+   [::refs {:optional true} ::refs]]])
 (schema/register! ::max-work [:int {:min 1}])
 (schema/register! ::max-results [:int {:min 1}])
 (schema/register! ::max-result-weight [:int {:min 1}])
@@ -190,8 +201,8 @@
 (def ^:dynamic *leaf* #?(:cljs session/leaf :clj nil))
 
 (declare current-agent-id db as-of since history cas-assert transact! query
-         query-with-evidence pull pull-many entity installed-schema execute-many
-         index-page)
+         query-with-evidence read-attribute-dependencies pull pull-many entity
+         installed-schema execute-many index-page)
 
 (defn bind-leaf
   "Return agent-facing database functions closed over one platform leaf."
@@ -203,8 +214,9 @@
                           (binding [*leaf* platform-leaf] (apply @v args)))
                         (meta v))])
              [#'current-agent-id #'db #'as-of #'since #'history #'cas-assert
-              #'transact! #'query #'query-with-evidence #'pull #'pull-many
-              #'entity #'installed-schema #'execute-many #'index-page])))
+              #'transact! #'query #'query-with-evidence
+              #'read-attribute-dependencies #'pull #'pull-many #'entity
+              #'installed-schema #'execute-many #'index-page])))
 
 (defn- leaf-fn [key]
   (or (get *leaf* key)
@@ -488,6 +500,56 @@
 
 (defn- explicit-query-source? [arguments]
   (some db-value? arguments))
+
+(def ^:private unaligned-dependency-arguments
+  ::unaligned-dependency-arguments)
+
+(defn- aligned-dependency-arguments
+  [query-form arguments]
+  (try
+    (let [arguments (vec (or arguments []))
+          input-count (datahike.query/query-input-count query-form)
+          source-bindings (datahike.query/query-source-bindings query-form)]
+      (cond
+        (= input-count (count arguments))
+        arguments
+
+        (and (= input-count (inc (count arguments)))
+             (= 1 (count source-bindings)))
+        (let [position
+              (:datahike.query.source/argument-position
+               (first source-bindings))]
+          (if (<= 0 position (count arguments))
+            (into (conj (subvec arguments 0 position)
+                        ::implicit-database-value)
+                  (subvec arguments position))
+            unaligned-dependency-arguments))
+
+        :else unaligned-dependency-arguments))
+    (catch #?(:clj Throwable :cljs :default) _
+      unaligned-dependency-arguments)))
+
+(defn ^{:seon.capability/effect :pure} read-attribute-dependencies
+  "Return exact query or pull attributes, or `:all` when open."
+  {:malli/schema
+   [:=> [:cat ::read-attribute-dependencies-request]
+    :datahike.query/attribute-dependencies]}
+  [request]
+  (try
+    (if-let [query-form (::query request)]
+      (let [arguments
+            (aligned-dependency-arguments query-form (::args request))]
+        (if (= unaligned-dependency-arguments arguments)
+          :all
+          (datahike.query/dependency-plan-attributes
+           (apply datahike.query/query-dependency-plan
+                  query-form arguments))))
+      (datahike.query/dependency-plan-attributes
+       (datahike.pull/pull-dependency-plan
+        (::pull-pattern request)
+        (or (::refs request) []))))
+    (catch #?(:clj Throwable :cljs :default) _
+      :all)))
 
 (defn- ^:async query-wire-request! [request]
   (let [arguments (vec (or (::args request) []))

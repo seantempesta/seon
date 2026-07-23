@@ -158,11 +158,12 @@
 (def public-functions
   [#'db/current-agent-id #'db/db #'db/as-of #'db/since #'db/history
    #'db/cas-assert #'db/transact! #'db/query #'db/query-with-evidence
-   #'db/pull #'db/pull-many #'db/entity #'db/installed-schema
-   #'db/execute-many #'db/index-page])
+   #'db/read-attribute-dependencies #'db/pull #'db/pull-many #'db/entity
+   #'db/installed-schema #'db/execute-many #'db/index-page])
 
 (def schema-required-functions
-  [#'db/current-agent-id #'db/cas-assert #'db/query-with-evidence #'db/pull-many #'db/entity
+  [#'db/current-agent-id #'db/cas-assert #'db/query-with-evidence
+   #'db/read-attribute-dependencies #'db/pull-many #'db/entity
    #'db/installed-schema #'db/execute-many #'db/index-page])
 
 (defn- assert-public-metadata! []
@@ -313,6 +314,33 @@
                                   ::db/limit 10 ::db/components [1]
                                   ::db/max-result-weight 22}))))))
     true))
+
+(deftest read-attribute-dependencies-are-portable
+  (let [project db/read-attribute-dependencies
+        bound-project
+        (get (db/bind-leaf {}) 'read-attribute-dependencies)
+        literal-query
+        {::db/query
+         '[:find ?name :where [?entity :demo/name ?name]]}
+        bound-query
+        {::db/query
+         '[:find ?entity :in $ ?attribute
+           :where [?entity ?attribute]]
+         ::db/args [:demo/name]}
+        open-query
+        {::db/query
+         '[:find ?entity :where [?entity ?attribute]]}
+        literal-pull
+        {::db/pull-pattern '[:demo/name]
+         ::db/refs [[:demo/id "one"]]}
+        wildcard-pull
+        {::db/pull-pattern '[*]}]
+    (is (= #{:demo/name} (project literal-query)))
+    (is (= #{:demo/name} (project bound-query)))
+    (is (= :all (project open-query)))
+    (is (= #{:demo/id :demo/name} (project literal-pull)))
+    (is (= :all (project wildcard-pull)))
+    (is (= (project literal-query) (bound-project literal-query)))))
 
 (deftest same-portable-database-contract-runs-on-both-tiers
   #?(:clj
