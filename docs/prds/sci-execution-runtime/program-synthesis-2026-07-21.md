@@ -859,6 +859,24 @@ COMPLETELY before dispatching anything.
   census cutover = host_surface_writer_test.clj:23-25 with ~17
   pending rows to resolve before the flip (U9's final commit).
 
+- FIXSEED STOP RULED (2026-07-23 eve, correct stop): the computed JVM
+  schema population (registered-schemas, 1,450 rows) excludes GENESIS
+  forms that are CLJS-captive in client.cljs/index-schemas — the
+  schema-registration-portability class in miniature. RULED option
+  (a): extract the genesis/boot schema-row producer into the one
+  portable schema authority (predfix done ⇒ client.cljs unprotected);
+  index-schemas delegates; fixtures consume the SAME producer; no
+  genesis seed list anywhere. Lane resumed. OWNER LANES DISPATCHED:
+  procmgmt research (orphaned process records impossible-by-
+  construction; ProcessHandle.onExit; R22 self-derived identity
+  precedent) + b2probe (live scheduled-fns fire proof on its own
+  cluster + durable-turn-wake design evaluation with owner question
+  list). Boot-time design investigation running (271s issue).
+  U9 TIMING (owner question answered): the deletion has NOT run — it
+  was dependency-gated on the checkpoint; its plan is now grounded
+  (accepted today) and it dispatches IMMEDIATELY after the checkpoint
+  goes green, with slice S0a (in-pod agent-view move) first.
+
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
