@@ -395,6 +395,8 @@
    :seon.release.member/execution "runtime/execution.js"
    :seon.release.member/runtime-assets "runtime/web"
    :seon.release.member/program-source "runtime/program-sources.edn"
+   :seon.release.member/client-inventory "runtime/client-inventory.edn"
+   :seon.release.member/execution-inventory "runtime/execution-inventory.edn"
    :seon.release.member/babashka "runtime/bb"
    :seon.release.member/operator "runtime/operator.jar"
    :seon.release.member/detach-helper "runtime/detach.py"
@@ -1665,10 +1667,11 @@
               :seon.dev.process/operation
               :seon.dev.process.operation/restart
               :seon.dev.process/targets
-              #{process/watcher-id process/pod-id process/host-id
+              #{process/watcher-id process/pod-id process/web-render-id
+                process/host-id
                 process/writer-id}})]
-        (is (= [process/pod-id process/host-id process/writer-id
-                process/watcher-id]
+        (is (= [process/web-render-id process/pod-id process/host-id
+                process/writer-id process/watcher-id]
                @calls))
         (is (= :seon.dev.process.classification/clean
                (:seon.dev.process/classification result)))
@@ -1676,6 +1679,24 @@
         (is (every? #(= :seon.dev.process.classification/clean
                         (:seon.dev.process/classification %))
                     (:seon.dev.process/results result)))))))
+
+(deftest clean-or-force-refuses-an-incomplete-target-proof
+  (let [configuration
+        (assoc (operator-config) :seon.dev.config/environment
+               {"SEON_TURN_TIMEOUT_MS" "10"})]
+    (with-redefs [process/stop-selected! (constantly [])]
+      (try
+        (process/clean-or-force!
+         {:seon.dev.process/configuration configuration
+          :seon.dev.process/operation :seon.dev.process.operation/down
+          :seon.dev.process/targets #{process/web-render-id}})
+        (is false "a missing requested result must fail loudly")
+        (catch clojure.lang.ExceptionInfo error
+          (is (= "The lifecycle result omitted or duplicated a requested process."
+                 (ex-message error)))
+          (is (= #{process/web-render-id}
+                 (:seon.dev.process/targets (ex-data error))))
+          (is (= [] (:seon.dev.process/result-ids (ex-data error)))))))))
 
 (deftest host-containment-sweep-is-kind-scoped-and-preserves-responders
   (let [configuration (test-config)
@@ -2365,9 +2386,16 @@
                   (fn [pid] (when (= 103 pid) "live-workload"))
                   process/socket-line!
                   (fn [& _] (throw (ex-info "control absent" {})))]
+      (is (= :seon.dev.process.status/dead-stale
+             (process/reported-process-status record))
+          "PID reuse proves the recorded exact identities are dead"))
+    (with-redefs [state/process-start-instant
+                  (fn [pid] (when (= 103 pid) "workload-start"))
+                  process/socket-line!
+                  (fn [& _] (throw (ex-info "control absent" {})))]
       (is (= :seon.dev.process.status/containment-uncertain
              (process/reported-process-status record))
-          "one present recorded PID preserves uncertainty"))
+          "one live recorded exact identity preserves uncertainty"))
     (with-redefs [state/process-start-instant (constantly nil)
                   process/socket-line! (constantly "generation-mismatch")]
       (is (= :seon.dev.process.status/containment-uncertain
@@ -2408,6 +2436,96 @@
               "the failure fixture leaves no containment process alive"))
         (fs/delete-tree (:seon.dev.test/directory configuration)
                         {:force true})))))
+
+(deftest dead-web-render-generation-is-consumed-before-replacement
+  (let [base (test-config)
+        directory (:seon.dev.test/directory base)
+        configuration (target-config base directory)
+        spec (harmless-spec process/web-render-id ["sleep" "300"])
+        replacement-spec
+        (assoc spec :seon.dev.process/argv ["sleep" "301"])
+        fixtures (atom [])]
+    (try
+      (let [record (process/ensure! configuration spec)
+            containment (:seon.dev.process/containment record)
+            workload
+            (:seon.dev.process.containment/workload-pid containment)]
+        (swap! fixtures conj record)
+        (is (zero? (:exit (shell/sh
+                           {:continue true
+                            :cmd ["/bin/kill" "-KILL" (str workload)]})))
+            "the regression kills the web-render workload directly")
+        (loop [remaining 500]
+          (when (and (pos? remaining)
+                     (= :seon.dev.process.status/alive
+                        (process/reported-process-status record)))
+            (Thread/sleep 10)
+            (recur (dec remaining))))
+        (let [down
+              (process/clean-or-force!
+               {:seon.dev.process/configuration configuration
+                :seon.dev.process/operation
+                :seon.dev.process.operation/down
+                :seon.dev.process/targets #{process/web-render-id}})]
+          (is (= [process/web-render-id]
+                 (mapv :seon.dev.process/id
+                       (:seon.dev.process/results down))))
+          (is (nil? (process/read-process configuration
+                                         process/web-render-id))
+              "down consumes the dead web-render record"))
+        (let [replacement (process/ensure! configuration replacement-spec)]
+          (swap! fixtures conj replacement)
+          (is (state/process-identity-alive? replacement)
+              "a reset-style replacement starts without manual cleanup")
+          (try
+            (process/ensure! configuration spec)
+            (is false "a live foreign generation must remain protected")
+            (catch clojure.lang.ExceptionInfo error
+              (is (= :seon.dev.process.status/managed-process-present
+                     (:seon.dev.process/status (ex-data error))))
+              (is (= :seon.dev.process.status/alive
+                     (:seon.dev.process/recorded-status (ex-data error))))))
+          (let [replacement-containment
+                (:seon.dev.process/containment replacement)
+                replacement-anchor
+                (:seon.dev.process.containment/anchor-pid
+                 replacement-containment)]
+            (is (zero? (:exit
+                        (shell/sh
+                         {:continue true
+                          :cmd ["/bin/kill" "-KILL" "--"
+                                (str "-" replacement-anchor)]}))))
+            (loop [remaining 500]
+              (when (and (pos? remaining)
+                         (not= :seon.dev.process.status/dead-stale
+                               (process/reported-process-status replacement)))
+                (Thread/sleep 10)
+                (recur (dec remaining)))))
+          (let [recovered (process/ensure! configuration spec)
+                _ (swap! fixtures conj recovered)]
+            (is (state/process-identity-alive? recovered)
+                "the start guard consumes a provably dead exact generation")
+            (is (not= (get-in replacement
+                              [:seon.dev.process/containment
+                               :seon.dev.process.containment/generation])
+                      (get-in recovered
+                              [:seon.dev.process/containment
+                               :seon.dev.process.containment/generation])))
+            (let [final-down
+                  (process/clean-or-force!
+                   {:seon.dev.process/configuration configuration
+                    :seon.dev.process/operation
+                    :seon.dev.process.operation/down
+                    :seon.dev.process/targets #{process/web-render-id}})]
+              (is (= :seon.dev.process.classification/clean
+                     (:seon.dev.process/classification final-down))
+                  "requested web-render drain is classified clean")
+              (is (nil? (process/read-process configuration
+                                             process/web-render-id)))))))
+      (finally
+        (doseq [record @fixtures]
+          (hard-clean-containment-fixture! record))
+        (fs/delete-tree directory {:force true})))))
 
 (deftest individually-killed-anchor-never-publishes-false-drained-evidence
   (let [configuration (test-config)

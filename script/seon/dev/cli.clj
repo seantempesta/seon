@@ -154,7 +154,9 @@
                              late-recovery (conj late-recovery))]
           (ensure-development-processes!
            configuration manifest start-owned! stop-results))
-        (let [readers #{process/pod-id process/watcher-id}
+        (let [readers
+              (disj (set (process/target-process-ids configuration))
+                    process/writer-id)
               already-stopped (stopped-targets prior-stop-results)
               readers-to-stop (set (remove already-stopped readers))
               reader-stop
@@ -238,7 +240,9 @@
   (into [(str (name (:seon.dev.process/operation result)) ": "
               (name (:seon.dev.process/classification result)))]
         (map stop-component-line)
-        (take 3 (:seon.dev.process/results result))))
+        (filter
+         (comp (set process/all-process-ids) :seon.dev.process/id)
+         (:seon.dev.process/results result))))
 
 (defn- print-stop-evidence! [indent result]
   (doseq [line (stop-evidence-lines result)]
@@ -672,12 +676,7 @@
                       {:seon.dev.cli/arguments (vec arguments)})))))
 
 (defn- parse-log-id [value]
-  (case value
-    "watcher" process/watcher-id
-    "writer" process/writer-id
-    "host" process/host-id
-    "pod" process/pod-id
-    nil))
+  (some #(when (= value (name %)) %) process/all-process-ids))
 
 (defn- parse-log-options [arguments]
   (loop [arguments (seq arguments)
@@ -712,7 +711,7 @@
     (if follow?
       (do
         (when-not (= 1 (count ids))
-          (throw (ex-info "`logs --follow` requires watcher, writer, host, or pod."
+          (throw (ex-info "`logs --follow` requires one managed process."
                           {:seon.dev.cli/arguments (vec arguments)})))
         (if-let [path (process/current-log configuration (first ids))]
           (shell/exec ["tail" "-n" (str lines) "-f" path])

@@ -4,6 +4,7 @@
             [babashka.process :as process]
             [cheshire.core :as json]
             [clojure.edn :as edn]
+            [clojure.set :as set]
             [clojure.string :as str]
             [malli.core :as m]
             [seon.dev.artifact :as artifact]
@@ -213,23 +214,36 @@
   (str (fs/path (:seon.dev.config/process-dir config)
                 "web-render" "http.port")))
 
+(defn- owned-process-graph
+  [config]
+  (let [source-checkout?
+        (not= false (:seon.dev.config/source-checkout? config))
+        descriptor (:seon.dev.config/launch-descriptor config)
+        owns-writer? (owns-writer-processes? descriptor)
+        owns-watcher? (and source-checkout?
+                           (owns-watcher-process? descriptor))]
+    (cond->
+     {pod-id
+      (cond-> []
+        owns-watcher? (conj watcher-id)
+        owns-writer? (conj writer-id)
+        source-checkout? (conj host-id))}
+      owns-watcher? (assoc watcher-id [])
+      owns-writer? (assoc writer-id [])
+      source-checkout?
+      (assoc host-id
+             (cond-> []
+               owns-watcher? (conj watcher-id)
+               owns-writer? (conj writer-id))
+             web-render-id
+             (cond-> [pod-id]
+               owns-writer? (conj writer-id))))))
+
 (defn target-process-ids
   "Return the processes owned by the selected runtime configuration."
   [config]
-  (let [source-checkout? (not= false (:seon.dev.config/source-checkout? config))
-        descriptor (:seon.dev.config/launch-descriptor config)
-        owns-writer? (owns-writer-processes? descriptor)
-        owns-watcher? (and source-checkout? (owns-watcher-process? descriptor))]
-    (cond
-      (and owns-watcher? owns-writer?) all-process-ids
-      owns-watcher? (if source-checkout?
-                      [watcher-id host-id web-render-id pod-id]
-                      [watcher-id pod-id])
-      owns-writer? (if source-checkout?
-                     [writer-id host-id web-render-id pod-id]
-                     [writer-id pod-id])
-      source-checkout? [host-id web-render-id pod-id]
-      :else [pod-id])))
+  (let [graph (owned-process-graph config)]
+    (filterv graph all-process-ids)))
 
 (defn- release-member
   [manifest identity-key]
@@ -400,6 +414,7 @@
   "Derive the selected runtime process graph from one verified manifest."
   [config manifest]
   (let [source-checkout? (not= false (:seon.dev.config/source-checkout? config))
+        process-graph (owned-process-graph config)
         manifest (process-artifact config manifest)
         environment (:seon.dev.config/environment config)
         source-descriptor (:seon.dev.config/launch-descriptor config)
@@ -506,10 +521,7 @@
               (:seon.dev.artifact/client-output manifest))]
            :seon.dev.process/environment pod-environment
            :seon.dev.process/dependencies
-           (cond-> []
-             owns-watcher-process? (conj watcher-id)
-             owns-writer-processes? (conj writer-id)
-             source-checkout? (conj host-id))
+           (get process-graph pod-id)
            :seon.dev.process/http-port-file
            (::launch/http-port-file descriptor-process)
            :seon.dev.process/readiness :seon.dev.process.readiness/pod
@@ -589,9 +601,7 @@
                      (::launch/blob-storage-view descriptor)})]
            :seon.dev.process/environment environment
            :seon.dev.process/dependencies
-           (cond-> []
-             owns-watcher-process? (conj watcher-id)
-             owns-writer-processes? (conj writer-id))
+           (get process-graph host-id)
            :seon.dev.process/readiness :seon.dev.process.readiness/host
            :seon.dev.process/ready-timeout-ms 180000
            :seon.dev.process/shutdown-grace-ms 30000
@@ -622,8 +632,7 @@
                :seon.web.server/port 0})]
             :seon.dev.process/environment environment
             :seon.dev.process/dependencies
-            (cond-> [pod-id]
-              owns-writer-processes? (conj writer-id))
+            (get process-graph web-render-id)
             :seon.dev.process/http-port-file
             (web-render-port-file config)
             :seon.dev.process/readiness
@@ -668,7 +677,7 @@
         (into ["--repl-port" (str (:seon.dev.config/writer-repl-port config))
                "--repl-port-file" (:seon.dev.config/writer-repl-port-file config)]))
       :seon.dev.process/environment environment
-      :seon.dev.process/dependencies []
+      :seon.dev.process/dependencies (get process-graph writer-id)
       :seon.dev.process/readiness :seon.dev.process.readiness/writer
       :seon.dev.process/ready-timeout-ms 180000
       :seon.dev.process/shutdown-grace-ms 30000
@@ -678,9 +687,15 @@
      host-id host-spec
      web-render-id web-render-spec
      pod-id pod-spec}
-        selected-ids (set (target-process-ids config))
-        spec-map (into {} (keep (fn [[id spec]] (when (and spec (selected-ids id))
-                                                  [id spec]))) spec-map)]
+        selected-ids (set (keys process-graph))
+        spec-map
+        (into {}
+              (keep
+               (fn [[id spec]]
+                 (when (and spec (selected-ids id))
+                   [id (assoc spec :seon.dev.process/dependencies
+                              (get process-graph id))])))
+              spec-map)]
     (doseq [spec (vals spec-map)]
       (validate! process-spec-schema spec
                  "The derived process specification is invalid."
@@ -707,6 +722,37 @@
         (recur (reduce disj remaining ready)
                (into completed ready)
                (into ordered ready))))))
+
+(defn- shutdown-order
+  [config targets]
+  (let [selected (set targets)
+        graph (owned-process-graph config)
+        owned (set (keys graph))
+        unavailable (set/difference selected owned)]
+    (when (seq unavailable)
+      (throw
+       (ex-info
+        "The lifecycle request includes processes outside the owned graph."
+        {:seon.dev.process/targets selected
+         :seon.dev.process/owned-processes owned
+         :seon.dev.process/unavailable-processes unavailable})))
+    (let [selected-graph
+          (into {}
+                (map
+                 (fn [id]
+                   [id
+                    {:seon.dev.process/id id
+                     :seon.dev.process/dependencies
+                     (filterv selected (get graph id))}]))
+                selected)
+          ordered (vec (reverse (start-order selected-graph)))]
+      (when-not (= selected (set ordered))
+        (throw
+         (ex-info
+          "The owned process graph did not order every lifecycle target."
+          {:seon.dev.process/targets selected
+           :seon.dev.process/ordered-processes (set ordered)})))
+      ordered)))
 
 (defn- process-status [record]
   (cond
@@ -1454,16 +1500,11 @@
 (defn- dead-stale-containment?
   [record]
   (let [containment (:seon.dev.process/containment record)
-        owner-pid (:seon.dev.process.containment/owner-pid containment)
-        anchor-pid (:seon.dev.process.containment/anchor-pid containment)
-        process-group (:seon.dev.process.containment/process-group containment)
-        workload-pid (:seon.dev.process.containment/workload-pid containment)
-        recorded-pids
-        (distinct [(:seon.dev.process/pid record)
-                   owner-pid anchor-pid process-group workload-pid])]
+        recorded-identities
+        (map #(containment-identity containment %)
+             [:owner :anchor :workload])]
     (and (exact-containment-record? record)
-         (every? pos-int? recorded-pids)
-         (every? #(nil? (state/process-start-instant %)) recorded-pids)
+         (not-any? state/process-identity-alive? recorded-identities)
          (not (containment-control-responsive? containment)))))
 
 (defn- containment-status
@@ -2095,6 +2136,7 @@
                (case id
                  :seon.dev.process/watcher true
                  :seon.dev.process/host true
+                 :seon.dev.process/web-render true
                  :seon.dev.process/pod
                  (true? (get-in result [:seon.dev.process/application-result
                                         :seon.client/quiesced?]))
@@ -2157,8 +2199,16 @@
                   lifecycle-reserve-ms)
         deadline (+ started budget)
         selected (set targets)
-        ordered (filterv selected [pod-id host-id writer-id watcher-id])
+        ordered (shutdown-order configuration selected)
         results (stop-selected! configuration deadline ordered)
+        result-ids (mapv :seon.dev.process/id results)
+        _ (when-not (and (= selected (set result-ids))
+                         (= (count selected) (count result-ids)))
+            (throw
+             (ex-info
+              "The lifecycle result omitted or duplicated a requested process."
+              {:seon.dev.process/targets selected
+               :seon.dev.process/result-ids result-ids})))
         classifications (set (map :seon.dev.process/classification results))
         classification
         (cond
@@ -2480,15 +2530,26 @@
 
 (defn- require-startable-absence! [config id record]
   (when record
-    (throw
-     (ex-info
-      "Refusing to replace a managed process without clean-or-force evidence."
-      {:seon.dev.process/id id
-       :seon.dev.process/status
-       :seon.dev.process.status/managed-process-present
-       :seon.dev.process/recorded-status (process-status record)
-       :seon.dev.process/required-transition
-       :seon.dev.process.transition/clean-or-force})))
+    (if (= :seon.dev.process.status/dead-stale
+           (containment-status record))
+      (do
+        (stop! config id record)
+        (when (read-process config id)
+          (throw
+           (ex-info
+            "The provably dead managed generation was not consumed."
+            {:seon.dev.process/id id
+             :seon.dev.process/status
+             :seon.dev.process.status/containment-uncertain}))))
+      (throw
+       (ex-info
+        "Refusing to replace a managed process without clean-or-force evidence."
+        {:seon.dev.process/id id
+         :seon.dev.process/status
+         :seon.dev.process.status/managed-process-present
+         :seon.dev.process/recorded-status (containment-status record)
+         :seon.dev.process/required-transition
+         :seon.dev.process.transition/clean-or-force}))))
   (when (accepting-unmanaged? config id)
     (throw
      (ex-info "An unmanaged listener blocks the Seon process."

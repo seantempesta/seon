@@ -28,10 +28,7 @@
     (mapv (fn [id]
             {:seon.dev.process/id id
              :seon.dev.process/classification classification})
-          (filterv targets
-                   [process/pod-id process/web-render-id process/host-id
-                    process/writer-id
-                    process/watcher-id]))}))
+          (filterv targets (reverse process/all-process-ids)))}))
 
 (defn- component-result
   ([id classification]
@@ -256,14 +253,12 @@
         watcher (component-result process/watcher-id
                                   :seon.dev.process.classification/clean
                                   generation)
-        extra (assoc watcher :seon.dev.process/reason
-                     :seon.dev.process.reason/should-not-render)
         lines
         (#'cli/stop-evidence-lines
          {:seon.dev.process/operation :seon.dev.process.operation/restart
           :seon.dev.process/classification
           :seon.dev.process.classification/forced
-          :seon.dev.process/results [pod writer watcher extra]})]
+          :seon.dev.process/results [pod writer watcher]})]
     (is (= ["restart: forced"
             (str "  pod: forced reason=incomplete-application"
                  " generation=" generation " trigger=requested")
@@ -274,8 +269,7 @@
                  " trigger=requested")]
            lines))
     (is (= 4 (count lines)))
-    (is (not-any? #(str/includes? % sentinel) lines))
-    (is (not-any? #(str/includes? % "should-not-render") lines))))
+    (is (not-any? #(str/includes? % sentinel) lines))))
 
 (deftest ready-output-renders-bounded-restart-component-evidence
   (let [target
@@ -293,9 +287,11 @@
                     "  root:  http://127.0.0.1:7890/\n"
                     "  data:  http://127.0.0.1:7890/data\n"
                     "  restart: forced\n"
-                    "    pod: forced\n"
                     "    web-render: forced\n"
-                    "    host: forced\n")
+                    "    pod: forced\n"
+                    "    host: forced\n"
+                    "    writer: forced\n"
+                    "    watcher: forced\n")
                (with-out-str (#'cli/print-ready! target false))))))))
 
 (deftest ready-url-selects-an-ordinary-agent-from-the-root-feed
@@ -354,7 +350,7 @@
                :seon.dev.process/operation
                :seon.dev.process.operation/rebuild-readers
                :seon.dev.process/targets
-               #{process/pod-id process/watcher-id}}]
+               (disj (set process/all-process-ids) process/writer-id)}]
              @requests))
       (is (= [process/watcher-id] @unwound)
           "only startup ownership directly unwinds the prepared watcher")
@@ -396,7 +392,7 @@
                  (mapv :seon.dev.process/operation
                        (:seon.dev.target/stop-results target)))))))
     (is (= [[:seon.dev.process.operation/rebuild-readers
-              #{process/pod-id process/watcher-id}]
+              (disj (set process/all-process-ids) process/writer-id)]
             [:seon.dev.process.operation/rebuild-writer
               #{process/writer-id}]]
            (mapv (juxt :seon.dev.process/operation
@@ -430,7 +426,7 @@
          {:seon.dev.target/status :seon.dev.target.status/ready})}
       (fn [] (#'cli/reconcile-development! configuration)))
     (is (= [[:seon.dev.process.operation/rebuild-readers
-             #{process/pod-id process/watcher-id}]]
+             (disj (set process/all-process-ids) process/writer-id)]]
            (mapv (juxt :seon.dev.process/operation
                        :seon.dev.process/targets)
                  @requests)))))
@@ -623,7 +619,8 @@
       (fn []
         (#'cli/reconcile-development! configuration [reset-result])))
     (is (= [[:seon.dev.process.operation/rebuild-readers
-             #{process/watcher-id}]]
+             #{process/watcher-id process/host-id
+               process/web-render-id}]]
            (mapv (juxt :seon.dev.process/operation
                        :seon.dev.process/targets)
                  @requests)))))
@@ -681,9 +678,11 @@
       (fn []
         (is (= (str "○ Seon is down\n"
                     "  down: forced\n"
-                    "    pod: forced\n"
                     "    web-render: forced\n"
-                    "    host: forced\n")
+                    "    pod: forced\n"
+                    "    host: forced\n"
+                    "    writer: forced\n"
+                    "    watcher: forced\n")
                (with-out-str (#'cli/down! configuration []))))))
     (is (= {:seon.dev.process/configuration configuration
             :seon.dev.process/operation :seon.dev.process.operation/down
@@ -1101,9 +1100,10 @@
             :seon.dev.target/stop-results stop-results})}
         (fn []
           (is (= (str "  reset: forced\n"
-                      "    pod: forced\n"
                       "    web-render: forced\n"
+                      "    pod: forced\n"
                       "    host: forced\n"
+                      "    writer: forced\n"
                       "● cluster default reset and ready\n")
                  (with-out-str
                    (#'cli/reset-cluster! configuration ["default"]))))))
