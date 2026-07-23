@@ -233,6 +233,54 @@
                       :where [?entity :receipt/value "parallel"]]
                     (d/db connection))))))))
 
+(deftest in-flight-cache-joins-same-intent-and-rejects-a-conflict
+  (let [base-runtime (runtime)
+        runtime (assoc base-runtime ::writer/in-flight-transactions (atom {}))
+        database-name (str "receipt-in-flight-" (random-uuid))]
+    (ensure-database! base-runtime database-name)
+    (install-schema! base-runtime database-name)
+    (let [connection (connection database-name)
+          request-id "receipt/in-flight"
+          request
+          (protocol/transaction-request
+           {:seon.db/db (current-database-value database-name)
+            ::protocol/request-id request-id
+            ::protocol/transaction-data [{:receipt/value "original"}]})
+          conflicting-request
+          (assoc request ::protocol/transaction-data
+                 [{:receipt/value "different"}])
+          fingerprint (protocol/logical-transaction-hash request)
+          claim! (var-get (ns-resolve 'seon.db.writer
+                                      'claim-in-flight-transaction!))
+          complete! (var-get (ns-resolve 'seon.db.writer
+                                         'complete-in-flight-transaction!))
+          await! (var-get (ns-resolve 'seon.db.writer
+                                      'await-in-flight-transaction!))
+          first-claim
+          (claim! runtime connection database-name request-id fingerprint nil)
+          second-claim
+          (claim! runtime connection database-name request-id fingerprint nil)
+          waiter (future (await! (::writer/in-flight-completion second-claim)))
+          conflict
+          (try
+            (claim! runtime connection database-name request-id
+                    (protocol/logical-transaction-hash conflicting-request) nil)
+            nil
+            (catch Throwable throwable throwable))
+          response {::protocol/request-id request-id
+                    ::protocol/success? true}]
+      (is (some? (::writer/in-flight-key first-claim)))
+      (is (nil? (::writer/in-flight-key second-claim)))
+      (is (identical? (::writer/in-flight-completion first-claim)
+                      (::writer/in-flight-completion second-claim)))
+      (is (= ::waiting (deref waiter 100 ::waiting)))
+      (is (= protocol/request-conflict-error
+             (::writer/failure-kind (ex-data conflict))))
+      (complete! (assoc first-claim ::writer/runtime runtime) response)
+      (is (= response (deref waiter 5000 ::timeout)))
+      (is (empty? @(::writer/in-flight-transactions runtime))
+          "the durable receipt remains authority after the cache entry retires"))))
+
 (deftest primary-transaction-does-not-wait-for-the-embedding-provider
   (let [base-runtime (runtime)
         database-name (str "receipt-provider-" (random-uuid))

@@ -20,10 +20,12 @@
   ([processors execute]
    (start-worker processors execute (fn [_completion] nil)))
   ([processors execute complete!]
+   (start-worker processors execute complete! (test-capacity processors)))
+  ([processors execute complete! capacity]
    (let [completions (atom {})]
      (assoc
       (executor/start!
-       {::executor/capacity (test-capacity processors)
+       {::executor/capacity capacity
         ::executor/execute execute
         ::executor/complete!
         (fn [completion]
@@ -342,6 +344,56 @@
         (is (= ["callback/rejected" "callback/abandoned"]
                (mapv ::executor/job-id @completions))
             "the late abandoned worker cannot publish a second completion"))
+      (finally
+        (.countDown release)
+        (executor/stop! {::executor/executor worker})))))
+
+(deftest mutation-in-flight-breaker-rejects-loudly-with-its-config-key
+  (let [entered (CountDownLatch. 1)
+        release (CountDownLatch. 1)
+        capacity (assoc-in (test-capacity 2)
+                           [::executor/classes :mutation
+                            ::executor/maximum-active]
+                           1)
+        completions (atom {})
+        worker
+        (assoc
+         (executor/start!
+          {::executor/capacity capacity
+           ::executor/execute
+           {:mutation
+            (fn [request]
+              (.countDown entered)
+              (.await release)
+              (:request/value request))}
+           ::executor/complete!
+           (fn [completion]
+             (when-let [result
+                        (get @completions (::executor/job-id completion))]
+               (deliver result (::executor/outcome completion))))})
+         ::completion-promises completions)
+        exact-scope (scope "a" (random-uuid) (random-uuid))
+        mutation-request
+        (fn [job-id value]
+          (assoc (request worker "a" exact-scope job-id value)
+                 ::executor/work-class :mutation))]
+    (try
+      (let [running (submit-async! (mutation-request "mutation/running" :run))]
+        (is (.await entered 5 TimeUnit/SECONDS))
+        (let [[admission completion]
+              (submit-with-evidence!
+               (mutation-request "mutation/rejected" :reject))
+              [outcome throwable] @completion]
+          (is (= {::executor/accepted? false ::executor/joined? false}
+                 admission))
+          (is (= ::executor/throwable outcome))
+          (is (= :seon.config.database.executor.mutation/maximum-active
+                 (:seon.config/governing-key (ex-data throwable))))
+          (is (re-find
+               #":seon.config.database.executor.mutation/maximum-active"
+               (ex-message throwable))))
+        (.countDown release)
+        (is (= [::executor/value :run] @running)))
       (finally
         (.countDown release)
         (executor/stop! {::executor/executor worker})))))
@@ -883,8 +935,8 @@
         (.countDown release)
         (executor/stop! {::executor/executor worker})))))
 
-(deftest mutations-serialize-per-database-and-progress-across-databases
-  (let [entered (CountDownLatch. 2)
+(deftest ordinary-mutations-pipeline-within-and-across-databases
+  (let [entered (CountDownLatch. 3)
         release (CountDownLatch. 1)
         active (atom {})
         peak-by-database (atom {})
@@ -897,7 +949,13 @@
                     (.await release)
                     (swap! active update database dec)
                     database))
-        worker (start-worker 4 {:mutation execute})
+        capacity (assoc-in (test-capacity 4)
+                           [::executor/classes :mutation
+                            ::executor/maximum-active]
+                           4)
+        worker (start-worker 4 {:mutation execute}
+                             (fn [_completion] nil)
+                             capacity)
         a (scope "a" (random-uuid) (random-uuid))
         b (scope "b" (random-uuid) (random-uuid))
         submit (fn [database-name one-scope job-id]
@@ -911,9 +969,9 @@
             a2 (submit "a" a "mutation/a2")
             b1 (submit "b" b "mutation/b1")]
         (is (.await entered 5 TimeUnit/SECONDS)
-            "independent database mutations start together")
-        (is (= {"a" 1 "b" 1} @peak-by-database))
-        (is (= {"a" 1 "b" 1}
+            "ordinary mutations start together within and across databases")
+        (is (= {"a" 2 "b" 1} @peak-by-database))
+        (is (= {"a" 2 "b" 1}
                (::executor/running-by-database (executor/evidence worker))))
         (.countDown release)
         (is (= [::executor/value "a"] @a1))

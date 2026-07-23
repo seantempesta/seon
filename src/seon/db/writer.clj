@@ -71,6 +71,7 @@
 (schema/register! ::query-vec 'fn?)
 (schema/register! ::knn 'fn?)
 (schema/register! ::active-requests 'some?)
+(schema/register! ::in-flight-transactions 'some?)
 (schema/register! ::query-jobs 'some?)
 (schema/register! ::interest-state 'some?)
 (schema/register! ::readiness-owner 'some?)
@@ -100,6 +101,7 @@
   [::read-defaults ::read-defaults]
   [::executor ::executor]
   [::active-requests {:optional true} ::active-requests]
+  [::in-flight-transactions {:optional true} ::in-flight-transactions]
   [::query-jobs {:optional true} ::query-jobs]
   [::interest-state {:optional true} ::interest-state]
   [::readiness-owner {:optional true} ::readiness-owner]
@@ -1444,6 +1446,45 @@
       (recover-committed db-value database-name transaction request-id fingerprint
                          candidates))))
 
+(defn- claim-in-flight-transaction!
+  [runtime connection database-name request-id fingerprint candidates]
+  (if-let [in-flight (::in-flight-transactions runtime)]
+    (locking in-flight
+      (if-let [response
+               (recover-current connection database-name request-id fingerprint
+                                candidates)]
+        {::response response}
+        (let [key [database-name request-id]]
+          (if-let [entry (get @in-flight key)]
+            (if (= fingerprint (::fingerprint entry))
+              {::in-flight-completion (::in-flight-completion entry)}
+              (throw
+               (request-conflict request-id fingerprint (::fingerprint entry))))
+            (let [completion (promise)]
+              (swap! in-flight assoc key
+                     {::fingerprint fingerprint
+                      ::in-flight-completion completion})
+              {::in-flight-key key
+               ::in-flight-completion completion})))))
+    (if-let [response
+             (recover-current connection database-name request-id fingerprint
+                              candidates)]
+      {::response response}
+      {})))
+
+(defn- complete-in-flight-transaction!
+  [{::keys [runtime in-flight-key in-flight-completion]} result]
+  (when (and in-flight-key in-flight-completion)
+    (let [in-flight (::in-flight-transactions runtime)]
+      (locking in-flight
+        (when (identical? in-flight-completion
+                          (get-in @in-flight
+                                  [in-flight-key ::in-flight-completion]))
+          (deliver in-flight-completion result)
+          (swap! in-flight dissoc in-flight-key)
+          (.notifyAll ^Object in-flight)))))
+  result)
+
 (defn- assert-current-database-value!
   [database-name db-value expected-db]
   (let [current-db (database-value database-name db-value)]
@@ -1465,53 +1506,64 @@
         fingerprint (protocol/logical-transaction-hash request)
         _ (assert-protocol-attributes-free! transaction-data transaction-meta)]
     (locking connection
-      (if-let [response
-               (recover-current connection database-name request-id fingerprint
-                                candidates)]
-        {::response response}
-        (let [db-value (d/db connection)
-              _ (assert-current-database-value! database-name db-value expected-db)
-              schema-declarations
-              (derive-transaction-schema db-value transaction-data)
-              effective-schema
-              (merge (into {}
-                           (map (juxt :db/ident identity))
-                           schema-declarations)
-                     (:schema db-value))
-              coerced-data
-              (coerce-transaction-data effective-schema transaction-data)
-              augmented-data
-              (into (vec schema-declarations) coerced-data)
-              caller-tempids
-              (id/transaction-tempids
-               {::id/db-value db-value
-                ::id/transaction-data augmented-data})
-              data-with-receipts
-              (into augmented-data
-                    (protocol/tempid-receipts request-id caller-tempids))
-              transaction-meta*
-              (assoc (or transaction-meta {})
-                     ::protocol/request-id request-id
-                     ::protocol/request-hash fingerprint
-                     ::protocol/version protocol/current-version)
-              transaction
-              (cond-> {:tx-data data-with-receipts
-                       :tx-meta transaction-meta*}
-                expected-db
-                (assoc :datahike/expected-basis-t
-                       (:t expected-db))
-                generated?
-                (assoc ::id/generated-candidates candidates))]
-          {::transaction-result (d/transact! connection transaction)
-           ::database-before (database-value database-name db-value)
-           ::request-id request-id
-           ::fingerprint fingerprint
-           ::candidates candidates
-           ::database-name database-name
-           ::branch/connection-id connection-id
-           :seon.db/expected-db expected-db
-           ::connection connection
-           ::runtime runtime})))))
+      (let [{::keys [response in-flight-key in-flight-completion] :as claim}
+            (claim-in-flight-transaction!
+             runtime connection database-name request-id fingerprint candidates)]
+        (cond
+          response claim
+          (and in-flight-completion (nil? in-flight-key)) claim
+          :else
+          (try
+            (let [db-value (d/db connection)
+                  _ (assert-current-database-value! database-name db-value expected-db)
+                  schema-declarations
+                  (derive-transaction-schema db-value transaction-data)
+                  effective-schema
+                  (merge (into {}
+                               (map (juxt :db/ident identity))
+                               schema-declarations)
+                         (:schema db-value))
+                  coerced-data
+                  (coerce-transaction-data effective-schema transaction-data)
+                  augmented-data
+                  (into (vec schema-declarations) coerced-data)
+                  caller-tempids
+                  (id/transaction-tempids
+                   {::id/db-value db-value
+                    ::id/transaction-data augmented-data})
+                  data-with-receipts
+                  (into augmented-data
+                        (protocol/tempid-receipts request-id caller-tempids))
+                  transaction-meta*
+                  (assoc (or transaction-meta {})
+                         ::protocol/request-id request-id
+                         ::protocol/request-hash fingerprint
+                         ::protocol/version protocol/current-version)
+                  transaction
+                  (cond-> {:tx-data data-with-receipts
+                           :tx-meta transaction-meta*}
+                    expected-db
+                    (assoc :datahike/expected-basis-t
+                           (:t expected-db))
+                    generated?
+                    (assoc ::id/generated-candidates candidates))]
+              (merge
+               claim
+               {::transaction-result (d/transact! connection transaction)
+                ::database-before (database-value database-name db-value)
+                ::request-id request-id
+                ::fingerprint fingerprint
+                ::candidates candidates
+                ::database-name database-name
+                ::branch/connection-id connection-id
+                :seon.db/expected-db expected-db
+                ::connection connection
+                ::runtime runtime}))
+            (catch Throwable throwable
+              (complete-in-flight-transaction!
+               (assoc claim ::runtime runtime)
+               throwable)
+              (throw throwable))))))))
 
 (defn- serialized-transaction-error
   [database-name connection expected-db ^Throwable throwable]
@@ -1549,13 +1601,35 @@
         (some? generated-entity-ids)
         (assoc ::protocol/generated-entity-ids generated-entity-ids)))))
 
+(defn- finish-owned-transaction!
+  [prepared result]
+  (let [outcome
+        (try
+          (finish-transaction! prepared result)
+          (catch Throwable throwable throwable))]
+    (complete-in-flight-transaction! prepared outcome)
+    (if (instance? Throwable outcome)
+      (throw outcome)
+      outcome)))
+
+(defn- await-in-flight-transaction!
+  [completion]
+  (let [outcome @completion]
+    (if (instance? Throwable outcome)
+      (throw outcome)
+      outcome)))
+
 (defn- transact-once!
   [runtime connection database-name connection-id request]
-  (let [{::keys [response transaction-result] :as prepared}
+  (let [{::keys [response transaction-result in-flight-completion in-flight-key]
+         :as prepared}
         (prepare-transaction! runtime connection database-name connection-id request)]
-    (if response
-      response
-      (finish-transaction!
+    (cond
+      response response
+      (and in-flight-completion (nil? in-flight-key))
+      (await-in-flight-transaction! in-flight-completion)
+      :else
+      (finish-owned-transaction!
        prepared
        (try
          @transaction-result
@@ -1563,10 +1637,14 @@
 
 (defn- transact-once-async!
   [runtime connection database-name connection-id request]
-  (let [{::keys [response transaction-result] :as prepared}
+  (let [{::keys [response transaction-result in-flight-completion in-flight-key]
+         :as prepared}
         (prepare-transaction! runtime connection database-name connection-id request)]
-    (if response
-      response
+    (cond
+      response response
+      (and in-flight-completion (nil? in-flight-key))
+      (await-in-flight-transaction! in-flight-completion)
+      :else
       (let [completion (async/promise-chan)]
         (async/take!
          transaction-result
@@ -1574,7 +1652,7 @@
            (async/put!
             completion
             (try
-              (finish-transaction!
+              (finish-owned-transaction!
                prepared
                (or result
                    (ex-info "Datahike transaction completion closed."
@@ -2970,16 +3048,31 @@
         request-id (::protocol/request-id request)
         owner (Object.)]
     (locking active
-      (when-not (contains? @active request-id)
-        (swap! active assoc request-id
-               {::owner owner
-                ::request request
-                ::request-bytes frame-bytes
-                ::transport-connection transport-connection
-                ::complete! complete!
-                ::jobs #{}
-                ::canceled? false})
-        owner))))
+      (if-let [entry (get @active request-id)]
+        (when (and (= protocol/transact-operation
+                      (::protocol/operation request))
+                   (= protocol/transact-operation
+                      (::protocol/operation (::request entry)))
+                   (= (get-in request [:seon.db/db :db-name])
+                      (get-in entry [::request :seon.db/db :db-name]))
+                   (= (protocol/logical-transaction-hash request)
+                      (protocol/logical-transaction-hash (::request entry))))
+          (swap! active update-in [request-id ::waiters] (fnil conj [])
+                 {::request request
+                  ::transport-connection transport-connection
+                  ::complete! complete!})
+          ::joined)
+        (do
+          (swap! active assoc request-id
+                 {::owner owner
+                  ::request request
+                  ::request-bytes frame-bytes
+                  ::transport-connection transport-connection
+                  ::complete! complete!
+                  ::waiters []
+                  ::jobs #{}
+                  ::canceled? false})
+          owner)))))
 
 (defn- remove-active-request!
   [runtime request-id owner]
@@ -3007,11 +3100,14 @@
                     (.notifyAll ^Object active)
                     entry)))]
     (when entry
-      (try
-        ((::complete! entry) (canonical-response (::request entry) response))
-        (catch Throwable throwable
-          (log/error throwable "database request delivery failed"
-                     {::protocol/request-id request-id}))))))
+      (doseq [{::keys [request complete!]}
+              (into [(select-keys entry [::request ::complete!])]
+                    (::waiters entry))]
+        (try
+          (complete! (canonical-response request response))
+          (catch Throwable throwable
+            (log/error throwable "database request delivery failed"
+                       {::protocol/request-id request-id})))))))
 
 (defn- await-active-scope!
   [runtime scope]
@@ -3959,16 +4055,26 @@
        ::protocol/error
        "The grouped database result limit cannot hold its bounded response."}))))
 
+(defn- allocation-transaction?
+  [connection request]
+  (or (contains? request ::protocol/generated-candidates)
+      (seq
+       (id/transaction-tempids
+        {::id/db-value (d/db connection)
+         ::id/transaction-data (::protocol/transaction-data request)}))))
+
 (defn- start-transact-request!
   [runtime transport-connection request request-id owner]
   (if-let [{::keys [connection database-name]
             connection-id ::branch/connection-id}
            (connection-for-request transport-connection request)]
-    (let [scope (committed-scope database-name connection-id (d/db connection))]
+    (let [scope (committed-scope database-name connection-id (d/db connection))
+          serialized? (boolean (allocation-transaction? connection request))]
       (submit-single!
        runtime request-id owner scope
        {::executor/executor (::executor runtime)
         ::executor/work-class :mutation
+        ::executor/serialized? serialized?
         ::executor/database-name database-name
         ::executor/scope scope
         ::executor/job-id request-id
@@ -4167,10 +4273,11 @@
        (if-let [owner
                 (claim-connection-request!
                  runtime transport-connection request frame-bytes complete!)]
-         (try
-           (when read-request?
-             (arm-read-deadline! runtime request-id owner))
-           (case (::protocol/operation request)
+         (when-not (= ::joined owner)
+           (try
+             (when read-request?
+               (arm-read-deadline! runtime request-id owner))
+             (case (::protocol/operation request)
              :seon.db.protocol.operation/acquire-database
              (deliver-active-request!
               runtime request-id owner
@@ -4225,12 +4332,12 @@
                 runtime request-id owner
                 (handle-unlisten! runtime transport-connection request)))
 
-             (deliver-active-request!
-              runtime request-id owner
-              (handle-request-sync runtime transport-connection request)))
-           (catch Throwable throwable
-             (deliver-active-request! runtime request-id owner
-                                      (request-failure-response throwable))))
+               (deliver-active-request!
+                runtime request-id owner
+                (handle-request-sync runtime transport-connection request)))
+             (catch Throwable throwable
+               (deliver-active-request! runtime request-id owner
+                                        (request-failure-response throwable)))))
          (try
            (complete!
             (canonical-response
@@ -4289,6 +4396,7 @@
                    request-server-options]
           executor-capacity ::executor/capacity} request
           active-requests (atom {})
+          in-flight-transactions (atom {})
           interest-state (atom (empty-interest-state))
           interest-lock (Object.)
           runtime-ref (atom nil)
@@ -4319,6 +4427,7 @@
           runtime (assoc dependencies
                          ::executor dispatcher
                          ::active-requests active-requests
+                         ::in-flight-transactions in-flight-transactions
                          ::query-jobs query-jobs
                          ::interest-state interest-state
                          ::interest-lock interest-lock

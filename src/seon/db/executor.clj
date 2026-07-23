@@ -34,6 +34,7 @@
 (schema/register! ::request-bytes [:int {:min 0}])
 (schema/register! ::reserved-work-class ::work-class)
 (schema/register! ::reserved-request-bytes [:int {:min 0}])
+(schema/register! ::serialized? :boolean)
 (schema/register! ::maximum-active [:int {:min 1}])
 (schema/register! ::maximum-queued [:int {:min 1}])
 (schema/register! ::maximum-queued-by-database [:int {:min 1}])
@@ -67,6 +68,7 @@
                    [::reserved-work-class {:optional true} ::reserved-work-class]
                    [::reserved-request-bytes {:optional true}
                     ::reserved-request-bytes]
+                   [::serialized? {:optional true} ::serialized?]
                    [::request-bytes {:optional true} ::request-bytes]])
 (schema/register! ::remove-database-request
                   [:map [::executor ::executor] [::scope ::scope]])
@@ -114,7 +116,11 @@
 
 (def ^:private empty-queue clojure.lang.PersistentQueue/EMPTY)
 (def ^:private cpu-classes #{:read :knn :hnsw :delivery})
-(def ^:private serialized-classes #{:mutation :delivery})
+(def ^:private serialized-classes #{:delivery})
+
+(defn- serialized-work?
+  [{::keys [work-class serialized?]}]
+  (or (serialized-classes work-class) (true? serialized?)))
 
 (defn capacity
   "Return one immutable authority capacity map from the selected processors."
@@ -169,6 +175,7 @@
    ::closed-scopes #{}
    ::running-by-class {}
    ::running-by-class-database {}
+   ::running-serialized-by-class-database {}
    ::running-by-database {}})
 
 (defn- add-database [ready database-name]
@@ -184,7 +191,7 @@
                (-> (add-database ready database-name)
                    (update-in [::by-database database-name] conj work)))))
 
-(defn- take-database [ready eligible-database?]
+(defn- take-database [ready eligible-work?]
   (let [ready-count (count (::database-order ready))]
     (loop [remaining ready-count
            ready ready]
@@ -193,7 +200,7 @@
         (let [database-name (peek (::database-order ready))
               ready (update ready ::database-order pop)
               queue (get-in ready [::by-database database-name])]
-          (if (and (seq queue) (eligible-database? database-name))
+          (if (and (seq queue) (eligible-work? (peek queue)))
             (let [next-queue (pop queue)]
               [(if (seq next-queue)
                  (-> ready
@@ -228,25 +235,35 @@
               work-class (nth order index)]
           (if (and (allowed-classes work-class)
                    (eligible-class? state capacity work-class))
-            (let [eligible-database?
-                  (if (serialized-classes work-class)
-                    #(zero? (get-in state [::running-by-class-database
-                                           [work-class %]] 0))
-                    (constantly true))
+            (let [eligible-work?
+                  (fn [{::keys [database-name] :as work}]
+                    (if (serialized-work? work)
+                      (zero? (get-in state [::running-by-class-database
+                                           [work-class database-name]] 0))
+                      (zero? (get-in
+                              state
+                              [::running-serialized-by-class-database
+                               [work-class database-name]]
+                              0))))
                   [ready work] (take-database
                                 (get-in state [::ready work-class])
-                                eligible-database?)]
+                                eligible-work?)]
               (if work
-                [(-> state
-                     (assoc cursor-key (mod (inc index) n))
-                     (assoc-in [::ready work-class] ready)
-                     (assoc-in [::jobs (::job-id work) ::status] :running)
-                     (update-in [::running-by-class work-class] (fnil inc 0))
-                     (update-in [::running-by-class-database
-                                 [work-class (::database-name work)]]
-                                (fnil inc 0))
-                     (update-in [::running-by-database (::database-name work)]
-                                (fnil inc 0)))
+                [(cond->
+                  (-> state
+                      (assoc cursor-key (mod (inc index) n))
+                      (assoc-in [::ready work-class] ready)
+                      (assoc-in [::jobs (::job-id work) ::status] :running)
+                      (update-in [::running-by-class work-class] (fnil inc 0))
+                      (update-in [::running-by-class-database
+                                  [work-class (::database-name work)]]
+                                 (fnil inc 0))
+                      (update-in [::running-by-database (::database-name work)]
+                                 (fnil inc 0)))
+                   (serialized-work? work)
+                   (update-in [::running-serialized-by-class-database
+                               [work-class (::database-name work)]]
+                              (fnil inc 0)))
                  work]
                 (recur (inc offset))))
             (recur (inc offset))))))))
@@ -315,10 +332,14 @@
           :else (do (.wait ^Object (::lock executor)) (recur)))))))
 
 (defn- decrement-running
-  [state {::keys [work-class database-name]}]
+  [state {::keys [work-class database-name] :as work}]
   (let [class-left (dec (get-in state [::running-by-class work-class]))
         class-db-left (dec (get-in state [::running-by-class-database
                                           [work-class database-name]]))
+        serialized-left
+        (when (serialized-work? work)
+          (dec (get-in state [::running-serialized-by-class-database
+                              [work-class database-name]])))
         db-left (dec (get-in state [::running-by-database database-name]))]
     (cond-> state
       (zero? class-left) (update ::running-by-class dissoc work-class)
@@ -328,6 +349,13 @@
       (pos? class-db-left)
       (assoc-in [::running-by-class-database [work-class database-name]]
                 class-db-left)
+      (and (some? serialized-left) (zero? serialized-left))
+      (update ::running-serialized-by-class-database
+              dissoc [work-class database-name])
+      (and (some? serialized-left) (pos? serialized-left))
+      (assoc-in [::running-serialized-by-class-database
+                 [work-class database-name]]
+                serialized-left)
       (zero? db-left) (update ::running-by-database dissoc database-name)
       (pos? db-left) (assoc-in [::running-by-database database-name] db-left))))
 
@@ -493,16 +521,30 @@
           (.start))]
     (assoc executor ::worker-threads (conj workers provider-dispatcher))))
 
-(defn- rejection! [executor database-name work-class message]
+(defn- class-capacity-config-key
+  [work-class limit-name]
+  (keyword (str "seon.config.database.executor." (name work-class))
+           (name limit-name)))
+
+(defn- rejection!
+  [executor database-name work-class message governing-config-key]
   (swap! (::counts executor) update ::rejected inc)
-  (let [outcome [::throwable (ex-info message
-                                      {::database-name database-name
-                                       ::work-class work-class})]]
+  (let [message (cond-> message
+                  governing-config-key
+                  (str " Governing configuration: "
+                       governing-config-key "."))
+        outcome
+        [::throwable
+         (ex-info message
+                  (cond-> {::database-name database-name
+                           ::work-class work-class}
+                    governing-config-key
+                    (assoc :seon.config/governing-key governing-config-key)))]]
     [{::accepted? false ::joined? false} outcome]))
 
 (defn- admit! [{::keys [executor work-class database-name scope scopes job-id request-id
                         request request-bytes reserved-work-class
-                        reserved-request-bytes]
+                        reserved-request-bytes serialized?]
                  :or {request-bytes 0 reserved-request-bytes 0}
                  :as submission}]
   (let [scopes (or scopes #{scope})
@@ -517,6 +559,10 @@
         (let [owner (Object.)
               class-capacity (get-in (::capacity executor) [::classes work-class])
               class-count (get (queued-by-class state) work-class 0)
+              class-in-flight (+ class-count
+                                 (get-in state
+                                         [::running-by-class work-class]
+                                         0))
               database-count (queued-by-class-database state work-class database-name)
               distinct-reservation? (and reserved-work-class
                                          (not= reserved-work-class work-class))
@@ -524,6 +570,30 @@
                                   (get-in (::capacity executor)
                                           [::classes reserved-work-class]))
               queued-bytes (queued-request-bytes state)
+              governing-config-key
+              (cond
+                (> request-bytes
+                   (::maximum-request-bytes (::capacity executor)))
+                :seon.config.database.transport/maximum-frame-bytes
+
+                (and (= :mutation work-class)
+                     (>= class-in-flight
+                         (::maximum-active class-capacity)))
+                (class-capacity-config-key work-class :maximum-active)
+
+                (>= class-count (::maximum-queued class-capacity))
+                (class-capacity-config-key work-class :maximum-queued)
+
+                (>= database-count
+                    (::maximum-queued-by-database class-capacity))
+                (class-capacity-config-key work-class
+                                           :maximum-queued-by-database)
+
+                (> (+ queued-bytes request-bytes reserved-request-bytes)
+                   (::maximum-queued-request-bytes (::capacity executor)))
+                :seon.config.database.executor/maximum-queued-request-bytes
+
+                :else nil)
               valid? (and class-capacity
                           (or (not distinct-reservation?)
                               (and reserved-capacity
@@ -541,13 +611,17 @@
                           (empty? (set/intersection (::closed-scopes state)
                                                     scopes))
                           (<= request-bytes (::maximum-request-bytes (::capacity executor)))
+                          (or (not= :mutation work-class)
+                              (< class-in-flight
+                                 (::maximum-active class-capacity)))
                           (< class-count (::maximum-queued class-capacity))
                           (< database-count (::maximum-queued-by-database class-capacity))
                           (<= (+ queued-bytes request-bytes reserved-request-bytes)
                               (::maximum-queued-request-bytes (::capacity executor))))]
           (if-not valid?
             (rejection! executor database-name work-class
-                        "The database work queue is full, fenced, or stopped.")
+                        "The database work queue is full, fenced, or stopped."
+                        governing-config-key)
             (let [work {::work-class work-class
                         ::database-name database-name
                         ::scope scope
@@ -556,6 +630,7 @@
                         ::request-id request-id
                         ::request request
                         ::request-bytes request-bytes
+                        ::serialized? (true? serialized?)
                         ::reserved-work-class reserved-work-class
                         ::reserved-request-bytes reserved-request-bytes
                         ::owner owner}]
