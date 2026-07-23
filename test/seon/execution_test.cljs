@@ -35,6 +35,22 @@
    ::execution/deadline-ms 9999999999999
    ::execution/result-limit-bytes 4096})
 
+(deftest package-source-admission-joins-prefix-to-installed-ledger-row
+  (let [namespace-name 'seon.packages.js.fast-deep-equal
+        installed {:seon.packages/package
+                   {:seon.packages/as namespace-name}}
+        other-cluster {}
+        mismatched {:seon.packages/package
+                    {:seon.packages/as 'seon.packages.js.other}}
+        non-js {:seon.packages/package
+                {:seon.packages/as 'seon.packages.browser}}]
+    (is (execution/package-source-admitted? installed namespace-name))
+    (is (execution/package-source-admitted? other-cluster namespace-name)
+        "ordinary REPL corpus rows remain admitted by process provenance")
+    (is (false? (execution/package-source-admitted? mismatched namespace-name)))
+    (is (false? (execution/package-source-admitted? non-js
+                                                   'seon.packages.browser)))))
+
 (deftest compiled-function-map-is-one-closed-descriptor-contract
   (let [descriptor {::execution/compiled-function (fn [_ _ _ _] :ok)
                     ::execution/pin-database? true}

@@ -14,6 +14,7 @@
    [seon.db.protocol :as db.protocol]
    [seon.error :as error]
    [seon.eval :as eval]
+   [seon.packages :as packages]
    [seon.render.value :as render.value]
    [seon.runtime.admission :as admission]
    [seon.schema :as schema]))
@@ -339,6 +340,17 @@
 (def ^:private acquisition-page-size 32)
 (def ^:private acquisition-page-max-result-weight 60000)
 
+(def ^:private admitted-source-entity-query
+  '[:find [?entity ...]
+    :in $ [?entity ...] ?source-attr
+    :where
+    [?entity ?source-attr _ ?tx]
+    (or-join [?entity ?tx]
+      (and [?tx :seon.db/process ?process]
+           [?process :seon.db.process/id :seon.db.process/repl])
+      (and [?entity :seon.packages/package ?package]
+           [?package :seon.packages/as _]))])
+
 (def ^:private repl-source-entity-query
   '[:find [?entity ...]
     :in $ [?entity ...] ?source-attr
@@ -346,6 +358,17 @@
     [?entity ?source-attr _ ?tx]
     [?tx :seon.db/process ?process]
     [?process :seon.db.process/id :seon.db.process/repl]])
+
+(def ^:private admitted-require-edge-query
+  '[:find ?namespace ?edge
+    :in $ [?namespace ...]
+    :where
+    [?namespace :seon.ns/require-edges ?edge ?tx]
+    (or-join [?namespace ?tx]
+      (and [?tx :seon.db/process ?process]
+           [?process :seon.db.process/id :seon.db.process/repl])
+      (and [?namespace :seon.packages/package ?package]
+           [?package :seon.packages/as _]))])
 
 (def ^:private repl-require-edge-query
   '[:find ?namespace ?edge
@@ -355,13 +378,23 @@
     [?tx :seon.db/process ?process]
     [?process :seon.db.process/id :seon.db.process/repl]])
 
+(def ^:private package-provenance-pull
+  '{:seon.packages/package [:seon.packages/as]})
+
 (def ^:private namespace-source-pull-pattern
+  [:seon.ns/name :seon.ns/source package-provenance-pull])
+
+(def ^:private repl-namespace-source-pull-pattern
   '[:seon.ns/name :seon.ns/source])
 
 (def ^:private require-edge-pull-pattern
   '[*])
 
 (def ^:private function-source-pull-pattern
+  [:seon.fn/sym :seon.fn/source {:seon.fn/ns [:seon.ns/name]}
+   package-provenance-pull])
+
+(def ^:private repl-function-source-pull-pattern
   '[:seon.fn/sym :seon.fn/source {:seon.fn/ns [:seon.ns/name]}])
 
 (def ^:private test-source-pull-pattern
@@ -379,8 +412,11 @@
     :where
     [?function :seon.fn/sym ?requested]
     [?function :seon.fn/source ?source ?tx]
-    [?tx :seon.db/process ?process]
-    [?process :seon.db.process/id :seon.db.process/repl]])
+    (or-join [?function ?tx]
+      (and [?tx :seon.db/process ?process]
+           [?process :seon.db.process/id :seon.db.process/repl])
+      (and [?function :seon.packages/package ?package]
+           [?package :seon.packages/as _]))])
 
 (defn- query-member [database query arguments]
   {::db.protocol/operation db.protocol/query-operation
@@ -652,7 +688,7 @@
     []))
 
 (defn- ^:async authored-rows!
-  [database identity-attr source-attr pull-pattern row-fn]
+  [database source-query identity-attr source-attr pull-pattern row-fn]
   (await
    (acquire-identity-pages!
     database identity-attr [] into
@@ -660,14 +696,16 @@
       (let [entity-ids (mapv first (:datahike.index-page/datoms page))
             authored-ids
             (await
-             (query-page! database repl-source-entity-query
+             (query-page! database source-query
                           [entity-ids source-attr]
                           acquisition-page-size))
             entities (await (pull-page! database pull-pattern authored-ids))]
         (into [] (keep row-fn) entities))))))
 
+(declare package-source-admitted?)
+
 (defn- ^:async namespace-rows!
-  [database]
+  [database source-query require-edge-query source-pull-pattern]
   (await
    (acquire-identity-pages!
     database :seon.ns/name {::namespace-sources [] ::require-edges []}
@@ -679,16 +717,16 @@
                                        identity-datoms)
             source-ids
             (await
-             (query-page! database repl-source-entity-query
+             (query-page! database source-query
                           [namespace-ids :seon.ns/source]
                           acquisition-page-size))
             edge-pairs
             (await
-             (query-page! database repl-require-edge-query [namespace-ids]
+             (query-page! database require-edge-query [namespace-ids]
                           maximum-program-results))
             source-entities
             (await
-             (pull-page! database namespace-source-pull-pattern source-ids))
+             (pull-page! database source-pull-pattern source-ids))
             edge-ids (mapv second edge-pairs)
             edge-entities
             (await (pull-page! database require-edge-pull-pattern edge-ids))
@@ -697,7 +735,9 @@
          (into []
                (keep (fn [entity]
                        (when (and (contains? entity :seon.ns/name)
-                                  (contains? entity :seon.ns/source))
+                                  (contains? entity :seon.ns/source)
+                                  (package-source-admitted?
+                                   entity (:seon.ns/name entity)))
                          [(:seon.ns/name entity) (:seon.ns/source entity)])))
                source-entities)
          ::require-edges
@@ -717,11 +757,22 @@
             entities (await (pull-page! database pull-pattern entity-ids))]
         (into [] (keep row-fn) entities))))))
 
+(defn package-source-admitted?
+  "True when a package-stamped corpus row matches its installed JS namespace."
+  {:malli/schema [:=> [:cat :map :symbol] :boolean]}
+  [entity namespace-name]
+  (let [package-as (get-in entity [:seon.packages/package
+                                   :seon.packages/as])]
+    (or (nil? package-as)
+        (and (= package-as namespace-name)
+             (packages/js-wrapper-namespace? package-as)))))
+
 (defn- function-row [entity]
   (let [namespace-name (get-in entity [:seon.fn/ns :seon.ns/name])]
     (when (and (contains? entity :seon.fn/sym)
                (contains? entity :seon.fn/source)
-               namespace-name)
+               namespace-name
+               (package-source-admitted? entity namespace-name))
       [(:seon.fn/sym entity) (:seon.fn/source entity) namespace-name])))
 
 (defn- test-row [entity]
@@ -755,15 +806,30 @@
 
 (defn- ^:async acquire-program!
   [database]
-  (let [{::keys [namespace-sources require-edges]}
-        (await (namespace-rows! database))
+  (let [installed (await (db/installed-schema database))
+        package-corpus? (contains? installed :seon.packages/package)
+        source-query (if package-corpus?
+                       admitted-source-entity-query
+                       repl-source-entity-query)
+        require-edge-query (if package-corpus?
+                             admitted-require-edge-query
+                             repl-require-edge-query)
+        namespace-pull-pattern (if package-corpus?
+                                 namespace-source-pull-pattern
+                                 repl-namespace-source-pull-pattern)
+        function-pull-pattern (if package-corpus?
+                                function-source-pull-pattern
+                                repl-function-source-pull-pattern)
+        {::keys [namespace-sources require-edges]}
+        (await (namespace-rows! database source-query require-edge-query
+                                namespace-pull-pattern))
         functions
         (await
-         (authored-rows! database :seon.fn/sym :seon.fn/source
-                         function-source-pull-pattern function-row))
+         (authored-rows! database source-query :seon.fn/sym :seon.fn/source
+                         function-pull-pattern function-row))
         tests
         (await
-         (authored-rows! database :seon.test/sym :seon.test/source
+         (authored-rows! database source-query :seon.test/sym :seon.test/source
                          test-source-pull-pattern test-row))
         schemas
         (await

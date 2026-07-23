@@ -249,6 +249,18 @@ the anchor stays the state ledger.
 - **bb tooling loads via bb.edn** — never bare `--classpath`; new deps
   used by bb-loaded namespaces must be pinned in bb.edn too (parinferish
   0.8.0 precedent).
+- **Content address can be the idempotency receipt.** `my.blob/put!` and
+  `concat!` derive their durable identity before publication through the one
+  `seon.content-hash/sha-256` owner. A replay of identical bytes therefore
+  addresses the same archive path and database identity; the publication leaf
+  verifies and re-syncs the existing file without a second rename. Declare
+  `:seon.capability/idempotency :content-hash` beside the `:idempotent` effect
+  instead of minting an unrelated operation id or adding a blob receipt table.
+- **An injection seam must own the whole native publication vocabulary.** A
+  partial map that injects only fsync/rename/transact still leaves tests and
+  alternate leaves coupled to direct `node:fs`, `node:path`, and UUID calls.
+  Extend that same map with open/close/mkdir/read/write/exists/unlink, path
+  algebra, and random-id operations; do not introduce a second effects map.
 
 ## Design rulings that bind conversions
 

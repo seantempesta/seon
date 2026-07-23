@@ -17,6 +17,9 @@
 (schema/register! :seon.packages.deps/lib :qualified-symbol)
 (schema/register! :seon.packages.deps/coord [:string {:min 1}])
 (schema/register! ::generation [:int {:min 0}])
+(schema/register! ::package :seon.db/ref)
+(schema/register! ::corpus-rows [:vector :map])
+(schema/register! ::corpus-entity-ids [:vector :int])
 
 (schema/register!
  ::install-request
@@ -69,7 +72,7 @@
   [:or
    :map
    [:tuple [:= :db.fn/retractEntity]
-    [:tuple [:= ::as] ::as]]]])
+    [:or :int [:tuple [:= ::as] ::as]]]]])
 (schema/register!
  ::install-plan
  [:map {:closed true}
@@ -106,6 +109,21 @@
         (re-matches
          #"seon\.packages\.[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)*"
          (name value)))))
+
+(defn js-wrapper-namespace?
+  "True when `value` names a cluster-local JavaScript wrapper namespace."
+  {:malli/schema [:=> [:cat :symbol] :boolean]}
+  [value]
+  (boolean
+   (and (boundary-namespace? value)
+        (str/starts-with? (name value) "seon.packages.js."))))
+
+(defn stamp-corpus-rows
+  "Attach one installed package ledger ref to ordinary corpus rows."
+  {:malli/schema
+   [:=> [:catn [::as ::as] [::corpus-rows ::corpus-rows]] ::corpus-rows]}
+  [as corpus-rows]
+  (mapv #(assoc % ::package [::as as]) corpus-rows))
 
 (defn- steering-error
   [rule message data]
@@ -331,6 +349,7 @@
          [:map {:closed true}
           [::request :map]
           [::rows ::rows]
+          [::corpus-rows {:optional true} ::corpus-rows]
           [:seon.config.packages/policy
            {:optional true} [:enum :closed :allowlist :open]]
           [:seon.config.packages/allowlist
@@ -338,7 +357,7 @@
           [:seon.config.packages/max-rows
            {:optional true} [:int {:min 1}]]]]
     [:or ::install-plan ::steering-error]]}
-  [{::keys [request rows]
+  [{::keys [request rows corpus-rows]
     policy :seon.config.packages/policy
     allowlist :seon.config.packages/allowlist
     max-rows :seon.config.packages/max-rows}]
@@ -375,13 +394,16 @@
            "The package ledger reached :seon.config.packages/max-rows."
            {::config-key :seon.config.packages/max-rows})
 
-          (= (select-keys current (keys row)) row)
+          (and (= (select-keys current (keys row)) row)
+               (empty? corpus-rows))
           {::converged? true ::tx-data []}
 
           :else
           {::converged? false
            ::operation (if current :update :install)
-           ::tx-data [row]})))))
+           ::tx-data (into [row]
+                           (stamp-corpus-rows (::as request)
+                                              (or corpus-rows [])))})))))
 
 (defn plan-remove
   "Plan ledger tx-data that removes one boundary namespace."
@@ -389,9 +411,10 @@
    [:=> [:cat
          [:map {:closed true}
           [::request ::remove-request]
-          [::rows ::rows]]]
+          [::rows ::rows]
+          [::corpus-entity-ids {:optional true} ::corpus-entity-ids]]]
     [:or ::install-plan ::steering-error]]}
-  [{::keys [request rows]}]
+  [{::keys [request rows corpus-entity-ids]}]
   (let [as (::as request)]
     (cond
       (not (boundary-namespace? as))
@@ -406,4 +429,7 @@
       :else
       {::converged? false
        ::operation :remove
-       ::tx-data [[:db.fn/retractEntity [::as as]]]})))
+       ::tx-data (into (mapv (fn [entity-id]
+                               [:db.fn/retractEntity entity-id])
+                             (or corpus-entity-ids []))
+                       [[:db.fn/retractEntity [::as as]]])})))

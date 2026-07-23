@@ -44,6 +44,17 @@
       (is (= :seon.packages.rule/illegal-as
              (get-in result [:seon/error :seon.error/data ::packages/rule]))))))
 
+(deftest js-wrapper-locality-and-corpus-provenance-are-computed
+  (is (packages/js-wrapper-namespace?
+       'seon.packages.js.fast-deep-equal))
+  (is (false? (packages/js-wrapper-namespace? 'seon.packages.browser)))
+  (is (= [{:seon.ns/name 'seon.packages.js.fast-deep-equal
+           ::packages/package
+           [::packages/as 'seon.packages.js.fast-deep-equal]}]
+         (packages/stamp-corpus-rows
+          'seon.packages.js.fast-deep-equal
+          [{:seon.ns/name 'seon.packages.js.fast-deep-equal}]))))
+
 (deftest ledger-attributes-bridge-to-the-settled-database-shapes
   (let [facets
         (into {}
@@ -176,6 +187,31 @@
     (is (= :seon.config.packages/policy
            (get-in closed
                    [:seon/error :seon.error/data ::packages/config-key])))))
+
+(deftest reconcile-plans-corpus-upsert-and-removal-through-ledger-ref
+  (let [as 'seon.packages.js.fast-deep-equal
+        row {::packages/as as
+             :seon.packages.npm/name "fast-deep-equal"
+             :seon.packages.npm/range "3.1.3"}
+        corpus [{:seon.ns/name as
+                 :seon.ns/source (str "(ns " as ")")}]
+        install (packages/plan-install
+                 {::packages/request {::packages/as as
+                                      ::packages/npm "fast-deep-equal@3.1.3"}
+                  ::packages/rows [row]
+                  ::packages/corpus-rows corpus})
+        remove (packages/plan-remove
+                {::packages/request {::packages/as as}
+                 ::packages/rows [row]
+                 ::packages/corpus-entity-ids [41 42]})]
+    (is (false? (::packages/converged? install)))
+    (is (= [row (assoc (first corpus) ::packages/package
+                       [::packages/as as])]
+           (::packages/tx-data install)))
+    (is (= [[:db.fn/retractEntity 41]
+            [:db.fn/retractEntity 42]
+            [:db.fn/retractEntity [::packages/as as]]]
+           (::packages/tx-data remove)))))
 
 (deftest remove-and-installed-views-derive-from-ledger-facts
   (let [rows [(assoc npm-row
