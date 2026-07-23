@@ -1037,7 +1037,7 @@ COMPLETELY before dispatching anything.
   builds (client AND test — r43fix proved only :test) to zero
   first-party arity/undeclared warnings + prove the v11 manifest
   publishes. Lesson sharpened: the class gate is BOTH builds.
-- CLIENTFIX RESULT: the pod shell requests now acquire the operation's
+- CLIENTFIX RESULT (`692bd252c`): the pod shell requests now acquire the operation's
   config singleton through the existing context-only request injection;
   the deleted default-var residue is gone. Both canonical builds compile
   with zero first-party arity/undeclared warnings, and the focused shell

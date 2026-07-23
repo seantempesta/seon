@@ -9,7 +9,7 @@ severity: blocker
 
 ## Evidence
 
-The 2026-07-23 clientfix checkpoint removed the two first-party shell
+The 2026-07-23 clientfix checkpoint (`692bd252c`) removed the two first-party shell
 config-conversion warnings and compiled both canonical `client` and `test`
 builds cleanly. A one-shot `clj -M:cljs compile client` completed and published
 `out/client/program-rows.edn`.
