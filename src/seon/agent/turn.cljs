@@ -20,6 +20,7 @@
     [seon.eval :as seval]
     [seon.execution :as execution]
     [seon.execution.host :as execution.host]
+    [seon.agent.ctx.driver :as ctx.driver]
     [seon.log :as seon-log]
     [seon.repl.parse :as repl-internal]
     [seon.schema :as schema]))
@@ -332,9 +333,6 @@
    [:seon.agent.ctx/rendered-blocks {:optional true} [:vector :map]]])
 (schema/register! ::prompt-result [:or ::rendered-prompt ::prompt-error])
 
-(def ^:private render-prompt-function
-  'seon.execution.runtime/render-prompt!)
-
 (def ^:private eval-batch-function
   'seon.execution.runtime/eval-batch!)
 
@@ -398,11 +396,27 @@
                    (assoc :seon.agent.ctx/profile (vec profile))
                    run-id
                    (assoc :seon.agent.run/id run-id))
-         response
+         invoke-authored!
+         ;; TEMPORARY U4 seam: authored render symbols retain the existing
+         ;; execution-child containment until U7 closes them behind the U1
+         ;; guarded door. Trusted prompt orchestration itself runs in the pod.
+         (fn [calls]
+           (execution.host/invoke-plans!
+            database
+            (mapv (fn [call]
+                    (execution/invocation-plan
+                     agent-id
+                     (::execution/function-symbol call)
+                     (::execution/arguments call)))
+                  calls)))
+         rendered
          (await
-           (apply execution.host/invoke-compiled!
-                  (cond-> [database agent-id render-prompt-function [request]]
-                    run-id (conj {:seon.agent.run/id run-id}))))]
+          (ctx.driver/render-prompt!
+           (assoc request ::db/db database)
+           invoke-authored!))
+         response {:seon.db/db database
+                   ::execution/message execution/result-message
+                   ::execution/result rendered}]
      (cond
        (not= database (:seon.db/db response))
        {:seon.error/message

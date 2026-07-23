@@ -9,7 +9,7 @@
   (:require
     [clojure.string :as str]
     [seon.db :as db]
-    [seon.render.canvas :as render-canvas]
+    [seon.render.canvas.field-signal :as field-signal]
     [seon.schema :as schema]))
 
 (schema/register! ::label :string)
@@ -33,17 +33,11 @@
 (def ^:private field-label-class "text-2xs text-text-400 uppercase tracking-wider")
 (def ^:private field-wrap-class "flex flex-col gap-1")
 
-(def ^:private signal-prefix "seon_")
-
 (defn- field-signal
   "Encode a qualified field keyword as a Datastar-safe signal identifier.
    `/call` decodes this exact prefix back to the original keyword."
   [field]
-  #?(:clj
-     (render-canvas/field-signal field)
-     :cljs
-     (str signal-prefix
-          (.toString (.from js/Buffer (str field) "utf8") "base64url"))))
+  (field-signal/field-signal field))
 
 (schema/register! ::view-request
   [:map {:closed true}

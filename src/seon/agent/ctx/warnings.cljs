@@ -368,8 +368,8 @@
   ;; lives. (Reading :seon.agent.ctx/block here was a dead key: the input
   ;; never carries it, so the override was silently ignored.)
   (let [database (or (::db/db input)
-                     (::db/db (db/current-tx-context))
-                     (await (db/db)))
+                     {:seon.error/message "Render block requires :seon.db/db."
+                      :seon.error/kind :core-bug})
         acquired (if (:seon.error/message database)
                    database
                    (await (acquire-warnings id entity database)))
@@ -460,8 +460,8 @@
   {:malli/schema [:=> [:cat :seon.render/section-request :any] :string]}
   [input _invoke-selected!]
   (let [database (or (::db/db input)
-                     (::db/db (db/current-tx-context))
-                     (await (db/db)))
+                     {:seon.error/message "Render block requires :seon.db/db."
+                      :seon.error/kind :core-bug})
         acquired (if (:seon.error/message database)
                    database
                    (await (db/execute-many
@@ -513,8 +513,8 @@
   {:malli/schema [:=> [:cat :seon.render/section-request :any] :string]}
   [input _invoke-selected!]
   (let [database (or (::db/db input)
-                     (::db/db (db/current-tx-context))
-                     (await (db/db)))
+                     {:seon.error/message "Render block requires :seon.db/db."
+                      :seon.error/kind :core-bug})
         result (if (:seon.error/message database)
                  database
                  (await (db/query

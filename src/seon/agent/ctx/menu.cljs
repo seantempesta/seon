@@ -366,8 +366,8 @@
 (defn ^:async ^:private acquire-prompt-menu
   [{agent-id :seon.agent/id :as input}]
   (let [database (or (::db/db input)
-                     (::db/db (db/current-tx-context))
-                     (await (db/db)))]
+                     {:seon.error/message "Render block requires :seon.db/db."
+                      :seon.error/kind :core-bug})]
     (if (:seon.error/message database)
       database
       (let [initial (await (db/execute-many

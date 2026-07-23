@@ -19,7 +19,8 @@
     [seon.derive :as derive]
     [seon.render.handlers.eval :as eval-handler]
     [seon.render :as render]
-    [seon.schema :as schema]))
+    [seon.schema :as schema]
+    [seon.time.instant :as instant]))
 
 (def ^:private node-os (js/require "os"))
 
@@ -101,7 +102,6 @@
 ;; context therefore renders the database-stable inline form by default; an
 ;; explicit true is retained only as a stored/profile compatibility dial and
 ;; still cannot consult process-local result membership.
-(schema/register! ::result-handles? [:boolean {:default false}])
 
 ;; ============================================================
 ;; Config-driven agent-init CP-3 — reactive config-on-record reads.
@@ -338,15 +338,14 @@
    MUST come from a fixed stored `:at` so the rendered prefix stays
    byte-stable across turns. A nil here means a caller lost an event's
    stored time — surface it, never paper over it with a live clock."
-  {:malli/schema [:=> [:catn [::inst :any]] :string]}
-  [inst]
+  {:malli/schema [:=> [:cat :any :string] :string]}
+  [inst timezone]
   (when-not (instance? js/Date inst)
     (throw (ex-info (str "seon.agent.ctx.transcript/clock: missing stored time — "
                          "every transcript event time must derive from its "
                          "fixed :at (byte-stability); got " (pr-str inst))
                     {:seon.agent.ctx.transcript/inst inst})))
-  (try (.toLocaleTimeString ^js inst "sv-SE" #js {:timeZone (ctx/host-timezone)})
-       (catch :default _ (subs (.toISOString ^js inst) 11 19))))
+  (instant/hh-mm inst timezone))
 
 ;; ------------------------------------------------------------
 ;; Inbound gate — the SAME rule as the wake. The shared boolean lives in
@@ -399,7 +398,8 @@
         who  (if outbound?
                (str "▶ to " (str/join ", " to-labels))
                (str "◀ from " from-label))]
-    (str ";;; " who " @ " (clock at)
+    (str ";;; " who " @ "
+         (clock at (config/host-timezone configuration))
          (when id (str " [" id "]"))
          (when new? " (NEW — unanswered; respond to this)")
          " — \"" body "\"")))
@@ -410,13 +410,12 @@
    carries the component caps ([[seon.agent.ctx/eval-render-cap]] /
    [[seon.agent.ctx/result-body-render-cap]]) forward. A `::ns-marker?` true
    event prepends a `; in <ns>` line (emitted only where the eval ns
-   changes from the prior eval). Only an exact bounded-runtime member
-   (`::result-live?` true) renders a `result/<id>` handle; evicted and
-   prior-process values remain visible without a dead handle."
+   changes from the prior eval). Results are rendered from stored bytes;
+   process-local result handles are never part of context."
   {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
   [{node :seon.render/node}]
-  (let [{::keys [entity result-live? ns-marker]} node
-        row (ctx/format-eval-row entity (not (true? result-live?)))]
+  (let [{::keys [entity ns-marker]} node
+        row (ctx/format-eval-row entity true)]
     (if ns-marker
       (str ns-marker "\n" row)
       row)))
@@ -553,16 +552,13 @@
 
 (defn- eval->event
   "Convert one eval row into a transcript event at its optional turn index."
-  ([turn-idx e]
-   (eval->event turn-idx e false))
-  ([turn-idx e result-live?]
+  [turn-idx e]
   (cond->
     {::at           (:seon.eval/at e)
      ::kind         :eval
      ::entity       (into {} e)
-     ::result-live? result-live?
      :seon.render/ai 'seon.agent.ctx.transcript/eval->renderable}
-    (some? turn-idx) (assoc ::turn-idx turn-idx))))
+    (some? turn-idx) (assoc ::turn-idx turn-idx)))
 
 (defn- with-ns-markers
   "Thread a `; in <ns>` marker into each EVAL event whose ns differs from
@@ -653,10 +649,9 @@
                       (:seon.config.run/batch-turn-limit policy)))
         ;; localized full date+tz so the agent can judge what's expensive.
         ;; This is the ONE legitimate live `now` in the transcript.
-        now     (let [tz (ctx/host-timezone)]
-                  (str (try (.toLocaleString (js/Date.) "sv-SE" #js {:timeZone tz})
-                            (catch :default _ (.toISOString (js/Date.))))
-                       " " tz))
+        now     (let [tz (config/host-timezone
+                          (:seon.config/configuration input))]
+                  (str (instant/sv-se-date-time (js/Date.) tz) " " tz))
         steer
         (cond
           (>= loop-k (max 1 (- cap 2)))
@@ -716,7 +711,7 @@
                (for [{turn-idx ::turn-idx :as turn} turns
                      e (sort-by (juxt :seon.eval/at :db/id)
                                 (:seon.agent.turn/evals turn))]
-                 (eval->event turn-idx e false)))
+                 (eval->event turn-idx e)))
         kind-rank {:message 0 :eval 1}
         sorted (sort-by (juxt #(.getTime ^js (::at %))
                               #(kind-rank (::kind %) 9)
@@ -1083,8 +1078,8 @@
 (defn- ^:async acquire-transcript
   [{:seon.agent/keys [id entity] :as input} eval-selector]
   (let [database (or (::db/db input)
-                     (::db/db (db/current-tx-context))
-                     (await (db/db)))
+                     {:seon.error/message "Render block requires :seon.db/db."
+                      :seon.error/kind :core-bug})
         node (:seon.render/node input)
         window-size (or (::turn-window-size node) default-turn-window-size)
         run (:seon.agent/run entity)
@@ -1312,12 +1307,6 @@
         ;; `:seon.render/result-body-cap` onto each eval event's `::entity`,
         ;; which `eval->renderable` forwards to `format-eval-row`.
         levels   (or (::result-decay node) [])
-        ;; Runtime-cache bytes OFF (`::result-handles?` false, node first):
-        ;; every eval renders without a `result/<id>` handle, so the render is
-        ;; a pure function of the db value across eviction/restarts (the
-        ;; autocomplete profile's setting).
-        handles? (let [nv (::result-handles? node)]
-                   (if (some? nv) nv true))
         ;; A PROFILE may PIN escape-clipping as a block-config CONSTANT
         ;; (`:seon.agent.ctx/escape-clipping?` on the profile's block map) —
         ;; threaded onto each event so the converters never re-read the live
@@ -1340,8 +1329,7 @@
                                              configuration)
                                (some? esc)
                                (update ::entity assoc
-                                       :seon.agent.ctx/escape-clipping? esc)
-                               (not handles?) (assoc ::result-live? false)))
+                                       :seon.agent.ctx/escape-clipping? esc)))
                            (cond-> (assoc ev :seon.config/configuration
                                          configuration)
                              (some? esc) (assoc ::escape? esc))))

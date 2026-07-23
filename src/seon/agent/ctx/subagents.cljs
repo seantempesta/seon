@@ -244,8 +244,8 @@
   {:malli/schema [:=> [:cat :seon.render/section-request :any] :string]}
   [{:seon.agent/keys [id] :as input} _invoke-selected!]
   (let [database (or (::db/db input)
-                     (::db/db (db/current-tx-context))
-                     (await (db/db)))
+                     {:seon.error/message "Render block requires :seon.db/db."
+                      :seon.error/kind :core-bug})
         stage-one
         (if (:seon.error/message database)
           database
@@ -341,8 +341,8 @@
   {:malli/schema [:=> [:cat :seon.render/section-request :any] :string]}
   [input _invoke-selected!]
   (let [database (or (::db/db input)
-                     (::db/db (db/current-tx-context))
-                     (await (db/db)))
+                     {:seon.error/message "Render block requires :seon.db/db."
+                      :seon.error/kind :core-bug})
         acquired (if (:seon.error/message database)
                    database
                    (await (db/execute-many

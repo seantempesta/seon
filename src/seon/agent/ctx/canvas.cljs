@@ -338,8 +338,8 @@
   [{:seon.agent/keys [id entity] :as input} invoke-selected!]
   (try
     (let [database (or (::db/db input)
-                       (::db/db (db/current-tx-context))
-                       (await (db/db)))
+                     {:seon.error/message "Render block requires :seon.db/db."
+                      :seon.error/kind :core-bug})
           _ (when (:seon.error/message database)
               (throw (ex-info (:seon.error/message database) database)))
           {wired ::canvas/wired :as acquired}

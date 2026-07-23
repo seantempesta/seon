@@ -13,6 +13,7 @@
     [seon.agent.ctx.render-fns]
     [seon.ai.tokens :as tokens]
     [seon.config :as config]
+    [seon.content-hash :as content-hash]
     [seon.db :as db]
     [seon.error.instrument :as einstrument]
     [seon.eval :as seval]
@@ -191,10 +192,22 @@
    The node's `:seon.agent.ctx/file-path` read FRESH and `;`-commented
    (via [[quote-lines]]). Blank when the file vanished between wiring and
    render (the section then renders empty and is dropped upstream)."
-  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
-  [{{path :seon.agent.ctx/file-path} :seon.render/node}]
-  (let [text (read-file-text path)]
-    (if (str/blank? text) "" (quote-lines text))))
+  {:malli/schema [:=> [:cat :seon.render/section-request]
+                  [:or :string :map]]}
+  [{{path :seon.agent.ctx/file-path} :seon.render/node
+    configuration :seon.config/configuration}]
+  (let [text (read-file-text path)
+        expected (config/file-fingerprint configuration path)
+        actual (when (string? text) (content-hash/sha-256 text))]
+    (if (and expected (= expected actual))
+      (if (str/blank? text) "" (quote-lines text))
+      {:seon.error/message
+       (str "File render fingerprint mismatch for " path ".")
+       :seon.error/kind :core-bug
+       :seon.error/data
+       {:seon.agent.ctx/file-path path
+        :seon.content-hash/expected expected
+        :seon.content-hash/actual actual}})))
 
 (defn file-block-html
   "The `:seon.render/html` slot for a file-block section.
@@ -202,8 +215,15 @@
    The node's `:seon.agent.ctx/file-path` read FRESH and rendered as
    markdown hiccup. Empty `[:div]` when the file vanished."
   {:malli/schema [:=> [:cat :seon.render/section-request] :seon.render.canvas/content]}
-  [{{path :seon.agent.ctx/file-path} :seon.render/node}]
-  (md/md->hiccup (or (read-file-text path) "")))
+  [{{path :seon.agent.ctx/file-path} :seon.render/node
+    configuration :seon.config/configuration}]
+  (let [text (read-file-text path)
+        expected (config/file-fingerprint configuration path)
+        actual (when (string? text) (content-hash/sha-256 text))]
+    (if (and expected (= expected actual))
+      (md/md->hiccup text)
+      [:div {:class "text-error"}
+       (str "File render fingerprint mismatch for " path ".")])))
 
 (defn file-block
   "A renderable context SECTION backed by a markdown file.

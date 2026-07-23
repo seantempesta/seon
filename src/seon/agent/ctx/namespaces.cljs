@@ -503,8 +503,8 @@
   "Acquire namespace rows at one database value."
   [{id :seon.agent/id :as input}]
   (let [database (or (::db/db input)
-                     (::db/db (db/current-tx-context))
-                     (await (db/db)))
+                     {:seon.error/message "Render block requires :seon.db/db."
+                      :seon.error/kind :core-bug})
         initial (if (:seon.error/message database)
                   database
                   (await (db/execute-many

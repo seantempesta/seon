@@ -51,8 +51,8 @@
 (defn ^:async ^:private acquire-prompt-provider
   [{agent-id :seon.agent/id :as input}]
   (let [database (or (::db/db input)
-                     (::db/db (db/current-tx-context))
-                     (await (db/db)))
+                     {:seon.error/message "Render block requires :seon.db/db."
+                      :seon.error/kind :core-bug})
         acquired (if (:seon.error/message database)
                    database
                    (await
@@ -159,8 +159,8 @@
 (defn ^:async ^:private acquire-steps-surface
   [{agent-id :seon.agent/id :as input}]
   (let [database (or (::db/db input)
-                     (::db/db (db/current-tx-context))
-                     (await (db/db)))
+                     {:seon.error/message "Render block requires :seon.db/db."
+                      :seon.error/kind :core-bug})
         initial (if (:seon.error/message database)
                   database
                   (await
