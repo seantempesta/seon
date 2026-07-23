@@ -461,6 +461,18 @@ COMPLETELY before dispatching anything.
   the tier inventory); the invocable surface is the PUBLISHED
   export inventory, never a naming convention; transparent routing
   covers the whole inventory.
+- U6b TRANSPORT LEAF CODE-COMPLETE (200e847e9): java.net.http leaf,
+  BOTH batch + SSE-stream with the portable first-form abort, one
+  shared HttpClient, timeout/error mapping onto the one :seon.ai
+  vocabulary, R27 facts, host installation; 6/23 green; the real
+  attempt-CAS regression satisfies audit §0.6; seam issue resolved.
+  Paid live claimant proofs DEFERRED to the checkpoint — startup was
+  blocked by the schema-admission lane's in-flight schema.cljc edit
+  (runtime symbol passed to cljs.core/resolve breaks CLJS compile —
+  REVIEW FLAG for that lane's return: its dual-tier file needs a
+  CLJS compile gate, not only JVM tests). With live proof, the pod
+  becomes genuinely optional for the LLM phase (D4 fulfilled:
+  streaming + normal).
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
