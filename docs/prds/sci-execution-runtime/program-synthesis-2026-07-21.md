@@ -1216,9 +1216,17 @@ round-trips). Encore: faster + more mid-flight kills.
 loop vertical slice, acceptance AMENDED to be the demo itself
 (scenario green + package call in the same arc + measurable perf +
 optional mid-turn kill encore). Dispatches the moment pkg-door lands
-(both need execution.cljs). pkg-door status: defect fix in, focused
-suites green, full gate running, two live operators planned
-(pkg-door-live + pkg-door-empty — the zero-package regression).
+(both need execution.cljs). pkg-door status: defect FIXED
+structurally (execution.cljs:804 selects the package-aware
+acquisition pair by installed-schema presence — orchestrator
+verified); ALL compiled gates green (full cljs 1561/7714). Live
+proofs blocked a third time by concurrent churn (p2-blob
+mid-conversion). ACCEPTANCE PLAN: when blob returns → ONE serial
+pass (full gates + pkg-door live proofs incl. package-empty turn +
+blob live proof) → commit blob + pkg-door → dispatch loop-slice (the
+demo) on a fully committed coherent tree. Recurring lesson: live
+proofs need a churn-free tree; committing accepted work promptly is
+the mitigation.
 
 **STAGED NEXT (refill on any free slot):** p2-blob · loop-essential
 my.* (queue derived from the loop-slice measurement — the old
