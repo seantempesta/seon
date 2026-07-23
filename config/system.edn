@@ -166,7 +166,22 @@
  ;; virtual threads do not fail while a legitimate platform call is in flight.
  :seon.config/claim-driver
  {:seon.config.claim-driver/jvm-heap-mb 4096
-  :seon.config.claim-driver/database-pool-wait-timeout-ms 110000}
+  :seon.config.claim-driver/database-pool-wait-timeout-ms 110000
+  :seon.config.claim-driver/invocation-deadline-ms 120000
+  :seon.config.claim-driver/invocation-result-maximum-bytes 1048576}
+
+ ;; ── PORTABLE RETRY AND CAPABILITY LIMITS ──
+ ;; These values preserve the bounded 2026-07-23 policies while moving their
+ ;; authority from portable source literals into the acquired config entity.
+ ;; Consumers fail loudly with the missing/fired key; they do not carry numeric
+ ;; runtime fallbacks.
+ :seon.config/llm-retry
+ {:seon.config.llm-retry/maximum-wait-ms 20000
+  :seon.config.llm-retry/maximum-total-wait-ms 60000
+  :seon.config.llm-retry/default-retries 4}
+
+ :seon.config/shell
+ {:seon.config.shell/default-timeout-ms 30000}
 
  ;; ── RENDER BOUNDS — the GLOBAL, process-wide value/eval/message DISPLAY caps
  ;; (#46). A proper config (not scattered env reads): each cap is a plain literal
@@ -277,7 +292,16 @@
  ;;                       config-selectable for synthesize-what-changed queries.
  :seon.config/web {:seon.agent.web/policy         :open
                    :seon.agent.web/search-backend :serper
-                   :seon.agent.web/search-model   "gemini-3.1-flash-lite"}
+                   :seon.agent.web/search-model   "gemini-3.1-flash-lite"
+                   :seon.config.web/default-timeout-ms 30000
+                   :seon.config.web/maximum-response-bytes 2000000
+                   :seon.config.web/default-preview-tokens 2000
+                   :seon.config.web/maximum-redirects 5
+                   :seon.config.web/default-link-count 25
+                   :seon.config.web/default-search-results 10
+                   :seon.config.web/maximum-search-results 20
+                   :seon.config.web/maximum-html-characters 1000000
+                   :seon.config.web/maximum-html-nesting-depth 3000}
 
  ;; ── AGENT-CONTEXT (v3, config-driven-agent-init) — the two-level context
  ;; config the GENERIC loader (seon.config/resolve-agent-context) consumes. A

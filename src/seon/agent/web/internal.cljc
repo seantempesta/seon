@@ -4,15 +4,41 @@
    [clojure.string :as str]
    [seon.agent.web :as-alias web]))
 
-(def default-timeout-ms 30000)
-(def default-max-bytes 2000000)
-(def default-max-preview-tokens 2000)
-(def default-max-redirects 5)
-(def default-links-cap 25)
-(def default-search-results 10)
-(def max-search-results 20)
-(def max-html-chars 1000000)
-(def max-nesting-depth 3000)
+(declare err search-err)
+
+(def fetch-limit-keys
+  [:seon.config.web/default-timeout-ms
+   :seon.config.web/maximum-response-bytes
+   :seon.config.web/default-preview-tokens
+   :seon.config.web/maximum-redirects])
+
+(def search-limit-keys
+  [:seon.config.web/default-timeout-ms
+   :seon.config.web/default-search-results
+   :seon.config.web/maximum-search-results])
+
+(defn missing-limit-key
+  "Return the first absent positive portable web-limit config key."
+  [configuration keys]
+  (some (fn [key]
+          (when-not (pos-int? (get configuration key)) key))
+        keys))
+
+(defn fetch-config-error
+  "Build a flat fetch error naming one unavailable config fact."
+  [url key]
+  (err url
+       (str "The web limit " key
+            " is unavailable; apply the governing config.")
+       {:seon.config/key key}))
+
+(defn search-config-error
+  "Build a flat search error naming one unavailable config fact."
+  [query key]
+  (search-err query
+              (str "The web limit " key
+                   " is unavailable; apply the governing config.")
+              {:seon.config/key key}))
 
 (defn domain-allowed?
   "Return whether a hostname is covered by an allowed domain."

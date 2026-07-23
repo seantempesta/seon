@@ -18,7 +18,13 @@
                               :seon.agent.shell/cwd "/repo"
                               :seon.agent.shell/stdin "input"
                               :seon.agent.shell/timeout-ms 99}
+                             {:seon.config.shell/default-timeout-ms 30000}
                              200))))
+  (testing "a missing portable default is a loud flat config error"
+    (is (= :seon.config.shell/default-timeout-ms
+           (get-in
+            (core/run-request {:seon.agent.shell/cmd "git"} {} 200)
+            [:seon.error/data :seon.config/key]))))
   (testing "Python is a pure stdin specialization"
     (is (= {:seon.agent.shell/cmd "python3"
             :seon.agent.shell/args ["-" "x"]

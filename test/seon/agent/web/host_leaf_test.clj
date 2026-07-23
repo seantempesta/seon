@@ -27,6 +27,14 @@
     (.start server)
     server))
 
+(def protective-limits
+  {:seon.config.web/default-timeout-ms 30000
+   :seon.config.web/maximum-response-bytes 2000000
+   :seon.config.web/default-preview-tokens 2000
+   :seon.config.web/maximum-redirects 5
+   :seon.config.web/default-search-results 10
+   :seon.config.web/maximum-search-results 20})
+
 (deftest real-local-fetch-preserves-the-public-envelope
   (let [server (local-server)
         url (str "http://127.0.0.1:"
@@ -48,8 +56,9 @@
                     :seon.agent.web/timeout-ms 1000
                     :seon.agent.web/max-preview-tokens 100
                     :seon.config/configuration
-                    {:seon.agent.web/policy :open
-                     :seon.agent.web/allowed-domains []}})]
+                    (assoc protective-limits
+                           :seon.agent.web/policy :open
+                           :seon.agent.web/allowed-domains [])})]
         (is (:seon.agent.web/ok? result))
         (is (= 200 (:seon.agent.web/status result)))
         (is (= "u8 web leaf\n" (:seon.agent.web/preview result)))
@@ -67,7 +76,8 @@
         result
         (fetch {:seon.agent.web/url "http://127.0.0.1:1/"
                 :seon.config/configuration
-                {:seon.agent.web/policy :public-only
-                 :seon.agent.web/allowed-domains []}})]
+                (assoc protective-limits
+                       :seon.agent.web/policy :public-only
+                       :seon.agent.web/allowed-domains [])})]
     (is (false? (:seon.agent.web/ok? result)))
     (is (re-find #"policy refused" (:seon.error/message result)))))

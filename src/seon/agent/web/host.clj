@@ -221,10 +221,13 @@
                          url (str "redirect (" status
                                   ") with no location header."))
 
-                        (>= (inc redirects) internal/default-max-redirects)
+                        (>= (inc redirects) (::maximum-redirects *services*))
                         (internal/err
                          url (str "too many redirects (cap "
-                                  internal/default-max-redirects ")."))
+                                  (::maximum-redirects *services*)
+                                  " from :seon.config.web/maximum-redirects).")
+                         {:seon.config/key
+                          :seon.config.web/maximum-redirects})
 
                         :else
                         (let [next (str (.resolve ^URI target location))]
@@ -251,7 +254,7 @@
                                 ::web/lane lane}
                                (read-capped
                                 (.body response)
-                                internal/default-max-bytes))))))
+                                (::maximum-response-bytes *services*)))))))
                 (catch InterruptedException interrupted
                   (.interrupt (Thread/currentThread))
                   (internal/err
@@ -306,9 +309,12 @@
   "Fetch and blob one web resource through java.net.http."
   [{::web/keys [url timeout-ms max-preview-tokens]
     configuration :seon.config/configuration}]
-  (let [timeout-ms (or timeout-ms internal/default-timeout-ms)
-        max-preview-tokens (or max-preview-tokens
-                               internal/default-max-preview-tokens)]
+  (let [timeout-ms
+        (or timeout-ms
+            (:seon.config.web/default-timeout-ms configuration))
+        max-preview-tokens
+        (or max-preview-tokens
+            (:seon.config.web/default-preview-tokens configuration))]
     (cond
       (not ((::enabled? *services*))) (internal/ungranted url)
       (str/blank? url)
@@ -316,7 +322,12 @@
                     ":seon.agent.web/url is required and must be non-blank.")
       :else
       (binding [*services*
-                (assoc *services* ::policy (policy configuration))]
+                (assoc *services*
+                       ::policy (policy configuration)
+                       ::maximum-response-bytes
+                       (:seon.config.web/maximum-response-bytes configuration)
+                       ::maximum-redirects
+                       (:seon.config.web/maximum-redirects configuration))]
         (let [response (transport url timeout-ms)]
           (cond
             (not (::web/ok? response)) response
@@ -371,6 +382,12 @@
                            ::web/truncated? (boolean (::web/truncated? response))
                            ::web/blob-hash (:my.blob/hash blob)
                            ::web/fetched-at now}
+                    (::web/truncated? response)
+                    (assoc :seon.config/key
+                           :seon.config.web/maximum-response-bytes)
+                    (> total max-preview-tokens)
+                    (assoc :seon.config/preview-key
+                           :seon.config.web/default-preview-tokens)
                     title (assoc ::web/title title)))))))))))
 
 (defn search
@@ -384,9 +401,14 @@
      query ":seon.agent.web/query is required and must be non-blank.")
     :else
     (let [backend (search-backend configuration)
-          timeout-ms (or timeout-ms internal/default-timeout-ms)
-          n (max 1 (min (or max-results internal/default-search-results)
-                        internal/max-search-results))
+          timeout-ms
+          (or timeout-ms
+              (:seon.config.web/default-timeout-ms configuration))
+          n (max 1
+                 (min
+                  (or max-results
+                      (:seon.config.web/default-search-results configuration))
+                  (:seon.config.web/maximum-search-results configuration)))
           key (case backend
                 :gemini-grounding (System/getenv "GEMINI_API_KEY")
                 :serper (System/getenv "SERPER_API_KEY")

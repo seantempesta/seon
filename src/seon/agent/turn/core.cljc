@@ -6,9 +6,6 @@
 (def llm-retry-base-ms 500)
 (def llm-retry-factor 2)
 (def llm-retry-jitter 0.5)
-(def llm-retry-max-delay-ms 20000)
-(def llm-retry-total-cap-ms 60000)
-(def llm-retry-default-count 4)
 
 (def phases
   [:rendered :attempt-open :reply-ready :evaling :evaled :published])
@@ -204,16 +201,24 @@
        (true? (get-in response [:seon.ai/error :seon.ai/timeout?])))))
 
 (defn llm-retry-strategy
-  "Portable bounded retry strategy from one frozen resolution."
-  ([resolution]
-   (llm-retry-strategy resolution 0))
-  ([resolution retry-reduction]
+  "Portable bounded retry strategy from a resolution and acquired config.
+
+   Wait ceilings are milliseconds. `retry-configuration` is the immutable
+   `:seon.config/llm-retry` projection acquired with the turn; there is no
+   numeric runtime fallback."
+  ([resolution retry-configuration]
+   (llm-retry-strategy resolution retry-configuration 0))
+  ([resolution retry-configuration retry-reduction]
    (-> (retry/multiplicative-strategy llm-retry-base-ms llm-retry-factor)
        (retry/randomize-strategy llm-retry-jitter)
-       (retry/clamp-delay llm-retry-max-delay-ms)
+       (retry/clamp-delay
+        (:seon.config.llm-retry/maximum-wait-ms retry-configuration))
        (retry/max-retries
         (max 0
              (- (or (:seon.ai/agent-max-retries resolution)
-                    llm-retry-default-count)
+                    (:seon.config.llm-retry/default-retries
+                     retry-configuration))
                 retry-reduction)))
-       (retry/max-duration llm-retry-total-cap-ms))))
+       (retry/max-duration
+        (:seon.config.llm-retry/maximum-total-wait-ms
+         retry-configuration)))))

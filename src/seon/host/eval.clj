@@ -422,8 +422,9 @@
                       var-meta (::var-meta raw-envelope)
                       live-value (::live-value raw-envelope)
                       output (::output raw-envelope)
-                      envelope (dissoc raw-envelope ::var-meta ::live-value
-                                       ::output)
+                      envelope
+                      (wire-safe-value
+                       (dissoc raw-envelope ::var-meta ::live-value ::output))
                       eval-id (:seon.eval/id started)
                       recorded
                       (when (and record? eval-id)

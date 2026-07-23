@@ -4,7 +4,6 @@
    [clojure.string :as str]
    [seon.ai.tokens :as tokens]))
 
-(def default-timeout-ms 30000)
 (def killed-exit 143)
 
 (defn fail
@@ -26,13 +25,20 @@
         {:seon.config/key :seon.config/shell-enabled?}))
 
 (defn run-request
-  "Normalize the frozen child run request into subprocess request data."
-  [{:seon.agent.shell/keys [cmd args cwd stdin timeout-ms]} max-output-bytes]
-  (cond-> {:seon.subprocess/cmd (into [cmd] (or args []))
-           :seon.subprocess/timeout-ms (or timeout-ms default-timeout-ms)
-           :seon.subprocess/max-output-bytes max-output-bytes}
-    cwd (assoc :seon.subprocess/cwd cwd)
-    (some? stdin) (assoc :seon.subprocess/stdin stdin)))
+  "Normalize a child run using an acquired millisecond timeout config fact."
+  [{:seon.agent.shell/keys [cmd args cwd stdin timeout-ms]}
+   configuration
+   max-output-bytes]
+  (if-let [default-timeout-ms
+           (:seon.config.shell/default-timeout-ms configuration)]
+    (cond-> {:seon.subprocess/cmd (into [cmd] (or args []))
+             :seon.subprocess/timeout-ms (or timeout-ms default-timeout-ms)
+             :seon.subprocess/max-output-bytes max-output-bytes}
+      cwd (assoc :seon.subprocess/cwd cwd)
+      (some? stdin) (assoc :seon.subprocess/stdin stdin))
+    (fail
+     "The shell timeout policy is unavailable; apply the governing config."
+     {:seon.config/key :seon.config.shell/default-timeout-ms})))
 
 (defn py-request
   "Specialize a frozen Python request into the ordinary run call shape."

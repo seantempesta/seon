@@ -6,6 +6,7 @@
    [malli.core :as m]
    [seon.agent.web :as web]
    [seon.agent.web.internal :as internal]
+   [seon.config.resolve]
    #?(:cljs [cljs.test :refer [async deftest is testing]]
       :clj [clojure.test :refer [deftest is testing]])))
 
@@ -25,10 +26,18 @@
                    :seon.agent.web/timeout-ms 50})))
 
 (deftest resource-caps-and-closed-request-drift
-  (is (= 2000000 internal/default-max-bytes))
-  (is (= 5 internal/default-max-redirects))
-  (is (= 25 internal/default-links-cap))
-  (is (= 20 internal/max-search-results))
+  (is (= :seon.config.web/maximum-response-bytes
+         (second internal/fetch-limit-keys)))
+  (is (= :seon.config.web/maximum-search-results
+         (last internal/search-limit-keys)))
+  (is (= :seon.config.web/default-timeout-ms
+         (internal/missing-limit-key {} internal/fetch-limit-keys)))
+  (is (= :seon.config.web/default-timeout-ms
+         (get-in
+          (internal/fetch-config-error
+           "https://example.com"
+           :seon.config.web/default-timeout-ms)
+          [:seon.error/data :seon.config/key])))
   (is (false? (m/validate :seon.agent.web/fetch-request
                           {:seon.agent.web/url "https://example.com"
                            :seon.agent.web/max-bytes 1})))

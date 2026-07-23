@@ -141,6 +141,20 @@
     (is (turn.core/llm-fallback-eligible? timeout))
     (is (not (turn.core/llm-fallback-eligible? client)))))
 
+(deftest retry-bounds-come-from-the-acquired-config-projection
+  (let [configuration
+        {:seon.config.llm-retry/maximum-wait-ms 7
+         :seon.config.llm-retry/maximum-total-wait-ms 28
+         :seon.config.llm-retry/default-retries 4}
+        waits (vec (turn.core/llm-retry-strategy {} configuration))]
+    (is (= 4 (count waits)))
+    (is (every? #(<= % 7) waits))
+    (is (<= (reduce + waits) 28))
+    (is (= 2
+           (count
+            (turn.core/llm-retry-strategy
+             {:seon.ai/agent-max-retries 3} configuration 1))))))
+
 (deftest no-progress-streak-is-derived-from-trailing-durable-turns
   (let [observation
         [{:seon.eval/source "(+ 1 2)"

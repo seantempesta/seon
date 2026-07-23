@@ -1,10 +1,15 @@
 (ns seon.agent.driver.host
   "JVM claimant leaf: database interest, virtual-thread custody, and eval."
-  (:require [my.blob.core :as blob.core]
+  (:require [my.blob :as blob]
+            [my.blob.core :as blob.core]
+            [my.blob.host :as blob.host]
+            [seon.ai.core :as ai.core]
             [seon.agent.driver :as driver]
             [seon.agent.run.core :as run.core]
             [seon.agent.turn.core :as turn.core]
+            [seon.agent.turn.llm :as turn.llm]
             [seon.content-hash :as content-hash]
+            [seon.config.resolve :as config.resolve]
             [seon.db :as db]
             [seon.db.host :as db.host]
             [seon.eval.receipt :as eval.receipt]
@@ -15,7 +20,8 @@
             [seon.host.session :as session]
             [seon.repl.parse :as repl.parse])
   (:import [java.nio.file Files Path]
-           [java.util.concurrent Callable ExecutorService Future]))
+           [java.util.concurrent Callable ExecutorService Future
+            ScheduledExecutorService TimeUnit]))
 
 (def ^:private artifact-digest
   "0000000000000000000000000000000000000000000000000000000000000000")
@@ -29,14 +35,93 @@
    :seon.db.leaf/without-agent (fn [f] (f))
    :seon.db.leaf/with-tx-context (fn [_ f] (f))
    :seon.db.leaf/install-configuration-context! (fn [_] nil)
-   :seon.db.leaf/schema-projection (constantly nil)
-   :seon.db.leaf/cache-schema-projection! (fn [_] nil)
-   :seon.db.leaf/schema-validation? (constantly false)})
+   :seon.db.leaf/schema-projection
+   (fn []
+     (let [projection
+           (::context/projection @(::context/projection-state writer))]
+       (when (seq (:seon.schema.projection/forms projection)) projection)))
+   :seon.db.leaf/cache-schema-projection!
+   (fn [projection]
+     (reset! (::context/projection-state writer)
+             {::context/projection projection}))
+   :seon.db.leaf/schema-validation?
+   (fn []
+     (boolean
+      (seq
+       (:seon.schema.projection/forms
+        (::context/projection @(::context/projection-state writer))))))})
 
 (defn database-leaf
   "Portable database leaf over the host's retained writer pool."
   [writer]
   (db.host/leaf writer #(database-context writer)))
+
+(defn claimant-capabilities
+  "Derive claimant policy from installed platform leaves."
+  [host]
+  (cond-> #{:seon.agent.driver.capability/eval}
+    (and (fn? (:seon.agent.driver/llm-transport! host))
+         (map? (:seon.agent.driver/blob-leaf host)))
+    (conj :seon.agent.driver.capability/llm)))
+
+(defn- resolve-llm-context!
+  [database agent-id]
+  (let [agent-row
+        (db/pull {::db/db database
+                  ::db/pull-pattern (ai.core/agent-config-pull-pattern)
+                  ::db/ref [:seon.agent/id agent-id]})
+        config-row
+        (db/decode-edn-values
+         (db/pull {::db/db database
+                   ::db/pull-pattern (ai.core/config-pull-pattern)
+                   ::db/ref [:seon.config/id "cluster"]}))
+        attempt-timeout-ms (:seon.ai/agent-attempt-timeout-ms agent-row)]
+    (if-not (pos-int? attempt-timeout-ms)
+      {:seon.error/message
+       "The acquired agent has no positive durable LLM attempt timeout."
+       :seon.error/kind :configuration}
+      {:seon.ai/config-resolution
+       (ai.core/resolved-config-from-rows
+        ai.core/shipped-defaults config-row agent-row attempt-timeout-ms)
+       :seon.config.llm-retry/maximum-wait-ms
+       (:seon.config.llm-retry/maximum-wait-ms config-row)
+       :seon.config.llm-retry/maximum-total-wait-ms
+       (:seon.config.llm-retry/maximum-total-wait-ms config-row)
+       :seon.config.llm-retry/default-retries
+       (:seon.config.llm-retry/default-retries config-row)
+       :seon.config/repl-mode
+       (or (:seon.config/repl-mode agent-row)
+           (:seon.config/repl-mode config-row)
+           :batch)})))
+
+(defn- bounded-llm-transport!
+  [host request]
+  (let [timeout-ms (:seon.ai/request-timeout-ms request)
+        interrupted-by-deadline? (atom false)
+        driver-thread (Thread/currentThread)
+        task
+        (.schedule
+         ^ScheduledExecutorService (:seon.host/watchdog host)
+         ^Runnable
+         (fn []
+           (reset! interrupted-by-deadline? true)
+           (.interrupt driver-thread))
+         (long timeout-ms) TimeUnit/MILLISECONDS)]
+    (try
+      ((:seon.agent.driver/llm-transport! host) request)
+      (catch InterruptedException interrupted
+        (if @interrupted-by-deadline?
+          (do
+            (Thread/interrupted)
+            {:seon.ai/error
+             {:seon.ai/msg
+              (str "LLM attempt exceeded the claimant deadline ("
+                   timeout-ms "ms).")
+              :seon.ai/timeout? true
+              :seon.ai/outer-timeout? true}})
+          (throw interrupted)))
+      (finally
+        (.cancel task false)))))
 
 (defn- ensure-context! [host agent-id]
   (or (get @(:seon.host/contexts host) agent-id)
@@ -123,7 +208,7 @@
        (:my.blob/content reply) false (host.eval/agent-home-ns agent-id)))))
 
 (defn- invocation
-  [agent-id database run-id claim-epoch turn-id program]
+  [agent-id database run-id claim-epoch turn-id program configuration]
   {:seon.execution/invocation-id (str (random-uuid))
    :seon.execution/agent-id agent-id
    :seon.db/db database
@@ -135,11 +220,35 @@
      :seon.eval/starting-ns (host.eval/agent-home-ns agent-id)
      :seon.agent.turn/id-of-turn turn-id
      :seon.agent.run/id-of-run run-id}]
-   :seon.execution/deadline-ms (+ (System/currentTimeMillis) 120000)
-   :seon.execution/result-limit-bytes 1048576
+   :seon.execution/deadline-ms
+   (+ (System/currentTimeMillis)
+      (:seon.config.claim-driver/invocation-deadline-ms configuration))
+   :seon.execution/result-limit-bytes
+   (:seon.config.claim-driver/invocation-result-maximum-bytes configuration)
    :seon.execution/run-fence
    {:seon.agent.run/id run-id
     :seon.agent.run/claim-epoch claim-epoch}})
+
+(defn- invocation-configuration! [database]
+  (let [singleton
+        (db/pull
+         {::db/db database
+          ::db/pull-pattern
+          (into [:seon.config/id] config.resolve/claim-driver-attributes)
+          ::db/ref [:seon.config/id :seon.config/singleton]})
+        configuration
+        (config.resolve/claim-driver-configuration singleton)
+        missing
+        (some #(when-not (pos-int? (get configuration %)) %)
+              [:seon.config.claim-driver/invocation-deadline-ms
+               :seon.config.claim-driver/invocation-result-maximum-bytes])]
+    (if missing
+      {:seon.error/message
+       (str "The JVM claimant limit " missing
+            " is unavailable; explicitly apply the governing config.")
+       :seon.error/kind :core-bug
+       :seon.error/data {:seon.config/key missing}}
+      configuration)))
 
 (defn- run-eval-batch!
   [host storage-view run claim-epoch database]
@@ -148,10 +257,17 @@
         turn (:seon.agent.run/current-turn run)
         turn-id (:seon.agent.turn/id turn)
         fence (run.core/run-fence agent-id run-id claim-epoch)
-        program (reply-program storage-view turn agent-id)]
-    (if (:my.blob/error program)
+        program (reply-program storage-view turn agent-id)
+        invocation-configuration (invocation-configuration! database)]
+    (cond
+      (:my.blob/error program)
       {:seon.error/message (:my.blob/error program)
        :seon.error/kind :core-bug}
+
+      (:seon.error/message invocation-configuration)
+      invocation-configuration
+
+      :else
       (let [host-session (driver-session host agent-id)
             task
             (.submit
@@ -159,9 +275,9 @@
              ^Callable
              (fn []
                (invoke/execute-invocation!
-                host-session
+               host-session
                 (invocation agent-id database run-id claim-epoch
-                            turn-id program))))
+                            turn-id program invocation-configuration))))
             batch (.get ^Future task)
             executable-count
             (count (filter #(contains? #{:form :read}
@@ -251,6 +367,32 @@
 
 (defn- execute-step! [host storage-view claim]
   (case (:seon.agent.driver/step claim)
+    :open-attempt
+    (binding [blob/*leaf* (:seon.agent.driver/blob-leaf host)]
+      (let [result
+            (turn.llm/llm-phase!
+             (assoc claim
+                    :seon.agent.turn/now! #(java.util.Date.)
+                    :seon.agent.turn/resolve-context!
+                    (fn [agent-id database _run-id]
+                      (resolve-llm-context! database agent-id))
+                    :seon.agent.turn/transport!
+                    #(bounded-llm-transport! host %)))]
+        (or (:seon.retry/result result) result)))
+
+    :settle-attempt
+    (binding [blob/*leaf* (:seon.agent.driver/blob-leaf host)]
+      (let [result
+            (turn.llm/llm-phase!
+             (assoc claim
+                    :seon.agent.turn/now! #(java.util.Date.)
+                    :seon.agent.turn/resolve-context!
+                    (fn [agent-id database _run-id]
+                      (resolve-llm-context! database agent-id))
+                    :seon.agent.turn/transport!
+                    #(bounded-llm-transport! host %)))]
+        (or (:seon.retry/result result) result)))
+
     :eval (eval-step! host storage-view claim)
     :settle-eval (settle-eval-step! host storage-view claim)
     {:seon.error/message "The JVM claimant was assigned an ineligible phase."
@@ -261,6 +403,14 @@
   [host storage-view]
   (let [writer (:seon.host/writer host)
         database-leaf (database-leaf writer)
+        database-functions (db/bind-leaf database-leaf)
+        blob-leaf
+        (blob.host/services
+         {::blob.host/current-db! (get database-functions 'db)
+          ::blob.host/query! (get database-functions 'query)
+          ::blob.host/transact! (get database-functions 'transact!)})
+        _ ((:my.blob/configure-storage-view! blob-leaf) storage-view)
+        host (assoc host :seon.agent.driver/blob-leaf blob-leaf)
         handles (atom {})
         leaf-holder (atom nil)
         dispatch!
@@ -293,7 +443,7 @@
             run-id))
         platform-leaf
         {:seon.agent.driver/capabilities
-         #{:seon.agent.driver.capability/eval}
+         (claimant-capabilities host)
          :seon.agent.driver/now #(java.util.Date.)
          :seon.agent.driver/dispatch-run! dispatch!
          :seon.agent.driver/execute-step!

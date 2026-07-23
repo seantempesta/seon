@@ -255,10 +255,21 @@
   {:malli/schema [:=> [:cat ::fetch-request] ::fetch-response]}
   [{::keys [url timeout-ms max-preview-tokens max-age-ms]
     configuration :seon.config/configuration
-    :or {timeout-ms         int/default-timeout-ms
-         max-preview-tokens int/default-max-preview-tokens
-         max-age-ms         0}}]
-  #?(:cljs
+    :or {max-age-ms 0}}]
+  (if-let [missing (int/missing-limit-key configuration
+                                           int/fetch-limit-keys)]
+    (int/fetch-config-error url missing)
+    (let [timeout-ms
+          (or timeout-ms
+              (:seon.config.web/default-timeout-ms configuration))
+          max-preview-tokens
+          (or max-preview-tokens
+              (:seon.config.web/default-preview-tokens configuration))
+          maximum-response-bytes
+          (:seon.config.web/maximum-response-bytes configuration)
+          maximum-redirects
+          (:seon.config.web/maximum-redirects configuration)]
+      #?(:cljs
      (try
     (cond
       (not (pod/granted?))
@@ -273,8 +284,8 @@
                              (await (pod/fresh-projection url max-age-ms)))]
           (pod/projection->response cached max-preview-tokens)
           (let [res (await (pod/transport policy url timeout-ms
-                                          int/default-max-bytes
-                                          int/default-max-redirects))]
+                                          maximum-response-bytes
+                                          maximum-redirects))]
           (cond
             (not (::ok? res))
             res
@@ -340,7 +351,7 @@
                ::max-preview-tokens max-preview-tokens
                ::max-age-ms max-age-ms}
         configuration
-        (assoc :seon.config/configuration configuration)))))
+        (assoc :seon.config/configuration configuration)))))))
 
 ;; ============================================================
 ;; search — the one ^:async grounded-search function.
@@ -406,10 +417,19 @@
      ; then fetch a row's ::url to page the real page into a blob."
   {:malli/schema [:=> [:cat ::search-request] ::search-response]}
   [{::keys [query max-results timeout-ms]
-    configuration :seon.config/configuration
-    :or {max-results int/default-search-results
-         timeout-ms  int/default-timeout-ms}}]
-  #?(:cljs
+    configuration :seon.config/configuration}]
+  (if-let [missing (int/missing-limit-key configuration
+                                           int/search-limit-keys)]
+    (int/search-config-error query missing)
+    (let [timeout-ms
+          (or timeout-ms
+              (:seon.config.web/default-timeout-ms configuration))
+          max-results
+          (or max-results
+              (:seon.config.web/default-search-results configuration))
+          maximum-search-results
+          (:seon.config.web/maximum-search-results configuration)]
+      #?(:cljs
      (try
     (cond
       (not (pod/granted?))
@@ -421,7 +441,7 @@
       :else
       (let [{backend ::search-backend model ::search-model}
             (pod/search-config configuration)
-            n (max 1 (min max-results int/max-search-results))]
+            n (max 1 (min max-results maximum-search-results))]
         (case backend
           :gemini-grounding
           (let [key (pod/gemini-key)]
@@ -510,4 +530,4 @@
                ::max-results max-results
                ::timeout-ms timeout-ms}
         configuration
-        (assoc :seon.config/configuration configuration)))))
+        (assoc :seon.config/configuration configuration)))))))

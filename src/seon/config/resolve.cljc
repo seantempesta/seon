@@ -121,6 +121,64 @@
 (doseq [[attribute shape] guard-budget-schemas]
   (schema/register! attribute shape))
 
+(def llm-retry-dial-schemas
+  "Portable LLM retry ceilings, with units and retained-policy provenance."
+  {:seon.config.llm-retry/maximum-wait-ms
+   [:int {:min 1
+          :description
+          "Maximum milliseconds before one retry. Default 20000 preserves the bounded 2026-07-23 retry policy; firing clamps the wait and names :seon.config.llm-retry/maximum-wait-ms in retry evidence."}]
+   :seon.config.llm-retry/maximum-total-wait-ms
+   [:int {:min 1
+          :description
+          "Maximum cumulative retry-wait milliseconds for one LLM dispatch. Default 60000 preserves the bounded 2026-07-23 retry policy; firing exhausts retries and names :seon.config.llm-retry/maximum-total-wait-ms."}]
+   :seon.config.llm-retry/default-retries
+   [:int {:min 0
+          :description
+          "Retry count when a frozen model resolution does not declare one. Default 4 preserves the 2026-07-23 policy; exhaustion names :seon.config.llm-retry/default-retries."}]})
+
+(def shell-dial-schemas
+  "Portable shell request defaults, with units and retained-policy provenance."
+  {:seon.config.shell/default-timeout-ms
+   [:int {:min 1
+          :description
+          "Default subprocess wall-clock timeout in milliseconds. Default 30000 preserves the 2026-07-23 portable shell policy; firing returns a flat timeout value naming :seon.config.shell/default-timeout-ms."}]})
+
+(def web-capability-dial-schemas
+  "Portable web defaults and ceilings, with units and retained-policy provenance."
+  {:seon.config.web/default-timeout-ms
+   [:int {:min 1 :description "Default web request timeout in milliseconds. Default 30000 preserves the 2026-07-23 portable policy; firing names :seon.config.web/default-timeout-ms."}]
+   :seon.config.web/maximum-response-bytes
+   [:int {:min 1 :description "Maximum response bytes retained by one fetch. Default 2000000 preserves the 2026-07-23 heap ceiling; firing marks the response truncated and names :seon.config.web/maximum-response-bytes."}]
+   :seon.config.web/default-preview-tokens
+   [:int {:min 1 :description "Default estimated-token preview size. Default 2000 preserves the 2026-07-23 response policy; firing returns a truncated preview and names :seon.config.web/default-preview-tokens."}]
+   :seon.config.web/maximum-redirects
+   [:int {:min 1 :description "Maximum redirects followed by one fetch. Default 5 preserves the 2026-07-23 SSRF-safe transport policy; firing returns a flat error naming :seon.config.web/maximum-redirects."}]
+   :seon.config.web/default-link-count
+   [:int {:min 1 :description "Default extracted link-row ceiling. Default 25 preserves the 2026-07-23 portable extraction policy; firing truncates link rows and names :seon.config.web/default-link-count."}]
+   :seon.config.web/default-search-results
+   [:int {:min 1 :description "Default grounded-search row count. Default 10 preserves the 2026-07-23 portable search policy under :seon.config.web/default-search-results."}]
+   :seon.config.web/maximum-search-results
+   [:int {:min 1 :description "Maximum grounded-search rows accepted per request. Default 20 preserves the 2026-07-23 request schema ceiling; firing clamps the request and names :seon.config.web/maximum-search-results."}]
+   :seon.config.web/maximum-html-characters
+   [:int {:min 1 :description "Maximum HTML characters admitted to DOM extraction. Default 1000000 preserves the 2026-07-23 parser ceiling; firing selects bounded fallback extraction and names :seon.config.web/maximum-html-characters."}]
+   :seon.config.web/maximum-html-nesting-depth
+   [:int {:min 1 :description "Maximum estimated HTML nesting depth admitted to DOM extraction. Default 3000 preserves the 2026-07-23 parser ceiling; firing selects bounded fallback extraction and names :seon.config.web/maximum-html-nesting-depth."}]})
+
+(doseq [[attribute shape] (merge llm-retry-dial-schemas
+                                  shell-dial-schemas
+                                  web-capability-dial-schemas)]
+  (schema/register! attribute shape))
+
+(schema/register! :seon.config/llm-retry
+  (into [:map {:closed true}]
+        (map (fn [attribute] [attribute {:optional true} attribute]))
+        (keys llm-retry-dial-schemas)))
+
+(schema/register! :seon.config/shell
+  (into [:map {:closed true}]
+        (map (fn [attribute] [attribute {:optional true} attribute]))
+        (keys shell-dial-schemas)))
+
 (schema/register! :seon.config/guard
   (into [:map {:closed true}]
         (map (fn [attribute]
@@ -192,7 +250,15 @@
    :seon.config.claim-driver/database-pool-wait-timeout-ms
    [:int {:min 1
           :description
-          "Maximum milliseconds a parked claimant vthread waits for a database pool member. Default 110000 approaches the 120000 ms call deadline so legitimate parked waiters do not fail one second into a bounded call."}]})
+          "Maximum milliseconds a parked claimant vthread waits for a database pool member. Default 110000 approaches the 120000 ms call deadline so legitimate parked waiters do not fail one second into a bounded call."}]
+   :seon.config.claim-driver/invocation-deadline-ms
+   [:int {:min 1
+          :description
+          "Maximum wall-clock milliseconds for one claimant evaluation invocation. Default 120000 preserves the 2026-07-23 JVM claimant ceiling; firing returns a flat timeout error naming :seon.config.claim-driver/invocation-deadline-ms."}]
+   :seon.config.claim-driver/invocation-result-maximum-bytes
+   [:int {:min 1
+          :description
+          "Maximum Transit bytes in one claimant invocation result. Default 1048576 preserves the 2026-07-23 JVM claimant ceiling; firing returns a flat agent error naming :seon.config.claim-driver/invocation-result-maximum-bytes."}]})
 
 (doseq [[attribute shape] claim-driver-dial-schemas]
   (schema/register! attribute shape))
@@ -219,6 +285,31 @@
                   :seon.config/web-render]}
   [singleton]
   (select-keys singleton web-render-attributes))
+
+(def llm-retry-attributes (vec (keys llm-retry-dial-schemas)))
+(def shell-attributes (vec (keys shell-dial-schemas)))
+(def web-capability-attributes (vec (keys web-capability-dial-schemas)))
+(def claim-driver-attributes (vec (keys claim-driver-dial-schemas)))
+
+(defn llm-retry-configuration
+  "Project portable retry bounds from one acquired config singleton."
+  [singleton]
+  (select-keys singleton llm-retry-attributes))
+
+(defn shell-configuration
+  "Project portable shell defaults from one acquired config singleton."
+  [singleton]
+  (select-keys singleton shell-attributes))
+
+(defn web-capability-configuration
+  "Project portable web defaults and ceilings from one acquired singleton."
+  [singleton]
+  (select-keys singleton web-capability-attributes))
+
+(defn claim-driver-configuration
+  "Project JVM claimant limits from one acquired config singleton."
+  [singleton]
+  (select-keys singleton claim-driver-attributes))
 ;; EXPLICIT-CHARACTER knobs (transcript-render redesign) — for content the
 ;; agent edits byte-exactly. Every DEFAULT reproduces today's bytes, so an
 ;; absent section / `{}` boot is byte-identical.
@@ -643,11 +734,14 @@
 ;;; host-owned CONFIG (never env — env carries only the API KEY, read live);
 ;;; a new backend (Serper) slots in here WITHOUT changing the function shape.
 (schema/register! :seon.config/web-spec
-  [:map
-   [:seon.agent.web/policy          {:optional true} :keyword]
-   [:seon.agent.web/allowed-domains {:optional true} [:vector :string]]
-   [:seon.agent.web/search-backend  {:optional true} :keyword]
-   [:seon.agent.web/search-model    {:optional true} :string]])
+  (into
+   [:map {:closed true}
+    [:seon.agent.web/policy          {:optional true} :keyword]
+    [:seon.agent.web/allowed-domains {:optional true} [:vector :string]]
+    [:seon.agent.web/search-backend  {:optional true} :keyword]
+    [:seon.agent.web/search-model    {:optional true} :string]]
+   (map (fn [attribute] [attribute {:optional true} attribute]))
+   (keys web-capability-dial-schemas)))
 
 ;;; FORM-AUTOFIX (repair) — the pre-flight repair dial (owner rulings
 ;;; 2026-07-05; design docs/prds/agent-ctx/research/form-autofix-system-
@@ -852,6 +946,14 @@
     {:optional true} :seon.config.guard/deadline-ms]
    [:seon.config.guard/output-cap
     {:optional true} :seon.config.guard/output-cap]
+   [:seon.config.llm-retry/maximum-wait-ms
+    {:optional true} :seon.config.llm-retry/maximum-wait-ms]
+   [:seon.config.llm-retry/maximum-total-wait-ms
+    {:optional true} :seon.config.llm-retry/maximum-total-wait-ms]
+   [:seon.config.llm-retry/default-retries
+    {:optional true} :seon.config.llm-retry/default-retries]
+   [:seon.config.shell/default-timeout-ms
+    {:optional true} :seon.config.shell/default-timeout-ms]
    [:seon.config.model-transport/response-identity-cap
     {:optional true} :seon.config.model-transport/response-identity-cap]
    [:seon.config.model-transport/endpoint-cap
@@ -879,6 +981,12 @@
    [:seon.config.claim-driver/database-pool-wait-timeout-ms
     {:optional true}
     :seon.config.claim-driver/database-pool-wait-timeout-ms]
+   [:seon.config.claim-driver/invocation-deadline-ms
+    {:optional true}
+    :seon.config.claim-driver/invocation-deadline-ms]
+   [:seon.config.claim-driver/invocation-result-maximum-bytes
+    {:optional true}
+    :seon.config.claim-driver/invocation-result-maximum-bytes]
    [:seon.config/on-core-error      {:optional true} :seon.config/on-core-error]
    [:seon.config/spawn-depth-cap    {:optional true} :seon.config/spawn-depth-cap]
    [:seon.config/always             {:optional true} :seon.config/always]
@@ -938,6 +1046,24 @@
    [:seon.agent.web/search-backend  {:optional true} :keyword]
    [:seon.agent.web/search-model    {:optional true} :string]
    [:seon.agent.web/allowed-domains {:optional true} :seon.agent.web/allowed-domains]
+   [:seon.config.web/default-timeout-ms
+    {:optional true} :seon.config.web/default-timeout-ms]
+   [:seon.config.web/maximum-response-bytes
+    {:optional true} :seon.config.web/maximum-response-bytes]
+   [:seon.config.web/default-preview-tokens
+    {:optional true} :seon.config.web/default-preview-tokens]
+   [:seon.config.web/maximum-redirects
+    {:optional true} :seon.config.web/maximum-redirects]
+   [:seon.config.web/default-link-count
+    {:optional true} :seon.config.web/default-link-count]
+   [:seon.config.web/default-search-results
+    {:optional true} :seon.config.web/default-search-results]
+   [:seon.config.web/maximum-search-results
+    {:optional true} :seon.config.web/maximum-search-results]
+   [:seon.config.web/maximum-html-characters
+    {:optional true} :seon.config.web/maximum-html-characters]
+   [:seon.config.web/maximum-html-nesting-depth
+    {:optional true} :seon.config.web/maximum-html-nesting-depth]
    [:seon.config.watchdog/stale-ms   {:optional true} :seon.config/cap]
    [:seon.config.breaker/crash-count {:optional true} :seon.config/cap]
    [:seon.config.breaker/window-ms   {:optional true} :seon.config/cap]
@@ -958,6 +1084,8 @@
    [:seon.config/run           {:optional true} :seon.config/run]
    [:seon.config/execution     {:optional true} :seon.config/execution]
    [:seon.config/guard         {:optional true} :seon.config/guard]
+   [:seon.config/llm-retry     {:optional true} :seon.config/llm-retry]
+   [:seon.config/shell         {:optional true} :seon.config/shell]
    [:seon.config/model-transport {:optional true} :seon.config/model-transport]
    [:seon.config/web-render      {:optional true} :seon.config/web-render]
    [:seon.config/claim-driver    {:optional true} :seon.config/claim-driver]
@@ -1611,6 +1739,8 @@
         reactive (get manifest :seon.config/reactive {})
         execution (get manifest :seon.config/execution {})
         guard (get manifest :seon.config/guard {})
+        llm-retry (get manifest :seon.config/llm-retry {})
+        shell (get manifest :seon.config/shell {})
         database (get manifest :seon.config/database {})
         contexts (resolve-context-entities manifest)
         _ (validate-liveness-relations! manifest environment run)
@@ -1650,6 +1780,16 @@
              (get guard :seon.config.guard/deadline-ms 600000)
              :seon.config.guard/output-cap
              (get guard :seon.config.guard/output-cap 1638400)
+             :seon.config.llm-retry/maximum-wait-ms
+             (get llm-retry :seon.config.llm-retry/maximum-wait-ms 20000)
+             :seon.config.llm-retry/maximum-total-wait-ms
+             (get llm-retry
+                  :seon.config.llm-retry/maximum-total-wait-ms
+                  60000)
+             :seon.config.llm-retry/default-retries
+             (get llm-retry :seon.config.llm-retry/default-retries 4)
+             :seon.config.shell/default-timeout-ms
+             (get shell :seon.config.shell/default-timeout-ms 30000)
              :seon.config.web-render/heartbeat-interval-ms
              (get web-render :seon.config.web-render/heartbeat-interval-ms 15000)
              :seon.config.web-render/mailbox-depth
@@ -1681,6 +1821,14 @@
              (get claim-driver
                   :seon.config.claim-driver/database-pool-wait-timeout-ms
                   110000)
+             :seon.config.claim-driver/invocation-deadline-ms
+             (get claim-driver
+                  :seon.config.claim-driver/invocation-deadline-ms
+                  120000)
+             :seon.config.claim-driver/invocation-result-maximum-bytes
+             (get claim-driver
+                  :seon.config.claim-driver/invocation-result-maximum-bytes
+                  1048576)
              :seon.config.render-context/host-timezone
              (get render-context
                   :seon.config.render-context/host-timezone
@@ -1740,6 +1888,24 @@
                           #{:gemini-grounding :serper} :gemini-grounding)
              :seon.agent.web/search-model    (get web :seon.agent.web/search-model "gemini-3.1-flash-lite")
              :seon.agent.web/allowed-domains (vec (get web :seon.agent.web/allowed-domains []))
+             :seon.config.web/default-timeout-ms
+             (get web :seon.config.web/default-timeout-ms 30000)
+             :seon.config.web/maximum-response-bytes
+             (get web :seon.config.web/maximum-response-bytes 2000000)
+             :seon.config.web/default-preview-tokens
+             (get web :seon.config.web/default-preview-tokens 2000)
+             :seon.config.web/maximum-redirects
+             (get web :seon.config.web/maximum-redirects 5)
+             :seon.config.web/default-link-count
+             (get web :seon.config.web/default-link-count 25)
+             :seon.config.web/default-search-results
+             (get web :seon.config.web/default-search-results 10)
+             :seon.config.web/maximum-search-results
+             (get web :seon.config.web/maximum-search-results 20)
+             :seon.config.web/maximum-html-characters
+             (get web :seon.config.web/maximum-html-characters 1000000)
+             :seon.config.web/maximum-html-nesting-depth
+             (get web :seon.config.web/maximum-html-nesting-depth 3000)
              :seon.config.watchdog/stale-ms
              (get-in manifest [:seon.config/watchdog :seon.config.watchdog/stale-ms] 1200000)
              :seon.config.breaker/crash-count
