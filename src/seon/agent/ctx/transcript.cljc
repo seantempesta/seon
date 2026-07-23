@@ -796,6 +796,19 @@
     (not [?turn :seon.agent.turn/scheduled? true])
     [?turn :seon.agent.turn/evals ?eval]])
 
+(def ^:private open-attempt-partial-query
+  '[:find ?partial .
+    :in $ ?agent-id
+    :where
+    [?agent :seon.agent/id ?agent-id]
+    [?agent :seon.agent/run ?run]
+    [?run :seon.agent.run/status :open]
+    [?turn :seon.agent.turn/run ?run]
+    [?turn :seon.agent.turn/phase :attempt-open]
+    [?turn :seon.agent.turn/llm-attempts ?attempt]
+    [?attempt :seon.ai.attempt/outcome :open]
+    [?attempt :seon.ai.attempt/partial-text ?partial]])
+
 (def ^:private ai-eval-selector
   '[:db/id :seon.eval/id :seon.eval/at
     :seon.eval/status
@@ -1098,7 +1111,7 @@
   (when (and (map? value) (string? (:seon.error/message value))) value))
 
 (defn- ^{:async #?(:cljs true :clj false)} acquire-transcript
-  [{:seon.agent/keys [id entity] :as input} eval-selector]
+  [{:seon.agent/keys [id entity] :as input} eval-selector include-partial?]
   (let [database (or (::db/db input)
                      {:seon.error/message "Render block requires :seon.db/db."
                       :seon.error/kind :core-bug})
@@ -1119,7 +1132,10 @@
           open? (conj (query-member database run-turn-count-query [run-id]
                                     500000 500000 4096)
                       (query-member database run-form-count-query [run-id]
-                                    500000 500000 4096)))
+                                    500000 500000 4096))
+          include-partial?
+          (conj (query-member database open-attempt-partial-query [id]
+                              500000 1 262144)))
         stage-one-results
         (if (database-error database)
           [database {::error database}]
@@ -1136,9 +1152,11 @@
                        (database-error stage-one)
                        (acquisition-error (::db/results stage-one)))]
       (assoc input ::error error)
-      (let [[action-member
-             latest-ns-member assignment-member
-             run-turn-member run-form-member] (::db/results stage-one)
+      (let [members (::db/results stage-one)
+            [action-member latest-ns-member assignment-member] members
+            run-turn-member (when open? (nth members 3 nil))
+            run-form-member (when open? (nth members 4 nil))
+            partial-member (when include-partial? (last members))
             newest-rows (->> (::turn-rows recent-turns)
                              (sort-by (juxt second first))
                              vec)
@@ -1231,6 +1249,7 @@
                     (boolean (::usage-history-omitted? recent-turns))
                     ::turns turns
                     ::messages (mapv first (or (query-result message-member) []))
+                    ::partial-text (query-result partial-member)
                     ::last-action-at (query-result action-member)
                     ::previous-ns previous-ns
                     :seon.agent.run/turn-count
@@ -1244,7 +1263,8 @@
   "Acquire and render the transcript at the active database value."
   {:malli/schema [:=> [:cat :seon.render/section-request :any] :string]}
   [input _invoke-selected!]
-  (format-transcript-block (await (acquire-transcript input ai-eval-selector))))
+  (format-transcript-block
+   (await (acquire-transcript input ai-eval-selector false))))
 
 (defn- format-transcript-block
   "The WHOLE bottom of the context: the [[masthead]], then the agent's
@@ -1464,6 +1484,17 @@
        (render/block :html configuration {:seon.agent/id agent-id}
                      {:seon.render/markdown (str/trim body)})]]]))
 
+(defn- partial-progress-html
+  "Render an escaped cumulative provider prefix with one stable identity."
+  [id partial-text]
+  [:div {:id (str "agent-transcript-partial-" id)
+         :class "border border-amber-800/40 rounded bg-amber-950/20 px-2.5 py-2"}
+   [:div {:class "text-2xs text-amber-300 font-mono mb-1"}
+    "● receiving reply"]
+   [:pre {:class (str "text-xs text-text-200 font-mono whitespace-pre-wrap "
+                      "break-words overflow-x-auto")}
+    partial-text]])
+
 (defn- html-events
   "Transcript events plus one derived usage row for each captured turn."
   [{turns ::turns :as input}]
@@ -1486,7 +1517,7 @@
          vec)))
 
 (defn- format-transcript-html
-  [{:seon.agent/keys [id] turns ::turns :as input}]
+  [{:seon.agent/keys [id] turns ::turns partial-text ::partial-text :as input}]
   (let [configuration (:seon.config/configuration input)
         node (:seon.render/node input)
         retained (or (::turns-retained node) default-turns-retained)
@@ -1513,10 +1544,12 @@
                                             (::outbound? %)))
                               last
                               render-message)]
-    (if (seq cards)
+    (if (or (seq cards) (string? partial-text))
       [:div {:class "seon-card"}
        [:div {:class "seon-card-compact"}
-        (or latest-reply (last cards))]
+        (if (string? partial-text)
+          (partial-progress-html "compact" partial-text)
+          (or latest-reply (last cards)))]
       (into [:div {:class "seon-card-expanded flex flex-col"}
               (when (or (::turn-history-omitted? input)
                         (::usage-history-omitted? input))
@@ -1529,7 +1562,9 @@
                     " · ")
                   (when (::usage-history-omitted? input)
                     "oversized or unavailable usage telemetry omitted"))])]
-             cards)]
+             (cond-> cards
+               (string? partial-text)
+               (conj (partial-progress-html "expanded" partial-text))))]
       [:div {:class "text-text-500 italic p-2 text-xs font-mono"}
        (cond
          (and (::turn-history-omitted? input)
@@ -1555,7 +1590,8 @@
   {:malli/schema [:=> [:cat :seon.render/section-request :any]
                   [:maybe :seon.render.canvas/hiccup]]}
   [input _invoke-selected!]
-  (let [acquired (await (acquire-transcript input html-eval-selector))]
+  (let [acquired
+        (await (acquire-transcript input html-eval-selector true))]
     (if-let [error (::error acquired)]
       [:div {:class "text-error p-2 text-xs font-mono"}
        (str "transcript render failed: " (pr-str error))]

@@ -5,7 +5,8 @@
     [clojure.string :as str]
     [seon.agent.ctx.transcript :as transcript]
     [seon.db :as db]
-    [seon.db.protocol :as protocol]))
+    [seon.db.protocol :as protocol]
+    [seon.ui.html :as html]))
 
 (def ^:private database {:datahike/commit-id "transcript" :max-tx 7})
 
@@ -85,6 +86,8 @@
                          (mapv (fn [turn] [turn turn])
                                (range 1 (inc turn-count)))))
   ([requests turn-count eval-row eval-pairs]
+   (transcript-responder requests turn-count eval-row eval-pairs nil))
+  ([requests turn-count eval-row eval-pairs partial-text]
    (fn [request]
      (swap! requests conj request)
      (let [members (::db/members request)
@@ -111,7 +114,14 @@
 
            (> (count members) 2)
            (execute-many-result
-             [turn-count nil [] []])
+            (mapv
+             (fn [index member]
+               (if (str/includes? (pr-str (::protocol/query-form member))
+                                  "seon.ai.attempt/partial-text")
+                 partial-text
+                 (nth [turn-count nil [] [] []] index [])))
+             (range)
+             members))
 
            (and (str/includes? query-text "seon.eval")
                 (not (str/includes? query-text "pull")))
@@ -126,6 +136,73 @@
 
            :else
            (execute-many-result (repeat (count members) []))))))))
+
+(deftest partial-progress-is-stable-pre-wrapped-and-html-escaped
+  (let [partial "<script>alert('no')</script>\n(+ 1 2)"
+        hiccup (@#'transcript/format-transcript-html
+                (assoc acquired-empty
+                       :seon.agent.ctx.transcript/partial-text partial))
+        markup (html/->string hiccup)]
+    (is (str/includes? markup "id=\"agent-transcript-partial-compact\""))
+    (is (str/includes? markup "id=\"agent-transcript-partial-expanded\""))
+    (is (str/includes? markup "whitespace-pre-wrap"))
+    (is (str/includes? markup "&lt;script&gt;alert"))
+    (is (not (str/includes? markup "<script>")))
+    (is (str/includes? markup "(+ 1 2)"))))
+
+(deftest html-transcript-acquires-only-the-open-attempt-partial
+  (async done
+    (let [requests (atom [])
+          original-execute-many db/execute-many
+          original-pull-many db/pull-many
+          partial "<b>streamed</b>\n(+ 40 2)"]
+      (set! db/execute-many
+            (transcript-responder
+             requests 1
+             (fn [turn]
+               {:db/id turn
+                :seon.eval/id (str "eval-" turn)
+                :seon.eval/at (js/Date. turn)
+                :seon.eval/ok? true
+                :seon.eval/ns 'my.agent.test})
+             [[1 1]]
+             partial))
+      (set! db/pull-many (turn-pull-responder 1))
+      (-> (transcript/transcript-block-html
+           {:seon.agent/id "agent"
+            :seon.agent/entity {:db/id 1 :seon.agent/id "agent"}
+            :seon.render/node {:seon.agent.ctx.transcript/readline? false}
+            ::db/db database}
+           nil)
+          (.then
+           (fn [hiccup]
+             (let [markup (html/->string hiccup)
+                   partial-members
+                   (->> @requests
+                        (mapcat ::db/members)
+                        (filter #(str/includes?
+                                  (pr-str (::protocol/query-form %))
+                                  "seon.ai.attempt/partial-text")))]
+               (is (= 1 (count partial-members)))
+               (is (= ["agent"] (::protocol/arguments
+                                  (first partial-members))))
+               (is (every?
+                    #(str/includes?
+                      (pr-str (::protocol/query-form
+                               (first partial-members)))
+                      %)
+                    [":seon.agent/run"
+                     ":seon.agent.run/status :open"
+                     ":seon.agent.turn/phase :attempt-open"
+                     ":seon.ai.attempt/outcome :open"]))
+               (is (str/includes? markup "&lt;b&gt;streamed&lt;/b&gt;"))
+               (is (str/includes? markup "(+ 40 2)")))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! db/execute-many original-execute-many)
+             (set! db/pull-many original-pull-many)
+             (done)))))))
 
 (deftest acquired-formatting-does-no-database-io
   (let [original-execute-many db/execute-many
@@ -416,6 +493,12 @@
                    (is (some #(= [[[1 1]]] (::protocol/arguments %))
                              (mapcat ::db/members @requests))
                        "a collection binding remains one Datalog argument")
+                   (is (not-any?
+                        #(str/includes?
+                          (pr-str (::protocol/query-form %))
+                          "seon.ai.attempt/partial-text")
+                        (mapcat ::db/members @requests))
+                       "the AI transcript does not subscribe to presentation partials")
                    (let [message-member
                          (->> @requests
                               (mapcat ::db/members)
