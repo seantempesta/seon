@@ -48,6 +48,7 @@
             [seon.agent.lifecycle.leaf :as lifecycle.leaf]
             [seon.agent.message :as message]
             [seon.agent.message.leaf :as message.leaf]
+            [seon.agent.shell.leaf :as shell.leaf]
             [seon.content-hash :as content-hash]
             [seon.db :as db]
             [seon.db.host :as db.host]
@@ -487,6 +488,18 @@
      'view {::wrapper-fn fs.leaf/view ::effect :read}
      'replace! {::wrapper-fn fs.leaf/replace! ::effect :external}
      'insert! {::wrapper-fn fs.leaf/insert! ::effect :external}}})
+  (register-host-wrappers!
+   {::registry registry
+    ::lib 'seon.agent.shell
+    ::wrappers
+    {'grants {::wrapper-fn shell.leaf/grants ::effect :read}
+     'run {::wrapper-fn shell.leaf/run ::effect :external}
+     'py-run {::wrapper-fn shell.leaf/py-run ::effect :external}
+     'run-bg! {::wrapper-fn shell.leaf/run-bg! ::effect :external}
+     'list-jobs {::wrapper-fn shell.leaf/list-jobs ::effect :read}
+     'job-status {::wrapper-fn shell.leaf/job-status ::effect :read}
+     'job-output {::wrapper-fn shell.leaf/job-output ::effect :read}
+     'job-stop! {::wrapper-fn shell.leaf/job-stop! ::effect :external}}})
   (register-host-wrappers!
    {::registry registry
     ::lib 'seon.db.id
