@@ -18,7 +18,12 @@ protected implementation or invent a second tool protocol.
 
 ## Contract
 
-- Every public function has a complete Malli input and output schema.
+- Every public function has a complete Malli input and output schema. A
+  durable agent definition requires a parseable `:malli/schema` at the
+  definition-admission choke point; only scratch namespaces are exempt, and
+  steering teaches register-first.
+- `:any` is banned in agent contracts; a genuinely polymorphic slot references
+  a named registered predicate schema (see [[data-model]]).
 - Agent-facing API-like functions accept and return one namespaced map.
 - Ordinary data-processing functions may use fully specified named positional
   arguments.
@@ -196,6 +201,11 @@ the toolkit standardizes every domain into a generic wrapper:
   requires serializable data. An unserializable value at that boundary returns
   the flat error shape with steering to keep it local, extract data, or call the
   owning capability; it is never stringified, printed, or silently dropped.
+- Live result symbols are tracked, not merely remembered: a lifecycle registry
+  of database facts keyed by process-instance identity records which tier
+  holds each live handle. When that platform resets or restarts, its handles
+  are wiped in the same recovery, so a later reference fails as a loud
+  steering error toward re-derivation instead of going silently stale.
 
 Function schemas are the query substrate for discovery: input and output shapes
 join functions to the data an agent holds. Namespace cards and current source

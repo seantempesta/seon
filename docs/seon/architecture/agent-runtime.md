@@ -92,6 +92,15 @@ Claimants do not route by agent identity or keep a private queue of runs.
 Database interests are ephemeral wakeups that request another scan; the scan
 and CAS determine authority.
 
+Phase eligibility says who may claim; the derived execution plan says whether
+this claimant can run this particular work. After parsing a proposed
+invocation and before entering the eval phase, the driver derives the plan at
+the claim database value, verifies schema and capability coverage against its
+own inventory, and provisions any permitted remote leaves. If another eligible
+claimant can satisfy the plan, the work is released unchanged for handoff; if
+no tier can, the result is one flat steering error naming the missing leaves,
+schemas, or unresolved edges. See [[architecture]] §Transparent distribution.
+
 Every active tier uses this driver from the same source. Platform leaves own
 only native effects: database sessions, clocks, virtual-thread dispatch,
 provider transport, SCI invocation, and publication I/O. Sync versus async

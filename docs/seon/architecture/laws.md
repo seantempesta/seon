@@ -59,6 +59,10 @@ sample sizes, and acceptance evidence belong in PRD research and roadmaps.
 - **Replacement is one mechanism.** When consumers move to the portable owner,
   the superseded path is deleted. Compatibility shims and dual-maintained
   drivers, renderers, or capability surfaces violate the architecture.
+- **Reset, never migrate.** A cluster reconciles to current code and schema by
+  resetting and reinstalling from the manifest and program facts. No data
+  migration path exists; a live proof runs on a freshly reset cluster at the
+  exact artifact it claims to prove.
 
 ## Limits
 
@@ -85,6 +89,29 @@ sample sizes, and acceptance evidence belong in PRD research and roadmaps.
   regress the broader behavioral battery.
 - **Hermetic fixtures.** Concurrent tests own isolated filesystem and database
   state.
+
+## Testing
+
+The full decision record is [[011-tests-find-design-issues]].
+
+- **Tests find design issues; structure retains them.** A recurring failure
+  class is dissolved by moving its invariant to one choke point, then keeping
+  exactly one regression per class. Fencing a symptom with many point tests is
+  the anti-pattern.
+- **Schemas generate the edge cases.** Generative round-trips over registered
+  shapes are the standing totality properties; hand-enumerated edge lists do
+  not scale to the contract surface.
+- **Every proof is claimed by a recurring surface.** A test or live proof
+  counts only while a discovery gate or checkpoint list re-runs it; green once
+  is not coverage. Orphan detection is itself computed, never a hand list.
+- **Fixture load paths are not the live boot path.** A mechanism proven
+  through fixtures still owes one live-boundary proof of its real
+  boot/acquisition path; the two are separate proof classes.
+- **Localized tests belong to lanes; full suites belong to frozen trees.** A
+  lane runs the tests for its own boundary; complete suites are integration
+  checkpoints over a coherent frozen tree.
+- **Assertions target facts, transitions, envelopes, and CAS outcomes.** Never
+  exact prose.
 
 ## Process
 

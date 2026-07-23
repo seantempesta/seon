@@ -379,6 +379,30 @@ parallel API with hand-written wrappers. Package hosts enter through the same
 rule: a package wrapper is a platform leaf beneath a portable family call
 surface, not another capability protocol.
 
+### Transparent distribution
+
+Agents write plain Clojure with no placement awareness. One derived,
+basis-fenced execution plan over the program graph — call edges, typed
+attribute reads and writes, effect and leaf descriptors, artifact export
+inventories, explicit uncertainty edges — is the sole placement authority.
+Purity and locality fold from those stored direct edges; no driver, router,
+or consumer independently rediscovers them from source scans, name prefixes
+alone, or hand classification, and dynamic construction fails closed as
+unplannable rather than silently empty. Plans are derived values keyed by the
+complete database value, graph digest, and tier inventories — never stored.
+
+Routing follows the plan: pure corpus logic runs in local SCI (SCI-local is
+the floor, never a failure), installed capabilities run in local leaves, and a
+call whose plan says elsewhere crosses as one invoke request/response family
+on the same typed database protocol — schema-projected arguments and results,
+receipts riding as for database effects, same-tier calls coalesced. The
+transparent proxy is the placement-aware wrapper installer: per var, a local
+implementation or a wire-calling stub, synchronous on virtual threads and
+awaited on the asynchronous tier. Data crosses as schema-projected values;
+a tier-local object crosses as a result-symbol handle tracked in the lifecycle
+registry and wiped when its platform resets, so transparency degrades loudly
+into data and steering, never silently into staleness.
+
 ### Derive everything
 
 Everything — the claim decision, the prompt, an agent's view, a status view, the work

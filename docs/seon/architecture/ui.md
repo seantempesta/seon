@@ -543,8 +543,8 @@ transacts datoms; it never opens or writes a stream.
   replay across lineages.
 - **The hard invariant: no agent code ever touches an SSE connection.** Agent →
   datom → committed `:db-after` value → selective derivation → morph, one way; actions
-  reverse it (a browser POST → the owning agent's sandbox → result datoms →
-  selective derivation → morph). The database is the bus both ways.
+  reverse it (a browser POST → a claimant's guarded door for the owning
+  agent → result datoms → selective derivation → morph). The database is the bus both ways.
 
 Each authored invocation owns one immutable input and guarded deadline. No
 process-global input or deadline cell can be overwritten by a nested or future

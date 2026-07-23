@@ -257,9 +257,15 @@ the sender as the user of the receiver's work.
 
 The durable provenance primitive is therefore a join from datom to transaction
 to user/process/time. Provenance belongs on the transaction entity, not as an
-owner, creator, kind, or status attribute copied onto domain entities. It does
-not grant authorization and it does not determine config/reconciliation
-authority.
+owner, creator, kind, or status attribute copied onto domain entities. It is
+not a capability grant and it does not determine config/reconciliation
+authority. Admission policies that must distinguish core-admitted from
+agent-authored program facts — for example which registered predicate schemas
+the writer may trust — derive that classification from the asserting
+transaction's user/process refs, fail closed to agent-authored when the refs
+are unrecognizable, and may carry the derived label in a compiled projection
+as cache. No stored source field and no name inference ever substitutes for
+that join.
 
 Consequence for modeling: who/when/writing-path is a **join** through the
 transaction, never a domain attribute — a `created-by`/`created-at`/`source-turn`
@@ -378,6 +384,31 @@ ordinary Malli resolution continues to see the last committed immutable
 projection. After acceptance, the exact candidate becomes active atomically.
 The Datahike bridge runs at the transaction boundary for attributes present in
 the transaction.
+
+**Registration authority is the committed facts, on every tier.** A
+registration is a committed `:seon.schema` fact, global by construction.
+Loading a namespace publishes nothing: a colocated `register!` form is a pure
+declaration whose authority is its transaction. Every tier — writer, claimant,
+web-render, leaf — acquires the committed projection at a database value and
+never re-runs `register!` to reconstruct it. Admission is symmetrical across
+reads and writes: a transaction may name only registered attributes, and a
+pull pattern's keys validate against the same committed projection, with
+steering that distinguishes a derived projection key from a stored attribute.
+The transactable population is computed from those facts; no hand-maintained
+attribute list exists.
+
+**Polymorphic slots are named predicate schemas.** `:any` is an undefined hole
+and is banned in agent contracts. A genuinely polymorphic slot is a named
+registered `[:fn]` predicate schema carrying `:error/message` and a
+`:gen/schema` generator hint. Predicates are corpus data like every other
+function: they compile on any tier by resolving through the corpus-loaded SCI
+environment behind the guarded door, so contracts validate fully on the tier
+that holds the value. Predicate admission is one computed rule — the
+predicate's derived call graph must be pure and capability-free (portability
+is derived from the program graph, never declared) — and the writer trusts
+only core-admitted predicates, distinguished by transaction provenance (§2.4),
+never by symbol lists. Genuinely opaque third-party boundaries remain the one
+legitimate exception.
 So an in-memory-only value shape — the flat error value (§6), the derived
 `:seon.warn/check-response` (§7), `:seon.derive/status` — registers fine even
 though it is a `:map` the bridge cannot store: it is never transacted as an entity
@@ -570,6 +601,18 @@ resolution shape is the general pattern for every agent-related config
 family (skills, render caps, ctx blocks, capability sets): agent attrs are
 the override point, one chain, absent = inherit — new families add an attr
 pair to the resolver's data map, never a second mechanism.
+
+**Providers are descriptor rows, not code branches.** Hosted provider identity
+lives in `:seon.config/provider-descriptors` — component rows under the
+configuration singleton carrying endpoint, auth-header, completion-limit,
+thinking, stream-options, usage-field, and capability/quirk data. Dispatch
+selects only the descriptor's adapter core (`:openai-compat` or `:anthropic`);
+provider identity never appears in dispatch code, so adding a compatible
+provider is one descriptor row plus live qualification evidence, never a new
+adapter arm. A provider whose wire contract genuinely differs earns its own
+core through the same core+leaf pattern only after a qualification probe
+proves the compatible surface insufficient. Local workers remain compiled
+local dispatch by explicit contract; descriptors describe hosted wires only.
 
 The configuration singleton may hold
 `:seon.config/model-variants`, a cardinality-one EDN map from a role keyword to
@@ -1054,7 +1097,8 @@ section schemas remain colocated with `seon.config.resolve`.
 ;; ns seon.config — the registry of known sections (config.cljs)
 (schema/register! :seon.config/manifest
   [:map
-   [:seon.config/repl-mode        {:optional true} :seon.config/repl-mode]         ; :batch | :stream (per-model default when absent)
+   [:seon.ai/wire-stream?         {:optional true} :seon.ai/wire-stream?]          ; transport streaming only
+   [:seon.ai/reply-evaluation     {:optional true} :seon.ai/reply-evaluation]      ; :batch | :first-form (orthogonal to streaming)
    [:seon.config/namespaces       {:optional true} :seon.config/namespaces-spec]   ; which nses render full
    [:seon.config/routes           {:optional true} [:vector :seon.config/route-spec]]
    [:seon.config/render           {:optional true} :seon.config/render]            ; the render caps (EDN/eval/message/value…)
@@ -1073,7 +1117,7 @@ section schemas remain colocated with `seon.config.resolve`.
 
 Each key resolves onto the flat `:seon.config/singleton` entity (`config.cljs`,
 every knob `{:optional true}`, `:seon.config/id` the only required key), so the
-render caps, `repl-mode`, `system-text`, `on-core-error`, and the multi-agent
+render caps, the reply facts, `system-text`, `on-core-error`, and the multi-agent
 dials are all datoms acquired with the agent turn's other database inputs.
 `resolve-routes`
 produces canonical desired maps reconciled exactly when selected; absence from the

@@ -140,6 +140,18 @@ capability instead of ad-hoc log files:
   search/embedding capabilities when explicitly requested; `my.blob` does not
   create another index.
 
+Volatile live values follow the same law with one addition: a live
+`result/<id>` handle stays in its owning process, but its existence is a
+database fact keyed by that process-instance identity — the result-symbol
+lifecycle registry. A platform reset or restart wipes its instance's rows, so
+a stale handle reference is a loud steering error toward re-derivation, and
+forensics can always answer which tier held a value and when it died.
+Streamed reply partials are the opposite case: a no-history presentation
+attribute holds only the current prefix, the terminal transaction retracts it
+while linking the durable reply blob, and historical feeds never replay it —
+partial text is presentation, never evidence; the attempt receipt and reply
+blob remain the forensic truth.
+
 Claimant telemetry follows the same storage law. JVM thread handles, active
 deadline timers, and demanded CPU or heap samples remain transient in the
 owning process. Healthy sampling does not write transactions. A deadline,

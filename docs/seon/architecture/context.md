@@ -80,10 +80,10 @@ always renders:
   most salient standing frame in the prompt wins by default — so evergreen
   advice ("after a restart, resume your plan") is **conditional/derived**,
   rendered only when its condition actually holds, never planted every turn.
-  A self-healing execution-child replacement is one such condition: the next
+  A self-healing claimant replacement is one such condition: the next
   turn names the interrupted eval and process failure, confirms that current
   functions/schemas/tests were reconstructed from database program facts, and
-  states that live `result/<id>` values, Promises, and other process-local state
+  states that live `result/<id>` values and other process-local state
   were lost. It does not imply that committed transactions were rolled back or
   that the interrupted form was replayed.
 - **where I am** — the plan, rendered with unambiguous status. The plan is not
@@ -186,23 +186,29 @@ renderer applies that same cap. Exact raw replies and error evidence remain
 separate database/blob facts, so bounded agent context never weakens forensic
 capture.
 
-## The REPL mode is a datom — and it teaches its own grammar
+## The reply mode is a datom — and it teaches its own grammar
 
-`:seon.config/repl-mode` selects `:batch` or `:stream` as database state. A
-named launch variant may copy the same attribute onto an agent; the agent value
-wins, so specialized planning can use `:batch` without changing the cluster
-default. `:batch` preserves the raw reply and parses it once. Ordinary forms
+Two orthogonal database facts govern a reply. `:seon.ai/wire-stream?` selects
+the provider transport only — whether bytes arrive as a stream — and never
+changes what is evaluated. `:seon.ai/reply-evaluation` selects `:batch` or
+`:first-form` as the evaluation semantics; all four combinations are legal,
+and a named launch variant may copy either fact onto an agent, whose value
+wins over the cluster default. `:batch` reads the reply to natural completion,
+preserves the raw bytes, and parses the complete program once. Ordinary forms
 retain source order, while explicit generated namespace sections run in
 derived requirement order with recognized schemas before the remaining forms
 in their namespace. Every attempted form records its real value or error with
 its original source position. It never
 regex-rewrites model output, invents a result for an unattempted form, or treats
-a model-authored claim as execution evidence. `:stream` ends the turn after the
-first complete top-level form and counts attempted forms as work.
+a model-authored claim as execution evidence. `:first-form` ends the turn after
+the first complete top-level form and counts attempted forms as work; it is an
+explicit per-agent choice for models that work better under immediate
+evaluation, not a consequence of the transport streaming.
 
-The transcript masthead derives its grammar instruction from the same mode
-datom, so only the applicable instruction is present. Turn facts retain the
-forms and token usage needed to compare modes without changing prompt truth.
+The transcript masthead derives its grammar instruction from the same
+evaluation fact, so only the applicable instruction is present. Turn facts
+retain the forms and token usage needed to compare modes without changing
+prompt truth.
 
 ## A render fn supplies twin projections
 
@@ -264,8 +270,8 @@ This is the block's two renders (`:seon.render/ai` / `:seon.render/hiccup`),
 now emitted by any in-scope `defn`, not only by seeded blocks. Its args are
 the db value (all data is reachable from it — [[think-in-clojure]]); it
 `require`s only the *code* it calls. It is pure over the frozen db, so it
-re-runs safely every turn, is bounded + errors-as-values through the exec
-service (a throw becomes a `:seon/error` card, never a crash), and replays
+re-runs safely every turn, is bounded + errors-as-values through the guarded
+execution door (a throw becomes a flat error card, never a crash), and replays
 from an immutable database value ([[observability]]). The historical prompt
 blob—not a re-executed effect—is the byte ground truth.
 
@@ -283,7 +289,7 @@ messaging required. Planning in full detail *is* showing the human the plan.
 The code corpus is cluster-shared. A function written by one agent is a
 committed `:seon.fn` fact with its namespace, schema, source, dependencies, and
 source-transaction provenance. Other agents do not replay the author's eval;
-their execution children receive the accepted program delta and can resolve the
+every execution scope receives the accepted program delta and can resolve the
 same function with normal Clojure semantics. Context then selects relevant
 namespace source and function contracts from that one graph. Capabilities
 therefore accumulate as the application grows instead of remaining private to
@@ -576,9 +582,9 @@ Collection knobs
 Two payoffs this unlocks: a dial is now **history-visible** (a `cluster fork`
 at the resolved commit before a dial change renders with the old value—config lives in
 history) and **live-tunable** (a `db/transact` of the singleton changes the
-next prompt with no file edit). `:seon.config/repl-mode` and the transcript's
-tier/decay datoms are the precedents this generalizes to the whole config
-surface.
+next prompt with no file edit). `:seon.ai/reply-evaluation` and the
+transcript's tier/decay datoms are the precedents this generalizes to the
+whole config surface.
 
 **The system prompt itself is DB state.** `seon.ai/effective-system-prompt`
 is one `or` chain: the per-request `:seon.ai/system-prompt` override (the one
@@ -600,7 +606,7 @@ and then forgets the path. A later config-free boot reads those facts from the
 database and adds no skill block on its own.
 
 Prompt acquisition resolves the system text and the agent's selected context
-inside the same compiled child operation over one immutable database value. That one
+inside one compiled acquisition operation over one immutable database value. That one
 ordinary result flows unchanged through turn capture, token accounting, every
 retry, the provider adapter, and the debug view. None of those consumers
 re-resolves live config after the prompt database value has been chosen.
