@@ -1258,6 +1258,25 @@ pull-pattern.md`, filed by loop-slice, whose owned test files fix
 it). ONLY LIVE LANE: loop-slice — routing implementation + that test
 fix + THE DEMO drive.
 
+**loop-slice ROUND 2 (ruling-18 routing PROVEN LIVE; demo blocked on
+one scoped defect):** the SAME agent installed
+seon.packages.js.fast-deep-equal (durable across restart), then
+required and called it IN BUN with receipts (95-113ms evals);
+tier-local result
+steering works; full writer green; honest perf at last — 38-46
+reply tok/s (DeepSeek), Bun seam ~100ms/eval, and the package-call
+arc consumed 243k prompt tokens over 7 turns (PROMPT SIZE is the
+dominant cost — owner-visible finding). BLOCKER (the frontier):
+ordinary batches routed to the SCI host produce ZERO receipts AND
+zero fault datoms on two real agents — the JVM sci host has never
+been the live eval path; live wiring (semantic-ready admission /
+invocation dispatch / pod-side receipt write-back) is suspect, and
+the silence itself violates the errors-as-data contract. Lane
+resumed: make the failure LOUD first (fault at the drop point), fix
+root cause, also granted the stale acquisition-fixture fix (its
+issue), then the demo arc + perf + TERM encore. Suspect flagged: a
+restart reconcile observed setting host-tier false in the manifest.
+
 **STAGED NEXT (refill on any free slot):** loop-essential
 my.* (queue derived from the loop-slice measurement — the old
 p2-my-families full-port spec is superseded by the LOOP-FIRST
