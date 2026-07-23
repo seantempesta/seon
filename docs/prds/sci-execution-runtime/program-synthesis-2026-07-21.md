@@ -118,10 +118,22 @@ COMPLETELY before dispatching anything.
   config gate condition (a resolve.cljc commit) is now satisfied; U5
   remains third in the config queue. U6a adapter-core spec drafted
   (tmp/orchestrator/u6a-adapter-core-spec-draft.md) as next refill.
-- U2 spec DRAFTED (tmp/orchestrator/u2-claim-driver-spec-draft.md) —
-  key reconciliation: pre-U6/U7 BOTH tiers run the one portable
-  driver as phase-limited claimants (pod: render+LLM; JVM host: eval
-  via U1's door); finalize grants + door/listen states at dispatch.
+- U1 ACCEPTED (2026-07-23 overnight): guard.cljc door landed
+  (8000f5327 + 3 follow-ups) — deterministic fuel, second-session
+  regression, native-reduce coverage, output-cap via the marker,
+  29.9 ns/check, R27 facts ≥100x measured P99.9 (calibration in
+  research/u1-fuel-calibration-2026-07-23.md). Full-suite + live
+  checkpoint DEFERRED to the orchestrator's serial integration gate
+  (source freeze blocked by U3/U5 uncommitted writer/db files —
+  correct call, see issue full-writer-gate-fails-during-runtime-
+  lane-integration).
+- U2 THE SPINE DISPATCHED (spec tmp/orchestrator/
+  u2-claim-driver-spec.md, effort=high): both tiers run the one
+  portable claim-native driver as phase-limited claimants (pod:
+  render+LLM; JVM host: eval via U1's door); poll-first JVM noticing;
+  attempt receipts + retry-decision relocation folded in; legacy Bun
+  loop-driving path deletes; U12 drill is the gate. Preserves U4's
+  committed turn.cljs rewire (488f3dd5e).
 - Owner answers at wind-down: first wave (U1+U3+U4) AUTHORIZED;
   U5 lane builds the web-render operator member itself; demo
   re-runs are BUG-FINDERS, cheap and at orchestrator discretion —
