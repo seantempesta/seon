@@ -573,6 +573,24 @@ COMPLETELY before dispatching anything.
   P3/P4/P5 are dependency-ready behind the checkpoint. Streaming
   lane observed mid-stage-3 (partials rendering in transcripts,
   14619bf56). LAST LANE OUT = streaming; checkpoint on its return.
+- R38 (owner, 2026-07-23): clusters ALWAYS reset to the latest code
+  and schema — never any data migration; reset scheduling is at
+  orchestrator discretion. Checkpoint practice: every live proof
+  runs on a FRESH-RESET cluster at the final artifact; the default
+  cluster resets at the checkpoint boundary so it carries today's
+  complete schema (claim/phase/partial-text/descriptors/edges)
+  fresh-installed.
+- STREAMING LANE COMPLETE minus one proof (098b27bcf +
+  e88057afd + c9c731ad2 + 924c8ad30): all four R36 combinations
+  green; db-backed partials in transcripts; SEVEN provider
+  descriptor rows; GEMINI COMPAT SURFACE QUALIFIED (R37 satisfied
+  as a row — no native core needed); entity-interest follow-up
+  filed with measured 1.094ms p50 recompute. BLOCKER for the live
+  morph proof + the checkpoint: standalone writer boot dies
+  :malli.core/sci-not-available (protocol.cljc:188) — the
+  schema-admission session RESUMED priority-zero to route core
+  predicates through requiring-resolve on every load path incl.
+  standalone boot, with the fixture-vs-boot regression.
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
