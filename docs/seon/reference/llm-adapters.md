@@ -6,23 +6,47 @@ tags: [reference, agent]
 
 # LLM Adapters — providers, config, and usage
 
-The Seon CLJS pod talks to hosted LLMs through two SDK-backed adapters and an
-optional DiffusionGemma worker path. This is the complete reference for
+Seon talks to hosted LLMs through two portable wire cores and their native
+transport leaves. Optional DiffusionGemma and typeahead workers remain a
+separate pod-only local-worker mechanism. This is the complete reference for
 configuring and calling them — including how to point the pod at a self-hosted
 **Qwen3.6-35B-A3B** (or any OpenAI-compatible server), enable tool-calling, and
 read back per-turn usage.
 
-## The two adapters
+## The two hosted wire cores
 
-| Adapter ns | SDK | Serves provider(s) | Wire |
+| Portable core | Native leaf | Serves provider(s) | Wire |
 |------------|-----|--------------------|------|
-| `seon.ai.openai-compat` | `openai` (^6.42) | `:deepseek`, `:openai-compat` | OpenAI chat-completions |
-| `seon.ai.anthropic` | `@anthropic-ai/sdk` (^0.104) | `:anthropic` | Anthropic Messages |
+| `seon.ai.openai-compat.core` | Node `openai` (^6.42) or JVM HTTP | `:deepseek`, `:kimi`, `:zai`, `:openrouter`, `:gemini`, `:openai-compat` | OpenAI Chat Completions |
+| `seon.ai.anthropic.core` | `@anthropic-ai/sdk` (^0.104) or JVM HTTP | `:anthropic` | Anthropic Messages |
 
 Both are vendored as read-only source under `reference-code/openai-node` and
 `reference-code/anthropic-sdk-typescript`. The active provider is chosen by the
-resolved database configuration; `seon.ai.dispatch/llm-fn` dispatches to the
-matching adapter, falling back to a stub function when no API key resolves.
+resolved database configuration. Hosted provider identity selects a component
+descriptor row, and dispatch uses only its `:seon.ai.provider/adapter-core`.
+Missing or duplicate rows are configuration errors rather than provider-name
+fallbacks.
+
+### Two mechanisms, explicitly
+
+The locality boundary is settled:
+
+- **Hosted wire descriptors** are database-owned component rows interpreted by
+  the fixed `:openai-compat` and `:anthropic` portable cores. Adding a compatible
+  hosted provider is one descriptor row, one catalog entry, and qualification
+  evidence.
+- **Local-worker adapters** are the compiled `:diffusiongemma` and `:typeahead`
+  provider registrations. They remain pod-only, experimental, and
+  owner-preserved under the explicit D12 development preload door. They do not
+  receive hosted descriptor rows, and the JVM HTTP leaf never gains
+  local-worker dispatch arms.
+
+This is not two competing hosted dispatch paths. The compiled local-worker
+registry exists because those providers run a different step/job protocol, not
+an OpenAI or Anthropic wire protocol. See the
+[D12 provider registry ruling](../../prds/sci-execution-runtime/specs/ns-1b-provider-registry.md)
+and the
+[HTTP portability boundary](../../prds/sci-execution-runtime/research/llm-http-io-design-2026-07-23.md).
 
 The adapter contract never changed across the migration:
 
@@ -54,7 +78,7 @@ backend, and retry policy—are database-owned and resolve agent entity override
 
 | Env var | Config-row attr | Type | Applies to | Notes |
 |---------|-----------------|------|------------|-------|
-| `SEON_AI_PROVIDER` | `:seon.ai/provider` | `deepseek`\|`anthropic`\|`openai-compat` | all | default `deepseek` |
+| `SEON_AI_PROVIDER` | `:seon.ai/provider` | `deepseek`\|`kimi`\|`zai`\|`openrouter`\|`gemini`\|`anthropic`\|`openai-compat` | all | default `deepseek` |
 | `SEON_AI_MODEL` | `:seon.ai/model` | string | all | per-provider default below |
 | `SEON_AI_MAX_TOKENS` | `:seon.ai/max-tokens` | int | all | |
 | `SEON_AI_COMPLETION_LIMIT_FIELD` | `:seon.ai/completion-limit-field` | `max-tokens`\|`max-completion-tokens` | openai-compat | wire name for the output cap; default `max-tokens` |
@@ -115,6 +139,55 @@ accepted — the adapter strips a trailing `/chat/completions` (or
 `SEON_AI_BASE_URL` is required (missing → a legible error envelope at call
 time, never a throw). Sampling is omitted unless explicitly configured because
 some compatible models fix those fields and reject supplied values.
+
+### Hosted descriptor catalog
+
+Descriptor rows carry endpoint, authentication, completion-limit, thinking,
+stream-usage, tool, response-format, and usage-field policy. Secrets are never
+descriptor values: a row stores only the environment-variable name.
+
+| Provider ID | Core | Base URL | Completion cap | Stream usage | Cached-token detail |
+|---|---|---|---|---|---|
+| `:deepseek` | `:openai-compat` | `https://api.deepseek.com` | `max_tokens` | request `include_usage` | direct `prompt_cache_hit_tokens`/`cached_tokens`, then `prompt_tokens_details.cached_tokens` |
+| `:kimi` | `:openai-compat` | `https://api.moonshot.ai/v1` | `max_completion_tokens` | request `include_usage` | direct `cached_tokens`, then nested compatible detail |
+| `:zai` | `:openai-compat` | `https://api.z.ai/api/paas/v4` | `max_tokens` | request `include_usage` | direct `cached_tokens`, then nested compatible detail |
+| `:openrouter` | `:openai-compat` | `https://openrouter.ai/api/v1` | `max_tokens` | always in the final SSE chunk | `prompt_tokens_details.cached_tokens`; preserve `cache_write_tokens` |
+| `:anthropic` | `:anthropic` | `https://api.anthropic.com/v1` | `max_tokens` | native start/delta events | direct `cache_read_input_tokens` |
+| `:gemini` | `:openai-compat` | `https://generativelanguage.googleapis.com/v1beta/openai` | `max_tokens` | request `include_usage` | `prompt_tokens_details.cached_tokens` when supplied |
+
+DeepSeek, Kimi, and Z.AI request fields are grounded in the maintained
+LiteLLM source:
+[DeepSeek](../../../reference-code/litellm-clj/src/litellm/providers/deepseek.clj),
+[Kimi](../../../reference-code/litellm-clj/src/litellm/providers/kimi.clj),
+[Z.AI](../../../reference-code/litellm-clj/src/litellm/providers/zai.clj), and
+the shared
+[compatible usage transform](../../../reference-code/litellm-clj/src/litellm/providers/openai_compatible.clj).
+That shared transform proves direct `cached_tokens` and nested
+`prompt_tokens_details.cached_tokens`; it does **not** prove DeepSeek's
+`prompt_cache_hit_tokens` spelling.
+
+The vendored OpenRouter streaming transform drops usage, so it is not the
+authority for current behavior. The
+[OpenRouter API reference](https://openrouter.ai/docs/api/reference/overview)
+documents exactly one final choices-empty usage chunk and nested cached-token
+detail; its current
+[usage accounting guide](https://openrouter.ai/docs/cookbook/administration/usage-accounting)
+states that `stream_options.include_usage` is now a deprecated no-op because
+usage is always returned.
+
+Gemini's native GenerateContent protocol remains a different protocol. The row
+uses only Google's beta
+[OpenAI compatibility surface](https://ai.google.dev/gemini-api/docs/openai).
+A 2026-07-23 live qualification proved two complete streamed Clojure forms,
+`data:` SSE framing, `[DONE]`, real cumulative usage, JSON-schema response
+format, OpenAI tool calls, and bounded HTTP error status. Gemini attaches
+cumulative usage to content chunks rather than emitting a choices-empty
+usage-only chunk; the portable fold intentionally retains the newest usage map
+independently of choices.
+
+Z.AI permits only automatic tool choice. Its `do_sample`, `tool_stream`, and
+`thinking.clear_thinking` fields remain explicit extra-body policy. Kimi's
+thinking constraints are model data: K2.7 Code cannot disable thinking.
 
 ### Thinking
 
@@ -471,12 +544,25 @@ Two ways to set it:
 
 ## Batch and streaming
 
-OpenAI-compatible `:batch` turns request one ordinary nonstreaming Chat
-Completion. This preserves the provider's complete assistant message without
-asking the SDK to reconstruct vendor-specific reasoning deltas. `:stream` is
-the only mode that requests a stream with terminal usage; it aborts after the
-first complete top-level form. Neither mode exposes token-by-token output to
-the agent loop.
+Wire transport and reply evaluation are independent:
+
+- `:seon.ai/wire-stream? true|false` chooses streaming or an ordinary response.
+- `:seon.ai/reply-evaluation :first-form|:batch` chooses whether evaluation
+  consumes one complete form or the complete parsed program.
+
+First-form evaluation with wire streaming preserves the upstream abort and
+explicitly estimated usage. Batch evaluation reads streaming to natural EOF,
+retains provider usage, parses once, and evaluates every form. Partial display
+is presentation-only and cannot affect transport, parsing, usage, or
+evaluation.
+
+> **Loud deprecation:** `:seon.config/repl-mode` is legacy compatibility
+> vocabulary. `:stream` means exactly
+> `{:seon.ai/wire-stream? true, :seon.ai/reply-evaluation :first-form}`;
+> `:batch` means exactly
+> `{:seon.ai/wire-stream? false, :seon.ai/reply-evaluation :batch}`. New
+> configuration must set the two R36 facts directly. The legacy names must
+> never be reinterpreted silently.
 
 ## Provider metadata (#25)
 
