@@ -1028,6 +1028,17 @@ COMPLETELY before dispatching anything.
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- BREAK #3 FIXED (73d41179d, accepted): derivation runs with
+  Shadow's disabled-devtools config + devtools client entry removed;
+  live proof = watcher first flush publishes the v11 manifest,
+  digests match, subprocess exits; issue archived. BREAK #4 (its
+  proof found the next): pod boot ENOENTs on out/execution/
+  program-inventory.edn — r43 made boot READ the execution inventory
+  but the immutable-runtime membership ships only client artifacts.
+  S2 resumed: membership fix through the same machinery + full
+  reconciliation proof to POD readiness. The checkpoint's serial
+  break-chain: test arity → client arity → devtools socket →
+  inventory membership; each stage failed loudly and correctly.
 - BREAK #2 FIXED + BREAK #3 ISOLATED (clientfix 692bd252c +
   48c0c0b12, accepted): shell caller fixed via proper config
   acquisition; BOTH canonical builds now zero first-party arity/
