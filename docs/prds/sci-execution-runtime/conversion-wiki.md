@@ -800,3 +800,17 @@ the anchor stays the state ledger.
   includes each function's analyzed generation. The deferred artifact export
   inventory can later select bundles without making private helpers public or
   changing edge identity.
+- **A pure planner needs an explicitly acquired planning projection.**
+  `:seon.db/db` is the closed ordinary database value
+  (`db-name`/`store-id`/basis/temporal fields/commit ID); it does not contain
+  program facts. The landed edge bundle has no production acquisition for its
+  bundles or sibling digest, and persisted terminal descriptors are global
+  rows without a function-to-terminal connection. Therefore
+  `{db-value, roots, invocation?, tier-inventories}` cannot support a pure,
+  portable reachable-graph walk by itself. Add one basis-fenced immutable
+  planning-projection input containing canonical bundles/terminal connections,
+  graph digest, committed schema projection, and fingerprint (or explicitly
+  rename a larger wrapper); never hide these under roots/invocation/inventories,
+  consult process-global state, or perform async database acquisition inside
+  `plan-execution` (`src/seon/db/protocol.cljc:242-250`,
+  `src/seon/program/edge.cljc:65-83,483-529`).
