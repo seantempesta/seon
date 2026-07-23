@@ -941,6 +941,17 @@ COMPLETELY before dispatching anything.
   end-state and reframes D2's cache as the resume path. Bootfast
   implements D1/D2/D4 now; the build-compiles-startup unit specs
   after its re-measurement.
+- R45 AMENDED (owner, same evening): INDEXING A RELEASE IS AN
+  EXPLICIT OPERATION, applied to a cluster deliberately (the config
+  explicit-apply philosophy extended to the whole release) — startup
+  itself NEVER pays a derivation tax and must come in ≤10 SECONDS.
+  The derive-once cost lives in the explicit index/apply step, not
+  in any process start. Startup = verify identity + load + attach,
+  always. This makes build-compiles-startup the MAINLINE (not a
+  follow-up): release indexing produces the seeded/derived artifacts;
+  cluster application installs them; every boot is a resume. The
+  10s figure is a design target for the startup path, not an R27
+  runtime limit.
 
 ## Rulings index (full text: git b1752173c and design docs)
 
