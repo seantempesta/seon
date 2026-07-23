@@ -19,6 +19,7 @@
    live in `seon.schema.internal`, outside agent context."
   (:require [malli.core :as m]
             [malli.registry :as mr]
+            [clojure.walk :as walk]
             [seon.schema.form :as form]
             [seon.schema.internal :as internal]
             #?(:cljs [sci.core])
@@ -86,6 +87,24 @@
                    'children m/children
                    'entries m/entries}}
      predicate-functions)})
+
+(defn- bind-core-predicates
+  "Replace registered core predicate symbols only for Malli compilation."
+  [form predicate-functions]
+  (walk/postwalk
+   (fn [value]
+     (if (and (vector? value) (= :fn (first value)))
+       (let [predicate-index (if (map? (second value)) 2 1)
+             predicate (get value predicate-index)]
+         (if-let [f (and (qualified-symbol? predicate)
+                         (get predicate-functions predicate))]
+           (assoc value predicate-index f)
+           value))
+       value))
+   form))
+
+(defn- bound-forms [forms predicate-functions]
+  (update-vals forms #(bind-core-predicates % predicate-functions)))
 
 (defn- portable-string-hash [s]
   #?(:clj (.hashCode ^String s)
@@ -254,7 +273,7 @@
          f)
   predicate)
 
-(defn- predicate-functions []
+(defn- core-predicate-functions []
   (:seon.schema.state/predicate-functions @!schema-state))
 
 (defn- active-forms []
@@ -270,7 +289,8 @@
 (defn- candidate-registry []
   (mr/composite-registry
     (m/default-schemas)
-    (mr/fast-registry (candidate-forms))))
+    (mr/fast-registry
+     (bound-forms (candidate-forms) (core-predicate-functions)))))
 
 ;; THE one stable registry facade Seon installs as Malli's process-global
 ;; default. Once a projection is active it reads only that committed
@@ -285,10 +305,10 @@
         (or (mr/-schema defaults type)
             (when-let [form (get (active-forms) type)]
               (m/schema
-               form
+               (bind-core-predicates form (core-predicate-functions))
                {:registry this
                 ::m/sci-options
-                (predicate-sci-options (predicate-functions))}))))
+                (predicate-sci-options (core-predicate-functions))}))))
       (-schemas [_]
         (merge (mr/-schemas defaults) (active-forms))))))
 
@@ -437,6 +457,10 @@
                       bindings)))
                 predicate-functions
                 predicate-symbols)
+        core-predicates (core-predicate-functions)
+        compiled-forms (bound-forms forms core-predicates)
+        compiled-definition
+        (bind-core-predicates definition core-predicates)
         _ (when (= :agent (:seon.schema.admission/source
                            (or admission
                                {:seon.schema.admission/source :agent})))
@@ -458,7 +482,7 @@
                  :seon.error/kind :user-input}))))
         registry (mr/composite-registry
                    (m/default-schemas)
-                   (mr/fast-registry forms))
+                   (mr/fast-registry compiled-forms))
         compile-options
         {:registry registry
          ::m/sci-options (predicate-sci-options predicate-functions)}
@@ -484,7 +508,9 @@
                           (when-not (contains? visited reference)
                             (let [reference-form (get forms reference)]
                               (walk-schema
-                                (m/schema reference-form
+                                (m/schema
+                                  (bind-core-predicates
+                                   reference-form core-predicates)
                                           compile-options)
                                 role
                                 reference
@@ -513,8 +539,8 @@
                              row-admission #{})))]
       (let [compiled (if (and (vector? definition)
                               (#{:=> :function} (first definition)))
-                       (m/function-schema definition compile-options)
-                       (m/schema definition compile-options))]
+                       (m/function-schema compiled-definition compile-options)
+                       (m/schema compiled-definition compile-options))]
         (walk-function compiled identity definition default-admission)))))
 
 (defn identity-attr?
@@ -606,7 +632,7 @@
        :seon.schema/forms (assoc (candidate-forms) k v)
        :seon.schema/admission
        {:seon.schema.admission/source *registration-admission-source*}
-       :seon.schema/predicate-functions (predicate-functions)})
+       :seon.schema/predicate-functions (core-predicate-functions)})
     (catch #?(:clj Exception :cljs :default) e
       (when-not (= :malli.core/invalid-schema (:type (ex-data e)))
         (throw e))))
@@ -642,11 +668,11 @@
      :map]]}
   ([forms]
    (build-projection
-    forms {} {:seon.schema/predicate-functions (predicate-functions)}))
+    forms {} {:seon.schema/predicate-functions (core-predicate-functions)}))
   ([forms function-contracts]
    (build-projection
     forms function-contracts
-    {:seon.schema/predicate-functions (predicate-functions)}))
+    {:seon.schema/predicate-functions (core-predicate-functions)}))
   ([forms function-contracts
     {:seon.schema/keys [schema-admissions function-admissions
                         pure-predicate-symbols predicate-functions]
@@ -667,15 +693,20 @@
                        bindings)))
                  predicate-functions
                  predicate-symbols)
+         core-predicates (core-predicate-functions)
+         compiled-forms (bound-forms forms core-predicates)
          core-admission {:seon.schema.admission/source :core}
          registry (mr/composite-registry
                     (m/default-schemas)
-                    (mr/fast-registry forms))
+                    (mr/fast-registry compiled-forms))
          options  {:registry registry
                    ::m/sci-options
                    (predicate-sci-options predicate-functions)}
          _        (doseq [[k form] (sort-by key forms)]
-                    (internal/assert-compilable-schema! forms k form options)
+                    (internal/assert-compilable-schema!
+                     compiled-forms k
+                     (get compiled-forms k)
+                     options)
                     (internal/assert-non-nilable-value-schema! forms k form)
                     (assert-complete-contract!
                       {:seon.schema/identity k
@@ -704,7 +735,7 @@
         (into (sorted-map)
               (map (fn [[k form]]
                      [k (direct-references*
-                          (m/schema form options)
+                          (m/schema (get compiled-forms k) options)
                           (set (keys forms)))]))
               forms)
         reverse-schema-dependencies
@@ -720,7 +751,10 @@
         (into (sorted-map)
               (map (fn [[sym form]]
                      [sym (direct-references*
-                            (m/function-schema form options)
+                            (m/function-schema
+                             (bind-core-predicates
+                              form core-predicates)
+                             options)
                             (set (keys forms)))]))
               function-contracts)
         shape-rows
@@ -908,7 +942,7 @@
                          [k (:seon.schema.parsed/admission row)]))
                contracts)
          :seon.schema/pure-predicate-symbols pure-predicate-symbols
-         :seon.schema/predicate-functions (predicate-functions)}))))
+         :seon.schema/predicate-functions (core-predicate-functions)}))))
 
 (defn activate-projection!
   "Atomically publish an already validated projection.
@@ -1344,7 +1378,7 @@
     schema-key
     {:registry (candidate-registry)
      ::m/sci-options
-     (predicate-sci-options (predicate-functions))})))
+     (predicate-sci-options (core-predicate-functions))})))
 
 (defn candidate-explainer
   "Compile a recursively resolved explainer from current declarations."
@@ -1356,7 +1390,7 @@
     schema-key
     {:registry (candidate-registry)
      ::m/sci-options
-     (predicate-sci-options (predicate-functions))})))
+     (predicate-sci-options (core-predicate-functions))})))
 
 (defn schemas-in-namespace
   "The `{keyword definition}` map of schemas registered under `ns-name`.

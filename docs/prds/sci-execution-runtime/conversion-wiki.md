@@ -188,6 +188,15 @@ the anchor stays the state ledger.
 
 ## Testing/proof recipes
 
+- **A fixture classpath is not a standalone artifact load path.** The writer
+  test runner composes `:host`, so SCI-backed Malli predicate compilation can
+  pass there while the R26 standalone writer exits before readiness. Keep
+  symbolic predicate forms durable, but replace registered core predicate
+  symbols with their trusted function values at the Malli compilation
+  boundary. Regress the scar by rebuilding the actual standalone jar, proving
+  it contains no SCI, and loading/compiling the protocol predicate schemas in
+  a child JVM whose classpath is only that jar
+  (`test/seon/writer_standalone_schema_test.clj`).
 - **Compiled gates cannot see live-boundary failures.** Every unit that
   changes schema, acquisition, renders, or process behavior gets a
   reset-boundary boot + live proof. Prompt-side render changes need the
