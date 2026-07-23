@@ -1194,7 +1194,14 @@ pinning-risk audit of vendored datahike/konserve/sci/superv.async
 on the ACTUAL pinned JDK, hybrid CPU-pool question for hostile
 evals, per-driver memory limits + compensations, writer contention
 at 1k callers, adoption recipe + 1k-driver probe plan → deliverable
-research/jvm-concurrency-research-2026-07-23.md.
+research/jvm-concurrency-research-2026-07-23.md. SCOPE ADDED
+(owner): the GUARDED EVAL DOOR — evaluate a FUEL COUNTER at sci's
+existing interrupt safepoints (we own the fork): deterministic
+thread-free preemption that would also close the Bun in-process
+render gap; one portable .cljc guarded-eval entry (deadline where
+threads exist + fuel everywhere + output caps + uniform steering)
+as the single door for every sci invocation; overhead + calibration
+honesty required.
 
 **RULING 24 CONFIRMED (owner "okay", 2026-07-23) + RULING 25
 COMMISSIONED-THEN-HELD: the ALL-JVM END-STATE design pass.** Owner direction:
