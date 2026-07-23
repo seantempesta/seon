@@ -1052,6 +1052,61 @@ Lane states at wind-down:
   Re-dispatch from `tmp/orchestrator/p3a-bun-worker-spec.md` (or
   resume thread `019f8bbe-4cb6-7663-aa95-1602a21650fb`).
 
+### RESTART PROTOCOL (2026-07-23 — READ THIS FIRST, IN ORDER)
+
+The owner restarted the orchestrator at context exhaustion. Do NOT
+go in blind and do NOT dispatch anything until you have genuinely
+absorbed, in this order:
+
+1. `unified-plan-2026-07-23.md` — THE queue authority (topology
+   rulings 26/27, units U1-U10, sequencing, D1-D5). Read it
+   COMPLETELY.
+2. This anchor's sections from "RESTART PROTOCOL" down through
+   "DEMO GREEN" (the night's state: what landed, rulings 9-27, the
+   research verdicts). Skim older sections only on demand.
+3. BEFORE WRITING EACH UNIT SPEC, read that unit's cited research
+   sections in full (U1 → jvm-concurrency §guarded-door; U2 →
+   loop-cljc-sci-design whole + concurrency §adoption; U3 →
+   writer-throughput §5.1+probes; U4 → render-ctx inventory+ledger;
+   U5 → jvm-web-sse). You cannot judge a sol lane's return against
+   a spec you didn't ground yourself — this is the point of the
+   protocol.
+4. `conversion-wiki.md` — before dispatching anything.
+
+FIRST ACTIONS AFTER READING (owner-authorized): write dispatch
+specs for U1 (guarded door + ruling-27 config-fact laws +
+calibration), U3 (writer admission fix), U4 (render purity +
+R0/R1/R2) — parallel, file-disjoint; dispatch as codex background
+lanes (NEVER shell-&); then U2 spec when U1 lands. U5 needs the
+NEW web-render operator member (topology #2 — the process doesn't
+exist yet; its spec must include the operator member + launch
+descriptor work, ruling-10-style). U6 waits for the owner's HTTP
+discussion (D4).
+
+STANDING MECHANICS (non-negotiable, learned this session): check
+lane summary files on disk — never strand on notifications; specs
+name every other live lane's grants PROTECTED (test files too) and
+the lane's OWN isolated cluster name (never borrow — a lane was
+caught using another's cluster); pre-rule every known decision in
+the spec (stop-cycles are the cost center); STOPPING EARLY IS FREE
+and stops are usually right — verify their claims from source,
+rule, re-dispatch; path-limited commits with explicit untracked
+adds; full gate logs to files always; live proofs need a
+churn-free tree — commit accepted work promptly; every
+schema/acquisition change gets the full boot-path regression AND a
+reset-boundary live proof; anchor updated same-turn for every
+ruling/lane state; skeptic posture on every return (re-derive from
+diffs); serial authoritative gates at integration are the
+orchestrator's job; agent-authored code NEVER in the writer
+process; no numeric limit literals — config facts only (ruling 27).
+
+OPEN OWNER ITEMS AT WIND-DOWN: D4 HTTP-leaf timing (morning talk;
+gates U6 only) · D5 fuel defaults blessed from U1's calibration
+numbers when they land · D1 beat cadence re-set after U3 · the
+seon.packages.jvm.* add-lib research is still queued (U8) · demo
+re-run scheduling after U2 (the standing E2E scenario is the
+rolling acceptance).
+
 ### DEMO GREEN (2026-07-22 ~22:30 — READ THIS FIRST)
 
 **TONIGHT'S GOAL MET, committed `eb81acb9`.** One durable agent on
