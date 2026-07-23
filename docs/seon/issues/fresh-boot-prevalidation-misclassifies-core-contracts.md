@@ -38,3 +38,13 @@ acquisition result and has no asserting transaction yet.
 - A real fresh writer initialization projects asserted core rows as
   core-admitted.
 - A fresh isolated cluster reaches pod readiness.
+
+## Current state
+
+The classification fixes and focused regressions landed in `adc25b852`,
+`b6ecb55df`, and `ad8eeb582`. Fresh boot now passes both former schema
+failures, then stops earlier in database opening because the complete compiled
+program exceeds the protocol's hard 4 MiB initialization frame. That distinct
+blocker is recorded in
+[[unbounded-runtime-acquisitions-exceed-frame]]. This issue remains open until
+the fresh readiness gate can run through that owner.

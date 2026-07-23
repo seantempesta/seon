@@ -55,3 +55,19 @@ reading member results.
 DISSOLVES into P4 loop migration plus the cutover/U12 acceptance: the named
 execution-child acquisition is deleted, and resumable database steps and
 surviving context consumers must pass the bounded restart drive.
+
+## Fresh initialization evidence — 2026-07-23
+
+The schema-admission fresh-cluster proof exposed a fourth unbounded consumer:
+the pod sends the complete compiled program in one `ensure-database`
+initialization request. After precommit core-schema validation was corrected,
+fresh clusters `schemagate-fix2c` and `schemagate-fix2d` both failed before
+pod readiness with `:seon.db.protocol.error/frame-too-large` at the fixed
+4 MiB ceiling. Both used an absent cluster path and the committed default
+artifact; reducing a few bytes in the admission walker did not change the
+result.
+
+The initialization path needs the same frame-safe, basis-coherent principle as
+the read consumers, but its write-side protocol must be designed by the
+database initialization/protocol owner. Raising the hard ceiling or deleting
+program facts is not an admissible fix.
