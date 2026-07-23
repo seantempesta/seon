@@ -808,6 +808,19 @@ COMPLETELY before dispatching anything.
   checkpoint: db/host + session deadlines → R27/R42 facts (Sol,
   census §worst as spec base).
 
+- FIXFIXTURE ACCEPTED (fe4bfed0c + 4aeab5efd, verified path-limited,
+  focused 40/247 green): FIVE schema-less durable-defn fixtures
+  repaired across three writer suites (audit predicted one — the
+  computed sweep found four more); zero remain; sweep recipe in the
+  wiki. It EXPOSED a second F1 instance: the registry suite's fixture
+  db lacks the landed :seon.program.edge/* canonical schemas (subset
+  hand list gone stale) — FIXSEED LANE DISPATCHED: seed the fixture
+  canonical-schema population COMPUTED from the one schema authority
+  (protected paths = all predfix-owned files; stop-and-report if the
+  fix needs them). Predfix observed mid live-proof; its stall commit
+  b8216c27a added boot-progress heartbeats (client/admission/session)
+  per the R42 obligation.
+
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
