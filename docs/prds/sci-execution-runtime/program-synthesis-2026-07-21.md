@@ -1203,6 +1203,25 @@ threads exist + fuel everywhere + output caps + uniform steering)
 as the single door for every sci invocation; overhead + calibration
 honesty required.
 
+**CONVERGENCE RESEARCH PORTFOLIO (owner, 2026-07-23) — four
+concurrent read-only lanes locking down the remaining unknowns
+before the all-JVM design pass:** (1) JVM concurrency + guarded
+eval door (LIVE, scope incl. fuel counter) →
+`research/jvm-concurrency-research-2026-07-23.md`; (2) JVM web/SSE
+tier (LIVE: datastar-clojure/hyperlith idioms, OLD-server autopsy
+incl. removal reasons, browser-asset story, /data-first slice) →
+`research/jvm-web-sse-research-2026-07-23.md`; (3) writer
+throughput at 100/1k/10k drivers (LIVE: write-load table from the
+designs, datahike/konserve pipeline ceilings, coalescing, probe
+plan) → `research/writer-throughput-research-2026-07-23.md`; (4)
+render/ctx portability + purity inventory (LIVE: per-namespace
+classification, impurity ledger vs I1-I5 + ruling 21, seon.eval
+re-seam map, guarded-door boundary, the port cut) →
+`research/render-ctx-portability-research-2026-07-23.md`. QUEUED
+next: JVM package interop via Clojure 1.12 add-lib
+(seon.packages.jvm.* per-cluster maven loading). The all-JVM design
+pass launches AFTER these return + owner scope confirmation.
+
 **RULING 24 CONFIRMED (owner "okay", 2026-07-23) + RULING 25
 COMMISSIONED-THEN-HELD: the ALL-JVM END-STATE design pass.** Owner direction:
 everything core = CLJC/sci on the JVM (driver, eval, render, web/SSE
