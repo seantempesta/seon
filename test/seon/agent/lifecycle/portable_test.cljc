@@ -15,8 +15,12 @@
     (let [at #?(:clj (java.util.Date. 1000) :cljs (js/Date. 1000))]
       (is (= [[:db.fn/cas [:seon.agent/id "a"] :seon.agent/run
                [:seon.agent.run/id "r"] [:seon.agent.run/id "r"]]
+              [:db.fn/cas [:seon.agent.run/id "r"]
+               :seon.agent.run/claim-epoch 3 3]
               {:seon.agent.run/id "r" :seon.agent.run/status :closed
                :seon.agent.run/closed-reason :waited
                :seon.agent.run/closed-at at}
+              [:db/retract [:seon.agent.run/id "r"]
+               :seon.agent.run/claimant]
               [:db/retract [:seon.agent/id "a"] :seon.agent/run]]
-             (core/close-tx-data "a" "r" :waited at))))))
+             (core/close-tx-data "a" "r" 3 :waited at))))))

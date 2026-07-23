@@ -1,16 +1,16 @@
 (ns seon.agent.turn
-  "Execute and persist one complete agent turn.
+  "Pod-owned leaves for the portable claim-native turn driver.
 
-   This namespace brackets prompt acquisition, the sole retrying LLM call,
-   reply evaluation, and turn capture under the current run. It owns turn
-   schemas and orchestration, while per-form isolation, context composition,
-   and run fencing remain in their established namespaces."
+   This namespace owns turn schemas plus render, LLM, publication, and
+   scheduled-eval leaves. Cursor and receipt policy live in
+   `seon.agent.turn.core`; the portable driver owns orchestration."
   (:require
     [clojure.string :as str]
     [my.plan :as plan]
     [seon.ai :as ai]
-    [seon.ai.tokens :as tokens]
+    [seon.agent.run.core :as run.core]
     [seon.config :as config]
+    [seon.content-hash :as content-hash]
     [seon.retry :as retry]
     [seon.agent.home :as home]
     [seon.agent.turn.core :as turn.core]
@@ -23,7 +23,6 @@
     [seon.execution.host :as execution.host]
     [seon.agent.ctx.driver :as ctx.driver]
     [seon.log :as seon-log]
-    [seon.repl.parse :as repl-internal]
     [seon.schema :as schema]))
 
 ;; ============================================================
@@ -191,7 +190,7 @@
                   [:enum :open :success :provider-error :adapter-timeout
                    :outer-timeout :crashed])
 (schema/register! :seon.ai.attempt/config-digest
-                  [:re "^[0-9a-f]{64}$"])
+                  [:string {:min 64 :max 64}])
 (schema/register! :seon.ai.attempt/deadline-at :inst)
 (schema/register! :seon.ai.attempt/retry-after-ms [:int {:min 0}])
 (schema/register! :seon.ai.attempt/error-status :seon.ai/status)
@@ -372,21 +371,88 @@
         (map? data) data
         :else value))))
 
-(defn- turn-failure
-  "Preserve an orchestration failure's committed turn and child evidence."
-  [exception]
-  (let [failure (error/->map exception)
-        data (:seon.error/data failure)
-        child-retired? (execution-child-retired? failure)
-        child-evidence (execution-child-evidence failure)
-        turn-id (or (:seon.agent.turn/id data)
-                    (:seon.agent.turn/id (ex-data exception)))]
-    (cond-> {:seon.agent.turn/status :error
-             :seon.error/data (error/->message exception)}
-      turn-id (assoc :seon.agent.turn/id turn-id)
-      child-retired?
-      (assoc ::execution/child-retired? true
-             :seon.error/data child-evidence))))
+(declare invoke-prompt-calls!)
+
+(def ^:private authored-prompt-symbols-query
+  '[:find [?requested ...]
+    :in $ [?requested ...]
+    :where
+    [?function :seon.fn/sym ?requested]
+    [?function :seon.fn/source _ ?tx]
+    (or-join [?function ?tx]
+      (and [?tx :seon.db/process ?process]
+           [?process :seon.db.process/id :seon.db.process/repl])
+      (and [?function :seon.packages/package ?package]
+           [?package :seon.packages/as _]))])
+
+(defn- supports-arity?
+  "Read the original CLJS callable through Malli's instrumentation wrapper."
+  [function-value arity]
+  (let [function-value
+        (or (aget function-value "malli$instrument$original")
+            function-value)
+        max-fixed (aget function-value "cljs$lang$maxFixedArity")
+        fixed (aget function-value
+                    (str "cljs$core$IFn$_invoke$arity$" arity))
+        variadic (aget function-value
+                       "cljs$core$IFn$_invoke$arity$variadic")]
+    (if (number? max-fixed)
+      (or (fn? fixed)
+          (and (fn? variadic) (>= arity max-fixed)))
+      (= arity (.-length function-value)))))
+
+(defn ^:async ^:private invoke-prompt-call!
+  "Run compiled prompt functions in the pod; retain the authored child door."
+  [database agent-id authored-symbols call]
+  (let [function-symbol (::execution/function-symbol call)]
+    (if-not (contains? authored-symbols function-symbol)
+      (try
+        (if-let [function-value (seval/lookup-value function-symbol)]
+          (let [base-arguments (::execution/arguments call)
+                arguments
+                (cond-> base-arguments
+                  (and (::execution/invoke-selected? call)
+                       (supports-arity?
+                        function-value (inc (count base-arguments))))
+                  (conj #(invoke-prompt-calls! database agent-id %)))
+                value (await (apply function-value arguments))]
+            {::execution/ok? true ::execution/value value})
+          {::execution/ok? false
+           ::execution/error
+           {:seon.error/message
+            "The selected compiled prompt function is not loaded."
+            :seon.error/kind :core-bug
+            :seon.error/data
+            {::execution/function-symbol function-symbol}}})
+        (catch :default exception
+          (error/record! {::error/raw exception ::error/fault :core})
+          {::execution/ok? false
+           ::execution/error (error/->map exception)}))
+      (first
+       (await
+        (execution.host/invoke-plans!
+         database
+         [(execution/invocation-plan
+           agent-id function-symbol (::execution/arguments call))]))))))
+
+(defn ^:async ^:private invoke-prompt-calls!
+  [database agent-id calls]
+  (let [symbols (mapv ::execution/function-symbol calls)
+        authored
+        (await
+         (db/query
+          {::db/db database
+           ::db/query authored-prompt-symbols-query
+           ::db/args [symbols]}))
+        authored-symbols (set (map symbol authored))
+        results
+        (await
+         (js/Promise.all
+          (clj->js
+           (mapv #(invoke-prompt-call!
+                   database agent-id authored-symbols %)
+                 calls))))]
+    (vec (array-seq results))))
 
 (defn ^:async render-prompt
   "Render one agent prompt inside its isolated execution child.
@@ -417,18 +483,9 @@
                    run-id
                    (assoc :seon.agent.run/id run-id))
          invoke-authored!
-         ;; TEMPORARY U4 seam: authored render symbols retain the existing
-         ;; execution-child containment until U7 closes them behind the U1
-         ;; guarded door. Trusted prompt orchestration itself runs in the pod.
-         (fn [calls]
-           (execution.host/invoke-plans!
-            database
-            (mapv (fn [call]
-                    (execution/invocation-plan
-                     agent-id
-                     (::execution/function-symbol call)
-                     (::execution/arguments call)))
-                  calls)))
+         ;; Trusted compiled prompt functions are pod-owned. Agent-authored
+         ;; render symbols retain their existing execution-child door.
+         #(invoke-prompt-calls! database agent-id %)
          rendered
          (await
           (ctx.driver/render-prompt!
@@ -670,190 +727,6 @@
                             :seon.error/data child-evidence))
                    e))))))
 
-;; ============================================================
-;; The LLM call + eval. ask-and-eval-reply! parses the reply and
-;; eval-batches the forms — the raw reply is NEVER folded into a self→self
-;; message (notes-to-self are eval narration, not message rows).
-;; ============================================================
-
-(defn- reply-program
-  "Parse one provider reply for the configured REPL mode."
-  [raw-reply stream? starting-ns]
-  (if-not stream?
-    (repl-internal/parse-program
-      raw-reply {:seon.repl/current-ns starting-ns})
-    (let [parsed (repl-internal/parse-forms raw-reply)
-          first-form-index
-          (reduce (fn [index entry]
-                    (if (= :form (:seon.repl/kind entry))
-                      (reduced index)
-                      (inc index)))
-                  0 parsed)
-          retained
-          (if (< first-form-index (count parsed))
-            (vec (take (inc first-form-index) parsed))
-            parsed)
-          remaining-form-count
-          (->> (drop (inc first-form-index) parsed)
-               (filter #(= :form (:seon.repl/kind %)))
-               count)
-          retained
-          (if (pos? remaining-form-count)
-            (update-in
-             retained [first-form-index :seon.repl/narration]
-             (fn [narration]
-               (str (when (seq narration) (str narration "\n"))
-                    "; stream mode executed the first complete form; "
-                    remaining-form-count " further "
-                    (if (= 1 remaining-form-count) "form was" "forms were")
-                    " not executed — resend the next form.")))
-            retained)]
-      {:seon.repl/eval-entries
-       retained
-       :seon.repl/errors []})))
-
-(defn ^:async ^:private ask-and-eval-reply!
-  "Internal — the successful-LLM-reply half of `ask-and-eval!`: parse the
-   reply and eval-batch the forms. `id` / `id-of-turn` are LOCALS threaded
-   down from `run-turn!` (captured before the LLM await), so the always-on
-   blob capture pairs this verbatim reply with the same turn's prompt."
-  [resp id id-of-turn run-id stream? start-ns database]
-  (let [raw-reply  (or (:text resp) "")
-        ;; Always-on reply capture — the provider string is the byte ground
-        ;; truth that goes to the blob store unchanged (best-effort; a lost
-        ;; capture never wedges the turn). Parser classification, not reply
-        ;; rewriting, decides which spans are executable forms.
-        reply-blob (await (capture-blob! raw-reply :reply))
-        ;; Link the reply blob onto the turn NOW, not only at close-turn!:
-        ;; a turn that dies mid-eval (e.g. a `:core` crash under the
-        ;; on-core-error dial) otherwise strands the captured blob with no
-        ;; ref — `agent-debug/turn` can't read the raw reply back. Best-effort
-        ;; like the capture; close-turn!'s later merge re-asserts the same
-        ;; ref (idempotent upsert). Drill finding, error-workflow 2026-07-05.
-        _          (when reply-blob
-                     (try
-                       (await (db/transact!
-                                {:seon.db/tx-data
-                                 [{:seon.agent.turn/id         id-of-turn
-                                   :seon.agent.turn/reply-blob reply-blob}]}))
-                       (catch :default e
-                         (seon-log/warn!
-                           {:seon.log/source ::reply-blob-link
-                            :seon.log/message
-                            (str "eager reply-blob link failed (turn continues): "
-                                 (or (some-> e .-message) (str e)))}))))
-        program    (reply-program raw-reply stream?
-                                  (or start-ns (home/home-ns id)))
-        parsed     (:seon.repl/eval-entries program)
-        ;; `:stream` single-form close (repl-milestone rung-0 verdict, 2026-07-10):
-        ;; the stream aborts at the FIRST complete form, but the delta that
-        ;; completed it can carry a tail that parses into extra entries
-        ;; (typically `:read` errors from a partial next line). The turn is
-        ;; ONE form: keep everything through the first `:form` entry and
-        ;; treat the tail as prose — it stays byte-intact in the reply blob,
-        ;; it just never evals. `:batch` evals the full parse as before.
-        ;; The batch starts where the agent IS (the derived current-ns the
-        ;; cursor + namespaces block already show), NOT the home ns — an
-        ;; `(in-ns …)` in a PRIOR turn must hold across the turn boundary
-        ;; (namespaces-milestone rung-1 root cause, 2026-07-10: seeding home here made every
-        ;; `:stream` turn silently define into my.agent.*, cursor flip-flop,
-        ;; ns-interns nil, cross-ns resolution failures).
-        batch      (if (some #(= :namespace-cycle (:seon.error/kind %))
-                             (:seon.repl/errors program))
-                     {:seon.eval/ids []
-                      :seon.eval/n-ok 0
-                      :seon.eval/n-fail 0
-                      :seon.error/message
-                      (->> (:seon.repl/errors program)
-                           (map :seon.error/message)
-                           (str/join "\n"))
-                      :seon.error/kind :namespace-cycle}
-                     (cond->
-                       (await (eval-parsed! id database parsed
-                                           (or start-ns (home/home-ns id))
-                                           id-of-turn run-id))
-                       (seq (:seon.repl/errors program))
-                       (assoc :seon.repl/errors
-                              (:seon.repl/errors program))))
-        publication
-        (when run-id
-          (await
-           (plan/publish-generated-program!
-            {::db/db database
-             :seon.agent.run/id run-id
-             :seon.agent.turn/id id-of-turn
-             :my.plan/program program
-             :my.plan/eval-batch batch})))
-        _          (when (false? (:my.plan/ok? publication))
-                     (throw
-                      (ex-info
-                       (:my.plan/error publication)
-                       publication)))
-        _          (when (:seon.error/message batch)
-                     (throw (ex-info (:seon.error/message batch) batch)))]
-    (cond->
-      ;; ATTEMPTED forms (ok + failed), not just n-ok: the loop's zero-forms
-      ;; halt means "no actionable forms" — NOT "every form errored". A
-      ;; failed eval must yield a next turn that shows the error.
-      {:seon.agent/eval-count (+ (:seon.eval/n-ok batch)
-                                 (:seon.eval/n-fail batch))}
-      reply-blob (assoc :seon.agent.turn/reply-blob reply-blob))))
-
-;; LLM retry tuning. The agent loop is the SOLE retry authority (the
-;; adapters ship `maxRetries 0`); these shape the exponential-backoff
-;; strategy fed to [[seon.retry/with-retry!]]. The turn's frozen config
-;; resolution carries the retry COUNT (`:seon.ai/agent-max-retries`,
-;; default 4); the per-wait clamp + total-duration ceiling bound
-;; worst-case latency so a transient blip never hangs the run loop.
-(def ^:private llm-retry-base-ms      500)
-(def ^:private llm-retry-factor       2)
-(def ^:private llm-retry-jitter       0.5)
-(def ^:private llm-retry-max-delay-ms 20000)
-(def ^:private llm-retry-total-cap-ms 60000)
-(def ^:private llm-retry-default-n    4)
-
-(defn- llm-retryable?
-  "True when an LLM `resp` failed with a TRANSIENT provider error worth a
-   bounded retry: a TRANSPORT-shaped fetch throw (`:seon.ai/transport?`),
-   HTTP 429 (rate limit), or any HTTP 5xx (502/503/504 overload/gateway).
-   A non-transient error — HTTP 4xx other than 429 (400/401/403/404 are
-   real, surface them), a refusal, an unparseable body, a config gap — and
-   a wall-clock timeout (already burned its full budget) are NOT retried.
-   A success (no `:seon.ai/error`) is never retried."
-  [resp]
-  (let [err    (:seon.ai/error resp)
-        status (:seon.ai/status err)]
-    (boolean
-      (and err
-           (or (true? (:seon.ai/transport? err))
-               (= 429 status)
-               (and (int? status) (<= 500 status 599)))))))
-
-(defn- llm-retry-strategy
-  "The backoff strategy for an LLM provider retry: exponential (base ×2),
-   jittered, per-wait-clamped, capped at the agent's effective max-retries and
-   a total-duration ceiling. The retry count comes from the same immutable
-   ordinary config resolution as the provider request; an absent override
-   retains the established default of four retries."
-  ([resolution]
-   (llm-retry-strategy resolution 0))
-  ([resolution retry-reduction]
-  (-> (retry/multiplicative-strategy llm-retry-base-ms llm-retry-factor)
-      (retry/randomize-strategy llm-retry-jitter)
-      (retry/clamp-delay llm-retry-max-delay-ms)
-      (retry/max-retries
-       (max 0 (- (or (:seon.ai/agent-max-retries resolution)
-                     llm-retry-default-n)
-                 retry-reduction)))
-      (retry/max-duration llm-retry-total-cap-ms))))
-
-(defn- llm-fallback-eligible?
-  "True when exhausted provider work may advance to the configured fallback."
-  [resp]
-  (boolean
-   (or (llm-retryable? resp)
-       (true? (get-in resp [:seon.ai/error :seon.ai/timeout?])))))
-
 (defn- attempt-outcome
   [response outer-timeout?]
   (cond
@@ -999,269 +872,303 @@
                           (boolean stream?)
                           response outer-timeout?)))))
 
-(defn ^:async ^:private call-llm!
-  "Internal — `(llm-fn prompt-text)` with bounded retry-with-backoff on a
-   TRANSIENT provider failure ([[llm-retryable?]]). Delegates the mechanics
-   to [[seon.retry/with-retry!]] (this is the SOLE LLM retry authority —
-   no parallel path). Each attempt is individually wall-clock-capped
-   ([[bounded-llm-attempt!]]), so retry count, total backoff AND single-attempt
-   latency are all bounded — a call-llm! can never park the turn. Honors a
-   server `Retry-After` (`:seon.ai/retry-after-ms`, clamped to the per-wait
-   ceiling) over the strategy's delay. On exhaustion the last (error) resp
-   flows through unchanged — the turn surfaces its `:seon.ai/error` as a
-   value, never a throw. When any retry fired, the resp carries
-  `:seon.agent.turn/llm-retries n` so the turn record is honest."
-  [id id-of-turn resolution llm-fn prompt-text system-prompt stream?]
-  (let [!attempts (atom [])
-        run-resolution!
-        (fn ^:async run-resolution!
-          [fallback-variant active-resolution retry-reduction]
-          (let [attempt-timeout-ms
-                (effective-llm-attempt-timeout-ms active-resolution)]
+;;; CLAIM-NATIVE POD PHASE LEAF
+
+(defn- ref-value [attribute value]
+  (cond
+    (vector? value) (second value)
+    (map? value) (get value attribute)
+    :else nil))
+
+(defn- split-persisted-prompt
+  "Recover the exact two provider blocks from the committed debug artifact."
+  [full-prompt]
+  (when-let [boundary-index (str/index-of full-prompt ai/system-boundary)]
+    {:seon.ai/system-prompt
+     (subs full-prompt 0 boundary-index)
+     :seon.ai/ctx
+     (subs full-prompt
+           (+ boundary-index (count ai/system-boundary)))}))
+
+(defn ^:async render-phase!
+  "Render and commit one addressable `:rendered` turn under a held epoch."
+  [{:seon.agent.driver/keys [run]
+    claim-epoch :seon.agent.run/claim-epoch
+    database :seon.db/db}]
+  (let [agent-id (:seon.agent/id run)
+        run-id (:seon.agent.run/id run)
+        rendered (await (render-prompt agent-id database [] run-id))]
+    (if (:seon.error/message rendered)
+      rendered
+      (let [prompt (:seon.render/text rendered)
+            system-prompt (:seon.ai/system-prompt rendered)
+            full-prompt
+            (ai/debug-full-prompt
+             {:seon.ai/ctx prompt
+              :seon.ai/system-prompt system-prompt})
+            prompt-blob (await (capture-blob! full-prompt :prompt))
+            allocation
             (await
-             (retry/with-retry!
-              {:seon.retry/thunk
-               (fn ^:async run-attempt! []
-                 (let [ordinal (count @!attempts)
-                       response
-                       (await
-                        (bounded-llm-attempt!
-                         id ordinal fallback-variant active-resolution llm-fn
-                         prompt-text system-prompt stream?
-                         attempt-timeout-ms))]
-                   (swap! !attempts conj (::attempt-row response))
-                   (dissoc response ::attempt-row)))
-               :seon.retry/strategy
-               (llm-retry-strategy active-resolution retry-reduction)
-               :seon.retry/retry? llm-retryable?
-               :seon.retry/override
-               (fn [resp]
-                 (some-> (get-in resp [:seon.ai/error
-                                       :seon.ai/retry-after-ms])
-                         (min llm-retry-max-delay-ms)))
-               :seon.retry/on-retry
-               (fn [{:seon.retry/keys [attempt delay-ms result]}]
-                 (log id "llm transient error — retry"
-                      (str attempt " in " delay-ms "ms — "
-                           (get-in result [:seon.ai/error :seon.ai/msg]))))}))))
-        primary (await (run-resolution! nil resolution 0))
-        fallback-variant (:seon.ai/fallback-variant resolution)
-        fallback-resolution (:seon.ai/fallback-config-resolution resolution)
-        fallback
-        (when (and fallback-variant fallback-resolution
-                   (llm-fallback-eligible? (:seon.retry/result primary)))
-          (log id "llm primary exhausted — fallback" (name fallback-variant))
-          (await (run-resolution! fallback-variant fallback-resolution 1)))
-        result (or (:seon.retry/result fallback)
-                   (:seon.retry/result primary))
-        retries (+ (:seon.retry/retries primary)
-                   (or (:seon.retry/retries fallback) 0))]
-    (cond-> (assoc result :seon.agent.turn/llm-attempts @!attempts)
-      (pos? retries) (assoc :seon.agent.turn/llm-retries retries))))
+             (db.id/allocate!
+              {::db/db database
+               ::db.id/allocations
+               [{::db.id/key ::claim-turn
+                 ::db.id/identity-attr :seon.agent.turn/id}]
+               ::db.id/transaction-builder
+               (fn [{turn-id ::claim-turn}]
+                 {::db/tx-data
+                  (into
+                   (run.core/run-fence agent-id run-id claim-epoch)
+                   [(cond->
+                     {:seon.agent.turn/id turn-id
+                      :seon.agent.turn/at (js/Date.)
+                      :seon.agent.turn/status :running
+                      :seon.agent.turn/phase :rendered
+                      :seon.agent.turn/run [:seon.agent.run/id run-id]
+                      :seon.agent.turn/prompt-chars (count full-prompt)
+                      :seon.agent.turn/rendered-tx (:t database)}
+                      prompt-blob
+                      (assoc :seon.agent.turn/prompt-blob prompt-blob))])})}))]
+        (if (:seon.error/message allocation)
+          allocation
+          {:seon.db/db (:db-after allocation)
+           :seon.agent.turn/id
+           (get-in allocation [::db.id/ids ::claim-turn])})))))
 
-(defn ^:async ask-and-eval!
-  "Call the LLM, parse the reply, eval-batch the forms (turn body).
+(def ^:private claim-attempt-selector
+  [:seon.agent.turn/id
+   :seon.agent.turn/phase
+   :seon.agent.turn/rendered-tx
+   {:seon.agent.turn/prompt-blob [:my.blob/hash]}
+   {:seon.agent.turn/llm-attempts
+    [:seon.ai.attempt/id :seon.ai.attempt/ordinal
+     :seon.ai.attempt/outcome]}])
 
-   The body of `open-turn!`: calls the LLM (via [[call-llm!]]), parses the reply,
-   eval-batches the forms (each as a `:seon.agent.turn/evals` component), and
-   returns `{:seon.agent/eval-count n}` (plus optional telemetry) for
-   `open-turn!` to fold into the close-tx. An LLM-call failure
-   (`:seon.ai/error`) closes the turn `:status :error` (render derives a
-   system line from the status — no self→self message row)."
-  {:malli/schema [:=> [:catn [:input :map]] :map]}
-  [{:seon.agent/keys [id llm-fn]
-    run-id :seon.agent.run/id
-    stream? :seon.ai/stream?
-    start-ns :seon.eval/start-ns
+(defn- attempt-deadline [milliseconds]
+  (js/Date. (+ (.getTime (js/Date.)) milliseconds)))
+
+(defn- attempt-open-evidence
+  [ordinal fallback-variant resolution attempt-timeout-ms stream?]
+  (let [template
+        (attempt-row ordinal fallback-variant resolution attempt-timeout-ms
+                     stream? {} false)]
+    (assoc (dissoc template :seon.ai.attempt/outcome)
+           :seon.ai.attempt/config-digest
+           (content-hash/sha-256 (pr-str resolution))
+           :seon.ai.attempt/deadline-at
+           (attempt-deadline attempt-timeout-ms))))
+
+(defn ^:async ^:private crash-open-attempt!
+  [database fence turn-id attempt-id]
+  (await
+   (db/transact!
+    {::db/db database
+     ::db/tx-data
+     (turn.core/crash-open-attempt-tx-data
+      fence turn-id attempt-id)})))
+
+(defn ^:async ^:private durable-llm-attempt!
+  [agent-id run-id claim-epoch turn-id resolution llm-fn prompt system-prompt
+   stream?]
+  (let [database (await (db/db))
+        turn (await
+              (db/pull
+               {::db/db database
+                ::db/pull-pattern claim-attempt-selector
+                ::db/ref [:seon.agent.turn/id turn-id]}))
+        attempts (vec (:seon.agent.turn/llm-attempts turn))
+        open-attempt (last (sort-by :seon.ai.attempt/ordinal
+                                    (filter #(= :open
+                                                (:seon.ai.attempt/outcome %))
+                                            attempts)))
+        fence (run.core/run-fence agent-id run-id claim-epoch)
+        crash-report
+        (when open-attempt
+          (await
+           (crash-open-attempt!
+            database fence turn-id
+            (:seon.ai.attempt/id open-attempt))))
+        database
+        (if (:db-after crash-report) (:db-after crash-report) database)
+        attempts
+        (cond-> attempts
+          open-attempt
+          (conj (assoc open-attempt :seon.ai.attempt/outcome :crashed)))
+        ordinal (turn.core/next-attempt-ordinal attempts)
+        attempt-timeout-ms (effective-llm-attempt-timeout-ms resolution)
+        open-evidence
+        (attempt-open-evidence ordinal nil resolution attempt-timeout-ms
+                               stream?)
+        allocation
+        (await
+         (db.id/allocate!
+          {::db/db database
+           ::db.id/allocations
+           [{::db.id/key ::claim-attempt
+             ::db.id/identity-attr :seon.ai.attempt/id}]
+           ::db.id/transaction-builder
+           (fn [{attempt-id ::claim-attempt}]
+             {::db/tx-data
+              ((if (= :rendered (:seon.agent.turn/phase turn))
+                 turn.core/open-attempt-tx-data
+                 turn.core/next-attempt-tx-data)
+               fence turn-id attempt-id open-evidence)})}))
+        attempt-id (get-in allocation [::db.id/ids ::claim-attempt])]
+    (if (:seon.error/message allocation)
+      allocation
+      (let [response
+            (await
+             (bounded-llm-attempt!
+              agent-id ordinal nil resolution llm-fn prompt system-prompt
+              stream? attempt-timeout-ms))
+            terminal (::attempt-row response)
+            reply-blob
+            (when (= :success (:seon.ai.attempt/outcome terminal))
+              (await (capture-blob! (or (:text response) "") :reply)))
+            retry-after
+            (get-in response [:seon.ai/error :seon.ai/retry-after-ms])
+            terminal
+            (cond-> terminal
+              (int? retry-after)
+              (assoc :seon.ai.attempt/retry-after-ms retry-after))
+            report
+            (await
+             (db/transact!
+              {::db/db (:db-after allocation)
+               ::db/tx-data
+               (turn.core/terminal-attempt-tx-data
+                fence turn-id attempt-id terminal reply-blob)}))]
+        (if (:seon.error/message report)
+          report
+          (assoc (dissoc response ::attempt-row)
+                 :seon.db/db (:db-after report)))))))
+
+(defn ^:async llm-phase!
+  "Resume the durable attempt cursor and advance a successful reply."
+  [{:seon.agent.driver/keys [run]
+    claim-epoch :seon.agent.run/claim-epoch
     database :seon.db/db
-    resolution :seon.ai/config-resolution
-    system-prompt :seon.ai/system-prompt
-    :seon.agent.turn/keys  [id-of-turn prompt-text]}]
-  (let [resp    (await (call-llm! id id-of-turn resolution llm-fn
-                                  prompt-text system-prompt (boolean stream?)))
-        retries (:seon.agent.turn/llm-retries resp)
-        attempts (:seon.agent.turn/llm-attempts resp)
-        raw     (:seon.ai/raw resp)
-        usage   (:seon.ai/usage raw)
-        usage-projection (persisted-usage usage)
-        usage-attributes (::usage-attributes usage-projection)
-        usage-error (::usage-error usage-projection)
-        estimated? (:seon.ai/estimated? raw)
-        pfields (:seon.ai/provider-fields raw)]
-    (if-let [err (:seon.ai/error resp)]
-      (do
-        (log id "llm error — turn :error"
-             (str (when retries (str "(after " retries " retry) "))
-                  (:seon.ai/msg err)))
-        (cond->
-          {:seon.agent/eval-count 0
-           :seon.agent.turn/status :error
-           ;; Capture the failure as data — the error record must not
-           ;; depend on turn success (observability.md).
-           :seon.agent.turn/error  (turn-error-str err)
-           :seon.agent.turn/llm-attempts attempts}
-          retries (assoc :seon.agent.turn/llm-retries retries)
-          (seq usage-attributes) (merge usage-attributes)
-          usage-error (assoc ::usage-error usage-error)
-          estimated? (assoc :seon.agent.turn/usage-estimated? true)
-          (seq pfields) (assoc :seon.agent.turn/llm-meta (pr-str pfields))))
-      (cond-> (await (ask-and-eval-reply! resp id id-of-turn run-id
-                                          (boolean stream?) start-ns database))
-        true        (assoc :seon.agent.turn/llm-attempts attempts)
-        retries     (assoc :seon.agent.turn/llm-retries retries)
-        (seq usage-attributes) (merge usage-attributes)
-        usage-error (assoc ::usage-error usage-error)
-        estimated?  (assoc :seon.agent.turn/usage-estimated? true)
-        (seq pfields) (assoc :seon.agent.turn/llm-meta (pr-str pfields))))))
-
-(defn ^:async ^:private run-turn-body!
-  "One full turn end-to-end. Map-in / map-out.
-
-   Input keys:
-     :seon.agent/id             agent id string
-     :seon.agent/llm-fn         ctx-string -> Promise<{:text \"…\"}>
-     :seon.agent.run/id         the OPEN run this turn belongs to (the loop
-                                passes its run-id; stamped on the turn)
-     :seon.db/db                the FROZEN db value the loop pinned for this
-                                turn (§8a — the prompt render + the loop's
-                                bound-checks share ONE basis-t); REQUIRED —
-                                [[run-turn!]] rejects a missing value as a
-                                `:core-bug` error value (no silent unpinned
-                                fallback)
-
-   Wraps the pipeline in a `with-tx-context` scope so every transact (incl.
-   the per-form txs inside `eval-batch!`) auto-tags with the causality
-   bundle. Returns the closed turn entity pulled with evals inlined, plus
-   `:seon.agent/eval-count`. On catastrophic error returns
-   `{:seon.agent.turn/status :error :seon.error/data <str>}` and retains
-   `:seon.agent.turn/id` when the turn row was already committed."
-  {:malli/schema [:=> [:catn [:input :map]] :map]}
-  [{:seon.agent/keys [id llm-fn] run-id :seon.agent.run/id db :seon.db/db}]
-  (let [database   db
-        ;; repl-mode read off the DB DATOM (config-through-DB), pinned to
-        ;; the SAME frozen db the prompt renders from — the turn loop never
-        ;; reads the config accessor.
-        prompt-result (await (render-prompt id database [] run-id))
-        _ (when (:seon.error/message prompt-result)
-            (throw (ex-info (:seon.error/message prompt-result)
-                            prompt-result)))
-        prompt (:seon.render/text prompt-result)
-        system-prompt (:seon.ai/system-prompt prompt-result)
-        config-resolution (:seon.ai/config-resolution prompt-result)
-        stream? (= :stream (:seon.config/repl-mode prompt-result))
-        full-prompt (ai/debug-full-prompt {:seon.ai/ctx prompt
-                                           :seon.ai/system-prompt system-prompt})
-        ;; Always-on observability capture: the database value's basis
-        ;; transaction plus the assembled prompt verbatim as a blob. Both land on the turn's
-        ;; open-tx; a failed blob write yields nil and the turn proceeds.
-        ;; The prompt acquisition returns the current namespace from that same
-        ;; database value, so the namespace the cursor showed is where the
-        ;; batch starts.
-        start-ns (some-> (:seon.eval/ns prompt-result) name symbol)
-        prompt-blob    (await (capture-blob! full-prompt :prompt))]
-    ;; ctx-tokens = the assembled context ONLY; the system text rides the
-    ;; adapter's system message, so it is reported as its own count here
-    ;; (repl-milestone rung-0 defect: the old line silently under-reported the fixed
-    ;; prefix by the system prompt's size).
-    (try
-      (let [result (await
-                     (db/with-agent id
-                       (fn []
-                         (db/with-tx-context
-                           {:seon.db/user [:seon.agent/id id]
-                            :seon.db/process
-                            [:seon.db.process/id :seon.db.process/repl]}
-                           (fn []
-                             (open-turn!
-                               (cond->
-                                 {:seon.agent/id           id
-                                  :seon.agent.run/id-of-run run-id
-                                  :seon.agent.turn/prompt-text   full-prompt
-                                  :seon.db/db database}
-                                 prompt-blob
-                                 (assoc :seon.agent.turn/prompt-blob prompt-blob))
-                               (fn ^:async run-allocated-turn! [turn-id]
-                                 (log id "open" turn-id "+"
-                                      (tokens/estimate prompt) "ctx-tokens" "+"
-                                      (tokens/estimate
-                                        system-prompt)
-                                      "system-tokens")
-                                 (await
-                                   (ask-and-eval!
-                                     {:seon.agent/id            id
-                                      :seon.agent/llm-fn        llm-fn
-                                      :seon.agent.run/id        run-id
-                                      :seon.db/db database
-                                      :seon.ai/config-resolution config-resolution
-                                      :seon.ai/stream?          stream?
-                                      :seon.ai/system-prompt    system-prompt
-                                      :seon.eval/start-ns       start-ns
-                                      :seon.agent.turn/id-of-turn turn-id
-                                      :seon.agent.turn/prompt-text prompt})))))))))]
-        (if (:seon.error/message result)
-          ;; The open-tx FAILED — there is NO turn entity to pull (the
-          ;; lookup-ref is unresolvable). Return the same `:error` shape the
-          ;; catch returns, so the loop closes the run `:error` instead of
-          ;; pulling nil → `{:seon.agent/eval-count 0}` (no status) and
-          ;; recur-ing `:turn-ok` forever (a tight retry storm on a write
-          ;; outage). run-turn! ALWAYS carries a status on its error paths.
-          (do (log id "open-turn! failed → turn :error"
-                   (pr-str result))
-              {:seon.agent.turn/status :error
-               :seon.error/data        (pr-str result)})
-          (let [turn-id (:seon.agent.turn/id result)
-                n-ok (or (:seon.agent/eval-count result) 0)
-                close-db (::close-db-after result)]
-            (log id (name (or (:seon.agent.turn/status result) :done)) n-ok
-                 (if (:seon.agent.turn/status result) "llm-error" "ok"))
-            (if (nil? close-db)
-              ;; The close-tx FAILED (close-turn! logged it) — there is no
-              ;; database value that shows the closed turn, so an unpinned
-              ;; pull would return a coordinate-dependent map. Fail loudly
-              ;; instead of returning silently unpinned data.
-              (do (log id "close-tx failed → turn :error" turn-id)
-                  {:seon.agent.turn/status :error
-                   :seon.agent.turn/id     turn-id
-                   :seon.error/data
-                   (str "The turn close transaction failed — no returned "
-                        "database value pins the final pull for turn "
-                        turn-id)})
-              ;; The final pull is PINNED to the close transaction's returned
-              ;; database value: a transaction landed between close and pull
-              ;; does not alter the returned turn map (§8a, frozen retries
-              ;; issue acceptance).
-              (assoc (await
-                       (db/pull {:seon.db/pull-pattern
-                                 '[* {:seon.agent.turn/evals [*]}
-                                      {:seon.agent.turn/llm-attempts [*]}]
-                                 :seon.db/ref [:seon.agent.turn/id turn-id]
-                                 :seon.db/db close-db}))
-                     :seon.agent/eval-count n-ok)))))
-      (catch :default e
-        ;; Catastrophic turn failure → return the :error shape. State is the
-        ;; loop's concern (its finally resets :idle); the turn never touches it.
-        ;; A body failure carries the identity already committed by open-turn!.
-        (log id "run-turn! error" (str e))
-        (turn-failure e)))))
-
-(defn ^:async run-turn!
-  "Run one complete turn and convert every outer orchestration failure to data.
-
-   Requires the loop's pinned `:seon.db/db` database value (§8a). A missing
-   value is a `:core-bug` error value — never a silent render from the
-   session's latest value — so an unpinned turn cannot happen quietly."
-  {:malli/schema [:=> [:catn [:input :map]] :map]}
-  [{:seon.agent/keys [id] db :seon.db/db :as input}]
-  (if (nil? db)
-    (do (log id "run-turn! called without a pinned database value → :error")
-        {:seon.agent.turn/status :error
+    llm-fn :seon.agent/llm-fn}]
+  (let [agent-id (:seon.agent/id run)
+        run-id (:seon.agent.run/id run)
+        turn (:seon.agent.run/current-turn run)
+        turn-id (:seon.agent.turn/id turn)
+        rendered-db
+        (db/as-of database
+                  (ref-value :db/id
+                             (:seon.agent.turn/rendered-tx turn)))
+        rendered (await (render-prompt agent-id rendered-db [] run-id))
+        prompt-hash
+        (ref-value :my.blob/hash
+                   (:seon.agent.turn/prompt-blob turn))
+        prompt-artifact (blob/get {:my.blob/hash prompt-hash})
+        persisted
+        (when (:my.blob/ok? prompt-artifact)
+          (split-persisted-prompt (:my.blob/content prompt-artifact)))]
+    (if (:seon.error/message rendered)
+      rendered
+      (if-not persisted
+        {:seon.error/message
+         (or (:my.blob/error prompt-artifact)
+             "The persisted prompt artifact has no system/context boundary.")
          :seon.error/kind :core-bug
          :seon.error/data
-         (str "run-turn! requires the loop's pinned :seon.db/db database "
-              "value (§8a one-value-per-turn); refusing to render from the "
-              "session's latest value.")})
-    (try
-      (await (run-turn-body! input))
-      (catch :default exception
-        (log id "run-turn! orchestration error" (error/->message exception))
-        (turn-failure exception)))))
+         {:seon.agent.turn/id turn-id
+          :seon.agent.turn/prompt-blob prompt-hash}}
+        (let [prompt (:seon.ai/ctx persisted)
+            system-prompt (:seon.ai/system-prompt persisted)
+            resolution (:seon.ai/config-resolution rendered)
+            stream? (= :stream (:seon.config/repl-mode rendered))
+            attempt-count (count (:seon.agent.turn/llm-attempts turn))
+                maximum-attempts
+                (inc (or (:seon.ai/agent-max-retries resolution)
+                         turn.core/llm-retry-default-count))]
+            (if (>= attempt-count maximum-attempts)
+              (let [report
+                    (await
+                     (db/transact!
+                      {::db/db database
+                       ::db/tx-data
+                       (turn.core/error-close-tx-data
+                        (run.core/run-fence agent-id run-id claim-epoch)
+                        agent-id run-id turn-id (js/Date.)
+                        "The durable LLM attempt budget was exhausted.")}))]
+                (if (:seon.error/message report)
+                  report
+                  {:seon.db/db (:db-after report)
+                   :seon.agent.driver/closed? true}))
+              (await
+               (retry/with-retry!
+                {:seon.retry/thunk
+                 #(durable-llm-attempt!
+                   agent-id run-id claim-epoch turn-id resolution llm-fn
+                   prompt system-prompt stream?)
+                 :seon.retry/strategy
+                 (turn.core/llm-retry-strategy resolution attempt-count)
+                 :seon.retry/retry? turn.core/llm-retryable?
+                 :seon.retry/override
+                 (fn [response]
+                   (some->
+                    (get-in response [:seon.ai/error
+                                     :seon.ai/retry-after-ms])
+                    (min turn.core/llm-retry-max-delay-ms)))}))))))))
+
+(defn ^:async publish-phase!
+  "Publish the evaled program and close its turn under the held epoch."
+  [{:seon.agent.driver/keys [run]
+    claim-epoch :seon.agent.run/claim-epoch
+    database :seon.db/db}]
+  (let [agent-id (:seon.agent/id run)
+        run-id (:seon.agent.run/id run)
+        current-turn (:seon.agent.run/current-turn run)
+        turn-id (:seon.agent.turn/id current-turn)
+        turn
+        (await
+         (db/pull
+          {::db/db database
+           ::db/pull-pattern
+           [:seon.agent.turn/id
+            {:seon.agent.turn/reply-blob [:my.blob/hash]}
+            {:seon.agent.turn/evals
+             [:seon.eval/id :seon.eval/status :seon.eval/ok?]}]
+           ::db/ref [:seon.agent.turn/id turn-id]}))
+        reply
+        (blob/get
+         {:my.blob/hash
+          (get-in turn [:seon.agent.turn/reply-blob :my.blob/hash])})]
+    (if-not (:my.blob/ok? reply)
+      {:seon.error/message (:my.blob/error reply)
+       :seon.error/kind :core-bug}
+      (let [program
+            (turn.core/reply-program
+             (:my.blob/content reply) false (home/home-ns agent-id))
+            evals (:seon.agent.turn/evals turn)
+            batch
+            {:seon.eval/ids (mapv :seon.eval/id evals)
+             :seon.eval/n-ok (count (filter :seon.eval/ok? evals))
+             :seon.eval/n-fail (count (remove :seon.eval/ok? evals))}
+            publication
+            (await
+             (plan/publish-generated-program!
+              {::db/db database
+               :seon.agent.run/id run-id
+               :seon.agent.turn/id turn-id
+               :my.plan/program program
+               :my.plan/eval-batch batch}))]
+        (if (false? (:my.plan/ok? publication))
+          {:seon.error/message (:my.plan/error publication)
+           :seon.error/kind :core-bug}
+          (let [head (await (db/db))
+                report
+                (await
+                 (db/transact!
+                  {::db/db head
+                   ::db/tx-data
+                   (turn.core/advance-phase-tx-data
+                    (run.core/run-fence agent-id run-id claim-epoch)
+                    turn-id :evaled :published
+                    [{:seon.agent.turn/id turn-id
+                      :seon.agent.turn/status :done}])}))]
+            (if (:seon.error/message report)
+              report
+              {:seon.db/db (:db-after report)})))))))

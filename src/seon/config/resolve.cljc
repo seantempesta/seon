@@ -61,7 +61,7 @@
 (schema/register! :seon.config.render-context/file-path
   [:and {:seon.db/identity true} [:string {:min 1}]])
 (schema/register! :seon.config.render-context/sha-256
-  :seon.content-hash/digest)
+  [:string {:min 64 :max 64}])
 (schema/register! :seon.config.render-context/file-fingerprint
   [:map {:seon.db/entity true}
    [:seon.config.render-context/file-path
@@ -183,11 +183,31 @@
 (doseq [[attribute shape] web-render-dial-schemas]
   (schema/register! attribute shape))
 
+(def claim-driver-dial-schemas
+  "JVM claimant protective limits with calibration provenance."
+  {:seon.config.claim-driver/jvm-heap-mb
+   [:int {:min 512
+          :description
+          "Maximum JVM claimant heap in MiB. Default 4096 separates retained sci contexts and eval evidence from the writer's 512 MiB transaction-only budget; it is a loud containment ceiling, not a utilization target."}]
+   :seon.config.claim-driver/database-pool-wait-timeout-ms
+   [:int {:min 1
+          :description
+          "Maximum milliseconds a parked claimant vthread waits for a database pool member. Default 110000 approaches the 120000 ms call deadline so legitimate parked waiters do not fail one second into a bounded call."}]})
+
+(doseq [[attribute shape] claim-driver-dial-schemas]
+  (schema/register! attribute shape))
+
 (schema/register! :seon.config/web-render
   (into [:map {:closed true}]
         (map (fn [attribute]
                [attribute {:optional true} attribute]))
         (keys web-render-dial-schemas)))
+
+(schema/register! :seon.config/claim-driver
+  (into [:map {:closed true}]
+        (map (fn [attribute]
+               [attribute {:optional true} attribute]))
+        (keys claim-driver-dial-schemas)))
 
 (def web-render-attributes
   "Flat singleton attributes consumed by the JVM web-render process."
@@ -854,6 +874,11 @@
     {:optional true} :seon.config.web-render/data-page-size]
    [:seon.config.web-render/maximum-request-body-bytes
     {:optional true} :seon.config.web-render/maximum-request-body-bytes]
+   [:seon.config.claim-driver/jvm-heap-mb
+    {:optional true} :seon.config.claim-driver/jvm-heap-mb]
+   [:seon.config.claim-driver/database-pool-wait-timeout-ms
+    {:optional true}
+    :seon.config.claim-driver/database-pool-wait-timeout-ms]
    [:seon.config/on-core-error      {:optional true} :seon.config/on-core-error]
    [:seon.config/spawn-depth-cap    {:optional true} :seon.config/spawn-depth-cap]
    [:seon.config/always             {:optional true} :seon.config/always]
@@ -935,6 +960,7 @@
    [:seon.config/guard         {:optional true} :seon.config/guard]
    [:seon.config/model-transport {:optional true} :seon.config/model-transport]
    [:seon.config/web-render      {:optional true} :seon.config/web-render]
+   [:seon.config/claim-driver    {:optional true} :seon.config/claim-driver]
    [:seon.config/namespaces    {:optional true} :seon.config/namespaces-spec]
    [:seon.config/routes        {:optional true} [:vector :seon.config/route-spec]]
    [:seon.config/render        {:optional true} :seon.config/render]
@@ -1578,6 +1604,7 @@
         run (merge (default-run-policy) (get manifest :seon.config/run {}))
         transport (get manifest :seon.config/model-transport {})
         web-render (get manifest :seon.config/web-render {})
+        claim-driver (get manifest :seon.config/claim-driver {})
         rep (get manifest :seon.config/repair {})
         web (get manifest :seon.config/web {})
         root (get manifest :seon.config/root {})
@@ -1646,6 +1673,14 @@
              (get web-render
                   :seon.config.web-render/maximum-request-body-bytes
                   4194304)
+             :seon.config.claim-driver/jvm-heap-mb
+             (get claim-driver
+                  :seon.config.claim-driver/jvm-heap-mb
+                  4096)
+             :seon.config.claim-driver/database-pool-wait-timeout-ms
+             (get claim-driver
+                  :seon.config.claim-driver/database-pool-wait-timeout-ms
+                  110000)
              :seon.config.render-context/host-timezone
              (get render-context
                   :seon.config.render-context/host-timezone

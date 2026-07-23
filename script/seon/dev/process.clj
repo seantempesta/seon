@@ -564,13 +564,19 @@
           (cond->
            {:seon.dev.process/id host-id
            :seon.dev.process/argv
-           ["clojure" "-M:writer:host" "-m" "seon.host"
+           ["clojure"
+            (str "-J-Xmx" (config/claim-driver-heap-mb config) "m")
+            "-M:writer:host" "-m" "seon.host"
             (pr-str {:seon.host/socket-path
                      (host-eval-socket config)
                      :seon.host.context/writer-socket-path
                      (:seon.dev.config/request-socket config)
                      :seon.host.context/database-name
-                     (:seon.dev.config/cluster-name config)})]
+                     (:seon.dev.config/cluster-name config)
+                     :seon.host/database-pool-wait-timeout-ms
+                     (config/claim-driver-pool-wait-timeout-ms config)
+                     :my.blob/storage-view
+                     (::launch/blob-storage-view descriptor)})]
            :seon.dev.process/environment environment
            :seon.dev.process/dependencies
            (cond-> []

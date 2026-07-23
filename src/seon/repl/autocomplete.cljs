@@ -148,7 +148,6 @@
     [{:seon.agent.ctx.transcript/from-turn-offset 0
       :seon.agent.ctx.transcript/token-cap 48}]
     :seon.agent.ctx.transcript/readline? false
-    :seon.agent.ctx.transcript/result-handles? false
     ;; PINNED as a block constant (the schema default's value): the
     ;; converters then never fall back to their live-conn read — the
     ;; render stays a pure fn of the db value.

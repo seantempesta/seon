@@ -1,7 +1,10 @@
 (ns seon.host
   "Serve the JVM execution protocol over one Unix-domain socket."
   (:require [clojure.edn :as edn]
+            [my.blob.schema]
+            [seon.agent.driver.host :as driver.host]
             [seon.db.branch :as db.branch]
+            [seon.db.host :as db.host]
             [seon.db.transport.uds :as uds]
             [seon.error :as error]
             [seon.host.context :as context]
@@ -21,6 +24,7 @@
 
 (schema/register! ::socket-path [:string {:min 1}])
 (schema/register! ::eval-threads [:int {:min 1}])
+(schema/register! ::database-pool-wait-timeout-ms [:int {:min 1}])
 (schema/register!
  ::start-request
  [:map {:closed true}
@@ -29,6 +33,9 @@
   [::context/database-name ::context/database-name]
   [::context/backend {:optional true} ::context/backend]
   [::context/database-path {:optional true} ::context/database-path]
+  [:my.blob/storage-view {:optional true} :my.blob/storage-view]
+  [::database-pool-wait-timeout-ms
+   {:optional true} ::database-pool-wait-timeout-ms]
   [::eval-threads {:optional true} ::eval-threads]])
 (schema/register! ::server 'some?)
 (schema/register! ::contexts 'some?)
@@ -227,15 +234,20 @@
 (defn start!
   "Start the agent host: shared base, contexts, and the UDS acceptor."
   {:malli/schema [:=> [:cat ::start-request] ::host]}
-  [{::keys [socket-path eval-threads]
+  [{::keys [socket-path eval-threads database-pool-wait-timeout-ms]
     :as request}]
   (let [^ServerSocketChannel server (bind-server! socket-path)]
     (try
-      (let [writer (context/writer-session
-                (select-keys request [::context/writer-socket-path
-                                      ::context/database-name
-                                      ::context/backend
-                                      ::context/database-path]))
+      (let [writer
+            (cond->
+             (context/writer-session
+              (select-keys request [::context/writer-socket-path
+                                    ::context/database-name
+                                    ::context/backend
+                                    ::context/database-path]))
+              database-pool-wait-timeout-ms
+              (assoc ::db.host/pool-wait-timeout-ms
+                     database-pool-wait-timeout-ms))
         _ (error/set-db-hooks!
            {:seon.error/transact!
             #(context/transact-writer! writer %)
@@ -310,7 +322,12 @@
          "seon-host-acceptor")]
         (.setDaemon acceptor true)
         (.start acceptor)
-        (assoc host ::acceptor acceptor))
+        (let [host (assoc host ::acceptor acceptor)]
+          (cond-> host
+            (:my.blob/storage-view request)
+            (assoc ::driver
+                   (driver.host/start!
+                    host (:my.blob/storage-view request))))))
       (catch Throwable throwable
         (try (.close server) (catch Throwable _ nil))
         (try (delete-dead-socket! socket-path) (catch Throwable _ nil))
@@ -319,7 +336,9 @@
 (defn stop!
   "Stop the host acceptor and release its pools and socket."
   {:malli/schema [:=> [:cat ::host] :nil]}
-  [{::keys [server eval-pool watchdog socket-path writer]}]
+  [{::keys [server eval-pool watchdog socket-path writer driver]}]
+  (when-let [stop! (:seon.agent.driver/stop! driver)]
+    (stop!))
   (try (.close ^ServerSocketChannel server) (catch Throwable _))
   (.shutdownNow ^ExecutorService eval-pool)
   (.shutdownNow ^ScheduledExecutorService watchdog)

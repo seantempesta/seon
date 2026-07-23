@@ -28,6 +28,16 @@ attempts to `slurp` a `sun.nio.fs.UnixPath` for the repository `AGENTS.md`.
 The U5-focused process and CLI namespaces pass 114 tests / 520 assertions.
 The complete operator transcript is `tmp/orchestrator/u5-gate-operator.log`.
 
+The frozen U2 checkpoint later ran 389 tests / 3,000 assertions and reported
+279 failures plus 13 errors
+(`tmp/orchestrator/u2-gate-writer.log`). U3's expected-basis work is now green;
+the dominant remaining host failure is the U1 guard-policy integration. Fresh
+host writer fixtures omit the five new guard facts. The acquisition boundary
+also accepted an absent row vacuously and passed nil fuel to the guard; U2
+fixed that separate runtime defect and added a focused policy regression. The
+fixtures now need the same shared complete-policy treatment as the archived
+value-sampling-policy repair, while production stays fail-closed.
+
 ## Acceptance
 
 - The first expected-basis writer integration regression passes.

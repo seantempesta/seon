@@ -219,40 +219,49 @@
                        [{:seon.agent/run
                          [:seon.agent.run/id :seon.agent.run/status
                           :seon.agent.run/started-at :seon.agent.run/deadline
-                          :seon.agent.run/paused-at :seon.agent.run/remaining-ms]}]
+                          :seon.agent.run/paused-at :seon.agent.run/remaining-ms
+                          :seon.agent.run/claim-epoch]}]
                        ::db/ref [:seon.agent/id agent-id]}))
         run (:seon.agent/run agent)]
     (cond (error-value? agent) agent
           (= :open (:seon.agent.run/status run)) run
           :else nil))))
 
-(defn ^:async ^:private pause-run! [database agent-id run-id]
+(defn- held-claim-epoch
+  "Use the invocation-held epoch when this is its run; otherwise use the
+   explicitly acquired lifecycle snapshot."
+  [run]
+  (let [context (db/current-tx-context)
+        context-run-id (:seon.agent.run/id context)]
+    (if (= context-run-id (:seon.agent.run/id run))
+      (:seon.agent.run/claim-epoch context)
+      (:seon.agent.run/claim-epoch run))))
+
+(defn ^:async ^:private pause-run! [database agent-id run]
   #?(:cljs
      (await (run/pause! {:seon.agent/id agent-id
-                         :seon.agent.run/id run-id
+                         :seon.agent.run/id (:seon.agent.run/id run)
+                         :seon.agent.run/claim-epoch (held-claim-epoch run)
                          :seon.db/db database}))
      :clj
-     (let [run (await (db/pull {::db/db database
-                             ::db/pull-pattern [:seon.agent.run/deadline]
-                             ::db/ref [:seon.agent.run/id run-id]}))]
+     (let [run-id (:seon.agent.run/id run)
+           claim-epoch (held-claim-epoch run)]
     (if-let [deadline (:seon.agent.run/deadline run)]
       (await (db/transact! {::db/db database
                             ::db/tx-data (core/pause-tx-data
-                                          agent-id run-id deadline
+                                          agent-id run-id claim-epoch deadline
                                           ((leaf-fn ::leaf/now)))}))
-      (if (error-value? run) run
-          (error-value (str "pause!: no run " (pr-str run-id) ".")))))))
+      (error-value (str "pause!: no run " (pr-str run-id) "."))))))
 
-(defn ^:async ^:private resume-run! [database agent-id run-id]
+(defn ^:async ^:private resume-run! [database agent-id run]
   #?(:cljs
      (await (run/resume! {:seon.agent/id agent-id
-                          :seon.agent.run/id run-id
+                          :seon.agent.run/id (:seon.agent.run/id run)
+                          :seon.agent.run/claim-epoch
+                          (:seon.agent.run/claim-epoch run)
                           :seon.db/db database}))
      :clj
-     (let [run (await (db/pull {::db/db database
-                             ::db/pull-pattern [:seon.agent.run/paused-at
-                                                :seon.agent.run/remaining-ms]
-                             ::db/ref [:seon.agent.run/id run-id]}))
+     (let [run-id (:seon.agent.run/id run)
         paused-at (:seon.agent.run/paused-at run)
         remaining-ms (:seon.agent.run/remaining-ms run)]
     (cond (error-value? run) run
@@ -262,7 +271,9 @@
           :else
           (await (db/transact! {::db/db database
                                 ::db/tx-data (core/resume-tx-data
-                                              agent-id run-id paused-at remaining-ms
+                                              agent-id run-id
+                                              (:seon.agent.run/claim-epoch run)
+                                              paused-at remaining-ms
                                               ((leaf-fn ::leaf/now)))}))))))
 
 (defn ^:async ^:private acquire-target
@@ -311,8 +322,8 @@
             "with message/user.")))))
 
 (defn- close-transaction-data
-  [agent-id run-id reason closed-at]
-  (core/close-tx-data agent-id run-id reason closed-at))
+  [agent-id run-id claim-epoch reason closed-at]
+  (core/close-tx-data agent-id run-id claim-epoch reason closed-at))
 
 (defn ^{:async #?(:cljs true :clj false)
         :seon.capability/effect :external} wait
@@ -334,7 +345,8 @@
                     {::db/db database
                      ::db/tx-data
                      (close-transaction-data
-                      agent-id (:seon.agent.run/id current) :waited
+                      agent-id (:seon.agent.run/id current)
+                      (held-claim-epoch current) :waited
                       ((leaf-fn ::leaf/now)))}))]
               (if (error-value? report) report :idle))))))
     (core/no-agent-error "wait")))
@@ -398,9 +410,11 @@
                  messages))})))))))
 
 (defn- completion-transaction-data
-  [agent-id run-id result result-ref message-data ids now]
-  (let [[fence close-row retract-pointer]
-        (close-transaction-data agent-id run-id :completed now)
+  [agent-id run-id claim-epoch result result-ref message-data ids now]
+  (let [close-data
+        (close-transaction-data agent-id run-id claim-epoch :completed now)
+        fence (subvec (vec close-data) 0 2)
+        close-and-release (subvec (vec close-data) 2)
         result-row
         (cond-> {:seon.agent.run/id run-id}
           (not (str/blank? result)) (assoc :seon.agent.run/result result)
@@ -410,11 +424,11 @@
           (:seon.db/tx-data
            ((:seon.agent.message/transaction-builder message-data) ids))
           [])]
-    (into [fence]
+    (into fence
           (concat
            (when (> (count result-row) 1) [result-row])
            message-rows
-           [close-row retract-pointer]))))
+           close-and-release))))
 
 (defn ^:async ^:private complete-once
   [result result-ref op-id]
@@ -459,20 +473,20 @@
                           (:seon.agent.message/allocations message-data)
                           ::db.id/transaction-builder
                           (fn [ids]
-                            {::db/expected-db database
-                             :seon.capability/op-id op-id
+                            {:seon.capability/op-id op-id
                              ::db/tx-data
                              (completion-transaction-data
-                              agent-id run-id result result-ref message-data ids
+                              agent-id run-id (held-claim-epoch current)
+                              result result-ref message-data ids
                               ((leaf-fn ::leaf/now)))})}))
                        (await
                         (db/transact!
                          {::db/db database
                           :seon.capability/op-id op-id
-                          ::db/expected-db database
                           ::db/tx-data
                           (completion-transaction-data
-                           agent-id run-id result result-ref nil nil
+                           agent-id run-id (held-claim-epoch current)
+                           result result-ref nil nil
                            ((leaf-fn ::leaf/now)))}))))))))))))
     (core/no-agent-error "complete")))
 
@@ -521,8 +535,7 @@
                    (nil? current) (no-open-run-error "pause" target-id)
                    :else
                    (let [report
-                         (await (pause-run! database target-id
-                                            (:seon.agent.run/id current)))]
+                         (await (pause-run! database target-id current))]
                      (if (error-value? report) report :paused))))))))))))
 
 (defn ^{:async #?(:cljs true :clj false)
@@ -554,8 +567,7 @@
                      (nil? current) (no-open-run-error "resume" target-id)
                      :else
                      (let [report
-                           (await (resume-run! database target-id
-                                               (:seon.agent.run/id current)))]
+                           (await (resume-run! database target-id current))]
                        (cond
                          (error-value? report) report
                          (not ((leaf-fn ::leaf/available?)))
@@ -586,13 +598,13 @@
                     close-data
                     (when current
                       (close-transaction-data
-                       target-id (:seon.agent.run/id current) :terminated
+                       target-id (:seon.agent.run/id current)
+                       (held-claim-epoch current) :terminated
                        ((leaf-fn ::leaf/now))))
                     report
                     (await
                      (db/transact!
                       {::db/db database
-                       ::db/expected-db database
                        ::db/tx-data
                        (into [termination release-namespace] close-data)}))]
                 (if (error-value? report) report :terminated)))))))))

@@ -160,6 +160,14 @@
   :seon.config.web-render/data-page-size 100
   :seon.config.web-render/maximum-request-body-bytes 4194304}
 
+ ;; ── JVM CLAIM DRIVER ──
+ ;; The heap is a containment ceiling for retained sci contexts, not a target.
+ ;; Pool wait stays just under the bounded database call deadline so parked
+ ;; virtual threads do not fail while a legitimate platform call is in flight.
+ :seon.config/claim-driver
+ {:seon.config.claim-driver/jvm-heap-mb 4096
+  :seon.config.claim-driver/database-pool-wait-timeout-ms 110000}
+
  ;; ── RENDER BOUNDS — the GLOBAL, process-wide value/eval/message DISPLAY caps
  ;; (#46). A proper config (not scattered env reads): each cap is a plain literal
  ;; here, read by seon.config's database-edn-cap / eval-render-cap / value-* etc.
@@ -469,7 +477,6 @@
     [{:seon.agent.ctx.transcript/from-turn-offset 0
       :seon.agent.ctx.transcript/token-cap 48}]
     :seon.agent.ctx.transcript/readline? false
-    :seon.agent.ctx.transcript/result-handles? false
     :seon.agent.ctx/escape-clipping? true}]}
 
  ;; ── ROOT-CONTEXT — a SPARSE declaration merged by :seon.agent.ctx/name over

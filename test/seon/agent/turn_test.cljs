@@ -1,17 +1,16 @@
 (ns seon.agent.turn-test
   (:require
    [cljs.test :refer [async deftest is]]
-   [my.blob :as blob]
-   [my.plan :as plan]
    [seon.agent.ctx.driver :as ctx.driver]
    [seon.agent.turn :as turn]
+   [seon.agent.turn.core :as turn.core]
    [seon.config :as config]
    [seon.db :as db]
    [seon.db.id :as db.id]
    [seon.error :as error]
    [seon.execution :as execution]
    [seon.execution.host :as execution.host]
-   [seon.repl.parse :as repl-internal]))
+   [seon.schema :as schema]))
 
 (def database
   {:db-name "turn-test"
@@ -32,10 +31,24 @@
    :seon.config/repl-mode :batch
    :seon.eval/ns 'my.agent.agent-1})
 
-(def ^:private reply-program (deref #'turn/reply-program))
-(defn- ask-and-eval-reply-promise
-  [& arguments]
-  (apply (deref #'turn/ask-and-eval-reply!) arguments))
+(def ^:private reply-program turn.core/reply-program)
+
+(deftest turn-usage-schemas-are-seven-native-long-attributes
+  (let [attributes
+        [:seon.agent.turn.usage/prompt-tokens
+         :seon.agent.turn.usage/completion-tokens
+         :seon.agent.turn.usage/cached-tokens
+         :seon.agent.turn.usage/input-tokens
+         :seon.agent.turn.usage/output-tokens
+         :seon.agent.turn.usage/cache-read-input-tokens
+         :seon.agent.turn.usage/cache-creation-input-tokens]
+        facets (db/malli->datahike-schema attributes)]
+    (is (nil? (schema/schema-definition :seon.agent.turn/llm-usage)))
+    (is (= :string (schema/schema-definition :seon.agent.turn/llm-meta)))
+    (is (= (set attributes) (set (map :db/ident facets))))
+    (is (every? #(= :db.type/long (:db/valueType %)) facets))
+    (is (every? #(schema/valid-candidate-value? % 0) attributes))
+    (is (every? #(not (schema/valid-candidate-value? % -1)) attributes))))
 
 (deftest llm-attempt-fallback-reads-the-config-owner
   (with-redefs [config/llm-attempt-timeout-ms (constantly 3210)]
@@ -99,140 +112,6 @@
                   (filter #(= :form (:seon.repl/kind %)))
                   first)]
     (is (= "" (:seon.repl/narration form)))))
-
-(deftest planner-handoff-publishes-the-identical-program-and-eval-batch-once
-  (async done
-    (let [original-put blob/put!
-          original-parse repl-internal/parse-program
-          original-eval turn/eval-parsed!
-          original-publish plan/publish-generated-program!
-          parse-calls (atom 0)
-          published (atom nil)
-          program {:seon.repl/eval-entries
-                   [{:seon.repl/kind :form :seon.repl/source "(+ 1 2)"}]
-                   :seon.repl/namespaces []
-                   :seon.repl/namespace-order []
-                   :seon.repl/errors []}
-          batch {:seon.eval/ids ["eval-1"]
-                 :seon.eval/n-ok 1
-                 :seon.eval/n-fail 0}]
-      (set! blob/put!
-            (fn [_]
-              (js/Promise.resolve
-               {:my.blob/ok? false :my.blob/error "test capture omitted"})))
-      (set! repl-internal/parse-program
-            (fn [& _]
-              (swap! parse-calls inc)
-              program))
-      (set! turn/eval-parsed!
-            (fn [_ _ parsed _ _ _]
-              (is (identical? (:seon.repl/eval-entries program) parsed))
-              (js/Promise.resolve batch)))
-      (set! plan/publish-generated-program!
-            (fn [request]
-              (reset! published request)
-              (js/Promise.resolve
-               {:my.plan/ok? true
-                :my.plan/root "root"
-                :my.plan/diff
-                {:my.plan/added 0 :my.plan/dropped 0 :my.plan/updated 0}
-                :my.plan/namespace-ids {}
-                :seon.eval/ids (:seon.eval/ids batch)})))
-      (-> (ask-and-eval-reply-promise
-           {:text "ignored"} "planner" "turn-1" "run-1" false
-           'my.agent.planner database)
-          (.then
-           (fn [result]
-             (is (= 1 (:seon.agent/eval-count result)))
-             (is (= 1 @parse-calls))
-             (is (identical? program (:my.plan/program @published)))
-             (is (identical? batch (:my.plan/eval-batch @published)))
-             (is (= database (::db/db @published)))
-             (is (= "run-1" (:seon.agent.run/id @published)))
-             (is (= "turn-1" (:seon.agent.turn/id @published)))))
-          (.finally
-           (fn []
-             (set! blob/put! original-put)
-             (set! repl-internal/parse-program original-parse)
-             (set! turn/eval-parsed! original-eval)
-             (set! plan/publish-generated-program! original-publish)))
-          (.then (fn [_] (done)))
-          (.catch (fn [error] (is false (str error)) (done)))))))
-
-(deftest planner-publication-failure-closes-the-existing-turn-as-error
-  (async done
-    (let [original-put blob/put!
-          original-parse repl-internal/parse-program
-          original-eval turn/eval-parsed!
-          original-publish plan/publish-generated-program!
-          original-allocate db.id/allocate!
-          original-transact db/transact!
-          original-context db/with-tx-context
-          transactions (atom [])
-          program {:seon.repl/eval-entries []
-                   :seon.repl/namespaces []
-                   :seon.repl/namespace-order []
-                   :seon.repl/errors []}
-          batch {:seon.eval/ids []
-                 :seon.eval/n-ok 0
-                 :seon.eval/n-fail 0}]
-      (set! blob/put!
-            (fn [_]
-              (js/Promise.resolve
-               {:my.blob/ok? false :my.blob/error "test capture omitted"})))
-      (set! repl-internal/parse-program (fn [& _] program))
-      (set! turn/eval-parsed! (fn [& _] (js/Promise.resolve batch)))
-      (set! plan/publish-generated-program!
-            (fn [_]
-              (js/Promise.resolve
-               {:my.plan/ok? false
-                :my.plan/root "root"
-                :my.plan/error "namespace DAG publication failed"})))
-      (set! db.id/allocate!
-            (fn [request]
-              (let [ids {::turn/turn-allocation "turn-failed"}]
-                (js/Promise.resolve
-                 {::db.id/ids ids
-                  ::db/tx-data
-                  (::db/tx-data
-                   ((::db.id/transaction-builder request) ids))}))))
-      (set! db/transact!
-            (fn [& [request]]
-              (swap! transactions conj request)
-              (js/Promise.resolve
-               {:db-before database
-                :db-after (update database :t inc)
-                :tx-data (::db/tx-data request)
-                :tempids {}
-                :tx-meta {}})))
-      (set! db/with-tx-context (fn [_ thunk] (thunk)))
-      (-> (turn/open-turn!
-           {:seon.agent/id "planner"
-            :seon.agent.run/id-of-run "run-1"
-            ::db/db database
-            :seon.agent.turn/prompt-text "planner prompt"}
-           (fn [turn-id]
-             (ask-and-eval-reply-promise
-              {:text "ignored"} "planner" turn-id "run-1" false
-              'my.agent.planner database)))
-          (.then (fn [_] (is false "publication failure must reject the turn body")))
-          (.catch
-           (fn [error]
-             (is (= "namespace DAG publication failed" (.-message error)))
-             (is (= [{:seon.agent.turn/id "turn-failed"
-                      :seon.agent.turn/status :error
-                      :seon.agent.turn/error "namespace DAG publication failed"}]
-                    (::db/tx-data (last @transactions))))))
-          (.finally
-           (fn []
-             (set! blob/put! original-put)
-             (set! repl-internal/parse-program original-parse)
-             (set! turn/eval-parsed! original-eval)
-             (set! plan/publish-generated-program! original-publish)
-             (set! db.id/allocate! original-allocate)
-             (set! db/transact! original-transact)
-             (set! db/with-tx-context original-context)
-             (done)))))))
 
 (deftest prompt-is-the-database-value-pinned-child-result
   (async done
@@ -427,32 +306,6 @@
              (set! execution.host/invoke-compiled! original)
              (done)))))))
 
-(deftest orchestration-wrapper-preserves-retired-child-recovery-evidence
-  (let [inner
-        (ex-info
-         "The execution child exited before returning a result."
-         {:seon.agent.turn/id "turn-crashed"
-          ::execution/child-retired? true
-          :seon.error/data
-          {::execution/child-retired? true
-           :seon.execution.host/pid 812
-           :seon.execution.host/stderr-tail "native loop"}})
-        wrapper
-        (ex-info ":malli.core/invalid-output"
-                 {:seon.error/kind :seon.error.kind/malli-instrument-output}
-                 inner)
-        result (@#'turn/turn-failure wrapper)]
-    (is (= :error (:seon.agent.turn/status result)))
-    (is (= "turn-crashed" (:seon.agent.turn/id result)))
-    (is (true? (::execution/child-retired? result)))
-    (is (true? (get-in result [:seon.error/data
-                               ::execution/child-retired?])))
-    (is (= 812 (get-in result [:seon.error/data
-                               :seon.execution.host/pid])))
-    (is (= "native loop"
-           (get-in result [:seon.error/data
-                           :seon.execution.host/stderr-tail])))))
-
 (deftest open-turn-stores-the-basis-transaction-and-consumes-native-results
   (async done
     (let [original-allocate db.id/allocate!
@@ -513,137 +366,6 @@
              (set! db.id/allocate! original-allocate)
              (set! db/transact! original-transact)
              (set! db/with-tx-context original-with-context)
-             (done)))))))
-
-(deftest run-turn-pins-the-final-pull-to-the-close-transaction
-  ;; I7 falsifier (frozen-turn-inputs acceptance 3): the final turn pull
-  ;; consumes the close transaction's returned database value. A head move
-  ;; landing between close and pull must not alter the returned map.
-  (async done
-    (let [original-render turn/render-prompt
-          original-put blob/put!
-          original-eval turn/eval-parsed!
-          original-allocate db.id/allocate!
-          original-transact db/transact!
-          original-context db/with-tx-context
-          original-agent db/with-agent
-          original-pull db/pull
-          !t (atom 42)
-          last-db-after (atom nil)
-          pulled (atom nil)]
-      (set! turn/render-prompt
-            ;; multi-arity like the real fn — the in-ns call site compiles
-            ;; to direct arity-4 dispatch
-            (fn stub-render
-              ([_ _] (js/Promise.resolve prompt-value))
-              ([_ _ _] (js/Promise.resolve prompt-value))
-              ([_ _ _ _] (js/Promise.resolve prompt-value))))
-      (set! blob/put!
-            (fn [_]
-              (js/Promise.resolve
-               {:my.blob/ok? false :my.blob/error "test capture omitted"})))
-      (set! turn/eval-parsed!
-            (fn [& _]
-              (js/Promise.resolve
-               {:seon.eval/ids [] :seon.eval/n-ok 0 :seon.eval/n-fail 0})))
-      (set! db.id/allocate!
-            (fn [request]
-              (js/Promise.resolve
-               {:db-before (assoc database :t @!t)
-                :db-after (assoc database :t (swap! !t inc))
-                :tx-data (:seon.db/tx-data
-                          ((::db.id/transaction-builder request)
-                           {::turn/turn-allocation "turn-pinned"}))
-                :tempids {}
-                :tx-meta {}
-                ::db.id/ids {::turn/turn-allocation "turn-pinned"}
-                ::db.id/eids {::turn/turn-allocation 101}})))
-      (set! db/transact!
-            (fn [& [request]]
-              (let [db-after (assoc database :t (inc @!t))]
-                (swap! !t inc)
-                (reset! last-db-after db-after)
-                (js/Promise.resolve
-                 {:db-before (assoc database :t (dec (:t db-after)))
-                  :db-after db-after
-                  :tx-data (:seon.db/tx-data request)
-                  :tempids {}
-                  :tx-meta {}}))))
-      (set! db/with-tx-context (fn [_context thunk] (thunk)))
-      (set! db/with-agent (fn [_id thunk] (thunk)))
-      (set! db/pull
-            (fn stub-pull
-              ([request]
-               (reset! pulled request)
-               ;; a concurrent transaction lands between close and pull
-               (swap! !t inc)
-               (js/Promise.resolve
-                {:seon.agent.turn/id (second (:seon.db/ref request))
-                 :seon.agent.turn/status :done}))
-              ([selector entity-id]
-               (stub-pull {:seon.db/pull-pattern selector
-                           :seon.db/ref entity-id}))
-              ([database-value selector entity-id]
-               (stub-pull {:seon.db/db database-value
-                           :seon.db/pull-pattern selector
-                           :seon.db/ref entity-id}))))
-      (-> (turn/run-turn!
-           {:seon.agent/id "agent-1"
-            :seon.agent/llm-fn (fn [_] (js/Promise.resolve {:text ""}))
-            :seon.db/db database})
-          (.then
-           (fn [result]
-             (let [close-db (:seon.db/db @pulled)]
-               (is (= "turn-pinned" (:seon.agent.turn/id result)))
-               (is (= :done (:seon.agent.turn/status result)))
-               (is (= 0 (:seon.agent/eval-count result)))
-               (is (some? close-db)
-                   "the final pull carries an explicit pinned value")
-               (is (= @last-db-after close-db)
-                   "the pinned value is the CLOSE transaction's db-after"))))
-          (.catch (fn [error] (is false (str error))))
-          (.finally
-           (fn []
-             (set! turn/render-prompt original-render)
-             (set! blob/put! original-put)
-             (set! turn/eval-parsed! original-eval)
-             (set! db.id/allocate! original-allocate)
-             (set! db/transact! original-transact)
-             (set! db/with-tx-context original-context)
-             (set! db/with-agent original-agent)
-             (set! db/pull original-pull)
-             (done)))))))
-
-(deftest run-turn-without-a-pinned-database-value-fails-loudly
-  ;; I8 falsifier: the unpinned door is closed — a missing :seon.db/db is a
-  ;; :core-bug error value, zero prompt renders, zero provider calls.
-  (async done
-    (let [original-render turn/render-prompt
-          renders (atom 0)
-          llm-calls (atom 0)]
-      (set! turn/render-prompt
-            (fn stub-render
-              ([_ _] (swap! renders inc) (js/Promise.resolve prompt-value))
-              ([_ _ _] (swap! renders inc) (js/Promise.resolve prompt-value))
-              ([_ _ _ _]
-               (swap! renders inc)
-               (js/Promise.resolve prompt-value))))
-      (-> (turn/run-turn!
-           {:seon.agent/id "agent-1"
-            :seon.agent/llm-fn (fn [_]
-                                 (swap! llm-calls inc)
-                                 (js/Promise.resolve {:text ""}))})
-          (.then
-           (fn [result]
-             (is (= :error (:seon.agent.turn/status result)))
-             (is (= :core-bug (:seon.error/kind result)))
-             (is (string? (:seon.error/data result)))
-             (is (zero? @renders) "no prompt render without a pinned value")
-             (is (zero? @llm-calls) "no provider call without a pinned value")))
-          (.catch (fn [error] (is false (str error))))
-          (.finally
-           (fn []
-             (set! turn/render-prompt original-render)
              (done)))))))
 
 (deftest open-turn-propagates-a-direct-allocation-error

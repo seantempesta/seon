@@ -208,8 +208,18 @@
 
 (defn- run-fence-transaction
   [agent-id run-fence]
-  (let [run-ref [:seon.agent.run/id (:seon.agent.run/id run-fence)]]
-    [[:db.fn/cas [:seon.agent/id agent-id] :seon.agent/run run-ref run-ref]]))
+  (let [run-ref [:seon.agent.run/id (:seon.agent.run/id run-fence)]
+        claim-epoch (:seon.agent.run/claim-epoch run-fence)]
+    (if (int? claim-epoch)
+      [[:db.fn/cas [:seon.agent/id agent-id]
+        :seon.agent/run run-ref run-ref]
+       [:db.fn/cas run-ref :seon.agent.run/claim-epoch
+        claim-epoch claim-epoch]]
+      (throw
+       (ex-info "The invocation run fence is missing its held claim epoch."
+                {:seon.error/kind :core-bug
+                 :seon.agent/id agent-id
+                 :seon.execution/run-fence run-fence})))))
 
 (defn claim-run-fence!
   "Claim one invocation run fence at its immutable database value."

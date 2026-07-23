@@ -2260,22 +2260,9 @@
                          :seon.runtime.state/error
                          (or (:seon.runtime.state/error reconciled)
                              (:seon.error/message reconciled))})))))
-        (when autonomous?
-          (let [recovered
-                (await
-                 (db/with-tx-context
-                  {:seon.db/user [:seon.agent/id "root"]
-                   :seon.db/process
-                   (db.process/lookup-ref :seon.db.process/boot)}
-                  (fn [] (recovery/recover! {}))))]
-            (recovery-result! recovered)
-            (when (::recovery/repaired? recovered)
-              (log/info-console!
-               "seon.client/start-runtime!"
-               (str "crash recovery: restored "
-                    (count (::recovery/agent-ids recovered))
-                    " agent(s) to idle")
-               recovered))))
+        ;; Claim leases and persisted phase cursors own ordinary restart.
+        ;; The conservative recovery operation remains an explicit repair
+        ;; surface; cold boot must not close work held by another claimant.
         (let [configuration (await (acquire-configuration!))
               _ (when envelope
                   (await (prove-launch-configuration! envelope configuration)))

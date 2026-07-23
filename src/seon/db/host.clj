@@ -15,8 +15,10 @@
 (def defaults
   "Hardware-derived defaults for one host database connection pool."
   {::pool-size (max 1 (dec (.availableProcessors (Runtime/getRuntime))))
-   ::pool-wait-timeout-ms 1000
+   ::pool-wait-timeout-ms 110000
    ::call-deadline-ms 120000
+   ::interest-call-timeout-ms 120000
+   ::interest-reconnect-backoff-ms 250
    ::request-conflict-backoff-ms 10})
 
 (declare close-member-session! pool-error protocol-error-value)
@@ -73,6 +75,7 @@
 (defn- required-interest-option
   [writer option]
   (or (get writer option)
+      (get defaults option)
       (throw
        (ex-info "The database interest session is missing a required dial."
                 {::missing-option option

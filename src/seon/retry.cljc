@@ -27,7 +27,10 @@
    FUTURE (not built — `again` also has it): a circuit-breaker
    (consecutive-failure trip + half-open probe) would compose as another
    manipulator; add it here when a caller needs it."
+  #?(:clj (:refer-clojure :exclude [await]))
   (:require [seon.schema :as schema]))
+
+#?(:clj (defmacro await [value] value))
 
 ;;; ============================================================
 ;;; STRATEGY shape — a (possibly infinite) seq of delays in ms. Specced
@@ -134,13 +137,18 @@
 ;;; EXECUTOR — run a thunk against a strategy, ^:async.
 ;;; ============================================================
 
-#?(:cljs
-   (do
-(defn ^:async ^:private sleep!
-  "A `js/Promise` that resolves after `ms` — the non-blocking backoff wait
-   (no core.async, no blocking sleep)."
+(defn ^{:async #?(:cljs true :clj false)} ^:private sleep!
+  "Wait interruptibly for one retry delay on the current platform."
   [ms]
-  (js/Promise. (fn [resolve] (js/setTimeout resolve ms))))
+  #?(:clj
+     (try
+       (Thread/sleep (long ms))
+       true
+       (catch InterruptedException _
+         (.interrupt (Thread/currentThread))
+         false))
+     :cljs
+     (js/Promise. (fn [resolve] (js/setTimeout resolve ms)))))
 
 (schema/register! :seon.retry/with-retry-request
   [:map
@@ -166,7 +174,7 @@
    ;; non-retryable).
    [:seon.retry/retries :seon.retry/count]])
 
-(defn ^:async with-retry!
+(defn ^{:async #?(:cljs true :clj false)} with-retry!
   "Run `:seon.retry/thunk` against `:seon.retry/strategy`, with retries.
 
    `:seon.retry/thunk` is a `() -> Promise<result>`. Retries while
@@ -191,5 +199,9 @@
             (on-retry {:seon.retry/attempt  (inc retries)
                        :seon.retry/delay-ms wait
                        :seon.retry/result   result}))
-          (await (sleep! wait))
-          (recur (next delays) (inc retries)))))))))
+          (let [continued? (await (sleep! wait))]
+            (if continued?
+              (recur (next delays) (inc retries))
+              {:seon.retry/result result
+               :seon.retry/retries retries
+               :seon.retry/interrupted? true})))))))

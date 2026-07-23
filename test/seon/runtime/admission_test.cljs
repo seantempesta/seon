@@ -765,23 +765,17 @@
                       (js/Promise.resolve {}))]
         (-> (js/Promise.all
               #js [wake drive
-                   (loop/run-loop!
-                     {:seon.agent/id "closed-agent"}
-                     "closed-run")
                    (schedule/fire-due-schedules!
                      {:seon.agent/now (js/Date.)})
                    ((deref #'loop/run-tick!) {} (js/Date.))])
             (.then
               (fn [results]
-                (let [[wake-result drive-result loop-result
-                       schedule-result tick-result]
+                (let [[wake-result drive-result schedule-result tick-result]
                       (array-seq results)]
                   (is (= :seon.runtime/unavailable
                          (unavailable-kind wake-result)))
                   (is (= :seon.runtime/unavailable
                          (unavailable-kind drive-result)))
-                  (is (= :seon.runtime/unavailable
-                         (unavailable-kind loop-result)))
                   (is (= [] (:seon.agent.schedule/fired schedule-result)))
                   (is (= :seon.runtime/unavailable
                          (unavailable-kind schedule-result)))

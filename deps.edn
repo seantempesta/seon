@@ -60,6 +60,8 @@
   :host
   {:extra-deps {org.babashka/sci {:local/root "reference-code/sci"}
                 parinferish/parinferish {:mvn/version "0.8.0"}
+                rewrite-clj/rewrite-clj
+                {:local/root "reference-code/rewrite-clj"}
                 dev.data-star.clojure/sdk
                 {:local/root
                  "reference-code/datastar-clojure/libraries/sdk"}

@@ -103,19 +103,13 @@
           (close-session-channel! session)
           false)))))
 
-(defn- run-invocation!
-  "Execute one claimed invocation on the calling pool thread."
-  [session token invocation]
-  ;; Cancellation revokes this exact invocation generation before touching
-  ;; its Future. If the pool won the FutureTask start race, it still cannot
-  ;; acquire policy, create receipts, evaluate, or record after settlement.
-  (when (identical? token @(::session/active session))
-    (let [{invocation-id :seon.execution/invocation-id
-           database :seon.db/db
+(defn execute-invocation!
+  "Execute one invocation through the guarded host door and return its value."
+  [session invocation]
+  (let [{database :seon.db/db
            identity-value :seon.execution/function-identity
            arguments :seon.execution/arguments
-           run-fence :seon.execution/run-fence
-           result-limit :seon.execution/result-limit-bytes} invocation
+           run-fence :seon.execution/run-fence} invocation
           function-symbol (:seon.execution/function-symbol identity-value)
           compiled? (contains? identity-value
                                :seon.execution/artifact-digest)
@@ -163,7 +157,10 @@
                            (:seon.config.guard/output-cap guard-facts))
                   result (binding [context/*agent-id*
                                    (:seon.execution/agent-id
-                                    @(::session/startup session))]
+                                    @(::session/startup session))
+                                   context/*tx-context*
+                                   (merge context/*tx-context*
+                                          run-fence)]
                            (eval/eval-batch-result session (first arguments)
                                               sampling-limits database
                                               (or run-fence {})))]
@@ -192,15 +189,33 @@
               (locking (::session/interrupt-lock session)
                 (reset! (::session/worker-phase session) :idle)
                 (Thread/interrupted))))]
+    (if-let [error (::error outcome)]
+      error
+      (::value outcome))))
+
+(defn- run-invocation!
+  "Execute one claimed invocation on the calling pool thread."
+  [session token invocation]
+  ;; Cancellation revokes this exact invocation generation before touching
+  ;; its Future. If the pool won the FutureTask start race, it still cannot
+  ;; acquire policy, create receipts, evaluate, or record after settlement.
+  (when (identical? token @(::session/active session))
+    (let [{invocation-id :seon.execution/invocation-id
+           database :seon.db/db
+           result-limit :seon.execution/result-limit-bytes} invocation
+          value (execute-invocation! session invocation)]
       (settle!
        session token
-       (if-let [error (::error outcome)]
-         (session/error-frame invocation-id error database)
-         (let [bounded (session/bounded-result (::value outcome) result-limit)]
+       (if (:seon.error/message value)
+         (session/error-frame invocation-id value database)
+         (let [bounded (session/bounded-result value result-limit)]
            (if (::session/ok? bounded)
-             (session/result-frame invocation-id database (::session/value bounded)
-                           (::session/result-bytes bounded))
-             (session/error-frame invocation-id (::session/error bounded) database))))))))
+             (session/result-frame invocation-id database
+                                   (::session/value bounded)
+                                   (::session/result-bytes bounded))
+             (session/error-frame invocation-id
+                                  (::session/error bounded)
+                                  database))))))))
 
 (defn begin-invocation!
   "Begin one admitted invocation."

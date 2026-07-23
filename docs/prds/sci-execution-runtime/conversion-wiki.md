@@ -433,6 +433,31 @@ the anchor stays the state ledger.
   Seon's per-database mutation serializer or invent a Seon-side head cache to
   conceal the dependency defect
   ([[../../../seon/issues/datahike-local-writer-rewinds-uncommitted-basis]]).
+- **A held claim still needs a transaction when a wake carries new input.**
+  Returning the already-held epoch without writing strands the message outside
+  `:seon.agent.run/consumed-input`; calling the retired epoch-less `renew!`
+  instead adopts authority the caller does not hold. The held transition emits
+  the same pointer+epoch-fenced beat transaction and adds the consumption edge.
+  A later scan derives the oldest uncovered inbound edge so a wake that raced
+  another tier's live custody is not lost (`seon.agent.run.core/claim-plan`,
+  `seon.agent.driver/acquire-run-state!`).
+- **Cursor resume must consume the persisted artifact, not rerender an
+  equivalent-looking input.** Prompt rendering includes legitimate
+  wall-clock/host observations. Re-rendering after `:rendered` can therefore
+  change bytes and violate the attempt's config digest. Store once, then split
+  the exact prompt blob at the system boundary for every resumed attempt
+  (`seon.agent.turn/llm-phase!`).
+- **Register an unstarted vthread before starting it.** A virtual driver thread
+  can complete before the handle map records it; installing the handle after
+  `.start` leaves a stale entry that suppresses every later dispatch for that
+  run. Create with `Thread/ofVirtual().unstarted`, win the map CAS, then start;
+  identity-check cleanup (`seon.agent.driver.host/start!`).
+- **Validate config-query cardinality before `every?`.** `every?` over the
+  empty values of a missing policy is true. The guard door then receives nil
+  fuel and collapses every host invocation with an implementation NPE. Require
+  the complete five-field row before validating positive values; remain loud
+  when the database lacks the config facts
+  ([[../../../seon/issues/guard-policy-empty-query-passes-vacuous-validation]]).
 
 ## Design rulings that bind conversions
 

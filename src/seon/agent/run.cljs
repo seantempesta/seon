@@ -8,6 +8,7 @@
   (:require
     [seon.agent.ctx :as ctx]
     [seon.agent.message :as msg]
+    [seon.agent.run.core :as run.core]
     [seon.ai.tokens :as tokens]
     [seon.config :as config]
     [seon.db :as db]
@@ -35,6 +36,11 @@
 (schema/register! :seon.agent.run/turn-limit :int)           ; WORK-QUANTITY bound (bumpable)
 (schema/register! :seon.agent.run/deadline   :inst)          ; WALL-CLOCK bound (absolute)
 (schema/register! :seon.agent.run/last-beat-at :inst)        ; heartbeat (liveness; per turn)
+(schema/register! :seon.agent.run/claimant [:string {:min 1}])
+(schema/register! :seon.agent.run/claim-epoch [:int {:min 1}])
+(schema/register!
+ :seon.agent.run/consumed-input
+ [:set :seon.db/ref])
 ;; Pause marker: presence on the OPEN run ⇒ derived state :paused (read by
 ;; seon.derive/derive-state via the agent's primitives).
 (schema/register! :seon.agent.run/paused-at  :inst)
@@ -85,6 +91,10 @@
    [:seon.agent.run/deadline      :seon.agent.run/deadline]
    [:seon.agent.run/cause         {:optional true} :seon.agent.run/cause]
    [:seon.agent.run/last-beat-at  {:optional true} :seon.agent.run/last-beat-at]
+   [:seon.agent.run/claimant      {:optional true} :seon.agent.run/claimant]
+   [:seon.agent.run/claim-epoch   {:optional true} :seon.agent.run/claim-epoch]
+   [:seon.agent.run/consumed-input
+    {:optional true} :seon.agent.run/consumed-input]
    [:seon.agent.run/paused-at     {:optional true} :seon.agent.run/paused-at]
    [:seon.agent.run/remaining-ms  {:optional true} :seon.agent.run/remaining-ms]
    [:seon.agent.run/closed-reason {:optional true} :seon.agent.run/closed-reason]
@@ -226,6 +236,8 @@
    [:seon.agent.run/turn-limit    :seon.agent.run/turn-limit]
    [:seon.agent.run/deadline      :seon.agent.run/deadline]
    [:seon.agent.run/last-beat-at  {:optional true} :seon.agent.run/last-beat-at]
+   [:seon.agent.run/claimant      {:optional true} :seon.agent.run/claimant]
+   [:seon.agent.run/claim-epoch   {:optional true} :seon.agent.run/claim-epoch]
    [:seon.agent.run/paused-at     {:optional true} :seon.agent.run/paused-at]
    [:seon.agent.run/closed-reason {:optional true} :seon.agent.run/closed-reason]])
 
@@ -234,6 +246,7 @@
                     :seon.agent.run/trigger :seon.agent.run/started-at
                     :seon.agent.run/turn-limit :seon.agent.run/deadline
                     :seon.agent.run/last-beat-at :seon.agent.run/paused-at
+                    :seon.agent.run/claimant :seon.agent.run/claim-epoch
                     :seon.agent.run/closed-reason]))
 
 ;; The agent-id VALUE schema in these request maps is base `:string`, NOT
@@ -269,6 +282,8 @@
                         :seon.agent.run/trigger :seon.agent.run/started-at
                         :seon.agent.run/turn-limit :seon.agent.run/deadline
                         :seon.agent.run/last-beat-at
+                        :seon.agent.run/claimant
+                        :seon.agent.run/claim-epoch
                         :seon.agent.run/paused-at
                         :seon.agent.run/closed-reason]}]
                      ::db/ref [:seon.agent/id id]}))
@@ -391,8 +406,14 @@
    `:seon.agent/run` pointer STILL names `run-id`. Lead a work-tx with this and
    the tx commits iff the pointer is unchanged; a moved/retracted pointer aborts
    the WHOLE tx and returns a direct :transact/cas error value."
-  [id run-id]
-  (db/cas-assert [:seon.agent/id id] :seon.agent/run [:seon.agent.run/id run-id]))
+  ([id run-id]
+   (throw
+    (ex-info "Run work requires the driver-held claim epoch."
+             {:seon.error/kind :core-bug
+              :seon.agent/id id
+              :seon.agent.run/id run-id})))
+  ([id run-id claim-epoch]
+   (run.core/run-fence id run-id claim-epoch)))
 
 (schema/register! ::open-run-request
   [:map
@@ -508,6 +529,7 @@
 (schema/register! ::close-run-request
   [:map
    [:seon.agent.run/id            :seon.agent.run/id]
+   [:seon.agent.run/claim-epoch   :seon.agent.run/claim-epoch]
    [:seon.agent.run/closed-reason :seon.agent.run/closed-reason]
    [:seon.db/db {:optional true} :seon.db/db]])
 
@@ -522,15 +544,18 @@
    (the pointer only moves off this run via a concurrent close, which already
    closed it). Pure (no db read) so the fence wiring is unit-testable. Every
    close stamps `:seon.agent.run/closed-at` = `closed-at` alongside the reason."
-  [owns? agent-id run-id reason closed-at]
+  [owns? agent-id run-id claim-epoch reason closed-at]
   (let [close-row {:seon.agent.run/id            run-id
                    :seon.agent.run/status        :closed
                    :seon.agent.run/closed-reason reason
                    :seon.agent.run/closed-at     closed-at}]
     (if owns?
-      [(run-fence agent-id run-id)
-       close-row
-       [:db/retract [:seon.agent/id agent-id] :seon.agent/run]]
+      (into
+       (run-fence agent-id run-id claim-epoch)
+       [close-row
+        [:db/retract [:seon.agent.run/id run-id]
+         :seon.agent.run/claimant]
+        [:db/retract [:seon.agent/id agent-id] :seon.agent/run]])
       [close-row])))
 
 ;; ============================================================
@@ -676,7 +701,9 @@
    retract stay in ONE tx — never a `:closed` run with a live pointer, which
    would deadlock `open-run!`'s absent-pointer CAS. `^:async`."
   {:malli/schema [:=> [:cat ::close-run-request] ::transact-result]}
-  [{run-id :seon.agent.run/id reason :seon.agent.run/closed-reason
+  [{run-id :seon.agent.run/id
+    claim-epoch :seon.agent.run/claim-epoch
+    reason :seon.agent.run/closed-reason
     database :seon.db/db}]
   (let [database (or database (await (db/db)))]
     (if (error-value? database)
@@ -701,7 +728,7 @@
             report    (await (db/transact!
                               {::db/db database
                                ::db/tx-data
-                               (close-tx-data owns? agent-id run-id reason
+                               (close-tx-data owns? agent-id run-id claim-epoch reason
                                               (js/Date.))}))]
         ;; Piece 2b — route the parent/root OUTCOME notice through this one
         ;; choke point (only after the close committed; only for an outcome
@@ -714,6 +741,7 @@
   [:map
    [:seon.agent/id     :string]
    [:seon.agent.run/id :seon.agent.run/id]
+   [:seon.agent.run/claim-epoch :seon.agent.run/claim-epoch]
    ;; Optional clock extension (ms) — defaults to the agent's
    ;; default-deadline-ms (else the global default).
    [:seon.agent.run/deadline-extension-ms {:optional true} :int]])
@@ -727,6 +755,7 @@
    direct CAS error (no pre-read predicate). `^:async`."
   {:malli/schema [:=> [:cat ::renew-request] ::transact-result]}
   [{id :seon.agent/id run-id :seon.agent.run/id
+    claim-epoch :seon.agent.run/claim-epoch
     ext :seon.agent.run/deadline-extension-ms}]
   (let [database (await (db/db))]
     (if (error-value? database)
@@ -763,16 +792,18 @@
                (db/transact!
                 {::db/db database
                  ::db/tx-data
-                 [(run-fence id run-id)
-                  [:db.fn/cas [:seon.agent.run/id run-id]
-                   :seon.agent.run/turn-limit old-turn-limit (inc old-turn-limit)]
-                  [:db/add [:seon.agent.run/id run-id]
-                   :seon.agent.run/deadline new-deadline]]})))))))))
+                 (into
+                  (run-fence id run-id claim-epoch)
+                  [[:db.fn/cas [:seon.agent.run/id run-id]
+                    :seon.agent.run/turn-limit old-turn-limit (inc old-turn-limit)]
+                   [:db/add [:seon.agent.run/id run-id]
+                    :seon.agent.run/deadline new-deadline]])})))))))))
 
 (schema/register! ::beat-request
   [:map
    [:seon.agent/id     :string]
-   [:seon.agent.run/id :seon.agent.run/id]])
+   [:seon.agent.run/id :seon.agent.run/id]
+   [:seon.agent.run/claim-epoch :seon.agent.run/claim-epoch]])
 
 (defn ^:async beat!
   "Heartbeat: write `last-beat-at` = now.
@@ -782,16 +813,20 @@
    direct error — the loop reads that as lost authority and stops.
    `^:async`."
   {:malli/schema [:=> [:cat ::beat-request] ::transact-result]}
-  [{id :seon.agent/id run-id :seon.agent.run/id}]
+  [{id :seon.agent/id run-id :seon.agent.run/id
+    claim-epoch :seon.agent.run/claim-epoch}]
   (await (db/transact!
            {:seon.db/tx-data
-            [(run-fence id run-id)
-             {:seon.agent.run/id run-id :seon.agent.run/last-beat-at (js/Date.)}]})))
+            (into
+             (run-fence id run-id claim-epoch)
+             [{:seon.agent.run/id run-id
+               :seon.agent.run/last-beat-at (js/Date.)}])})))
 
 (schema/register! ::pause-request
   [:map
    [:seon.agent/id     :string]
    [:seon.agent.run/id :seon.agent.run/id]
+   [:seon.agent.run/claim-epoch :seon.agent.run/claim-epoch]
    [:seon.db/db {:optional true} :seon.db/db]])
 
 (defn ^:async pause!
@@ -802,7 +837,8 @@
    never instantly blows the clock bound. The tx LEADS with the [[run-fence]]
    CAS. `^:async`."
   {:malli/schema [:=> [:cat ::pause-request] ::transact-result]}
-  [{id :seon.agent/id run-id :seon.agent.run/id database :seon.db/db}]
+  [{id :seon.agent/id run-id :seon.agent.run/id
+    claim-epoch :seon.agent.run/claim-epoch database :seon.db/db}]
   (let [database (or database (await (db/db)))]
     (if (error-value? database)
       database
@@ -821,18 +857,22 @@
              (db/transact!
               {::db/db database
                ::db/tx-data
-               [(run-fence id run-id)
-                (db/cas-assert [:seon.agent.run/id run-id]
-                               :seon.agent.run/deadline deadline)
-                [:db.fn/cas [:seon.agent.run/id run-id]
-                 :seon.agent.run/paused-at nil now]
-                [:db/add [:seon.agent.run/id run-id]
-                 :seon.agent.run/remaining-ms remaining-ms]]}))))))))
+               (into
+                (run-fence id run-id claim-epoch)
+                [(db/cas-assert [:seon.agent.run/id run-id]
+                                :seon.agent.run/deadline deadline)
+                 [:db.fn/cas [:seon.agent.run/id run-id]
+                  :seon.agent.run/paused-at nil now]
+                 [:db/add [:seon.agent.run/id run-id]
+                  :seon.agent.run/remaining-ms remaining-ms]
+                 [:db/retract [:seon.agent.run/id run-id]
+                  :seon.agent.run/claimant]])}))))))))
 
 (schema/register! ::resume-request
   [:map
    [:seon.agent/id     :string]
    [:seon.agent.run/id :seon.agent.run/id]
+   [:seon.agent.run/claim-epoch :seon.agent.run/claim-epoch]
    [:seon.db/db {:optional true} :seon.db/db]])
 
 (defn ^:async resume!
@@ -845,7 +885,8 @@
    overwrite with the default window. The tx LEADS with the [[run-fence]] CAS
    too. `^:async`."
   {:malli/schema [:=> [:cat ::resume-request] ::transact-result]}
-  [{id :seon.agent/id run-id :seon.agent.run/id database :seon.db/db}]
+  [{id :seon.agent/id run-id :seon.agent.run/id
+    claim-epoch :seon.agent.run/claim-epoch database :seon.db/db}]
   (let [database (or database (await (db/db)))]
     (if (error-value? database)
       database
@@ -868,17 +909,18 @@
              (db/transact!
               {::db/db database
                ::db/tx-data
-               [(run-fence id run-id)
-                (db/cas-assert [:seon.agent.run/id run-id]
-                               :seon.agent.run/paused-at paused-at)
-                (db/cas-assert [:seon.agent.run/id run-id]
-                               :seon.agent.run/remaining-ms remaining-ms)
-                [:db/add [:seon.agent.run/id run-id]
-                 :seon.agent.run/deadline new-deadline]
-                [:db/retract [:seon.agent.run/id run-id]
-                 :seon.agent.run/paused-at]
-                [:db/retract [:seon.agent.run/id run-id]
-                 :seon.agent.run/remaining-ms]]}))))))))
+               (into
+                (run-fence id run-id claim-epoch)
+                [(db/cas-assert [:seon.agent.run/id run-id]
+                                :seon.agent.run/paused-at paused-at)
+                 (db/cas-assert [:seon.agent.run/id run-id]
+                                :seon.agent.run/remaining-ms remaining-ms)
+                 [:db/add [:seon.agent.run/id run-id]
+                  :seon.agent.run/deadline new-deadline]
+                 [:db/retract [:seon.agent.run/id run-id]
+                  :seon.agent.run/paused-at]
+                 [:db/retract [:seon.agent.run/id run-id]
+                  :seon.agent.run/remaining-ms]])}))))))))
 
 ;; ============================================================
 ;; The deadline WATCHDOG — the wall-clock half of the one ticker
@@ -916,26 +958,27 @@
                   (db/query
                    {::db/db database
                     ::db/query
-                        '[:find ?rid ?deadline
+                        '[:find ?rid ?deadline ?claim-epoch
                           :where
                           [?r :seon.agent.run/status :open]
                           [?r :seon.agent.run/id ?rid]
                           [?r :seon.agent.run/deadline ?deadline]
+                          [?r :seon.agent.run/claim-epoch ?claim-epoch]
                           (not [?r :seon.agent.run/paused-at _])]}))]
         (if (error-value? rows)
           rows
           (let [overdue (->> rows
-                             (filter (fn [[_ deadline]]
+                             (filter (fn [[_ deadline _]]
                                        (> (.getTime now) (.getTime deadline))))
-                             (map first)
-                             sort
+                             (sort-by first)
                              vec)]
-            (loop [[rid & more] overdue]
+            (loop [[[rid _deadline claim-epoch] & more] overdue]
               (if-not rid
-                {:seon.agent.run/closed overdue}
+                {:seon.agent.run/closed (mapv first overdue)}
                 (let [result
                       (await
                        (close-run! {:seon.agent.run/id rid
+                                    :seon.agent.run/claim-epoch claim-epoch
                                     :seon.agent.run/closed-reason
                                     :deadline-exceeded}))]
                   (if (error-value? result)
@@ -964,20 +1007,22 @@
 ;; ============================================================
 
 (def ^:private stale-runs-query
-  '[:find ?rid ?agent-id ?started ?anchor
+  '[:find ?rid ?agent-id ?started ?anchor ?claim-epoch
     :where
     [?r :seon.agent.run/status :open]
     [?r :seon.agent.run/id ?rid]
     [?r :seon.agent.run/agent ?agent]
     [?agent :seon.agent/id ?agent-id]
     [?r :seon.agent.run/started-at ?started]
+    [?r :seon.agent.run/claim-epoch ?claim-epoch]
     (not [?r :seon.agent.run/paused-at _])
     (or-join [?r ?anchor]
              [?r :seon.agent.run/last-beat-at ?anchor]
              (and [?r :seon.agent.run/started-at ?anchor]
                   (not [?r :seon.agent.run/last-beat-at _])))])
 
-(schema/register! ::stale-run-row [:tuple :string :string :inst :inst])
+(schema/register! ::stale-run-row
+  [:tuple :string :string :inst :inst :seon.agent.run/claim-epoch])
 (schema/register! ::stale-run-rows [:set ::stale-run-row])
 
 (defn stale-run-ids
@@ -994,7 +1039,7 @@
   [rows now stale-ms]
   (let [cutoff (- (.getTime ^js now) stale-ms)]
     (->> rows
-         (keep (fn [[run-id _agent-id _started-at anchor]]
+         (keep (fn [[run-id _agent-id _started-at anchor _claim-epoch]]
                  (when (< (.getTime ^js anchor) cutoff) run-id)))
          sort
          vec)))
@@ -1050,15 +1095,17 @@
               (let [configuration (db/decode-edn-values stored-configuration)
                     stale-ms (config/watchdog-stale-ms configuration)
                     ids (stale-run-ids rows now stale-ms)
-                    agent-id-by-run-id (into {} (map (juxt first second)) rows)]
+                    row-by-run-id (into {} (map (juxt first identity)) rows)]
                 (loop [[run-id & more] ids]
                   (if-not run-id
                     {:seon.agent.run/closed ids}
-                    (let [agent-id (get agent-id-by-run-id run-id)
+                    (let [[_ agent-id _ _ claim-epoch]
+                          (get row-by-run-id run-id)
                           result
                           (await
                            (close-run!
                             {:seon.agent.run/id run-id
+                             :seon.agent.run/claim-epoch claim-epoch
                              :seon.agent.run/closed-reason :crashed}))]
                       (if (error-value? result)
                         result

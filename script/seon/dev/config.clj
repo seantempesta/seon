@@ -56,6 +56,22 @@
         (str heap-mb "m"))
       (:seon.dev.config/writer-max-heap configuration)))
 
+(defn claim-driver-heap-mb
+  "Return the resolved JVM claimant heap ceiling in MiB."
+  [configuration]
+  (get-in configuration
+          [:seon.dev.config/resolved-configuration
+           :seon.config.claim-driver/jvm-heap-mb]
+          4096))
+
+(defn claim-driver-pool-wait-timeout-ms
+  "Return the resolved claimant database-pool wait ceiling."
+  [configuration]
+  (get-in configuration
+          [:seon.dev.config/resolved-configuration
+           :seon.config.claim-driver/database-pool-wait-timeout-ms]
+          110000))
+
 (defn- validate-configuration! [configuration]
   (when-let [heap (writer-max-heap configuration)]
     (when-not (re-matches #"[1-9][0-9]*[kKmMgG]" heap)

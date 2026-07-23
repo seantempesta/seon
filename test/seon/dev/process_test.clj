@@ -234,11 +234,16 @@
            (:seon.dev.process/dependencies host)))
     (is (= :seon.dev.process.readiness/host
            (:seon.dev.process/readiness host)))
-    (is (= ["clojure" "-M:writer:host" "-m" "seon.host"]
-           (subvec (:seon.dev.process/argv host) 0 4)))
-    (is (= (:seon.dev.config/host-eval-socket configuration)
-           (:seon.host/socket-path
-            (edn/read-string (last (:seon.dev.process/argv host))))))
+    (is (= ["clojure" "-J-Xmx4096m" "-M:writer:host" "-m" "seon.host"]
+           (subvec (:seon.dev.process/argv host) 0 5)))
+    (let [request (edn/read-string (last (:seon.dev.process/argv host)))]
+      (is (= (:seon.dev.config/host-eval-socket configuration)
+             (:seon.host/socket-path request)))
+      (is (= 110000
+             (:seon.host/database-pool-wait-timeout-ms request)))
+      (is (= (::launch/blob-storage-view
+              (:seon.dev.config/launch-descriptor configuration))
+             (:my.blob/storage-view request))))
     (is (= [process/watcher-id process/writer-id process/host-id]
            (get-in spec-map [process/pod-id :seon.dev.process/dependencies])))))
 

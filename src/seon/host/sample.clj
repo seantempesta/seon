@@ -308,7 +308,8 @@
                    :seon.config.guard/deadline-ms
                    :seon.config.guard/output-cap]
                   row))]
-    (if (every? pos-int? (vals policy))
+    (if (and (= 5 (count policy))
+             (every? pos-int? (vals policy)))
       policy
       (throw
        (ex-info "The invocation database lacks a complete SCI guard policy."
