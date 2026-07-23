@@ -499,6 +499,22 @@ COMPLETELY before dispatching anything.
   whether :seon.agent.run/last-beat-at can go no-history (recovery
   notices derive from history joins — check what claim archaeology
   reads before flipping).
+- U7 COMPLETE (e6a23e37b + bc27f46eb): the whole ctx block family
+  portable around ONE acquisition executor; admin isolated in
+  ctx/admin.cljs; typeahead the experimental leaf; JVM requires +
+  cross-tier byte assertion + authored-infinite-render guard green.
+  Rendering is now tier-independent — the R26 web-render and
+  claimant tiers can render agent context. U9 (great deletion) is
+  DEPENDENCY-READY (U2+U5+U7 all landed) behind the checkpoint;
+  edge-bundle handoff #3 (execution.cljs artifact inventory) is
+  UNBLOCKED — grant on that lane's return.
+- INTEGRATION CHECKPOINT IS DUE when the edge-bundle lane returns
+  (last source-editing lane): frozen tree → full bin/test-cljs +
+  widened bin/test-writer + operator gate → the deferred live-proof
+  list (U1 guard live, U4 restart byte comparison, U5 web
+  up/status/down + identity + gzip transcripts, U6a/U6b live LLM
+  drives incl. JVM-claimant batch+stream, U8a leaf invocations) →
+  one demo bug-finder run. Then U9 + P2 dispatch.
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
