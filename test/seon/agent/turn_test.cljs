@@ -4,7 +4,6 @@
    [seon.agent.ctx.driver :as ctx.driver]
    [seon.agent.turn :as turn]
    [seon.agent.turn.core :as turn.core]
-   [seon.config :as config]
    [seon.db :as db]
    [seon.db.id :as db.id]
    [seon.error :as error]
@@ -49,14 +48,6 @@
     (is (every? #(= :db.type/long (:db/valueType %)) facets))
     (is (every? #(schema/valid-candidate-value? % 0) attributes))
     (is (every? #(not (schema/valid-candidate-value? % -1)) attributes))))
-
-(deftest llm-attempt-fallback-reads-the-config-owner
-  (with-redefs [config/llm-attempt-timeout-ms (constantly 3210)]
-    (is (= 3210
-           (@#'turn/effective-llm-attempt-timeout-ms {})))
-    (is (= 99
-           (@#'turn/effective-llm-attempt-timeout-ms
-            {:seon.ai/agent-attempt-timeout-ms 99})))))
 
 (deftest batch-replies-use-the-shared-ordered-program-projection
   (let [program

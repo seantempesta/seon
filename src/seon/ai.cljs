@@ -137,28 +137,7 @@
                               :seon.config.model-transport/endpoint-cap]]
                   [:or ::endpoint ::endpoint-error]]}
   [url endpoint-cap]
-  (try
-    (let [parsed (js/URL. url)
-          path (.-pathname parsed)
-          root-path
-          (cond
-            (str/ends-with? path "/chat/completions")
-            (subs path 0 (- (count path) (count "/chat/completions")))
-
-            (str/ends-with? path "/completions")
-            (subs path 0 (- (count path) (count "/completions")))
-
-            :else path)
-          endpoint-path
-          (str (str/replace root-path #"/+$" "") "/chat/completions")]
-      ;; URL.origin intentionally excludes userinfo; query and fragment are
-      ;; excluded by reconstructing from protocol/host/pathname only.
-      (let [endpoint (str (.-protocol parsed) "//" (.-host parsed) endpoint-path)]
-        (if (<= (count endpoint) endpoint-cap)
-          endpoint
-          {::msg "The normalized OpenAI endpoint exceeds the evidence bound."})))
-    (catch :default _
-      {::msg "The configured OpenAI endpoint is not a valid URL."})))
+  (core/openai-request-endpoint url endpoint-cap))
 
 (defn aborted?
   "True when `signal` is an aborted host AbortSignal. nil is false."
@@ -312,30 +291,13 @@
 ;; resolution must report one value rather than drift independently.
 (def shipped-defaults
   "Per-provider shipped defaults for the `:seon.ai/resolved-config` keys."
-  {:deepseek       {::model "deepseek-v4-pro" ::temperature 0.7
-                    ::max-tokens 4096 ::thinking "false"
-                    ::completion-limit-field :max-tokens
-                    ::timeout-ms 60000
-                    ::base-url "https://api.deepseek.com/v1"}
-   :openai-compat  {::model "deepseek-v4-pro"
-                    ::max-tokens 4096 ::thinking "false"
-                    ::completion-limit-field :max-tokens
-                    ::timeout-ms 60000}
-   :anthropic      {::model "claude-opus-4-8" ::max-tokens 16000
-                    ::thinking "false" ::timeout-ms 60000}
-   :diffusiongemma {::dg-backend :control}})
+  core/shipped-defaults)
 
 (defn resolved-adapter
   "The provider adapter selected by one immutable resolved config."
   {:malli/schema [:=> [:cat ::resolved-config] ::adapter]}
   [config]
-  (case (::provider config)
-    :anthropic :anthropic
-    :diffusiongemma (if (= :control (::dg-backend config))
-                      :diffusiongemma
-                      :openai-compat)
-    :typeahead :typeahead
-    :openai-compat))
+  (core/resolved-adapter config))
 
 ;; The config attrs a row (or the env) may carry — shared shape for
 ;; [[sync-tx-data]]'s two inputs and the row read.
@@ -541,9 +503,7 @@
   "Pull pattern for one agent's ordinary LLM override values."
   {:malli/schema [:=> [:cat] [:vector :keyword]]}
   []
-  (into [:seon.agent/id ::agent-max-retries ::agent-attempt-timeout-ms
-         ::agent-fallback-variant]
-        (keys agent-override-attrs)))
+  (core/agent-config-pull-pattern))
 
 (schema/register! ::agent-id [:string {:min 1}])
 
@@ -604,7 +564,7 @@
   "Pull pattern for the ordinary database values that resolve LLM config."
   {:malli/schema [:=> [:cat] [:vector :keyword]]}
   []
-  (into [::id] config-attrs))
+  (core/config-pull-pattern))
 
 (defn model-transport-pull-pattern
   "Pull pattern for model-transport limits on the cluster config row."
@@ -637,7 +597,7 @@
                   :seon.config.model-transport/response-identity-cap]]
     ::evidence-error]}
   [message response-identity-cap]
-  (subs message 0 (min response-identity-cap (count message))))
+  (core/bounded-evidence-error message response-identity-cap))
 
 (defn config-evidence
   "Bounded non-secret evidence for one resolved provider request."
@@ -689,8 +649,7 @@
 ;; and the context begins — the same two blocks the adapters wire
 ;; (openai-compat `:messages [{:role "system" …}]`, anthropic
 ;; `:system [{:type "text" …}]`).
-(def system-boundary
-  "\n\n;; ──────── ↑ system message  │  ↓ context (:seon.ai/ctx) ────────\n\n")
+(def system-boundary core/system-boundary)
 
 ;; Request for [[debug-full-prompt]]: the assembled context (block 2) plus
 ;; the same optional `::system-prompt` override `effective-system-prompt`

@@ -8,6 +8,7 @@
    [seon.schema :as schema])
   #?(:clj
      (:import
+      [java.net URI]
       [java.time ZonedDateTime]
       [java.time.format DateTimeFormatter])))
 
@@ -28,6 +29,77 @@
   [:seon.ai/retry-after-ms {:optional true} :seon.ai/retry-after-ms]
   [:seon.ai/evidence-error {:optional true} :seon.ai/evidence-error]
   [:seon.ai/raw-body {:optional true} :seon.ai/raw-body]])
+
+(def shipped-defaults
+  "Per-provider shipped defaults for resolved model configuration."
+  {:deepseek       {:seon.ai/model "deepseek-v4-pro"
+                    :seon.ai/temperature 0.7
+                    :seon.ai/max-tokens 4096
+                    :seon.ai/thinking "false"
+                    :seon.ai/completion-limit-field :max-tokens
+                    :seon.ai/timeout-ms 60000
+                    :seon.ai/base-url "https://api.deepseek.com/v1"}
+   :openai-compat  {:seon.ai/model "deepseek-v4-pro"
+                    :seon.ai/max-tokens 4096
+                    :seon.ai/thinking "false"
+                    :seon.ai/completion-limit-field :max-tokens
+                    :seon.ai/timeout-ms 60000}
+   :anthropic      {:seon.ai/model "claude-opus-4-8"
+                    :seon.ai/max-tokens 16000
+                    :seon.ai/thinking "false"
+                    :seon.ai/timeout-ms 60000}
+   :diffusiongemma {:seon.ai/dg-backend :control}})
+
+(def system-boundary
+  "\n\n;; ──────── ↑ system message  │  ↓ context (:seon.ai/ctx) ────────\n\n")
+
+(defn resolved-adapter
+  "Provider adapter keyword for one immutable resolved configuration."
+  [config]
+  (case (:seon.ai/provider config)
+    :anthropic :anthropic
+    :diffusiongemma (if (= :control (:seon.ai/dg-backend config))
+                      :diffusiongemma
+                      :openai-compat)
+    :typeahead :typeahead
+    :openai-compat))
+
+(defn bounded-evidence-error
+  "Bound an evidence error using one resolved positive cap."
+  [message response-identity-cap]
+  (subs message 0 (min response-identity-cap (count message))))
+
+(defn openai-request-endpoint
+  "Return bounded, credential-free chat-completions endpoint evidence."
+  [url endpoint-cap]
+  (try
+    (let [parsed #?(:clj (URI. url) :cljs (js/URL. url))
+          path #?(:clj (.getPath ^URI parsed) :cljs (.-pathname parsed))
+          root-path
+          (cond
+            (str/ends-with? path "/chat/completions")
+            (subs path 0 (- (count path) (count "/chat/completions")))
+
+            (str/ends-with? path "/completions")
+            (subs path 0 (- (count path) (count "/completions")))
+
+            :else path)
+          endpoint-path
+          (str (str/replace root-path #"/+$" "") "/chat/completions")
+          endpoint
+          #?(:clj
+             (let [port (.getPort ^URI parsed)]
+               (str (.getScheme ^URI parsed) "://" (.getHost ^URI parsed)
+                    (when (not= -1 port) (str ":" port))
+                    endpoint-path))
+             :cljs
+             (str (.-protocol parsed) "//" (.-host parsed) endpoint-path))]
+      (if (<= (count endpoint) endpoint-cap)
+        endpoint
+        {:seon.ai/msg
+         "The normalized OpenAI endpoint exceeds the evidence bound."}))
+    (catch #?(:clj Throwable :cljs :default) _
+      {:seon.ai/msg "The configured OpenAI endpoint is not a valid URL."})))
 
 (def ^:private config-attrs
   [:seon.ai/provider
@@ -58,6 +130,26 @@
 (def ^:private model-transport-cap-attrs
   [:seon.config.model-transport/response-identity-cap
    :seon.config.model-transport/endpoint-cap])
+
+(defn agent-config-pull-pattern
+  "Pull pattern for one agent's ordinary model overrides and phase policy."
+  []
+  (into [:seon.agent/id
+         :seon.config/repl-mode
+         :seon.ai/agent-max-retries
+         :seon.ai/agent-attempt-timeout-ms
+         :seon.ai/agent-fallback-variant]
+        (keys agent-override-attrs)))
+
+(defn config-pull-pattern
+  "Pull pattern for the ordinary cluster values used by model resolution."
+  []
+  (into [:seon.config/id
+         :seon.config.llm-retry/maximum-wait-ms
+         :seon.config.llm-retry/maximum-total-wait-ms
+         :seon.config.llm-retry/default-retries
+         {:seon.config/model-variants ['*]}]
+        (concat config-attrs model-transport-cap-attrs)))
 
 (defn thinking-mode
   "Parse stored thinking configuration to the adapter value."
