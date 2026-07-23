@@ -1028,6 +1028,17 @@ COMPLETELY before dispatching anything.
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- BREAK #2 FIXED + BREAK #3 ISOLATED (clientfix 692bd252c +
+  48c0c0b12, accepted): shell caller fixed via proper config
+  acquisition; BOTH canonical builds now zero first-party arity/
+  undeclared warnings; shell suite 21/81 green. THE REAL FLUSH
+  BLOCKER isolated: the S2 derivation subprocess retains a Shadow
+  devtools socket (compiled client autoconnects under the watcher)
+  → never exits → killed at bound → v10 manifest → watcher timeout;
+  derivation logic itself CORRECT (one-shot published rows,
+  SHA 524e2e00). S2 session RESUMED: disable devtools autoconnect
+  via Shadow's own mechanism (R47), prove first flush publishes v11
+  on an isolated cluster. Checkpoint resumes on its landing.
 - CHECKPOINT BREAK #2 (same class, client build): shell
   internal.cljs:120 exec still passes 2 args to core/run-request
   (3 since the shell config-fact conversion) — R28-era breakage on a
