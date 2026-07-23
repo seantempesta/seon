@@ -1042,3 +1042,21 @@ the anchor stays the state ledger.
   source and build analysis both classify that function as public. Attribute
   the failure to schema projection or SCI predicate binding from those facts;
   changing private-row publication would conceal a separate acquisition bug.
+
+## Reconstruction and readiness scars (2026-07-23)
+
+- **Fixture compilation is not client reconstruction.** A registered core
+  predicate may compile in schema fixtures while the committed projection's
+  dependency walk or Malli instrumentation silently drops its computed
+  predicate bindings. Every projection consumer must carry the same complete
+  compile options derived from the one predicate registration authority.
+- **Readiness is detected, never guessed.** The readiness advertisement ends
+  the wait; a clock may only break a stall after concrete progress stops.
+  Initialization page receipts, boot-phase transitions, projection-acquisition
+  pages, and bounded heartbeats must advance the observed log so legitimate
+  corpus growth cannot resemble a wedge.
+- **Polling loops and timeout literals are design-smell hunting grounds.**
+  Ask which event should end the wait and which observable progress can prove
+  healthy work before adding any clock. When a stall breaker remains
+  necessary, make it an R27 config fact, document its unit and protection
+  boundary, and name that key loudly when it fires.
