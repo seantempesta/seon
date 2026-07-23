@@ -288,7 +288,7 @@
    [:int
     {:min 1
      :description
-     "Maximum milliseconds the operator waits for pod readiness before failing loudly. Default 600000 protects startup ownership from a wedged pod while leaving at least 10x headroom over the measured 2026-07-23 fresh paged initialization baseline; firing names :seon.config.operator/pod-readiness-timeout-ms."}]})
+     "Maximum milliseconds the operator waits for pod readiness before failing loudly. Default 3000000 protects startup ownership from a wedged pod while leaving more than 10x headroom over the measured 2026-07-23 257-second fresh paged initialization baseline; firing names :seon.config.operator/pod-readiness-timeout-ms."}]})
 
 (doseq [[attribute shape] operator-dial-schemas]
   (schema/register! attribute shape))
@@ -1949,7 +1949,7 @@
              :seon.config.operator/pod-readiness-timeout-ms
              (get operator
                   :seon.config.operator/pod-readiness-timeout-ms
-                  600000)
+                  3000000)
              :seon.config.render-context/host-timezone
              (get render-context
                   :seon.config.render-context/host-timezone

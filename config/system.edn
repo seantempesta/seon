@@ -189,11 +189,11 @@
 
  ;; ── DEVELOPMENT OPERATOR ──
  ;; Pod readiness includes fresh paged initialization, schema acquisition,
- ;; committed projection construction, and instrumentation. The 600 s default
- ;; is a protective ceiling with at least 10x headroom over the measured
- ;; 2026-07-23 legitimate fresh-boot baseline; firing remains loud.
+ ;; committed projection construction, and instrumentation. The 3000 s default
+ ;; is a protective ceiling with more than 10x headroom over the measured
+ ;; 2026-07-23 legitimate 257 s fresh-boot baseline; firing remains loud.
  :seon.config/operator
- {:seon.config.operator/pod-readiness-timeout-ms 600000}
+ {:seon.config.operator/pod-readiness-timeout-ms 3000000}
 
  ;; ── PORTABLE RETRY AND CAPABILITY LIMITS ──
  ;; These values preserve the bounded 2026-07-23 policies while moving their

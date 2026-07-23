@@ -76,9 +76,10 @@
   "Return the resolved pod-readiness ceiling in milliseconds.
 
    The limit protects operator startup ownership from a pod that never
-   advertises readiness. Its 600000 ms default is selected in manifest
-   resolution from the measured 2026-07-23 fresh paged-boot baseline with at
-   least 10x headroom; timeout failure names the owning config key."
+   advertises readiness. Its 3000000 ms default is selected in manifest
+   resolution from the measured 2026-07-23 257-second fresh paged-boot
+   baseline with more than 10x headroom; timeout failure names the owning
+   config key."
   [configuration]
   (or
    (get-in configuration

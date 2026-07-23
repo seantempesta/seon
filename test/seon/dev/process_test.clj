@@ -220,7 +220,7 @@
                 (str (fs/path directory "pod-port"))
                 :seon.dev.config/resolved-configuration
                 {:seon.config.operator/pod-readiness-timeout-ms
-                 600000}})))
+                 3000000}})))
 
 (declare target-manifest-for)
 
@@ -251,7 +251,7 @@
              (:my.blob/storage-view request))))
     (is (= [process/watcher-id process/writer-id process/host-id]
            (get-in spec-map [process/pod-id :seon.dev.process/dependencies])))
-    (is (= 600000
+    (is (= 3000000
            (get-in spec-map
                    [process/pod-id
                     :seon.dev.process/ready-timeout-ms])))
@@ -285,7 +285,7 @@
           (state/process-start-instant pid)
          :seon.dev.process/log
           (str (fs/path (:seon.dev.test/directory base) "pod.log"))})]
-    (is (= 600000
+    (is (= 3000000
            (dev-config/pod-readiness-timeout-ms manifest-configuration))
         "The checked-in Aero manifest resolves the calibrated readiness fact")
     (is (= 777000 (:seon.dev.process/ready-timeout-ms spec)))
