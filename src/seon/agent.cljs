@@ -236,6 +236,7 @@
    [:seon.eval/duration-ms {:optional true} :seon.eval/duration-ms]
    [:seon.eval/narration   {:optional true} :seon.eval/narration]
    [:seon.eval/ns          {:optional true} :seon.eval/ns]
+   [:seon.eval/progress?   {:optional true} :seon.eval/progress?]
    [:seon.eval/result-edn  {:optional true} :seon.eval/result-edn]
    [:seon.eval/output      {:optional true} :seon.eval/output]
    [:seon.eval/error       {:optional true} :seon.eval/error]

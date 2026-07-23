@@ -20,7 +20,9 @@ loaded, although the JVM claimant now creates and reads the same receipts.
 
 The complete eval receipt attribute schema now lives in the portable
 `seon.eval.receipt` owner. The pod evaluator consumes that registration instead
-of maintaining a second copy.
+of maintaining a second copy. The canonical `:seon.eval` entity schema also
+references the optional `:seon.eval/progress?` attribute, so fresh database
+initialization includes it through the one entity-schema derivation mechanism.
 
 The focused JVM portable-driver gate passes 8 tests and 34 assertions. The
 reset-boundary live proof remains the acceptance authority because it exercises
