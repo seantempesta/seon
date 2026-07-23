@@ -952,6 +952,14 @@ COMPLETELY before dispatching anything.
   cluster application installs them; every boot is a resume. The
   10s figure is a design target for the startup path, not an R27
   runtime limit.
+- R45 DESIGN AGENT DISPATCHED (owner-directed, Fable): the definitive
+  pre-processing design → research/preprocessing-design-2026-07-23.md
+  — operations/contracts/key algebra, full cache inventory with
+  write-through triggers, ≤10s startup sequence, failure modes, and
+  SCI-FORK INTERNALS (owner: we own reference-code/sci — study its
+  analyzer/env/jit caching for what pre-processing can persist vs
+  what must re-materialize; spec a fork extension if a clean
+  analysis-cache hook needs one). Implementation units spec from it.
 - R45 vocabulary + maintenance (owner, same evening): the operation
   is PRE-PROCESSING (use that name); and the preprocessed cache is
   kept CURRENT AS CHANGES HAPPEN — every mutation that would
