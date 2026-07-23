@@ -3,7 +3,9 @@
 
    Canonical tokens give morph targets deterministic presentation identity.
    This namespace does not render, cache, query, or publish feeds."
-  (:require [seon.schema :as schema]))
+  (:require [seon.schema :as schema])
+  #?(:clj (:import [java.nio.charset StandardCharsets]
+                   [java.util Base64])))
 
 (schema/register! ::identity-value
   [:or :string :keyword :symbol :boolean :int :uuid])
@@ -28,7 +30,12 @@
   "Encode UTF-8 text as an RFC 4648 base64url token."
   {:malli/schema [:=> [:catn [::text ::text]] ::token]}
   [value]
-  (-> (js/Buffer.from value "utf8") (.toString "base64url")))
+  #?(:clj
+     (.encodeToString
+      (.withoutPadding (Base64/getUrlEncoder))
+      (.getBytes value StandardCharsets/UTF_8))
+     :cljs
+     (-> (js/Buffer.from value "utf8") (.toString "base64url"))))
 
 (defn identity-token
   "Stable opaque token derived from a view's namespaced identity data."

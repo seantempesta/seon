@@ -5,6 +5,7 @@
    acquisition, transcript selection, and feed publication remain upstream."
   (:require
     [seon.schema :as schema]
+    [seon.time.instant :as instant]
     [seon.ui.markdown :as md]))
 
 ;; ============================================================
@@ -59,13 +60,6 @@
 ;; The bubble hiccup — one fn per stream, one per message.
 ;; ============================================================
 
-(defn- hh-mm
-  [at]
-  (if (instance? js/Date at)
-    (let [pad #(if (< % 10) (str "0" %) (str %))]
-      (str (pad (.getHours at)) ":" (pad (.getMinutes at))))
-    ""))
-
 (defn bubble
   "Render ONE conversation message as a chat bubble.
 
@@ -82,7 +76,7 @@
    serializer; see the ns docstring)."
   {:malli/schema [:=> [:cat ::message] :seon.render.canvas/hiccup]}
   [{::keys [at kind label content]}]
-  (let [time (hh-mm at)]
+  (let [time (instant/hh-mm at)]
     (case kind
       ::human
       [:div {:class "flex justify-end"}

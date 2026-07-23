@@ -83,7 +83,7 @@
   "From the opening quote at `i`, consume a `\"…\"` string (honouring `\\\"`
    escapes). Returns `[end-index text]`. An unterminated string runs to EOF
    (degrade, never throw)."
-  [^string src n i]
+  [src n i]
   (loop [j (inc i)]
     (if (>= j n)
       [n (subs src i n)]
@@ -96,7 +96,7 @@
 (defn- read-comment-token
   "From `;` at `i`, consume to end of line (exclusive of the newline).
    Returns `[end-index text]`."
-  [^string src n i]
+  [src n i]
   (let [nl (str/index-of src "\n" i)
         end (if nl nl n)]
     [end (subs src i end)]))
@@ -105,7 +105,7 @@
   "From a backslash at `i`, consume a char literal — `\\(`, `\\a`, or a named
    char like `\\newline`. Returns `[end-index text]`. Consumes the backslash +
    one char, then trailing word-chars for named literals."
-  [^string src n i]
+  [src n i]
   (let [j (inc i)]
     (if (>= j n)
       [n (subs src i n)]                          ; lone trailing backslash
@@ -117,7 +117,7 @@
 (defn- read-word-token
   "From a non-boundary char at `i`, consume a bare word (symbol / keyword /
    number / literal). Returns `[end-index text]`."
-  [^string src n i]
+  [src n i]
   (loop [k i]
     (if (and (< k n) (not (boundary? (.charAt src k))))
       (recur (inc k))
@@ -126,7 +126,7 @@
 (defn- tokenize
   "Source string → seq of hiccup children (plain strings + classed `:span`s).
    Pure; consecutive plain chars are coalesced into one string node."
-  [^string src]
+  [src]
   (let [n (count src)]
     (loop [i 0
            plain ""                               ; coalesced default-colour run
@@ -189,4 +189,4 @@
      [:code {:class "language-clojure hljs"}
       (try
         (seq (tokenize src))
-        (catch :default _ src))]]))
+        (catch #?(:clj Throwable :cljs :default) _ src))]]))

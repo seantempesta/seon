@@ -16,7 +16,9 @@
    was retracted between tx and render."
   [k]
   (when (keyword? k)
-    (try (schema/schema-definition k) (catch :default _ nil))))
+    (try
+      (schema/schema-definition k)
+      (catch #?(:clj Throwable :cljs :default) _ nil))))
 
 (defn- shape-summary
   "One-line `pr-str` of a Malli form, truncated. Built-in IntoSchema
