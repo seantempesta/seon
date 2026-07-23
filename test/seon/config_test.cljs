@@ -1819,6 +1819,31 @@
           (set! (.-SEON_AI_MODEL env) saved-m)
           (js-delete env "SEON_AI_MODEL"))))))
 
+(deftest r36-reply-policy-maps-legacy-and-keeps-explicit-axes
+  (let [resolve
+        (fn [manifest]
+          (select-keys
+           (config/resolve-config-singleton manifest)
+           [:seon.config/repl-mode
+            :seon.ai/wire-stream?
+            :seon.ai/reply-evaluation
+            :seon.config.model-stream/partial-publish-settle-ms]))]
+    (is (= {:seon.config/repl-mode :stream
+            :seon.ai/wire-stream? true
+            :seon.ai/reply-evaluation :first-form
+            :seon.config.model-stream/partial-publish-settle-ms 400}
+           (resolve {:seon.config/repl-mode :stream})))
+    (is (= {:seon.config/repl-mode :batch
+            :seon.ai/wire-stream? false
+            :seon.ai/reply-evaluation :batch
+            :seon.config.model-stream/partial-publish-settle-ms 125}
+           (resolve
+            {:seon.config/repl-mode :batch
+             :seon.ai/wire-stream? false
+             :seon.ai/reply-evaluation :batch
+             :seon.config/model-stream
+             {:seon.config.model-stream/partial-publish-settle-ms 125}})))))
+
 (deftest render-context-facts-are-resolved-from-explicit-observations
   (let [manifest
         {:seon.config/render-context

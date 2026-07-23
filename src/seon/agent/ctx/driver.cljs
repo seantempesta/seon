@@ -354,8 +354,9 @@
                                                invoke-selected!))))]
         (error/with-configuration
           cluster-config-row
-          #(assoc
-             (ctx/rendered-context-from-entity
+          #(merge
+             (assoc
+              (ctx/rendered-context-from-entity
                (cond-> {:seon.agent/entity entity
                         :seon.agent.ctx/selected-blocks resolved-blocks}
                  (seq profile) (assoc :seon.agent.ctx/profile (vec profile))
@@ -364,14 +365,13 @@
              :seon.ai/system-prompt system-prompt
              :seon.ai/config-resolution config-resolution
              :seon.db/db database
-             :seon.config/repl-mode
-             (let [agent-mode (:seon.config/repl-mode entity)]
-               (if (contains? #{:batch :stream} agent-mode)
-                 agent-mode
-                 (or (:seon.config/repl-mode cluster-config-row) :batch)))
+             :seon.config.model-stream/partial-publish-settle-ms
+             (:seon.config.model-stream/partial-publish-settle-ms
+              cluster-config-row)
              :seon.eval/ns
              (or (::render-fns/current-ns namespace-value)
-                 (symbol (str "my.agent." id)))))))))
+                 (symbol (str "my.agent." id))))
+             (ai/reply-policy-from-rows cluster-config-row entity)))))))
 
 (def agent-view-members
   [(merge

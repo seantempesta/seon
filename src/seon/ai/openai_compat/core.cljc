@@ -191,6 +191,7 @@
   (let [resolution (:seon.ai/config-resolution request)
         config (:seon.ai/resolved-config resolution)
         stream? (boolean (:seon.ai/stream? request))
+        reply-evaluation (:seon.ai/reply-evaluation request)
         result
         (native-request!
          {:seon.ai.http/endpoint
@@ -217,8 +218,10 @@
           :seon.ai.http/stream? stream?
           :seon.ai.http/stream-initial {:seon.ai.http/text ""}
           :seon.ai.http/stream-step stream-step
+          :seon.ai.http/progress! (:seon.ai/progress! request)
           :seon.ai.http/stream-abort?
-          #(ai/first-form-complete? (:seon.ai.http/text %))})]
+          #(and (= :first-form reply-evaluation)
+                (ai/first-form-complete? (:seon.ai.http/text %)))})]
     (if (:seon.ai/error result)
       result
       (if stream?

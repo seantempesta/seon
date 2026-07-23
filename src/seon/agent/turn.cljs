@@ -180,6 +180,11 @@
 (schema/register! :seon.ai.attempt/adapter-timeout-ms :seon.ai/timeout-ms)
 (schema/register! :seon.ai.attempt/outer-timeout-ms :int)
 (schema/register! :seon.ai.attempt/stream? :boolean)
+(schema/register! :seon.ai.attempt/reply-evaluation
+                  :seon.ai/reply-evaluation)
+(schema/register!
+ :seon.ai.attempt/partial-text
+ [:string {:seon.db/no-history? true}])
 (schema/register! :seon.ai.attempt/extra-body-digest :seon.ai/extra-body-digest)
 (schema/register! :seon.ai.attempt/dg-backend :seon.ai/dg-backend)
 (schema/register! :seon.ai.attempt/api-key-env :seon.ai/api-key-env)
@@ -219,6 +224,10 @@
    [:seon.ai.attempt/adapter-timeout-ms {:optional true} :seon.ai.attempt/adapter-timeout-ms]
    [:seon.ai.attempt/outer-timeout-ms :seon.ai.attempt/outer-timeout-ms]
    [:seon.ai.attempt/stream? :seon.ai.attempt/stream?]
+   [:seon.ai.attempt/reply-evaluation
+    :seon.ai.attempt/reply-evaluation]
+   [:seon.ai.attempt/partial-text
+    {:optional true} :seon.ai.attempt/partial-text]
    [:seon.ai.attempt/extra-body-digest {:optional true} :seon.ai.attempt/extra-body-digest]
    [:seon.ai.attempt/dg-backend {:optional true} :seon.ai.attempt/dg-backend]
    [:seon.ai.attempt/api-key-env {:optional true} :seon.ai.attempt/api-key-env]
@@ -750,6 +759,8 @@
     prompt-text :seon.ai/ctx
     system-prompt :seon.ai/system-prompt
     stream? :seon.ai/stream?
+    reply-evaluation :seon.ai/reply-evaluation
+    progress! :seon.ai/progress!
     ms :seon.ai/request-timeout-ms
     llm-fn :seon.agent/llm-fn}]
   (let [
@@ -757,7 +768,9 @@
         signal     (.-signal controller)
         arg        (cond-> {:seon.ai/ctx          prompt-text
                             :seon.ai/abort-signal signal
-                            :seon.ai/config-resolution resolution}
+                            :seon.ai/config-resolution resolution
+                            :seon.ai/reply-evaluation reply-evaluation
+                            :seon.ai/progress! progress!}
                      (string? system-prompt)
                      (assoc :seon.ai/system-prompt system-prompt)
                      stream? (assoc :seon.ai/stream? true))
@@ -865,6 +878,9 @@
            ::db/pull-pattern
            [:seon.agent.turn/id
             {:seon.agent.turn/reply-blob [:my.blob/hash]}
+            {:seon.agent.turn/llm-attempts
+             [:seon.ai.attempt/ordinal :seon.ai.attempt/outcome
+              :seon.ai.attempt/reply-evaluation]}
             {:seon.agent.turn/evals
              [:seon.eval/id :seon.eval/status :seon.eval/ok?]}]
            ::db/ref [:seon.agent.turn/id turn-id]}))
@@ -877,7 +893,13 @@
        :seon.error/kind :core-bug}
       (let [program
             (turn.core/reply-program
-             (:my.blob/content reply) false (home/home-ns agent-id))
+             (:my.blob/content reply)
+             (->> (:seon.agent.turn/llm-attempts turn)
+                  (filter #(= :success (:seon.ai.attempt/outcome %)))
+                  (sort-by :seon.ai.attempt/ordinal)
+                  last
+                  :seon.ai.attempt/reply-evaluation)
+             (home/home-ns agent-id))
             evals (:seon.agent.turn/evals turn)
             batch
             {:seon.eval/ids (mapv :seon.eval/id evals)

@@ -23,6 +23,7 @@
   {:seon.ai/system-prompt "Return one form."
    :seon.ai/ctx "Add one and two."
    :seon.ai/stream? stream?
+   :seon.ai/reply-evaluation (if stream? :first-form :batch)
    :seon.ai/request-timeout-ms timeout-ms
    :seon.ai/config-resolution
    {:seon.ai/resolved-config
@@ -137,6 +138,47 @@
           (is (true? (:seon.ai/estimated? result)))
           (is (pos-int? (get-in result
                                 [:seon.ai/usage :completion_tokens])))))
+      (finally
+        (.stop instance 0)))))
+
+(deftest batch-stream-retains-all-forms-terminal-usage-and-sink-isolation
+  (let [offers (atom [])
+        usage {:prompt_tokens 5
+               :completion_tokens 8
+               :total_tokens 13}
+        instance
+        (server
+         (reify HttpHandler
+           (handle [_ exchange]
+             (.add (.getResponseHeaders exchange)
+                   "Content-Type" "text/event-stream")
+             (.sendResponseHeaders exchange 200 0)
+             (with-open [output (.getResponseBody exchange)]
+               (doseq [event [{:choices [{:delta {:content "(+ 1 2)"}}]}
+                              {:choices [{:delta {:content "\n(+ 3 4)"}
+                                          :finish_reason "stop"}]}
+                              {:choices [] :usage usage}]]
+                 (.write output
+                         (.getBytes
+                          (str "data: " (json/write-value-as-string event)
+                               "\n\n")
+                          StandardCharsets/UTF_8)))
+               (.write output (.getBytes "data: [DONE]\n\n"
+                                         StandardCharsets/UTF_8))))))]
+    (try
+      (binding [http/*environment-value* (constantly "stub-key")]
+        (let [result
+              (http/complete
+               (assoc (request (.getPort (.getAddress instance)) true 2000)
+                      :seon.ai/reply-evaluation :batch
+                      :seon.ai/progress!
+                      (fn [prefix]
+                        (swap! offers conj prefix)
+                        (throw (ex-info "presentation-only" {})))))]
+          (is (= "(+ 1 2)\n(+ 3 4)" (:seon.ai/text result)))
+          (is (= usage (:seon.ai/usage result)))
+          (is (not (:seon.ai/estimated? result)))
+          (is (= ["(+ 1 2)" "(+ 1 2)\n(+ 3 4)"] @offers))))
       (finally
         (.stop instance 0)))))
 

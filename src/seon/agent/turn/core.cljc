@@ -35,7 +35,7 @@
     [ordinal config-digest deadline-at fallback-variant provider adapter
      requested-model temperature max-tokens completion-limit-field thinking
      endpoint adapter-timeout-ms outer-timeout-ms stream? extra-body-digest
-     dg-backend api-key-env credential-class]}]
+     dg-backend api-key-env credential-class reply-evaluation]}]
   (cond->
    {:seon.ai.attempt/ordinal ordinal
     :seon.ai.attempt/config-digest config-digest
@@ -44,6 +44,7 @@
     :seon.ai.attempt/adapter adapter
     :seon.ai.attempt/outer-timeout-ms outer-timeout-ms
     :seon.ai.attempt/stream? (boolean stream?)
+    :seon.ai.attempt/reply-evaluation reply-evaluation
     :seon.ai.attempt/outcome :open}
     fallback-variant
     (assoc :seon.ai.attempt/fallback-variant fallback-variant)
@@ -103,6 +104,8 @@
    (vec run-fence)
    (concat
     [(phase-fence turn-id :attempt-open)
+     [:db/retract [:seon.ai.attempt/id attempt-id]
+      :seon.ai.attempt/partial-text]
      [:db.fn/cas [:seon.ai.attempt/id attempt-id] :seon.ai.attempt/outcome
       :open (:seon.ai.attempt/outcome terminal)]
      (merge {:seon.ai.attempt/id attempt-id}
@@ -119,8 +122,21 @@
   (into
    (vec run-fence)
    [(phase-fence turn-id :attempt-open)
+    [:db/retract [:seon.ai.attempt/id attempt-id]
+     :seon.ai.attempt/partial-text]
     [:db.fn/cas [:seon.ai.attempt/id attempt-id]
      :seon.ai.attempt/outcome :open :crashed]]))
+
+(defn partial-attempt-tx-data
+  "Publish one cumulative reply prefix under run and attempt fences."
+  [run-fence turn-id attempt-id partial-text]
+  (into
+   (vec run-fence)
+   [(phase-fence turn-id :attempt-open)
+    [:db.fn/cas [:seon.ai.attempt/id attempt-id]
+     :seon.ai.attempt/outcome :open :open]
+    [:db/add [:seon.ai.attempt/id attempt-id]
+     :seon.ai.attempt/partial-text partial-text]]))
 
 (defn error-close-tx-data
   "Close an exhausted LLM turn and its claimed run atomically."
@@ -148,9 +164,9 @@
     0))
 
 (defn reply-program
-  "Parse one provider reply for the frozen REPL mode."
-  [raw-reply stream? starting-ns]
-  (if-not stream?
+  "Parse one provider reply for the frozen evaluation mode."
+  [raw-reply reply-evaluation starting-ns]
+  (if (= :batch reply-evaluation)
     (repl.parse/parse-program
      raw-reply {:seon.repl/current-ns starting-ns})
     (let [parsed (repl.parse/parse-forms raw-reply)
@@ -174,7 +190,7 @@
              retained [first-form-index :seon.repl/narration]
              (fn [narration]
                (str (when (seq narration) (str narration "\n"))
-                    "; stream mode executed the first complete form; "
+                    "; first-form mode executed the first complete form; "
                     remaining-form-count " further "
                     (if (= 1 remaining-form-count) "form was" "forms were")
                     " not executed — resend the next form.")))

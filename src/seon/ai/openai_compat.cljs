@@ -44,8 +44,9 @@
    AGENTS.md) rides the user-message CONTEXT as file-sections
    (`seon.agent.ctx/file-block`), decoupled from the system message.
 
-   `:batch` uses one ordinary nonstreaming ChatCompletion. `:stream` uses
-   the SDK stream and stops at the first complete form. Native tool
+   Wire streaming is independent of reply evaluation. `:first-form` stops
+   an SDK stream at the first complete form; `:batch` consumes a stream to
+   natural EOF or uses an ordinary nonstreaming ChatCompletion. Native tool
    calling and a generic `:extra-body` (e.g. Qwen's
    `chat_template_kwargs`) ride through when the caller opts in."
   (:require ["openai" :as OpenAI]
@@ -158,8 +159,8 @@
    here — [[complete]] merges it into these params (the SDK's 2nd-arg
    `:body` would REPLACE the body, dropping model/messages).
 
-   Explicit request opts win over the resolved value. Only `:stream` mode
-   requests a stream and terminal usage via
+   Explicit request opts win over the resolved value. A wire-streaming request
+   asks for terminal usage via
    `:stream_options {:include_usage true}`. `:tools` / `:tool_choice`
    are included ONLY when present as direct request options. Public so
    tests and live debugging can inspect exactly what goes over the
@@ -288,9 +289,9 @@
    [::error {:optional true} ::error]])
 
 (defn ^:async stream-until-form!
-  "Consume the SDK stream, aborting once one top-level form has streamed.
+  "Consume an SDK stream under one frozen reply-evaluation policy.
 
-   The repl-mode `:stream` consumer. Per content delta: append to the accumulator, run the cheap
+   In `:first-form`, per content delta: append to the accumulator, run the cheap
    [[seon.repl.parse/first-top-level-close]] delimiter gate, and — only
    when a top-level group has closed — CONFIRM with the real `parse-forms`
    that a genuine evaluable `:form` is present (a bare `{…}`/`[…]` closes at
@@ -301,6 +302,7 @@
    non-form remainder as evidence without executing it). On natural end (no form ever
    completes): `{::text <all> ::aborted? false}`. The usage-only final chunk
    (`:stream_options {:include_usage true}`) has no `choices` — guarded.
+   In `:batch`, consume to natural EOF, retain terminal usage, and never abort.
 
    NEVER rejects. A transport/SDK failure mid-consume (timeout, connection
    reset — the iterator's `.next` Promise rejects) is returned as the
@@ -311,29 +313,38 @@
    (the P4-bench acme pod crashes, 2026-07-10). Errors-as-values at this
    boundary is the root fix, not an exception to the fault net: an
    external provider failure is the caller's expected error, not our bug."
-  {:malli/schema [:=> [:cat :any] :any]}
-  [^js stream]
-  (try
-    (let [it (js-invoke stream js/Symbol.asyncIterator)]
-      (loop [acc ""]
-        (let [step (await (.next it))]
-          (if (.-done step)
-            {::text acc ::aborted? false}
-            (let [^js chunk (.-value step)
-                  choices   (.-choices chunk)
-                  ^js choice (when (and choices (pos? (.-length choices)))
-                               (aget choices 0))
-                  ^js delta  (some-> choice .-delta)
-                  piece      (some-> delta .-content)
-                  acc'    (if piece (str acc piece) acc)]
-              (if (and piece
-                       (repl-internal/first-top-level-close acc')
-                       (some #(= :form (:seon.repl/kind %))
-                             (repl-internal/parse-forms acc')))
-                (do (.abort stream) {::text acc' ::aborted? true})
-                (recur acc')))))))
-    (catch :default e
-      {::text "" ::aborted? false ::error e})))
+  {:malli/schema [:function
+                  [:=> [:cat :any] :any]
+                  [:=> [:cat :any :seon.ai/reply-evaluation :any] :any]]}
+  ([stream]
+   (stream-until-form! stream :first-form nil))
+  ([^js stream reply-evaluation progress!]
+   (try
+     (let [it (js-invoke stream js/Symbol.asyncIterator)]
+       (loop [acc ""]
+         (let [step (await (.next it))]
+           (if (.-done step)
+             {::text acc ::aborted? false}
+             (let [^js chunk (.-value step)
+                   choices (.-choices chunk)
+                   ^js choice (when (and choices (pos? (.-length choices)))
+                                (aget choices 0))
+                   ^js delta (some-> choice .-delta)
+                   piece (some-> delta .-content)
+                   acc' (if piece (str acc piece) acc)]
+               (when (and piece progress!)
+                 (try
+                   (progress! acc')
+                   (catch :default _ nil)))
+               (if (and (= :first-form reply-evaluation)
+                        piece
+                        (repl-internal/first-top-level-close acc')
+                        (some #(= :form (:seon.repl/kind %))
+                              (repl-internal/parse-forms acc')))
+                 (do (.abort stream) {::text acc' ::aborted? true})
+                 (recur acc')))))))
+     (catch :default e
+       {::text "" ::aborted? false ::error e}))))
 
 (defn- estimated-usage
   "A CLIENT-SIDE usage map for an ABORTED stream (the provider's final usage
@@ -435,16 +446,19 @@
                                  (seq extra) (merge extra)))
               ^js completions (.. client -chat -completions)
               stream?  (boolean (:seon.ai/stream? request))
+              reply-evaluation (:seon.ai/reply-evaluation request)
+              progress! (:seon.ai/progress! request)
               signal   (:seon.ai/abort-signal request)
               options  (when signal #js{:signal signal})]
           (if stream?
-            ;; repl-mode :stream — consume deltas, abort at the first
-            ;; complete top-level form (one form per turn).
+            ;; Wire streaming is orthogonal to reply evaluation: first-form
+            ;; aborts at its boundary; batch consumes to natural EOF.
             (let [^js stream (if options
                                (.stream completions params options)
                                (.stream completions params))
                   {::keys [text aborted? error]}
-                  (await (stream-until-form! stream))]
+                  (await
+                   (stream-until-form! stream reply-evaluation progress!))]
               (cond
                 ;; The consumer captured an SDK failure as a VALUE (it
                 ;; never rejects — see its docstring); re-raise into
@@ -497,11 +511,18 @@
   [opts request]
   (let [ctx-text (:seon.ai/ctx request)
         stream?  (:seon.ai/stream? request)
+        reply-evaluation (:seon.ai/reply-evaluation request)
+        progress! (:seon.ai/progress! request)
         signal   (:seon.ai/abort-signal request)
         system-prompt (:seon.ai/system-prompt request)
         resolution (:seon.ai/config-resolution request)
         resp (await (complete (cond-> (assoc opts :seon.ai/ctx ctx-text)
                                 stream? (assoc :seon.ai/stream? true)
+                                reply-evaluation
+                                (assoc :seon.ai/reply-evaluation
+                                       reply-evaluation)
+                                progress!
+                                (assoc :seon.ai/progress! progress!)
                                 signal (assoc :seon.ai/abort-signal signal)
                                 system-prompt
                                 (assoc :seon.ai/system-prompt system-prompt)

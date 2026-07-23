@@ -80,19 +80,19 @@
       {:seon.error/message
        "The acquired agent has no positive durable LLM attempt timeout."
        :seon.error/kind :configuration}
-      {:seon.ai/config-resolution
-       (ai.core/resolved-config-from-rows
-        ai.core/shipped-defaults config-row agent-row attempt-timeout-ms)
-       :seon.config.llm-retry/maximum-wait-ms
-       (:seon.config.llm-retry/maximum-wait-ms config-row)
-       :seon.config.llm-retry/maximum-total-wait-ms
-       (:seon.config.llm-retry/maximum-total-wait-ms config-row)
-       :seon.config.llm-retry/default-retries
-       (:seon.config.llm-retry/default-retries config-row)
-       :seon.config/repl-mode
-       (or (:seon.config/repl-mode agent-row)
-           (:seon.config/repl-mode config-row)
-           :batch)})))
+      (merge
+       {:seon.ai/config-resolution
+        (ai.core/resolved-config-from-rows
+         ai.core/shipped-defaults config-row agent-row attempt-timeout-ms)
+        :seon.config.llm-retry/maximum-wait-ms
+        (:seon.config.llm-retry/maximum-wait-ms config-row)
+        :seon.config.llm-retry/maximum-total-wait-ms
+        (:seon.config.llm-retry/maximum-total-wait-ms config-row)
+        :seon.config.llm-retry/default-retries
+        (:seon.config.llm-retry/default-retries config-row)
+        :seon.config.model-stream/partial-publish-settle-ms
+        (:seon.config.model-stream/partial-publish-settle-ms config-row)}
+       (ai.core/reply-policy-from-rows config-row agent-row)))))
 
 (defn- bounded-llm-transport!
   [host request]
@@ -195,9 +195,19 @@
     ::db/pull-pattern
     [:seon.agent.turn/id :seon.agent.turn/phase :seon.agent.turn/status
      {:seon.agent.turn/reply-blob [:my.blob/hash]}
+     {:seon.agent.turn/llm-attempts
+      [:seon.ai.attempt/ordinal :seon.ai.attempt/outcome
+       :seon.ai.attempt/reply-evaluation]}
      {:seon.agent.turn/evals
       [:seon.eval/id :seon.eval/status :seon.eval/ok?]}]
     ::db/ref [:seon.agent.turn/id turn-id]}))
+
+(defn- successful-reply-evaluation [turn]
+  (->> (:seon.agent.turn/llm-attempts turn)
+       (filter #(= :success (:seon.ai.attempt/outcome %)))
+       (sort-by :seon.ai.attempt/ordinal)
+       last
+       :seon.ai.attempt/reply-evaluation))
 
 (defn- reply-program [storage-view turn agent-id]
   (let [hash (get-in turn [:seon.agent.turn/reply-blob :my.blob/hash])
@@ -205,7 +215,9 @@
     (if-not (:my.blob/ok? reply)
       reply
       (turn.core/reply-program
-       (:my.blob/content reply) false (host.eval/agent-home-ns agent-id)))))
+       (:my.blob/content reply)
+       (successful-reply-evaluation turn)
+       (host.eval/agent-home-ns agent-id)))))
 
 (defn- invocation
   [agent-id database run-id claim-epoch turn-id program configuration]

@@ -9,18 +9,141 @@
             [seon.content-hash :as content-hash]
             [seon.db :as db]
             [seon.db.id :as db.id]
-            [seon.retry :as retry]))
+            [seon.retry :as retry]
+            [seon.schema :as schema])
+  #?(:clj
+     (:import [java.util.concurrent Executors ScheduledExecutorService
+               ScheduledFuture ThreadFactory TimeUnit])))
 
 #?(:clj (defmacro await [value] value))
+
+(schema/register! :seon.ai.attempt/reply-evaluation
+                  :seon.ai/reply-evaluation)
+(schema/register!
+ :seon.ai.attempt/partial-text
+ [:string {:seon.db/no-history? true}])
+
+#?(:clj
+   (defonce ^:private partial-scheduler
+     (Executors/newSingleThreadScheduledExecutor
+      (reify ThreadFactory
+        (newThread [_ runnable]
+          (doto (Thread. runnable "seon-llm-partial-publisher")
+            (.setDaemon true)))))))
+
+(defn- cancel-scheduled! [scheduled]
+  #?(:clj (when scheduled (.cancel ^ScheduledFuture scheduled false))
+     :cljs (when scheduled (js/clearTimeout scheduled))))
+
+(defn- schedule-after! [milliseconds callback]
+  #?(:clj
+     (.schedule ^ScheduledExecutorService partial-scheduler
+                ^Runnable callback
+                (long milliseconds)
+                TimeUnit/MILLISECONDS)
+     :cljs
+     (js/setTimeout callback milliseconds)))
+
+(defn presentation-sink
+  "Create a non-blocking latest-prefix sink with isolated publication."
+  [settle-ms publish!]
+  (let [state (atom {::closed? false
+                     ::pending nil
+                     ::scheduled nil
+                     ::publishing? false})
+        schedule-flush! (atom nil)
+        publication-finished!
+        (fn []
+          (let [schedule? (atom false)]
+            (swap! state
+                   (fn [current]
+                     (let [current (assoc current ::publishing? false)]
+                       (if (and (not (::closed? current))
+                                (string? (::pending current))
+                                (nil? (::scheduled current)))
+                         (do
+                           (reset! schedule? true)
+                           (assoc current ::scheduled ::arming))
+                         current))))
+            (when @schedule? (@schedule-flush!))))
+        flush!
+        (fn []
+          (let [text (atom nil)]
+            (swap! state
+                   (fn [current]
+                     (if (or (::closed? current)
+                             (::publishing? current))
+                       (assoc current ::scheduled nil)
+                       (do
+                         (reset! text (::pending current))
+                         (assoc current
+                                ::pending nil
+                                ::scheduled nil
+                                ::publishing? (string? (::pending current)))))))
+            (when (string? @text)
+              #?(:clj
+                 (try
+                   (publish! @text)
+                   (catch Throwable _ nil)
+                   (finally (publication-finished!)))
+                 :cljs
+                 (-> (js/Promise.resolve nil)
+                     (.then (fn [_] (publish! @text)))
+                     (.catch (fn [_] nil))
+                     (.finally publication-finished!))))))
+        arm!
+        (fn []
+          (let [scheduled (schedule-after! settle-ms flush!)
+                keep? (atom false)]
+            (swap! state
+                   (fn [current]
+                     (if (and (not (::closed? current))
+                              (= ::arming (::scheduled current)))
+                       (do (reset! keep? true)
+                           (assoc current ::scheduled scheduled))
+                       current)))
+            (when-not @keep? (cancel-scheduled! scheduled))))]
+    (reset! schedule-flush! arm!)
+    {:seon.ai.presentation/offer!
+     (fn [complete-prefix]
+       (when (string? complete-prefix)
+         (let [schedule? (atom false)]
+           (swap! state
+                  (fn [current]
+                    (if (::closed? current)
+                      current
+                      (let [current (assoc current ::pending complete-prefix)]
+                        (if (and (nil? (::scheduled current))
+                                 (not (::publishing? current)))
+                          (do
+                            (reset! schedule? true)
+                            (assoc current ::scheduled ::arming))
+                          current)))))
+           (when @schedule? (arm!))))
+       nil)
+     :seon.ai.presentation/close!
+     (fn []
+       (let [scheduled (atom nil)]
+         (swap! state
+                (fn [current]
+                  (reset! scheduled (::scheduled current))
+                  (assoc current
+                         ::closed? true
+                         ::pending nil
+                         ::scheduled nil)))
+         (when-not (= ::arming @scheduled)
+           (cancel-scheduled! @scheduled)))
+       nil)}))
 
 (def claim-attempt-selector
   [:seon.agent.turn/id
    :seon.agent.turn/phase
    :seon.agent.turn/rendered-tx
    {:seon.agent.turn/prompt-blob [:my.blob/hash]}
-   {:seon.agent.turn/llm-attempts
+    {:seon.agent.turn/llm-attempts
     [:seon.ai.attempt/id :seon.ai.attempt/ordinal
-     :seon.ai.attempt/outcome]}])
+     :seon.ai.attempt/outcome
+     :seon.ai.attempt/reply-evaluation]}])
 
 (defn- instant-ms [instant]
   #?(:clj (.getTime ^java.util.Date instant)
@@ -63,7 +186,8 @@
 
 (defn attempt-row
   "Build bounded terminal evidence from a frozen request and response."
-  [ordinal fallback-variant resolution timeout-ms stream? response]
+  [ordinal fallback-variant resolution timeout-ms stream? reply-evaluation
+   response]
   (let [config (:seon.ai/resolved-config resolution)
         raw (or (:seon.ai/raw response) response)
         credential (get-in raw [:seon.ai/config-evidence
@@ -96,6 +220,7 @@
       :seon.ai.attempt/adapter adapter
       :seon.ai.attempt/outer-timeout-ms timeout-ms
       :seon.ai.attempt/stream? (boolean stream?)
+      :seon.ai.attempt/reply-evaluation reply-evaluation
       :seon.ai.attempt/outcome (attempt-outcome response)}
       fallback-variant
       (assoc :seon.ai.attempt/fallback-variant fallback-variant)
@@ -155,10 +280,11 @@
   (max 1 (- (instant-ms deadline) (instant-ms now))))
 
 (defn- open-evidence
-  [ordinal fallback-variant resolution deadline timeout-ms stream?]
+  [ordinal fallback-variant resolution deadline timeout-ms stream?
+   reply-evaluation]
   (let [template
         (attempt-row ordinal fallback-variant resolution timeout-ms
-                     stream? {})]
+                     stream? reply-evaluation {})]
     (assoc (dissoc template :seon.ai.attempt/outcome)
            :seon.ai.attempt/config-digest
            (content-hash/sha-256 (pr-str resolution))
@@ -177,6 +303,8 @@
     prompt :seon.ai/ctx
     system-prompt :seon.ai/system-prompt
     stream? :seon.ai/stream?
+    reply-evaluation :seon.ai/reply-evaluation
+    settle-ms :seon.config.model-stream/partial-publish-settle-ms
     transport! :seon.agent.turn/transport!
     now! :seon.agent.turn/now!}]
   (let [agent-id (:seon.agent/id run)
@@ -212,7 +340,7 @@
         deadline (attempt-deadline run now attempt-timeout-ms)
         timeout-ms (remaining-ms now deadline)
         evidence (open-evidence ordinal nil resolution deadline timeout-ms
-                                stream?)
+                                stream? reply-evaluation)
         allocation
         (if (:seon.error/message crash-report)
           crash-report
@@ -232,48 +360,64 @@
         attempt-id (get-in allocation [::db.id/ids ::claim-attempt])]
     (if (:seon.error/message allocation)
       allocation
-      (let [response
-            (await
-             (transport!
-              (cond-> {:seon.ai/ctx prompt
-                       :seon.ai/config-resolution resolution
-                       :seon.ai/request-timeout-ms timeout-ms
-                       :seon.ai/deadline-at deadline}
-                (string? system-prompt)
-                (assoc :seon.ai/system-prompt system-prompt)
-                stream? (assoc :seon.ai/stream? true))))
-            terminal (attempt-row ordinal nil resolution timeout-ms stream?
-                                  response)
-            reply-result
-            (when (= :success (:seon.ai.attempt/outcome terminal))
-              (await
-               (blob/put! {:my.blob/content (or (:text response) "")
-                           :my.blob/media :reply})))
-            reply-blob (blob-ref reply-result)
-            retry-after
-            (get-in response [:seon.ai/error :seon.ai/retry-after-ms])
-            terminal (cond-> terminal
-                       (int? retry-after)
-                       (assoc :seon.ai.attempt/retry-after-ms retry-after))
-            publication-failed?
-            (and (= :success (:seon.ai.attempt/outcome terminal))
-                 (nil? reply-blob))]
-        (if publication-failed?
-          {:seon.error/message
-           (or (:my.blob/error reply-result)
-               "The successful LLM reply was not published to blob storage.")
-           :seon.error/kind :core-bug
-           :seon.db/db (:db-after allocation)}
-          (let [report
+      (let [sink
+            (presentation-sink
+             settle-ms
+             (fn [partial-text]
+               (db/transact!
+                {::db/db (:db-after allocation)
+                 ::db/tx-data
+                 (turn.core/partial-attempt-tx-data
+                  fence turn-id attempt-id partial-text)})))]
+        (try
+          (let [response
                 (await
-                 (db/transact!
-                  {::db/db (:db-after allocation)
-                   ::db/tx-data
-                   (turn.core/terminal-attempt-tx-data
-                    fence turn-id attempt-id terminal reply-blob)}))]
-            (if (:seon.error/message report)
-              report
-              (assoc response :seon.db/db (:db-after report)))))))))
+                 (transport!
+                  (cond-> {:seon.ai/ctx prompt
+                           :seon.ai/config-resolution resolution
+                           :seon.ai/request-timeout-ms timeout-ms
+                           :seon.ai/deadline-at deadline
+                           :seon.ai/reply-evaluation reply-evaluation
+                           :seon.ai/progress!
+                           (:seon.ai.presentation/offer! sink)}
+                    (string? system-prompt)
+                    (assoc :seon.ai/system-prompt system-prompt)
+                    stream? (assoc :seon.ai/stream? true))))
+                terminal
+                (attempt-row ordinal nil resolution timeout-ms stream?
+                             reply-evaluation response)
+                reply-result
+                (when (= :success (:seon.ai.attempt/outcome terminal))
+                  (await
+                   (blob/put! {:my.blob/content (or (:text response) "")
+                               :my.blob/media :reply})))
+                reply-blob (blob-ref reply-result)
+                retry-after
+                (get-in response [:seon.ai/error :seon.ai/retry-after-ms])
+                terminal (cond-> terminal
+                           (int? retry-after)
+                           (assoc :seon.ai.attempt/retry-after-ms retry-after))
+                publication-failed?
+                (and (= :success (:seon.ai.attempt/outcome terminal))
+                     (nil? reply-blob))]
+            (if publication-failed?
+              {:seon.error/message
+               (or (:my.blob/error reply-result)
+                   "The successful LLM reply was not published to blob storage.")
+               :seon.error/kind :core-bug
+               :seon.db/db (:db-after allocation)}
+              (let [report
+                    (await
+                     (db/transact!
+                      {::db/db (:db-after allocation)
+                       ::db/tx-data
+                       (turn.core/terminal-attempt-tx-data
+                        fence turn-id attempt-id terminal reply-blob)}))]
+                (if (:seon.error/message report)
+                  report
+                  (assoc response :seon.db/db (:db-after report))))))
+          (finally
+            ((:seon.ai.presentation/close! sink))))))))
 
 (defn ^{:async #?(:cljs true :clj false)} llm-phase!
   "Resume the durable attempt cursor and advance a successful reply."
@@ -314,7 +458,10 @@
              [:seon.config.llm-retry/maximum-wait-ms
               :seon.config.llm-retry/maximum-total-wait-ms
               :seon.config.llm-retry/default-retries])
-            stream? (= :stream (:seon.config/repl-mode context))
+            stream? (:seon.ai/wire-stream? context)
+            reply-evaluation (:seon.ai/reply-evaluation context)
+            settle-ms
+            (:seon.config.model-stream/partial-publish-settle-ms context)
             attempt-count (count (:seon.agent.turn/llm-attempts turn))
             maximum-attempts
             (inc (or (:seon.ai/agent-max-retries resolution)
@@ -344,7 +491,10 @@
                       :seon.ai/ctx (:seon.ai/ctx persisted)
                       :seon.ai/system-prompt
                       (:seon.ai/system-prompt persisted)
-                      :seon.ai/stream? stream?))
+                      :seon.ai/stream? stream?
+                      :seon.ai/reply-evaluation reply-evaluation
+                      :seon.config.model-stream/partial-publish-settle-ms
+                      settle-ms))
              :seon.retry/strategy
              (turn.core/llm-retry-strategy
               resolution retry-configuration attempt-count)

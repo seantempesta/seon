@@ -634,9 +634,11 @@
       {:optional true} [:int (assoc inherit-error :min 1)]]
      [:seon.ai/agent-fallback-variant
       {:optional true} [:and inherit-error :seon.config/model-variant]]
-     ;; Turn grammar is launch-role data too. A planning or generated repair
-     ;; agent must be able to consume one multi-namespace batch without changing
-     ;; the cluster default used by ordinary agents.
+     [:seon.ai/wire-stream?
+      {:optional true} :seon.ai/wire-stream?]
+     [:seon.ai/reply-evaluation
+      {:optional true} :seon.ai/reply-evaluation]
+     ;; Deprecated compatibility pair. New variants set the two R36 facts.
      [:seon.config/repl-mode
       {:optional true} [:or [:enum :inherit] :seon.config/repl-mode]]]))
 
@@ -819,17 +821,22 @@
    [:seon.config.database.pull/max-result-weight
     {:optional true} :seon.config.database.pull/max-result-weight]])
 
-;;; REPL MODE (repl-mode Phase 1) — how the agent's REPL turn resolves a
-;;; form's result. The DEFAULT is per-MODEL ([[default-repl-mode]]); an
-;;; explicit manifest value always wins. `:batch`: the turn is one LLM call writing N
-;;; forms; a model-typed result is STRIPPED at the reply boundary and the
-;;; real values arrive interleaved next turn. `:stream`: the SDK stream is
-;;; consumed delta-by-delta and ABORTED the moment one complete top-level
-;;; form has streamed — one form per turn, its real value in the next
-;;; transcript. The manifest value is read ONCE at boot and reconciled into
-;;; a DB datom on the singleton cluster-config entity; the turn loop + the
-;;; transcript masthead read the DATOM (config-through-DB), never this key.
+;;; LEGACY REPL MODE — retained as an explicit compatibility input while
+;;; R36's two orthogonal facts graduate. `:stream` means wire streaming plus
+;;; first-form evaluation; `:batch` means an ordinary response plus batch
+;;; evaluation. New configuration should set the two `:seon.ai/*` facts.
 (schema/register! :seon.config/repl-mode [:enum :batch :stream])
+(schema/register! :seon.ai/wire-stream? :boolean)
+(schema/register! :seon.ai/reply-evaluation [:enum :first-form :batch])
+(schema/register!
+ :seon.config.model-stream/partial-publish-settle-ms
+ [:int {:default 400 :min 1}])
+(schema/register!
+ :seon.config/model-stream
+ [:map
+  [:seon.config.model-stream/partial-publish-settle-ms
+   {:optional true}
+   :seon.config.model-stream/partial-publish-settle-ms]])
 
 ;;; RUN RESOURCE POLICY — generous safety ceilings, not normal stop reasons.
 ;;; The manifest section resolves into three scalar singleton datoms so the
@@ -947,6 +954,11 @@
    [:seon.config/id                          :seon.config/id]
    [:seon.config/skills-dir         {:optional true} :seon.config/skills-dir]
    [:seon.config/repl-mode          {:optional true} :seon.config/repl-mode]
+   [:seon.ai/wire-stream?           {:optional true} :seon.ai/wire-stream?]
+   [:seon.ai/reply-evaluation       {:optional true} :seon.ai/reply-evaluation]
+   [:seon.config.model-stream/partial-publish-settle-ms
+    {:optional true}
+    :seon.config.model-stream/partial-publish-settle-ms]
    [:seon.config.run/batch-turn-limit  {:optional true} :seon.config.run/batch-turn-limit]
    [:seon.config.run/stream-form-limit {:optional true} :seon.config.run/stream-form-limit]
    [:seon.config.run/deadline-ms       {:optional true} :seon.config.run/deadline-ms]
@@ -1103,6 +1115,9 @@
   [:map
    [:seon.config/skills-dir    {:optional true} :seon.config/skills-dir]
    [:seon.config/repl-mode     {:optional true} :seon.config/repl-mode]
+   [:seon.ai/wire-stream?      {:optional true} :seon.ai/wire-stream?]
+   [:seon.ai/reply-evaluation  {:optional true} :seon.ai/reply-evaluation]
+   [:seon.config/model-stream  {:optional true} :seon.config/model-stream]
    [:seon.config/run           {:optional true} :seon.config/run]
    [:seon.config/execution     {:optional true} :seon.config/execution]
    [:seon.config/guard         {:optional true} :seon.config/guard]
@@ -1762,6 +1777,7 @@
         execution (get manifest :seon.config/execution {})
         guard (get manifest :seon.config/guard {})
         llm-retry (get manifest :seon.config/llm-retry {})
+        model-stream (get manifest :seon.config/model-stream {})
         shell (get manifest :seon.config/shell {})
         database (get manifest :seon.config/database {})
         contexts (resolve-context-entities manifest)
@@ -1777,10 +1793,25 @@
            :seon.config.execution/host-respawn-backoff-ms
            1000
            "At least one second must separate failed host-reconcile attempts so repeated demand cannot spin operator subprocesses.")]
-    (cond-> {:seon.config/id cluster-config-id
-             :seon.config/repl-mode
-             (let [d (default-repl-mode environment)]
-               (coerce-enum (get manifest :seon.config/repl-mode d) #{:batch :stream} d))
+    (let [default-mode (default-repl-mode environment)
+          legacy-mode
+          (coerce-enum (get manifest :seon.config/repl-mode default-mode)
+                       #{:batch :stream}
+                       default-mode)]
+      (cond-> {:seon.config/id cluster-config-id
+             :seon.config/repl-mode legacy-mode
+             :seon.ai/wire-stream?
+             (if (contains? manifest :seon.ai/wire-stream?)
+               (:seon.ai/wire-stream? manifest)
+               (= :stream legacy-mode))
+             :seon.ai/reply-evaluation
+             (if (contains? manifest :seon.ai/reply-evaluation)
+               (:seon.ai/reply-evaluation manifest)
+               (if (= :stream legacy-mode) :first-form :batch))
+             :seon.config.model-stream/partial-publish-settle-ms
+             (get model-stream
+                  :seon.config.model-stream/partial-publish-settle-ms
+                  400)
              :seon.config.run/batch-turn-limit
              (:seon.config.run/batch-turn-limit run)
              :seon.config.run/stream-form-limit
@@ -1998,7 +2029,7 @@
                                       (get repair-class-attributes class)]
                              [attribute enabled?])))
                    (:seon.config.repair/classes rep))
-             (resolve-operational-values manifest hardware))))))
+             (resolve-operational-values manifest hardware)))))))
 
 (defn execution-host-respawn-backoff-ms
   "The demand-triggered host reconcile backoff from one resolved singleton."

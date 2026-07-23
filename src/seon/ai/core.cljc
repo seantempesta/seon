@@ -187,6 +187,8 @@
   []
   (into [:seon.agent/id
          :seon.config/repl-mode
+         :seon.ai/wire-stream?
+         :seon.ai/reply-evaluation
          :seon.ai/agent-max-retries
          :seon.ai/agent-attempt-timeout-ms
          :seon.ai/agent-fallback-variant]
@@ -196,11 +198,44 @@
   "Pull pattern for the ordinary cluster values used by model resolution."
   []
   (into [:seon.config/id
+         :seon.config/repl-mode
+         :seon.ai/wire-stream?
+         :seon.ai/reply-evaluation
+         :seon.config.model-stream/partial-publish-settle-ms
          :seon.config.llm-retry/maximum-wait-ms
          :seon.config.llm-retry/maximum-total-wait-ms
          :seon.config.llm-retry/default-retries
          {:seon.config/model-variants ['*]}]
         (concat config-attrs model-transport-cap-attrs)))
+
+(defn reply-policy-from-rows
+  "Resolve R36 wire and evaluation facts independently from acquired rows."
+  {:malli/schema
+   [:=> [:catn [::config-row :map] [::agent-row :map]] :map]}
+  [config-row agent-row]
+  (let [legacy-pair
+        (fn [mode]
+          (case mode
+            :stream {:seon.ai/wire-stream? true
+                     :seon.ai/reply-evaluation :first-form}
+            :batch {:seon.ai/wire-stream? false
+                    :seon.ai/reply-evaluation :batch}
+            nil))
+        agent-legacy (legacy-pair (:seon.config/repl-mode agent-row))
+        cluster-legacy
+        (or (legacy-pair (:seon.config/repl-mode config-row))
+            {:seon.ai/wire-stream? false
+             :seon.ai/reply-evaluation :batch})
+        resolve-axis
+        (fn [attribute]
+          (cond
+            (contains? agent-row attribute) (get agent-row attribute)
+            (contains? agent-legacy attribute) (get agent-legacy attribute)
+            (contains? config-row attribute) (get config-row attribute)
+            :else (get cluster-legacy attribute)))]
+    {:seon.ai/wire-stream? (boolean (resolve-axis :seon.ai/wire-stream?))
+     :seon.ai/reply-evaluation
+     (resolve-axis :seon.ai/reply-evaluation)}))
 
 (defn thinking-mode
   "Parse stored thinking configuration to the adapter value."

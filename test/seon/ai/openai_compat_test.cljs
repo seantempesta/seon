@@ -435,3 +435,27 @@
                    (is (true? @aborted))))
           (.then (fn [_] (done)))
           (.catch (fn [error] (is false (str "threw — " error)) (done)))))))
+
+(deftest batch-stream-consumes-every-form-and-isolates-progress-failure
+  (async done
+    (let [aborted (atom false)
+          offers (atom [])
+          stream (scripted-stream ["(+ 1 2)" "\n" "(+ 3 4)"] aborted)]
+      (-> (openai/stream-until-form!
+           stream
+           :batch
+           (fn [prefix]
+             (swap! offers conj prefix)
+             (when (= 2 (count @offers))
+               (throw (js/Error. "presentation-only")))))
+          (.then
+           (fn [response]
+             (is (= "(+ 1 2)\n(+ 3 4)"
+                    (:seon.ai.openai-compat/text response)))
+             (is (false? (:seon.ai.openai-compat/aborted? response)))
+             (is (false? @aborted))
+             (is (= ["(+ 1 2)" "(+ 1 2)\n" "(+ 1 2)\n(+ 3 4)"]
+                    @offers))))
+          (.then (fn [_] (done)))
+          (.catch
+           (fn [error] (is false (str "threw — " error)) (done)))))))

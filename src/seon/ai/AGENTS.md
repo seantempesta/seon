@@ -29,14 +29,16 @@ LLM call sits in the turn), `observability.md` (what of the request/response
   environment variable. This is how independent
   agents use different providers and compatible gateways; never add
   call-site provider conditionals. Named launch variants may also carry the
-  existing `:seon.config/repl-mode`; prompt acquisition resolves the agent's
-  value before the cluster singleton so planning/repair agents can use
-  `:batch` without changing ordinary agents.
+  explicit `:seon.ai/reply-evaluation` and `:seon.ai/wire-stream?` facts;
+  prompt acquisition resolves the agent's values before the cluster singleton.
+  The legacy `:seon.config/repl-mode` vocabulary is deprecated compatibility
+  input only.
 - OpenAI-compatible completion limits are capability data, never model-name
   branches. `:seon.ai/completion-limit-field` selects `max_tokens` or
   `max_completion_tokens`; the Kimi planning variant selects the latter.
-  `:batch` uses one nonstreaming ChatCompletion so the provider's complete
-  assistant message is not reconstructed from vendor-specific deltas.
+  Batch reply evaluation may use streaming or nonstreaming transport. When it
+  streams, it reads to natural EOF and retains terminal provider usage before
+  parsing the complete reply once.
 - **`::max-tokens` is the OUTPUT cap** — a context-window limit is a
   separate concern; don't conflate them.
 - **`tokens.cljs` owns the one token estimator** (`chars/4`). Every size

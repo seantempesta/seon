@@ -5,7 +5,9 @@
    [my.blob :as blob]
    [seon.agent.turn.llm :as llm]
    [seon.ai.core :as ai]
-   [seon.db :as db]))
+   [seon.db :as db])
+  #?(:clj
+     (:import [java.util.concurrent CountDownLatch TimeUnit])))
 
 (def resolution
   {:seon.ai/resolved-config
@@ -22,10 +24,10 @@
     (is (nil? (llm/split-persisted-prompt "uncommitted reconstruction")))))
 
 (deftest attempt-terminal-evidence-is-portable-and-bounded
-  (let [success (llm/attempt-row 0 nil resolution 1000 false
+  (let [success (llm/attempt-row 0 nil resolution 1000 false :batch
                                  {:text "(+ 1 2)"})
         timeout (llm/attempt-row
-                 1 nil resolution 1000 false
+                 1 nil resolution 1000 false :first-form
                  {:seon.ai/error {:seon.ai/timeout? true
                                   :seon.ai/outer-timeout? true}})]
     (testing "terminal vocabulary is shared by both claimants"
@@ -68,3 +70,32 @@
                  (fn [_] (throw (ex-info "must not dispatch" {})))})]
            (is (= "missing prompt" (:seon.error/message result)))
            (is (= :core-bug (:seon.error/kind result))))))))
+
+#?(:clj
+   (deftest presentation-backpressure-never-blocks-prefix-offers
+     (let [entered (CountDownLatch. 1)
+           release (CountDownLatch. 1)
+           published (CountDownLatch. 2)
+           values (atom [])
+           sink
+           (llm/presentation-sink
+            1
+            (fn [prefix]
+              (swap! values conj prefix)
+              (.countDown published)
+              (when (= "A" prefix)
+                (.countDown entered)
+                (.await release 2 TimeUnit/SECONDS))))
+           offer! (:seon.ai.presentation/offer! sink)]
+       (offer! "A")
+       (is (.await entered 1 TimeUnit/SECONDS))
+       (let [started (System/nanoTime)]
+         (doseq [prefix ["AB" "ABC" "ABCD"]]
+           (offer! prefix))
+         (is (< (/ (- (System/nanoTime) started) 1000000.0) 50.0)
+             "offers remain constant-time while publication is blocked"))
+       (.countDown release)
+       (is (.await published 1 TimeUnit/SECONDS))
+       ((:seon.ai.presentation/close! sink))
+       (is (= ["A" "ABCD"] @values)
+           "only the newest pending prefix survives backpressure"))))

@@ -77,14 +77,17 @@ turn/FSM/bounds), `data-model.md` (every attr you'll touch), `observability.md`
   eval transaction with the `:seon.agent/namespace` assignment transaction:
   a newer assignment selects the next turn, while a later eval preserves
   ordinary REPL namespace movement. All prompt consumers reuse that rule.
-- **repl-mode `:batch`/`:stream` is a DB datom** returned by the same compiled
-  prompt acquisition from the `:seon.config` singleton; manifest-absent default is per-MODEL,
-  `config/default-repl-mode`). `:stream` aborts the LLM stream at the first
-  complete top-level form and evals ONE form per turn, so the run's work
-  bound counts FORMS (`derive/run-form-count`, `run/default-form-limit` 60);
-  `:batch` preserves the exact provider reply, parses it once, then attempts
-  every complete parsed form and records only real execution results. Runtime-
-  like narration remains evidence and never creates an event by resemblance.
+- **Reply evaluation and wire streaming are independent DB facts** returned by
+  the same compiled prompt acquisition. `:seon.ai/reply-evaluation`
+  `:first-form` aborts a streaming response at the first complete top-level
+  form, evaluates one form, and makes the run work bound count forms
+  (`derive/run-form-count`, `run/default-form-limit` 60). `:batch` consumes to
+  natural EOF, parses the exact reply once, and attempts every complete form.
+  `:seon.ai/wire-stream?` controls transport presentation only. The deprecated
+  repl-mode vocabulary maps `:stream` to `{:first-form, wire-stream}` and
+  `:batch` to `{:batch, nonstreaming}`; new code uses the explicit axes.
+  Runtime-like narration remains evidence and never creates an event by
+  resemblance.
 
 ## Vendored grounding
 

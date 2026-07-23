@@ -110,7 +110,7 @@
 
 (defn- send-stream
   [^HttpClient client ^HttpRequest request maximum-response-bytes
-   initial step abort?]
+   initial step abort? progress!]
   (let [handler (HttpResponse$BodyHandlers/limiting
                  (HttpResponse$BodyHandlers/ofInputStream)
                  maximum-response-bytes)
@@ -133,7 +133,15 @@
                 state
 
                 :else
-                (let [next-state (step state (read-json data))]
+                (let [next-state (step state (read-json data))
+                      prior-text (:seon.ai.http/text state)
+                      next-text (:seon.ai.http/text next-state)]
+                  (when (and progress!
+                             (string? next-text)
+                             (not= prior-text next-text))
+                    (try
+                      (progress! next-text)
+                      (catch Throwable _ nil)))
                   (if (abort? next-state)
                     (assoc next-state :seon.ai.http/aborted? true)
                     (recur next-state)))))
@@ -145,7 +153,7 @@
   [{:seon.ai.http/keys
     [credential-candidates config-resolution connect-timeout-ms
      maximum-response-bytes request-timeout-ms stream? stream-initial
-     stream-step stream-abort?]
+     stream-step stream-abort? progress!]
     :as request}]
   (cond
     (not (pos-int? request-timeout-ms))
@@ -169,7 +177,8 @@
                  (send-stream client
                               (request-builder request secret)
                               maximum-response-bytes
-                              stream-initial stream-step stream-abort?)
+                              stream-initial stream-step stream-abort?
+                              progress!)
                  (send-batch client
                              (request-builder request secret)
                              maximum-response-bytes))

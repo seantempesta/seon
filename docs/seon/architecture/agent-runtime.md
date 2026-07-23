@@ -229,9 +229,10 @@ same fence and terminal transaction as normal completion.
 
 ## Bounds and truthful stopping
 
-A run has separate work and wall-clock bounds. Batch mode counts completed
-turns; stream mode counts attempted forms. The absolute deadline bounds the
-whole run, while guarded-door limits bound each SCI invocation. Provider
+A run has separate work and wall-clock bounds. Reply evaluation in `:batch`
+mode counts completed turns; `:first-form` counts attempted forms independently
+of whether the provider transport streams bytes. The absolute deadline bounds
+the whole run, while guarded-door limits bound each SCI invocation. Provider
 attempts have their own frozen transport deadline and durable receipt.
 
 No-progress is derived from trailing committed eval observations. Repeated

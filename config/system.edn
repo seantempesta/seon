@@ -37,6 +37,13 @@
   :seon.ai/base-url "https://api.deepseek.com"
   :seon.ai/api-key-env "DEEPSEEK_API_KEY"}
 
+ ;; ── MODEL REPLY POLICY — wire delivery and evaluation are orthogonal.
+ ;; The default retains the established first-form early-abort behavior.
+ :seon.ai/wire-stream? true
+ :seon.ai/reply-evaluation :first-form
+ :seon.config/model-stream
+ {:seon.config.model-stream/partial-publish-settle-ms 400}
+
  ;; A live switch remains an ordinary transact against the database-owned row.
  ;; Per-agent model settings are ordinary optional `:seon.ai/agent-*` attributes
  ;; on the agent entity. They may also be declared in `agent-context` or
@@ -382,7 +389,8 @@
  :seon.config/model-variants
  {:planning
   {:seon.ai/agent-provider :openai-compat
-   :seon.config/repl-mode :batch
+   :seon.ai/wire-stream? true
+   :seon.ai/reply-evaluation :batch
    :seon.ai/agent-model "kimi-k3"
    :seon.ai/agent-max-tokens 16384
    :seon.ai/agent-completion-limit-field :max-completion-tokens
@@ -404,7 +412,8 @@
    :seon.ai/agent-api-key-env "META_MODEL_API_KEY"}
   :execution
   {:seon.ai/agent-provider :deepseek
-   :seon.config/repl-mode :batch
+   :seon.ai/wire-stream? false
+   :seon.ai/reply-evaluation :batch
    :seon.ai/agent-model "deepseek-v4-flash"
    :seon.ai/agent-thinking "false"
    :seon.ai/agent-max-tokens 8192

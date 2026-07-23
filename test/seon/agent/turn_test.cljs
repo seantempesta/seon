@@ -59,7 +59,7 @@
                "(def before-schema 1)\n"
                "(schema/register! ::id :string)\n"
                "(def value 2)")
-          false
+          :batch
           'my.agent.agent-1)]
     (is (= ['my.agent.agent-1 'my.feature.model 'my.feature.ui]
            (:seon.repl/namespace-order program)))
@@ -73,32 +73,32 @@
                 (filter :seon.repl/phase)
                 (mapv (juxt :seon.repl/phase :seon.repl/source)))))))
 
-(deftest stream-replies-retain-the-existing-first-form-boundary
-  (let [program (reply-program ";; first\n(+ 1 2)\n(+ 3 4)" true
+(deftest first-form-replies-retain-the-existing-boundary
+  (let [program (reply-program ";; first\n(+ 1 2)\n(+ 3 4)" :first-form
                                'my.agent.agent-1)
         forms (->> (:seon.repl/eval-entries program)
                    (filter #(= :form (:seon.repl/kind %)))
                    vec)]
     (is (= ["(+ 1 2)"] (mapv :seon.repl/source forms)))
     (is (= (str "first\n"
-                "; stream mode executed the first complete form; "
+                "; first-form mode executed the first complete form; "
                 "1 further form was not executed — resend the next form.")
            (:seon.repl/narration (first forms))))))
 
 (deftest stream-tail-narration-counts-only-unexecuted-complete-forms
   (let [program (reply-program
                  "(+ 1 2)\n;; between\n(+ 3 4)\n(+ 5 6)\n(incomplete"
-                 true
+                 :first-form
                  'my.agent.agent-1)
         form (->> (:seon.repl/eval-entries program)
                   (filter #(= :form (:seon.repl/kind %)))
                   first)]
-    (is (= "; stream mode executed the first complete form; 2 further forms were not executed — resend the next form."
+    (is (= "; first-form mode executed the first complete form; 2 further forms were not executed — resend the next form."
            (:seon.repl/narration form)))
     (is (= "(+ 1 2)" (:seon.repl/source form)))))
 
-(deftest stream-single-form-needs-no-tail-narration
-  (let [program (reply-program "(+ 1 2)\n;; trailing thought" true
+(deftest first-form-single-form-needs-no-tail-narration
+  (let [program (reply-program "(+ 1 2)\n;; trailing thought" :first-form
                                'my.agent.agent-1)
         form (->> (:seon.repl/eval-entries program)
                   (filter #(= :form (:seon.repl/kind %)))
