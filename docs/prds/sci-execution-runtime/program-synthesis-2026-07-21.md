@@ -984,6 +984,24 @@ COMPLETELY before dispatching anything.
   settled extraction (canonical-schema-rows portable + CLJS-captive
   registration moves) commits first path-limited. The script/**
   uncommitted hunks are PROCFIX's live work — verified disjoint.
+- R45 DESIGN ACCEPTED (2026-07-23 eve, sci verdict verified:
+  research/preprocessing-design-2026-07-23.md is the authority):
+  three identities (base = artifact×core-fingerprint; cluster =
+  release×manifest digest; divergence = fingerprint×basis, db-
+  resident) with resume = base ⊕ divergence; operations pre-process/
+  apply/start/maintain — APPLY absorbs paged seed + config reconcile
+  plus initial-agent birth (today's 35s gap moves out of startup);
+  START = three hash checks, loud cluster-apply remedy; MAINTAIN =
+  the mutating tx itself carries the divergence-cache delta (crash
+  window unrepresentable). 14-cache inventory; sci analysis output =
+  reify-Eval closures, NEVER persistable (verified types.cljc) — no
+  fork extension now, precomputed base-load plan instead. Estimates:
+  startup ≈5-9s/process; fresh-cluster apply ≈16s→10s; ephemeral
+  lane clusters 271s→tens of seconds. Unit ladder S1-S7 (S1 =
+  bootfast, awaiting fixseed's schema.cljc release). THREE OWNER
+  DECISIONS OPEN (§8): divergence-cache granularity, sci base-load
+  fallback trigger, apply ergonomics — recommendations in the doc,
+  surfaced to owner.
 - TEST-SIMPLIFICATION AUDIT QUEUED (owner, 2026-07-23 eve): once
   fixseed proves the fixtures-are-clusters-in-miniature mechanism, a
   Sol audit sweeps the whole test surface to migrate suites onto it
