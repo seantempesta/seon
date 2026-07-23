@@ -1127,6 +1127,15 @@ W5), census→0, cutover flip, U10 drill.
 PARALLEL PORTFOLIO (no longer gating the loop): JVM leaves
 fs/shell/web/blob + bindings (~28 rows) · my.* host bindings ·
 the 5 straggler ports.
+**META-STRIP LANDED `d92e2aa9`** (spine step 1 done): marker gone
+from 48 files (net −138 lines of ceremony), only :malli/schema
+required, census RE-BASELINED to public-var enumeration — the
+honest meter is now **223 public vars: 46 done (22 base + 24
+resolved), 173 capability-pending, 4 platform-pending** (the
+denominator grew because all functions are agent-facing now, per
+ruling 19). Absent effect proven non-replayable by construction
+with a regression. Spine step 2 (loop-migration slice) dispatches
+on the design agent's return.
 LIVE: loop-migration DESIGN agent (owner-directed, 2026-07-23) —
 fresh-eyes grounding in reference-code/datahike + reference-code/sci
 (native CAS/listen!/interrupt primitives vs Seon hand-rolls),
