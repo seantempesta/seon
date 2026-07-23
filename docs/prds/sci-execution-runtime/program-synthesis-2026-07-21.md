@@ -104,6 +104,12 @@ COMPLETELY before dispatching anything.
   aero config fact (schema+docstring+calibration provenance),
   defaults ≥100× measured legitimate P99.9, firing always loud,
   NO numeric limit literals in runtime code.
+- R28 (owner, 2026-07-23 overnight): breaking the CLJS/Bun side is
+  AUTHORIZED and dual-maintenance is explicitly NOT wanted — no
+  compat shims, no keeping both paths working. JVM gates
+  (bin/test-writer, JVM loads, live JVM proofs) are authoritative;
+  never spend cycles running CLJS suites to prove known breakage —
+  run them only when a unit claims a still-alive pod surface works.
 
 ## Standing mechanics (all learned the hard way)
 
