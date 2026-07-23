@@ -26,9 +26,10 @@
 (def watcher-id :seon.dev.process/watcher)
 (def writer-id :seon.dev.process/writer)
 (def host-id :seon.dev.process/host)
+(def web-render-id :seon.dev.process/web-render)
 (def pod-id :seon.dev.process/pod)
 (def restore-admin-id :seon.dev.process/restore-admin)
-(def all-process-ids [watcher-id writer-id host-id pod-id])
+(def all-process-ids [watcher-id writer-id host-id web-render-id pod-id])
 
 (def ^:private legacy-containment-shutdown-grace-ms 2500)
 
@@ -202,6 +203,11 @@
                       ::launch/host-owner ::launch/eval-socket-path])
       (:seon.dev.config/host-eval-socket config)))
 
+(defn- web-render-port-file
+  [config]
+  (str (fs/path (:seon.dev.config/process-dir config)
+                "web-render" "http.port")))
+
 (defn target-process-ids
   "Return the processes owned by the selected runtime configuration."
   [config]
@@ -212,12 +218,12 @@
     (cond
       (and owns-watcher? owns-writer?) all-process-ids
       owns-watcher? (if source-checkout?
-                      [watcher-id host-id pod-id]
+                      [watcher-id host-id web-render-id pod-id]
                       [watcher-id pod-id])
       owns-writer? (if source-checkout?
-                     [writer-id host-id pod-id]
+                     [writer-id host-id web-render-id pod-id]
                      [writer-id pod-id])
-      source-checkout? [host-id pod-id]
+      source-checkout? [host-id web-render-id pod-id]
       :else [pod-id])))
 
 (defn- release-member
@@ -583,6 +589,43 @@
                      :seon.dev.process/readiness
                      :seon.dev.process.readiness/writer
                      :seon.dev.process/artifact-digest
+                   (:seon.dev.artifact/writer-digest manifest)}])))
+        web-render-spec
+        (when source-checkout?
+          (cond->
+           {:seon.dev.process/id web-render-id
+            :seon.dev.process/argv
+            ["clojure" "-M:writer:host" "-m" "seon.web.server"
+             (pr-str
+              {:seon.web.server/writer-socket-path
+               (:seon.dev.config/request-socket config)
+               :seon.web.server/database-name
+               (:seon.dev.config/cluster-name config)
+               :seon.web.server/port-file
+               (web-render-port-file config)
+               :seon.web.server/port 0})]
+            :seon.dev.process/environment environment
+            :seon.dev.process/dependencies
+            (cond-> []
+              owns-writer-processes? (conj writer-id))
+            :seon.dev.process/http-port-file
+            (web-render-port-file config)
+            :seon.dev.process/readiness
+            :seon.dev.process.readiness/web-render
+            :seon.dev.process/ready-timeout-ms
+            (:seon.dev.process/ready-timeout-ms host-spec)
+            :seon.dev.process/shutdown-grace-ms
+            (:seon.dev.process/shutdown-grace-ms host-spec)
+            :seon.dev.process/artifact-digest
+            (artifact/source-input-digest config)}
+            (not owns-writer-processes?)
+            (assoc :seon.dev.process/external-dependencies
+                   [{:seon.dev.process/id writer-id
+                     :seon.dev.process/owner-process-dir
+                     (::launch/writer-process-dir descriptor-writer)
+                     :seon.dev.process/readiness
+                     :seon.dev.process.readiness/writer
+                     :seon.dev.process/artifact-digest
                      (:seon.dev.artifact/writer-digest manifest)}])))
         spec-map
         {watcher-id
@@ -617,6 +660,7 @@
       (:seon.dev.artifact/writer-digest manifest)}
 
      host-id host-spec
+     web-render-id web-render-spec
      pod-id pod-spec}
         selected-ids (set (target-process-ids config))
         spec-map (into {} (keep (fn [[id spec]] (when (and spec (selected-ids id))
@@ -849,6 +893,8 @@
          :seon.dev.process.readiness/writer (writer-ready? config)
          :seon.dev.process.readiness/host
          (unix-socket-ready? (host-eval-socket config))
+         :seon.dev.process.readiness/web-render
+         (pod-ready? config spec record)
          :seon.dev.process.readiness/pod (pod-ready? config spec record)
          false)))
 
@@ -977,6 +1023,8 @@
          (filterv string?))
     :seon.dev.process/host
     (if-let [path (host-eval-socket config)] [path] [])
+    :seon.dev.process/web-render
+    [(web-render-port-file config)]
     :seon.dev.process/pod
     (if-let [path
              (or (get-in config [:seon.dev.config/launch-descriptor

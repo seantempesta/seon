@@ -158,6 +158,47 @@
     {:optional true} :seon.config.model-transport/response-identity-cap]
    [:seon.config.model-transport/endpoint-cap
     {:optional true} :seon.config.model-transport/endpoint-cap]])
+
+(def web-render-dial-schemas
+  "JVM web-render runtime policy, including units and calibration provenance."
+  {:seon.config.web-render/heartbeat-interval-ms
+   [:int {:min 1 :description "Milliseconds between idle SSE heartbeats. Default 15000 ports the measured pod policy in seon.web.datastar."}]
+   :seon.config.web-render/mailbox-depth
+   [:int {:min 1 :description "Complete rendered states retained per SSE connection. Default 1 ports the pod's latest-wins policy."}]
+   :seon.config.web-render/maximum-connections
+   [:int {:min 1 :description "Loud SSE connection-admission ceiling. Default 10000 is a protective first-slice value at least 100x the expected single-user P99.9; refine from slice-2 measurements."}]
+   :seon.config.web-render/request-executor-size
+   [:int {:min 1 :description "http-kit request worker count. Default 256 is a generous first-slice capacity; refine from slice-2 measured request concurrency."}]
+   :seon.config.web-render/database-pool-size
+   [:int {:min 1 :description "Retained db.host request-session count. Default 16 separates page render reads from the dedicated interest session; refine from slice-2 contention measurements."}]
+   :seon.config.web-render/database-call-timeout-ms
+   [:int {:min 1 :description "Milliseconds before a database call or interest control request fails loudly. Default 120000 is a protective ceiling above 100x expected loopback latency."}]
+   :seon.config.web-render/interest-reconnect-backoff-ms
+   [:int {:min 1 :description "Milliseconds between failed interest-session restore attempts. Default 1000 prevents a disconnected writer from causing a reconnect spin."}]
+   :seon.config.web-render/data-page-size
+   [:int {:min 1 :description "Datoms rendered by one /data view page. Default 100 preserves the bounded first-slice database browser policy."}]
+   :seon.config.web-render/maximum-request-body-bytes
+   [:int {:min 1 :description "Loud http-kit request-body ceiling in bytes. Default 4194304 matches the transport frame ceiling and exceeds expected GET bodies by more than 100x."}]})
+
+(doseq [[attribute shape] web-render-dial-schemas]
+  (schema/register! attribute shape))
+
+(schema/register! :seon.config/web-render
+  (into [:map {:closed true}]
+        (map (fn [attribute]
+               [attribute {:optional true} attribute]))
+        (keys web-render-dial-schemas)))
+
+(def web-render-attributes
+  "Flat singleton attributes consumed by the JVM web-render process."
+  (vec (keys web-render-dial-schemas)))
+
+(defn web-render-configuration
+  "Project the JVM web-render policy from one acquired config singleton."
+  {:malli/schema [:=> [:cat :seon.config/singleton]
+                  :seon.config/web-render]}
+  [singleton]
+  (select-keys singleton web-render-attributes))
 ;; EXPLICIT-CHARACTER knobs (transcript-render redesign) — for content the
 ;; agent edits byte-exactly. Every DEFAULT reproduces today's bytes, so an
 ;; absent section / `{}` boot is byte-identical.
@@ -795,6 +836,24 @@
     {:optional true} :seon.config.model-transport/response-identity-cap]
    [:seon.config.model-transport/endpoint-cap
     {:optional true} :seon.config.model-transport/endpoint-cap]
+   [:seon.config.web-render/heartbeat-interval-ms
+    {:optional true} :seon.config.web-render/heartbeat-interval-ms]
+   [:seon.config.web-render/mailbox-depth
+    {:optional true} :seon.config.web-render/mailbox-depth]
+   [:seon.config.web-render/maximum-connections
+    {:optional true} :seon.config.web-render/maximum-connections]
+   [:seon.config.web-render/request-executor-size
+    {:optional true} :seon.config.web-render/request-executor-size]
+   [:seon.config.web-render/database-pool-size
+    {:optional true} :seon.config.web-render/database-pool-size]
+   [:seon.config.web-render/database-call-timeout-ms
+    {:optional true} :seon.config.web-render/database-call-timeout-ms]
+   [:seon.config.web-render/interest-reconnect-backoff-ms
+    {:optional true} :seon.config.web-render/interest-reconnect-backoff-ms]
+   [:seon.config.web-render/data-page-size
+    {:optional true} :seon.config.web-render/data-page-size]
+   [:seon.config.web-render/maximum-request-body-bytes
+    {:optional true} :seon.config.web-render/maximum-request-body-bytes]
    [:seon.config/on-core-error      {:optional true} :seon.config/on-core-error]
    [:seon.config/spawn-depth-cap    {:optional true} :seon.config/spawn-depth-cap]
    [:seon.config/always             {:optional true} :seon.config/always]
@@ -875,6 +934,7 @@
    [:seon.config/execution     {:optional true} :seon.config/execution]
    [:seon.config/guard         {:optional true} :seon.config/guard]
    [:seon.config/model-transport {:optional true} :seon.config/model-transport]
+   [:seon.config/web-render      {:optional true} :seon.config/web-render]
    [:seon.config/namespaces    {:optional true} :seon.config/namespaces-spec]
    [:seon.config/routes        {:optional true} [:vector :seon.config/route-spec]]
    [:seon.config/render        {:optional true} :seon.config/render]
@@ -1517,6 +1577,7 @@
         render-context (get manifest :seon.config/render-context {})
         run (merge (default-run-policy) (get manifest :seon.config/run {}))
         transport (get manifest :seon.config/model-transport {})
+        web-render (get manifest :seon.config/web-render {})
         rep (get manifest :seon.config/repair {})
         web (get manifest :seon.config/web {})
         root (get manifest :seon.config/root {})
@@ -1562,6 +1623,29 @@
              (get guard :seon.config.guard/deadline-ms 600000)
              :seon.config.guard/output-cap
              (get guard :seon.config.guard/output-cap 1638400)
+             :seon.config.web-render/heartbeat-interval-ms
+             (get web-render :seon.config.web-render/heartbeat-interval-ms 15000)
+             :seon.config.web-render/mailbox-depth
+             (get web-render :seon.config.web-render/mailbox-depth 1)
+             :seon.config.web-render/maximum-connections
+             (get web-render :seon.config.web-render/maximum-connections 10000)
+             :seon.config.web-render/request-executor-size
+             (get web-render :seon.config.web-render/request-executor-size 256)
+             :seon.config.web-render/database-pool-size
+             (get web-render :seon.config.web-render/database-pool-size 16)
+             :seon.config.web-render/database-call-timeout-ms
+             (get web-render :seon.config.web-render/database-call-timeout-ms
+                  120000)
+             :seon.config.web-render/interest-reconnect-backoff-ms
+             (get web-render
+                  :seon.config.web-render/interest-reconnect-backoff-ms
+                  1000)
+             :seon.config.web-render/data-page-size
+             (get web-render :seon.config.web-render/data-page-size 100)
+             :seon.config.web-render/maximum-request-body-bytes
+             (get web-render
+                  :seon.config.web-render/maximum-request-body-bytes
+                  4194304)
              :seon.config.render-context/host-timezone
              (get render-context
                   :seon.config.render-context/host-timezone

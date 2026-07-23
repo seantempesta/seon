@@ -144,6 +144,22 @@
   :seon.config.model-transport/endpoint-cap
   #long #or [#env SEON_MODEL_ENDPOINT_CAP 2048]}
 
+ ;; ── JVM WEB-RENDER TIER ──
+ ;; Heartbeat 15s and mailbox depth 1 port the measured pod SSE policy.
+ ;; Connection/call/body limits are loud protective ceilings, not governors:
+ ;; first-slice defaults are at least 100x legitimate expected P99.9 where a
+ ;; direct comparison exists, and are explicitly due for slice-2 calibration.
+ :seon.config/web-render
+ {:seon.config.web-render/heartbeat-interval-ms 15000
+  :seon.config.web-render/mailbox-depth 1
+  :seon.config.web-render/maximum-connections 10000
+  :seon.config.web-render/request-executor-size 256
+  :seon.config.web-render/database-pool-size 16
+  :seon.config.web-render/database-call-timeout-ms 120000
+  :seon.config.web-render/interest-reconnect-backoff-ms 1000
+  :seon.config.web-render/data-page-size 100
+  :seon.config.web-render/maximum-request-body-bytes 4194304}
+
  ;; ── RENDER BOUNDS — the GLOBAL, process-wide value/eval/message DISPLAY caps
  ;; (#46). A proper config (not scattered env reads): each cap is a plain literal
  ;; here, read by seon.config's database-edn-cap / eval-render-cap / value-* etc.

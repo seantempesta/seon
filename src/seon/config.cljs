@@ -627,6 +627,13 @@
   [configuration]
   (:seon.config.guard/output-cap configuration))
 
+(defn web-render-configuration
+  "The JVM web-render dial section projected from one acquired singleton."
+  {:malli/schema [:=> [:cat :seon.config/singleton]
+                  :seon.config/web-render]}
+  [configuration]
+  (resolve/web-render-configuration configuration))
+
 (defn eval-render-cap
   "Char cap for one eval row's echoed SOURCE + captured STDOUT.
 

@@ -362,6 +362,26 @@ the anchor stays the state ledger.
   repoint those consumers before deleting bands: `src/seon/execution.cljs`,
   `src/seon/execution/host.cljs`, and `src/seon/eval.cljs` are not honest
   whole-file deletions merely because their engines die.
+- **A dedicated JVM interest session can stay on the public UDS seam.** Open
+  one retained session with `open-session!`, derive streams from its public
+  channel, and use `read-frame`/`write-frame!` for a single reader vthread,
+  correlated control responses, and committed events. After reconnect,
+  reinstall every typed `listen-request` and synthesize one
+  `resynchronization-event` per still-current handler. No writer or transport
+  change is required (`src/seon/db/host.clj`, U5 regression
+  `seon.db.host-interest-test`).
+- **The Datastar JVM SDK has no SSE-comment operation.** Heartbeats must not
+  hand-roll framing merely to reproduce a comment. An empty named custom event
+  sent through `send-event!` preserves SDK framing/compression, stays inert to
+  Datastar, and can retain the existing “skip while draining; never displace
+  state” policy. Record this wire-shape difference explicitly in parity
+  evidence.
+- **Babashka does not accept `java.nio.file.Path` directly in `slurp`.** The
+  operator-side config resolver must convert `babashka.fs/path` results to
+  strings before reading render-context files. Otherwise `bin/seon up` fails
+  before process reconciliation and the cluster tests error while opening
+  `AGENTS.md`; never bypass the supervisor to obtain a live proof
+  (`tmp/orchestrator/u5-gate-live-up.log`).
 
 ## Design rulings that bind conversions
 

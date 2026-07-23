@@ -783,14 +783,27 @@
 (defn ^:async listen!
   ([input-or-handler]
    #?(:cljs (await (session/listen! input-or-handler))
-      :clj (session-error "Listeners are pod-only." {})))
+      :clj (if-let [listen! (:seon.db.leaf/listen! *leaf*)]
+             (listen! (if (map? input-or-handler)
+                        input-or-handler
+                        {::handler input-or-handler}))
+             (session-error "The JVM database leaf has no listener." {}))))
   ([key handler]
    #?(:cljs (await (session/listen! key handler))
-      :clj (session-error "Listeners are pod-only." {})))
+      :clj (if-let [listen! (:seon.db.leaf/listen! *leaf*)]
+             (listen! {::key key ::handler handler})
+             (session-error "The JVM database leaf has no listener." {}))))
   ([database key handler]
    #?(:cljs (await (session/listen! database key handler))
-      :clj (session-error "Listeners are pod-only." {}))))
-(defn unlisten! [input] #?(:cljs (session/unlisten! input) :clj false))
+      :clj (if-let [listen! (:seon.db.leaf/listen! *leaf*)]
+             (listen! {::db database ::key key ::handler handler})
+             (session-error "The JVM database leaf has no listener." {})))))
+(defn unlisten!
+  [input]
+  #?(:cljs (session/unlisten! input)
+     :clj (if-let [unlisten! (:seon.db.leaf/unlisten! *leaf*)]
+            (unlisten! input)
+            false)))
 (defn cancel! [request-id] #?(:cljs (session/cancel! request-id) :clj (session-error "Cancellation is pod-only." {})))
 (defn release [database] #?(:cljs (session/release! database) :clj (session-error "Release is pod-only." {})))
 (defn resolve-transaction-branch-head! [{::keys [containing-branch-head transaction-id]}]
