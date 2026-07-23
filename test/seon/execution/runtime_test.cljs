@@ -39,9 +39,9 @@
     (is (= ctx.driver/agent-entity-read-profile
            (select-keys (first prompt-members)
                         (keys ctx.driver/agent-entity-read-profile))))
-    (is (= runtime/agent-entity-read-profile
+    (is (= ctx.driver/agent-entity-read-profile
            (select-keys (first view-members)
-                        (keys runtime/agent-entity-read-profile))))
+                        (keys ctx.driver/agent-entity-read-profile))))
     (is (= config/configuration-read-profile
            (select-keys (second prompt-members)
                         (keys config/configuration-read-profile))))
@@ -84,7 +84,7 @@
          {:seon.error/message
           "The selected function is absent from the current database program."
           :seon.error/kind :agent}}
-        hiccup (@#'runtime/html-value "agent-1" block result)
+        hiccup (@#'ctx.driver/html-value "agent-1" block result)
         rendered (pr-str hiccup)]
     (is (str/includes? rendered "Updating this canvas"))
     (is (not (str/includes? rendered "my.app/orders")))
