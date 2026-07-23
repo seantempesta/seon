@@ -162,7 +162,10 @@
   [projection form]
   (let [forms (:seon.schema.projection/forms projection)
         registry (:seon.schema.projection/registry projection)
-        compiled (m/schema form {:registry registry})]
+        compile-options
+        (or (:seon.schema.projection/compile-options projection)
+            {:registry registry})
+        compiled (m/schema form compile-options)]
     (direct-references* compiled (set (keys forms)))))
 
 (defn dependent-schema-keys
