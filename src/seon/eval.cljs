@@ -2511,8 +2511,6 @@
 ;; Replaced WHOLESALE on change ([[ns-require-edges-tx]]) — component
 ;; retractEntity cascades, so no orphan edge rows. `[:vector …]` like
 ;; every component-ref attr (tx values are vectors).
-(schema/register! :seon.ns/require-edges
-                  [:vector {:seon.db/component true} :seon.db/ref])
 
 ;; The attrs a fn's source names as QUALIFIED keyword literals — its
 ;; declared read-set, extracted from the ALREADY-READ defn form at tee
@@ -2520,7 +2518,6 @@
 ;; `[:vector …]` (not `[:set …]`): the transact validator checks the
 ;; tx VALUE against the registered container, and diff-upserts
 ;; transact vectors.
-(schema/register! :seon.fn/read-attrs [:vector :qualified-keyword])
 
 (defn- defn-read-forms
   "The subforms of a top-level `form` whose keyword literals count as

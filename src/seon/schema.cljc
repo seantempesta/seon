@@ -353,6 +353,40 @@
                             :string
                             [:tuple :keyword :seon.db/lookup-ref-value]]))
 
+;; Canonical schema rows must describe themselves before any other registered
+;; form can become database data. These declarations therefore belong to the
+;; portable schema authority, not to a CLJS application namespace that happens
+;; to index them during boot.
+(defonce ^:private _canonical-schema-row-types
+  (update-candidate-forms!
+   merge
+   {:seon.schema/key [:keyword {:seon.db/identity true}]
+    :seon.schema/ns :seon.db/ref
+    :seon.schema/form :string
+    :seon.schema/created-at :inst}))
+
+;; Program rows are canonical schema data on both runtime tiers.  Their
+;; declarations belong to the portable registration authority, rather than to
+;; whichever CLJS namespace happens to index or tee them first.
+(defonce ^:private _program-graph-types
+  (update-candidate-forms!
+   merge
+   {:seon.fn/sym [:string {:seon.db/identity true}]
+    :seon.fn/ns :seon.db/ref
+    :seon.fn/source :string
+    :seon.fn/source-fingerprint :string
+    :seon.fn/execution-tier [:enum :nursery :graduated]
+    :seon.fn/fn-var? :boolean
+    :seon.fn/arglists :string
+    :seon.fn/doc :string
+    :seon.fn/private? :boolean
+    :seon.fn/spec :string
+    :seon.fn/schema-error :string
+    :seon.fn/created-at :inst
+    :seon.fn/read-attrs [:vector :qualified-keyword]
+    :seon.ns/require-edges
+    [:vector {:seon.db/component true} :seon.db/ref]}))
+
 ;; Generated persistent identity syntax is owned by `seon.db.id`, which loads
 ;; before `seon.db` registers slots that refer to `:seon.db/id`.  Keeping an
 ;; older bootstrap copy here let namespace load order silently restore the
@@ -1129,6 +1163,28 @@
   {:malli/schema [:=> [:cat] :map]}
   []
   (candidate-forms))
+
+(defn canonical-schema-rows
+  "Build the complete canonical schema-row population at one instant."
+  {:malli/schema
+   [:=> [:catn [:seon.schema/created-at :inst]] [:vector :map]]}
+  [created-at]
+  (into
+   []
+   (keep
+    (fn [[schema-key definition]]
+      (when (keyword? schema-key)
+        (let [properties (form/attr-form-properties definition)]
+          (cond-> {:seon.schema/key schema-key
+                   :seon.schema/form (form-string schema-key)
+                   :seon.schema/created-at created-at}
+            (contains? properties :seon.db.id/generator)
+            (assoc :seon.db.id/generator
+                   (:seon.db.id/generator properties))
+            (namespace schema-key)
+            (assoc :seon.schema/ns
+                   {:seon.ns/name (symbol (namespace schema-key))}))))))
+   (registered-schemas)))
 
 (defn registered?
   "Check if a schema keyword is registered."

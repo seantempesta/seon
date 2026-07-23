@@ -77,6 +77,12 @@
    [:seon.render/ai    {:optional true} :seon.render/ai]
    [:seon.render/html  {:optional true} :seon.render/html]])
 
+(schema/register! :seon.agent/ctx
+                  [:vector {:seon.db/component true}
+                   [:or {:seon.db/value-type :db.type/ref}
+                    :seon.db/ref
+                    :seon.agent.ctx/block]])
+
 ;; ============================================================
 ;; Config-driven agent-init — agent-level composer attrs.
 ;;   ::escape-clipping? (#43) — WIRED (CP-5): default true frees successful

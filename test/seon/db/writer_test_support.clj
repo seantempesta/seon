@@ -1,8 +1,11 @@
 (ns seon.db.writer-test-support
   "Shared admitted database-session fixtures for JVM writer tests."
   (:require [seon.config.resolve :as config.resolve]
+            [seon.db.host :as db.host]
+            [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds]
-            [seon.db.writer :as writer]))
+            [seon.db.writer :as writer]
+            [seon.schema :as schema]))
 
 (def ^:private fixture-hardware
   {:seon.hardware/cores 8
@@ -19,15 +22,27 @@
     fixture-hardware)
    (keys config.resolve/guard-budget-schemas)))
 
-(def guard-schema-rows
-  "Schema rows for the complete SCI guard policy seeded by host fixtures."
-  (into
-   [{:seon.schema/key :seon.config/cap
-     :seon.schema/form "[:int {:min 1}]"}]
-   (map (fn [[attribute shape]]
-          {:seon.schema/key attribute
-           :seon.schema/form (pr-str shape)}))
-   config.resolve/guard-budget-schemas))
+(defn canonical-schema-rows
+  "Derive fixture schema rows from the loaded canonical schema authority."
+  {:malli/schema [:=> [:cat] [:vector :map]]}
+  []
+  (schema/canonical-schema-rows (java.util.Date.)))
+
+(defn seed-canonical-schema!
+  "Commit the computed canonical schema population with boot provenance."
+  [session database-name initial-data]
+  (let [database (db.host/resolve-db! session nil false)]
+    (db.host/call!
+     session
+     (protocol/transaction-request
+      {::protocol/request-id (str (random-uuid))
+       :seon.db/db database
+       ::protocol/transaction-data
+       (into (canonical-schema-rows) initial-data)
+       ::protocol/transaction-meta
+       {:seon.db/user [:seon.agent/id "root"]
+        :seon.db/process
+        [:seon.db.process/id :seon.db.process/boot]}}))))
 
 (def read-defaults
   "Generous finite read limits for writer tests not exercising read policy."

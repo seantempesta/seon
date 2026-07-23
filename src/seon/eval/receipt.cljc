@@ -32,6 +32,13 @@
 (schema/register! :seon.eval/ns :symbol)
 ;; Optional direct ref to the agent whose scope produced the eval.
 (schema/register! :seon.eval/agent :seon.db/ref)
+(schema/register!
+  :seon.agent.turn/id
+  [:and {:seon.db/identity true
+         :seon.db.id/generator :seon.db.id.generator/compact}
+   ::db.id/compact-value])
+(schema/register! :seon.agent.turn/evals
+                  [:vector {:seon.db/component true} :seon.db/ref])
 
 (schema/register! ::receipt-state
                   [:enum :absent :running :done :error :interrupted])

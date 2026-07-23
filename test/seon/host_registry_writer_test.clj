@@ -17,6 +17,10 @@
             [clojure.test :refer [deftest is]]
             [sci.core :as sci]
             [seon.capability :as capability]
+            [seon.ai.core]
+            [seon.agent.lifecycle]
+            [seon.agent.ctx]
+            [seon.agent.home]
             [seon.db.host :as db.host]
             [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds]
@@ -24,6 +28,7 @@
             [seon.db.writer-test-support :as writer-test]
             [seon.host :as host]
             [seon.host.context :as context]
+            [seon.agent.ctx.render-fns]
             [seon.schema :as schema])
   (:import [java.io File]
            [java.nio.channels Channels SocketChannel]))
@@ -189,33 +194,14 @@
         base (context/build-base! session)
         ctx (context/fork-context base)]
     (try
-      (let [rows [{:seon.schema/key :seon.schema/key
-                   :seon.schema/form "[:keyword {:seon.db/identity true}]"}
-                  {:seon.schema/key :seon.schema/form
-                   :seon.schema/form ":string"}
-                  {:seon.schema/key :seon.host-registry-writer-test/note
-                   :seon.schema/form "[:string {:min 1}]"}
-                  {:seon.schema/key :seon.db/lookup-ref-value
-                   :seon.schema/form
-                   "[:or :string :uuid :keyword :symbol :int]"}
-                  {:seon.schema/key :seon.db/ref
-                   :seon.schema/form
-                   "[:or :int :string [:tuple :keyword :seon.db/lookup-ref-value]]"}
-                  {:seon.schema/key :seon.db/user
-                   :seon.schema/form ":seon.db/ref"}
-                  {:seon.schema/key :seon.db/process
-                   :seon.schema/form ":seon.db/ref"}
-                  {:seon.schema/key :seon.user/id
-                   :seon.schema/form "[:string {:seon.db/identity true}]"}
-                  {:seon.schema/key :seon.db.process/id
-                   :seon.schema/form "[:keyword {:seon.db/identity true}]"}]]
-        (register-runtime-schemas! rows)
-        (let [seeded (seed-schema-rows!
-                      session
-                      (into rows [{:seon.user/id "user"}
-                                  {:seon.db.process/id
-                                   :seon.db.process/repl}]))]
-          (is (true? (::protocol/success? seeded)) (pr-str seeded))))
+      (schema/register! :seon.host-registry-writer-test/note
+                        [:string {:min 1}])
+      (let [seeded
+            (writer-test/seed-canonical-schema!
+             session database-name
+             [{:seon.user/id "user"}
+              {:seon.db.process/id :seon.db.process/repl}])]
+        (is (true? (::protocol/success? seeded)) (pr-str seeded)))
       (let [installed
             (seed-schema-rows!
              session
@@ -311,125 +297,8 @@
 ;;; U4 — host-tier eval recording through the one corpus mechanism.
 
 (def ^:private corpus-schema-rows
-  "The canonical schema rows the recording contract writes against.
-
-   A fresh memory writer self-describes through `:seon.schema` rows in
-   ordinary transactions (the same shapes the pod's compiled-program
-   reconcile installs); these are the exact registered forms of the
-   attributes the U4 recorder persists."
-  (into
-   [{:seon.schema/key :seon.schema/key
-     :seon.schema/form "[:keyword {:seon.db/identity true}]"}
-   {:seon.schema/key :inst :seon.schema/form "inst?"}
-   {:seon.schema/key :seon.schema/form :seon.schema/form ":string"}
-   {:seon.schema/key :seon.schema/created-at :seon.schema/form ":inst"}
-   {:seon.schema/key :seon.db/lookup-ref-value
-    :seon.schema/form "[:or :string :uuid :keyword :symbol :int]"}
-   {:seon.schema/key :seon.db/ref
-    :seon.schema/form
-    "[:or :int :string [:tuple :keyword :seon.db/lookup-ref-value]]"}
-   {:seon.schema/key :seon.schema/ns :seon.schema/form ":seon.db/ref"}
-   {:seon.schema/key :seon.db.id/generator :seon.schema/form ":keyword"}
-   {:seon.schema/key :seon.db/user :seon.schema/form ":seon.db/ref"}
-   {:seon.schema/key :seon.db/process :seon.schema/form ":seon.db/ref"}
-   {:seon.schema/key :seon.user/id
-    :seon.schema/form "[:string {:seon.db/identity true}]"}
-   {:seon.schema/key :seon.db.process/id
-    :seon.schema/form
-    (str "[:and {:seon.db/identity true}"
-         " [:enum :seon.db.process/boot :seon.db.process/config"
-         " :seon.db.process/repl]]")}
-   {:seon.schema/key :seon.agent/id
-    :seon.schema/form "[:string {:seon.db/identity true}]"}
-   {:seon.schema/key :seon.agent.turn/id
-    :seon.schema/form "[:string {:seon.db/identity true}]"}
-   {:seon.schema/key :seon.agent.turn/evals
-    :seon.schema/form "[:vector {:seon.db/component true} :seon.db/ref]"}
-   {:seon.schema/key :seon.db.id/legacy-value
-    :seon.schema/form "[:string {:min 14 :max 14}]"}
-   {:seon.schema/key :seon.db.id/compact-value
-    :seon.schema/form
-    (str "[:or :seon.db.id/legacy-value"
-         " [:and :string [:re \"^[a-z][a-z0-9]{11}$\"]]]")}
-   {:seon.schema/key :seon.eval/id
-    :seon.schema/form
-    (str "[:and {:seon.db/identity true"
-         " :seon.db.id/generator :seon.db.id.generator/compact}"
-         " :seon.db.id/compact-value]")
-    :seon.db.id/generator :seon.db.id.generator/compact}
-   {:seon.schema/key :seon.eval/at :seon.schema/form ":inst"}
-   {:seon.schema/key :seon.eval/duration-ms :seon.schema/form ":int"}
-   {:seon.schema/key :seon.eval/narration :seon.schema/form ":string"}
-   {:seon.schema/key :seon.eval/source :seon.schema/form ":string"}
-   {:seon.schema/key :seon.eval/status
-    :seon.schema/form "[:enum :running :done :error :interrupted]"}
-   {:seon.schema/key :seon.eval/ok? :seon.schema/form ":boolean"}
-   {:seon.schema/key :seon.eval/result-edn :seon.schema/form ":string"}
-   {:seon.schema/key :seon.eval/output :seon.schema/form ":string"}
-   {:seon.schema/key :seon.eval/error :seon.schema/form ":string"}
-   {:seon.schema/key :seon.eval/ns :seon.schema/form ":symbol"}
-   {:seon.schema/key :seon.eval/agent :seon.schema/form ":seon.db/ref"}
-   {:seon.schema/key :seon.fn/sym
-    :seon.schema/form "[:string {:seon.db/identity true}]"}
-   {:seon.schema/key :seon.fn/ns :seon.schema/form ":seon.db/ref"}
-   {:seon.schema/key :seon.fn/source :seon.schema/form ":string"}
-   {:seon.schema/key :seon.fn/source-fingerprint
-    :seon.schema/form ":string"}
-   {:seon.schema/key :seon.fn/execution-tier
-    :seon.schema/form "[:enum :nursery :graduated]"}
-   {:seon.schema/key :seon.fn/fn-var? :seon.schema/form ":boolean"}
-   {:seon.schema/key :seon.fn/arglists :seon.schema/form ":string"}
-   {:seon.schema/key :seon.fn/doc :seon.schema/form ":string"}
-   {:seon.schema/key :seon.fn/private? :seon.schema/form ":boolean"}
-   {:seon.schema/key :seon.fn/spec :seon.schema/form ":string"}
-   {:seon.schema/key :seon.fn/schema-error :seon.schema/form ":string"}
-   {:seon.schema/key :seon.fn/created-at :seon.schema/form ":inst"}
-   {:seon.schema/key :seon.fn/read-attrs
-    :seon.schema/form "[:vector :qualified-keyword]"}
-   {:seon.schema/key :seon.ns/name
-    :seon.schema/form "[:symbol {:seon.db/identity true}]"}
-   {:seon.schema/key :seon.ns/source :seon.schema/form ":string"}
-   {:seon.schema/key :seon.ns/require-edges
-    :seon.schema/form "[:vector {:seon.db/component true} :seon.db/ref]"}
-   {:seon.schema/key :seon.ns.require/target :seon.schema/form ":symbol"}
-   {:seon.schema/key :seon.ns.require/alias :seon.schema/form ":symbol"}
-   {:seon.schema/key :seon.ns.require/refers
-    :seon.schema/form "[:set :symbol]"}
-   {:seon.schema/key :seon.ns.require/refer-all?
-    :seon.schema/form ":boolean"}
-   {:seon.schema/key :seon.ns.require/as-alias?
-    :seon.schema/form ":boolean"}
-   {:seon.schema/key :seon.config/id
-    :seon.schema/form "[:string {:seon.db/identity true}]"}
-   {:seon.schema/key :seon.config/cap
-    :seon.schema/form "[:int {:min 1}]"}
-   {:seon.schema/key :seon.config.render/value-max-path-segments
-    :seon.schema/form ":seon.config/cap"}
-   {:seon.schema/key :seon.config.render/value-max-path-bytes
-    :seon.schema/form ":seon.config/cap"}
-   {:seon.schema/key :seon.config.render/value-max-realized-items
-    :seon.schema/form ":seon.config/cap"}
-   {:seon.schema/key :seon.config.render/value-max-depth
-    :seon.schema/form ":seon.config/cap"}
-   {:seon.schema/key :seon.config.render/value-max-string
-    :seon.schema/form ":seon.config/cap"}
-   {:seon.schema/key :seon.config.render/value-shape-sample
-    :seon.schema/form ":seon.config/cap"}
-   {:seon.schema/key :seon.config.render/value-max-items
-    :seon.schema/form ":seon.config/cap"}
-   {:seon.schema/key :seon.config.repair/level
-    :seon.schema/form "[:enum :off :safe-syntax :symbols :aggressive]"}
-   {:seon.schema/key :seon.config.repair.class/delimiters?
-    :seon.schema/form ":boolean"}
-   {:seon.schema/key :seon.config.repair.class/def-vs-defn?
-    :seon.schema/form ":boolean"}
-   {:seon.schema/key :seon.config.repair.class/undeclared-var?
-    :seon.schema/form ":boolean"}
-   {:seon.schema/key :seon.config.repair/max-fixes-per-form
-    :seon.schema/form ":seon.config/cap"}
-    {:seon.schema/key :seon.config.repair/budget-ms
-     :seon.schema/form ":seon.config/cap"}]
-   writer-test/guard-schema-rows))
+  "The loaded canonical schema population used by recording fixtures."
+  (writer-test/canonical-schema-rows))
 
 (def ^:private value-sampling-policy
   (merge
@@ -521,12 +390,11 @@
                   seed-ctx (str "(seon.db/query (quote " (pr-str form) "))")))]
     (try
       (register-runtime-schemas! corpus-schema-rows)
-      (let [genesis (seed-schema-rows!
-                     session
-                     (into corpus-schema-rows
-                           [{:seon.user/id "user"}
-                            {:seon.db.process/id
-                             :seon.db.process/repl}]))]
+      (let [genesis
+            (writer-test/seed-canonical-schema!
+             session database-name
+             [{:seon.user/id "user"}
+              {:seon.db.process/id :seon.db.process/repl}])]
         (is (true? (::protocol/success? genesis)) (pr-str genesis)))
       (let [installed (seed-schema-rows!
                        session
@@ -779,15 +647,10 @@
         base (context/build-base! session)
         ctx (context/fork-context base)]
     (try
-      (sci/eval-string*
-       ctx
-       (str "(require 'seon.db)"
-            "(seon.db/transact!"
-            " {:seon.db/tx-data"
-            "  [{:seon.schema/key :seon.schema/key"
-            "    :seon.schema/form \"[:keyword {:seon.db/identity true}]\"}"
-            "   {:seon.schema/key :seon.schema/form"
-            "    :seon.schema/form \":string\"}]})"))
+      (let [seeded
+            (writer-test/seed-canonical-schema!
+             session database-name [])]
+        (is (true? (::protocol/success? seeded)) (pr-str seeded)))
       (is (nil? (sci/eval-string*
                  ctx
                  (str "(seon.db/query"

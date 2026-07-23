@@ -36,11 +36,6 @@
 ;; {:seon.db/identity true} so the bridge writes :db.unique/identity.
 ;; ============================================================
 
-(schema/register!
-  :seon.agent.turn/id
-  [:and {:seon.db/identity true
-         :seon.db.id/generator :seon.db.id.generator/compact}
-   ::db.id/compact-value])
 (schema/register! :seon.agent.turn/at
                   [:inst {:seon.db/index true}])
 ;; A turn is running/done/error/interrupted — DISTINCT from the agent FSM state
@@ -103,7 +98,6 @@
 ;; CLIENT-SIDE estimates (the aborted stream lost the provider's usage
 ;; chunk) — marked so a reader never treats them as provider-reported.
 (schema/register! :seon.agent.turn/usage-estimated? :boolean)
-(schema/register! :seon.agent.turn/evals        [:vector {:seon.db/component true} :seon.db/ref])
 (schema/register! :seon.agent.turn/llm-attempts [:vector {:seon.db/component true} :seon.db/ref])
 
 (defn- usage-count [usage key]

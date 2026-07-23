@@ -21,6 +21,21 @@
 (schema/register! :seon.ai/retry-after-ms :int)
 (schema/register! :seon.ai/evidence-error [:string {:min 1}])
 (schema/register! :seon.ai/raw-body :string)
+(schema/register! :seon.ai/agent-provider :seon.ai/provider)
+(schema/register! :seon.ai/agent-model [:string {:min 1}])
+(schema/register! :seon.ai/agent-temperature :double)
+(schema/register! :seon.ai/agent-max-tokens :int)
+(schema/register! :seon.ai/agent-completion-limit-field
+                  [:enum :max-tokens :max-completion-tokens])
+(schema/register! :seon.ai/agent-thinking [:string {:min 1}])
+(schema/register! :seon.ai/agent-timeout-ms :int)
+(schema/register! :seon.ai/agent-base-url [:string {:min 1}])
+(schema/register! :seon.ai/agent-api-key-env [:string {:min 1}])
+(schema/register! :seon.ai/agent-dg-backend [:enum :vllm :control])
+(schema/register! :seon.ai/agent-extra-body-edn [:string {:min 1}])
+(schema/register! :seon.ai/agent-max-retries [:int {:min 0}])
+(schema/register! :seon.ai/agent-attempt-timeout-ms [:int {:min 1}])
+(schema/register! :seon.ai/agent-fallback-variant :seon.config/model-variant)
 (schema/register!
  :seon.ai/error
  [:map

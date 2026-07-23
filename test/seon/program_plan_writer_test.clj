@@ -22,26 +22,6 @@
     (.getAbsolutePath
      (File. directory (str "program-plan-" (random-uuid) ".sock")))))
 
-(def edge-schema-rows
-  [{:seon.schema/key ::edge/generation :seon.schema/form ":string"}
-   {:seon.schema/key ::edge/calls :seon.schema/form "[:set :string]"}
-   {:seon.schema/key ::edge/read-attributes
-    :seon.schema/form "[:set :qualified-keyword]"}
-   {:seon.schema/key ::edge/written-attributes
-    :seon.schema/form "[:set :qualified-keyword]"}
-   {:seon.schema/key ::edge/all-at-basis? :seon.schema/form ":boolean"}
-   {:seon.schema/key ::edge/uncertainties
-    :seon.schema/form "[:set :keyword]"}
-   {:seon.schema/key ::edge/terminal-symbol
-    :seon.schema/form "[:string {:seon.db/identity true}]"}
-   {:seon.schema/key ::edge/effect :seon.schema/form ":keyword"}
-   {:seon.schema/key ::edge/required-bindings
-    :seon.schema/form "[:set :string]"}
-   {:seon.schema/key ::edge/terminal-generation
-    :seon.schema/form ":string"}
-   {:seon.schema/key ::edge/terminal-refs
-    :seon.schema/form "[:set :seon.db/ref]"}])
-
 (deftest acquisition-reconstructs-the-committed-edge-bundle-at-its-fence
   (let [database-name (str "program-plan-" (random-uuid))
         request-path (socket-path)
@@ -58,8 +38,7 @@
           ::context/backend :memory})
         seed! (private-value 'seed-schema-rows!)
         register! (private-value 'register-runtime-schemas!)
-        schema-rows (into (private-value 'corpus-schema-rows)
-                          edge-schema-rows)
+        schema-rows (private-value 'corpus-schema-rows)
         bundle
         {::edge/function-symbol "fixture.writer/root"
          ::edge/generation "root-generation"

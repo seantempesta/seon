@@ -108,7 +108,6 @@
     ;; render symbols. Renderer kind-lookup queries these via
     ;; datalog instead of walking the in-memory *schemas atom.
     [seon.schema :as schema]
-    [seon.schema.form :as schema.form]
     ;; Phase 2 — test capture as data. Required so the bundle
     ;; includes the runner; agent code reaches it from
     ;; bootstrap-CLJS eval via the analyzer's globalThis fallback
@@ -1797,26 +1796,7 @@
    replayable call form."
   {:malli/schema [:=> [:cat] :any]}
   []
-  (let [now (js/Date.)]
-    (into []
-          (keep (fn [[k v]]
-                  (when (keyword? k)
-                    (let [form v
-                          properties
-                          (schema.form/attr-form-properties form)
-                          generator-present?
-                          (contains? properties :seon.db.id/generator)
-                          form-string (schema/form-string k)]
-                      (cond-> {:seon.schema/key        k
-                               :seon.schema/form       form-string
-                               :seon.schema/created-at now}
-                        generator-present?
-                        (assoc :seon.db.id/generator
-                               (:seon.db.id/generator properties))
-                        (namespace k)
-                        (assoc :seon.schema/ns
-                               {:seon.ns/name (symbol (namespace k))}))))))
-          (schema/registered-schemas))))
+  (schema/canonical-schema-rows (js/Date.)))
 
 (def ^:private compiled-program-wall-clock-attrs
   #{:seon.fn/created-at :seon.schema/created-at :seon.test/created-at})

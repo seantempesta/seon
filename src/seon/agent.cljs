@@ -141,13 +141,6 @@
 ;; (no merge over a separate default set). The one slot attr is
 ;; :seon.render/ai. (Turns are NOT owned here — a turn points UP to its run;
 ;; runs point UP to the agent via :seon.agent.run/agent.)
-(schema/register! :seon.agent/ctx
-  [:vector
-   {:seon.db/component true}
-   [:or
-    {:seon.db/value-type :db.type/ref}
-    :seon.db/ref
-    :seon.agent.ctx/block]])
 
 ;; ============================================================
 ;; Program graph. :seon.ns owns the namespace source; :seon.fn /
@@ -161,34 +154,17 @@
 ;; schemas reference them and seon.agent.ctx loads first).
 ;; ============================================================
 
-(schema/register! :seon.fn/sym        [:string {:seon.db/identity true}])
-(schema/register! :seon.fn/ns         :seon.db/ref)
-(schema/register! :seon.fn/source     :string)
-(schema/register! :seon.fn/source-fingerprint :string)
-(schema/register! :seon.fn/execution-tier [:enum :nursery :graduated])
 ;; Projections from the analyzer's var-map. Re-derived on every
 ;; detect-and-tee + on bulk-load resume.
-(schema/register! :seon.fn/fn-var?    :boolean)
-(schema/register! :seon.fn/arglists   :string)
-(schema/register! :seon.fn/doc        :string)
-(schema/register! :seon.fn/private?   :boolean)
 ;; Positive capability declaration. Presence true means the function may
 ;; enter agent tool context; absence keeps it only in the program graph.
 ;; The fn's contract: `(pr-str (m/form <the fn's :malli/schema>))`.
 ;; PRESENT ⇒ specced (the exact contract is in the corpus); ABSENT ⇒
 ;; unspecced.
-(schema/register! :seon.fn/spec       :string)
 ;; Set when `:malli/schema` metadata is present but the value fails to
 ;; parse via `malli.core/schema`. Orthogonal to `:seon.fn/spec` — when this
 ;; is set, the schema is present but unparseable, so we omit `:seon.fn/spec`
 ;; and will not instrument the fn.
-(schema/register! :seon.fn/schema-error :string)
-(schema/register! :seon.fn/created-at :inst)
-
-(schema/register! :seon.schema/key        [:keyword {:seon.db/identity true}])
-(schema/register! :seon.schema/ns         :seon.db/ref)
-(schema/register! :seon.schema/form     :string)
-(schema/register! :seon.schema/created-at :inst)
 
 ;; ============================================================
 ;; Entity-kind `:map` schemas. One per renderable kind, each DECLARED

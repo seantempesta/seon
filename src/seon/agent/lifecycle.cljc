@@ -61,7 +61,7 @@
 (register-schema! ::lifecycle-result
   [:or :seon.derive/state ::direct-error])
 
-(register-schema! ::wake? [:boolean {:default true}])
+(schema/register! ::wake? [:boolean {:default true}])
 (register-schema! ::llm-fn 'fn?)
 (register-schema! ::resumed? :boolean)
 (register-schema! ::unhosted? :boolean)

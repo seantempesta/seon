@@ -71,7 +71,7 @@
 ;; The user is a REAL entity — ONE `:seon.user/id` row seeded at boot
 ;; (identity upsert, idempotent — same pattern as agent entities). All
 ;; message refs are uniform; later home for user prefs/memory.
-(register-schema! :seon.user/id         [:string {:seon.db/identity true}])
+(schema/register! :seon.user/id         [:string {:seon.db/identity true}])
 
 (register-schema! :seon.user
   [:map {:seon.db/entity true}
