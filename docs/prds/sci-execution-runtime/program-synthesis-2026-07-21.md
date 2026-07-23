@@ -170,6 +170,16 @@ COMPLETELY before dispatching anything.
      tier.
   9. Receipt pure-suite dual-tier promotion + attempt-receipt JVM
      persistence regression — fold into U6b spec (audit #5/#6).
+- OWNER RULINGS (AM #3): (i) Malli root-enforcement research
+  DISPATCHED (Fable, read-only → research/malli-root-enforcement-
+  2026-07-23.md): required complete interfaces at the defn admission
+  choke point, schema-driven wire representation (ruling-15 result
+  symbols BY SCHEMA), one-boundary coercion policy, schema-driven
+  generative testing as the edge-case engine. (ii) Testing cadence:
+  lanes run LOCALIZED tests for their own boundary; full suites are
+  orchestrator integration checkpoints (memory + spec templates
+  updated). (iii) Attr-registration Sol investigation running in
+  parallel (queue row 8).
 - QUEUED after the drill window (source-editing), in order:
   test-integrity lane → persistence bug-chase lane (designed-out
   classes 1-3 + audit regressions) → U6b (with audit #6 folded) →
