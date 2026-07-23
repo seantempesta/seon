@@ -642,6 +642,20 @@ COMPLETELY before dispatching anything.
   transport gate at its return) + input cap 32→128 MiB committed
   clean (frame ≤ input invariant). The one focused-gate failure is
   the lane's mid-flight ensure-database reshaping, not the limits.
+- P5 COMPLETE (411627db8): plan enforcement live at reply-ready→
+  evaling (verify→provision→execute, release-handoff, pre-receipt
+  steering, exact-plan drift = :core-bug); router consumes
+  :selected-tier, scans DELETED; result-symbol routing retained;
+  dual-tier green. pure-block? = a verified planner-contract stop
+  (issue planner-lacks-per-root-purity-projection — P-ladder row).
+  Its reset proof exposed the R40 parallel-literal collision:
+  queued-request cap was an independent 64 MiB literal → floor
+  violated at the header margin. FIXED at the class root: the
+  derivation now derives from the ONE frame constant (+header,
+  ×2 cap) — rides the initpage lane's resolve.cljc commit (also
+  flag: the lane's page-size docstring still says 4 MiB — stale
+  against R40, correct at its return). Namespace load proven;
+  behavioral proof = the lane's reset acceptance.
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
