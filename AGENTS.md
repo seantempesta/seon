@@ -468,6 +468,14 @@ code-block comment above a form, and `;;;` is runtime-structure demarcation.
 - Nothing throws into the agent loop. Every failure is a `:seon/error` value;
   catch sites record the fault as database data. Agent mistakes never crash the
   pod. Core faults follow the one `:seon.config/on-core-error` dial.
+- Fail LOUD in development, never crash in production — one config dial, not
+  per-site judgment. Degraded fallbacks (e.g. codec text-serialization of a
+  value with no ordinary wire projection) always warn loudly; in development
+  the same event panics so it is found immediately (owner ruling R41).
+- Classification rules are COMPUTED, never name-based. A namespace-prefix or
+  literal-list trust/privacy/placement rule is a hand list; derive the fact
+  from provenance, the corpus, or the artifact inventory instead (R34
+  precedent).
 - Instrumentation is derived from the database program graph and reapplied on
   hot reload. Wrong schemas/calls are fixed at the source. The kill-switch is
   only emergency recovery.

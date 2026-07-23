@@ -711,6 +711,32 @@ COMPLETELY before dispatching anything.
   operator gate, then the live-proof ledger on FRESH-RESET clusters
   per R38, capped by one demo bug-finder run).
 
+- FRAGILE-TEST AUDIT ACCEPTED (2026-07-23 eve, verified from source:
+  research/fragile-tests-audit-2026-07-23.md): (1) namespace-doc
+  failure = stale program-source sidecar predating U7's warn rename
+  (current sidecar correct; residual smell = exact-prose pins +
+  digest-not-freshness check); (2) host-registry parity fixture is
+  stale against the correct R30 gate (12269fd57 updated five test
+  files, missed this sixth) — predicted red at the checkpoint, fix =
+  give the fixture a schema; (3) my.plan [1 1]→[0 0] is REAL: U7
+  trusted table lacks my.plan entries AND error/agent-authored-sym?
+  classifies trust by NAME-PREFIX regex — a hand-rule contradicting
+  R34; issue my-toolkit-renderer-misclassified-as-agent-authored
+  (owner ruling requested, recommendation = R34 derived provenance).
+  Also filed: read-side-attribute-admission-fails-open (the P3
+  pull-pattern admission target, verified: extraction exists via
+  datahike dependency plans incl. pull; only the gate is missing).
+  F-rows queued: fixtures ride paged initialization (F1), fail-open
+  validation windows (F2), 56 exact-prose steering pins (F3), six
+  transit point tests → C1 generative round-trip (F4).
+- OWNER RULING R41 (2026-07-23 eve): wire-codec totality fallback =
+  serialize-as-TEXT with LOUD warnings when a value has no ordinary
+  projection; error posture is a config dial — DEVELOPMENT panics/
+  crashes on codec fallback so it is always found; PRODUCTION never
+  crashes (warn + steer). Folds into the C1 codec lane. Owner also
+  confirmed: validation-off switches die (triage #6), byte-identity
+  as the one render regression, one-seeding-path for fixtures.
+
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
