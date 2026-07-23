@@ -102,13 +102,11 @@
   ([agent-id run-id]
    (await (drive-claimed-run! agent-id run-id nil)))
   ([agent-id run-id input-ref]
-  (await
-   (driver/call-with-leaf
-    driver.pod/leaf db/*leaf*
-    #(driver/drive-run!
-      {:seon.agent/id agent-id
-       :seon.agent.run/id run-id
-       :seon.agent.run/input-ref input-ref})))))
+   (await
+    (driver.pod/dispatch-run!
+     {:seon.agent/id agent-id
+      :seon.agent.run/id run-id
+      :seon.agent.run/input-ref input-ref}))))
 
 (defn ^:async ^:private acquire-agent-state
   "Read one agent and its current run from one database value."
