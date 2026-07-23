@@ -555,6 +555,16 @@ COMPLETELY before dispatching anything.
   P2: function→terminal connection rows so persisted bundles
   reconstruct (digest-equality regression). Streaming lane observed
   landing the no-history facet (1c8a5d2f1) mid-flight.
+- Streaming lane stage-1 landed (no-history facet, real temporal
+  regression) + stop RULED (2026-07-23 PM): (i) narrow driver seams
+  granted (frozen reply-evaluation threaded to reply-program; run
+  accounting off the mode fact); (ii) entity-scoped interest ruled
+  OUT of this unit — attribute-level wakes + equality suppression
+  accepted, design row filed with a measured recompute cost for the
+  web-tier-slice-2 unit; (iii) local providers (:diffusiongemma/
+  :typeahead) stay on compiled local-worker dispatch as an EXPLICIT
+  documented contract (D12) — descriptors are hosted-wire only.
+  Lane resumed through stage 4 incl. the R37 Gemini probe.
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
