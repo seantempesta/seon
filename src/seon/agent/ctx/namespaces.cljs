@@ -16,7 +16,8 @@
     [seon.db :as db]
     [seon.db.protocol :as protocol]
     [seon.error.instrument :as einstrument]
-    [seon.schema :as schema]))
+    [seon.schema :as schema]
+    [seon.time.instant :as instant]))
 
 ;; The compact card renderer is defined at the BOTTOM of this file (its
 ;; helpers cluster there); [[namespaces-block]] above it dispatches the long
@@ -946,7 +947,7 @@
                                       (contains? include-set nm)))))
                      (sort-by (fn [row]
                                 [(or (:seon.db/tx row)
-                                     js/Number.MAX_SAFE_INTEGER)
+                                     instant/max-safe-integer)
                                  (name (:seon.ns/name row))])))
             rows (if (and cur-ns
                       (not (some #(= cur-ns (:seon.ns/name %)) scanned)))

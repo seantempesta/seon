@@ -66,7 +66,8 @@
     [malli.error :as me]
     [seon.ai.tokens :as tokens]
     #?(:cljs [seon.config :as config])
-    [seon.schema :as schema]))
+    [seon.schema :as schema]
+    [seon.time.instant :as instant]))
 
 ;; The eval loop can allocate a different id on retry. Preparation therefore
 ;; owns every touch of the raw value; formatting owns only the later id. These
@@ -215,13 +216,8 @@
   {:malli/schema [:=> [:catn [::candidate ::value]] :boolean]}
   [x]
   (and (number? x)
-       #?(:clj (and (integer? x)
-                    (<= -9007199254740991 x 9007199254740991))
-          :cljs (js/Number.isSafeInteger x))
-       #?(:clj (not (and (number? x)
-                         (zero? x)
-                         (neg? (Double/doubleToRawLongBits (double x)))))
-          :cljs (not (js/Object.is x (js/Number "-0"))))
+       (instant/safe-integer? x)
+       (not (instant/negative-zero? x))
        (<= 0 x)))
 
 (defn safe-positive-int?
@@ -239,12 +235,8 @@
       (string? x)
       (keyword? x)
       (symbol? x)
-      (and (number? x)
-           #?(:clj (Double/isFinite (double x))
-              :cljs (js/Number.isFinite x))
-           #?(:clj (not (and (zero? x)
-                             (neg? (Double/doubleToRawLongBits (double x)))))
-              :cljs (not (js/Object.is x (js/Number "-0")))))))
+      (and (instant/finite-number? x)
+           (not (instant/negative-zero? x)))))
 
 ;; ============================================================
 ;; Sampling bounds — every one overridable by env (the `SEON_RENDER_VALUE_*`
@@ -559,12 +551,8 @@
   [k max-string]
   (or (nil? k)
       (boolean? k)
-    (and (number? k)
-           #?(:clj (Double/isFinite (double k))
-              :cljs (js/Number.isFinite k))
-           #?(:clj (not (and (zero? k)
-                             (neg? (Double/doubleToRawLongBits (double k)))))
-              :cljs (not (and (zero? k) (= js/-Infinity (/ 1 k))))))
+    (and (instant/finite-number? k)
+         (not (instant/negative-zero? k)))
       (and (string? k) (<= (count k) max-string))
       (and (or (keyword? k) (symbol? k))
            (<= (+ (count (name k))

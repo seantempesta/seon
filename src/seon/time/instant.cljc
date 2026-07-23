@@ -1,7 +1,37 @@
 (ns seon.time.instant
-  "Portable formatting for immutable instants used by render projections."
+  "Portable instant and numeric primitives used by render projections."
   #?(:clj (:import [java.time Instant ZoneId]
                    [java.time.format DateTimeFormatter])))
+
+(def max-safe-integer 9007199254740991)
+
+(defn safe-integer?
+  "Whether `value` is an integer in the shared exact numeric range."
+  [value]
+  (and (number? value)
+       #?(:clj (and (integer? value)
+                    (<= (- max-safe-integer) value max-safe-integer))
+          :cljs (js/Number.isSafeInteger value))))
+
+(defn finite-number?
+  "Whether `value` is a finite number."
+  [value]
+  (and (number? value)
+       #?(:clj (Double/isFinite (double value))
+          :cljs (js/Number.isFinite value))))
+
+(defn negative-zero?
+  "Whether `value` is IEEE negative zero."
+  [value]
+  (and (number? value) (zero? value)
+       #?(:clj (neg? (Double/doubleToRawLongBits (double value)))
+          :cljs (js/Object.is value (js/Number "-0")))))
+
+(defn round
+  "Round `value` with the platform's standard nearest-integer operation."
+  [value]
+  #?(:clj (Math/round (double value))
+     :cljs (js/Math.round value)))
 
 (defn hh-mm
   "Format an instant as local 24-hour `HH:mm`, or blank for a non-instant."

@@ -9,7 +9,8 @@
     [clojure.string :as str]
     [seon.ai.tokens :as tokens]
     [seon.db :as db]
-    [seon.db.protocol :as protocol]))
+    [seon.db.protocol :as protocol]
+    [seon.time.instant :as instant]))
 
 ;; ============================================================
 ;; The block — install explicitly, never seeded.
@@ -328,7 +329,7 @@
   "A calibrated-nats value mapped onto the mini-bar's 0–100% (the
    measured range: off-menu collapse ≈ −12 … strong fire ≈ +12)."
   [v]
-  (-> (* 100 (/ (+ v 12) 24)) (max 0) (min 100) js/Math.round))
+  (-> (* 100 (/ (+ v 12) 24)) (max 0) (min 100) instant/round))
 
 (defn- margin-bar
   "The offer's calibrated-lift mini-bar with the auto-offer threshold
@@ -421,7 +422,7 @@
   "The done-ness meter — `eos-logprob` (measured −7 more-work … −2.8
    done) as a small horizontal bar."
   [lp]
-  (let [pct (-> (* 100 (/ (+ lp 8) 8)) (max 2) (min 100) js/Math.round)]
+  (let [pct (-> (* 100 (/ (+ lp 8) 8)) (max 2) (min 100) instant/round)]
     [:div {:class "flex items-center gap-1"}
      [:div {:class "w-16 h-1.5 bg-base-800 rounded overflow-hidden"}
       [:div {:class "h-full bg-signal"
