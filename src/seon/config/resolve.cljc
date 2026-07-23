@@ -6,10 +6,10 @@
             #?(:cljs [goog.string :as gstring])
             [malli.core :as m]
             [malli.transform :as mt]
-            [seon.ai.provider :as provider]
             [seon.content-hash :as content-hash]
             [seon.db.protocol :as protocol]
-            [seon.schema :as schema]))
+            [seon.schema :as schema]
+            [seon.ai.provider :as provider]))
 
 ;; The optional pull-reference corpus directory is one ordinary string. Corpus
 ;; rows are never injected into an agent's context tree. Roots identify by id
