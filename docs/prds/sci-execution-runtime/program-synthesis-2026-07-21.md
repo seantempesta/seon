@@ -392,6 +392,19 @@ COMPLETELY before dispatching anything.
   liveness/blast-radius reasons, not safety. Follow-up queued to the
   schema-admission lane on return: the pure-call-graph admission rule
   + corpus-resident predicate compilation path.
+- R34 (design, 2026-07-23): registration PROVENANCE IS DERIVED from
+  the asserting transaction's :seon.db/user//process facts (core
+  process identities = core-admitted; agent turns = agent-authored;
+  unrecognizable/pre-provenance rows default agent = fail-closed),
+  carried in the compiled projection as cache. No stored source
+  field, no name inference. Schema-admission lane resumed with the
+  ruling + grants (acquisition producers, error/instrument for
+  spell-check wiring); R33's transitive purity walk may hand off to
+  the execution-planning unit (research running) — one graph walker.
+- Execution-planning design research DISPATCHED (owner-directed):
+  graph-derived placement + schema/capability manifests per form
+  (plan→provision→execute; absorbs the mixed-tier router; enforces
+  R33 purity; plans derived-never-stored per R21).
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
