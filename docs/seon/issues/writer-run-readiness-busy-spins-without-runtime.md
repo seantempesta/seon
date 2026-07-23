@@ -15,24 +15,37 @@ registered, this is a full-speed busy-spin on a writer thread (yield is
 not a wait). Found by the poll/timeout census
 (`research/poll-timeout-census-2026-07-23.md`, "suspected defect").
 
-## Open questions (trace needed)
+## Trace results (Sol read-only trace, 2026-07-23 — verified with file:line)
 
-- Can `readiness-runtime` be legitimately absent for a ready source
-  (startup ordering before registration? runtime death?), or is absence
-  always a bug upstream?
-- Does `take-ready!` block when the queue is empty (making the spin only
-  reachable via the requeue path)?
+- `take-ready!` BLOCKS on empty (ArrayBlockingQueue.take) — the spin is
+  reachable only via the explicit `requeue-ready!` path.
+- Absence IS legitimate transiently: normal unlisten/teardown and
+  gap-recovery replacement races, plus the supported late-ownership-
+  publication window (writer_interest_test.clj:1005-1021 pins
+  "requeued, not lost"). So a loud absence assertion is WRONG — it
+  would convert valid races into failures.
+- The SUSTAINED spin route is real: `writer/stop!` unregisters the
+  runtime BEFORE verifying interests are gone (writer.clj:4864-4867);
+  a retained interest's open ready source then take→requeue→yields
+  forever whenever another runtime keeps the shared readiness thread
+  alive.
 
-## Direction (R42)
+## Ruled fix shape (R42 park-until-event)
 
-Detect-and-respond, not spin: absence of a runtime for a ready source
-should park the source until a runtime REGISTERS (event: registration),
-or fail loud if absence is impossible by construction. No sleep-loop
-fix.
+- Park a missing-owner source once (no immediate requeue); wake it
+  exactly once on SOURCE-OWNER PUBLICATION into a registered runtime
+  (not on register-readiness! — ownership can publish later); drop
+  parked sources on close/replace.
+- Fix stop ordering: never unregister a runtime while `::by-scope`
+  holds live interests (close/fence them first, or keep the failed-stop
+  runtime registered).
+- `requeue-ready!` stays the wake primitive (identity-fenced,
+  idempotent — committed_report.cljc:226-247).
 
 ## Acceptance
 
-- The spin is unreachable by construction (source parked on the
-  registration event, or absence proven impossible and asserted loudly).
-- One regression: a ready source with no runtime does not consume CPU
-  and is delivered exactly once when the runtime registers.
+- The failed-stop retained-interest scenario does not spin (regression
+  exercises exactly it: retained interest + second live runtime).
+- The existing late-publication regression still passes (parked source
+  delivered exactly once on ownership publication).
+- No CPU consumption while parked; no sleep loops introduced.

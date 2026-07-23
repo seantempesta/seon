@@ -821,6 +821,25 @@ COMPLETELY before dispatching anything.
   b8216c27a added boot-progress heartbeats (client/admission/session)
   per the R42 obligation.
 
+- PREDFIX ACCEPTED (2026-07-23 eve; 8 commits 719bb8e1d..c9a9ecaa4,
+  live proof verified from predfix-up.log): client-tier core-predicate
+  reconstruction FIXED at the one registration authority (projection
+  producer/dependency walk, instrumentation consumer, admission owner,
+  cold-reconstruction caller — no second registry); R42 IMPLEMENTED —
+  pod spec carries NO total-duration timeout, the R27 stall fact
+  :seon.config.operator/pod-boot-stall-timeout-ms (300s, log-advance
+  resets) replaces it, boot path gained full progress observability
+  (97/97 page receipts, acquisition pages, projection/instrumentation
+  transitions, heartbeat); fresh reset → POD READY in a MEASURED 271s
+  (PERF ROW: fresh boot >2min — SCI reconstruction of 925 instrumented
+  fns dominates; not an abort condition per R42); blocker issue closed
+  and archived. NEW ISSUE (its find): predfix-web-render-record-survives-
+  operator-down (orphaned managed-process record → reset exit 1 after
+  the accepted pod proof; operator-owned recovery needed). BUSY-SPIN
+  TRACE ACCEPTED into the issue (real failure-path spin via stop-
+  ordering; park-until-owner-publication fix shape ruled; post-
+  checkpoint Sol unit). CHECKPOINT now waits ONLY on fixseed.
+
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
