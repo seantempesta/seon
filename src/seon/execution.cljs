@@ -953,7 +953,8 @@
 (defn- selected-call-error
   ([function-symbol exception]
    (selected-call-error function-symbol exception
-                        (error/fault-for function-symbol)))
+                        (error/fault-for
+                         function-symbol (schema/current-projection))))
   ([function-symbol exception fault]
    (when (= :core fault)
      (error/record! {::error/raw exception ::error/fault :core}))
@@ -964,7 +965,8 @@
    fault policy. This is an error-only read: successful invocations pay no
    configuration hop. Authored `my.*` failures remain ordinary values."
   [function-symbol exception]
-  (when (= :core (error/fault-for function-symbol))
+  (when (= :core
+           (error/fault-for function-symbol (schema/current-projection)))
     (try
       (let [database (await (db/db))
             stored (when-not (:seon.error/message database)
@@ -1013,9 +1015,8 @@
     (let [program-function?
           (contains? (get-in @state [::program ::source-by-symbol] {})
                      function-symbol)
-          fault (if program-function?
-                  :core
-                  (error/fault-for function-symbol))
+          fault
+          (error/fault-for function-symbol (schema/current-projection))
           exception
           (ex-info (if program-function?
                      "The selected function is not loaded in the execution child."

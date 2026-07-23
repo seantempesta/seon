@@ -1301,8 +1301,8 @@
         ;; same code path produces the same String.
         configuration (:seon.config/configuration input)
         render-input
-        (assoc input ::render/trusted-renderers
-               (merge render.core/renderers transcript-renderers))
+        (assoc input ::render/compiled-renderers
+               (merge render.core/renderer-functions transcript-renderers))
         render* #(render/render :seon.render/ai render-input %)
         events   (ordered-events input)
         ;; Flag any INBOUND newer than the last action as NEW (UNANSWERED) —

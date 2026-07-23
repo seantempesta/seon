@@ -414,7 +414,8 @@
   "Run a core prompt directly or an authored render through its seam."
   [database agent-id render-door call]
   (let [function-symbol (::execution/function-symbol call)]
-    (if-not (error/agent-authored-sym? function-symbol)
+    (if-not (error/agent-authored-sym?
+             function-symbol (schema/current-projection))
       (try
         (if-let [function-value (seval/lookup-value function-symbol)]
           (let [base-arguments (::execution/arguments call)

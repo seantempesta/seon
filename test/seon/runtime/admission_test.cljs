@@ -153,11 +153,17 @@
             ([_] (js/Promise.resolve []))
             ([_ _] (js/Promise.resolve []))
             ([_ _ _] (js/Promise.resolve []))))
-    (set! admission/committed-projection
+    (let [build-projection
           (or committed-projection
               (constantly
-                {:seon.schema.projection/fingerprint 42
-                 :seon.schema.projection/function-contracts {}})))
+               {:seon.schema.projection/fingerprint 42
+                :seon.schema.projection/function-contracts {}}))]
+      (set! admission/committed-projection
+            (fn
+              ([acquired]
+               (build-projection acquired))
+              ([acquired _reusable-projection]
+               (build-projection acquired)))))
     (set! schema/current-projection (or current-projection (constantly nil)))
     (set! schema/activate-projection! (or activate-projection! identity))
     (set! instrument/reconcile-projection! reconcile-projection!)
@@ -187,11 +193,13 @@
         :seon.schema/form ":boolean"}
    201 {:db/id 201
         :seon.fn/sym "probe.alpha/find"
+        :seon.fn/source "(defn find [value] value)"
         :seon.fn/spec "[:=> [:cat :string] :string]"}
    202 {:db/id 202
         :seon.fn/sym "probe.beta/unspecced"}
    203 {:db/id 203
         :seon.fn/sym "probe.gamma/count"
+        :seon.fn/source "(defn count [value] value)"
         :seon.fn/spec "[:=> [:cat :int] :int]"}})
 
 (def ^:private schema-cursor
@@ -304,6 +312,7 @@
             (fn [acquired]
               (let [schema-rows (::admission/schema-rows acquired)
                     contract-rows (::admission/function-contract-rows acquired)
+                    source-rows (::admission/function-source-rows acquired)
                     expected-schema-rows
                     (->> (vals acquisition-entities)
                          (keep (fn [entity]
@@ -321,18 +330,30 @@
                                    [(:seon.fn/sym entity)
                                     (:seon.fn/spec entity)
                                     core-asserting-transaction])))
+                         set)
+                    expected-source-rows
+                    (->> (vals acquisition-entities)
+                         (keep (fn [entity]
+                                 (when (and (contains? entity :seon.fn/sym)
+                                            (contains? entity :seon.fn/source))
+                                   [(:seon.fn/sym entity)
+                                    (:seon.fn/source entity)
+                                    core-asserting-transaction])))
                          set)]
                 (is (= expected-schema-rows (set schema-rows))
                     "paged schemas equal the two-attribute presence query")
                 (is (= expected-contract-rows (set contract-rows))
                     "paged contracts equal the spec-presence query")
+                (is (= expected-source-rows (set source-rows))
+                    "paged sources retain their own asserting transactions")
                 (is (= (count schema-rows)
                        (count (set (map first schema-rows))))
                     "schema identities occur once")
                 (is (= (count contract-rows)
                        (count (set (map first contract-rows))))
                     "function identities occur once")
-                (is (= [:seon.schema/key :seon.schema/key :seon.fn/sym]
+                (is (= [:seon.schema/key :seon.schema/key
+                        :seon.fn/sym :seon.fn/sym]
                        (mapv #(first (::db/components %)) @!index-requests))
                     "each stream continues independently through complete?")
                 (is (every? #(= 32 (::db/limit %)) @!index-requests))
@@ -382,7 +403,8 @@
                           @!requests)
                   "requests reuse the exact immutable value")
               (is (= #{[:seon.schema/key :seon.schema/form]
-                       [:seon.fn/sym :seon.fn/spec]}
+                       [:seon.fn/sym :seon.fn/spec]
+                       [:seon.fn/sym :seon.fn/source]}
                      (into #{}
                            (keep (fn [request]
                                    (when-let [args (::db/args request)]

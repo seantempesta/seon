@@ -260,7 +260,24 @@
               (let [database (context/resolve-head! writer)]
                 (when-not (:seon/error database)
                   (db.branch/head-from-database-value database))))})
-        acquired-projection (context/acquire-committed-projection! writer)
+        base (context/build-base! writer)
+        jvm-artifact-inventory
+        (capability/installed-artifact-inventory
+         (::context/tier-inventory base))
+        artifact-inventories
+        (capability/merge-artifact-inventories
+         (cond-> [jvm-artifact-inventory]
+           (:seon.execution/artifact-inventories request)
+           (conj (:seon.execution/artifact-inventories request))))
+        artifact-exports
+        (into #{}
+              (comp
+               (mapcat val)
+               (map symbol))
+              (:seon.execution.inventory/exports-by-tier
+               artifact-inventories))
+        acquired-projection
+        (context/acquire-committed-projection! writer artifact-exports)
         _ (when (:seon/error acquired-projection)
             (context/close-session! writer)
             (error/set-db-hooks! {})
@@ -274,15 +291,6 @@
         projection-state (::context/projection-state writer)
         _ (reset! projection-state acquired-projection)
         contexts (atom {})
-        base (context/build-base! writer)
-        jvm-artifact-inventory
-        (capability/installed-artifact-inventory
-         (::context/tier-inventory base))
-        artifact-inventories
-        (capability/merge-artifact-inventories
-         (cond-> [jvm-artifact-inventory]
-           (:seon.execution/artifact-inventories request)
-           (conj (:seon.execution/artifact-inventories request))))
         graduation-report
         (graduate/rebuild!
          {::context/base base

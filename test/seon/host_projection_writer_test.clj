@@ -65,6 +65,7 @@
                                   {:seon.db/process
                                    {:seon.db.process/id
                                     :seon.db.process/boot}}]}})
+            (protocol/success {:datahike.query/result #{}})
             (protocol/success {:datahike.query/result #{}})]})]
     (with-redefs [context/resolve-head! (fn [_] database)]
       (with-redefs-fn
@@ -74,9 +75,10 @@
         (fn []
           (let [result (context/acquire-committed-projection! {})]
             (is (= 42 (get-in result [::context/database :t])))
-            (is (= [database database]
+            (is (= [database database database]
                    (mapv :seon.db/db (::protocol/members @request))))
             (is (= [[schema/asserting-transaction-provenance-pattern]
+                    [schema/asserting-transaction-provenance-pattern]
                     [schema/asserting-transaction-provenance-pattern]]
                    (mapv ::protocol/arguments
                          (::protocol/members @request))))))))))
@@ -131,10 +133,18 @@
   (let [closed? (atom false)]
     (with-redefs [context/writer-session (fn [_] ::writer)
                   context/close-session! (fn [_] (reset! closed? true))
+                  context/build-base!
+                  (fn [_]
+                    {::context/tier-inventory
+                     {:seon.execution.inventory/tier :jvm
+                      :seon.execution.inventory/bindings #{}
+                      :seon.execution.inventory/remote-bindings #{}
+                      :seon.execution.inventory/pure-bindings #{}
+                      :seon.execution.inventory/digest "empty"}})
                   context/acquire-committed-projection!
-                  (fn [_] {:seon/error
-                           {:seon.error/message "unresolved committed form"
-                            :seon.error/kind :core-bug}})]
+                  (fn [_ _] {:seon/error
+                             {:seon.error/message "unresolved committed form"
+                              :seon.error/kind :core-bug}})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"unresolved committed form"
                             (host/start! {::host/socket-path "tmp/never-ready.sock"
@@ -171,7 +181,7 @@
 (deftest a-covering-newer-generation-makes-an-older-refresh-failure-harmless
   (let [state (atom (acquired 11 :projection.test/eleven :int))]
     (with-redefs [context/acquire-committed-projection!
-                  (fn [_] {:seon/error
+                  (fn [_ _] {:seon/error
                            {:seon.error/message "late t10 refresh failed"
                             :seon.error/kind :core-bug}})]
       (is (= 11
@@ -189,7 +199,7 @@
                            :seon.error/kind :core-bug}}
                          (acquired 12 :projection.test/twelve :int)])]
     (with-redefs [context/acquire-committed-projection!
-                  (fn [_] (let [response (first @responses)]
+                  (fn [_ _] (let [response (first @responses)]
                             (swap! responses subvec 1)
                             response))]
       (context/refresh-committed-projection! {} state 13)
@@ -199,10 +209,38 @@
       (is (= "t13 failed"
              (get-in @state [::context/fault :seon.error/message]))))))
 
+(deftest failed-refresh-preserves-artifact-exports-for-recovery
+  (let [exports #{'my.compiled/renderer}
+        initial
+        (update (acquired 9 :projection.test/nine :int)
+                ::context/projection
+                assoc :seon.schema.projection/artifact-exports exports)
+        state (atom initial)
+        observed-exports (atom [])]
+    (with-redefs [context/acquire-committed-projection!
+                  (fn [_ artifact-exports]
+                    (swap! observed-exports conj artifact-exports)
+                    (if (= 1 (count @observed-exports))
+                      {:seon/error
+                       {:seon.error/message "t10 failed"
+                        :seon.error/kind :core-bug}}
+                      (assoc (acquired 10 :projection.test/ten :int)
+                             ::context/projection
+                             (assoc (projection :projection.test/ten :int)
+                                    :seon.schema.projection/artifact-exports
+                                    artifact-exports))))]
+      (context/refresh-committed-projection! {} state 10)
+      (context/refresh-committed-projection! {} state 10)
+      (is (= [exports exports] @observed-exports))
+      (is (= exports
+             (get-in @state
+                     [::context/projection
+                      :seon.schema.projection/artifact-exports]))))))
+
 (deftest stale-success-after-a-newer-commit-faults-and-refuses-drill
   (let [state (atom (acquired 8 :projection.test/eight :int))]
     (with-redefs [context/acquire-committed-projection!
-                  (fn [_] (acquired 9 :projection.test/nine :int))]
+                  (fn [_ _] (acquired 9 :projection.test/nine :int))]
       (is (= :core-bug
              (get-in (context/refresh-committed-projection! {} state 10)
                      [:seon/error :seon.error/kind])))
@@ -214,7 +252,7 @@
         entered (promise)
         release (promise)]
     (with-redefs [context/acquire-committed-projection!
-                  (fn [_]
+                  (fn [_ _]
                     (deliver entered true)
                     @release
                     (acquired 10 :projection.test/ten :int))]

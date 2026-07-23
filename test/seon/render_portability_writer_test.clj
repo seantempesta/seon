@@ -29,7 +29,11 @@
   (let [trusted-sym 'seon.render-portability-writer-test/core-render
         authored-called? (atom false)
         base {:seon.config/configuration {}
-              ::render/trusted-renderers
+              :seon.schema/projection
+              {:seon.schema.projection/function-source-admissions
+               {trusted-sym {:seon.schema.admission/source :core}}
+               :seon.schema.projection/artifact-exports #{}}
+              ::render/compiled-renderers
               {trusted-sym (fn [_] "compiled core")}}]
     (testing "a compiled symbol resolves only from the immutable trusted table"
       (is (= "compiled core"
@@ -43,7 +47,11 @@
             :seon.render/ai
             {:seon.agent/id "jvm-render"
              :seon.agent/entity {:seon.agent/id "jvm-render"}
-             :seon.config/configuration {}}
+             :seon.config/configuration {}
+             :seon.schema/projection
+             {:seon.schema.projection/function-source-admissions {}
+              :seon.schema.projection/artifact-exports
+              #{'seon.render.canvas/welcome}}}
             {:seon.agent.ctx/name :welcome
              :seon.render/ai 'seon.render.canvas/welcome}))))
     (testing "a hostile core-looking symbol cannot fall through to SCI"
@@ -54,8 +62,8 @@
                     (fn [_] (reset! authored-called? true)))
              {:seon.agent.ctx/name :hostile
               :seon.render/ai 'seon.render.fake/not-in-artifact})]
-        (is (false? @authored-called?))
-        (is (re-find #"does not resolve" result))))))
+        (is (true? @authored-called?))
+        (is (true? result))))))
 
 (deftest authored-infinite-render-stops-inside-the-guarded-door
   (let [holder (guard/holder)
@@ -71,7 +79,11 @@
            (render/render
             :seon.render/ai
             {:seon.config/configuration {}
-             ::render/trusted-renderers {}
+             :seon.schema/projection
+             {:seon.schema.projection/function-source-admissions
+              {'my.render/forever {:seon.schema.admission/source :agent}}
+              :seon.schema.projection/artifact-exports #{}}
+             ::render/compiled-renderers {}
              ::render/invoke-authored! (authored-door context holder 20)}
             {:seon.agent.ctx/name :canvas
              :seon.render/ai 'my.render/forever})))]

@@ -950,6 +950,38 @@
    a literal)."
   (into #{} (first-party-ns-strs)))
 
+(defn- load-compiled-artifact-exports
+  "Load the exact P1b export inventories admitted beside both Bun outputs."
+  []
+  (let [path (js/require "path")
+        client-output (aget (.-argv js/process) 1)
+        execution-output
+        (get-in launch/process-launch-descriptor
+                [::launch/runtime ::launch/execution-output])]
+    (when-not (every? string? [client-output execution-output])
+      (throw
+       (ex-info "The launch does not identify both compiled Bun outputs."
+                {:seon.error/kind :core-bug})))
+    (let [inventory-paths
+          (mapv #(.join path (.dirname path %) "program-inventory.edn")
+                [client-output execution-output])]
+      (into #{}
+            (mapcat
+             (fn [inventory-path]
+               (let [inventory
+                     (reader/read-string
+                      (.readFileSync (js/require "fs")
+                                     inventory-path "utf8"))]
+                 (map symbol
+                      (concat
+                       (:seon.dev.program-inventory/public-exports inventory)
+                       (:seon.dev.program-inventory/internal-terminals
+                        inventory)))))
+            inventory-paths)))))
+
+(defonce ^:private compiled-artifact-exports
+  (delay (load-compiled-artifact-exports)))
+
 (defn- load-program-sources
   "Load and verify the admitted build's resource-name to source-string map."
   []
@@ -1583,6 +1615,12 @@
                         [(symbol (:seon.fn/sym row))
                          (reader/read-string form)])))
               program)
+        function-source-syms
+        (into #{}
+              (keep (fn [row]
+                      (when (string? (:seon.fn/source row))
+                        (symbol (:seon.fn/sym row)))))
+              program)
         boot-admission
         (schema/admission-from-asserting-transaction
          {:seon.db/user {:seon.agent/id "root"}
@@ -1594,8 +1632,16 @@
          function-contracts
          {:seon.schema/schema-admissions
           (zipmap (keys schema-forms) (repeat boot-admission))
-          :seon.schema/function-admissions
-          (zipmap (keys function-contracts) (repeat boot-admission))})]
+         :seon.schema/function-admissions
+          (zipmap (keys function-contracts) (repeat boot-admission))
+          :seon.schema/function-source-admissions
+          (zipmap function-source-syms (repeat boot-admission))
+          :seon.schema/artifact-exports
+          (if (string?
+               (get-in descriptor
+                       [::launch/runtime ::launch/execution-output]))
+            @compiled-artifact-exports
+            #{})})]
     (when-not artifact-digest
       (throw
        (ex-info "The launch has no compiled execution artifact digest."

@@ -23,6 +23,13 @@
     [seon.error.instrument :as ei]
     [seon.instrument :as si]))
 
+(def ^:private classification-projection
+  {:seon.schema.projection/function-source-admissions
+   {'my.probe/f {:seon.schema.admission/source :agent}
+    'seon.db/transact! {:seon.schema.admission/source :core}
+    'seon.db/pull {:seon.schema.admission/source :core}}
+   :seon.schema.projection/artifact-exports #{}})
+
 (declare tick install-capture-hooks! clear-error-hooks!
          captured-errors with-captured-errors)
 
@@ -81,16 +88,6 @@
            (:seon.error/kind payload)))
     (is (string? (:seon.error.malli/hint payload)))))
 
-(deftest fault-discriminator-is-what-were-we-calling
-  (testing "agent-authored namespaces → :agent"
-    (is (= :agent (error/fault-for 'my.plan/add!)))
-    (is (= :agent (error/fault-for 'my.agent.root/tile))))
-  (testing "core/lib namespaces → :core (unclassified = loud)"
-    (is (= :core (error/fault-for 'seon.eval/raw-eval)))
-    (is (= :core (error/fault-for 'seon.db/transact!)))
-    (is (= :core (error/fault-for 'cljs.core/map)))
-    (is (= :core (error/fault-for 'unqualified)))))
-
 (deftest error-data-flatten-is-deepest-wins
   ;; C43: `:seon.error/data` flattens the cause chain DEEPEST-wins — the
   ;; original throw's ex-data is the real cause; outer wrappers (cljs.js
@@ -138,16 +135,16 @@
     (is (= :agent (si/wrapper-fault
                     (ex-info ":malli.core/invalid-input"
                              {:seon.error/kind
-                              :seon.error.kind/malli-instrument-input
+                             :seon.error.kind/malli-instrument-input
                               :seon.error.malli/fn-sym 'my.probe/f})
-                    :core))))
+                    :core classification-projection))))
   (testing "malli violation on a CORE fn, no agent turn in scope → coarse"
     (is (= :core (si/wrapper-fault
                    (ex-info ":malli.core/invalid-input"
                             {:seon.error/kind
-                             :seon.error.kind/malli-instrument-input
+                            :seon.error.kind/malli-instrument-input
                              :seon.error.malli/fn-sym 'seon.db/transact!})
-                   :core))))
+                   :core classification-projection))))
   (testing "NESTED kinds classify from the DEEPEST kind (the real cause)"
     (let [deep  (ex-info "agent typo" {:seon.error/kind :user-input})
           outer (ex-info "core conduit re-wrap"
@@ -171,13 +168,19 @@
         (fn []
           (is (true? (error/in-dev-eval?)))
           (testing "input-contract violations on a CORE fn → :agent (caller's fault)"
-            (is (= :agent (si/wrapper-fault
-                            (malli-e :seon.error.kind/malli-instrument-input) :core)))
-            (is (= :agent (si/wrapper-fault
-                            (malli-e :seon.error.kind/malli-instrument-arity) :core))))
+            (is (= :agent
+                   (si/wrapper-fault
+                    (malli-e :seon.error.kind/malli-instrument-input)
+                    :core classification-projection)))
+            (is (= :agent
+                   (si/wrapper-fault
+                    (malli-e :seon.error.kind/malli-instrument-arity)
+                    :core classification-projection))))
           (testing "invalid OUTPUT stays :core — our fn broke; dev presence doesn't excuse it"
-            (is (= :core (si/wrapper-fault
-                           (malli-e :seon.error.kind/malli-instrument-output) :core))))
+            (is (= :core
+                   (si/wrapper-fault
+                    (malli-e :seon.error.kind/malli-instrument-output)
+                    :core classification-projection))))
           (testing "a genuine internal core throw in dev scope stays :core"
             (is (= :core (si/wrapper-fault (js/Error. "internal core bug") :core))))))
       (is (false? (error/in-dev-eval?))

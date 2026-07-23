@@ -209,29 +209,30 @@
 ;; ============================================================
 
 (defn agent-authored-sym?
-  "True when `sym` names an AGENT-authored fn.
+  "True when `sym` is agent-authored in the compiled `projection`.
 
-   Any agent-authored render/layout/handler (a canvas fn, a context-block
-   render, a `/call` handler) gets the SCI wrapper, and a failure while
-   CALLING it is `:agent`-fault; the core
-   (`seon.*`/`clojure.*`/`cljs.*`/`sci.*`/`goog.*`) compiled path is
-   unbounded and a failure there is `:core`-fault."
-  {:malli/schema [:=> [:cat :any] :boolean]}
-  [sym]
-  (boolean
-    (and (qualified-symbol? sym)
-         (let [ns (namespace sym)]
-           (not (or (= ns "seon")
-                    (re-find #"^(seon|clojure|cljs|sci|goog)\." ns)))))))
+   A corpus source row decides first from its asserting-transaction
+   provenance. Only a symbol with no corpus source row may inherit core trust
+   from exact compiled artifact exports. Missing or unrecognized evidence
+   fails closed as agent-authored."
+  {:malli/schema [:=> [:cat :any :map] :boolean]}
+  [sym projection]
+  (let [source-admissions
+        (:seon.schema.projection/function-source-admissions projection)]
+    (if (contains? source-admissions sym)
+      (not= :core
+            (:seon.schema.admission/source (get source-admissions sym)))
+      (not (contains? (:seon.schema.projection/artifact-exports projection)
+                      sym)))))
 
 (defn fault-for
   "The `:seon.error/fault` population for a failed call of `sym`.
 
-   `:agent` when [[agent-authored-sym?]], `:core` otherwise (an
-   unclassified bug is still a bug — default loud)."
-  {:malli/schema [:=> [:cat :any] ::fault]}
-  [sym]
-  (if (agent-authored-sym? sym) :agent :core))
+   `:agent` when [[agent-authored-sym?]], `:core` otherwise. Unknown symbols
+   fail closed as agent-authored."
+  {:malli/schema [:=> [:cat :any :map] ::fault]}
+  [sym projection]
+  (if (agent-authored-sym? sym projection) :agent :core))
 
 (def agent-fault-kinds
   "The `:seon.error/kind` values that identify an AGENT-population failure:

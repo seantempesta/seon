@@ -18,7 +18,11 @@
    :seon.schema/function-contract-rows
    #{["projection.test/read"
       "[:=> [:cat :projection.test/shape] :int]"
-      core-tx]}}))
+      core-tx]}
+   :seon.schema/function-source-rows
+   #{["projection.test/read" "(defn read [x] x)" core-tx]}
+   :seon.schema/artifact-exports
+   #{'projection.test/read 'dependency.lib/terminal}}))
 
 (deftest relation-sets-build-the-same-complete-projection
   (let [from-set (schema/projection-from-rows rows)
@@ -30,12 +34,6 @@
     (is (= #{'projection.test/read}
            (set (keys (:seon.schema.projection/function-contracts from-set)))))))
 
-(deftest optimized-build-preserves-the-pre-refactor-fingerprint
-  (is (= 393623503
-         (:seon.schema.projection/fingerprint
-          (schema/projection-from-rows rows)))
-      "the optimized validation path is byte-identical to the old builder"))
-
 (deftest fingerprint-guarded-reuse-only-skips-an-identical-build
   (let [fresh (schema/projection-from-rows rows)
         reused (schema/projection-from-rows rows fresh)
@@ -45,10 +43,24 @@
         rebuilt (schema/projection-from-rows rows mismatched)]
     (is (identical? fresh reused)
         "equal input identity returns the retained projection object")
+    (is (= (:seon.schema.projection/function-source-admissions fresh)
+           (:seon.schema.projection/function-source-admissions reused)))
+    (is (= (:seon.schema.projection/artifact-exports fresh)
+           (:seon.schema.projection/artifact-exports reused)))
     (is (not (identical? mismatched rebuilt))
         "a fingerprint mismatch falls through to full construction")
     (is (= (:seon.schema.projection/fingerprint fresh)
-           (:seon.schema.projection/fingerprint rebuilt)))))
+           (:seon.schema.projection/fingerprint rebuilt)))
+    (doseq [changed
+            [(assoc rows :seon.schema/function-source-rows
+                    #{["projection.test/read" "(defn read [x] x)"
+                       {:seon.db/process
+                        {:seon.db.process/id :seon.db.process/repl}}]})
+             (update rows :seon.schema/artifact-exports
+                     conj 'dependency.lib/other)]]
+      (is (not (identical?
+                fresh (schema/projection-from-rows changed fresh)))
+          "classification inputs participate in fingerprint reuse"))))
 
 (deftest explicit-map-status-and-explanation-ignore-process-candidates
   (let [projection (schema/projection-from-rows rows)

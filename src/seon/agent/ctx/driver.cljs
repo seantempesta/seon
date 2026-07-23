@@ -77,7 +77,9 @@
   (let [renderer (:seon.render/html block)
         authoring-ns
         (cond
-          (and (symbol? renderer) (error/agent-authored-sym? renderer))
+          (and (symbol? renderer)
+               (error/agent-authored-sym?
+                renderer (schema/current-projection)))
           (symbol (namespace renderer))
 
           (and (vector? renderer)

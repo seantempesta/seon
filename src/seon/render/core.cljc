@@ -1,11 +1,12 @@
 (ns seon.render.core
-  "Immutable compiled renderer authority shared by both runtimes.
+  "Immutable compiled renderer functions shared by both runtimes.
 
    Every entry is an ordinary require plus a literal symbol-to-function
-   association. Stored symbols outside this table never resolve as trusted
-   code. Context block entries join this table in the portable context
-   acquisition executor once those namespaces are promoted."
+   association. This map resolves compiled functions; it does not classify
+   trust. The active schema projection derives trust from source transaction
+   provenance and exact artifact exports."
   (:require [seon.render.canvas :as canvas]
+            #?(:cljs [seon.eval :as eval])
             [seon.render.handlers.eval :as handler-eval]
             [seon.render.handlers.fn :as handler-fn]
             [seon.render.handlers.message :as handler-message]
@@ -13,8 +14,17 @@
             [seon.render.handlers.schema :as handler-schema]
             [seon.render.handlers.test :as handler-test]))
 
-(def renderers
-  "The render-core portion of the one static trusted renderer table."
+(defn resolve-compiled
+  "Resolve one compiled function symbol through the platform's language owner."
+  [sym]
+  #?(:clj
+     (when (qualified-symbol? sym)
+       (requiring-resolve sym))
+     :cljs
+     (eval/lookup-value sym)))
+
+(def renderer-functions
+  "Compiled render-core symbol-to-function resolution."
   {'seon.render.canvas/welcome
    (fn [input] (canvas/welcome input nil))
 

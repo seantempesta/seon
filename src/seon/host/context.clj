@@ -104,6 +104,7 @@
 (schema/register! ::call-executor 'some?)
 (schema/register! ::eval-generator 'some?)
 (schema/register! ::projection-state 'some?)
+(schema/register! ::artifact-exports [:set :symbol])
 (schema/register! ::session 'some?)
 (schema/register! ::committed-basis :int)
 (schema/register!
@@ -1539,12 +1540,25 @@
     [?function :seon.fn/sym ?sym]
     [?function :seon.fn/spec ?form ?tx]])
 
+(def ^:private committed-function-source-query
+  '[:find ?sym ?source (pull ?tx ?provenance-pattern)
+    :in $ ?provenance-pattern
+    :where
+    [?function :seon.fn/sym ?sym]
+    [?function :seon.fn/source ?source ?tx]])
+
 (def ^:private committed-projection-row-limit 4096)
 
 (defn acquire-committed-projection!
   "Acquire and compile the complete committed program at one database value."
-  {:malli/schema [:=> [:catn [::writer ::writer]] :map]}
-  [writer]
+  {:malli/schema
+   [:function
+    [:=> [:catn [::writer ::writer]] :map]
+    [:=> [:catn [::writer ::writer] [::artifact-exports [:set :symbol]]]
+     :map]]}
+  ([writer]
+   (acquire-committed-projection! writer #{}))
+  ([writer artifact-exports]
   (try
     (let [database (resolve-head! writer)]
       (if (:seon/error database)
@@ -1568,7 +1582,8 @@
                   {::protocol/request-id (str (random-uuid))
                    ::protocol/members
                    [(member committed-schema-query)
-                    (member committed-function-contract-query)]
+                    (member committed-function-contract-query)
+                    (member committed-function-source-query)]
                    :datahike.resource/max-result-weight (* 6 1024 1024)}))]
           (if-not (::protocol/success? response)
             {:seon.error/message
@@ -1579,8 +1594,8 @@
              :seon.error/data
              (select-keys response [::protocol/error-kind
                                     ::protocol/request-id])}
-            (let [[schemas contracts] (::protocol/results response)]
-              (if-not (every? ::protocol/success? [schemas contracts])
+            (let [[schemas contracts sources] (::protocol/results response)]
+              (if-not (every? ::protocol/success? [schemas contracts sources])
                 {:seon/error
                  {:seon.error/message
                   "Committed schema projection acquisition failed."
@@ -1588,10 +1603,13 @@
                   :seon.error/data
                   {:seon.host.context/member-results [schemas contracts]}}}
                 (let [schema-rows (:datahike.query/result schemas)
-                      contract-rows (:datahike.query/result contracts)]
+                      contract-rows (:datahike.query/result contracts)
+                      source-rows (:datahike.query/result sources)]
                   (if (or (> (count schema-rows)
                              committed-projection-row-limit)
                           (> (count contract-rows)
+                             committed-projection-row-limit)
+                          (> (count source-rows)
                              committed-projection-row-limit))
                     {:seon/error
                      {:seon.error/message
@@ -1602,14 +1620,17 @@
                      (schema/projection-from-rows
                        {:seon.schema/schema-rows schema-rows
                         :seon.schema/function-contract-rows
-                        contract-rows})}))))))))
+                        contract-rows
+                        :seon.schema/function-source-rows source-rows
+                        :seon.schema/artifact-exports
+                        artifact-exports})}))))))))
     (catch Throwable throwable
       {:seon/error
        {:seon.error/message
         (str "Committed schema projection is invalid: "
              (.getMessage throwable))
         :seon.error/kind :core-bug
-        :seon.error/data (ex-data throwable)}})))
+        :seon.error/data (ex-data throwable)}}))))
 
 (defn publish-committed-projection!
   "Publish `acquired` only when its basis transaction is newer."
@@ -1653,13 +1674,20 @@
                             (get current ::committed-basis -1))]
              (if (< floor committed-basis)
                {::fault
-                {:seon.error/message
+               {:seon.error/message
                  "Committed schema projection refresh is pending."
                  :seon.error/kind :core-bug}
                 ::pending? true
+                ::artifact-exports
+                (or (::artifact-exports current)
+                    (:seon.schema.projection/artifact-exports
+                     (::projection current))
+                    #{})
                 ::committed-basis committed-basis}
                current))))
-  (let [read-result (acquire-committed-projection! writer)
+  (let [read-result
+        (acquire-committed-projection!
+         writer (or (::artifact-exports @projection-state) #{}))
         acquired
         (if (and (not (:seon/error read-result))
                  (< (get-in read-result [::database :t] -1)
@@ -1677,11 +1705,21 @@
                              (get current ::committed-basis -1))
                         committed-basis)
                    {::fault (:seon/error acquired)
+                    ::artifact-exports
+                    (or (::artifact-exports current)
+                        (:seon.schema.projection/artifact-exports
+                         (::projection current))
+                        #{})
                     ::committed-basis committed-basis}
                    (if (and (::pending? current)
                             (= committed-basis
                                (::committed-basis current)))
                      {::fault (:seon/error acquired)
+                      ::artifact-exports
+                      (or (::artifact-exports current)
+                          (:seon.schema.projection/artifact-exports
+                           (::projection current))
+                          #{})
                       ::committed-basis committed-basis}
                      current))))
         (let [current @projection-state]

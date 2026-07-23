@@ -10,6 +10,7 @@
             [seon.db.transport.uds :as uds]
             [seon.db.writer-test-support :as writer-test]
             [seon.db.writer :as writer]
+            [seon.error :as error]
             [seon.schema :as schema])
   (:import [java.io ByteArrayOutputStream File]))
 
@@ -479,6 +480,64 @@
                           'my.core/answer
                           :seon.schema.admission/source]))
               "fresh writer boot contract rows retain recognizable provenance"))
+        (let [before-spec-tx
+              (d/q '[:find ?tx .
+                     :where
+                     [?function :seon.fn/sym "my.core/answer"]
+                     [?function :seon.fn/spec _ ?tx]]
+                   (d/db connection))
+              _ (d/transact
+                 connection
+                 {:tx-data
+                  [{:seon.fn/sym "my.core/answer"
+                    :seon.fn/source "(defn answer [] 43)"
+                    :seon.fn/spec "[:=> [:cat] :int]"}]
+                  :tx-meta
+                  {:seon.db/user [:seon.user/id "user"]
+                   :seon.db/process
+                   [:seon.db.process/id :seon.db.process/repl]}})
+              database (d/db connection)
+              after-spec-tx
+              (d/q '[:find ?tx .
+                     :where
+                     [?function :seon.fn/sym "my.core/answer"]
+                     [?function :seon.fn/spec _ ?tx]]
+                   database)
+              contract-rows
+              (d/q
+               '[:find ?sym ?spec (pull ?tx ?provenance-pattern)
+                 :in $ ?provenance-pattern
+                 :where
+                 [?function :seon.fn/sym ?sym]
+                 [?function :seon.fn/spec ?spec ?tx]]
+               database schema/asserting-transaction-provenance-pattern)
+              source-rows
+              (d/q
+               '[:find ?sym ?source (pull ?tx ?provenance-pattern)
+                 :in $ ?provenance-pattern
+                 :where
+                 [?function :seon.fn/sym ?sym]
+                 [?function :seon.fn/source ?source ?tx]]
+               database schema/asserting-transaction-provenance-pattern)
+              projection
+              (schema/projection-from-rows
+               {:seon.schema/schema-rows []
+                :seon.schema/function-contract-rows contract-rows
+                :seon.schema/function-source-rows source-rows})]
+          (is (= before-spec-tx after-spec-tx)
+              "reasserting an identical spec does not replace its datom")
+          (is (= :core
+                 (get-in projection
+                         [:seon.schema.projection/function-admissions
+                          'my.core/answer
+                          :seon.schema.admission/source])))
+          (is (= :agent
+                 (get-in projection
+                         [:seon.schema.projection/function-source-admissions
+                          'my.core/answer
+                          :seon.schema.admission/source])))
+          (is (= :agent (error/fault-for 'my.core/answer projection))
+              "source assertion provenance, not stale spec provenance, owns trust"))
         (let [before-domain (d/db connection)
               report
               (d/transact

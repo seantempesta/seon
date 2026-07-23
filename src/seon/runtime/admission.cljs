@@ -214,10 +214,17 @@
     [:=> [:catn [::acquired :map] [::reusable-projection :map]] :map]]}
   ([acquired]
    (committed-projection acquired {}))
-  ([{::keys [schema-rows function-contract-rows]} reusable-projection]
+  ([{::keys [schema-rows function-contract-rows function-source-rows
+             artifact-exports]}
+    reusable-projection]
    (schema/projection-from-rows
     {:seon.schema/schema-rows schema-rows
-     :seon.schema/function-contract-rows function-contract-rows}
+     :seon.schema/function-contract-rows function-contract-rows
+     :seon.schema/function-source-rows function-source-rows
+     :seon.schema/artifact-exports
+     (or artifact-exports
+         (:seon.schema.projection/artifact-exports reusable-projection)
+         #{})}
     reusable-projection)))
 
 (defn- acquisition-error!
@@ -287,10 +294,15 @@
         contracts
         (await
          (acquire-identity-stream!
-          database :seon.fn/sym :seon.fn/spec))]
+          database :seon.fn/sym :seon.fn/spec))
+        sources
+        (await
+         (acquire-identity-stream!
+          database :seon.fn/sym :seon.fn/source))]
     {::db/db database
      ::schema-rows schemas
-     ::function-contract-rows contracts}))
+     ::function-contract-rows contracts
+     ::function-source-rows sources}))
 
 (defn- ^:async reconcile-committed!
   [old-projection instrument? reusable-projection]
@@ -305,7 +317,15 @@
             (count (::schema-rows acquired))
             :seon.runtime.admission/function-contract-row-count
             (count (::function-contract-rows acquired))})
-        projection (committed-projection acquired reusable-projection)
+        projection
+        (committed-projection
+         (assoc acquired
+                ::artifact-exports
+                (or (:seon.schema.projection/artifact-exports
+                     reusable-projection)
+                    (:seon.schema.projection/artifact-exports old-projection)
+                    #{}))
+         reusable-projection)
         _ (log/info-console!
            "seon.runtime.admission"
            "committed projection instrumentation started")

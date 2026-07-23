@@ -1,6 +1,6 @@
 ---
 type: issue
-status: active
+status: resolved
 tags: [issue, runtime, render]
 ---
 
@@ -43,3 +43,18 @@ becomes the class regression.
 - No name-prefix trust classification remains in `seon.error`.
 - One regression: a compiled `my.*` renderer classifies `:core`; an
   agent-authored renderer with identical naming classifies `:agent`.
+
+## Resolution
+
+Resolved by R43. The compiled schema projection now carries authorship derived
+from each current `:seon.fn/source` datom's asserting transaction plus exact
+P1b artifact exports. Both values participate in the projection fingerprint
+and its guarded reuse path.
+
+`seon.error/agent-authored-sym?` is the sole classifier. Corpus provenance
+decides before artifact membership and unknown symbols fail closed. Compiled
+renderer lookup is resolution only; it grants no trust.
+
+Recurring proofs cover both tiers, the `my.plan` render path, fingerprint
+reuse, and the Datahike no-op case where an agent replaces source while
+reasserting an identical core spec.

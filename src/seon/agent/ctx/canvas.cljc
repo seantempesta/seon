@@ -15,7 +15,8 @@
     [seon.db :as db]
     [seon.db.protocol :as protocol]
     [seon.error :as err]
-    [seon.render.canvas :as canvas]))
+    [seon.render.canvas :as canvas]
+    [seon.schema :as schema]))
 
 #?(:clj (defmacro await [value] value))
 
@@ -225,7 +226,8 @@
       ""
       (let [body-comment (ctx/quote-lines body)
             wired-value (:seon.render.canvas/value wired)
-            fn-src (when (and (err/agent-authored-sym? wired-value)
+            fn-src (when (and (err/agent-authored-sym?
+                               wired-value (schema/current-projection))
                               (some? source))
                      (tokens/clip-str
                        source cap (partial clip-marker "canvas source")))
@@ -359,7 +361,9 @@
                      (symbol? value) (selected-canvas-response wired result)
                      :else {:seon.render/hiccup value
                             ::canvas/wired wired})
-          source (when (and result (err/agent-authored-sym? value))
+          source (when (and result
+                            (err/agent-authored-sym?
+                             value (schema/current-projection)))
                    (:seon.execution/source result))]
       {:seon.render/ai
        (rendered-canvas-text

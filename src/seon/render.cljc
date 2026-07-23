@@ -39,7 +39,7 @@
     [seon.ui.html :as html]
     [seon.ui.markdown :as md]))
 
-(schema/register! ::trusted-renderers [:map-of :symbol 'fn?])
+(schema/register! ::compiled-renderers [:map-of :symbol 'fn?])
 (schema/register! ::invoke-authored! 'fn?)
 (schema/register! ::function-symbol :symbol)
 (schema/register! ::arguments [:vector :any])
@@ -51,6 +51,11 @@
 
 (declare unwrap-response)
 
+(defn- classification-projection [input]
+  (or (:seon.schema/projection input)
+      (schema/current-projection)
+      {}))
+
 (defn- error-value?
   [x]
   (and (map? x) (string? (:seon.error/message x))))
@@ -58,10 +63,12 @@
 (defn- symbol-call
   "Resolve and invoke one stored render symbol through its trust boundary."
   [input sym arguments]
-  (if (err/agent-authored-sym? sym)
+  (if (err/agent-authored-sym? sym (classification-projection input))
     (when-let [invoke-authored! (::invoke-authored! input)]
       (invoke-authored! {::function-symbol sym ::arguments (vec arguments)}))
-    (when-let [f (get (or (::trusted-renderers input) core/renderers) sym)]
+    (when-let [f (or (get (::compiled-renderers input) sym)
+                     (get core/renderer-functions sym)
+                     (core/resolve-compiled sym))]
       (apply f arguments))))
 
 (defn- render-result
@@ -242,7 +249,9 @@
    entity. Among full matches, the schema with the most required attrs
    wins (specificity). Tie-broken alphabetically by `:seon.schema/key`
    for stable output (research §D)."
-  [entity]
+  ([entity]
+   (entity-primary-schema entity nil))
+  ([entity projection]
   (let [present (set (filter keyword? (keys entity)))]
     (when (seq present)
       (let [full (keep
@@ -252,13 +261,14 @@
                        (when (and (seq req)
                                   (every? #(contains? present %) req))
                          [catalog-row (count req)])))
-                   (schema/entity-catalog))]
+                   (or (:seon.schema.projection/catalog projection)
+                       (schema/entity-catalog)))]
         (when (seq full)
           (->> full
                (sort-by
                  (juxt (comp - second)
                        (comp str :seon.schema.catalog/key first)))
-               ffirst))))))
+               ffirst)))))))
 
 (defn- entity-render
   "Resolve the render value for `entity` in `render` (`:html` or `:ai`)
@@ -267,11 +277,11 @@
    the entity's primary `:seon.schema` shape's default symbol. nil when
    neither step yields a value. The entity map and process-local schema
    catalog are the complete input; dispatch never observes a database."
-  [entity render]
+  [entity render projection]
   (let [attr (case render :html :seon.render/html :ai :seon.render/ai)]
     (or (some->> (get entity attr)
                  (db/decode-edn-value attr))
-        (let [catalog-row (entity-primary-schema entity)
+        (let [catalog-row (entity-primary-schema entity projection)
               render-key (case render
                            :html :seon.schema.catalog/render-html
                            :ai   :seon.schema.catalog/render-ai)]
@@ -389,7 +399,8 @@
   {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :any]]}
   [{:seon.render/keys [entity node] :as input}]
   (let [entity (or node entity)]
-    (when-let [sym (entity-render entity :html)]
+    (when-let [sym (entity-render
+                    entity :html (classification-projection input))]
       (try
         (let [r (symbol-call input sym
                              [(assoc input :seon.render/node entity)])]
@@ -404,7 +415,10 @@
           ;; Record BEFORE strict-fail! (which re-throws in strict mode,
           ;; bypassing the tail). recorded? skips an inner funnel's datom.
           (when-not (err/recorded? e)
-            (err/record! {:seon.error/raw e :seon.error/fault (err/fault-for sym)}))
+            (err/record!
+             {:seon.error/raw e
+              :seon.error/fault
+              (err/fault-for sym (classification-projection input))}))
           ;; STRICT dial: dev/test/benchmark → re-throw LOUD; prod → graceful guard.
           (strict-fail! (:seon.config/configuration input) sym e)
           (canvas/error-card
@@ -746,11 +760,13 @@
                              :seon.config/configuration configuration
                              :seon.render/node x)
                 schema-key (assoc :seon.render/schema-key schema-key))
-        resolved? (if (err/agent-authored-sym? custom-symbol)
+        resolved? (if (err/agent-authored-sym?
+                       custom-symbol (classification-projection input))
                     (fn? (::invoke-authored! input))
-                    (contains? (or (::trusted-renderers input)
-                                   core/renderers)
-                               custom-symbol))]
+                    (some? (or (get (::compiled-renderers input)
+                                    custom-symbol)
+                               (get core/renderer-functions custom-symbol)
+                               (core/resolve-compiled custom-symbol))))]
     (when-not resolved?
       (throw (ex-info (str "Missing custom renderer " custom-symbol ".")
                       {:seon.render/custom-symbol custom-symbol})))
@@ -773,14 +789,20 @@
   (let [projection (or (:seon.schema/projection render-request)
                        (schema/current-projection)
                        (schema/build-projection (schema/snapshot)))
-        catalog-row (when (map? x) (entity-primary-schema x))]
+        catalog-row
+        (when (map? x)
+          (entity-primary-schema
+           x (:seon.schema/projection render-request)))]
     (value/render-html-data-in
       configuration "" projection x (generic-sample-options catalog-row))))
 
 (defn- generic-ai-render
   "Render generic data as metadata first, one bounded sample, then continuation."
-  [configuration x projection]
-  (let [catalog-row (when (map? x) (entity-primary-schema x))
+  [configuration render-request x projection]
+  (let [catalog-row
+        (when (map? x)
+          (entity-primary-schema
+           x (:seon.schema/projection render-request)))
         schema-key (or (:seon.schema.catalog/key catalog-row)
                        (some-> projection :seon.render.value/schemas first
                                :seon.schema/key))
@@ -831,7 +853,8 @@
                                                   :html :seon.render/html
                                                   :ai :seon.render/ai))))
           property (case view :html :seon.render/html :ai :seon.render/ai)
-          catalog-row (when (map? x) (entity-primary-schema x))
+          catalog-row
+          (when (map? x) (entity-primary-schema x projection))
           sample (when custom-candidate?
                    (value/sample configuration x
                                  (generic-sample-options catalog-row)))
@@ -892,9 +915,10 @@
           (error-value? x)   (:seon.error/message x)
           (canvas/valid-hiccup? x) (hiccup-text x)
           custom             (invoke-custom-render view configuration render-request x custom)
-          prepared           (generic-ai-render configuration x prepared)
+          prepared
+          (generic-ai-render configuration render-request x prepared)
           :else              (generic-ai-render
-                               configuration x
+                               configuration render-request x
                                (generic-data-projection
                                  configuration render-request x)))))
     (catch #?(:clj Throwable :cljs :default) e
@@ -905,7 +929,8 @@
         (err/record! {:seon.error/raw e
                       :seon.error/fault
                       (if-let [sym (:seon.render/custom-symbol (ex-data e))]
-                        (err/fault-for sym)
+                        (err/fault-for
+                         sym (classification-projection render-request))
                         :core)}))
       ;; STRICT dial: dev/test/benchmark → re-throw LOUD; prod → graceful guard.
       (strict-fail! configuration :block e)
@@ -926,7 +951,8 @@
   {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :string]]}
   [{:seon.render/keys [entity node] :as input}]
   (let [entity (or node entity)]
-    (when-let [sym (entity-render entity :ai)]
+    (when-let [sym (entity-render
+                    entity :ai (classification-projection input))]
       (try
         (let [r (symbol-call input sym
                              [(assoc input :seon.render/node entity)])]
@@ -942,7 +968,10 @@
           ;; converter → :agent, core converter → :core. Record BEFORE
           ;; strict-fail! (re-throws in strict mode); recorded? skips a dup.
           (when-not (err/recorded? e)
-            (err/record! {:seon.error/raw e :seon.error/fault (err/fault-for sym)}))
+            (err/record!
+             {:seon.error/raw e
+              :seon.error/fault
+              (err/fault-for sym (classification-projection input))}))
           ;; STRICT dial: dev/test/benchmark → re-throw LOUD; prod → legible line.
           (strict-fail! (:seon.config/configuration input) sym e)
           (str "[render error — " sym " threw: "
@@ -995,7 +1024,7 @@
       (let [configuration (:seon.config/configuration input)
             node (apply dissoc node render-control-attrs)
             projection (generic-data-projection configuration input node)]
-        (generic-ai-render configuration node projection)))
+        (generic-ai-render configuration input node projection)))
     :seon.render/html
     (fn [{:seon.render/keys [node] :as input}]
       (let [configuration (:seon.config/configuration input)
@@ -1040,11 +1069,12 @@
       (string? slot-val) (fn [_] slot-val)
       (vector? slot-val) (fn [_] slot-val)
       (symbol? slot-val)
-      (let [resolved? (if (err/agent-authored-sym? slot-val)
+      (let [resolved? (if (err/agent-authored-sym?
+                           slot-val (classification-projection input))
                         (fn? (::invoke-authored! input))
-                        (contains? (or (::trusted-renderers input)
-                                       core/renderers)
-                                   slot-val))]
+                        (some? (or (get (::compiled-renderers input) slot-val)
+                                   (get core/renderer-functions slot-val)
+                                   (core/resolve-compiled slot-val))))]
         (if resolved?
           (fn [input] (render-result view
                                      (symbol-call input slot-val [input])))
@@ -1087,7 +1117,10 @@
             (err/record! {:seon.error/raw   e
                           :seon.error/fault (let [sv (get node view)]
                                               (if (and (symbol? sv)
-                                                       (err/agent-authored-sym? sv))
+                                                       (err/agent-authored-sym?
+                                                        sv
+                                                        (classification-projection
+                                                         ctx)))
                                                 :agent :core))}))
           ;; STRICT dial: dev/test/benchmark → re-throw LOUD (block name + full
           ;; malli explain); prod → fall through to the graceful guard below.

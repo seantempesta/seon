@@ -152,11 +152,11 @@
 
 (defn- projection-fingerprint
   [forms function-contracts schema-admissions function-admissions
-   pure-predicate-symbols]
+   function-source-admissions artifact-exports pure-predicate-symbols]
   (portable-string-hash
    (canonical-data-string
     [forms function-contracts schema-admissions function-admissions
-     pure-predicate-symbols])))
+     function-source-admissions artifact-exports pure-predicate-symbols])))
 
 (defn direct-references
   "Canonical schema keys directly referenced by `form` in `projection`.
@@ -516,6 +516,12 @@
     [:map {:closed true}
      [:seon.schema/schema-rows :seon.schema/projection-rows]
      [:seon.schema/function-contract-rows :seon.schema/projection-rows]
+     [:seon.schema/function-source-rows
+      {:optional true}
+      :seon.schema/projection-rows]
+     [:seon.schema/artifact-exports
+      {:optional true}
+      [:set :symbol]]
      [:seon.schema/pure-predicate-symbols
       {:optional true}
       [:set :symbol]]]))
@@ -819,9 +825,12 @@
     {:seon.schema/predicate-functions (core-predicate-functions)}))
   ([forms function-contracts
     {:seon.schema/keys [schema-admissions function-admissions
+                        function-source-admissions artifact-exports
                         pure-predicate-symbols predicate-functions]
      :or {schema-admissions {}
           function-admissions {}
+          function-source-admissions {}
+          artifact-exports #{}
           pure-predicate-symbols #{}
           predicate-functions {}}}]
    (let [predicate-functions
@@ -1029,12 +1038,15 @@
         fingerprint
         (projection-fingerprint
          forms function-contracts schema-admissions function-admissions
-         pure-predicate-symbols)]
+         function-source-admissions artifact-exports pure-predicate-symbols)]
     {:seon.schema.projection/forms forms
      :seon.schema.projection/registry registry
      :seon.schema.projection/compile-options options
      :seon.schema.projection/schema-admissions schema-admissions
      :seon.schema.projection/function-admissions function-admissions
+     :seon.schema.projection/function-source-admissions
+     function-source-admissions
+     :seon.schema.projection/artifact-exports artifact-exports
      :seon.schema.projection/pure-predicate-symbols pure-predicate-symbols
      :seon.schema.projection/schema-dependencies schema-dependencies
      :seon.schema.projection/reverse-schema-dependencies
@@ -1063,8 +1075,11 @@
   ([projection-input]
    (projection-from-rows projection-input {}))
   ([{:seon.schema/keys [schema-rows function-contract-rows
+                        function-source-rows artifact-exports
                         pure-predicate-symbols]
-     :or {pure-predicate-symbols #{}}}
+     :or {function-source-rows []
+          artifact-exports #{}
+          pure-predicate-symbols #{}}}
     reusable-projection]
    (letfn [(parse-rows [rows identity-fn identity-label]
             (reduce
@@ -1134,6 +1149,61 @@
                                        :seon.schema/identity identity
                                        :seon.error/kind :core-bug}))))
                    "function contract")
+          source-admissions
+          (reduce
+           (fn [admissions row]
+             (when-not (and (sequential? row) (= 3 (count row)))
+               (throw (ex-info "Malformed committed function source row."
+                               {:seon.schema/error
+                                :seon.schema/malformed-projection-row
+                                :seon.schema/row row
+                                :seon.error/kind :core-bug})))
+             (let [[raw-identity source asserting-transaction] row
+                   identity (cond
+                              (qualified-symbol? raw-identity) raw-identity
+                              (string? raw-identity) (symbol raw-identity)
+                              :else raw-identity)]
+               (when-not (and (qualified-symbol? identity) (string? source))
+                 (throw (ex-info "Malformed committed function source row."
+                                 {:seon.schema/error
+                                  :seon.schema/malformed-projection-row
+                                  :seon.schema/row row
+                                  :seon.error/kind :core-bug})))
+               (when (contains? admissions identity)
+                 (throw (ex-info (str "Duplicate committed function source "
+                                      identity ".")
+                                 {:seon.schema/error
+                                  :seon.schema/duplicate-projection-row
+                                  :seon.schema/identity identity
+                                  :seon.error/kind :core-bug})))
+               (assoc admissions identity
+                      (admission-from-asserting-transaction
+                       asserting-transaction))))
+           {}
+           function-source-rows)
+          artifact-exports
+          (into #{}
+                (map (fn [export]
+                       (cond
+                         (qualified-symbol? export) export
+                         (string? export)
+                         (let [parsed (symbol export)]
+                           (if (qualified-symbol? parsed)
+                             parsed
+                             (throw
+                              (ex-info "Artifact export is not qualified."
+                                       {:seon.schema/error
+                                        :seon.schema/malformed-artifact-export
+                                        :seon.schema/export export
+                                        :seon.error/kind :core-bug}))))
+                         :else
+                         (throw
+                          (ex-info "Artifact export is malformed."
+                                   {:seon.schema/error
+                                    :seon.schema/malformed-artifact-export
+                                    :seon.schema/export export
+                                    :seon.error/kind :core-bug})))))
+                artifact-exports)
           forms
           (into {} (map (fn [[k row]]
                           [k (:seon.schema.parsed/form row)]))
@@ -1153,7 +1223,7 @@
           fingerprint
           (projection-fingerprint
            forms function-contracts schema-admissions function-admissions
-           pure-predicate-symbols)]
+           source-admissions artifact-exports pure-predicate-symbols)]
       (if (= fingerprint
              (:seon.schema.projection/fingerprint reusable-projection))
         reusable-projection
@@ -1162,6 +1232,8 @@
          function-contracts
          {:seon.schema/schema-admissions schema-admissions
           :seon.schema/function-admissions function-admissions
+          :seon.schema/function-source-admissions source-admissions
+          :seon.schema/artifact-exports artifact-exports
           :seon.schema/pure-predicate-symbols pure-predicate-symbols
           :seon.schema/predicate-functions (core-predicate-functions)}))))))
 

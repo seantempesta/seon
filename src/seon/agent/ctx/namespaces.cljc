@@ -140,8 +140,8 @@
    SELECTION — that is [[namespaces-block]]'s three-rule model
    ([[ns-name/included-ns?]] keeps `.internal` out of the prompt regardless of what
    is stored). `my.*.internal` MUST store real source even though it never
-   renders: its fns are agent-editable render fns
-   (`seon.error/agent-authored-sym?` routes every `my.*` fn through
+   renders: its functions may be agent-edited render functions (the compiled
+   projection routes source rows with agent transaction provenance through
    the SCI cage) and the cage rebuilds a fn's lexical environment — its
    `:require` `:as` aliases — from the stored `:seon.ns/source`; a
    `(ns x)` stub loses the aliases and the fn cannot run BOUNDED.

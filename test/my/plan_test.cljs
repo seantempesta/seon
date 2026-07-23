@@ -144,7 +144,13 @@
                                    (filter forms))]
              (recur (into (vec (next pending)) dependencies)
                     (assoc selected schema-key form))))
-         selected)))))
+         selected))
+     {}
+     {:seon.schema/function-source-admissions
+      {'my.plan.internal/plan-html {:seon.schema.admission/source :core}
+       'my.plan.internal/plan-ai {:seon.schema.admission/source :core}}
+      :seon.schema/artifact-exports
+      #{'my.plan.internal/plan-html 'my.plan.internal/plan-ai}})))
 
 (deftest plan-value-dispatch-is-generic-valid-only-and-non-recursive
   (let [value {:my.plan/roots

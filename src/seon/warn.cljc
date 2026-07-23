@@ -808,7 +808,7 @@
                                   :seon.render.canvas/content content)]
                     (when (and (qualified-symbol? decoded)
                                (not (contains? current-authored-symbols decoded))
-                               (not (contains? render.core/renderers decoded)))
+                               (nil? (render.core/resolve-compiled decoded)))
                       {:seon.warn/sym   (str decoded)
                        :seon.warn/where (str "canvas of " aid)}))))
           (sort-by :seon.warn/sym)

@@ -248,7 +248,13 @@
           :seon.schema/function-contract-rows
           [["example.core/identity"
             (:seon.fn/spec function-row)
-            core-transaction]]}
+            core-transaction]]
+          :seon.schema/function-source-rows
+          [["example.core/identity"
+            (:seon.fn/source function-row)
+            core-transaction]]
+          :seon.schema/artifact-exports
+          (:seon.schema.projection/artifact-exports boot-projection)}
          boot-projection)]
     (is (identical? boot-projection acquired-projection)
         "fresh boot retains the exact projection after committed-row identity")))

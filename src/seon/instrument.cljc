@@ -267,8 +267,13 @@
           frames are all `my.*`) and get re-blamed as follow-up, not
           argued up front;
         - anything else → `coarse` (unclassified bugs stay loud)."
-     {:malli/schema [:=> [:cat :any :seon.error/fault] :seon.error/fault]}
-     [e coarse]
+     {:malli/schema
+      [:function
+       [:=> [:cat :any :seon.error/fault] :seon.error/fault]
+       [:=> [:cat :any :seon.error/fault :map] :seon.error/fault]]}
+     ([e coarse]
+      (wrapper-fault e coarse (schema/current-projection)))
+     ([e coarse projection]
      (try
        (let [env  (error/->map e)
              data (:seon.error/data env)
@@ -282,14 +287,15 @@
            (ei/instrument-error? data)
            (let [violated (:seon.error.malli/fn-sym data)]
              (cond
-               (and violated (error/agent-authored-sym? violated)) :agent
+               (and violated
+                    (error/agent-authored-sym? violated projection)) :agent
                (some? (db/current-agent-id))                       :agent
                (and (error/in-dev-eval?)
                     (contains? ei/caller-fault-kinds kind))        :agent
                :else coarse))
 
            :else coarse))
-       (catch :default _ coarse))))
+       (catch :default _ coarse)))))
 
 #?(:cljs
    (defn injecting-fschema
@@ -317,21 +323,25 @@
       behavior-identical to the stock wrapper. The resulting object rides in
       Malli's explicit instrumentation data; there is no second registry.
 
-      `fn-sym` (the wrapped fn's QUALIFIED symbol) decides the
-      `:seon.error/fault` population once, at register time — \"what were
-      we calling\": `my.*`/agent-authored → `:agent`, everything else →
-      `:core`. The async arms below call `seon.error/record!` with it so
+      `fn-sym` and the accepted projection decide the `:seon.error/fault`
+      population once, at register time — \"what were we calling\" derived
+      from source transaction provenance and exact artifact exports. The
+      async arms below call `seon.error/record!` with it so
       both async failure modes become datoms regardless of caller
       behavior (research: malli-instrument-error-data-2026-07-04 §4)."
      {:malli/schema [:function
                      [:=> [:cat :any :qualified-symbol] :any]
-                     [:=> [:cat :any :qualified-symbol :map] :any]]}
+                     [:=> [:cat :any :qualified-symbol :map] :any]
+                     [:=> [:cat :any :qualified-symbol :map :map] :any]]}
      ([inner-form fn-sym]
-      (injecting-fschema inner-form fn-sym {}))
+      (injecting-fschema inner-form fn-sym {} (schema/current-projection)))
      ([inner-form fn-sym schema-options]
+      (injecting-fschema
+       inner-form fn-sym schema-options (schema/current-projection)))
+     ([inner-form fn-sym schema-options projection]
       (let [s        (m/function-schema inner-form schema-options)
             inj-keys (declared-injectables s)
-            fault    (error/fault-for fn-sym)]
+            fault    (error/fault-for fn-sym projection)]
        (reify
          m/Schema
          (-validator [_] (m/-validator s))
@@ -400,7 +410,8 @@
                                    (when-not (error/recorded? e)
                                      (error/record!
                                        {:seon.error/raw   e
-                                        :seon.error/fault (wrapper-fault e fault)}))
+                                        :seon.error/fault
+                                        (wrapper-fault e fault projection)}))
                                    (throw e)))
                          (.then (fn [v]
                                   ;; Async output/guard failures become
@@ -475,9 +486,9 @@
 #?(:cljs
    (defn- async-function-form
      "Raw Malli `:function` form with one Seon schema object per arity."
-     [function-schema sym options]
+     [function-schema sym options projection]
      (into [:function]
-           (map #(injecting-fschema % sym options))
+           (map #(injecting-fschema % sym options projection))
            (m/-function-schema-arities function-schema))))
 
 #?(:cljs
@@ -581,7 +592,7 @@
 #?(:cljs
    (defn- prepare-target
      "Compile one Seon target into Malli data or a namespaced rejection."
-     [{::keys [sym schema-form registry schema-options]}]
+     [{::keys [sym schema-form registry schema-options projection]}]
      (if-let [[ns-sym fn-sym] (qualified-target-parts sym)]
        (let [the-fn (-original-fn (find-js-var ns-sym fn-sym))
              options (or schema-options
@@ -601,7 +612,8 @@
                  (let [compiled
                        (cond
                          (and async? arrow?)
-                         (injecting-fschema schema-form sym options)
+                         (injecting-fschema
+                          schema-form sym options projection)
 
                          async?
                          ;; Malli's CLJS multi-arity surgery calls `rest` on
@@ -609,10 +621,12 @@
                          ;; compiled FunctionSchema object, so all accessor
                          ;; replacement stays inside Malli while Seon's one
                          ;; wrapper owns Promise resolution.
-                         (async-function-form function-schema sym options)
+                         (async-function-form
+                          function-schema sym options projection)
 
                          (and arrow? (-simple-fixed-arity-fn? the-fn))
-                         (injecting-fschema schema-form sym options)
+                         (injecting-fschema
+                          schema-form sym options projection)
 
                          ;; `mi/instrument!` has no separate Malli options
                          ;; input. Passing the durable raw form here makes its
@@ -925,7 +939,8 @@
              (mapv (fn [[sym form]]
                      {::sym sym
                       ::schema-form form
-                      ::schema-options schema-options})
+                      ::schema-options schema-options
+                      ::projection projection})
                    (:seon.schema.projection/function-contracts projection))
              result (instrument-targets! targets)
              rejected-counts (frequencies (map ::reason (::rejected result)))]
@@ -981,7 +996,8 @@
              (mapv (fn [[sym form]]
                      {::sym sym
                       ::schema-form form
-                      ::schema-options schema-options})
+                      ::schema-options schema-options
+                      ::projection new-projection})
                    new-contracts)
              {::keys [data accepted-syms rejected] :as prepared}
              (prepare-targets targets)
@@ -1066,7 +1082,8 @@
                    (keep (fn [sym]
                            (when-let [form (get contracts sym)]
                              {::sym sym ::schema-form form
-                              ::schema-options schema-options})))
+                              ::schema-options schema-options
+                              ::projection new-projection})))
                    selected-syms)
              result (instrument-delta!
                       {::changed-syms selected-syms ::targets targets})]
