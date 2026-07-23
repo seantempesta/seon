@@ -139,6 +139,14 @@ the anchor stays the state ledger.
   value. An empty fake/bootstrap database explicitly disables domain
   validation until its schema declaration transaction establishes a
   projection; never activate one host's projection process-wide.
+- **Loading a portable capability must not publish child-only schemas on the
+  JVM.** Requiring message/lifecycle from the host installer eagerly added
+  their application declarations to the process-global schema population; a
+  minimal test host then rejected an unrelated seed because
+  `:seon.agent.lifecycle/lifecycle-result` referenced an absent
+  `:seon.derive/state`, cascading into 198 writer failures. Keep executable
+  `.cljc` cores loadable while making child application-schema registration a
+  CLJS-only load effect (`src/seon/agent/{message,lifecycle}.cljc`).
 - **Normalize optional component nils before portable validation.** Malli
   default decoding can materialize absent optional keys inside acquired maps;
   `src/seon/db/internal.cljc:287` recursively omits those nil map entries so
@@ -154,6 +162,13 @@ the anchor stays the state ledger.
   (`src/seon/db.cljc:27-34`), and the shared test rejects a nested
   `:seon/error` wrapper (`test/seon/db/portable_test.cljc:267-271`). Sweep the
   target docs for old specialized/nested examples whenever a family is ported.
+- **A receipt key does not stabilize generated transaction intent by itself.**
+  Message allocation generates candidate ids before `seon.db/transact!`; a
+  later call with the same `:seon.capability/op-id` can therefore present a
+  different candidate manifest and fail the writer's intent-hash check instead
+  of replaying. An idempotent generated-id capability must retain or derive the
+  exact candidate manifest from the op-id before claiming two-call replay
+  (`src/seon/agent/message.cljc`, `src/seon/db/id.cljc:1341-1360`).
 
 ## Process/operator
 
@@ -165,6 +180,16 @@ the anchor stays the state ledger.
   absent require rethrows at `src/seon/eval.cljs:884-885`. Do not directly eval
   the file to manufacture REPL provenance; WP-W must transact it through the
   one corpus authority.
+
+- **Package corpus locality is a database join, not a loader path.** Stamp each
+  ordinary `:seon.ns`/`:seon.fn`/`:seon.schema` row with the installed ledger
+  ref (`:seon.packages/package`), acquire it alongside REPL-proven rows, then
+  require exact equality between the row's namespace and the ledger's
+  `:seon.packages/as` plus the computed `seon.packages.js.` prefix
+  (`src/seon/packages.cljc`, `src/seon/execution.cljs`). Retraction removes the
+  stamped corpus entities before the ledger entity; absence of the ref/ledger
+  join makes another cluster unable to acquire the wrapper without a loader
+  filesystem branch.
 
 - **The CLJS UDS transport has no public server-side framed-text seam.**
   `seon.db.transport.uds/connect-stream!` exposes the existing four-byte

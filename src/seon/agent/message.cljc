@@ -4,44 +4,76 @@
    This namespace owns message and user schemas, the single validated write
    boundary, and the agent-facing send surface. It derives whether inbound data
    should wake an agent, while the runtime loop performs the wake itself."
+  #?(:clj (:refer-clojure :exclude [await]))
   (:require
     [clojure.string :as str]
     [seon.agent.message.internal :as internal]
+    [seon.agent.message.leaf :as leaf]
+    #?(:cljs [seon.agent.message.pod :as pod])
     [seon.db :as db]
     [seon.db.id :as db.id]
     [seon.db.protocol :as protocol]
-    [seon.runtime.admission :as admission]
-    [seon.schema :as schema]
-    [seon.warn :as warn]))
+    [seon.schema :as schema]))
+
+#?(:clj (defmacro await [value] value))
+
+(defn- register-schema! [key definition]
+  #?(:cljs (schema/register! key definition)
+     :clj nil))
+
+(def ^:dynamic *leaf* nil)
+
+(declare user agent)
+
+(defn bind-leaf
+  "Return portable message functions bound to one platform leaf."
+  ([platform-leaf] (bind-leaf platform-leaf nil))
+  ([platform-leaf database-leaf]
+  (into {}
+        (map (fn [v]
+               [(:name (meta v))
+                (fn [& args]
+                  (binding [*leaf* platform-leaf
+                            db/*leaf* (or database-leaf db/*leaf*)]
+                    (apply @v args)))])
+             [#'user #'agent]))))
+
+(defn- platform-leaf []
+  (or *leaf* #?(:cljs (pod/services) :clj nil)))
+
+(defn- leaf-fn [key]
+  (or (get (platform-leaf) key)
+      (throw (ex-info "The message platform leaf is not installed."
+                      {:seon.error/kind :core-bug}))))
 
 ;; Every stored message is FULLY FORMED — from + to + content + at + id
 ;; + hops. Identity is the ref (`:seon.agent.message/from` points at the
 ;; sender entity — a `:seon.user/id` or `:seon.agent/id` entity).
 ;; "My conversation" is DERIVED: from = me OR to ∋ me.
-(schema/register!
+(register-schema!
   :seon.agent.message/id
   [:and {:seon.db/identity true
          :seon.db.id/generator :seon.db.id.generator/compact}
    ::db.id/compact-value])
-(schema/register! :seon.agent.message/content :string)
-(schema/register! :seon.agent.message/from    :seon.db/ref)
-(schema/register! :seon.agent.message/to      [:vector :seon.db/ref])
-(schema/register! :seon.agent.message/at      :inst)
+(register-schema! :seon.agent.message/content :string)
+(register-schema! :seon.agent.message/from    :seon.db/ref)
+(register-schema! :seon.agent.message/to      [:vector :seon.db/ref])
+(register-schema! :seon.agent.message/at      :inst)
 ;; Ping-pong guard: 0 from the user; an agent send carries the SAME
 ;; {me,peer}-pair's prior depth + 1 (per-peer, reset at each human
 ;; message — see `internal/outbound-hops`); the wake trigger refuses
 ;; past `seon.warn/hop-cap`.
-(schema/register! :seon.agent.message/hops    :int)
+(register-schema! :seon.agent.message/hops    :int)
 ;; Provenance for the wake gate: :human / :agent / :core (a substrate
 ;; nudge that must never wake an idle agent). Derived in message!.
-(schema/register! :seon.agent.message/origin  [:enum :human :agent :core])
+(register-schema! :seon.agent.message/origin  [:enum :human :agent :core])
 
 ;; The user is a REAL entity — ONE `:seon.user/id` row seeded at boot
 ;; (identity upsert, idempotent — same pattern as agent entities). All
 ;; message refs are uniform; later home for user prefs/memory.
-(schema/register! :seon.user/id         [:string {:seon.db/identity true}])
+(register-schema! :seon.user/id         [:string {:seon.db/identity true}])
 
-(schema/register! :seon.user
+(register-schema! :seon.user
   [:map {:seon.db/entity true}
    [:seon.user/id :seon.user/id]])
 
@@ -53,7 +85,7 @@
 ;; Entity-kind :map schema — required attrs reflect what message!
 ;; (the single writer) populates unconditionally. See the entity-kind
 ;; block comment in seon.agent for the discovery/render mechanism.
-(schema/register! :seon.agent.message
+(register-schema! :seon.agent.message
   [:map {:seon.db/entity   true
          :seon.render/ai   'seon.render.handlers.message/render-ai
          :seon.render/html 'seon.render.handlers.message/render-html}
@@ -65,18 +97,18 @@
    [:seon.agent.message/hops    :seon.agent.message/hops]
    [:seon.agent.message/origin  :seon.agent.message/origin]])
 
-(schema/register! ::recent-limit [:int {:min 1 :max 200}])
-(schema/register! ::recent-request
+(register-schema! ::recent-limit [:int {:min 1 :max 200}])
+(register-schema! ::recent-request
   [:map {:closed true}
    [:seon.agent/id :string]
    [::recent-limit ::recent-limit]
    [::db/db {:optional true} :seon.db/db]])
-(schema/register! ::read-failure
+(register-schema! ::read-failure
   [:map {:closed true}
    [:seon.error/message :string]
    [:seon.error/data :map]])
-(schema/register! ::recent-response [:or [:vector :map] ::read-failure])
-(schema/register! ::recent-all-request
+(register-schema! ::recent-response [:or [:vector :map] ::read-failure])
+(register-schema! ::recent-all-request
   [:map {:closed true}
    [::recent-limit ::recent-limit]
    [::db/db {:optional true} :seon.db/db]])
@@ -109,7 +141,7 @@
   [messages]
   (->> messages
        (remove nil?)
-       (sort-by #(.getTime ^js (:seon.agent.message/at %)))
+       (sort-by #(inst-ms (:seon.agent.message/at %)))
        vec))
 
 (defn ^:async recent
@@ -205,7 +237,7 @@
 ;; string is a Datahike string TEMPID there, which can never name a
 ;; message sender or recipient, so `to "some-agent-id"` fails here at
 ;; the boundary instead of surfacing a raw writer protocol error.
-(schema/register! ::participant-ref
+(register-schema! ::participant-ref
   [:or [:int {:min 1}] [:tuple :keyword :seon.db/lookup-ref-value]])
 
 ;; CLOSED on purpose: a mis-keyed request (bare :to, a typo'd key)
@@ -214,7 +246,7 @@
 ;; recipient — messages p7413gax9q6j/uiga4705cvb6 (2026-07-20) committed
 ;; to the user while the caller addressed an agent, and the agent never
 ;; woke. See docs/seon/issues/message-resolves-recipient-at-stale-basis.md.
-(schema/register! ::message-request
+(register-schema! ::message-request
   [:map {:closed true}
    [::db/db {:optional true} :seon.db/db]
    [:seon.agent.message/content :seon.agent.message/content]
@@ -231,19 +263,25 @@
    ;; :core explicitly so it can't wake an idle agent. The HTTP/user
    ;; adapter relies on the derived :human; agent sends on the derived
    ;; :agent.
-   [:seon.agent.message/origin {:optional true} :seon.agent.message/origin]])
+   [:seon.agent.message/origin {:optional true} :seon.agent.message/origin]
+   [:seon.capability/op-id {:optional true} :seon.capability/op-id]])
 
 ;; Concise success / direct error value: the raw transact tx-report
 ;; is OFF the agent surface — it taught nothing and carried a misdirected
 ;; "narrow your query" hint. A committed identity already says it stored;
 ;; success answers which message and at what hop depth. Failures are direct
 ;; :seon.error/message values.
-(schema/register! ::message-response
+(register-schema! ::message-response
   [:or
    [:map
     [:seon.agent.message/id   :seon.agent.message/id]
-    [:seon.agent.message/hops :seon.agent.message/hops]]
-   [:map [:seon.error/message :string]]])
+    [:seon.agent.message/hops :seon.agent.message/hops]
+    [:seon.capability/op-id {:optional true} :seon.capability/op-id]
+    [:seon.capability/replayed? {:optional true} :seon.capability/replayed?]]
+   [:map
+    [:seon.error/message :string]
+    [:seon.error/kind {:optional true} :keyword]
+    [:seon.error/data {:optional true} :map]]])
 
 ;; The waking-inbound RULE — ONE source of truth for "this message wakes
 ;; (and renders as an inbound) for the agent whose eid is `my-eid`". Both
@@ -277,7 +315,7 @@
    (hop-live? …))` to drop a dead-chain message from the rendered log."
   {:malli/schema [:=> [:catn [::m :map]] :boolean]}
   [m]
-  (< (or (:seon.agent.message/hops m) 0) warn/hop-cap))
+  (< (or (:seon.agent.message/hops m) 0) (get (platform-leaf) ::leaf/hop-cap 8)))
 
 (defn- normalize-recipients
   [to]
@@ -361,7 +399,7 @@
         :seon.agent.message/from from
         :seon.agent.message/to to
         :seon.agent.message/origin origin
-        :seon.agent.message/at (js/Date.)
+        :seon.agent.message/at ((leaf-fn ::leaf/now))
         :seon.agent.message/send-data send-data}))))
 
 (defn ^:async ^:no-doc initial-agent-transaction
@@ -386,7 +424,7 @@
                 :seon.agent.message/from from
                 :seon.agent.message/to []
                 :seon.agent.message/origin :agent
-                :seon.agent.message/at (js/Date.)
+                :seon.agent.message/at ((leaf-fn ::leaf/now))
                 :seon.agent.message/send-data
                 (assoc send-data :seon.agent.message/hops 0)})
               build (:seon.agent.message/transaction-builder transaction)]
@@ -435,10 +473,10 @@
    is visible in the transcript and a human follow-up re-wakes the agent.
    Nothing else here blocks a send."
   {:malli/schema [:=> [:cat ::message-request] ::message-response]}
-  [{database ::db/db
+  [{database ::db/db supplied-op-id :seon.capability/op-id
     :seon.agent.message/keys [content from to origin]}]
-  (if-not (admission/available?)
-    (:seon/error (admission/unavailable))
+  (if-not ((leaf-fn ::leaf/available?))
+    ((leaf-fn ::leaf/unavailable))
     (let [agent-id (db/current-agent-id)
           from     (or from (when agent-id [:seon.agent/id agent-id]))
           to       (normalize-recipients to)]
@@ -476,21 +514,28 @@
                    :seon.agent.message/origin origin}))]
             (if (failed-read? transaction)
               transaction
-              (let [env
+              (let [op-id (or supplied-op-id ((leaf-fn ::leaf/uuid)))
+                    build (:seon.agent.message/transaction-builder transaction)
+                    env
                     (await
                      (db.id/allocate!
                       {::db/db database
                        ::db.id/allocations
                        (:seon.agent.message/allocations transaction)
                        ::db.id/transaction-builder
-                       (:seon.agent.message/transaction-builder transaction)}))
+                       (fn [ids]
+                         (assoc (build ids) :seon.capability/op-id op-id))}))
                     msg-id (get-in env [::db.id/ids
                                         :seon.agent.message/id])]
                 (if (failed-read? env)
                   env
-                  {:seon.agent.message/id msg-id
+                  (cond-> {:seon.agent.message/id msg-id
                    :seon.agent.message/hops
-                   (:seon.agent.message/hops transaction)}))))))))))
+                   (:seon.agent.message/hops transaction)}
+                    (:seon.capability/op-id env)
+                    (assoc :seon.capability/op-id (:seon.capability/op-id env))
+                    (:seon.capability/replayed? env)
+                    (assoc :seon.capability/replayed? true))))))))))))
 
 ;; ============================================================
 ;; The two agent-facing functions. Thin wrappers over `message!` — `from`
@@ -504,7 +549,8 @@
 ;; crash. Both reuse `::message-response`.
 ;; ============================================================
 
-(defn ^{:async true :seon.fn/agent-facing? true} user
+(defn ^{:async #?(:cljs true :clj false) :seon.fn/agent-facing? true
+        :seon.capability/effect :idempotent} user
   "Send a message to your human user.
 
    [[message!]] with `to` := THE one user. `from` is you (the ALS
@@ -517,7 +563,8 @@
   (await (message! {:seon.agent.message/content content
                     :seon.agent.message/to      [user-ref]})))
 
-(defn ^{:async true :seon.fn/agent-facing? true} agent
+(defn ^{:async #?(:cljs true :clj false) :seon.fn/agent-facing? true
+        :seon.capability/effect :idempotent} agent
   "Send a message to a PEER agent by id.
 
    `message!` with `to` := `[[:seon.agent/id agent-id]]`. `from` is you

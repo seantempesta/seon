@@ -43,6 +43,10 @@
             [sci.interrupt :as interrupt]
             [seon.ai.provider :as ai.provider]
             [seon.ai.tokens :as tokens]
+            [seon.agent.lifecycle :as lifecycle]
+            [seon.agent.lifecycle.leaf :as lifecycle.leaf]
+            [seon.agent.message :as message]
+            [seon.agent.message.leaf :as message.leaf]
             [seon.content-hash :as content-hash]
             [seon.db :as db]
             [seon.db.host :as db.host]
@@ -116,17 +120,20 @@
 (schema/register! ::wrapper-value :any)
 (schema/register! ::arglists [:sequential [:vector :symbol]])
 (schema/register! ::doc [:string {:min 1}])
+(schema/register! ::effect [:enum :pure :read :idempotent :external])
 (schema/register!
  ::wrapper
  [:or
   [:map {:closed true}
    [::wrapper-fn ::wrapper-fn]
    [::arglists {:optional true} ::arglists]
-   [::doc {:optional true} ::doc]]
+   [::doc {:optional true} ::doc]
+   [::effect {:optional true} ::effect]]
   [:map {:closed true}
-   [::wrapper-value ::wrapper-value]
+  [::wrapper-value ::wrapper-value]
   [::arglists {:optional true} ::arglists]
-   [::doc {:optional true} ::doc]]])
+   [::doc {:optional true} ::doc]
+   [::effect {:optional true} ::effect]]])
 (schema/register! ::wrappers [:map-of :symbol ::wrapper])
 (schema/register!
  ::register-request
@@ -266,6 +273,21 @@
   [writer]
   (db/bind-leaf (db.host/leaf writer #(database-context writer))))
 
+(defn- host-message-leaf []
+  {::message.leaf/available? (constantly true)
+   ::message.leaf/unavailable (constantly {:seon.error/message "Host admission is unavailable."
+                                           :seon.error/kind :core-bug})
+   ::message.leaf/now #(java.util.Date.)
+   ::message.leaf/uuid #(str (random-uuid))
+   ::message.leaf/hop-cap 8})
+
+(defn- host-lifecycle-leaf []
+  {::lifecycle.leaf/available? (constantly true)
+   ::lifecycle.leaf/unavailable (constantly {:seon.error/message "Host admission is unavailable."
+                                             :seon.error/kind :core-bug})
+   ::lifecycle.leaf/now #(java.util.Date.)
+   ::lifecycle.leaf/uuid #(str (random-uuid))})
+
  ;;; Wrapper registry — the ONE capability-provisioning mechanism.
 
 (defn registry
@@ -306,7 +328,7 @@
                  sci-ns (or (::sci-ns entry) (sci/create-ns lib))
                  vars
                  (reduce-kv
-                  (fn [acc fn-sym {::keys [wrapper-fn wrapper-value arglists doc]
+                  (fn [acc fn-sym {::keys [wrapper-fn wrapper-value arglists doc effect]
                                   :as wrapper}]
                     (let [value (if (contains? wrapper ::wrapper-fn)
                                   wrapper-fn wrapper-value)]
@@ -320,7 +342,9 @@
                                  host-authored?
                                  (cond-> {:ns sci-ns :name fn-sym}
                                    arglists (assoc :arglists arglists)
-                                   doc (assoc :doc doc))))))))
+                                   doc (assoc :doc doc)
+                                   effect (assoc :seon.fn/agent-facing? true
+                                                 :seon.capability/effect effect))))))))
                   (or (::vars entry) {})
                   wrappers)]
              (assoc entries lib {::sci-ns sci-ns ::vars vars}))))
@@ -424,6 +448,27 @@
                       (:doc source-meta)
                       (assoc ::doc (:doc source-meta)))])))
           (bound-database-functions writer))})
+  (let [database-leaf (db.host/leaf writer #(database-context writer))]
+    (doseq [[lib functions]
+            [['seon.agent.message
+              (message/bind-leaf (host-message-leaf) database-leaf)]
+             ['seon.agent.lifecycle
+              (lifecycle/bind-leaf (host-lifecycle-leaf) database-leaf)]]]
+      (register-host-wrappers!
+       {::registry registry
+        ::lib lib
+        ::wrappers
+        (into {}
+              (map (fn [[function-symbol implementation]]
+                     (let [source-var (ns-resolve lib function-symbol)
+                           source-meta (meta source-var)]
+                       [function-symbol
+                        (cond-> {::wrapper-fn implementation}
+                          (:arglists source-meta) (assoc ::arglists (:arglists source-meta))
+                          (:doc source-meta) (assoc ::doc (:doc source-meta))
+                          (:seon.capability/effect source-meta)
+                          (assoc ::effect (:seon.capability/effect source-meta)))])))
+              functions)})))
   (register-host-wrappers!
    {::registry registry
     ::lib 'seon.db.id

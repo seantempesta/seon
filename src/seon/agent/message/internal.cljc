@@ -4,10 +4,13 @@
    This internal namespace contains user lookup, target validation, and shared
    message data transformations used by `seon.agent.message`. It owns no public
    schemas or agent-facing messaging surface."
+  #?(:clj (:refer-clojure :exclude [await]))
   (:require
     [clojure.string :as str]
     [seon.db :as db]
     [seon.db.protocol :as protocol]))
+
+#?(:clj (defmacro await [value] value))
 
 (defn clip-title
   "A SHORT single-line preview of message `content` for an address-step
@@ -133,7 +136,8 @@
                    recipients))
             peer-eids (set recipient-eids)
             from-user? (user-entity? sender)
-            barrier (or (member-result barrier-member) (js/Date. 0))]
+            barrier (or (member-result barrier-member) #?(:cljs (js/Date. 0)
+                                                          :clj (java.util.Date. 0)))]
         (cond
           (seq unresolved)
           (failure "Message sender or recipient does not resolve to a user or agent."

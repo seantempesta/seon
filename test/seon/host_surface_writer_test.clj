@@ -228,15 +228,15 @@
    ["seon.agent.fs/write-file" {::disposition :host/capability-pending ::unit :w5-0g}]
 
    ;; W5-0d lifecycle capability family.
-   ["seon.agent.lifecycle/complete" {::disposition :host/capability-pending ::unit :w5-0d}]
-   ["seon.agent.lifecycle/pause" {::disposition :host/capability-pending ::unit :w5-0d}]
-   ["seon.agent.lifecycle/resume" {::disposition :host/capability-pending ::unit :w5-0d}]
-   ["seon.agent.lifecycle/terminate" {::disposition :host/capability-pending ::unit :w5-0d}]
-   ["seon.agent.lifecycle/wait" {::disposition :host/capability-pending ::unit :w5-0d}]
+   ["seon.agent.lifecycle/complete" {::disposition :host/resolved}]
+   ["seon.agent.lifecycle/pause" {::disposition :host/resolved}]
+   ["seon.agent.lifecycle/resume" {::disposition :host/resolved}]
+   ["seon.agent.lifecycle/terminate" {::disposition :host/resolved}]
+   ["seon.agent.lifecycle/wait" {::disposition :host/resolved}]
 
    ;; W5-0c message capability family.
-   ["seon.agent.message/agent" {::disposition :host/capability-pending ::unit :w5-0c}]
-   ["seon.agent.message/user" {::disposition :host/capability-pending ::unit :w5-0c}]
+   ["seon.agent.message/agent" {::disposition :host/resolved}]
+   ["seon.agent.message/user" {::disposition :host/resolved}]
 
    ;; W5-0g search capability family.
    ["seon.agent.search/grep" {::disposition :host/capability-pending ::unit :w5-0g}]
@@ -362,19 +362,22 @@
                (pr-str (sort (set/difference table-symbols left-symbols)))))
       (is (every? valid-dispositions (map (comp ::disposition val) table))
           "every row must carry exactly one recognized disposition"))
-    (testing "every ported database capability declares one effect"
+    (testing "every ported capability declares one effect"
       (let [valid-effects #{:pure :read :idempotent :external}
             missing-or-invalid
             (into (sorted-map)
                   (comp
-                   (filter (fn [[sym _]] (str/starts-with? sym "seon.db/")))
+                   (filter (fn [[sym _]]
+                             (or (str/starts-with? sym "seon.db/")
+                                 (str/starts-with? sym "seon.agent.message/")
+                                 (str/starts-with? sym "seon.agent.lifecycle/"))))
                    (keep (fn [[sym metadata]]
                            (let [effect (:seon.capability/effect metadata)]
                              (when-not (contains? valid-effects effect)
                                [sym effect])))))
                   definitions)]
         (is (empty? missing-or-invalid)
-            (str "ported seon.db functions missing a valid "
+            (str "ported capability functions missing a valid "
                  ":seon.capability/effect: "
                  (pr-str missing-or-invalid)))))
     (testing "registry-backed resolution agrees with registry declarations"
