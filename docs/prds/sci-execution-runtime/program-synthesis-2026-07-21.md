@@ -1028,6 +1028,14 @@ COMPLETELY before dispatching anything.
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- S2 TRANSACTION-DATA ACCEPTED (4b3d32093, verified path-limited,
+  58/313 green): program-rows.edn published per supported build +
+  release under the grounded name — compiled index derivation, row
+  bytes preserved exactly, program-sources digest binding, artifact
+  manifest + application digest membership; 5,487 rows current
+  corpus. FIXSEED RESUMED on its trigger (fixture consumption via
+  the artifact manifest + digest verification; registry-gate green
+  = acceptance; r43trust + interpreter-step files protected).
 - ADVISORY (owner, 2026-07-23 eve): the codex agents database may
   be broken (owner repairing) — until the all-clear: no new codex
   dispatches; strange lane failures attribute ENVIRONMENT-FIRST;
