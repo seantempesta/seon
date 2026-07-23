@@ -565,6 +565,14 @@ COMPLETELY before dispatching anything.
   :typeahead) stay on compiled local-worker dispatch as an EXPLICIT
   documented contract (D12) — descriptors are hosted-wire only.
   Lane resumed through stage 4 incl. the R37 Gemini probe.
+- P2 COMPLETE (f3ddfb0bb + 2c4d72400): plan-execution landed —
+  pure fenced planner (placement/eligible-tiers/manifests/unresolved/
+  cache-key over the fifth planning-projection input), the coverage
+  helper, the ONE impure acquirer (real-writer test green), and the
+  P1 terminal-connection fix with digest-equality reconstruction.
+  P3/P4/P5 are dependency-ready behind the checkpoint. Streaming
+  lane observed mid-stage-3 (partials rendering in transcripts,
+  14619bf56). LAST LANE OUT = streaming; checkpoint on its return.
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
