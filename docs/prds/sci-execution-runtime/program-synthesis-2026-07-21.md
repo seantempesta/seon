@@ -1148,7 +1148,26 @@ child/self-host tests); preserve subprocess.cljs, eval/receipt.cljc,
 diffusion bootstrap. Sequencing confirms the spine — nothing
 deletable early.
 
-AUDIT LANES DISPATCHED (owner-directed, 2026-07-23): `issue-triage`
+**ISSUE TRIAGE RETURNED + committed `d476204e`**: 132 open → 20
+archived (evidence-based), 28 annotated dissolving-into-units, 73
+real+independent (sized), 11 unclear (probes named). Open backlog
+now 113. TOP-10 ranked in `research/issue-triage-2026-07-23.md`;
+No. 1 (`ai-context-is-not-pure-over-database-value`, L) CONVERGES
+with ruling 20(d)'s render port — fold it into that unit's spec
+when it dispatches. Good early portfolio fillers: the two M items
+(#8 arbitrary-db-results-vs-error-shape — public seon.db result
+boundary; #6 host-session-errors-vanish-silently — pairs with the
+L0/loud-failure thread) and #10 datastar-feed-stale-render (M).
+
+QUEUE AS OF 2026-07-23 (post-audits): SPINE = L0 (LIVE) → L1 → L2
+(U12 drill) → L3 → L4. PORTFOLIO next refills: LLM-I/O research
+unit (ruling 20c, after the morning HTTP discussion) · triage
+top-10 M items (#8, #6, #10) · JVM leaves fs/shell/web/blob ·
+my.* host bindings · 5 straggler ports · NS-1b resume · NS-4/5 ·
+normalize-5 · compat-residue migrations (after-loop per deletion
+audit) · 11 triage probes.
+
+AUDIT LANES DISPATCHED (historical, 2026-07-23): `issue-triage`
 (all 133 open issues → fixed-archive / dissolves-with-unit /
 real+independent(S/M/L) / unclear, top-10 queue candidates; spec
 `tmp/orchestrator/issue-triage-spec.md`) ∥ `deletion-audit`
