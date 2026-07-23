@@ -314,7 +314,7 @@
   [agent-id run-id reason closed-at]
   (core/close-tx-data agent-id run-id reason closed-at))
 
-(defn ^{:async #?(:cljs true :clj false) :seon.fn/agent-facing? true
+(defn ^{:async #?(:cljs true :clj false)
         :seon.capability/effect :external} wait
   "Park the calling agent by closing its current run as `:waited`."
   {:malli/schema [:=> [:catn [::note :string]] ::lifecycle-result]}
@@ -483,7 +483,7 @@
         (await (retry-stale! #(complete-once result result-ref op-id)))]
     (if (error-value? final-result) final-result :idle)))
 
-(defn ^{:async #?(:cljs true :clj false) :seon.fn/agent-facing? true
+(defn ^{:async #?(:cljs true :clj false)
         :seon.capability/effect :idempotent} complete
   "Complete the current run atomically with its result and optional message."
   {:malli/schema
@@ -494,7 +494,7 @@
   ([result] (await (complete* result nil)))
   ([result result-ref] (await (complete* result result-ref))))
 
-(defn ^{:async #?(:cljs true :clj false) :seon.fn/agent-facing? true
+(defn ^{:async #?(:cljs true :clj false)
         :seon.capability/effect :external} pause
   "Pause the current run of a managed agent."
   {:malli/schema
@@ -525,7 +525,7 @@
                                             (:seon.agent.run/id current)))]
                      (if (error-value? report) report :paused))))))))))))
 
-(defn ^{:async #?(:cljs true :clj false) :seon.fn/agent-facing? true
+(defn ^{:async #?(:cljs true :clj false)
         :seon.capability/effect :external} resume
   "Resume the paused current run of a managed agent."
   {:malli/schema
@@ -597,7 +597,7 @@
                        (into [termination release-namespace] close-data)}))]
                 (if (error-value? report) report :terminated)))))))))
 
-(defn ^{:async #?(:cljs true :clj false) :seon.fn/agent-facing? true
+(defn ^{:async #?(:cljs true :clj false)
         :seon.capability/effect :idempotent} terminate
   "Terminate a managed non-root agent and atomically close its current run."
   {:malli/schema [:=> [:catn [::id :seon.agent/id]] ::lifecycle-result]}

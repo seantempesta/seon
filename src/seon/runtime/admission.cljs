@@ -83,8 +83,7 @@
   {:malli/schema [:=> [:cat]
                   [:map
                    [::admitted? [:= false]]
-                   [:seon/error :map]]]
-   :seon.fn/agent-facing? false}
+                   [:seon/error :map]]]}
   []
   (let [{::keys [status generation reason]} @!state]
     {::admitted? false

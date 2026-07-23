@@ -256,7 +256,7 @@
 (defn- ^:async request-db! [request]
   (await ((leaf-fn ::leaf/request-db!) request)))
 (defn current-tx-context [] ((context-fn ::leaf/current-tx-context)))
-(defn ^{:seon.fn/agent-facing? true :seon.capability/effect :pure} current-agent-id
+(defn ^{:seon.capability/effect :pure} current-agent-id
   "Return the current invocation's agent id."
   {:malli/schema [:=> [:cat] [:or :nil :string]]}
   [] ((context-fn ::leaf/current-agent-id)))
@@ -338,8 +338,7 @@
 
 ;;; Fiber-local attribution and immutable database values
 
-(defn ^{:async #?(:cljs true :clj false)
-        :seon.fn/agent-facing? true :seon.capability/effect :read} db
+(defn ^{:async #?(:cljs true :clj false) :seon.capability/effect :read} db
   "Return the current or named immutable database value."
   {:malli/schema [:function [:=> [:cat] [:or :seon.db/db ::error]]
                   [:=> [:cat [:map {:closed true}
@@ -349,27 +348,27 @@
   ([request]
    (await ((leaf-fn ::leaf/resolve-db!) (::database-name request) true))))
 
-(defn ^{:seon.fn/agent-facing? true :seon.capability/effect :pure} as-of
+(defn ^{:seon.capability/effect :pure} as-of
   "Return a database value containing facts through `point`."
   {:malli/schema
    [:=> [:catn [::db :seon.db/db] [::point [:or :int :inst]]] :seon.db/db]}
   [database point]
   (assoc database :as-of point :since nil))
 
-(defn ^{:seon.fn/agent-facing? true :seon.capability/effect :pure} since
+(defn ^{:seon.capability/effect :pure} since
   "Return a database value containing facts added after `point`."
   {:malli/schema
    [:=> [:catn [::db :seon.db/db] [::point [:or :int :inst]]] :seon.db/db]}
   [database point]
   (assoc database :as-of nil :since point))
 
-(defn ^{:seon.fn/agent-facing? true :seon.capability/effect :pure} history
+(defn ^{:seon.capability/effect :pure} history
   "Return a database value containing assertions and retractions."
   {:malli/schema [:=> [:catn [::db :seon.db/db]] :seon.db/db]}
   [database]
   (assoc database :history true))
 
-(defn ^{:seon.fn/agent-facing? true :seon.capability/effect :pure} cas-assert
+(defn ^{:seon.capability/effect :pure} cas-assert
   "Return transaction data asserting an unchanged attribute value."
   {:malli/schema [:=> [:catn [::ref :seon.db/ref]
                        [::attr :qualified-keyword] [::value :any]]
@@ -415,7 +414,7 @@
                   ((leaf-fn ::leaf/on-commit!) report)
                   report))))))
 
-(defn ^{:async #?(:cljs true :clj false) :seon.fn/agent-facing? true :seon.capability/effect :idempotent} transact!
+(defn ^{:async #?(:cljs true :clj false) :seon.capability/effect :idempotent} transact!
   "Commit ordinary transaction data through the authoritative writer."
   {:malli/schema
    [:function
@@ -526,7 +525,7 @@
       response
       (decode-read-result (:datahike.query/result response)))))
 
-(defn ^{:async #?(:cljs true :clj false) :seon.fn/agent-facing? true :seon.capability/effect :read} query
+(defn ^{:async #?(:cljs true :clj false) :seon.capability/effect :read} query
   "Run one Datalog query with source arguments in their declared positions."
   {:malli/schema
    [:=> [:catn [::request-or-query [:or ::query-request ::query-form]]
@@ -541,7 +540,7 @@
       request-or-query
       {::query request-or-query ::args (vec inputs)}))))
 
-(defn ^{:async #?(:cljs true :clj false) :seon.fn/agent-facing? true :seon.capability/effect :read} query-with-evidence
+(defn ^{:async #?(:cljs true :clj false) :seon.capability/effect :read} query-with-evidence
   "Run a query and return its result plus Datahike dependency/cache evidence."
   {:malli/schema [:=> [:cat ::query-request] :any]}
   [request]
@@ -555,7 +554,7 @@
                     :datahike.query/cache-evidence
                     :datahike.query/resource-evidence]))))
 
-(defn ^{:async #?(:cljs true :clj false) :seon.fn/agent-facing? true :seon.capability/effect :read} pull
+(defn ^{:async #?(:cljs true :clj false) :seon.capability/effect :read} pull
   "Pull one entity as ordinary data."
   {:malli/schema
    [:function
@@ -591,7 +590,7 @@
                  ::pull-pattern selector
                  ::ref entity-id}))))
 
-(defn ^{:async #?(:cljs true :clj false) :seon.fn/agent-facing? true :seon.capability/effect :read} pull-many
+(defn ^{:async #?(:cljs true :clj false) :seon.capability/effect :read} pull-many
   "Pull several entities as eager ordinary maps in input order."
   {:malli/schema [:function
                   [:=> [:cat ::pull-many-request] :any]
@@ -624,7 +623,7 @@
                       ::pull-pattern selector
                       ::refs (vec entity-ids)}))))
 
-(defn ^{:async #?(:cljs true :clj false) :seon.fn/agent-facing? true :seon.capability/effect :read} entity
+(defn ^{:async #?(:cljs true :clj false) :seon.capability/effect :read} entity
   "Pull every attribute of one entity as eager ordinary data."
   {:malli/schema [:function [:=> [:cat [:or ::entity-request :seon.db/ref]] :any]
                   [:=> [:cat :seon.db/db :seon.db/ref] :any]]}
@@ -636,7 +635,7 @@
   ([database entity-id]
    (await (pull database '[*] entity-id))))
 
-(defn ^{:async #?(:cljs true :clj false) :seon.fn/agent-facing? true :seon.capability/effect :read} installed-schema
+(defn ^{:async #?(:cljs true :clj false) :seon.capability/effect :read} installed-schema
   "Return Datahike's installed schema map for an explicit or current database."
   {:malli/schema [:function [:=> [:cat] :any]
                   [:=> [:cat [:or [:map {:closed true}
@@ -655,7 +654,7 @@
            :else (do (record-primary-read-evidence! base response)
                      (::protocol/schema response))))))))
 
-(defn ^{:async #?(:cljs true :clj false) :seon.fn/agent-facing? true :seon.capability/effect :read} execute-many
+(defn ^{:async #?(:cljs true :clj false) :seon.capability/effect :read} execute-many
   "Run bounded independent database operations at one database value."
   {:malli/schema [:=> [:cat ::execute-many-request] :any]}
   [request]
@@ -713,7 +712,7 @@
           (nil? (:seon.error/kind value))
           (assoc :seon.error/kind :core-bug))))))
 
-(defn ^{:async #?(:cljs true :clj false) :seon.fn/agent-facing? true :seon.capability/effect :read} index-page
+(defn ^{:async #?(:cljs true :clj false) :seon.capability/effect :read} index-page
   "Return one eager bounded page in native Datahike index order."
   {:malli/schema [:function [:=> [:cat ::index-page-request] :any]
                   [:=> [:cat :seon.db/db ::index-page-request] :any]]}

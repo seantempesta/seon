@@ -21,7 +21,6 @@
 (def ^:private done-row
   {:seon.fn/sym "my.plan/done!"
    :seon.fn/fn-var? true
-   :seon.fn/agent-facing? true
    :seon.fn/spec "[:=> [:cat :map] :map]"
    :seon.fn/arglists "([request])"
    :seon.fn/doc "Mark a step done."})
@@ -29,7 +28,6 @@
 (def ^:private plan-row
   {:seon.fn/sym "my.plan/plan!"
    :seon.fn/fn-var? true
-   :seon.fn/agent-facing? true
    :seon.fn/spec "[:=> [:cat :map] :map]"
    :seon.fn/arglists "([request])"
    :seon.fn/doc "Author a whole plan."})

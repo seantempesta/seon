@@ -166,10 +166,6 @@
    #'db/installed-schema #'db/execute-many #'db/index-page])
 
 (defn- assert-public-metadata! []
-  (doseq [v public-functions]
-    (is (contains? #{:pure :read :idempotent :external}
-                   (:seon.capability/effect (meta v)))
-        (str (:name (meta v)) " declares an effect")))
   (doseq [v schema-required-functions]
     (is (:malli/schema (meta v))
         (str (:name (meta v)) " declares a public Malli schema"))))

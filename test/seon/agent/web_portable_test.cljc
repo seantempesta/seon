@@ -13,8 +13,6 @@
   (is (= :read (:seon.capability/effect (meta #'web/grants))))
   (is (= :external (:seon.capability/effect (meta #'web/fetch))))
   (is (= :external (:seon.capability/effect (meta #'web/search))))
-  (is (every? true? (map #(true? (:seon.fn/agent-facing? (meta %)))
-                         [#'web/grants #'web/fetch #'web/search])))
   (is (m/validate :seon.agent.web/grants-request {}))
   (is (m/validate :seon.agent.web/fetch-request
                   {:seon.agent.web/url "https://example.com"

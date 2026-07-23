@@ -73,7 +73,6 @@
    :seon.fn/doc ":string"
    :seon.fn/arglists ":string"
    :seon.fn/private? ":boolean"
-   :seon.fn/agent-facing? ":boolean"
    :seon.user/entity
    "[:map {:seon.db/entity true} [:seon.user/id :seon.user/id]]"
    :seon.db.protocol/cursor ":int"
@@ -89,7 +88,7 @@
     :seon.user/id :seon.ns/name :seon.ns/source :seon.ns/doc :seon.ns/summary
     :seon.fn/sym :seon.fn/ns
     :seon.fn/source :seon.fn/doc :seon.fn/arglists :seon.fn/private?
-    :seon.fn/agent-facing? :seon.render/full?]
+    :seon.render/full?]
    :seon.db/program
    (into [{:seon.ns/name 'my.core
            :seon.ns/source "(ns my.core)"
@@ -100,8 +99,7 @@
            :seon.fn/source "(defn answer [] 42)"
            :seon.fn/doc "Answer."
            :seon.fn/arglists "([])"
-           :seon.fn/private? false
-           :seon.fn/agent-facing? false}]
+           :seon.fn/private? false}]
          (map (fn [[attribute form]]
                 {:seon.schema/key attribute
                  :seon.schema/form form}))

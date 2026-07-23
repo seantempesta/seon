@@ -166,7 +166,7 @@
 ;; is host-owned config the agent CANNOT widen at runtime).
 ;; ============================================================
 
-(defn ^{:seon.fn/agent-facing? true :seon.capability/effect :read} grants
+(defn ^{:seon.capability/effect :read} grants
   "What web access do I have? The SEON_WEB grant, reachability, search.
 
    Returns the live truth every function enforces: `:seon.agent.web/enabled?`
@@ -203,7 +203,6 @@
 ;; ============================================================
 
 (defn ^{:async #?(:cljs true :clj false)
-        :seon.fn/agent-facing? true
         :seon.capability/effect :external} fetch
   "Fetch a web page as markdown: a preview now, the full text as a blob.
 
@@ -343,7 +342,6 @@
        "fact-lookup query (or retry) if you need citable web sources."))
 
 (defn ^{:async #?(:cljs true :clj false)
-        :seon.fn/agent-facing? true
         :seon.capability/effect :external} search
   "Search the web; ranked result rows plus a grounded answer.
 

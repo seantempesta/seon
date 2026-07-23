@@ -1273,7 +1273,12 @@
                               (swap! ensure-count inc)
                               (js/Promise.resolve nil))
                             (constantly 1000))
-      (let [completion (host/invoke! (eval-batch-invocation "host-eval-2"))]
+      (let [undeclared-effect-call
+            (parsed-form '(seon.ai.tokens/estimate "x"))
+            completion
+            (host/invoke!
+             (eval-batch-invocation "host-eval-2"
+                                    [undeclared-effect-call]))]
         (-> (turn*)
             (.then
              (fn [_]
@@ -1308,7 +1313,7 @@
                                      (::execution/invocation-id %))
                                  (map written-message
                                       @(::writes fixture)))))
-                     "the interrupted invocation is never replayed"))
+                     "an undeclared-effect invocation is never replayed"))
                (testing "the dead session is removed; the next invocation
                          reconnects instead of reusing it"
                  (is (empty? (host/processes)))

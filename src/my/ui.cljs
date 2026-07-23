@@ -60,7 +60,7 @@
    [::value ::value]
    [::tone {:optional true} ::tone]])
 
-(defn ^:seon.fn/agent-facing? status-line
+(defn status-line
   "One labelled status line: `label: value`, tinted by `tone`.
    The dual render of a single fact.
 
@@ -83,7 +83,7 @@
    [::title {:optional true} ::title]
    [::rows  ::rows]])
 
-(defn ^:seon.fn/agent-facing? kv-table
+(defn kv-table
   "A two-column key/value table from `rows`, with an optional `title`.
 
    `rows` is `[[k v] …]`. The dual render of a small breakdown — a styled
@@ -113,7 +113,7 @@
    [::label ::label]
    [::tone {:optional true} ::tone]])
 
-(defn ^:seon.fn/agent-facing? badge
+(defn badge
   "A small status pill: `label` tinted by `tone` (default :info).
 
    The dual render of one labelled state: a bordered pill for the human,
@@ -137,7 +137,7 @@
    [::title {:optional true} ::title]
    [::items ::items]])
 
-(defn ^:seon.fn/agent-facing? bullets
+(defn bullets
   "A bulleted list from `items`, with an optional `title`.
 
    The dual render of a simple list — a semantic `[:ul]` for the human,
@@ -164,7 +164,7 @@
    [::total   ::total]
    [::tone {:optional true} ::tone]])
 
-(defn ^:seon.fn/agent-facing? progress
+(defn progress
   "A labelled progress bar showing `current` of `total`.
 
    The fill is tinted by `tone` (default :signal). The dual render of a
@@ -198,7 +198,7 @@
    [::columns    ::columns]
    [::table-data ::table-data]])
 
-(defn ^:seon.fn/agent-facing? table
+(defn table
   "A table of N labelled columns, built from rows of cell maps.
 
    Generalises `kv-table` to N columns.
@@ -250,7 +250,7 @@
    [::title  ::title]
    [::blocks ::blocks]])
 
-(defn ^:seon.fn/agent-facing? section
+(defn section
   "COMPOSE child envelopes under one titled container.
 
    The combinator that keeps the dual render mirrored through nesting.

@@ -46,15 +46,6 @@
 (defn- by-sym [tx sym]
   (first (filter #(= sym (:seon.fn/sym %)) tx)))
 
-(defn- agent-facing-syms
-  "Agent-facing function symbols indexed for namespace `ns-name`."
-  [tx ns-name]
-  (into #{}
-        (comp (filter #(= true (:seon.fn/agent-facing? %)))
-              (map :seon.fn/sym)
-              (filter #(str/starts-with? % (str ns-name "/"))))
-        tx))
-
 (defn- arity-count
   "Number of arity arg-vectors recovered in a parsed arglists string, e.g.
    \"([req] [db eid])\" → 2. Counts opening `[` — robust to the exact arg
@@ -119,13 +110,8 @@
     (is (and (str/starts-with? (:seon.fn/source register) "(defn")
              (str/includes? (:seon.fn/source register) "register!"))
         "register! gets REAL source (artifact lookup, not stub)")
-    (is (true? (:seon.fn/agent-facing? query))
-        "query carries the positive colocated capability fact")
-    (is (true? (:seon.fn/agent-facing? register))
-        "register! carries the positive colocated capability fact")
-    (is (not (contains? (by-sym tx "seon.db/listen!")
-                        :seon.fn/agent-facing?))
-        "a public implementation function remains indexed but unmarked")))
+    (is (some? (by-sym tx "seon.db/listen!"))
+        "a public implementation function remains indexed")))
 
 (deftest instrumentation-coverage-indexes-with-its-real-contract
   (let [coverage (by-sym @core-tx "seon.instrument/coverage-gaps")]
@@ -134,38 +120,6 @@
         "the native Datahike relation contract resolves as pure Malli data")
     (is (str/includes? (:seon.fn/spec coverage)
                        "[:set [:tuple :string :string]]"))))
-
-(deftest protected-tool-inventory-is-explicit
-  (let [tx @core-tx]
-    (is (= #{"seon.db/current-agent-id"
-             "seon.db/db"
-             "seon.db/cas-assert"
-             "seon.db/transact!"
-             "seon.db/query"
-             "seon.db/query-with-evidence"
-             "seon.db/installed-schema"
-             "seon.db/pull"
-             "seon.db/pull-many"
-             "seon.db/entity"
-             "seon.db/execute-many"
-             "seon.db/index-page"
-             "seon.db/history"
-             "seon.db/as-of"
-             "seon.db/since"}
-           (agent-facing-syms tx "seon.db"))
-        "seon.db exposes only the deliberate database toolkit")
-    (is (= #{"seon.schema/identity-attr?"
-             "seon.schema/enum-members"
-             "seon.schema/register!"
-             "seon.schema/registered-schemas"
-             "seon.schema/registered?"
-             "seon.schema/schema-definition"
-             "seon.schema/schemas-in-namespace"}
-           (agent-facing-syms tx "seon.schema"))
-        "seon.schema excludes projection and eval-validation internals")
-    (is (= #{"my.kb/remember" "my.kb/recall"}
-           (agent-facing-syms tx "my.kb"))
-        "my.kb advertises only its general knowledge operations")))
 
 (deftest my-kb-capabilities-and-recipes-stay-indexed-and-inspectable
   (let [tx          @core-tx
@@ -187,16 +141,12 @@
       (let [row    (by-sym tx sym)
             source (:seon.fn/source row)]
         (is (some? row) (str sym " remains in the program graph"))
-        (is (true? (:seon.fn/agent-facing? row))
-            (str sym " carries its colocated capability metadata"))
         (is (and (string? source) (str/includes? ns-source source))
             (str sym " remains real source in the full my.kb namespace"))))
     (doseq [sym sample-syms]
       (let [row    (by-sym tx sym)
             source (:seon.fn/source row)]
         (is (some? row) (str sym " remains in the program graph"))
-        (is (not (contains? row :seon.fn/agent-facing?))
-            (str sym " is not advertised as a standing tool"))
         (is (and (string? source) (str/includes? ns-source source))
             (str sym " remains in full my.kb source for deliberate inspection"))))
     (is (str/includes? ns-source ":my.kb.source/id")

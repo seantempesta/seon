@@ -42,7 +42,7 @@
   []
   [{::id "shared"}])
 
-(defn ^{:async true :seon.fn/agent-facing? true} instructions
+(defn ^{:async true} instructions
   "The current cluster-wide instructions, oldest append first.
 
    Standing guidance for ALL agents in this cluster, as a vector of text

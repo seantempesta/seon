@@ -24,7 +24,6 @@
    :seon.fn/doc "Run."
    :seon.fn/arglists "([])"
    :seon.fn/private? false
-   :seon.fn/agent-facing? true
    :seon.fn/created-at #inst "2026-07-16T12:00:00.000-00:00"})
 
 (def schema-row
@@ -137,7 +136,7 @@
 
 (deftest drift-repairs-fields-components-and-removed-optional-values
   (let [desired-function
-        (dissoc function-row :seon.fn/spec :seon.fn/agent-facing?)
+        (dissoc function-row :seon.fn/spec)
         desired-schema (dissoc schema-row :seon.db.id/generator)
         next-edge {:seon.ns.require/target 'my.next
                    :seon.ns.require/alias 'next}
@@ -153,8 +152,6 @@
              :seon.ns/require-edges [next-edge]}
             [:db/retract [:seon.fn/sym "my.app/run"]
              :seon.fn/spec "[:=> [:cat] :int]"]
-            [:db/retract [:seon.fn/sym "my.app/run"]
-             :seon.fn/agent-facing? true]
             [:db/retract [:seon.schema/key :my.app/value]
              :seon.db.id/generator
              :seon.db.id.generator/human-readable]]

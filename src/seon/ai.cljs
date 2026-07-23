@@ -896,7 +896,7 @@
 ;; generate-code! — the explicit agent-facing generation operation.
 ;; ============================================================
 
-(defn ^{:async true :seon.fn/agent-facing? true} generate-code!
+(defn ^{:async true} generate-code!
   "Hand one difficult goal to a stronger planning agent.
 
    An explicit, side-effecting operation — never an automatic stage of a

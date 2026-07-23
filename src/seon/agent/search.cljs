@@ -150,7 +150,7 @@
 ;; Public API
 ;; ============================================================
 
-(defn ^{:async true :seon.fn/agent-facing? true} grep
+(defn ^{:async true} grep
   "Search file CONTENTS under the seon.agent.fs allowed roots.
 
    `^:async` — returns a Promise that ALWAYS resolves to a
@@ -285,7 +285,7 @@
       (in/fail (str "unexpected error in seon.agent.search/grep: "
                     (or (some-> e .-message) (str e)))))))
 
-(defn ^{:async true :seon.fn/agent-facing? true} grep-graph
+(defn ^{:async true} grep-graph
   "Search stored code (functions, schemas, namespaces) by regex.
 
    Text-search over the LIVE PROGRAM GRAPH — the literal counterpart of

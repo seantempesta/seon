@@ -343,8 +343,7 @@
                                  (cond-> {:ns sci-ns :name fn-sym}
                                    arglists (assoc :arglists arglists)
                                    doc (assoc :doc doc)
-                                   effect (assoc :seon.fn/agent-facing? true
-                                                 :seon.capability/effect effect))))))))
+                                   effect (assoc :seon.capability/effect effect))))))))
                   (or (::vars entry) {})
                   wrappers)]
              (assoc entries lib {::sci-ns sci-ns ::vars vars}))))

@@ -203,7 +203,7 @@
       :seon.error/data {:seon.db/member member}}))
 
 #?(:cljs
-   (defn ^{:async true :seon.fn/agent-facing? false} acquire-completion!
+   (defn ^{:async true} acquire-completion!
      "Acquire restore completion, publication facts, schema, and branch-head."
      {:malli/schema
       [:=> [:cat ::acquire-completion-request]
@@ -327,7 +327,7 @@
                      :seon.error/kind :core-bug})))}))
 
 #?(:cljs
-   (defn ^{:async true :seon.fn/agent-facing? false} record!
+   (defn ^{:async true} record!
      "Record or prove one exact restore completion after its frozen head.
 
       Retry first reads the unique plan digest from one frozen database value.

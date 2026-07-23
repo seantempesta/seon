@@ -281,7 +281,6 @@
                              :seon.host-hostile-battery-writer-test/sentinel
                              "schema-install-probe"}
                             {:seon.fn/sym "hostile/install-probe"
-                             :seon.fn/agent-facing? true
                              :seon.fn/spec "[:=> [:cat :int] :int]"
                              :seon.fn/schema-error "none"
                              :seon.fn/read-attrs [:hostile/probe]}])

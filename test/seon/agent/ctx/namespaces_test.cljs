@@ -39,7 +39,6 @@
      :seon.fn/ns       [:seon.ns/name ns-kw]
      :seon.fn/source   (str "(defn " nm " [x] (" body-marker " x))")
      :seon.fn/fn-var?  true :seon.fn/private? false
-     :seon.fn/agent-facing? true
      :seon.fn/arglists "([x])"
      :seon.fn/spec     "[:=> [:cat :int] :int]"}))
 

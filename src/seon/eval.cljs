@@ -2395,8 +2395,7 @@
                           ;; row creation.
                           :when (defn-form? source)
                           :let [{:seon.analyzer-info/keys
-                                 [sym fn-var? arglists doc private? spec
-                                  agent-facing?]}
+                                 [sym fn-var? arglists doc private? spec]}
                                 (analyzer-info/var-projection var-map)
                                 ;; Phase 3 (mvp-completion-plan 2026-05-27): if
                                 ;; `:malli/schema` metadata is present, validate
@@ -2445,7 +2444,6 @@
                                :seon.fn/doc        doc
                                :seon.fn/private?   private?
                                :seon.fn/created-at at}
-                        agent-facing? (assoc :seon.fn/agent-facing? true)
                         ;; PRESENT ⇒ specced; ABSENT ⇒ unspecced. Omit
                         ;; entirely when the schema is missing or errored.
                         (some? effective-spec) (assoc :seon.fn/spec effective-spec)
@@ -2511,7 +2509,7 @@
     (vec (concat ns-entities fn-entities schema-entities test-entities))))
 
 (def ^:private optional-fn-projection-attrs
-  #{:seon.fn/spec :seon.fn/schema-error :seon.fn/agent-facing?})
+  #{:seon.fn/spec :seon.fn/schema-error})
 
 (defn- omitted-fn-projection-retractions
   "Retract optional function facts omitted by an accepted redefinition.

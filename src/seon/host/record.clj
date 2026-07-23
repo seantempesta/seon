@@ -155,13 +155,11 @@
              :seon.fn/doc (or (:doc var-meta) doc "")
              :seon.fn/private? (= 'defn- (first form))
              :seon.fn/created-at at}
-      (true? (:seon.fn/agent-facing? meta-map))
-      (assoc :seon.fn/agent-facing? true)
       (some? spec) (assoc :seon.fn/spec spec)
       schema-error (assoc :seon.fn/schema-error schema-error))))
 
 (def ^:private optional-fn-projection-attrs
-  #{:seon.fn/spec :seon.fn/schema-error :seon.fn/agent-facing?})
+  #{:seon.fn/spec :seon.fn/schema-error})
 
 (defn- omitted-fn-projection-retractions
   "Retract optional function facts a redefinition no longer declares.

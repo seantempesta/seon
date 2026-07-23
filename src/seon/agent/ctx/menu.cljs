@@ -238,8 +238,8 @@
    :limit global-eval-scan-window})
 
 (def ^:private prompt-fn-selector
-  '[:seon.fn/sym :seon.fn/fn-var? :seon.fn/agent-facing?
-    :seon.fn/private? :seon.fn/spec :seon.fn/arglists :seon.fn/doc])
+  '[:seon.fn/sym :seon.fn/fn-var? :seon.fn/private?
+    :seon.fn/spec :seon.fn/arglists :seon.fn/doc])
 
 (def ^:private prompt-ns-selector
   '[:seon.ns/name {:seon.ns/require-edges
@@ -312,7 +312,6 @@
                         (keep (fn [row]
                                 (when (and (:seon.fn/sym row)
                                            (:seon.fn/fn-var? row)
-                                           (:seon.fn/agent-facing? row)
                                            (not (:seon.fn/private? row)))
                                   [(:seon.fn/sym row) row])))
                         function-rows)
@@ -428,8 +427,7 @@
                                             [?edge :seon.ns.require/target ?target-name]
                                             [?target :seon.ns/name ?target-name]
                                             [?fn :seon.fn/ns ?target]
-                                            [?fn :seon.fn/fn-var? true]
-                                            [?fn :seon.fn/agent-facing? true]]}
+                                            [?fn :seon.fn/fn-var? true]]}
                                   [source-nses] 65536 2097152)
                                 {::protocol/operation protocol/pull-many-operation
                                  ::protocol/selector prompt-fn-selector

@@ -219,8 +219,7 @@
 
 (defn ^:no-doc configure-storage-view!
   "Replace the process-local blob storage view and return the prior view."
-  {:malli/schema [:=> [:cat ::storage-view] ::storage-view]
-   :seon.fn/agent-facing? false}
+  {:malli/schema [:=> [:cat ::storage-view] ::storage-view]}
   [view]
   ((leaf-fn ::configure-storage-view!) view))
 
@@ -228,8 +227,7 @@
   "Observe one immutable database value's bounded `blob/` set identity."
   {:malli/schema
    [:=> [:cat ::retained-observation-request]
-    ::retained-observation-result]
-   :seon.fn/agent-facing? false}
+    ::retained-observation-result]}
   [request]
   (core/observe-retained request))
 
@@ -239,8 +237,7 @@
    The request carries the hashes already acquired from one immutable database
    value. This function performs no database reads or writes."
   {:malli/schema
-   [:=> [:cat ::materialization-request] ::materialization-result]
-   :seon.fn/agent-facing? false}
+   [:=> [:cat ::materialization-request] ::materialization-result]}
   [request]
   ((leaf-fn ::materialize-retained!) request))
 
@@ -251,8 +248,7 @@
    materializer. It requires the portable startup identity's frozen digest to
    agree before delegating any filesystem effect."
   {:malli/schema
-   [:=> [:cat ::intent-materialization-request] ::materialization-result]
-   :seon.fn/agent-facing? false}
+   [:=> [:cat ::intent-materialization-request] ::materialization-result]}
   [{::keys [target-branch-head retained-hashes source-storage-view
             destination-storage-view]
     startup-identity :seon.dev.restore/startup-identity}]
@@ -291,9 +287,7 @@
 (declare stat) ; text refuses a binary blob by naming stat's recorded media
 
 (defn ^{:async #?(:cljs true :clj false)
-        :seon.fn/agent-facing? true
-        :seon.capability/effect :idempotent
-        :seon.capability/idempotency :content-hash} put!
+        :seon.capability/effect :idempotent} put!
   "Save a long text durably; read it back page by page later.
 
    Persists `:my.blob/content` content-addressed and records its DB
@@ -315,7 +309,7 @@
   #?(:cljs (await ((leaf-fn ::put!) request))
      :clj ((leaf-fn ::put!) request)))
 
-(defn ^{:seon.fn/agent-facing? true :seon.capability/effect :read} get
+(defn ^{:seon.capability/effect :read} get
   "Fetch a stored text's full content by hash, for use in code.
 
    Sync, for CODE, never for your reply:
@@ -338,9 +332,7 @@
           media (assoc ::media media)))))))
 
 (defn ^{:async #?(:cljs true :clj false)
-        :seon.fn/agent-facing? true
-        :seon.capability/effect :idempotent
-        :seon.capability/idempotency :content-hash} concat!
+        :seon.capability/effect :idempotent} concat!
   "Join stored blobs, in order, into ONE new canonical blob.
 
    Takes `:my.blob/hashes` — existing put! hashes, in order — reads
@@ -380,8 +372,7 @@
              (page-lines (::content env) from-line
                          (or max-lines default-max-lines))))))
 
-(defn ^{:async #?(:cljs true :clj false)
-        :seon.fn/agent-facing? true :seon.capability/effect :read} text
+(defn ^{:async #?(:cljs true :clj false) :seon.capability/effect :read} text
   "Read a stored blob page by page, as a bounded line window.
 
    Resolves with honest totals, never the whole document at once.
@@ -437,8 +428,7 @@
                      ::at at}
               (not= :my.blob.media/absent media) (assoc ::media media))))))))
 
-(defn ^{:async #?(:cljs true :clj false)
-        :seon.fn/agent-facing? true :seon.capability/effect :read} stat
+(defn ^{:async #?(:cljs true :clj false) :seon.capability/effect :read} stat
   "Check whether a blob exists, and its size, without reading it.
 
    The blob's DB projection — exists?, tokens, media, at; no disk

@@ -50,7 +50,7 @@
    [::content ::content]
    [::ai {:optional true} ::ai]])
 
-(defn ^:seon.fn/agent-facing? view
+(defn view
   "Build the canonical render returned by a canvas renderer fn.
 
    The renderer contract is `[:=> [:cat :seon.render/system-input]
@@ -76,7 +76,7 @@
     (symbol (name current-ns) (name content))
     content))
 
-(defn ^{:async true :seon.fn/agent-facing? true} show!
+(defn ^{:async true} show!
   "Pin literal hiccup or a renderer fn to YOUR canvas.
 
    A bare renderer symbol resolves in the eval's current namespace; an already
@@ -127,7 +127,7 @@
    [:seon.agent/id {:optional true} :string]])
 (schema/register! ::clear-response :seon.db/transact-response)
 
-(defn ^{:async true :seon.fn/agent-facing? true} clear!
+(defn ^{:async true} clear!
   "Clear YOUR explicit canvas pin and resume the derived default.
 
    Call `(clear! {})`; agent id and db are injected."
@@ -144,7 +144,7 @@
    [:map [::content {:optional true} :seon.render.canvas/content]]
    :seon.db/error])
 
-(defn ^{:async true :seon.fn/agent-facing? true} pinned
+(defn ^{:async true} pinned
   "Return YOUR explicit canvas pin, or an empty map when none is pinned.
 
    Call `(pinned {})`; agent id and db are injected. A database error is
@@ -182,7 +182,7 @@
    [:seon.agent/id {:optional true} :string]])
 (schema/register! ::state-response ::values)
 
-(defn ^{:async true :seon.fn/agent-facing? true} state
+(defn ^{:async true} state
   "Read qualified canvas/domain attributes from YOUR agent entity.
 
    `:seon.db/db` and `:seon.agent/id` are injected. Example:
@@ -203,7 +203,7 @@
    [:seon.agent/id {:optional true} :string]])
 (schema/register! ::save-response :seon.db/transact-response)
 
-(defn ^{:async true :seon.fn/agent-facing? true} save!
+(defn ^{:async true} save!
   "Merge qualified values onto YOUR agent entity; returns the envelope.
 
    `:seon.agent/id` is injected. Every attribute must already have a registered
@@ -223,7 +223,7 @@
    [::handler ::handler]
    [::data {:optional true} ::data]])
 
-(defn ^:seon.fn/agent-facing? button
+(defn button
   "A button routed to one of YOUR map-in handler fns through the call gate.
 
    The handler receives the VALUE of `::data` directly, never a
@@ -245,7 +245,7 @@
    [::label {:optional true} ::label]
    [::placeholder {:optional true} ::placeholder]])
 
-(defn ^:seon.fn/agent-facing? input
+(defn input
   "A text field for a surrounding [[form]].
 
    `::field` is a qualified keyword; the routing adapter preserves that
@@ -263,7 +263,7 @@
    [::options ::options]
    [::label {:optional true} ::label]])
 
-(defn ^:seon.fn/agent-facing? select
+(defn select
   "A dropdown whose qualified `::field` is preserved in the handler map."
   {:malli/schema [:=> [:cat ::select-request] ::control]}
   [{::keys [field options label]}]
@@ -279,7 +279,7 @@
    [::field ::field]
    [::label {:optional true} ::label]])
 
-(defn ^:seon.fn/agent-facing? toggle
+(defn toggle
   "A boolean checkbox; its qualified `::field` reaches the handler map."
   {:malli/schema [:=> [:cat ::toggle-request] ::control]}
   [{::keys [field label]}]
@@ -294,7 +294,7 @@
    [::label ::label]
    [::controls ::controls]])
 
-(defn ^:seon.fn/agent-facing? form
+(defn form
   "Stack controls into a form that submits a field map to your handler.
 
    The fully-namespaced field map is the handler's direct argument, not a

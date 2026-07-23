@@ -263,7 +263,7 @@
 ;;; Registration API
 ;;; ---------------------------------------------------------------------------
 
-(defn ^:seon.fn/agent-facing? identity-attr?
+(defn identity-attr?
   "True when the attr schema for `attr-key` carries `{:seon.db/identity true}`.
 
    Covers the three identity shapes Seon uses
@@ -274,7 +274,7 @@
   [attr-key]
   (internal/identity-attr? (candidate-forms) attr-key))
 
-(defn ^:seon.fn/agent-facing? enum-members
+(defn enum-members
   "Members of a registered `:enum` attr schema, or an empty vector.
 
    Empty when the attr is not an enum (absence = empty, never nil). Reads the schema
@@ -285,7 +285,7 @@
   [attr-key]
   (form/enum-members (get (candidate-forms) attr-key)))
 
-(defn ^:seon.fn/agent-facing? register!
+(defn register!
   "Define a new attribute so facts using it can be saved and queried.
 
    Adds one canonical declaration to the current candidate collector. Schema
@@ -733,19 +733,19 @@
 ;;; Introspection
 ;;; ---------------------------------------------------------------------------
 
-(defn ^:seon.fn/agent-facing? registered-schemas
+(defn registered-schemas
   "A map of all registered domain schemas (Malli's built-ins excluded)."
   {:malli/schema [:=> [:cat] :map]}
   []
   (candidate-forms))
 
-(defn ^:seon.fn/agent-facing? registered?
+(defn registered?
   "Check if a schema keyword is registered."
   {:malli/schema [:=> [:catn [::registry-key ::registry-key]] :boolean]}
   [k]
   (contains? (candidate-forms) k))
 
-(defn ^:seon.fn/agent-facing? schema-definition
+(defn schema-definition
   "The raw definition for a registered schema, or nil if not registered."
   {:malli/schema [:=> [:catn [::registry-key ::registry-key]] :any]}
   [k]
@@ -997,7 +997,7 @@
   (m/explainer
    (m/deref-recursive schema-key {:registry (candidate-registry)})))
 
-(defn ^:seon.fn/agent-facing? schemas-in-namespace
+(defn schemas-in-namespace
   "The `{keyword definition}` map of schemas registered under `ns-name`.
 
    `ns-name` is a string, e.g. \"seon.agent\"."

@@ -930,7 +930,6 @@
    :seon.fn/arglists
    :seon.fn/doc
    :seon.fn/private?
-   :seon.fn/agent-facing?
    :seon.fn/spec
    :seon.fn/schema-error
    :seon.fn/created-at
@@ -1499,8 +1498,6 @@
                :seon.fn/doc        (or (:doc m) "")
                :seon.fn/private?   (boolean (:private m))
                :seon.fn/created-at now}
-        (true? (:seon.fn/agent-facing? m))
-        (assoc :seon.fn/agent-facing? true)
         ;; PRESENT ⇒ specced (exact contract in corpus); ABSENT ⇒ unspecced.
         (some? spec) (assoc :seon.fn/spec spec)))))
 

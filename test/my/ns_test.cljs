@@ -20,13 +20,11 @@
 
 (def ^:private demo-function-rows
   [{:seon.fn/sym "my.demo/twice"
-    :seon.fn/agent-facing? true
     :seon.fn/fn-var? true
     :seon.fn/doc "Double a number.\n\nThe mechanism story lives below the fold."
     :seon.fn/arglists "([n])"
     :seon.fn/spec "[:=> [:cat :int] :int]"}
    {:seon.fn/sym "my.demo/add"
-    :seon.fn/agent-facing? true
     :seon.fn/fn-var? true
     :seon.fn/doc "Add two numbers."
     :seon.fn/arglists "([a b])"
@@ -243,7 +241,6 @@
              :seon.fn/source "(defn show [x] (DEMO-BODY x))"
              :seon.fn/fn-var? true
              :seon.fn/private? false
-             :seon.fn/agent-facing? true
              :seon.fn/arglists "([x])"
              :seon.fn/spec "[:=> [:cat :int] :int]"}]}
           initial

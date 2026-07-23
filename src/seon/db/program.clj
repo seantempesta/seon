@@ -28,15 +28,14 @@
 (def ^:private no-generator :seon.db.id.generator/absent)
 
 (def ^:private current-function-query
-  '[:find ?sym ?source ?spec ?doc ?arglists ?private ?agent-facing
+  '[:find ?sym ?source ?spec ?doc ?arglists ?private
     :where
     [?function :seon.fn/sym ?sym]
     [?function :seon.fn/source ?source]
     [(get-else $ ?function :seon.fn/spec "") ?spec]
     [(get-else $ ?function :seon.fn/doc "") ?doc]
     [(get-else $ ?function :seon.fn/arglists "") ?arglists]
-    [(get-else $ ?function :seon.fn/private? false) ?private]
-    [(get-else $ ?function :seon.fn/agent-facing? false) ?agent-facing]])
+    [(get-else $ ?function :seon.fn/private? false) ?private]])
 
 (def ^:private boot-function-query
   '[:find [?sym ...]
@@ -129,8 +128,7 @@
    :seon.fn/spec (get row :seon.fn/spec "")
    :seon.fn/doc (:seon.fn/doc row)
    :seon.fn/arglists (:seon.fn/arglists row)
-   :seon.fn/private? (:seon.fn/private? row)
-   :seon.fn/agent-facing? (true? (:seon.fn/agent-facing? row))})
+   :seon.fn/private? (:seon.fn/private? row)})
 
 (defn- schema-fields [row]
   {:seon.schema/form (:seon.schema/form row)
@@ -146,13 +144,12 @@
   [{:keys [current-functions current-schemas current-namespaces]}]
   {:functions
    (into {}
-         (map (fn [[sym source spec doc arglists private? agent-facing?]]
+         (map (fn [[sym source spec doc arglists private?]]
                 [sym {:seon.fn/source source
                       :seon.fn/spec spec
                       :seon.fn/doc doc
                       :seon.fn/arglists arglists
-                      :seon.fn/private? private?
-                      :seon.fn/agent-facing? agent-facing?}]))
+                      :seon.fn/private? private?}]))
          current-functions)
    :schemas
    (into {}
@@ -214,19 +211,12 @@
         (mapcat
          (fn [row]
            (if-some [sym (:seon.fn/sym row)]
-             (let [stored-spec (get-in functions [sym :seon.fn/spec])
-                   stored-agent-facing?
-                   (get-in functions [sym :seon.fn/agent-facing?])]
+             (let [stored-spec (get-in functions [sym :seon.fn/spec])]
                (cond-> []
                  (and (not (contains? row :seon.fn/spec))
                       (seq stored-spec))
                  (conj [:db/retract [:seon.fn/sym sym]
-                        :seon.fn/spec stored-spec])
-
-                 (and stored-agent-facing?
-                      (not (contains? row :seon.fn/agent-facing?)))
-                 (conj [:db/retract [:seon.fn/sym sym]
-                        :seon.fn/agent-facing? true])))
+                        :seon.fn/spec stored-spec])))
              (when-some [schema-key (:seon.schema/key row)]
                (let [stored-generator
                      (get-in schemas [schema-key :seon.db.id/generator])]

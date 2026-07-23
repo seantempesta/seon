@@ -155,7 +155,6 @@
                {:name 'my.ns/foo :fn-var true
                 :arglists '(quote ([x]))
                 :meta {:doc "a fn" :private false
-                       :seon.fn/agent-facing? true
                        :malli/schema [:=> [:cat :int] :int]}})]
     (is (m/validate :seon.analyzer-info/var-projection proj)
         "validates against the registered ::var-projection schema")
@@ -164,7 +163,6 @@
             :seon.analyzer-info/arglists "([x])"
             :seon.analyzer-info/doc      "a fn"
             :seon.analyzer-info/private? false
-            :seon.analyzer-info/agent-facing? true
             :seon.analyzer-info/spec     "[:=> [:cat :int] :int]"}
            proj)
         "every key is :seon.analyzer-info/* — no bare keys; single-arity
@@ -173,9 +171,4 @@
                                             :arglists '(quote ([x]))
                                             :meta {}})
                         :seon.analyzer-info/spec))
-        "unspecced var → ::spec ABSENT (optional = absent, never nil)")
-    (is (not (contains? (ai/var-projection {:name 'my.ns/internal :fn-var true
-                                            :arglists '(quote ([x]))
-                                            :meta {}})
-                        :seon.analyzer-info/agent-facing?))
-        "unmarked var → eligibility ABSENT; false is never stored")))
+        "unspecced var → ::spec ABSENT (optional = absent, never nil)")))

@@ -549,7 +549,7 @@
 ;; crash. Both reuse `::message-response`.
 ;; ============================================================
 
-(defn ^{:async #?(:cljs true :clj false) :seon.fn/agent-facing? true
+(defn ^{:async #?(:cljs true :clj false)
         :seon.capability/effect :idempotent} user
   "Send a message to your human user.
 
@@ -563,7 +563,7 @@
   (await (message! {:seon.agent.message/content content
                     :seon.agent.message/to      [user-ref]})))
 
-(defn ^{:async #?(:cljs true :clj false) :seon.fn/agent-facing? true
+(defn ^{:async #?(:cljs true :clj false)
         :seon.capability/effect :idempotent} agent
   "Send a message to a PEER agent by id.
 

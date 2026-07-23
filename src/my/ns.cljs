@@ -46,7 +46,7 @@
    [::error {:optional true} ::error]
    [::hint {:optional true} ::hint]])
 
-(defn ^{:async true :seon.fn/agent-facing? true} functions
+(defn ^{:async true} functions
   "List the functions a namespace defines — name, doc, and args.
 
    Answers \"what can I call in X?\" for ANY indexed namespace (seon.*,
@@ -204,7 +204,7 @@
                        ns-name (str "namespace selection failed: "
                                     (:seon.agent.ctx/error installed))))))))))))))
 
-(defn ^{:async true :seon.fn/agent-facing? true} full!
+(defn ^{:async true} full!
   "Reveal one indexed namespace's complete source in your next context.
 
    This moves the namespace from the block's compact presence-set to its exact
@@ -217,7 +217,7 @@
   [{ns-name ::ns}]
   (await (select-source! ns-name true)))
 
-(defn ^{:async true :seon.fn/agent-facing? true} compact!
+(defn ^{:async true} compact!
   "Return one indexed namespace to its compact card in your next context.
 
    This moves the namespace from full-source to the existing block's compact

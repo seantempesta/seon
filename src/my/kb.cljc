@@ -142,7 +142,7 @@
        :my.kb.source/rating 5 :my.kb.source/topics [:functional :data-structures]
        :my.kb.source/author "author-okasaki"}]}))
 
-(defn ^{:async true :seon.fn/agent-facing? true} remember
+(defn ^{:async true} remember
   "Store ONE finding as a durable, provenance-stamped knowledge row.
 
    The one-call way to persist what you verified, with NO schema design, NO
@@ -345,7 +345,7 @@
        (sort-by (fn [[e n]] [(- n) e]))
        vec))
 
-(defn ^{:async true :seon.fn/agent-facing? true} recall
+(defn ^{:async true} recall
   "Find what you already know about a topic: ranked facts with sources.
 
    \"What do we know about X?\" in ONE call. Map-in:

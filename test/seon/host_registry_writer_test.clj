@@ -354,7 +354,6 @@
    {:seon.schema/key :seon.fn/arglists :seon.schema/form ":string"}
    {:seon.schema/key :seon.fn/doc :seon.schema/form ":string"}
    {:seon.schema/key :seon.fn/private? :seon.schema/form ":boolean"}
-   {:seon.schema/key :seon.fn/agent-facing? :seon.schema/form ":boolean"}
    {:seon.schema/key :seon.fn/spec :seon.schema/form ":string"}
    {:seon.schema/key :seon.fn/schema-error :seon.schema/form ":string"}
    {:seon.schema/key :seon.fn/created-at :seon.schema/form ":inst"}
@@ -544,7 +543,6 @@
                                   [:seon.db.process/id
                                    :seon.db.process/repl]}
                                  {:seon.fn/sym "seed/install-probe"
-                                  :seon.fn/agent-facing? true
                                   :seon.fn/spec "[:=> [:cat :int] :int]"
                                   :seon.fn/schema-error "none"
                                   :seon.fn/read-attrs [:seed/attr]}])
