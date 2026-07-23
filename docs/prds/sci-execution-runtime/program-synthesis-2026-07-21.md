@@ -1091,11 +1091,24 @@ turn and the architecture docs via the docs lane.
    docs, no migration diary. Spec
    `tmp/orchestrator/docs-reconcile-spec.md`.
 
-**STAGED NEXT (refill on any free slot):** p2-message-lifecycle ·
-p2-blob · p2-my-families (specs in tmp/orchestrator/, exemplar commit
-= `f6d843ee`) · agent-facing interface-guidance unit. Known open:
-drill-harness nil-FileInputStream failure (recorded, pre-writer
-readiness, not seam-owned — needs its own small issue/fix).
+**WAVE UPDATE (2026-07-22 late night):** pkg-wrapper-exemplar and
+docs-reconcile RETURNED and committed (`dbc5e21d`): architecture docs
+now carry the seam (claim→source table in the lane summary);
+fast-deep-equal wrapped per ruling 16 with the munge rule pinned; the
+ONE blocker found = no ingestion/loader door for the cluster package
+corpus (issue `cluster-package-corpus-has-no-loader-door.md`, precise
+owners + acceptance). LIVE LANES NOW: `e2e-live-drive` (still
+running) ∥ `pkg-loader-door` (spec
+`tmp/orchestrator/pkg-loader-door-spec.md` — closes that issue
+through the ONE corpus authority, prefix-computed admission,
+removal/restart proofs) ∥ `p2-msglc` (message/lifecycle port,
+exemplar `f6d843ee` named as the worked pattern).
+
+**STAGED NEXT (refill on any free slot):** p2-blob · p2-my-families
+(specs in tmp/orchestrator/, exemplar commit = `f6d843ee`) ·
+agent-facing interface-guidance unit. Known open: drill-harness
+nil-FileInputStream failure (recorded, pre-writer readiness, not
+seam-owned — needs its own small issue/fix).
 
 ### Restart state (2026-07-22, orchestrator resumed in ~/src/seon)
 
