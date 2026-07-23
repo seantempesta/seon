@@ -930,3 +930,25 @@ the anchor stays the state ledger.
   boundaries; a fixture-only available inventory does not make production
   planning exact (`src/seon/program/plan.cljc:33-43,524-568`,
   `script/seon/dev/artifact.clj:386-515`).
+
+## Invocation-placement implementation scars (2026-07-23)
+
+- **Parsed invocation forms are synthetic graph roots, not a second corpus.**
+  Retain the P1 analyzer resolution with the parsed reply, qualify definitions
+  in reply order, and pass each form through `seon.program.edge/analyze-function`.
+  Non-definition forms can be wrapped in synthetic zero-argument definitions
+  because that changes neither their calls nor their attribute and package
+  references. Everything they call still resolves through the acquired
+  persisted graph.
+- **No roots means no executable placement evidence.** An empty root vector is
+  `:unplannable` with a named `:no-roots` unresolved entry; it is not a
+  vacuously pure program.
+- **Tier selection is policy data derived after eligibility.** Prefer the
+  invoking claimant only when it is eligible, then an eligible handoff tier.
+  If neither is eligible the selected tier is absent so the caller releases
+  the run instead of inventing placement.
+- **Installed-leaf inventories are captured by the installer.** Enumerate
+  binding, effect, and remoteness descriptors while wrappers are installed,
+  default undeclared effects to external, and hash the canonical immutable
+  descriptor set. Reconstructing this inventory later from wrapper registries
+  loses producer metadata and creates a second authority.
