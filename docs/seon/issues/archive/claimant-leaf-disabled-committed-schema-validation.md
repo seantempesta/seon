@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, database, schema, runtime]
 ---
@@ -30,3 +30,11 @@ The one portable `seon.db` leaf context backed by
 - The claimant leaf reads and updates the host's retained committed projection.
 - An out-of-enum turn phase and a zero claim epoch each return a flat
   `:user-input` error before the writer transport is called.
+
+## Resolution
+
+Commit `34f0373e8` binds the claimant leaf to the host's retained committed
+projection. `seon.db.claimant-validation-test` passes 2 tests / 10 assertions:
+an out-of-enum turn phase and zero claim epoch both return flat
+`:user-input` values before the transport, and claimant invocation limits come
+from acquired config facts.

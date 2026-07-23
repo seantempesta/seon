@@ -15,6 +15,21 @@ the anchor stays the state ledger.
 
 ## Datahike/schema shapes (cost us two live boot failures)
 
+- **Strict committed-contract admission needs provenance in the projection
+  input.** `seon.schema/projection-from-rows` currently receives only
+  `[identity form-string]`; it cannot preserve core/opaque exceptions while
+  rejecting durable agent contracts without a forbidden namespace/name
+  heuristic. Carry transaction-derived admission source through every
+  acquisition producer (`host/context`, runtime admission, execution, and web
+  value) into the one projection compiler before enabling R31 on reload
+  ([[../../../seon/issues/committed-contract-admission-lacks-source-provenance]]).
+- **Malli spell-checking and the wrong-namespace hint are complementary.**
+  `me/with-spell-checking` classifies similar extra keys on closed maps, while
+  the retained `seon.error.instrument/hint-for` covers the previously-proven
+  same-name/different-namespace miss that Malli's distance threshold omitted.
+  Compose spell-checking before `me/humanize`, keep the fallback, and bound the
+  resulting headline through the existing steering head; do not delete either
+  path ([[../../../seon/issues/instrument-report-omits-malli-spell-checking]]).
 - **An old→old epoch CAS is a stale-holder fence, not claim arbitration.**
   Two drivers holding the same epoch both satisfy `e → e`; exactly-one turn
   requires an earlier exclusive claim transition (`nil → 1`, or steal
@@ -569,3 +584,50 @@ the anchor stays the state ledger.
   already committed cursor/receipt evidence, name the exact compiler error, and
   stop the owned cluster. Never patch or commit the other lane's in-flight
   source to manufacture U12 or full-CLJS evidence.
+
+## Portable durable LLM phase (2026-07-23)
+
+- **The durable phase owns receipts; transports own only wire I/O.** Before a
+  provider call, the portable phase commits the open attempt with the held
+  pointer/epoch fence, frozen config digest, ordinal, and absolute deadline.
+  The platform transport receives that frozen request plus the remaining
+  request timeout. It never creates, settles, or repairs attempt rows.
+- **Successful provider bytes are not terminal until blob publication is
+  addressable.** Reply publication calls the bound `my.blob` capability. If
+  that capability fails, the attempt remains `:open`; takeover records it
+  `:crashed` and advances the ordinal. Committing `:success` without a reply
+  link would strand the cursor and falsely claim durable evidence.
+- **JVM LLM eligibility is the intersection of installed leaves.** A claimant
+  advertises `:llm` only when both a real transport function and the JVM blob
+  leaf are present. Absence is scheduler policy data, not a transport stub.
+- **Compose HTTP and custody deadlines at the claimant boundary.** The
+  portable phase derives the minimum of the run deadline and frozen attempt
+  horizon. A JVM transport must apply the resulting milliseconds to
+  `HttpRequest.Builder.timeout`; the claimant independently schedules an
+  interrupt of its retained driver virtual thread. The eval session watchdog
+  is invocation-private and is not reused for provider I/O.
+
+## Bug-chase persistence hardening (2026-07-23)
+
+- **Every database leaf must bind the retained committed projection.** A leaf
+  that returns nil from `schema-projection`, discards cache refreshes, or
+  reports validation disabled silently defeats the shared transaction
+  admission mechanism. Mirror the host context's projection-state contract:
+  return only a projection with forms, replace the cached generation
+  atomically, and derive validation from those committed forms. Prove the leaf
+  rejects an enum violation and a positive-int violation before its transport.
+- **Guard the final public eval envelope, not only the ordinary SCI result.**
+  Terminal preflight, read, timeout, repair, and recording paths can replace or
+  extend an earlier `wire-safe-value` result. Extract host-only live values
+  first, then apply the same guard to the envelope that is persisted and
+  returned. This keeps Transit admission in one mechanism and turns a nested
+  `clojure.core$_STAR_` value into a flat tier-local error without closing the
+  execution session.
+- **A protective portable literal graduates through all four config layers.**
+  Register one described leaf shape, reference it from a closed concern
+  section, reference it from the singleton entity, and resolve the manifest
+  value into a flat fact. The consumer acquires that fact and carries no
+  numeric fallback. Descriptions record units, retained-policy provenance, the
+  protected resource, and the exact key surfaced when the limit is absent or
+  fires. This applies equally to retry waits, capability defaults, parser
+  ceilings, and JVM claimant invocation bounds.

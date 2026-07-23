@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 tags:
   - runtime
   - persistence
@@ -30,3 +30,12 @@ through the existing `wire-safe-value` projection after extracting host-local
 values and before persistence. Prove that a terminal response embedding a
 function is a flat `:agent` error, round-trips over Transit, and that a second
 invocation succeeds over the same execution session.
+
+## Resolution
+
+Commit `34f0373e8` applies `wire-safe-value` to the final public envelope before
+terminal persistence. The focused same-session regression passed 1 test / 7
+assertions: a nested function becomes a flat `:agent` error, Transit
+round-trips the response, and a second invocation on the same execution
+session returns 42. A later rerun was blocked before this behavior by an
+unrelated in-flight `seon.host.context` arity mismatch; both logs are retained.

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 tags:
   - runtime
   - configuration
@@ -24,3 +24,11 @@ default into the `:seon.config` singleton. Portable/JVM consumers acquire those
 facts and carry no numeric fallback. Every leaf description records units,
 default provenance, protected resource, and the key surfaced when the limit
 fires. Focused CLJC tests prove default and override resolution.
+
+## Resolution
+
+Commit `34f0373e8` registers and resolves the LLM retry, shell, web, and
+claimant invocation limits as singleton facts. Portable and JVM consumers
+acquire those projections without numeric fallbacks. Focused config,
+portable-core, shell-host, web-host, and durable-LLM gates pass 27 tests / 146
+assertions.
