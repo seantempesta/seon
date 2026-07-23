@@ -138,9 +138,42 @@ COMPLETELY before dispatching anything.
   replay, receipts CAS); designed-out-classes section;
   anti-recommendations for dying tiers. Report lands at
   research/cljc-test-parity-audit-2026-07-23.md.
-- QUEUED after the drill window (source-editing): the core
-  persistence bug-chase lane implementing the audit's designed-out
-  constraints + top regressions; U2's disposition of the two drill
+- OWNER DIRECTIVE (2026-07-23 AM #2): the JVM test suite gets agents
+  ON IT UNTIL RESOLVED; record every problem found and queue fixes.
+- JVM-SUITE PROBLEM QUEUE (from the accepted Fable audit,
+  research/cljc-test-parity-audit-2026-07-23.md — verified: the
+  discovery predicate at script/seon/dev/test_roots.clj:65-73 sees
+  only test/seon/db/** + direct *_writer_test.clj):
+  1. ~20 orphaned JVM-relevant test files invisible to the full
+     writer gate (incl. guard_test.cljc, driver_core_test.cljc,
+     value_writer_test.clj since birth) — WHEN: test-integrity lane,
+     dispatches at drill-window close (spec
+     tmp/orchestrator/test-integrity-spec.md).
+  2. Orphan gate (computed: every test file discovered by ≥1
+     surface) — same lane.
+  3. host_guard_policy_test.clj wrong suffix — same lane (rename).
+  4. Wiki's false discovery claim — same lane (correct it).
+  5. Newly-seen failures after widening — same lane triages; real
+     defects → issues + stop for ruling; dead-legacy → delete with
+     justification; fixture gaps → shared mechanism.
+  6. Claimant-tier Malli validation OFF (driver/host.clj:32-37
+     schema-validation? (constantly false)) — bug-chase lane
+     (audit rank #2; wire the bound committed projection).
+  7. Codec encode totality (uds.cljc:210-217 bare transit/write) —
+     bug-chase lane (designed-out class #1; UNCLEAR which response
+     paths validate — probe write-frame! callers first).
+  8. Global attr-registration guarantee — Sol investigation RUNNING
+     (mechanism A-D analysis); bug-chase implements the ruling.
+     OWNER TUNING: attributes are GLOBAL (fully namespaced);
+     register!-before-fns is learned agent behavior; the invariant
+     is every parsed statement has a registration entry on every
+     tier.
+  9. Receipt pure-suite dual-tier promotion + attempt-receipt JVM
+     persistence regression — fold into U6b spec (audit #5/#6).
+- QUEUED after the drill window (source-editing), in order:
+  test-integrity lane → persistence bug-chase lane (designed-out
+  classes 1-3 + audit regressions) → U6b (with audit #6 folded) →
+  U7 ctx/render port → U8 leaves. U2's disposition of the two drill
   findings reviewed skeptically first (neither waves through
   without root cause + regression).
 - Docs lane ACCEPTED (ff9196412: 12 docs + R26/R27/R28 ADRs). Its
