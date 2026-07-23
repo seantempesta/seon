@@ -1127,6 +1127,15 @@ W5), census→0, cutover flip, U10 drill.
 PARALLEL PORTFOLIO (no longer gating the loop): JVM leaves
 fs/shell/web/blob + bindings (~28 rows) · my.* host bindings ·
 the 5 straggler ports.
+LIVE: loop-migration DESIGN agent (owner-directed, 2026-07-23) —
+fresh-eyes grounding in reference-code/datahike + reference-code/sci
+(native CAS/listen!/interrupt primitives vs Seon hand-rolls),
+run-claim state machine, portable-core vs leaf split for the whole
+driver, optimality-audit table, phased cut ending at the U12 drill;
+deliverable research/loop-cljc-sci-design-2026-07-23.md + owner
+decisions section; summary → tmp/orchestrator/loop-design-summary.txt.
+Meta-strip lane still in flight alongside (read-only design agent is
+safe to overlap).
 PORTFOLIO: NS-1b resume · NS-4/5 · normalize-5 · seam observability
 (receipt durations) · issue-triage sweep · packages with priority
 INVERTED by CLJ execution (seon.packages.jvm.*/Java interop before
