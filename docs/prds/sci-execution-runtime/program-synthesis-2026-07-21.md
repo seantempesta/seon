@@ -106,11 +106,18 @@ COMPLETELY before dispatching anything.
   interest-bearing db.host session on PUBLIC framing primitives
   approved; uds.cljc stays untouched (private-primitive blocks are a
   separate evidence-based ruling).
-- MORNING OWNER ITEMS (batched): U6 JVM LLM leaf timing (D4 —
-  streaming+normal both settled; it now also gates the LIVE U12
-  drill's non-pod LLM path, though pre-U6 the pod claimant covers
-  it); my.blob strict-restart-purity variant for identity files
-  (f above); D1 beat-cadence default once U3's numbers land.
+- MORNING OWNER ITEMS: U6b timing ANSWERED (owner, 2026-07-23 AM:
+  "whenever we are ready" = authorized as soon as dependency-ready;
+  it is — dispatch after U2's live-drill source-freeze window
+  closes; streaming+normal both). STILL OPEN: push the two fork
+  commits to seantempesta/datahike; my.blob strict-restart-purity
+  variant for identity files; D1 beat-cadence default now that U3's
+  numbers exist.
+- Morning parallel plan (drill-window-aware): docs-reconciliation
+  lane DISPATCHED (docs-only, safe during the freeze); queued behind
+  the drill window: U6b JVM LLM leaf, U7 ctx/render port (deps U1+U5
+  both landed), U8 JVM fs/shell/web/blob leaves + host bindings,
+  triage #6/#8/#10.
 - Config entanglement resolved (2026-07-23 overnight): U4's
   render-context sections and U3's mutation-admission sections landed
   interleaved in the one uncommitted config owner; orchestrator
