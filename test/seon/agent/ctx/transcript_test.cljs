@@ -30,8 +30,9 @@
                   :seon.eval/ok? true
                   :seon.eval/source "(+ 1 1)"
                   :seon.eval/result-edn "2"})]
-    (is (false? (:seon.agent.ctx.transcript/result-live? event))
-        "ordinary context derives handle absence from stored data only")))
+    (is (not (contains? event
+                        :seon.agent.ctx.transcript/result-live?))
+        "process-local result membership is absent from stored render data")))
 
 (deftest live-readline-is-confined-to-the-root-tail
   (is (= "" (transcript/readline-block

@@ -5,6 +5,7 @@
     [clojure.string :as str]
     [seon.agent.ctx :as ctx]
     [seon.config :as config]
+    [seon.content-hash :as content-hash]
     [seon.db :as db]))
 
 (deftest plan-default-migration-is-exact-and-idempotent
@@ -132,7 +133,7 @@
     (is (not (str/includes? (:seon.render/text rendered)
                             ctx/stable-boundary)))))
 
-(deftest manifest-file-block-renders-fresh-and-omits-when-absent
+(deftest manifest-file-block-refuses-bytes-that-diverge-from-config-fingerprint
   ;; The GENERAL manifest→file-block path (owner ruling 2026-07-20: KEEP):
   ;; a manifest block map carrying :seon.agent.ctx/file-path + the two
   ;; file-block render symbols survives the ONE decode
@@ -148,6 +149,11 @@
     (try
       (let [configuration
             {:seon.config/id config/cluster-config-id
+             :seon.config.render-context/file-fingerprints
+             [{:seon.config.render-context/file-path path
+               :seon.config.render-context/sha-256
+               (content-hash/sha-256
+                "# Notes\nremember the falsifier")}]
              :seon.config/agent-context
              [{:seon.config/context :seon.config.context/agent
                :seon.agent/ctx
@@ -170,7 +176,9 @@
                 {:seon.agent/entity {:seon.agent/ctx []}
                  :seon.agent.ctx/selected-blocks
                  [(assoc fb :seon.render/ai
-                         (ctx/file-block-ai {:seon.render/node fb}))
+                         (ctx/file-block-ai
+                          {:seon.render/node fb
+                           :seon.config/configuration configuration}))
                   tail]}))]
         (testing "the decode preserves the file-block declaration verbatim"
           (is (= path (:seon.agent.ctx/file-path fb)))
@@ -187,17 +195,20 @@
             (is (< (str/index-of text "remember the falsifier")
                    (str/index-of text "tail body"))
                 "priority 30 renders before priority 100")))
-        (testing "file edited → next render re-reads fresh"
+        (testing "file edited without config apply → loud refusal"
           (.writeFileSync fs abs "an edited line")
-          (is (str/includes? (:seon.render/text (render-selected))
-                             "; an edited line")))
-        (testing "file absent → section omitted, no fallback"
+          (is (= :core-bug
+                 (:seon.error/kind
+                  (ctx/file-block-ai
+                   {:seon.render/node fb
+                    :seon.config/configuration configuration})))))
+        (testing "file absent → loud refusal, no fallback"
           (.unlinkSync fs abs)
-          (let [rendered (render-selected)]
-            (is (= [:tail]
-                   (mapv :seon.agent.ctx/name
-                         (:seon.agent.ctx/rendered-blocks rendered))))
-            (is (not (str/includes? (:seon.render/text rendered) "notes"))))))
+          (is (= :core-bug
+                 (:seon.error/kind
+                  (ctx/file-block-ai
+                   {:seon.render/node fb
+                    :seon.config/configuration configuration}))))))
       (finally
         (when (.existsSync fs abs) (.unlinkSync fs abs))))))
 

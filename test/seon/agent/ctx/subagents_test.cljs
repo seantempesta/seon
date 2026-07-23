@@ -107,7 +107,8 @@
                 (js/Promise.resolve response))))
       (-> (db/with-tx-context
             {::db/db database}
-            #(sub/subagents-block {:seon.agent/id "parent"} nil))
+            #(sub/subagents-block
+              {:seon.agent/id "parent" ::db/db database} nil))
           (.then
             (fn [out]
               (is (str/includes? out "child [running]"))

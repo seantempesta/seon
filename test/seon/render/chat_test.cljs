@@ -30,7 +30,7 @@
 
 (defn- hiccup-classes [h] (->> (flatten h) (filter map?) (keep :class)))
 
-(def ^:private at (js/Date. 2026 5 11 14 30 0))
+(def ^:private at (js/Date. "2026-06-11T14:30:00Z"))
 
 (deftest bubble-human-is-right-aligned-amber
   (let [h (chat/bubble {::chat/at at ::chat/kind ::chat/human

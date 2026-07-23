@@ -293,7 +293,8 @@
         member-failure?
         (not (every? #(true? (::protocol/success? %)) required-members))]
     (if member-failure?
-      (prompt-acquisition-error acquired required-members)
+      (assoc (prompt-acquisition-error acquired required-members)
+             :seon.db/db database)
       (let [entity (or (acquired-member agent-member) {})
             cluster-config-row
             (db/decode-edn-values
@@ -362,6 +363,7 @@
                  (assoc :seon.agent.ctx/whole-prompt resolved-whole-prompt)))
              :seon.ai/system-prompt system-prompt
              :seon.ai/config-resolution config-resolution
+             :seon.db/db database
              :seon.config/repl-mode
              (let [agent-mode (:seon.config/repl-mode entity)]
                (if (contains? #{:batch :stream} agent-mode)

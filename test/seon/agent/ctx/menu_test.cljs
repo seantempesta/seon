@@ -61,7 +61,8 @@
              (let [response (first @calls)]
                (swap! calls subvec 1)
                (js/Promise.resolve response))))
-     (-> (menu/function-menu-block {:seon.agent/id agent-id} nil)
+     (-> (menu/function-menu-block
+          {:seon.agent/id agent-id ::db/db database} nil)
          (.finally (fn []
                      (set! db/current-tx-context original-context)
                      (set! db/execute-many original-execute)))))))

@@ -3,6 +3,7 @@
    [cljs.test :refer [async deftest is]]
    [my.blob :as blob]
    [my.plan :as plan]
+   [seon.agent.ctx.driver :as ctx.driver]
    [seon.agent.turn :as turn]
    [seon.config :as config]
    [seon.db :as db]
@@ -235,69 +236,58 @@
 
 (deftest prompt-is-the-database-value-pinned-child-result
   (async done
-    (let [original execution.host/invoke-compiled!
+    (let [original ctx.driver/render-prompt!
           observed (atom nil)]
-      (set! execution.host/invoke-compiled!
-            (fn [database agent-id function-symbol arguments]
-              (reset! observed [database agent-id function-symbol arguments])
-              (js/Promise.resolve
-                {::execution/message execution/result-message
-                 :seon.db/db database
-                 ::execution/result prompt-value})))
+      (set! ctx.driver/render-prompt!
+            (fn [request _]
+              (reset! observed request)
+              (js/Promise.resolve (assoc prompt-value :seon.db/db database))))
       (-> (turn/render-prompt "agent-1" database)
           (.then
             (fn [prompt]
               (is (= prompt-value prompt))
-              (is (= [database "agent-1"
-                      'seon.execution.runtime/render-prompt!
-                      [{:seon.agent/id "agent-1"}]]
+              (is (= {:seon.agent/id "agent-1" :seon.db/db database}
                      @observed))))
           (.catch
             (fn [exception]
               (is false (str "prompt invocation rejected: " exception))))
           (.finally
             (fn []
-              (set! execution.host/invoke-compiled! original)
+              (set! ctx.driver/render-prompt! original)
               (done)))))))
 
 (deftest prompt-profile-is-forwarded-to-the-same-compiled-owner
   (async done
-    (let [original execution.host/invoke-compiled!
+    (let [original ctx.driver/render-prompt!
           observed (atom nil)
           profile [{:seon.agent.ctx/name :transcript}]]
-      (set! execution.host/invoke-compiled!
-            (fn [database agent-id function-symbol arguments]
-              (reset! observed [database agent-id function-symbol arguments])
+      (set! ctx.driver/render-prompt!
+            (fn [request _]
+              (reset! observed request)
               (js/Promise.resolve
-                {::execution/message execution/result-message
-                 :seon.db/db database
-                 ::execution/result (assoc prompt-value
-                                           :seon.render/text "profile prompt")})))
+               (assoc prompt-value :seon.db/db database
+                      :seon.render/text "profile prompt"))))
       (-> (turn/render-prompt "agent-1" database profile)
           (.then
             (fn [prompt]
               (is (= "profile prompt" (:seon.render/text prompt)))
-              (is (= [database "agent-1"
-                      'seon.execution.runtime/render-prompt!
-                      [{:seon.agent/id "agent-1"
-                        :seon.agent.ctx/profile profile}]]
+              (is (= {:seon.agent/id "agent-1"
+                      :seon.agent.ctx/profile profile
+                      :seon.db/db database}
                      @observed))))
           (.catch (fn [error] (is false (str error))))
           (.finally
             (fn []
-              (set! execution.host/invoke-compiled! original)
+              (set! ctx.driver/render-prompt! original)
               (done)))))))
 
 (deftest prompt-rejects-a-moved-database-value-as-data
   (async done
-    (let [original execution.host/invoke-compiled!
+    (let [original ctx.driver/render-prompt!
           moved (assoc database :t 43)]
-      (set! execution.host/invoke-compiled!
-            (fn [_ _ _ _]
-              (js/Promise.resolve
-                {::execution/message execution/result-message
-                 :seon.db/db moved
-                 ::execution/result prompt-value})))
+      (set! ctx.driver/render-prompt!
+            (fn [_ _]
+              (js/Promise.resolve (assoc prompt-value :seon.db/db moved))))
       (-> (turn/render-prompt "agent-1" database)
           (.then
             (fn [result]
@@ -311,21 +301,19 @@
               (is false (str "database mismatch rejected: " exception))))
           (.finally
             (fn []
-              (set! execution.host/invoke-compiled! original)
+              (set! ctx.driver/render-prompt! original)
               (done)))))))
 
 (deftest prompt-preserves-a-child-acquisition-error
   (async done
-    (let [original execution.host/invoke-compiled!
+    (let [original ctx.driver/render-prompt!
           child-error {:seon.error/message "authority failed"
                        :seon.error/kind :core-bug
                        :seon.error/data {:seon.db/results []}}]
-      (set! execution.host/invoke-compiled!
-            (fn [database _ _ _]
+      (set! ctx.driver/render-prompt!
+            (fn [_ _]
               (js/Promise.resolve
-                {::execution/message execution/result-message
-                 :seon.db/db database
-                 ::execution/result child-error})))
+               (assoc child-error :seon.db/db database))))
       (-> (turn/render-prompt "agent-1" database)
           (.then (fn [result] (is (= child-error result))))
           (.catch
@@ -333,7 +321,7 @@
               (is false (str "prompt error was rejected: " exception))))
           (.finally
             (fn []
-              (set! execution.host/invoke-compiled! original)
+              (set! ctx.driver/render-prompt! original)
               (done)))))))
 
 (deftest parsed-reply-uses-the-same-agent-child-and-database-value

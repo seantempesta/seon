@@ -13,6 +13,7 @@
     [seon.config :as config]
     [seon.retry :as retry]
     [seon.agent.home :as home]
+    [seon.agent.turn.core :as turn.core]
     [my.blob :as blob]
     [seon.db :as db]
     [seon.db.id :as db.id]
@@ -51,6 +52,9 @@
 ;; remains to close the committed turn normally.
 (schema/register! :seon.agent.turn/status
                   [:enum :running :done :error :interrupted])
+(schema/register! :seon.agent.turn/phase
+                  [:enum :rendered :attempt-open :reply-ready
+                   :evaling :evaled :published])
 ;; The RUN this turn belongs to. Each turn-open STAMPS the agent's current
 ;; open run here, so the run's derived current-turn (`count turns where
 ;; :seon.agent.turn/run = run-eid`) is derivable. STORED — the spine that
@@ -159,6 +163,11 @@
 ;; these component rows; the effective config remains derived from the parent
 ;; turn's database value and is projected here only as the non-secret values
 ;; actually used. Absence remains absence.
+(schema/register!
+ :seon.ai.attempt/id
+ [:and {:seon.db/identity true
+        :seon.db.id/generator :seon.db.id.generator/compact}
+  ::db.id/compact-value])
 (schema/register! :seon.ai.attempt/ordinal :int)
 (schema/register! :seon.ai.attempt/fallback-variant
                   :seon.config/model-variant)
@@ -179,7 +188,12 @@
 (schema/register! :seon.ai.attempt/api-key-env :seon.ai/api-key-env)
 (schema/register! :seon.ai.attempt/credential-class :seon.ai/credential-class)
 (schema/register! :seon.ai.attempt/outcome
-                  [:enum :success :provider-error :adapter-timeout :outer-timeout])
+                  [:enum :open :success :provider-error :adapter-timeout
+                   :outer-timeout :crashed])
+(schema/register! :seon.ai.attempt/config-digest
+                  [:re "^[0-9a-f]{64}$"])
+(schema/register! :seon.ai.attempt/deadline-at :inst)
+(schema/register! :seon.ai.attempt/retry-after-ms [:int {:min 0}])
 (schema/register! :seon.ai.attempt/error-status :seon.ai/status)
 (schema/register! :seon.ai.attempt/response-model :seon.ai/response-model)
 (schema/register! :seon.ai.attempt/system-fingerprint :seon.ai/system-fingerprint)
@@ -190,7 +204,10 @@
 (schema/register! :seon.ai.attempt/usage :string)
 (schema/register! :seon.ai.attempt/entity
   [:map {:seon.db/entity true}
+   [:seon.ai.attempt/id :seon.ai.attempt/id]
    [:seon.ai.attempt/ordinal :seon.ai.attempt/ordinal]
+   [:seon.ai.attempt/config-digest :seon.ai.attempt/config-digest]
+   [:seon.ai.attempt/deadline-at :seon.ai.attempt/deadline-at]
    [:seon.ai.attempt/fallback-variant
     {:optional true} :seon.ai.attempt/fallback-variant]
    [:seon.ai.attempt/provider :seon.ai.attempt/provider]
@@ -217,7 +234,9 @@
    [:seon.ai.attempt/evidence-error {:optional true} :seon.ai.attempt/evidence-error]
    [:seon.ai.attempt/finish-reason {:optional true} :seon.ai.attempt/finish-reason]
    [:seon.ai.attempt/truncated? {:optional true} :seon.ai.attempt/truncated?]
-   [:seon.ai.attempt/usage {:optional true} :seon.ai.attempt/usage]])
+   [:seon.ai.attempt/usage {:optional true} :seon.ai.attempt/usage]
+   [:seon.ai.attempt/retry-after-ms
+    {:optional true} :seon.ai.attempt/retry-after-ms]])
 
 ;; Entity shape. NB: seon.db validates per-ATTRIBUTE, not entity-level, so the
 ;; non-:optional entries below are documentation, not an enforced required-key
@@ -227,6 +246,7 @@
    [:seon.agent.turn/id           :seon.agent.turn/id]
    [:seon.agent.turn/at           :seon.agent.turn/at]
    [:seon.agent.turn/status       :seon.agent.turn/status]
+   [:seon.agent.turn/phase        :seon.agent.turn/phase]
    [:seon.agent.turn/run          {:optional true} :seon.agent.turn/run]
    [:seon.agent.turn/scheduled?   {:optional true} :seon.agent.turn/scheduled?]
    [:seon.agent.turn/prompt-chars {:optional true} :seon.agent.turn/prompt-chars]
@@ -414,9 +434,9 @@
           (ctx.driver/render-prompt!
            (assoc request ::db/db database)
            invoke-authored!))
-         response {:seon.db/db database
+         response {:seon.db/db (:seon.db/db rendered)
                    ::execution/message execution/result-message
-                   ::execution/result rendered}]
+                   ::execution/result (dissoc rendered :seon.db/db)}]
      (cond
        (not= database (:seon.db/db response))
        {:seon.error/message
