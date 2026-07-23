@@ -984,6 +984,15 @@ COMPLETELY before dispatching anything.
   settled extraction (canonical-schema-rows portable + CLJS-captive
   registration moves) commits first path-limited. The script/**
   uncommitted hunks are PROCFIX's live work — verified disjoint.
+- TEST-SIMPLIFICATION AUDIT QUEUED (owner, 2026-07-23 eve): once
+  fixseed proves the fixtures-are-clusters-in-miniature mechanism, a
+  Sol audit sweeps the whole test surface to migrate suites onto it
+  and simplify: every bespoke fixture-seeding helper dissolves into
+  the one paged-initialization path; combined with the fragile-tests
+  audit's F-rows (exact-prose pins → behavior asserts, point tests →
+  the C1 generative round-trip, one regression per class). Deliverable
+  = migration worklist + deletions, then implementation lanes.
+  Dispatch trigger: fixseed's accepted return.
 - R45 vocabulary + maintenance (owner, same evening): the operation
   is PRE-PROCESSING (use that name); and the preprocessed cache is
   kept CURRENT AS CHANGES HAPPEN — every mutation that would
