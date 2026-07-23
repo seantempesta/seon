@@ -64,6 +64,7 @@
         (fn [identity]
           (#'artifact/derive-application-digest
            config identity [] digest digest "out/program-sources.edn" digest
+           "out/program-rows.edn" digest
            "out/client/program-inventory.edn" digest
            digest "out/execution/program-inventory.edn" digest
            digest digest digest))
@@ -123,6 +124,8 @@
          :seon.dev.artifact/client-digest digest-a
          :seon.dev.artifact/program-source-path "out/client/program-sources.edn"
          :seon.dev.artifact/program-source-digest digest-a
+         :seon.dev.artifact/program-row-path "out/client/program-rows.edn"
+         :seon.dev.artifact/program-row-digest digest-a
          :seon.dev.artifact/client-inventory-path
          "out/client/program-inventory.edn"
          :seon.dev.artifact/client-inventory-digest digest-a
@@ -170,6 +173,7 @@
   (let [directory (fs/create-temp-dir {:prefix "seon-client-digest-test-"})
         output (fs/path directory "out-acme/client/main.js")
         program-source (fs/path directory "out-acme/client/program-sources.edn")
+        program-row (fs/path directory "out-acme/client/program-rows.edn")
         inventory (fs/path directory "out-acme/client/program-inventory.edn")
         runtime (fs/path directory
                          "shadow/builds/acme-client/dev/out/cljs-runtime/a.js")
@@ -183,6 +187,7 @@
       (fs/create-dirs (fs/parent runtime))
       (spit (str output) "main-a")
       (spit (str program-source) "program-a")
+      (spit (str program-row) "rows-a")
       (spit (str inventory) "inventory-a")
       (spit (str runtime) "runtime-a")
       (let [digest (artifact/current-client-digest config)]
@@ -190,6 +195,9 @@
         (spit (str program-source) "program-b")
         (is (not= digest (artifact/current-client-digest config)))
         (spit (str program-source) "program-a")
+        (spit (str program-row) "rows-b")
+        (is (not= digest (artifact/current-client-digest config)))
+        (spit (str program-row) "rows-a")
         (spit (str runtime) "runtime-b")
         (is (not= digest (artifact/current-client-digest config))))
       (finally (fs/delete-tree directory)))))
@@ -208,16 +216,16 @@
         (is (not= digest (artifact/current-execution-digest config))))
       (finally (fs/delete-tree directory)))))
 
-(deftest cljs-inventory-unions-build-sidecars-and-is-export-sensitive
+(deftest cljs-inventory-unions-build-artifacts-and-is-export-sensitive
   (let [directory (fs/create-temp-dir {:prefix "seon-cljs-inventory-test-"})
         client (fs/path directory "out/client/main.js")
         execution (fs/path directory "out/execution/main.js")
-        client-sidecar (fs/path directory "out/client/program-inventory.edn")
-        execution-sidecar
+        client-inventory (fs/path directory "out/client/program-inventory.edn")
+        execution-inventory
         (fs/path directory "out/execution/program-inventory.edn")
         config {:seon.dev.config/client-output (str client)
                 :seon.dev.config/execution-output (str execution)}
-        write-sidecar!
+        write-inventory!
         (fn [path exports terminals]
           (fs/create-dirs (fs/parent path))
           (spit (str path)
@@ -225,15 +233,15 @@
                  {:seon.dev.program-inventory/public-exports exports
                   :seon.dev.program-inventory/internal-terminals terminals})))]
     (try
-      (write-sidecar! client-sidecar ["example/public"] ["vendor/helper"])
-      (write-sidecar! execution-sidecar ["example/execute"] ["vendor/leaf"])
+      (write-inventory! client-inventory ["example/public"] ["vendor/helper"])
+      (write-inventory! execution-inventory ["example/execute"] ["vendor/leaf"])
       (let [initial (artifact/current-cljs-artifact-inventory config)]
         (is (= {:bun #{"example/public" "example/execute"
                        "vendor/helper" "vendor/leaf"}}
                (:seon.execution.inventory/exports-by-tier initial)))
         (is (re-matches #"[0-9a-f]{64}"
                         (:seon.execution.inventory/digest initial)))
-        (write-sidecar! client-sidecar
+        (write-inventory! client-inventory
                         ["example/public" "example/new-export"]
                         ["vendor/helper"])
         (is (not= (:seon.execution.inventory/digest initial)
@@ -245,6 +253,7 @@
   (let [component (atom {:writer (apply str (repeat 64 "a"))
                          :client (apply str (repeat 64 "b"))
                          :program-source (apply str (repeat 64 "7"))
+                         :program-row (apply str (repeat 64 "8"))
                          :execution (apply str (repeat 64 "c"))
                          :client-inventory (apply str (repeat 64 "1"))
                          :execution-inventory (apply str (repeat 64 "2"))
@@ -266,6 +275,8 @@
             #'artifact/current-client-digest (fn [_] (:client @component))
             #'artifact/current-program-source-digest
             (fn [_] (:program-source @component))
+            #'artifact/current-program-row-digest
+            (fn [_] (:program-row @component))
             #'artifact/current-inventory-digest
             (fn [output]
               (if (= output (:seon.dev.config/client-output config))
@@ -291,13 +302,16 @@
            (fn [] (artifact/current-output-digests config)))]
     (let [initial (observe)]
       (is (= (select-keys @component
-                          [:writer :client :program-source :client-inventory
+                          [:writer :client :program-source :program-row
+                           :client-inventory
                            :execution :execution-inventory :execution-runtime
                            :bootstrap :css])
              {:writer (:seon.dev.artifact/writer-digest initial)
               :client (:seon.dev.artifact/client-digest initial)
               :program-source
               (:seon.dev.artifact/program-source-digest initial)
+              :program-row
+              (:seon.dev.artifact/program-row-digest initial)
               :client-inventory
               (:seon.dev.artifact/client-inventory-digest initial)
               :execution (:seon.dev.artifact/execution-digest initial)
@@ -311,6 +325,7 @@
               [[:writer :seon.dev.artifact/writer-digest]
                [:client :seon.dev.artifact/client-digest]
                [:program-source :seon.dev.artifact/program-source-digest]
+               [:program-row :seon.dev.artifact/program-row-digest]
                [:client-inventory
                 :seon.dev.artifact/client-inventory-digest]
                [:execution :seon.dev.artifact/execution-digest]
@@ -381,6 +396,8 @@
          (str (fs/path directory "runtime/execution.js"))
          :seon.dev.artifact/release-program-source-output
          (str (fs/path directory "runtime/program-sources.edn"))
+         :seon.dev.artifact/release-program-row-output
+         (str (fs/path directory "runtime/program-rows.edn"))
          :seon.dev.artifact/release-client-inventory-output
          (str (fs/path directory "runtime/client-program-inventory.edn"))
          :seon.dev.artifact/release-execution-inventory-output
@@ -412,8 +429,14 @@
         (is (= "execution" (nth execution-argv 3)))
         (is (= (:seon.dev.artifact/release-client-output release)
                (:output-to pod-merge)))
-        (is (= [['seon.dev.program-artifact/publish!
+        (is (= [['seon.dev.program-artifact/prepare-program-rows!
+                 "runtime/program-sources.edn"
+                 "runtime/program-rows.edn"]
+                ['seon.dev.program-artifact/publish!
                  "runtime/program-sources.edn"]
+                ['seon.dev.program-artifact/publish-rows!
+                 "runtime/program-sources.edn"
+                 "runtime/program-rows.edn"]
                 ['seon.dev.program-artifact/publish-inventory!
                  "runtime/client-program-inventory.edn"]]
                (:build-hooks pod-merge)))
@@ -439,6 +462,8 @@
          (str (fs/path directory "runtime/execution.js"))
          :seon.dev.artifact/release-program-source-output
          (str (fs/path directory "runtime/program-sources.edn"))
+         :seon.dev.artifact/release-program-row-output
+         (str (fs/path directory "runtime/program-rows.edn"))
          :seon.dev.artifact/release-client-inventory-output
          (str (fs/path directory "runtime/client-program-inventory.edn"))
          :seon.dev.artifact/release-execution-inventory-output
@@ -468,6 +493,8 @@
          (str (fs/path directory "runtime/execution.js"))
          :seon.dev.artifact/release-program-source-output
          (str (fs/path directory "runtime/program-sources.edn"))
+         :seon.dev.artifact/release-program-row-output
+         (str (fs/path directory "runtime/program-rows.edn"))
          :seon.dev.artifact/release-client-inventory-output
          (str (fs/path directory "runtime/client-program-inventory.edn"))
          :seon.dev.artifact/release-execution-inventory-output
@@ -710,6 +737,7 @@
         source (fs/path directory "out/bootstrap/example.txt")
         client (fs/path directory "out/client/main.js")
         program-source (fs/path directory "out/client/program-sources.edn")
+        program-row (fs/path directory "out/client/program-rows.edn")
         client-inventory (fs/path directory "out/client/program-inventory.edn")
         execution (fs/path directory "out/execution/main.js")
         execution-inventory
@@ -733,6 +761,7 @@
       (spit (str source) "default-bootstrap")
       (spit (str client) "default-client")
       (spit (str program-source) "default-program-source")
+      (spit (str program-row) "default-program-row")
       (spit (str execution) "default-execution")
       (spit (str execution-runtime) "default-runtime")
       (let [default-digest (artifact/digest-paths
@@ -743,10 +772,13 @@
             (artifact/current-execution-runtime-digest config)
             default-program-source-digest
             (artifact/current-program-source-digest config)
+            default-program-row-digest
+            (artifact/current-program-row-digest config)
             default-root (#'artifact/publish-runtime-root!
                            config default-digest default-execution-digest
                            default-runtime-digest
-                           default-program-source-digest)]
+                           default-program-source-digest
+                           default-program-row-digest)]
         (is (= "default-bootstrap"
                (slurp (str (fs/path default-root
                                     "out/bootstrap/example.txt")))))
@@ -760,13 +792,17 @@
         (is (= "default-program-source"
                (slurp (str (fs/path default-root
                                     "out/client/program-sources.edn")))))
+        (is (= "default-program-row"
+               (slurp (str (fs/path default-root
+                                    "out/client/program-rows.edn")))))
 
         (spit (str source) "acme-bootstrap")
         (let [acme-digest (artifact/digest-paths directory ["out/bootstrap"])
               acme-root (#'artifact/publish-runtime-root!
                          config acme-digest default-execution-digest
                          default-runtime-digest
-                         default-program-source-digest)]
+                         default-program-source-digest
+                         default-program-row-digest)]
           (is (not= default-root acme-root))
           (is (= default-digest
                  (artifact/digest-paths default-root ["out/bootstrap"])))
@@ -779,7 +815,8 @@
           (is (= acme-root
                  (#'artifact/publish-runtime-root!
                   config acme-digest default-execution-digest
-                  default-runtime-digest default-program-source-digest))
+                  default-runtime-digest default-program-source-digest
+                  default-program-row-digest))
               "identical runtime bytes reuse their verified content address")
           (spit (str execution) "changed-execution")
           (let [changed-execution-digest
@@ -787,7 +824,8 @@
                 changed-root (#'artifact/publish-runtime-root!
                               config acme-digest changed-execution-digest
                               default-runtime-digest
-                              default-program-source-digest)]
+                              default-program-source-digest
+                              default-program-row-digest)]
             (is (not= acme-root changed-root))
             (is (= "default-execution"
                    (slurp (str (fs/path acme-root
@@ -800,7 +838,8 @@
                 changed-root (#'artifact/publish-runtime-root!
                               config acme-digest default-execution-digest
                               default-runtime-digest
-                              changed-program-source-digest)]
+                              changed-program-source-digest
+                              default-program-row-digest)]
             (is (not= acme-root changed-root))
             (is (= "default-program-source"
                    (slurp (str (fs/path acme-root
@@ -929,6 +968,7 @@
         writer (fs/path directory "target/writer.jar")
         client (fs/path directory "out/client/main.js")
         program-source (fs/path directory "out/client/program-sources.edn")
+        program-row (fs/path directory "out/client/program-rows.edn")
         client-inventory (fs/path directory "out/client/program-inventory.edn")
         execution (fs/path directory "out/execution/main.js")
         execution-inventory
@@ -956,6 +996,7 @@
       (write-test-jar! writer "writer-a")
       (doseq [[path value] [[client "client"] [execution "execution"]
                             [program-source "program-source"]
+                            [program-row "program-row"]
                             [client-inventory
                              "{:seon.dev.program-inventory/public-exports [\"example/client\"] :seon.dev.program-inventory/internal-terminals []}"]
                             [execution-inventory
@@ -968,9 +1009,10 @@
       (with-redefs [artifact/maintained-dependencies (fn [_] @dependencies)
                     artifact/publish-runtime-root!
                     (fn [_ bootstrap-digest execution-digest runtime-digest
-                         program-source-digest]
+                         program-source-digest program-row-digest]
                       (str "/runtime/" bootstrap-digest "-" execution-digest
-                           "-" runtime-digest "-" program-source-digest))]
+                           "-" runtime-digest "-" program-source-digest
+                           "-" program-row-digest))]
         (let [bun (artifact/bun-identity! {})
               initial (#'artifact/output-manifest config bun)]
           (swap! dependencies assoc-in
@@ -1008,6 +1050,8 @@
          :seon.dev.artifact/program-source-path
          "out/client/program-sources.edn"
          :seon.dev.artifact/program-source-digest digest
+         :seon.dev.artifact/program-row-path "out/client/program-rows.edn"
+         :seon.dev.artifact/program-row-digest digest
          :seon.dev.artifact/client-inventory-path
          "out/client/program-inventory.edn"
          :seon.dev.artifact/client-inventory-digest digest

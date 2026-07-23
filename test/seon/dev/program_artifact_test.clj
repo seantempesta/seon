@@ -97,3 +97,46 @@
              (edn/read-string (slurp (str output)))))
       (is (empty? (fs/glob (fs/parent output) ".*.tmp")))
       (finally (fs/delete-tree project)))))
+
+(deftest row-flush-publishes-the-live-derivation-byte-for-byte
+  (let [project (fs/create-temp-dir {:prefix "seon-program-rows-publish-"})
+        source-file (fs/path project "src/example/core.cljs")
+        row-output (fs/path project "out/client/program-rows.edn")
+        state {:project-dir (.toFile project)
+               :sources {:core (source source-file "example/core.cljs")}}
+        rows [{:seon.fn/sym "example.core/value"
+               :seon.fn/source "(defn value [] 42)"}]
+        compiled-row-text (pr-str rows)]
+    (try
+      (fs/create-dirs (fs/parent source-file))
+      (spit (str source-file) "(ns example.core)\n(defn value [] 42)\n")
+      (with-redefs-fn
+        {#'program-artifact/derive-program-rows
+         (fn [_state program-source-text target]
+           (is (= (program-artifact/artifact-text state)
+                  program-source-text))
+           (is (= (str (fs/canonicalize row-output))
+                  (str target)))
+           {:seon.dev.artifact/program-rows rows
+            :seon.dev.artifact/program-row-text compiled-row-text})}
+        #(let [prepared
+               (program-artifact/prepare-program-rows!
+                state
+                "out/client/program-sources.edn"
+                "out/client/program-rows.edn")]
+           (program-artifact/publish!
+            prepared "out/client/program-sources.edn")
+           (is (identical?
+                prepared
+                (program-artifact/publish-rows!
+                 prepared
+                 "out/client/program-sources.edn"
+                 "out/client/program-rows.edn")))))
+      (is (= {:seon.dev.artifact/program-rows rows}
+             (edn/read-string (slurp (str row-output)))))
+      (is (= (str "{:seon.dev.artifact/program-rows "
+                  compiled-row-text
+                  "}\n")
+             (slurp (str row-output))))
+      (is (empty? (fs/glob (fs/parent row-output) ".*.tmp")))
+      (finally (fs/delete-tree project)))))

@@ -14,7 +14,7 @@
            [java.time Instant]
            [java.util.jar JarFile]))
 
-(def current-version 10)
+(def current-version 11)
 
 (def bun-identity-schema
   [:map {:closed true}
@@ -49,6 +49,8 @@
    [:seon.dev.artifact/client-output :string]
    [:seon.dev.artifact/program-source-path :string]
    [:seon.dev.artifact/program-source-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/program-row-path :string]
+   [:seon.dev.artifact/program-row-digest [:re #"[0-9a-f]{64}"]]
    [:seon.dev.artifact/client-inventory-path :string]
    [:seon.dev.artifact/client-inventory-digest [:re #"[0-9a-f]{64}"]]
    [:seon.dev.artifact/execution-output :string]
@@ -396,8 +398,23 @@
                       {:seon.dev.artifact/path path})))
     (file-digest path)))
 
+(defn program-row-path
+  "Return the flavor-owned program-row file beside the client output."
+  [config]
+  (str (fs/path (fs/parent (:seon.dev.config/client-output config))
+                "program-rows.edn")))
+
+(defn current-program-row-digest
+  "Hash the exact flavor-owned program-row artifact bytes."
+  [config]
+  (let [path (program-row-path config)]
+    (when-not (fs/regular-file? path)
+      (throw (ex-info "The program-row artifact is absent."
+                      {:seon.dev.artifact/path path})))
+    (file-digest path)))
+
 (defn program-inventory-path
-  "Return the function-inventory sidecar beside a compiled output."
+  "Return the function-inventory artifact beside a compiled output."
   [output]
   (str (fs/path (fs/parent output) "program-inventory.edn")))
 
@@ -409,21 +426,21 @@
     (file-digest path)))
 
 (defn current-cljs-artifact-inventory
-  "Combine selected CLJS build sidecars into one planner-ready Bun inventory."
+  "Combine selected CLJS build artifacts into one planner-ready Bun inventory."
   [config]
-  (let [sidecars
+  (let [inventories
         (mapv (fn [output]
                 (edn/read-string (slurp (program-inventory-path output))))
               [(:seon.dev.config/client-output config)
                (:seon.dev.config/execution-output config)])
         exports
         (into (sorted-set)
-              (mapcat (fn [sidecar]
+              (mapcat (fn [inventory]
                         (concat
-                         (:seon.dev.program-inventory/public-exports sidecar)
+                         (:seon.dev.program-inventory/public-exports inventory)
                          (:seon.dev.program-inventory/internal-terminals
-                          sidecar))))
-              sidecars)]
+                          inventory))))
+              inventories)]
     {:seon.execution.inventory/availability :available
      :seon.execution.inventory/exports-by-tier {:bun exports}
      :seon.execution.inventory/digest
@@ -439,6 +456,7 @@
                  "dev/out/cljs-runtime")]
     (digest-paths root [(:seon.dev.config/client-output config)
                         (program-source-path config)
+                        (program-row-path config)
                         (program-inventory-path
                          (:seon.dev.config/client-output config))
                         client-runtime])))
@@ -497,6 +515,8 @@
    [:seon.dev.artifact/client-digest [:re #"[0-9a-f]{64}"]]
    [:seon.dev.artifact/program-source-path :string]
    [:seon.dev.artifact/program-source-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/program-row-path :string]
+   [:seon.dev.artifact/program-row-digest [:re #"[0-9a-f]{64}"]]
    [:seon.dev.artifact/client-inventory-path :string]
    [:seon.dev.artifact/client-inventory-digest [:re #"[0-9a-f]{64}"]]
    [:seon.dev.artifact/execution-digest [:re #"[0-9a-f]{64}"]]
@@ -512,6 +532,7 @@
 (defn- derive-application-digest
   [config bun maintained-dependencies writer-digest client-digest
    program-source-path program-source-digest
+   program-row-path program-row-digest
    client-inventory-path client-inventory-digest
    execution-digest execution-inventory-path execution-inventory-digest
    execution-runtime-digest bootstrap-digest css-digest]
@@ -529,6 +550,8 @@
                   "client" client-digest
                   "program-source-path" program-source-path
                   "program-source" program-source-digest
+                  "program-row-path" program-row-path
+                  "program-row" program-row-digest
                   "client-inventory-path" client-inventory-path
                   "client-inventory" client-inventory-digest
                   "execution-build-id"
@@ -554,6 +577,9 @@
         program-source-path
         (str (fs/relativize (fs/path root) (fs/path (program-source-path config))))
         program-source-digest (current-program-source-digest config)
+        program-row-path
+        (str (fs/relativize (fs/path root) (fs/path (program-row-path config))))
+        program-row-digest (current-program-row-digest config)
         client-inventory-path
         (str (fs/relativize
               (fs/path root)
@@ -577,6 +603,7 @@
         (derive-application-digest
          config bun maintained-dependencies writer-digest client-digest
          program-source-path program-source-digest
+         program-row-path program-row-digest
          client-inventory-path client-inventory-digest
          execution-digest execution-inventory-path execution-inventory-digest
          execution-runtime-digest bootstrap-digest css-digest)]
@@ -585,6 +612,8 @@
      :seon.dev.artifact/client-digest client-digest
      :seon.dev.artifact/program-source-path program-source-path
      :seon.dev.artifact/program-source-digest program-source-digest
+     :seon.dev.artifact/program-row-path program-row-path
+     :seon.dev.artifact/program-row-digest program-row-digest
      :seon.dev.artifact/client-inventory-path client-inventory-path
      :seon.dev.artifact/client-inventory-digest client-inventory-digest
      :seon.dev.artifact/execution-digest execution-digest
@@ -669,6 +698,7 @@
    [:seon.dev.artifact/release-client-output :string]
    [:seon.dev.artifact/release-execution-output :string]
    [:seon.dev.artifact/release-program-source-output :string]
+   [:seon.dev.artifact/release-program-row-output :string]
    [:seon.dev.artifact/release-client-inventory-output :string]
    [:seon.dev.artifact/release-execution-inventory-output :string]])
 
@@ -725,6 +755,8 @@
         (:seon.dev.artifact/release-execution-output release)
         program-source-output
         (:seon.dev.artifact/release-program-source-output release)
+        program-row-output
+        (:seon.dev.artifact/release-program-row-output release)
         client-inventory-output
         (:seon.dev.artifact/release-client-inventory-output release)
         execution-inventory-output
@@ -734,6 +766,8 @@
                    [:seon.dev.artifact/release-client-output client-output]
                    [:seon.dev.artifact/release-execution-output
                     execution-output]
+                   [:seon.dev.artifact/release-program-row-output
+                    program-row-output]
                    [:seon.dev.artifact/release-client-inventory-output
                     client-inventory-output]
                    [:seon.dev.artifact/release-execution-inventory-output
@@ -743,6 +777,10 @@
         (release-relative-path!
          root :seon.dev.artifact/release-program-source-output
          program-source-output)
+        program-row-relative
+        (release-relative-path!
+         root :seon.dev.artifact/release-program-row-output
+         program-row-output)
         client-inventory-relative
         (release-relative-path!
          root :seon.dev.artifact/release-client-inventory-output
@@ -755,6 +793,7 @@
         (update config :seon.dev.config/environment
                 assoc "SHADOW_CLJS" (pr-str {:cache-root cache-root}))]
     (doseq [path [client-output execution-output program-source-output
+                  program-row-output
                   client-inventory-output execution-inventory-output]]
       (fs/create-dirs (fs/parent path)))
     (run-step!
@@ -766,7 +805,11 @@
        {:output-to client-output
         :compiler-options {:parallel-build false}
         :build-hooks
-        [['seon.dev.program-artifact/publish! program-source-relative]
+        [['seon.dev.program-artifact/prepare-program-rows!
+          program-source-relative program-row-relative]
+         ['seon.dev.program-artifact/publish! program-source-relative]
+         ['seon.dev.program-artifact/publish-rows!
+          program-source-relative program-row-relative]
          ['seon.dev.program-artifact/publish-inventory!
           client-inventory-relative]]
         :devtools {:enabled false :preloads [] :build-notify nil}}
@@ -979,9 +1022,13 @@
   (fs/path runtime-root
            (runtime-relative-path config (program-source-path config))))
 
+(defn- runtime-program-row [config runtime-root]
+  (fs/path runtime-root
+           (runtime-relative-path config (program-row-path config))))
+
 (defn- verify-runtime-root!
   [config runtime-root bootstrap-digest execution-digest
-   execution-runtime-digest program-source-digest]
+   execution-runtime-digest program-source-digest program-row-digest]
   (let [actual-bootstrap (digest-paths runtime-root ["out/bootstrap"])
         execution-output (runtime-execution-output config runtime-root)
         actual-execution
@@ -994,7 +1041,11 @@
         program-source (runtime-program-source config runtime-root)
         actual-program-source
         (when (fs/regular-file? program-source)
-          (file-digest program-source))]
+          (file-digest program-source))
+        program-row (runtime-program-row config runtime-root)
+        actual-program-row
+        (when (fs/regular-file? program-row)
+          (file-digest program-row))]
     (when-not (= bootstrap-digest actual-bootstrap)
       (throw (ex-info "An immutable runtime root has unexpected bootstrap bytes."
                       {:seon.dev.artifact/runtime-root (str runtime-root)
@@ -1015,21 +1066,26 @@
                       {:seon.dev.artifact/runtime-root (str runtime-root)
                        :seon.dev.artifact/expected program-source-digest
                        :seon.dev.artifact/actual actual-program-source})))
+    (when-not (= program-row-digest actual-program-row)
+      (throw (ex-info "An immutable runtime root has unexpected program rows."
+                      {:seon.dev.artifact/runtime-root (str runtime-root)
+                       :seon.dev.artifact/expected program-row-digest
+                       :seon.dev.artifact/actual actual-program-row})))
     (str runtime-root)))
 
 (defn- publish-runtime-root!
   [config bootstrap-digest execution-digest execution-runtime-digest
-   program-source-digest]
+   program-source-digest program-row-digest]
   (let [root (fs/path (:seon.dev.config/root config))
         parent (fs/path root "tmp/seon-runtime-artifacts")
         identity (digest-values [bootstrap-digest execution-digest
                                  execution-runtime-digest
-                                 program-source-digest])
+                                 program-source-digest program-row-digest])
         runtime-root (fs/path parent identity)]
     (if (fs/directory? runtime-root)
       (verify-runtime-root! config runtime-root bootstrap-digest
                             execution-digest execution-runtime-digest
-                            program-source-digest)
+                            program-source-digest program-row-digest)
       (let [temporary (fs/path parent (str "." identity "."
                                                 (random-uuid) ".tmp"))]
         (try
@@ -1048,6 +1104,10 @@
            (fs/parent (runtime-program-source config temporary)))
           (fs/copy (program-source-path config)
                    (runtime-program-source config temporary))
+          (fs/create-dirs
+           (fs/parent (runtime-program-row config temporary)))
+          (fs/copy (program-row-path config)
+                   (runtime-program-row config temporary))
           ;; The bootstrap and complete execution closure are immutable runtime
           ;; members. Development source and assets remain explicit links until
           ;; downstream packaging publishes its bounded corpus.
@@ -1057,7 +1117,7 @@
             (fs/create-sym-link (fs/path temporary relative) source))
           (verify-runtime-root! config temporary bootstrap-digest
                                 execution-digest execution-runtime-digest
-                                program-source-digest)
+                                program-source-digest program-row-digest)
           (fs/create-dirs parent)
           (fs/move temporary runtime-root {:atomic-move true})
           (str runtime-root)
@@ -1072,6 +1132,7 @@
         required [writer
                   (:seon.dev.config/client-output config)
                   (program-source-path config)
+                  (program-row-path config)
                   (program-inventory-path
                    (:seon.dev.config/client-output config))
                   (:seon.dev.config/execution-output config)
@@ -1089,6 +1150,9 @@
           program-source-relative-path
           (str (runtime-relative-path config (program-source-path config)))
           program-source-digest (current-program-source-digest config)
+          program-row-relative-path
+          (str (runtime-relative-path config (program-row-path config)))
+          program-row-digest (current-program-row-digest config)
           client-inventory-path
           (str (runtime-relative-path
                 config
@@ -1111,13 +1175,14 @@
           runtime-root
           (publish-runtime-root! config bootstrap-digest execution-digest
                                  execution-runtime-digest
-                                 program-source-digest)
+                                 program-source-digest program-row-digest)
           execution-output
           (str (runtime-execution-output config runtime-root))
           application-digest
           (derive-application-digest
            config bun maintained-dependencies writer-digest client-digest
            program-source-relative-path program-source-digest
+           program-row-relative-path program-row-digest
            client-inventory-path client-inventory-digest
            execution-digest execution-inventory-path
            execution-inventory-digest execution-runtime-digest
@@ -1146,6 +1211,8 @@
          :seon.dev.artifact/program-source-path
          program-source-relative-path
          :seon.dev.artifact/program-source-digest program-source-digest
+         :seon.dev.artifact/program-row-path program-row-relative-path
+         :seon.dev.artifact/program-row-digest program-row-digest
          :seon.dev.artifact/client-inventory-path client-inventory-path
          :seon.dev.artifact/client-inventory-digest client-inventory-digest
          :seon.dev.artifact/execution-digest execution-digest

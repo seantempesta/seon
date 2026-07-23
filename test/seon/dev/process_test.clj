@@ -370,6 +370,7 @@
    :seon.dev.release/execution-member :seon.release.member/execution
    :seon.dev.release/runtime-assets-member :seon.release.member/runtime-assets
    :seon.dev.release/program-source-member :seon.release.member/program-source
+   :seon.dev.release/program-row-member :seon.release.member/program-row
    :seon.dev.release/client-inventory-member
    :seon.release.member/client-inventory
    :seon.dev.release/execution-inventory-member
@@ -395,6 +396,7 @@
    :seon.release.member/execution "runtime/execution.js"
    :seon.release.member/runtime-assets "runtime/web"
    :seon.release.member/program-source "runtime/program-sources.edn"
+   :seon.release.member/program-row "runtime/program-rows.edn"
    :seon.release.member/client-inventory "runtime/client-inventory.edn"
    :seon.release.member/execution-inventory "runtime/execution-inventory.edn"
    :seon.release.member/babashka "runtime/bb"

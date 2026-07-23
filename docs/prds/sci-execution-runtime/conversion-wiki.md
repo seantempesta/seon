@@ -86,7 +86,8 @@ the anchor stays the state ledger.
 - **A portable SCI guard needs an actual SCI installation on every claimed
   tier.** The production Bun eval path still calls `cljs.js/eval-str`
   (`src/seon/eval.cljs:1185-1292`), so there is no `:interrupt-fn` installation
-  site and a synchronous loop cannot be fuel-preempted there. The retired B2
+  site and a synchronous loop cannot be interpreter-step-preempted there. The
+  retired B2
   probe under `tmp/sci-probe/exec-src/` is not a production seam, and C2 ruled
   out the Bun SCI tier. Specify whether “Bun proof” means a direct portable SCI
   conformance test or grant the engine/cutover owner; never claim the current
@@ -515,7 +516,8 @@ the anchor stays the state ledger.
   identity-check cleanup (`seon.agent.driver.host/start!`).
 - **Validate config-query cardinality before `every?`.** `every?` over the
   empty values of a missing policy is true. The guard door then receives nil
-  fuel and collapses every host invocation with an implementation NPE. Require
+  interpreter-step budget and collapses every host invocation with an
+  implementation NPE. Require
   the complete five-field row before validating positive values; remain loud
   when the database lacks the config facts
   ([[../../../seon/issues/guard-policy-empty-query-passes-vacuous-validation]]).
@@ -670,8 +672,9 @@ the anchor stays the state ledger.
   unguarded compiled authority.
 - **A guard steering error is the render-slot value.** Do not stringify
   `:budget`/`:timeout` into ordinary prose inside the walker. Carry the flat
-  error value through the slot so the caller retains kind, config key, fuel,
-  and invocation-class evidence; view formatting happens outside the door.
+  error value through the slot so the caller retains kind, config key,
+  interpreter-step, and invocation-class evidence; view formatting happens
+  outside the door.
 - **Port config reads as reads of the threaded singleton.** The JVM render
   path reads immutable configuration map facts with the same shipped defaults.
   A CLJS compatibility call may retain the existing accessor for redefinition
@@ -762,7 +765,8 @@ the anchor stays the state ledger.
   and every returned var becomes a public `:seon.fn` row. Capture per-function
   direct facts during analysis, filter them by Shadow's exact
   `:build-sources` closure at the existing flush publisher, and bind each
-  sidecar digest into the selected artifact manifest and application digest.
+  inventory-artifact digest into the selected artifact manifest and
+  application digest.
   A client-only file or namespace-level `:used-vars` reconstruction is not an
   exact artifact inventory.
 - **Graph identity must be acquired at one immutable database value.** Add
@@ -942,9 +946,10 @@ the anchor stays the state ledger.
   before implementation rather than scanning source or mislabeling the writer
   jar as a claimant artifact (`build.clj:58-82`,
   `script/seon/dev/process.clj:562-585`).
-- **Publishing a sidecar is not planner consumption.** The current acquisition
-  path hardcodes artifact inventories unavailable, and selected-flavor sidecar
-  paths plus application-digest membership belong to the build manifest
+- **Publishing a build artifact is not planner consumption.** The current
+  acquisition path hardcodes artifact inventories unavailable, and
+  selected-flavor artifact paths plus application-digest membership belong to
+  the build manifest
   owner. A bounded inventory lane must own or receive explicit handoffs for the
   build hook/config, manifest digest, and planning-projection acquisition
   boundaries; a fixture-only available inventory does not make production
@@ -1037,8 +1042,9 @@ the anchor stays the state ledger.
   justified only by proof that a reachable compiled terminal is absent from
   installed bindings.
 - **Inventory bytes are application identity, not diagnostic output.** Publish
-  one sidecar beside every supported CLJS build output, include both sidecar
-  digests in the artifact manifest and application digest, and pass the
+  one `program-inventory.edn` artifact beside every supported CLJS build
+  output, include both inventory-artifact digests in the artifact manifest and
+  application digest, and pass the
   planner-ready Bun projection through the host launch request. The host merges
   that value with its claimant-local JVM inventory before planning.
 - **Private is a presence fact, not an indexing exclusion.** First-party
@@ -1087,6 +1093,27 @@ the anchor stays the state ledger.
 - **The JVM cannot reproduce CLJS analyzer rows.** Re-reading program source
   with `seon.host.record` changed function metadata and namespace edges, proving
   it is a second indexer rather than a portable reconstruction. The build must
-  publish the byte-faithful, digest-bound boot program-row sidecar from the
+  publish the byte-faithful, digest-bound `program-rows.edn` artifact from the
   live analyzer derivation. Both runtime tiers and fixtures consume those
   rows; neither tier reconstructs them.
+- **Pre-parsed transaction data must come from the compiled indexer, not an
+  approximation of Shadow metadata.** The flush hook already has the exact
+  just-built Shadow state, but that state cannot supply registered Malli forms
+  or runtime var metadata byte-faithfully. At release `:optimize-prepare`,
+  convert only the copied Closure/JS inputs exactly as Shadow's dev compiler
+  does, flush an isolated unoptimized Node view of that state, replace only
+  Shadow's generated main append with a build derivation that calls
+  `seon.client/index-core!` and `seon.client/index-schemas`, then retain the
+  ordinary transaction-data rows in the build state. Dev builds run the same
+  derivation at flush. The existing flush publisher verifies the published
+  program-source digest and remains the sole atomic artifact writer. Capturing
+  before optimization matters: an optimized release state cannot expose the
+  runtime vars, while its copied `goog.module` sources are intentionally not
+  loadable without the normal conversion. Invoke the compiled boot path's own
+  wall-clock removal and identity ordering, then preserve its CLJS `pr-str`
+  bytes directly: JVM `pr-str` is not byte-identical for the full population
+  and must not reserialize the rows (`script/seon/dev/program_artifact.clj`).
+  Producer names use Shadow/build vocabulary (`flush`, artifact, digest);
+  consumers must use Datahike and `seon.db.protocol/initialization-pages`
+  vocabulary (`transaction data`, rows, pages), never an orchestrator lane
+  label.

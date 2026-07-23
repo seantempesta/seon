@@ -1,11 +1,17 @@
 (ns seon.dev.program-artifact
-  "Publish the exact first-party source strings used by one client build."
-  (:require [clojure.java.io :as io]
+  "Publish deterministic program artifacts for one exact client build."
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
+            [clojure.java.shell :as shell]
             [clojure.string :as str])
   (:import [java.io File]
            [java.nio.charset StandardCharsets]
-           [java.nio.file CopyOption Files StandardCopyOption]
+           [java.nio.file CopyOption DirectoryNotEmptyException Files
+            StandardCopyOption]
            [java.security MessageDigest]))
+
+(def ^:private program-row-marker "SEON_PROGRAM_ROWS_EDN ")
+(def ^:private prepared-program-rows ::prepared-program-rows)
 
 (defn- canonical-file [root value]
   (.getCanonicalFile
@@ -116,12 +122,12 @@
    (selected-namespaces state)))
 
 (defn inventory-text
-  "Return deterministic EDN bytes for one build inventory sidecar."
+  "Return deterministic EDN bytes for one build inventory artifact."
   [state]
   (str (pr-str (inventory-value state)) "\n"))
 
 (defn digest
-  "Return the SHA-256 identity of one program-source artifact text."
+  "Return the SHA-256 identity of one program artifact's text."
   [text]
   (let [hasher (MessageDigest/getInstance "SHA-256")]
     (.update hasher (.getBytes ^String text StandardCharsets/UTF_8))
@@ -134,7 +140,7 @@
                    (not (str/blank? relative-path))
                    (not (.isAbsolute (io/file relative-path)))
                    (path-within? project output))
-      (throw (ex-info "The program-source artifact path must stay in the project."
+      (throw (ex-info "The program artifact path must stay in the project."
                       {:seon.dev.artifact/path relative-path})))
     output))
 
@@ -153,6 +159,126 @@
         (Files/deleteIfExists (.toPath temporary)))))
   target)
 
+(defn- delete-tree! [^File root]
+  ;; A clean release flush can still finish materializing source maps for a
+  ;; moment after `flush-unoptimized` returns. Re-scan rather than treating one
+  ;; lazy file-tree snapshot as complete.
+  (loop [attempt 0]
+    (when (.exists root)
+      (doseq [file (reverse (file-seq root))]
+        (try
+          (Files/deleteIfExists (.toPath ^File file))
+          (catch DirectoryNotEmptyException _)))
+      (when (.exists root)
+        (when (= attempt 99)
+          (throw
+           (ex-info "The temporary program-row build could not be removed."
+                    {:seon.dev.artifact/path (.getCanonicalPath root)})))
+        (Thread/sleep 10)
+        (recur (inc attempt))))))
+
+(defn- main-append-resource-id [state]
+  (some (fn [[resource-id resource]]
+          (when (= 'shadow.module.main.append (:ns resource))
+            resource-id))
+        (:sources state)))
+
+(defn- program-row-build-js []
+  (str
+   "var seon$program$configuration = "
+   "seon.config.resolve_config_singleton"
+   "(cljs.core.PersistentArrayMap.EMPTY);\n"
+   "var seon$program$raw$rows = cljs.core.concat("
+   "seon.client.index_core_BANG_(seon$program$configuration),"
+   "seon.client.index_schemas());\n"
+   "var seon$program$rows = cljs.core.vec("
+   "cljs.core.sort_by.cljs$core$IFn$_invoke$arity$2("
+   "seon.client.compiled_program_sort_key,"
+   "cljs.core.map.cljs$core$IFn$_invoke$arity$2(function(row){"
+   "return cljs.core.apply.cljs$core$IFn$_invoke$arity$3("
+   "cljs.core.dissoc,row,"
+   "seon.client.compiled_program_wall_clock_attrs);"
+   "},seon$program$raw$rows)));\n"
+   "process.stdout.write(\"\\n" program-row-marker "\" + "
+   "cljs.core.pr_str(seon$program$rows) + \"\\n\");\n"))
+
+(defn- unoptimized-build-state [state]
+  (if-not (= :release (:mode state))
+    state
+    (let [resources (mapv #(get-in state [:sources %])
+                          (:build-sources state))
+          goog (filterv #(= :goog (:type %)) resources)
+          js (filterv #(= :js (:type %)) resources)
+          unconverted-ids (mapv :resource-id (concat goog js))
+          convert-goog (requiring-resolve 'shadow.build.closure/convert-goog)
+          convert-sources
+          (requiring-resolve 'shadow.build.closure/convert-sources)]
+      (cond-> (update state :output #(apply dissoc % unconverted-ids))
+        (seq goog) (convert-goog goog)
+        (seq js) (convert-sources js)))))
+
+(defn- derive-program-rows
+  [state program-source-text target]
+  (let [state
+        ((requiring-resolve 'shadow.build.async/wait-for-pending-tasks!)
+         state)
+        state (unoptimized-build-state state)
+        append-id (main-append-resource-id state)]
+    (when-not append-id
+      (throw
+       (ex-info "The client build has no generated main append resource."
+                {:seon.dev.artifact/build-id
+                 (:shadow.build/build-id state)})))
+    (let [parent (.getParentFile ^File target)
+          build-root (io/file parent
+                              (str ".program-rows-build-" (random-uuid)))
+          build-output (io/file build-root "program-rows.js")
+          program-source-file (io/file build-root "program-sources.edn")
+          program-source-digest (digest program-source-text)
+          build-state
+          (-> state
+              (assoc-in [:node-config :output-to] build-output)
+              (assoc-in [:build-options :output-dir] build-root)
+              (assoc-in [:build-options :cljs-runtime-path] "cljs-runtime")
+              (assoc-in [:output append-id :js] (program-row-build-js)))]
+      (try
+        (.mkdirs build-root)
+        (spit program-source-file program-source-text)
+        (let [flushed
+              ((requiring-resolve 'shadow.build.node/flush-unoptimized)
+               build-state)]
+          ((requiring-resolve 'shadow.build.async/wait-for-pending-tasks!)
+           flushed))
+        (let [environment
+              (assoc (into {} (System/getenv))
+                     "SEON_PROGRAM_SOURCE_PATH"
+                     (.getCanonicalPath ^File program-source-file)
+                     "SEON_PROGRAM_SOURCE_DIGEST" program-source-digest)
+              executable (or (get environment "SEON_BUN_EXECUTABLE") "bun")
+              result
+              (shell/sh executable (.getCanonicalPath build-output)
+                        :env environment)
+              output (:out result)
+              marker-index (str/last-index-of output program-row-marker)]
+          (when-not (zero? (:exit result))
+            (throw
+             (ex-info "The compiled program-row derivation failed."
+                      {:seon.dev.artifact/exit (:exit result)
+                       :seon.dev.artifact/error (str/trim (:err result))})))
+          (when-not marker-index
+            (throw
+             (ex-info "The compiled program-row derivation returned no rows."
+                      {:seon.dev.artifact/output (str/trim output)
+                       :seon.dev.artifact/error (str/trim (:err result))})))
+          (let [program-row-text
+                (str/trim
+                 (subs output (+ marker-index (count program-row-marker))))]
+            {:seon.dev.artifact/program-rows
+             (edn/read-string program-row-text)
+             :seon.dev.artifact/program-row-text program-row-text}))
+        (finally
+          (delete-tree! build-root))))))
+
 (defn ^{:shadow.build/stage :flush} publish!
   "Atomically publish deterministic program sources after a client flush."
   [state relative-path]
@@ -164,3 +290,56 @@
   [state relative-path]
   (atomic-spit! (output-file state relative-path) (inventory-text state))
   state)
+
+(defn ^{:shadow.build/stage :optimize-prepare} prepare-program-rows!
+  "Prepare exact compiled boot rows before release optimization rewrites code."
+  [state _program-source-relative-path relative-path]
+  (let [program-source-text (artifact-text state)
+        prepared
+        (assoc (derive-program-rows
+                state program-source-text (output-file state relative-path))
+               :seon.dev.artifact/program-source-digest
+               (digest program-source-text))]
+    (assoc-in state [prepared-program-rows relative-path] prepared)))
+
+(defn ^{:shadow.build/stage :flush} publish-rows!
+  "Publish the exact compiled boot-program rows from the client artifact."
+  [state program-source-relative-path relative-path]
+  (let [program-source-file
+        (output-file state program-source-relative-path)
+        _ (when-not (.isFile program-source-file)
+            (throw
+             (ex-info "The program-source artifact must publish before rows."
+                      {:seon.dev.artifact/path
+                       program-source-relative-path})))
+        program-source-text (slurp program-source-file)
+        program-source-digest (digest program-source-text)
+        target (output-file state relative-path)
+        prepared
+        (or (get-in state [prepared-program-rows relative-path])
+            (when-not (= :release (:mode state))
+              (assoc (derive-program-rows state program-source-text target)
+                     :seon.dev.artifact/program-source-digest
+                     program-source-digest)))
+        rows (:seon.dev.artifact/program-rows prepared)
+        compiled-row-text (:seon.dev.artifact/program-row-text prepared)]
+    (when-not prepared
+      (throw
+       (ex-info "The pre-optimization program rows are absent."
+                {:seon.dev.artifact/path relative-path})))
+    (when-not (= program-source-digest
+                 (:seon.dev.artifact/program-source-digest prepared))
+      (throw
+       (ex-info "Program sources changed after program rows were prepared."
+                {:seon.dev.artifact/path program-source-relative-path
+                 :seon.dev.artifact/expected
+                 (:seon.dev.artifact/program-source-digest prepared)
+                 :seon.dev.artifact/actual program-source-digest})))
+    (when-not (and (vector? rows) (every? map? rows))
+      (throw
+       (ex-info "The compiled boot derivation returned invalid program rows."
+                {:seon.dev.artifact/value-type (type rows)})))
+    (atomic-spit!
+     target
+     (str "{:seon.dev.artifact/program-rows " compiled-row-text "}\n"))
+    state))

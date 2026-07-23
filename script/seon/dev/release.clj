@@ -14,7 +14,7 @@
            [java.util Properties]
            [java.util.jar JarEntry JarFile JarOutputStream]))
 
-(def current-version 1)
+(def current-version 2)
 
 (def sdk-version 1)
 
@@ -55,6 +55,7 @@
    :seon.release.member/execution "runtime/execution.js"
    :seon.release.member/runtime-assets "runtime-root"
    :seon.release.member/program-source "runtime/program-sources.edn"
+   :seon.release.member/program-row "runtime/program-rows.edn"
    :seon.release.member/client-inventory "runtime/client-program-inventory.edn"
    :seon.release.member/execution-inventory
    "runtime/execution-program-inventory.edn"
@@ -101,6 +102,7 @@
    [:seon.dev.release/execution-member :qualified-keyword]
    [:seon.dev.release/runtime-assets-member :qualified-keyword]
    [:seon.dev.release/program-source-member :qualified-keyword]
+   [:seon.dev.release/program-row-member :qualified-keyword]
    [:seon.dev.release/client-inventory-member :qualified-keyword]
    [:seon.dev.release/execution-inventory-member :qualified-keyword]
    [:seon.dev.release/babashka-member :qualified-keyword]
@@ -129,6 +131,7 @@
    :seon.dev.release/execution-member
    :seon.dev.release/runtime-assets-member
    :seon.dev.release/program-source-member
+   :seon.dev.release/program-row-member
    :seon.dev.release/client-inventory-member
    :seon.dev.release/execution-inventory-member
    :seon.dev.release/babashka-member
@@ -614,6 +617,8 @@
    :seon.release.member/runtime-assets
    :seon.dev.release/program-source-member
    :seon.release.member/program-source
+   :seon.dev.release/program-row-member
+   :seon.release.member/program-row
    :seon.dev.release/client-inventory-member
    :seon.release.member/client-inventory
    :seon.dev.release/execution-inventory-member
@@ -771,6 +776,7 @@
            [::bootstrap :string]
            [::public-assets :string]
            [::program-source :string]
+           [::program-row :string]
            [::client-inventory :string]
            [::execution-inventory :string]
            [::babashka :string]
@@ -792,7 +798,8 @@
            [::license :string]]]
     release-manifest-schema]}
   [{::keys [package-root bun bun-version writer pod execution bootstrap
-            public-assets program-source client-inventory execution-inventory
+            public-assets program-source program-row
+            client-inventory execution-inventory
             babashka babashka-asset operator
             detach-helper
             launcher config brand-css babashka-license bun-license
@@ -811,6 +818,7 @@
     (copy-file! pod (fs/path runtime "pod.js"))
     (copy-file! execution (fs/path runtime "execution.js"))
     (copy-file! program-source (fs/path runtime "program-sources.edn"))
+    (copy-file! program-row (fs/path runtime "program-rows.edn"))
     (copy-file! client-inventory
                 (fs/path runtime "client-program-inventory.edn"))
     (copy-file! execution-inventory
@@ -1020,6 +1028,8 @@
          (str (fs/path build-root "execution.js"))
          :seon.dev.artifact/release-program-source-output
          (str (fs/path build-root "program-sources.edn"))
+         :seon.dev.artifact/release-program-row-output
+         (str (fs/path build-root "program-rows.edn"))
          :seon.dev.artifact/release-client-inventory-output
          (str (fs/path build-root "client-program-inventory.edn"))
          :seon.dev.artifact/release-execution-inventory-output
@@ -1095,6 +1105,8 @@
         ::public-assets (str (fs/path root "resources/public"))
         ::program-source
         (:seon.dev.artifact/release-program-source-output release-programs)
+        ::program-row
+        (:seon.dev.artifact/release-program-row-output release-programs)
         ::client-inventory
         (:seon.dev.artifact/release-client-inventory-output release-programs)
         ::execution-inventory

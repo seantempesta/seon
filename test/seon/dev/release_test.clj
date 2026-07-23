@@ -24,6 +24,7 @@
     (spit (str (fs/path root "pod.js")) "pod")
     (spit (str (fs/path root "execution.js")) "execution")
     (spit (str (fs/path root "program-sources.edn")) "{}")
+    (spit (str (fs/path root "program-rows.edn")) "{}")
     (spit (str (fs/path root "client-program-inventory.edn")) "{}")
     (spit (str (fs/path root "execution-program-inventory.edn")) "{}")
     (spit (str (fs/path root "bb")) "bb")
@@ -47,6 +48,7 @@
    :seon.release.member/execution "execution.js"
    :seon.release.member/runtime-assets "web"
    :seon.release.member/program-source "program-sources.edn"
+   :seon.release.member/program-row "program-rows.edn"
    :seon.release.member/client-inventory "client-program-inventory.edn"
    :seon.release.member/execution-inventory "execution-program-inventory.edn"
    :seon.release.member/babashka "bb"
@@ -80,6 +82,7 @@
    :seon.dev.release/execution-member :seon.release.member/execution
    :seon.dev.release/runtime-assets-member :seon.release.member/runtime-assets
    :seon.dev.release/program-source-member :seon.release.member/program-source
+   :seon.dev.release/program-row-member :seon.release.member/program-row
    :seon.dev.release/client-inventory-member
    :seon.release.member/client-inventory
    :seon.dev.release/execution-inventory-member
@@ -230,6 +233,7 @@
               [["bun" "bun"] ["writer.jar" "writer"] ["pod.js" "pod"]
                ["execution.js" "execution"]
                ["program-sources.edn" "{}"]
+               ["program-rows.edn" "{}"]
                ["client-program-inventory.edn" "{}"]
                ["execution-program-inventory.edn" "{}"]
                ["bb" "bb"] ["operator.jar" "operator"]
@@ -262,6 +266,8 @@
               ::release/public-assets (str (fs/path inputs "public"))
               ::release/program-source
               (str (fs/path inputs "program-sources.edn"))
+              ::release/program-row
+              (str (fs/path inputs "program-rows.edn"))
               ::release/client-inventory
               (str (fs/path inputs "client-program-inventory.edn"))
               ::release/execution-inventory
