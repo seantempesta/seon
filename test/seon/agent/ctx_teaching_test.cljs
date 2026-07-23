@@ -5,9 +5,10 @@
    [clojure.string :as str]
    [my.plan.internal :as plan.internal]
    [seon.agent.ctx :as ctx]
+   [seon.agent.ctx.driver :as ctx.driver]
    [seon.db :as db]
    [seon.db.protocol :as protocol]
-   [seon.execution.runtime :as runtime]))
+   ))
 
 (defn- rendered-system-text [host-tier?]
   (ctx/render-system-text host-tier? ctx/system-text-shared))
@@ -53,9 +54,13 @@
     (let [original-execute-many db/execute-many
           tier-result (atom nil)
           requests (atom [])
+          database {:db-name "default" :t 42 :as-of nil :since nil
+                    :history false
+                    :datahike/commit-id
+                    #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"}
           render! (fn []
-                    (runtime/render-prompt!
-                     {:seon.agent/id "teaching-agent"}
+                    (ctx.driver/render-prompt!
+                     {:seon.agent/id "teaching-agent" ::db/db database}
                      (fn [_] (js/Promise.resolve []))))
           restore! (fn []
                      (set! db/execute-many original-execute-many)
