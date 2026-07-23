@@ -1143,7 +1143,14 @@ lifecycle portable cores landed in tree (7 census rows
 capability-pending→resolved; effects: user/agent/complete/terminate
 :idempotent, wait/pause/resume :external); full CLJS green over the
 combined tree (1560/7712) — this also serially gates the loader-door
-diff. HONEST LIMIT recorded in wiki: a receipt key doesn't stabilize
+diff. **SERIAL WRITER GATE FAILED (198F/12E,
+`tmp/orchestrator/serial-writer-gate.log`)**: sci registry/
+graduated-root/authored-invocation chain broken — msglc's
+host/context.clj installer edit or its .cljc cores on the JVM are
+the only changes in that chain since p1c's green 382/2982; the lane
+only ran a census slice in-lane. Thread RESUMED with the log to fix
+root-cause in its owned paths + prove full writer green + its
+pending live proof. NOTHING commits until that gate is green. HONEST LIMIT recorded in wiki: a receipt key doesn't stabilize
 generated transaction intent, so two-call PUBLIC replay of message!
 is not claimed; :idempotent is honest for the recovery path
 (allocator/retry receipt-stable); positional arities can't take
