@@ -1017,6 +1017,15 @@ COMPLETELY before dispatching anything.
   for ephemeral clusters, EXPLICIT with loud refusal + exact remedy
   for file-backed clusters. The preprocessing design doc is now fully
   ruled; S-ladder implementation unblocked.
+- PARALLEL FILL (2026-07-23 eve, owner: 'anything else in
+  parallel?'): THREE new lanes beside fixseed, all file-disjoint —
+  r43trust (implementation: derived-provenance classification,
+  error.cljc + render/core.cljc, fixes live my.plan rendering before
+  the checkpoint demo), testsimp-audit (read-only: the migration
+  worklist onto the one seeding path + F-row folds), rowsidecar (S2:
+  build-side program-rows sidecar, production only, byte-faithful
+  regression vs live derivation; consumption stays S3/S4). Four
+  lanes live total.
 - B2 LIVE-PROVEN BROKEN + R46 SETTLED (2026-07-23 eve): the probe
   showed the tier-less scheduled eval's ERROR VALUE IS DISCARDED and
   the turn closes falsely :done with zero receipts (receipt-integrity
