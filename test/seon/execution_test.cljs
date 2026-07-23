@@ -980,6 +980,12 @@
 (deftest selected-call-boundary-records-core-but-not-authored-failures
   (async done
     (let [recorded (atom [])
+          projection
+          {:seon.schema.projection/function-source-admissions
+           {'my.orders/view {:seon.schema.admission/source :agent}
+            'my.orders/unloaded {:seon.schema.admission/source :agent}}
+           :seon.schema.projection/artifact-exports
+           #{'seon.missing/core-renderer}}
           state
           (atom
            {::execution/authored-symbols #{'my.orders/view}
@@ -987,6 +993,7 @@
             {::execution/source-by-symbol
              {'my.orders/unloaded "(defn unloaded [] :ok)"}}})]
       (with-redefs [error/record! #(swap! recorded conj %)
+                    schema/current-projection (fn [] projection)
                     seval/lookup-value
                     (fn [sym]
                       (when (= 'my.orders/view sym)
@@ -1020,10 +1027,9 @@
                (is (= "The selected function is not loaded in the execution child."
                       (get-in (aget results 2)
                               [::execution/error :seon.error/message])))
-               (is (= 2 (count @recorded)))
+               (is (= 1 (count @recorded)))
                (is (every? #(= :core (::error/fault %)) @recorded))
-               (is (= #{'my.orders/unloaded
-                        'seon.missing/core-renderer}
+               (is (= #{'seon.missing/core-renderer}
                       (into #{}
                             (map #(get (ex-data (::error/raw %))
                                        ::execution/function-symbol))
@@ -1043,6 +1049,11 @@
           original-db db/db
           original-entity db/entity
           original-record! error/record!
+          original-current-projection schema/current-projection
+          core-projection
+          {:seon.schema.projection/function-source-admissions {}
+           :seon.schema.projection/artifact-exports
+           #{'seon.execution.runtime/render-agent-view!}}
           core-error (ex-info "composition failed"
                               {:seon.error/kind :core-bug})]
       (set! db/db
@@ -1068,10 +1079,12 @@
                         (current-scope)
                         [:seon.error.scope/configuration
                          :seon.config/on-core-error])})))
+      (set! schema/current-projection (fn [] core-projection))
       (try
         (is (= :core
                (error/fault-for
-                'seon.execution.runtime/render-agent-view!)))
+                'seon.execution.runtime/render-agent-view!
+                core-projection)))
         (-> (js/Promise.resolve
              (record-top-level! 'my.orders/view
                                 (js/Error. "authored failure")))
@@ -1097,11 +1110,13 @@
                (set! db/db original-db)
                (set! db/entity original-entity)
                (set! error/record! original-record!)
+               (set! schema/current-projection original-current-projection)
                (done))))
         (catch :default exception
           (set! db/db original-db)
           (set! db/entity original-entity)
           (set! error/record! original-record!)
+          (set! schema/current-projection original-current-projection)
           (throw exception))))))
 
 (deftest selected-load-error-preserves-only-child-reload
