@@ -48,15 +48,21 @@ COMPLETELY before dispatching anything.
   uncommitted claim-epoch retrofit in agent/{loop,run,turn}.cljs is
   the post-R22 L0 attempt, SUPERSEDED by ruling 24 (it is the exact
   legacy-loop fence retrofit R24 forbids); diff preserved at
-  tmp/orchestrator/l0-retrofit-superseded-by-r24.patch; files left in
-  tree, PROTECTED in all first-wave specs; U2 consumes or deletes.
-- LANES (first wave, dispatched 2026-07-23): U3 writer admission
-  (spec tmp/orchestrator/u3-writer-admission-spec.md, summary
-  u3-summary.txt) RUNNING; U1 guarded door + U4 render purity specs
-  written (u1-guarded-door-spec.md, u4-render-purity-spec.md),
-  dispatch gated on a tree compile probe over the L0 residue
-  (tmp/orchestrator/l0-tree-compile-probe.log). U2 dispatches when U1
-  lands; U5 next refill; U6 held for owner HTTP talk.
+  tmp/orchestrator/l0-retrofit-superseded-by-r24.patch. The compile
+  probe then proved the retrofit INCOMPLETE (run-loop! 3-arity vs the
+  stale 2-arg call at test/seon/runtime/admission_test.cljs:768), so
+  the residue was reverse-applied — tree is HEAD-clean; re-apply the
+  patch only if U2 wants it as reference material.
+- LANES (first wave, all RUNNING 2026-07-23): U1 guarded door
+  (spec tmp/orchestrator/u1-guarded-door-spec.md, thread
+  019f8e36-8d84-7b51-b686-5b37991f8779) · U3 writer admission
+  (u3-writer-admission-spec.md, thread
+  019f8e34-6e63-7e12-8be9-c1fe69c2a98f) · U4 render purity
+  (u4-render-purity-spec.md, thread
+  019f8e36-92ee-7a80-b0ea-e1902bf38f41). Summaries land at
+  tmp/orchestrator/u{1,3,4}-summary.txt; final messages at
+  u{1,3,4}-final-message.txt. U2 dispatches when U1 lands; U5 is the
+  next refill; U6 held for the owner HTTP talk.
 - Owner answers at wind-down: first wave (U1+U3+U4) AUTHORIZED;
   U5 lane builds the web-render operator member itself; demo
   re-runs are BUG-FINDERS, cheap and at orchestrator discretion —
