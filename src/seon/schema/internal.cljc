@@ -64,7 +64,7 @@
    Returns advisory findings that remain non-terminal."
   [{:seon.schema/keys [identity definition compiled role admission
                        pure-predicate-symbols canonical-keys]}]
-  (let [agent-authored?
+  (let [authored?
         (= :agent (:seon.schema.admission/source admission))
         advisories (volatile! [])
         walk-options
@@ -75,7 +75,7 @@
      (fn [schema path _children _options]
        (let [schema-type (m/type schema)
              properties (or (m/properties schema) {})]
-         (when (and agent-authored? (contains? undefined-types schema-type))
+         (when (and authored? (contains? undefined-types schema-type))
            (contract-error!
             identity definition path :seon.schema/undefined-contract
             (str identity " uses " schema-type
@@ -85,7 +85,7 @@
                  "[:fn {:error/message \"must be ...\" "
                  ":gen/schema :string} 'my.domain/value?]).")
             {:seon.schema/schema-type schema-type}))
-         (when (and agent-authored?
+         (when (and authored?
                     (= :input role)
                     (= :map schema-type)
                     (not (true? (:closed properties))))
@@ -97,7 +97,7 @@
                  "shows the recursively closed shape, but admission will not "
                  "rewrite the authored contract.")
             {}))
-         (when (and agent-authored? (= :fn schema-type))
+         (when (and authored? (= :fn schema-type))
            (let [predicate (guarded-predicate-symbol schema)]
              (when-not (and (qualified-symbol? predicate)
                             (guarded-predicate-properties-complete? properties))
@@ -109,7 +109,7 @@
                      "a nonblank `:error/message`/`:error/fn`, and a bounded "
                      "`:gen/schema`, `:gen/elements`, or `:gen/return`.")
                 {:seon.schema/predicate predicate}))
-             (when (and agent-authored?
+             (when (and authored?
                         (not (contains? pure-predicate-symbols predicate)))
                (contract-error!
                 identity definition path
@@ -123,7 +123,7 @@
                 {:seon.schema/predicate predicate}))))
          (when (= :maybe schema-type)
            (cond
-             (and agent-authored? (map-value-maybe? compiled path))
+             (and authored? (map-value-maybe? compiled path))
              (contract-error!
               identity definition path :seon.schema/nilable-map-value
               (str identity
@@ -132,7 +132,7 @@
                    "`{:optional true}` on the map entry.")
               {})
 
-             (and agent-authored? (= :output role) (empty? path))
+             (and authored? (= :output role) (empty? path))
              (contract-error!
               identity definition path :seon.schema/nilable-return
               (str identity
