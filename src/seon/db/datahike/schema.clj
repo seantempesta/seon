@@ -280,6 +280,28 @@
 ;;; Public API
 ;;; ---------------------------------------------------------------------------
 
+(defn- resolve-schema-alias
+  "Resolve a canonical bare-keyword alias through the explicit form population."
+  [forms form]
+  (loop [candidate form
+         chain []]
+    (if (and (qualified-keyword? candidate)
+             (not= :seon.db/ref candidate)
+             (contains? forms candidate))
+      (do
+        (when (some #{candidate} chain)
+          (let [cycle (conj chain candidate)]
+            (throw
+             (ex-info
+              (str "A canonical schema alias cycle cannot be stored by Datahike: "
+                   (pr-str cycle))
+              {:schema-alias-chain cycle}))))
+        (recur (get forms candidate) (conj chain candidate)))
+      {:form candidate
+       :schema-alias-chain (cond-> chain
+                             (qualified-keyword? candidate)
+                             (conj candidate))})))
+
 (defn malli-form->datahike-attribute
   "Derive one Datahike declaration from a canonical schema-form population.
 
@@ -293,13 +315,26 @@
                [::form :any]]
     [:map-of :keyword :any]]}
   [forms attribute form]
-  (let [registry (mr/composite-registry
+  (let [{resolved-form :form
+         alias-chain :schema-alias-chain}
+        (resolve-schema-alias forms form)
+        registry (mr/composite-registry
                   (m/default-schemas)
                   (mr/fast-registry schema.form/primitive-schema-forms)
-                  (mr/fast-registry forms))
-        compiled (m/schema form {:registry registry})]
-    (assoc (schema->attr-partial attribute nil compiled)
-           :db/ident attribute)))
+                  (mr/fast-registry forms))]
+    (try
+      (let [compiled (m/schema resolved-form {:registry registry})]
+        (assoc (schema->attr-partial attribute nil compiled)
+               :db/ident attribute))
+      (catch Throwable throwable
+        (if (seq alias-chain)
+          (throw
+           (ex-info
+            (str "A canonical schema alias cannot be stored by Datahike: "
+                 (pr-str alias-chain))
+            {:schema-alias-chain alias-chain}
+            throwable))
+          (throw throwable))))))
 
 (defn malli-map->datahike-schema
   "Derive a datahike schema vector from a Malli `:map` schema.

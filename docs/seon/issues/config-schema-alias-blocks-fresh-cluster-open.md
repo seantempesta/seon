@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 tags: [issue, config, database]
 severity: blocker
 ---
@@ -35,3 +35,30 @@ launch internal processes outside the supervisor.
   manifest.
 - `bin/seon up` proceeds through pod readiness to the dependent JVM web-render
   member.
+
+## Resolution
+
+`seon.db.datahike.schema/malli-form->datahike-attribute` now recursively
+dereferences a bare qualified-keyword form through the complete canonical form
+population before compiling its Datahike declaration. It preserves the
+bridge's existing terminal `:seon.db/ref` storage semantics. Alias cycles and
+unresolvable aliases fail with the complete traversal in
+`:schema-alias-chain`; the writer retains its existing
+`A canonical schema form cannot be stored by Datahike` rejection boundary.
+
+Regression evidence is in
+`tmp/orchestrator/u3-gate-schema-alias-writer-final.log`: the focused
+`seon.db.datahike.schema-test` and `seon.db.writer-initialization-test`
+namespaces pass 26 tests and 164 assertions. The bridge tests prove recursive
+digest-to-string projection, cycle rejection, and missing-alias rejection.
+The writer-level test opens a fresh database, installs the recursively aliased
+config attribute through the real initialization transaction, writes its
+value, and reads the installed `:db.type/string` declaration and datom back.
+
+Schema installation consumes the complete program independently of which
+manifest sections carry initial values. The original full-system and minimal
+web-render attempts both stopped at this same pre-reconciliation installation
+boundary, so the fresh writer-level proof covers both manifest selections.
+An additional `bin/seon up` was intentionally omitted while the runtime spine
+lane's protected pod sources were mid-rebuild; pod readiness is not needed to
+falsify this resolved writer bridge defect.

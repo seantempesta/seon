@@ -305,6 +305,62 @@
         (writer/stop! server)
         (.delete socket-file)))))
 
+(deftest initialization-installs-recursively-aliased-config-attributes
+  (let [database-name (str "writer-schema-alias-" (random-uuid))
+        socket-file (File. "tmp" (str database-name ".sock"))
+        server
+        (writer-test/start!
+         {::writer/dependencies (dependencies)
+          ::writer/database-name database-name
+          ::writer/backend :memory
+          ::writer/request-socket-path (.getAbsolutePath socket-file)})
+        runtime (::writer/runtime server)
+        sha-256 (apply str (repeat 64 "a"))
+        aliased-initialization
+        (-> initialization
+            (update :seon.db/attributes conj
+                    :seon.config.render-context/sha-256)
+            (update :seon.db/program into
+                    [{:seon.schema/key :seon.content-hash/digest
+                      :seon.schema/form "[:string {:min 64 :max 64}]"}
+                     {:seon.schema/key :seon.config.render-context/digest
+                      :seon.schema/form ":seon.content-hash/digest"}
+                     {:seon.schema/key :seon.config.render-context/sha-256
+                      :seon.schema/form
+                      ":seon.config.render-context/digest"}])
+            (update-in [:seon.db/initial-data 0]
+                       assoc
+                       :seon.config.render-context/sha-256
+                       sha-256))]
+    (try
+      (let [response
+            (writer/handle-request
+             runtime
+             (protocol/ensure-database-request
+              {::protocol/request-id "schema-alias/initialization"
+               ::protocol/database-name database-name
+               ::protocol/backend :memory
+               :seon.db/initialization aliased-initialization}))
+            connection
+            (::registry/conn
+             (registry/lookup-connection
+              {::registry/database-name (keyword database-name)}))
+            db-value (d/db connection)]
+        (is (::protocol/success? response) (pr-str response))
+        (is (= :db.type/string
+               (get-in (:schema db-value)
+                       [:seon.config.render-context/sha-256
+                        :db/valueType])))
+        (is (= #{[sha-256]}
+               (d/q
+                '[:find ?digest
+                  :where
+                  [_ :seon.config.render-context/sha-256 ?digest]]
+                db-value))))
+      (finally
+        (writer/stop! server)
+        (.delete socket-file)))))
+
 (deftest failed-or-branch-initialization-never-publishes-a-writing-route
   (let [database-name (str "writer-initialization-main-" (random-uuid))
         failed-name (str "writer-initialization-failed-" (random-uuid))

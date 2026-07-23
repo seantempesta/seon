@@ -363,6 +363,51 @@
           :example/completed-at
           :inst))))
 
+(deftest canonical-keyword-aliases-resolve-to-storable-forms
+  (testing "a keyword alias recursively resolves to its scalar storage form"
+    (is (= {:db/ident :example/sha-256
+            :db/valueType :db.type/string
+            :db/cardinality :db.cardinality/one}
+           (dhs/malli-form->datahike-attribute
+            {:seon.content-hash/digest [:string {:min 64 :max 64}]
+             :example/digest :seon.content-hash/digest
+             :example/sha-256 :example/digest}
+            :example/sha-256
+            :example/digest))))
+
+  (testing "an alias cycle reports its complete traversal"
+    (let [error
+          (try
+            (dhs/malli-form->datahike-attribute
+             {:example/left :example/right
+              :example/right :example/left}
+             :example/value
+             :example/left)
+            nil
+            (catch clojure.lang.ExceptionInfo throwable
+              throwable))]
+      (is (some? error))
+      (is (= [:example/left :example/right :example/left]
+             (:schema-alias-chain (ex-data error))))
+      (is (re-find #"alias cycle cannot be stored"
+                   (ex-message error)))))
+
+  (testing "an unresolvable alias reports the attempted chain"
+    (let [error
+          (try
+            (dhs/malli-form->datahike-attribute
+             {:example/value :example/missing}
+             :example/value
+             :example/missing)
+            nil
+            (catch clojure.lang.ExceptionInfo throwable
+              throwable))]
+      (is (some? error))
+      (is (= [:example/missing]
+             (:schema-alias-chain (ex-data error))))
+      (is (re-find #"alias cannot be stored"
+                   (ex-message error))))))
+
 (deftest e2e-derive-install-transact-test
   (testing "derived schema installs and accepts valid data"
     (schema/register! :seon.db.datahike.schema-test/id

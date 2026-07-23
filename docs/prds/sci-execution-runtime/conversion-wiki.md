@@ -385,10 +385,12 @@ the anchor stays the state ledger.
 - **A manifest section can be absent while its registered schema still blocks
   fresh database open.** Database opening installs the complete schema graph,
   so selecting a minimal manifest does not avoid an unstorable canonical
-  alias. On 2026-07-23 `:seon.config.render-context/sha-256` retained
-  `:seon.content-hash/digest` as its canonical form and stopped the pod before
-  config reconciliation. Fix alias projection at the schema owner; do not
-  weaken config acquisition or bypass the operator.
+  alias. Resolve bare qualified-keyword forms recursively through the complete
+  canonical form population before deriving the Datahike declaration; retain
+  a traversal chain so cycles and missing aliases fail legibly. Preserve
+  terminal storage semantics such as `:seon.db/ref`; do not inline shared
+  shapes, weaken config acquisition, or bypass the operator
+  ([[../../../seon/issues/config-schema-alias-blocks-fresh-cluster-open]]).
 - **A database-backed member that requires selected config must depend on the
   config-reconciling pod for a fresh cluster.** Writer readiness alone cannot
   guarantee config singleton facts exist. Put the additive member after pod
