@@ -1289,12 +1289,19 @@ waits on the all-JVM seon.db shape). DEFECT FILED: my.canvas :clj
 branch calls nonexistent seon.render.canvas/field-signal — cannot
 actually load on JVM; census .cljc status nominal (S fix).
 
-**ALL FOUR RESEARCH LANES COMPLETE.** The all-JVM design pass
-(ruling 25) now has every section pre-grounded: concurrency
-(vthreads+bulkhead+fuel door), web/SSE (7.8k near-verbatim,
-pre-authorized comeback, /data-from-writer slice), writer scaling
-(admission fix 5-20×, lanes, sharding), render/ctx (R0-R4 cut).
-GATE: owner scope confirmation, per the standing hold.
+**THE UNIFIED PLAN IS WRITTEN AND IS NOW THE QUEUE AUTHORITY:
+`unified-plan-2026-07-23.md`** (owner-directed synthesis replacing
+the separate design pass — ruling 25 fulfilled by it). It pins:
+Ruling 26 topology (writer JVM = transactions+feed ONLY, agent
+code NEVER; Core JVM app = web+claimants+evals behind the door;
+disposable Bun leaf host; static browser), units U1-U10 with
+grounding/falsifiers/dependencies (U1 guarded door → U2
+claim-native driver = the spine; U3 writer admission fix, U4
+render purity, U5 web slice parallel; U6 held for the HTTP talk;
+U7 ctx port; U8 rolling portfolio; U9 great deletion; U10
+graduation drills), sequencing, open owner decisions D1-D5, and
+the concrete graduation gate. This anchor stays the state ledger;
+unit dispatch specs derive from the plan's rows.
 concurrent read-only lanes locking down the remaining unknowns
 before the all-JVM design pass:** (1) JVM concurrency + guarded
 eval door (LIVE, scope incl. fuel counter) →
