@@ -319,7 +319,7 @@ COMPLETELY before dispatching anything.
   (streaming+normal, attempt-receipt regression folded) · U7 ctx/
   render port (L9 door split structural at resolution; R4 one
   portable acquisition executor) · U8a JVM fs/shell/web/blob leaves
-  + my.* host bindings. Specs: tmp/orchestrator/{test-integrity,
+  and my.* host bindings. Specs: tmp/orchestrator/{test-integrity,
   u6b-jvm-llm-leaf,u7-ctx-render-port,u8-jvm-leaves}-spec.md.
   Bug-chase lane dispatches when the Malli + attr-registration
   research returns ground it. U2's unproven falsifiers (remaining
@@ -399,7 +399,7 @@ COMPLETELY before dispatching anything.
   protects the database; R26's agent-code-never-in-writer stands for
   liveness/blast-radius reasons, not safety. Follow-up queued to the
   schema-admission lane on return: the pure-call-graph admission rule
-  + corpus-resident predicate compilation path.
+  and corpus-resident predicate compilation path.
 - R34 (design, 2026-07-23): registration PROVENANCE IS DERIVED from
   the asserting transaction's :seon.db/user//process facts (core
   process identities = core-admitted; agent turns = agent-authored;
@@ -600,7 +600,7 @@ COMPLETELY before dispatching anything.
   predicates through requiring-resolve on every load path incl.
   standalone boot, with the fixture-vs-boot regression.
 - QUEUE STATE (2026-07-23 late): DISPATCHED — P5 driver enforcement
-  + router deletion (spec tmp/orchestrator/p5-enforcement-spec.md)
+  and router deletion (spec tmp/orchestrator/p5-enforcement-spec.md)
   and P1b per-artifact export inventories (p1b-inventory-spec.md);
   LIVE — schemagate provenance-recognition fix (checkpoint gate),
   arch-drift Fable audit (docs). POST-CHECKPOINT ORDER: P3 + P4
@@ -776,6 +776,20 @@ COMPLETELY before dispatching anything.
   parity-double; audit finding #2) + sweep for sibling fixtures the
   R30 commit missed — so the checkpoint doesn't go red on known-stale
   fixtures. File-disjoint from predfix.
+
+- GAS-PEDAL STATE (2026-07-23 eve): THREE lanes live — predfix
+  (R42 stall-breaker rework + live proof; killed-and-resumed per the
+  owner's kill-and-resume rule when R42 superseded the total-duration
+  design; its config commits e2c7187ee + 7e9298243 kept), fixfixture
+  (stale R30 fixtures, spec tmp/orchestrator/fixfixture-spec.md),
+  poll/timeout census (read-only Fable, report to research/
+  poll-timeout-census-2026-07-23.md — the owner's standing smell
+  rule made systematic). STAGED for instant post-checkpoint dispatch:
+  tmp/orchestrator/r43-trust-provenance-spec.md +
+  p3-registration-spec.md ({{LANE_MAP}} placeholders get the live
+  lane map at dispatch). Owner goal rewritten (gas on straightaways,
+  slow on curves); juicy/surprising issues get surfaced to the owner
+  as design hints as they land.
 
 ## Rulings index (full text: git b1752173c and design docs)
 
