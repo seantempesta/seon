@@ -208,7 +208,12 @@ U1 ──► U2 ──────────────► U9 ──► U10
 - **D3 — DECIDED (owner, 2026-07-23):** web/render is its OWN
   process (topology #2) — rendering is pure derivation over a
   replica and nothing agent-controlled can touch it.
-- **D4 (HTTP leaf timing):** the U6 morning discussion.
+- **D4 — PARTIALLY SETTLED (owner, 2026-07-23):** the JVM LLM leaf
+  supports BOTH streaming and normal sessions; remaining morning
+  item is timing/priority only.
+- **Demo cadence (owner):** re-runs are BUG-FINDERS at orchestrator
+  discretion — cheap, focused on proving the conversion right;
+  never benchmark sweeps.
 - **D5 — REFRAMED by ruling 27:** fuel/deadline budgets are
   abort-only circuit breakers calibrated at ≥100× measured
   legitimate P99.9, landed as fully-specced config facts with U1's
