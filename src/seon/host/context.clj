@@ -38,6 +38,7 @@
    row."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
+            [clojure.tools.reader :as tools.reader]
             [my.blob :as blob]
             [my.blob.host :as blob.host]
             [sci.core :as sci]
@@ -295,6 +296,132 @@
    ::lifecycle.leaf/now #(java.util.Date.)
    ::lifecycle.leaf/uuid #(str (random-uuid))})
 
+(defn- toolkit-call
+  [delegates function-symbol]
+  (fn [& arguments]
+    (if-let [implementation (get @delegates function-symbol)]
+      (apply implementation arguments)
+      {:seon.error/message
+       (str function-symbol " is unavailable on this host.")
+       :seon.error/kind :core-bug})))
+
+(defn- host-context-blocks
+  [database-functions agent-id]
+  (let [entity
+        ((get database-functions 'pull)
+         {:seon.db/pull-pattern '[{:seon.agent/ctx [*]}]
+          :seon.db/ref [:seon.agent/id agent-id]
+          :datahike.resource/max-work 100000
+          :datahike.resource/max-results 2048
+          :datahike.resource/max-result-weight 262144})]
+    (if (:seon.error/message entity)
+      entity
+      (->> (:seon.agent/ctx entity)
+           (sort-by (juxt :seon.agent.ctx/priority
+                          (comp str :seon.agent.ctx/name)))
+           (mapv #(dissoc % :db/id))))))
+
+(defn- host-context-transaction
+  [database-functions operation names agent-id blocks]
+  (let [transaction-data
+        (into [[:db.fn/retractAttribute
+                [:seon.agent/id agent-id] :seon.agent/ctx]]
+              (when (seq blocks)
+                [{:seon.agent/id agent-id
+                  :seon.agent/ctx (vec blocks)}]))
+        result ((get database-functions 'transact!)
+                {:seon.db/tx-data transaction-data})]
+    (if-let [message (:seon.error/message result)]
+      {:seon.agent.ctx/ok? false
+       :seon.agent.ctx/error
+       (str operation " transact failed: " message)}
+      {:seon.agent.ctx/ok? true
+       :seon.agent.ctx/names names})))
+
+(defn- host-context-install!
+  [database-functions block-or-blocks]
+  (if-not *agent-id*
+    {:seon.agent.ctx/ok? false
+     :seon.agent.ctx/error
+     (str "install!: no agent in scope — call inside "
+          "(seon.db/with-agent id …).")}
+    (let [current (host-context-blocks database-functions *agent-id*)]
+      (if-let [message (:seon.error/message current)]
+        {:seon.agent.ctx/ok? false :seon.agent.ctx/error message}
+        (let [blocks (if (vector? block-or-blocks)
+                       block-or-blocks [block-or-blocks])
+              names (into #{} (map :seon.agent.ctx/name) blocks)
+              kept (remove #(contains? names (:seon.agent.ctx/name %))
+                           current)]
+          (host-context-transaction database-functions "install!"
+                                    (vec names) *agent-id*
+                                    (into (vec kept) blocks)))))))
+
+(defn- host-context-remove!
+  [database-functions block-name]
+  (if-not *agent-id*
+    {:seon.agent.ctx/ok? false
+     :seon.agent.ctx/error
+     (str "remove!: no agent in scope — call inside "
+          "(seon.db/with-agent id …).")}
+    (let [current (host-context-blocks database-functions *agent-id*)]
+      (if-let [message (:seon.error/message current)]
+        {:seon.agent.ctx/ok? false :seon.agent.ctx/error message}
+        (host-context-transaction
+         database-functions "remove!" [block-name] *agent-id*
+         (remove #(= block-name (:seon.agent.ctx/name %)) current))))))
+
+(defn- host-allocate!
+  [database-functions request]
+  (try
+    (let [database (or (:seon.db/db request)
+                       ((get database-functions 'db)))
+          allocations (:seon.db.id/allocations request)
+          attributes (->> allocations
+                          (map :seon.db.id/identity-attr)
+                          distinct
+                          (sort-by str)
+                          vec)
+          rows ((get database-functions 'query)
+                {:seon.db/db database
+                 :seon.db/query db.id/generator-policy-query
+                 :seon.db/args [attributes]})]
+      (if (:seon.error/message rows)
+        rows
+        (loop [attempt 1]
+          (let [manifest (db.id/candidate-manifest (into {} rows)
+                                                   allocations)
+                ids (into {}
+                          (map (juxt :seon.db.id/key
+                                     :seon.db.id/value))
+                          manifest)
+                transaction-data
+                ((:seon.db.id/transaction-builder request) ids)
+                result
+                ((get database-functions 'transact!)
+                 (cond-> {:seon.db/db database
+                          :seon.db/tx-data transaction-data
+                          :seon.db.id/generated-candidates manifest}
+                   (:seon.db/expected-db request)
+                   (assoc :seon.db/expected-db
+                          (:seon.db/expected-db request))))]
+            (if (and (= protocol/generated-candidate-conflict-error
+                        (get-in result
+                                [:seon.error/data
+                                 ::protocol/error-kind]))
+                     (< attempt 16))
+              (recur (inc attempt))
+              (if (:seon.error/message result)
+                result
+                (assoc result :seon.db.id/ids ids)))))))
+    (catch Throwable throwable
+      {:seon.error/message (or (.getMessage throwable) (str throwable))
+       :seon.error/kind
+       (or (:seon.error/kind (ex-data throwable)) :core-bug)
+       :seon.error/data (or (ex-data throwable)
+                            {:seon.db.id/error
+                             :seon.db.id.error/allocation-failed})})))
+
  ;;; Wrapper registry — the ONE capability-provisioning mechanism.
 
 (defn registry
@@ -431,7 +558,7 @@
    the pure-data writer boundary, `seon.schema` and `seon.ai.tokens` wrap
    the compiled host functions. Restart re-registers from configuration;
    nothing here persists."
-  [registry writer]
+  [registry writer toolkit-delegates]
   (register-host-wrappers!
    {::registry registry
     ::lib 'seon.ai.provider
@@ -452,8 +579,16 @@
                       (:arglists source-meta)
                       (assoc ::arglists (:arglists source-meta))
                       (:doc source-meta)
-                      (assoc ::doc (:doc source-meta)))])))
+                          (assoc ::doc (:doc source-meta)))])))
           (bound-database-functions writer))})
+  (register-host-wrappers!
+   {::registry registry
+    ::lib 'seon.db
+    ::wrappers
+    {'current-agent-id {::wrapper-fn (fn [] *agent-id*)
+                        ::arglists '([])}
+     'current-tx-context {::wrapper-fn (fn [] *tx-context*)
+                         ::arglists '([])}}})
   (let [database-leaf (db.host/leaf writer #(database-context writer))]
     (doseq [[lib functions]
             [['seon.agent.message
@@ -475,6 +610,38 @@
                           (:seon.capability/effect source-meta)
                           (assoc ::effect (:seon.capability/effect source-meta)))])))
               functions)})))
+  (let [database-leaf (db.host/leaf writer #(database-context writer))]
+    (register-host-wrappers!
+      {::registry registry
+       ::lib 'seon.agent.message
+       ::wrappers
+       {'message-transaction-for
+        {::wrapper-fn
+         (fn [database request]
+           (binding [message/*leaf* (host-message-leaf)
+                     db/*leaf* database-leaf]
+             (message/message-transaction-for database request)))
+         ::arglists '([database request])}}}))
+  (register-host-wrappers!
+   {::registry registry
+    ::lib 'seon.agent.home
+    ::wrappers
+    {'home-ns {::wrapper-fn
+               (fn [agent-id] (symbol (str "my.agent." agent-id)))
+               ::arglists '([agent-id])}}})
+  (register-host-wrappers!
+   {::registry registry
+    ::lib 'seon.embed
+    ::wrappers
+    {'enabled? {::wrapper-fn (constantly false) ::arglists '([])}
+     'search-pull
+     {::wrapper-fn
+      (fn [_]
+        {:seon/error
+         {:seon.error/message
+          "Embeddings are not enabled on this JVM host."
+          :seon.error/kind :user-input}})
+      ::arglists '([request])}}})
   (register-host-wrappers!
    {::registry registry
     ::lib 'seon.agent.fs
@@ -552,7 +719,12 @@
    {::registry registry
     ::lib 'seon.db.id
     ::wrappers
-    {'candidate-manifest {::wrapper-fn db.id/candidate-manifest
+    {'allocate! {::wrapper-fn
+                 (fn [request]
+                   (host-allocate! (bound-database-functions writer)
+                                   request))
+                 ::arglists '([request])}
+     'candidate-manifest {::wrapper-fn db.id/candidate-manifest
                           ::arglists '([generator-policies allocations])
                           ::doc "Generate one validated identity-candidate manifest."}
      'generator-policy-query {::wrapper-value db.id/generator-policy-query
@@ -643,7 +815,19 @@
    {::registry registry
     ::lib 'seon.agent.ctx
     ::wrappers
-    {'read-file-text
+    {'install!
+     {::wrapper-fn
+      (fn [block-or-blocks]
+        (host-context-install! (bound-database-functions writer)
+                               block-or-blocks))
+      ::arglists '([block-or-blocks])}
+     'remove!
+     {::wrapper-fn
+      (fn [block-name]
+        (host-context-remove! (bound-database-functions writer)
+                              block-name))
+      ::arglists '([block-name])}
+     'read-file-text
      {::wrapper-fn (fn [path]
                      (try
                        (let [file (io/file path)]
@@ -674,6 +858,45 @@
           (catch Throwable _ [])))
       ::arglists '([dir])
       ::doc "List the readable skill markdown files under one corpus directory."}}})
+  (register-host-wrappers!
+   {::registry registry
+    ::lib 'my.plan
+    ::wrappers
+    {'active! {::wrapper-fn (toolkit-call toolkit-delegates 'my.plan/active!)}
+     'blocked! {::wrapper-fn (toolkit-call toolkit-delegates 'my.plan/blocked!)}
+     'document {::wrapper-fn (toolkit-call toolkit-delegates 'my.plan/document)}
+     'done! {::wrapper-fn (toolkit-call toolkit-delegates 'my.plan/done!)}
+     'drop! {::wrapper-fn (toolkit-call toolkit-delegates 'my.plan/drop!)}
+     'list-open {::wrapper-fn (toolkit-call toolkit-delegates 'my.plan/list-open)}
+     'move! {::wrapper-fn (toolkit-call toolkit-delegates 'my.plan/move!)}
+     'needs! {::wrapper-fn (toolkit-call toolkit-delegates 'my.plan/needs!)}
+     'next {::wrapper-fn (toolkit-call toolkit-delegates 'my.plan/next)}
+     'plan! {::wrapper-fn (toolkit-call toolkit-delegates 'my.plan/plan!)}
+     'reconcile! {::wrapper-fn (toolkit-call toolkit-delegates 'my.plan/reconcile!)}
+     'reopen! {::wrapper-fn (toolkit-call toolkit-delegates 'my.plan/reopen!)}
+     'status {::wrapper-fn (toolkit-call toolkit-delegates 'my.plan/status)}
+     'step! {::wrapper-fn (toolkit-call toolkit-delegates 'my.plan/step!)}
+     'tree {::wrapper-fn (toolkit-call toolkit-delegates 'my.plan/tree)}}})
+  (register-host-wrappers!
+   {::registry registry
+    ::lib 'my.kb
+    ::wrappers
+    {'recall {::wrapper-fn (toolkit-call toolkit-delegates 'my.kb/recall)}
+     'remember {::wrapper-fn (toolkit-call toolkit-delegates 'my.kb/remember)}}})
+  (register-host-wrappers!
+   {::registry registry
+    ::lib 'my.kb.shared
+    ::wrappers
+    {'instructions
+     {::wrapper-fn
+      (toolkit-call toolkit-delegates 'my.kb.shared/instructions)}}})
+  (register-host-wrappers!
+   {::registry registry
+    ::lib 'my.skills
+    ::wrappers
+    {'list {::wrapper-fn (toolkit-call toolkit-delegates 'my.skills/list)}
+     'load {::wrapper-fn (toolkit-call toolkit-delegates 'my.skills/load)}
+     'unload {::wrapper-fn (toolkit-call toolkit-delegates 'my.skills/unload)}}})
   (register-host-wrappers!
    {::registry registry
     ::lib 'seon.render.canvas
@@ -707,6 +930,15 @@
   [form]
   (and (seq? form) (contains? '#{def defn defn-} (first form))))
 
+(defn- host-form
+  "Read one recorded block for the JVM with its source alias table intact."
+  [source ns-sym aliases]
+  (try
+    (binding [tools.reader/*alias-map* aliases
+              *ns* (or (find-ns ns-sym) (create-ns ns-sym))]
+      (tools.reader/read-string {:read-cond :allow :features #{:clj}} source))
+    (catch Throwable _ nil)))
+
 (defn- definition-blocks
   "Top-level definition blocks from the one tools.reader source read."
   [source ns-sym aliases]
@@ -716,7 +948,10 @@
                      (let [source (or (:source (meta form)) (pr-str form))]
                        {::block-name (str (second form))
                         ::source source
-                        ::host-source (some-> (record/read-host-form source)
+                        ;; The recorded source retains reader conditionals.
+                        ;; Re-read it for `:clj`, preserving the namespace's
+                        ;; alias table so `::db/db` cannot drift into `user`.
+                        ::host-source (some-> (host-form source ns-sym aliases)
                                               pr-str)}))))
         (record/read-forms {::record/source source
                             ::record/ns-sym ns-sym
@@ -939,6 +1174,95 @@
      ::blocks rows
      ::failures failures}))
 
+(def ^:private host-toolkit-bindings
+  {'my.plan
+   '#{active! blocked! document done! drop! list-open move! needs! next
+      plan! reconcile! reopen! status step! tree}
+   'my.kb '#{recall remember}
+   'my.kb.shared '#{instructions}
+   'my.skills '#{list load unload}})
+
+(def ^:private host-toolkit-implementation-namespaces
+  '#{my.plan.generation my.plan.internal my.plan
+     my.kb my.kb.shared my.skills})
+
+(defn- load-host-toolkit-bindings!
+  "Load the effectful toolkit closure, then reinstall its public host wrappers.
+
+   JVM database calls are synchronous, so the source vocabulary's unqualified
+   `await` is identity at this tier. Definitions load from the same alias-aware
+   source units as the portable base. A small fixed-point pass honors forward
+   declarations without inventing a second implementation."
+  [ctx registry delegates]
+  (doseq [namespace host-toolkit-implementation-namespaces]
+    (sci/eval-string* ctx
+                      (str "(in-ns '" namespace ")\n"
+                           "(def await identity)")))
+  (let [units (mapv source-unit (toolkit-source-files))
+        ordered (::ordered (dependency-order units))
+        candidates
+        (into []
+              (comp
+               (filter #(contains? host-toolkit-implementation-namespaces
+                                   (::namespace %)))
+               (mapcat
+                (fn [unit]
+                  (for [block (::blocks unit)
+                        :when (and (string? (::host-source block))
+                                   (not (pure-block? (::host-source block))))]
+                    [unit block]))))
+              ordered)
+        unresolved
+        (loop [pending candidates
+               previous-count nil]
+          (if (or (empty? pending) (= previous-count (count pending)))
+            pending
+            (let [failed
+                  (into []
+                        (keep
+                         (fn [[unit block :as candidate]]
+                           (try
+                             (sci/eval-string*
+                              ctx
+                              (str "(in-ns '" (::namespace unit) ")\n"
+                                   (::host-source block)))
+                             nil
+                             (catch Throwable _ candidate))))
+                        pending)]
+              (recur failed (count pending)))))
+        implementations
+        (into {}
+              (mapcat
+               (fn [[lib function-symbols]]
+                 (for [function-symbol function-symbols
+                       :let [qualified (symbol (str lib)
+                                               (str function-symbol))
+                             sci-var (sci/resolve ctx qualified)]
+                       :when sci-var]
+                   [qualified @sci-var])))
+              host-toolkit-bindings)
+        expected
+        (into #{}
+              (mapcat
+               (fn [[lib function-symbols]]
+                 (map #(symbol (str lib) (str %)) function-symbols)))
+              host-toolkit-bindings)
+        missing (remove #(contains? implementations %) expected)]
+    (when (seq missing)
+      (throw
+       (ex-info "The JVM host toolkit binding closure did not load."
+                {:seon.host/missing-toolkit-bindings (vec (sort missing))
+                 :seon.host/unresolved-toolkit-blocks
+                 (mapv (fn [[unit block]]
+                         (symbol (str (::namespace unit))
+                                 (::block-name block)))
+                       unresolved)})))
+    (reset! delegates implementations)
+    (doseq [lib (keys host-toolkit-bindings)]
+      (install-registered-wrappers!
+       {::registry registry ::ctx ctx ::lib lib}))
+    nil))
+
 (defn build-base!
   "Build the one shared base context for a host serving one cluster.
 
@@ -951,16 +1275,23 @@
   {:malli/schema [:=> [:cat ::writer] ::base]}
   [writer]
   (let [wrapper-registry (registry)
-        _ (register-host-capabilities! wrapper-registry writer)
+        toolkit-delegates (atom {})
+        _ (register-host-capabilities! wrapper-registry writer
+                                       toolkit-delegates)
         ctx (sci/init
              {:load-fn (registry-load-fn wrapper-registry writer)
               :namespaces {'clojure.core interrupt/clojure-core
                            'clojure.string interrupt/clojure-string}
+              :classes {'java.util.Date java.util.Date
+                        'java.lang.Long java.lang.Long
+                        'Long java.lang.Long}
               :interrupt-fn
               (fn []
                 (when-let [holder (::guard/holder (sci.ctx-store/get-ctx))]
                   ((::guard/check! holder))))})
         report (load-portable-slice! ctx wrapper-registry)
+        _ (load-host-toolkit-bindings! ctx wrapper-registry
+                                       toolkit-delegates)
         _ (stamp-shared-base-vars! ctx)]
     {::ctx ctx ::report report ::registry wrapper-registry}))
 
