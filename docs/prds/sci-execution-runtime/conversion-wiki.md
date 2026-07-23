@@ -814,3 +814,31 @@ the anchor stays the state ledger.
   consult process-global state, or perform async database acquisition inside
   `plan-execution` (`src/seon/db/protocol.cljc:242-250`,
   `src/seon/program/edge.cljc:65-83,483-529`).
+
+## Streaming and provider-descriptor verified-stop scars (2026-07-23)
+
+- **R36 reply policy must cross the durable attempt into the evaluator.**
+  Orthogonalizing transport behavior alone is incomplete. The JVM driver
+  currently hardcodes batch reply parsing
+  (`src/seon/agent/driver/host.clj:253-307`), and portable run accounting still
+  branches on legacy `:seon.config/repl-mode`
+  (`src/seon/agent/driver.cljc:107-122`). The claimant must freeze
+  `:seon.ai/reply-evaluation` on the attempt, the protected driver must pass
+  that value to the existing reply-program path, and run bounds must count
+  forms only for `:first-form`.
+- **Attribute-indexed reactive interest is not entity-specific interest.**
+  A transcript query can join an agent to its open attempt, but the current
+  dependency plan reduces that evidence to attributes. Adding
+  `:seon.ai.attempt/partial-text` therefore wakes every feed interested in the
+  attribute; equality suppression can hide the extra morph but does not prove
+  that another agent's feed avoided recomputation. The writer/dependency-plan
+  owner must provide an entity-scoped contract before the cross-agent
+  no-recompute falsifier can pass.
+- **A two-core provider descriptor needs an explicit local-worker
+  disposition.** The proposed `:openai-compat`/`:anthropic` descriptor enum
+  covers hosted providers, while `:diffusiongemma` and `:typeahead` still use
+  compiled local adapters. Deleting provider-ID dispatch without classifying
+  those adapters would either strand them or preserve a second registry while
+  claiming row-only extensibility. Settle whether descriptors are
+  frontier-only or admit local adapter cores before replacing the existing
+  dispatch mechanism.
