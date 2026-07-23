@@ -1031,7 +1031,9 @@ COMPLETELY before dispatching anything.
 - R47 APPLIED TO THE GUARD (owner catch, 2026-07-23 eve): 'fuel' is
   an invented metaphor for what is literally an interpreter STEP
   count at sci's :interrupt-fn safepoint — STEPBUDGET rename lane
-  dispatched (config facts → :seon.config.guard/*-step-budget;
+  dispatched, refined by owner: INTERPRETER-step budget ('step' alone
+  collides with agent-loop steps; config facts →
+  :seon.config.guard/*-interpreter-step-budget;
   internal counters → steps; steering says 'exceeded its step
   budget'; deadline/output-cap unchanged — already literal; history
   keeps its vocabulary; R38 makes the config-key rename
