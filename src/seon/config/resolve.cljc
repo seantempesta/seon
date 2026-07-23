@@ -6,6 +6,7 @@
             #?(:cljs [goog.string :as gstring])
             [malli.core :as m]
             [malli.transform :as mt]
+            [seon.ai.provider :as provider]
             [seon.content-hash :as content-hash]
             [seon.db.protocol :as protocol]
             [seon.schema :as schema]))
@@ -606,7 +607,8 @@
     [[:seon.ai/agent-provider
       {:optional true}
       [:enum inherit-error
-       :deepseek :anthropic :openai-compat :diffusiongemma :typeahead]]
+       :deepseek :kimi :zai :openrouter :gemini :anthropic :openai-compat
+       :diffusiongemma :typeahead]]
      [:seon.ai/agent-model
       {:optional true} [:string (assoc inherit-error :min 1)]]
      [:seon.ai/agent-temperature
@@ -946,6 +948,13 @@
     {:seon.db/value-type :db.type/ref}
     :seon.db/ref
     :seon.config/model-variant-entity]])
+(schema/register! :seon.config/provider-descriptors
+  [:vector
+   {:seon.db/component true}
+   [:or
+    {:seon.db/value-type :db.type/ref}
+    :seon.db/ref
+    :seon.ai.provider/descriptor]])
 
 ;; The singleton entity schema — every knob optional (a `{}` manifest seeds the
 ;; resolved defaults; `:seon.config/id` is the only required key).
@@ -956,6 +965,8 @@
    [:seon.config/repl-mode          {:optional true} :seon.config/repl-mode]
    [:seon.ai/wire-stream?           {:optional true} :seon.ai/wire-stream?]
    [:seon.ai/reply-evaluation       {:optional true} :seon.ai/reply-evaluation]
+   [:seon.config/provider-descriptors
+    {:optional true} :seon.config/provider-descriptors]
    [:seon.config.model-stream/partial-publish-settle-ms
     {:optional true}
     :seon.config.model-stream/partial-publish-settle-ms]
@@ -1117,6 +1128,8 @@
    [:seon.config/repl-mode     {:optional true} :seon.config/repl-mode]
    [:seon.ai/wire-stream?      {:optional true} :seon.ai/wire-stream?]
    [:seon.ai/reply-evaluation  {:optional true} :seon.ai/reply-evaluation]
+   [:seon.config/provider-descriptors
+    {:optional true} [:vector :seon.ai.provider/descriptor]]
    [:seon.config/model-stream  {:optional true} :seon.config/model-stream]
    [:seon.config/run           {:optional true} :seon.config/run]
    [:seon.config/execution     {:optional true} :seon.config/execution]
@@ -1812,6 +1825,10 @@
              (get model-stream
                   :seon.config.model-stream/partial-publish-settle-ms
                   400)
+             :seon.config/provider-descriptors
+             (vec
+              (or (:seon.config/provider-descriptors manifest)
+                  (vals provider/hosted-provider-descriptors)))
              :seon.config.run/batch-turn-limit
              (:seon.config.run/batch-turn-limit run)
              :seon.config.run/stream-form-limit

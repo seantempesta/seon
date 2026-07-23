@@ -8,21 +8,19 @@
 (def ^:private known-completion-keys
   #{:choices :usage :id :object :created :model :system_fingerprint})
 
-(defn- openai-compat?
-  [resolution]
-  (= :openai-compat
-     (get-in resolution [:seon.ai/resolved-config :seon.ai/provider])))
-
 (defn request-params
   "Build OpenAI chat-completion wire data from one frozen resolution."
   {:malli/schema
    [:=> [:catn [::request :map] [::resolution :map]] :map]}
   [{:seon.ai/keys [ctx model temperature max-tokens tools tool-choice stream?]
     :as request}
-   resolution]
+  resolution]
   (let [config (:seon.ai/resolved-config resolution)
+        descriptor (ai/resolved-provider-descriptor config)
+        thinking-policy (:seon.ai.provider/thinking-policy descriptor)
+        stream-options-policy
+        (:seon.ai.provider/stream-options-policy descriptor)
         thinking (ai/thinking-mode config)
-        compatible? (openai-compat? resolution)
         temperature* (or temperature (:seon.ai/temperature config))
         tools* (or tools (:seon.ai/tools config))
         choice* (or tool-choice (:seon.ai/tool-choice config))
@@ -40,15 +38,20 @@
              (or max-tokens (:seon.ai/max-tokens config)))
 
       stream?
-      (assoc :stream true :stream_options {:include_usage true})
+      (assoc :stream true)
+
+      (and stream?
+           (= :openai-include-usage stream-options-policy))
+      (assoc :stream_options {:include_usage true})
 
       (some? temperature*)
       (assoc :temperature temperature*)
 
-      (not compatible?)
+      (= :deepseek-thinking-toggle thinking-policy)
       (assoc :thinking {:type (if thinking "enabled" "disabled")})
 
-      (string? thinking)
+      (and (= :openai-reasoning-effort thinking-policy)
+           (string? thinking))
       (assoc :reasoning_effort thinking)
 
       (some? tools*)
@@ -190,6 +193,7 @@
   [request native-request!]
   (let [resolution (:seon.ai/config-resolution request)
         config (:seon.ai/resolved-config resolution)
+        descriptor (ai/resolved-provider-descriptor config)
         stream? (boolean (:seon.ai/stream? request))
         reply-evaluation (:seon.ai/reply-evaluation request)
         result
@@ -199,8 +203,10 @@
           :seon.ai.http/credential-candidates
           (ai/credential-candidates resolution)
           :seon.ai.http/config-resolution resolution
-          :seon.ai.http/credential-header "Authorization"
-          :seon.ai.http/credential-prefix "Bearer "
+          :seon.ai.http/credential-header
+          (:seon.ai.provider/credential-header descriptor)
+          :seon.ai.http/credential-prefix
+          (:seon.ai.provider/credential-prefix descriptor)
           :seon.ai.http/headers {"Content-Type" "application/json"
                                  "Accept" (if stream?
                                             "text/event-stream"

@@ -3,12 +3,13 @@
   (:require
    #?(:clj [clojure.test :refer [deftest is testing]]
       :cljs [cljs.test :refer-macros [deftest is testing]])
+   [seon.ai.core :as ai]
    [seon.ai.openai-compat.core :as openai]
    [seon.ai.provider :as provider]
    [seon.schema :as schema]))
 
 (def ^:private expected-hosted-providers
-  #{:deepseek :kimi :zai :openrouter :anthropic :gemini})
+  #{:deepseek :openai-compat :kimi :zai :openrouter :anthropic :gemini})
 
 (deftest hosted-descriptors-are-valid-identified-data
   (is (= expected-hosted-providers
@@ -78,20 +79,19 @@
          :seon.ai.provider.usage/output-field :completion_tokens
          :seon.ai.provider.usage/total-field :total_tokens}
         resolution
-        {:seon.ai/resolved-config
-         {:seon.ai/provider
-          (:seon.ai.provider/adapter-core descriptor)
-          :seon.ai/model
-          (:seon.ai.provider/default-model descriptor)
-          :seon.ai/max-tokens
-          (:seon.ai.provider/default-max-tokens descriptor)
-          :seon.ai/completion-limit-field
-          (:seon.ai.provider/completion-limit-field descriptor)
-          :seon.ai/base-url
-          (:seon.ai.provider/default-base-url descriptor)}}]
+        (ai/resolved-config-from-rows
+         {}
+         {:seon.config/provider-descriptors [descriptor]}
+         {:seon.ai/agent-provider :fictitious}
+         60000)]
     (is (schema/valid-candidate-value?
          :seon.ai.provider/descriptor
          descriptor))
+    (is (= :fictitious
+           (get-in resolution
+                   [:seon.ai/resolved-config :seon.ai/provider])))
+    (is (= :openai-compat
+           (ai/resolved-adapter (:seon.ai/resolved-config resolution))))
     (is (= {:model "fiction-1"
             :messages [{:role "system" :content "System."}
                        {:role "user" :content "Return one form."}]

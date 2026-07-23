@@ -366,8 +366,12 @@
 (schema/register! ::agent-fallback-variant :seon.config/model-variant)
 (schema/register!
  ::agent-config
- [:map {:seon.db/entity true}
+  [:map {:seon.db/entity true}
   [:seon.agent/id :seon.agent/id]
+  [:seon.config/repl-mode {:optional true} :seon.config/repl-mode]
+  [:seon.ai/wire-stream? {:optional true} :seon.ai/wire-stream?]
+  [:seon.ai/reply-evaluation
+   {:optional true} :seon.ai/reply-evaluation]
   [::agent-provider {:optional true} ::agent-provider]
   [::agent-model {:optional true} ::agent-model]
   [::agent-temperature {:optional true} ::agent-temperature]
@@ -415,6 +419,10 @@
   [s]
   (case s
     "deepseek"      :deepseek
+    "kimi"          :kimi
+    "zai"           :zai
+    "openrouter"    :openrouter
+    "gemini"        :gemini
     "anthropic"     :anthropic
     "openai-compat" :openai-compat
     "diffusiongemma" :diffusiongemma

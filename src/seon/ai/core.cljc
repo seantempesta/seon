@@ -4,6 +4,7 @@
    [clojure.string :as str]
    #?(:clj [clojure.edn :as reader]
       :cljs [cljs.reader :as reader])
+   [seon.ai.provider :as provider]
    [seon.content-hash :as content-hash]
    [seon.repl.parse :as repl.parse]
    [seon.schema :as schema])
@@ -55,16 +56,25 @@
 (def system-boundary
   "\n\n;; ──────── ↑ system message  │  ↓ context (:seon.ai/ctx) ────────\n\n")
 
+(defn resolved-provider-descriptor
+  "Hosted descriptor embedded in, or selected by, one resolved configuration."
+  [config]
+  (or (get-in config
+              [:seon.ai/provider-descriptor])
+      (get provider/hosted-provider-descriptors
+           (:seon.ai/provider config))))
+
 (defn resolved-adapter
   "Provider adapter keyword for one immutable resolved configuration."
   [config]
-  (case (:seon.ai/provider config)
-    :anthropic :anthropic
-    :diffusiongemma (if (= :control (:seon.ai/dg-backend config))
-                      :diffusiongemma
-                      :openai-compat)
-    :typeahead :typeahead
-    :openai-compat))
+  (or (:seon.ai.provider/adapter-core
+       (resolved-provider-descriptor config))
+      (case (:seon.ai/provider config)
+        :diffusiongemma (if (= :control (:seon.ai/dg-backend config))
+                          :diffusiongemma
+                          :openai-compat)
+        :typeahead :typeahead
+        nil)))
 
 (defn bounded-evidence-error
   "Bound an evidence error using one resolved positive cap."
@@ -205,6 +215,7 @@
          :seon.config.llm-retry/maximum-wait-ms
          :seon.config.llm-retry/maximum-total-wait-ms
          :seon.config.llm-retry/default-retries
+         {:seon.config/provider-descriptors ['*]}
          {:seon.config/model-variants ['*]}]
         (concat config-attrs model-transport-cap-attrs)))
 
@@ -373,7 +384,19 @@
                  [::attempt-timeout-ms :int]]
     :map]}
   [shipped-defaults config-row agent-row attempt-timeout-ms]
-  (let [transport-caps
+  (let [descriptors
+        (provider/descriptors-by-id
+         (or (seq (:seon.config/provider-descriptors config-row))
+             (vals provider/hosted-provider-descriptors)))
+        descriptor-defaults
+        (into {}
+              (map (fn [[provider-id descriptor]]
+                     [provider-id
+                      (provider/descriptor-defaults descriptor)]))
+              descriptors)
+        shipped-defaults
+        (merge-with merge shipped-defaults descriptor-defaults)
+        transport-caps
         (into {}
               (keep (fn [attr]
                       (when (contains? config-row attr)
@@ -395,11 +418,25 @@
             (assoc :seon.ai/agent-attempt-timeout-ms
                    (or (:seon.ai/agent-attempt-timeout-ms row)
                        attempt-timeout-ms))))
-        primary (provider-resolution agent-row)
+        attach-descriptor
+        (fn [resolution]
+          (let [provider-id
+                (get-in resolution
+                        [:seon.ai/resolved-config :seon.ai/provider])]
+            (if-let [descriptor (get descriptors provider-id)]
+              (-> resolution
+                  (assoc-in [:seon.ai/resolved-config
+                             :seon.ai/provider-descriptor]
+                            descriptor)
+                  (assoc-in [:seon.ai/provenance
+                             :seon.ai/provider-descriptor]
+                            :config-row))
+              resolution)))
+        primary (attach-descriptor (provider-resolution agent-row))
         fallback-variant (:seon.ai/agent-fallback-variant agent-row)
         fallback-row (get (model-variants config-row) fallback-variant)]
     (cond-> primary
       (and (keyword? fallback-variant) (map? fallback-row))
       (assoc :seon.ai/fallback-variant fallback-variant
              :seon.ai/fallback-config-resolution
-             (provider-resolution fallback-row)))))
+             (attach-descriptor (provider-resolution fallback-row))))))

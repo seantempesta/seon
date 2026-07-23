@@ -203,6 +203,17 @@
      :seon.ai.provider.usage/cached-parent-field :prompt_tokens_details
      :seon.ai.provider.usage/cached-nested-field :cached_tokens})
 
+   :openai-compat
+   (openai-row
+    :openai-compat
+    {:seon.ai.provider/default-base-url "https://api.deepseek.com/v1"
+     :seon.ai.provider/default-api-key-env "SEON_AI_API_KEY"
+     :seon.ai.provider/default-model "deepseek-v4-pro"
+     :seon.ai.provider/default-max-tokens 4096
+     :seon.ai.provider/completion-limit-field :max-tokens
+     :seon.ai.provider/thinking-policy :omit
+     :seon.ai.provider/stream-options-policy :openai-include-usage})
+
    :kimi
    (openai-row
     :kimi
@@ -295,7 +306,39 @@
      :seon.ai.provider/quirks
      #{:usage-on-content-chunks
        :beta-openai-compatibility
-     :native-generate-content-is-a-different-core}})})
+       :native-generate-content-is-a-different-core}})})
+
+(defn descriptor-defaults
+  "Translate one hosted descriptor into the existing resolved-config fields.
+
+   Provider identity remains metadata; transport dispatch reads adapter-core
+   from the embedded descriptor."
+  [descriptor]
+  (cond->
+   {:seon.ai/base-url
+    (:seon.ai.provider/default-base-url descriptor)
+    :seon.ai/api-key-env
+    (:seon.ai.provider/default-api-key-env descriptor)}
+    (:seon.ai.provider/default-model descriptor)
+    (assoc :seon.ai/model
+           (:seon.ai.provider/default-model descriptor))
+    (:seon.ai.provider/default-temperature descriptor)
+    (assoc :seon.ai/temperature
+           (:seon.ai.provider/default-temperature descriptor))
+    (:seon.ai.provider/default-max-tokens descriptor)
+    (assoc :seon.ai/max-tokens
+           (:seon.ai.provider/default-max-tokens descriptor))
+    (:seon.ai.provider/default-thinking descriptor)
+    (assoc :seon.ai/thinking
+           (:seon.ai.provider/default-thinking descriptor))
+    (:seon.ai.provider/completion-limit-field descriptor)
+    (assoc :seon.ai/completion-limit-field
+           (:seon.ai.provider/completion-limit-field descriptor))))
+
+(defn descriptors-by-id
+  "Index acquired descriptor rows by their identity attribute."
+  [descriptors]
+  (into {} (map (juxt :seon.ai.provider/id identity)) descriptors))
 
 (defn frontier-provider?
   "True when `provider` is a hosted frontier LLM, not a local worker."

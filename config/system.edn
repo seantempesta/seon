@@ -388,7 +388,7 @@
  ;; never changes the cluster default or an existing namespace resident.
  :seon.config/model-variants
  {:planning
-  {:seon.ai/agent-provider :openai-compat
+  {:seon.ai/agent-provider :kimi
    :seon.ai/wire-stream? true
    :seon.ai/reply-evaluation :batch
    :seon.ai/agent-model "kimi-k3"

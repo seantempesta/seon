@@ -221,10 +221,10 @@
   "JVM claimant LLM transport installed on the driver host map."
   {:malli/schema [:=> [:catn [::request :map]] :map]}
   [request]
-  (case (get-in request
-                [:seon.ai/config-resolution
-                 :seon.ai/resolved-config
-                 :seon.ai/provider])
+  (case (ai/resolved-adapter
+         (get-in request
+                 [:seon.ai/config-resolution
+                  :seon.ai/resolved-config]))
     :anthropic (anthropic/complete request request!)
-    (:deepseek :openai-compat) (openai/complete request request!)
+    :openai-compat (openai/complete request request!)
     (failure "The JVM LLM HTTP leaf does not support the resolved provider.")))
