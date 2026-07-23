@@ -180,7 +180,9 @@
 
 (def ^:private default-codec-worker-queue-capacity 256)
 (def ^:private default-shutdown-timeout-ms 5000)
-(def ^:private default-maximum-input-bytes (* 32 1024 1024))
+; R40 (2026-07-23): 128 MiB — must stay >= the protocol frame bound (64 MiB)
+; so a legal frame can never exceed connection input; pure runaway breaker.
+(def ^:private default-maximum-input-bytes (* 128 1024 1024))
 (def ^:private default-maximum-response-slots 256)
 (def ^:private default-maximum-session-response-slots 64)
 (def ^:private default-maximum-output-bytes (* 256 1024 1024))
