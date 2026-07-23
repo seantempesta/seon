@@ -1773,7 +1773,7 @@
   {:malli/schema [:=> [:cat ::writer :map] :map]}
   [writer {eval-id :seon.eval/id
            ::keys [envelope at duration-ms source narration ns-sym
-                   agent-id forms var-meta new-schema-keys output
+                   agent-id forms var-meta new-schema-keys output resolution
                    database-edn-cap]}]
   (let [program-tx-data
         (when (:seon.eval/ok? envelope)
@@ -1781,6 +1781,7 @@
            {::record/forms (or forms [])
             ::record/source source
             ::record/ns-sym ns-sym
+            ::record/resolution resolution
             ::record/var-meta (or var-meta {})
             ::record/new-schema-keys (or new-schema-keys #{})
             ::record/at at}))

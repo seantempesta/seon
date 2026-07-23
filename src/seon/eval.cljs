@@ -69,6 +69,7 @@
             [seon.error.instrument :as einstrument]
             [seon.instrument :as instrument]
             [seon.platform :as platform]
+            [seon.program.edge :as edge]
             [seon.render.value :as value]
             [seon.repl.parse.repair :as repair]
             [seon.repl.parse :as internal]
@@ -3427,10 +3428,37 @@
          ::stored-source stored-source
          ::source-process source-process}))))
 
+(defn- function-edge-tx
+  [tee-entities analysis-resolution keyword-resolution]
+  (into []
+        (mapcat
+         (fn [entity]
+           (when-let [function-symbol
+                      (and (map? entity) (:seon.fn/sym entity))]
+             (when-let [form
+                        (first
+                         (or (read-all-forms
+                              (:seon.fn/source entity)
+                              keyword-resolution)
+                             []))]
+               (edge/transition-tx
+                (edge/analyze-function
+                 (cond->
+                  {::edge/function-symbol function-symbol
+                   ::edge/form form
+                   ::edge/resolution analysis-resolution}
+                   (get (::edge/effects analysis-resolution)
+                        (symbol function-symbol))
+                   (assoc
+                    ::edge/function-effect
+                    (get (::edge/effects analysis-resolution)
+                         (symbol function-symbol))))))))))
+        tee-entities))
+
 (defn- compile-eval-tee
   "Compile one complete eval program transaction from frozen and acquired data."
   [{::keys [tee-entities schemas-after old-projection changed-schemas source
-            ending-ns require-edges result pending?]}
+            ending-ns require-edges analysis-resolution result pending?]}
    acquired]
   (let [tee-entities
         (reject-core-overrides
@@ -3491,13 +3519,16 @@
                      (:seon.fn/source entity)
                      keyword-resolution)))))
               tee-entities)
+        edge-tx
+        (function-edge-tx
+         tee-entities analysis-resolution keyword-resolution)
         require-declaration-tx
         (when namespace
           (require-decl-tx namespace source
                            (::stored-source acquired)
                            (::source-process acquired)))]
     {::tee (vec (concat tee-entities require-edge-tx
-                        require-declaration-tx read-attribute-tx))
+                        require-declaration-tx edge-tx read-attribute-tx))
      ::result result
      ::pending? pending?
      ::candidate-outcome candidate-outcome
@@ -4391,6 +4422,9 @@
               require-edges
               (when (and (::ok? result) (symbol? ending-ns))
                 (analyzer-info/ns-require-edges compile-state ending-ns))
+              analysis-resolution
+              (when (and (::ok? result) (symbol? ending-ns))
+                (analyzer-info/analysis-resolution compile-state ending-ns))
               frozen
               {::tee-entities (vec tee-entities)
                ::schemas-after (schema/snapshot)
@@ -4399,6 +4433,7 @@
                ::source source
                ::ending-ns ending-ns
                ::require-edges (or require-edges #{})
+               ::analysis-resolution analysis-resolution
                ::result result
                ::result-framing result-framing
                ::pending? pending?

@@ -100,6 +100,35 @@
   (is (= #{} (ai/ns-require-edges (atom {:cljs.analyzer/namespaces {}}) 'no.such))
       "unknown / never-eval'd ns yields the empty edge set"))
 
+(deftest analysis-resolution-retains-alias-refer-and-effects
+  (let [compile-state
+        (atom
+         {:cljs.analyzer/namespaces
+          {'fixture.edge
+           {:requires {'db 'seon.db, 'seon.db 'seon.db}
+            :uses {'fetch 'seon.agent.web}
+            :defs {'subject {:fn-var true :meta {}}
+                   'helper {:fn-var true
+                            :meta {:seon.capability/effect :pure}}}}
+           'cljs.core
+           {:defs {'keyword {:fn-var true
+                            :meta {:seon.capability/effect :pure}}}}
+           'seon.agent.web
+           {:defs {'fetch {:fn-var true
+                          :meta {:seon.capability/effect :external}}}}}})
+        resolution (ai/analysis-resolution compile-state 'fixture.edge)]
+    (is (= {'db 'seon.db} (:seon.program.edge/aliases resolution)))
+    (is (= {'fetch 'seon.agent.web/fetch}
+           (:seon.program.edge/refers resolution)))
+    (is (= #{'subject 'helper}
+           (:seon.program.edge/current-vars resolution)))
+    (is (= :pure
+           (get (:seon.program.edge/effects resolution)
+                'clojure.core/keyword)))
+    (is (= :external
+           (get (:seon.program.edge/effects resolution)
+                'seon.agent.web/fetch)))))
+
 (deftest source-require-edges-match-the-structural-edge-contract
   (let [edges (ns.source/require-edges-from-source
                 "(ns my.probe (:require [seon.db :as db]

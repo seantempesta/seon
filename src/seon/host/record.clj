@@ -21,6 +21,7 @@
             [malli.core :as m]
             [seon.ai.tokens :as tokens]
             [seon.content-hash :as content-hash]
+            [seon.program.edge :as edge]
             [seon.schema :as schema]
             [seon.schema.form :as schema.form]))
 
@@ -29,6 +30,7 @@
 (schema/register! ::source :string)
 (schema/register! ::ns-sym :symbol)
 (schema/register! ::aliases [:map-of :symbol :symbol])
+(schema/register! ::resolution ::edge/resolution)
 (schema/register! ::forms [:vector :any])
 
 ;;; ---------------------------------------------------------------------------
@@ -423,12 +425,13 @@
   {:malli/schema [:=> [:cat [:map [::forms ::forms]
                              [::source ::source]
                              [::ns-sym ::ns-sym]
+                             [::resolution {:optional true} ::resolution]
                              [::var-meta {:optional true} :map]
                              [::new-schema-keys
                               [:set :qualified-keyword]]
                              [::at :inst]]]
                   [:vector :any]]}
-  [{::keys [forms source ns-sym var-meta new-schema-keys at]}]
+  [{::keys [forms source ns-sym resolution var-meta new-schema-keys at]}]
   (let [defn? (and (single-defn? forms)
                    (not (contains? transient-ns-syms ns-sym)))
         fn-rows (when defn?
@@ -437,10 +440,35 @@
                             ::ns-sym ns-sym
                             ::source source
                             ::at at})])
+        resolution
+        (or resolution
+            {::edge/namespace ns-sym
+             ::edge/aliases {}
+             ::edge/refers {}
+             ::edge/current-vars
+             (cond-> #{}
+               (first fn-rows)
+               (conj (symbol (name (symbol
+                                    (:seon.fn/sym (first fn-rows)))))))
+             ::edge/core-vars #{}
+             ::edge/known-namespaces #{ns-sym}
+             ::edge/macro-symbols #{}
+             ::edge/effects {}})
         read-attr-ops (when defn?
                         (fn-read-attrs-tx
                          (:seon.fn/sym (first fn-rows))
                          (source-qualified-kws forms)))
+        edge-ops
+        (when defn?
+          (edge/transition-tx
+           (edge/analyze-function
+            (cond-> {::edge/function-symbol
+                     (:seon.fn/sym (first fn-rows))
+                     ::edge/form (first forms)
+                     ::edge/resolution resolution}
+              (:seon.capability/effect var-meta)
+              (assoc ::edge/function-effect
+                     (:seon.capability/effect var-meta))))))
         declared-ns (ns-declaration forms)
         declared-ns (when-not (contains? transient-ns-syms declared-ns)
                       declared-ns)
@@ -454,5 +482,6 @@
     (vec (concat ns-rows
                  fn-rows
                  (omitted-fn-projection-retractions (vec fn-rows))
+                 edge-ops
                  read-attr-ops
                  schema-rows))))

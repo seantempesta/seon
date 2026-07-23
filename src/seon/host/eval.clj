@@ -12,6 +12,7 @@
             [seon.host.record :as record]
             [seon.host.sample :as sample]
             [seon.host.session :as session]
+            [seon.program.edge :as edge]
             [seon.repl.parse.repair :as repair]
             [seon.schema :as schema])
   (:import [java.io Writer]))
@@ -39,6 +40,60 @@
 
 (defn- entry-source [entry]
   (or (:seon.repl/eval-source entry) (:seon.repl/source entry)))
+
+(defn- sci-var-symbol [value]
+  (when (instance? sci.lang.Var value)
+    (sci/var->symbol value)))
+
+(defn- source-effect [target sci-var]
+  (or (:seon.capability/effect (meta sci-var))
+      (when-let [host-ns (some-> target namespace symbol find-ns)]
+        (some-> (ns-resolve host-ns (symbol (name target)))
+                meta
+                :seon.capability/effect))))
+
+(defn- namespace-resolution [ctx ns-sym]
+  (let [namespaces (:namespaces @(:env ctx))
+        current (get namespaces ns-sym)
+        entries
+        (for [[_ namespace-map] namespaces
+              [_ value] namespace-map
+              :let [target (sci-var-symbol value)]
+              :when target]
+          [target value])]
+    {::edge/namespace ns-sym
+     ::edge/aliases (into {} (:aliases current))
+     ::edge/refers
+     (into {}
+           (keep (fn [[local value]]
+                   (when-let [target (sci-var-symbol value)]
+                     [local target])))
+           (:refers current))
+     ::edge/current-vars
+     (into #{}
+           (keep (fn [[local value]]
+                   (when (and (symbol? local) (sci-var-symbol value))
+                     local)))
+           current)
+     ::edge/core-vars
+     (into #{}
+           (keep (fn [[local value]]
+                   (when (and (symbol? local) (sci-var-symbol value))
+                     local)))
+           (get namespaces 'clojure.core))
+     ::edge/known-namespaces
+     (into #{} (filter symbol?) (keys namespaces))
+     ::edge/macro-symbols
+     (into #{}
+           (keep (fn [[target value]]
+                   (when (:macro (meta value)) target)))
+           entries)
+     ::edge/effects
+     (into {}
+           (keep (fn [[target value]]
+                   (when-let [effect (source-effect target value)]
+                     [target effect])))
+           entries)}))
 
 (defn classified-error-value
   "Classify one SCI throwable as an execution error value."
@@ -414,10 +469,13 @@
                                         (schema/commit-registration-delta!
                                           schema-delta)
                                         #{})
+                      resolution (when (= :form kind)
+                                   (namespace-resolution ctx current-ns))
                       forms (if (= :form kind)
                               (record/read-forms
                                {::record/source source
-                                ::record/ns-sym current-ns})
+                                ::record/ns-sym current-ns
+                                ::record/aliases (::edge/aliases resolution)})
                               [])
                       var-meta (::var-meta raw-envelope)
                       live-value (::live-value raw-envelope)
@@ -437,6 +495,7 @@
                           ::context/source source
                           ::context/narration narration
                           ::context/ns-sym current-ns
+                          ::context/resolution resolution
                           ::context/agent-id agent-id
                           ::context/forms forms
                           ::context/var-meta var-meta

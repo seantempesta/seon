@@ -24,6 +24,7 @@
    research note's reference impl is wrong on that point."
   (:require [malli.core :as m]
             [seon.ns.source :as ns.source]
+            [seon.program.edge :as edge]
             [seon.schema :as schema]))
 
 ;;; ---------------------------------------------------------------------------
@@ -84,12 +85,73 @@
            (:doc m)
            (:private m)
            (:malli/schema m)
+           (:seon.capability/effect m)
            ;; `:test` meta — cljs.test/deftest puts the test body fn
            ;; here. Each eval makes a fresh fn object → fresh identity-
            ;; hash. Including it means re-deftest tees a fresh
            ;; :seon.test row (Phase 4 mvp-completion-plan 2026-05-27).
            ;; For non-test defs `:test` is nil; doesn't affect digest.
            (:test m)])))
+
+(defn- canonical-analysis-symbol [ns-sym sym]
+  (let [target (if (qualified-symbol? sym)
+                 sym
+                 (symbol (str ns-sym) (name sym)))]
+    (if (= "cljs.core" (namespace target))
+      (symbol "clojure.core" (name target))
+      target)))
+
+(defn analysis-resolution
+  "Return immutable symbol-resolution facts for one analyzer namespace."
+  {:malli/schema [:=> [:cat ::compile-state :symbol] ::edge/resolution]}
+  [compile-state ns-sym]
+  (let [namespaces (:cljs.analyzer/namespaces @compile-state)
+        ns-info (get namespaces ns-sym)
+        requires (:requires ns-info)
+        uses (:uses ns-info)
+        aliases
+        (into {}
+              (keep (fn [[alias target]]
+                      (when (not= alias target) [alias target])))
+              requires)
+        aliases (into aliases (or (:as-aliases ns-info) {}))
+        refers
+        (into {}
+              (map (fn [[local target-ns]]
+                     [local (canonical-analysis-symbol target-ns local)]))
+              uses)
+        core-defs (:defs (get namespaces 'cljs.core))
+        var-entries
+        (for [[target-ns target-info] namespaces
+              :when (symbol? target-ns)
+              [local var-map] (:defs target-info)
+              :when (simple-symbol? local)
+              :let [target (canonical-analysis-symbol target-ns local)
+                    var-meta (:meta var-map)]]
+          [target var-map var-meta])]
+    {::edge/namespace ns-sym
+     ::edge/aliases aliases
+     ::edge/refers refers
+     ::edge/current-vars
+     (into #{} (filter simple-symbol?) (keys (:defs ns-info)))
+     ::edge/core-vars
+     (into #{} (filter simple-symbol?) (keys core-defs))
+     ::edge/known-namespaces
+     (into #{} (filter symbol?) (keys namespaces))
+     ::edge/macro-symbols
+     (into #{}
+           (keep (fn [[target var-map var-meta]]
+                   (when (or (:macro var-map) (:macro var-meta))
+                     target)))
+           var-entries)
+     ::edge/effects
+     (into {}
+           (keep (fn [[target var-map var-meta]]
+                   (when-let [effect
+                              (or (:seon.capability/effect var-meta)
+                                  (:seon.capability/effect var-map))]
+                     [target effect])))
+           var-entries)}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Public API
