@@ -631,3 +631,31 @@ the anchor stays the state ledger.
   protected resource, and the exact key surfaced when the limit is absent or
   fires. This applies equally to retry waits, capability defaults, parser
   ceilings, and JVM claimant invocation bounds.
+
+## U7 render and ctx portability scars (2026-07-23)
+
+- **Classify a stored symbol before resolving it.** A trusted renderer lookup
+  is a literal compiled symbol-to-function table. An authored symbol enters
+  only the injected guarded SCI door. Never try a dynamic lookup first and
+  classify the result afterward: a hostile core-looking symbol would inherit
+  unguarded compiled authority.
+- **A guard steering error is the render-slot value.** Do not stringify
+  `:budget`/`:timeout` into ordinary prose inside the walker. Carry the flat
+  error value through the slot so the caller retains kind, config key, fuel,
+  and invocation-class evidence; view formatting happens outside the door.
+- **Port config reads as reads of the threaded singleton.** The JVM render
+  path reads immutable configuration map facts with the same shipped defaults.
+  A CLJS compatibility call may retain the existing accessor for redefinition
+  tests, but no promoted namespace may require the pod-only config authority
+  on the JVM.
+- **A promoted helper must pass the production JVM classpath, not only a test
+  alias.** `seon.repl.parse` is `.cljc`, but its rewrite-clj dependency is not
+  in the writer production alias. The scratch-definition predicate therefore
+  belongs beside the already-portable namespace-source reader. The failed
+  production require was useful evidence that a filename suffix is not a
+  portability proof.
+- **One `.cljc` assertion is the cross-runtime byte oracle.** Run the same
+  core block, same ordinary database value, and same expected string under
+  Shadow and the writer test runner. Pair it with fresh JVM require gates and
+  the existing nonempty stage-5 context-byte gate; none substitutes for the
+  others.
