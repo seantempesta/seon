@@ -545,6 +545,16 @@ COMPLETELY before dispatching anything.
   stay P4/P5; spec tmp/orchestrator/p2-planner-spec.md). CHECKPOINT
   fires when the streaming lane returns (P2 is file-disjoint and may
   span it; its gates are localized).
+- P2 stop RULED (2026-07-23 PM): the pure planner takes a FIFTH
+  input — :seon.execution/planning-projection, basis-fenced to the
+  db-value (edge bundles + terminal connections, graph digest,
+  schema projection + fingerprint, inventories); the impure
+  acquisition builder (acquire-planning-projection) is the ONLY
+  query site, beside the planner — acquire-then-derive, the bound
+  committed projection precedent. P1 completeness gap granted to
+  P2: function→terminal connection rows so persisted bundles
+  reconstruct (digest-equality regression). Streaming lane observed
+  landing the no-history facet (1c8a5d2f1) mid-flight.
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
