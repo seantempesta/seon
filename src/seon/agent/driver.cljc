@@ -98,27 +98,40 @@
      {:seon.agent.turn/reply-blob [:my.blob/hash]}
      {:seon.agent.turn/llm-attempts
       [:db/id :seon.ai.attempt/id :seon.ai.attempt/ordinal
-       :seon.ai.attempt/outcome :seon.ai.attempt/deadline-at]}
+       :seon.ai.attempt/outcome :seon.ai.attempt/deadline-at
+       :seon.ai.attempt/reply-evaluation]}
      {:seon.agent.turn/evals
       [:seon.eval/id :seon.eval/source :seon.eval/status :seon.eval/ok?
        :seon.eval/progress? :seon.eval/result-edn :seon.eval/output
        :seon.eval/error :seon.eval/error-data :seon.eval/ns]}]}])
 
 (def ^:private claim-policy-selector
-  [:seon.config.watchdog/stale-ms :seon.config/repl-mode])
+  [:seon.config.watchdog/stale-ms])
 
-(defn- work-count [run repl-mode]
+(defn- turn-reply-evaluation [turn]
+  (->> (:seon.agent.turn/llm-attempts turn)
+       (filter #(= :success (:seon.ai.attempt/outcome %)))
+       (sort-by :seon.ai.attempt/ordinal)
+       last
+       :seon.ai.attempt/reply-evaluation))
+
+(defn- work-count [run]
   (let [turns (->> (:seon.agent.turn/_run run)
                    (remove :seon.agent.turn/scheduled?)
                    (filter #(= :done (:seon.agent.turn/status %))))]
-    (if (= :stream repl-mode)
-      (reduce + 0 (map #(count (:seon.agent.turn/evals %)) turns))
-      (count turns))))
+    (reduce
+     (fn [work-total turn]
+       (+ work-total
+          (if (= :first-form (turn-reply-evaluation turn))
+            (count (:seon.agent.turn/evals turn))
+            1)))
+     0
+     turns)))
 
-(defn- close-reason [run policy now]
+(defn- close-reason [run _policy now]
   (cond
     (and (int? (:seon.agent.run/turn-limit run))
-         (>= (work-count run (:seon.config/repl-mode policy))
+         (>= (work-count run)
              (:seon.agent.run/turn-limit run)))
     :turn-limit
 

@@ -3,6 +3,7 @@
   (:require
    #?(:clj [clojure.test :refer [deftest is testing]]
       :cljs [cljs.test :refer [deftest is testing]])
+   [seon.agent.driver :as driver]
    [seon.agent.loop.core :as loop.core]
    [seon.agent.run.core :as run.core]
    [seon.agent.turn.core :as turn.core]
@@ -177,3 +178,31 @@
                    assoc :seon.eval/progress? true)]
     (is (= 3 (loop.core/no-progress-streak repeated)))
     (is (zero? (loop.core/no-progress-streak progressed)))))
+
+#?(:clj
+   (deftest run-accounting-is-orthogonal-to-wire-streaming
+     (let [run
+           (assoc base-run
+                  :seon.agent.run/turn-limit 2
+                  :seon.agent.turn/_run
+                  [{:seon.agent.turn/status :done
+                    :seon.agent.turn/llm-attempts
+                    [{:seon.ai.attempt/ordinal 0
+                      :seon.ai.attempt/outcome :success
+                      :seon.ai.attempt/reply-evaluation :first-form}]
+                    :seon.agent.turn/evals
+                    [{:seon.eval/id "eval-1"}
+                     {:seon.eval/id "eval-2"}]}])
+           close-reason #'driver/close-reason]
+       (is (= :turn-limit
+              (close-reason run {} now)))
+       (is (nil?
+            (close-reason
+             (assoc-in
+              run
+              [:seon.agent.turn/_run 0
+               :seon.agent.turn/llm-attempts 0
+               :seon.ai.attempt/reply-evaluation]
+              :batch)
+             {}
+             now))))))
