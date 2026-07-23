@@ -833,6 +833,7 @@
              pure-predicate-symbols]))]
     {:seon.schema.projection/forms forms
      :seon.schema.projection/registry registry
+     :seon.schema.projection/compile-options options
      :seon.schema.projection/schema-admissions schema-admissions
      :seon.schema.projection/function-admissions function-admissions
      :seon.schema.projection/pure-predicate-symbols pure-predicate-symbols

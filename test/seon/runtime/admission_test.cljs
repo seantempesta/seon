@@ -10,6 +10,7 @@
     [seon.agent.schedule :as schedule]
     [seon.db :as db]
     [seon.db.id :as db.id]
+    [seon.db.protocol :as protocol]
     [seon.error :as error]
     [seon.instrument :as instrument]
     [seon.runtime.admission :as admission]
@@ -657,6 +658,38 @@
            (get-in projection
                    [:seon.schema.projection/function-contracts
                     'probe.entity/find])))))
+
+(deftest committed-core-predicate-resolves-during-client-reconstruction
+  (let [core-transaction
+        {:seon.db/process
+         {:seon.db.process/id :seon.db.process/boot}}
+        projection
+        (admission/committed-projection
+         {::admission/schema-rows
+          [[:seon.db.protocol/ordinary-wire-value
+            (pr-str
+             [:fn
+              {:error/message "must be eager ordinary protocol data"
+               :gen/schema :string}
+              'seon.db.protocol/ordinary-wire-value?])
+            core-transaction]]
+          ::admission/function-contract-rows
+          [["seon.db.protocol/ordinary-wire-value?"
+            "[:=> [:cat :seon.db.protocol/ordinary-wire-value] :boolean]"
+            core-transaction]]})
+        prepared
+        (instrument/prepare-targets
+         [{::instrument/sym 'seon.db.protocol/ordinary-wire-value?
+           ::instrument/schema-form
+           (get-in projection
+                   [:seon.schema.projection/function-contracts
+                    'seon.db.protocol/ordinary-wire-value?])
+           ::instrument/schema-options
+           (:seon.schema.projection/compile-options projection)}])]
+    (is (= #{'seon.db.protocol/ordinary-wire-value?}
+           (::instrument/accepted-syms prepared)))
+    (is (empty? (::instrument/rejected prepared)))
+    (is (protocol/ordinary-wire-value? "resolved"))))
 
 (deftest failed-publication-retries-once-and-records-once
   (async done

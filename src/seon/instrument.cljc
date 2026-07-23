@@ -575,10 +575,11 @@
 #?(:cljs
    (defn- prepare-target
      "Compile one Seon target into Malli data or a namespaced rejection."
-     [{::keys [sym schema-form registry]}]
+     [{::keys [sym schema-form registry schema-options]}]
      (if-let [[ns-sym fn-sym] (qualified-target-parts sym)]
        (let [the-fn (-original-fn (find-js-var ns-sym fn-sym))
-             options (cond-> {} registry (assoc :registry registry))]
+             options (or schema-options
+                         (cond-> {} registry (assoc :registry registry)))]
          (cond
            (nil? the-fn)
            {::sym sym ::reason ::no-var}
@@ -621,15 +622,17 @@
      "Build exact Malli data for the supplied canonical function targets.
 
       Each target is a namespaced map containing `::sym` (a qualified
-      symbol), `::schema-form`, and optionally `::registry` (an immutable
-      Malli registry projection). The result separates accepted target data
-      from rejected rows; it never mutates Malli's function-schema registry."
+      symbol), `::schema-form`, and either `::schema-options` from an immutable
+      projection or a legacy explicit `::registry`. The result separates
+      accepted target data from rejected rows; it never mutates Malli's
+      function-schema registry."
      {:malli/schema
       [:=>
        [:cat [:sequential
               [:map
                [::sym :qualified-symbol]
                [::schema-form :any]
+               [::schema-options {:optional true} :map]
                [::registry {:optional true} :any]]]]
        [:map
         [::data :any]
@@ -864,6 +867,7 @@
                      [:map
                       [::sym :qualified-symbol]
                       [::schema-form :any]
+                      [::schema-options {:optional true} :map]
                       [::registry {:optional true} :any]]]]]]
        :map]}
      [{::keys [changed-syms targets]}]
@@ -902,10 +906,13 @@
      [projection]
      (if-not (enabled?)
        {::enabled? false ::n-instrumented 0}
-       (let [registry (:seon.schema.projection/registry projection)
+       (let [schema-options
+             (:seon.schema.projection/compile-options projection)
              targets
              (mapv (fn [[sym form]]
-                     {::sym sym ::schema-form form ::registry registry})
+                     {::sym sym
+                      ::schema-form form
+                      ::schema-options schema-options})
                    (:seon.schema.projection/function-contracts projection))
              result (instrument-targets! targets)
              rejected-counts (frequencies (map ::reason (::rejected result)))]
@@ -947,7 +954,8 @@
        {::enabled? false ::ok? true ::n-unstrumented 0
         ::n-instrumented 0 ::accepted-syms #{} ::rejected []
         ::verification-gaps []}
-       (let [registry (:seon.schema.projection/registry new-projection)
+       (let [schema-options
+             (:seon.schema.projection/compile-options new-projection)
              old-syms
              (set (keys
                     (:seon.schema.projection/function-contracts
@@ -958,7 +966,9 @@
              all-syms (into old-syms new-syms)
              targets
              (mapv (fn [[sym form]]
-                     {::sym sym ::schema-form form ::registry registry})
+                     {::sym sym
+                      ::schema-form form
+                      ::schema-options schema-options})
                    new-contracts)
              {::keys [data accepted-syms rejected] :as prepared}
              (prepare-targets targets)
@@ -1034,7 +1044,8 @@
                    (into (set (keys old-function-dependencies))
                          (keys new-function-dependencies)))
              selected-syms (into (set changed-syms) dependent-syms)
-             registry (:seon.schema.projection/registry new-projection)
+             schema-options
+             (:seon.schema.projection/compile-options new-projection)
              contracts
              (:seon.schema.projection/function-contracts new-projection)
              targets
@@ -1042,7 +1053,7 @@
                    (keep (fn [sym]
                            (when-let [form (get contracts sym)]
                              {::sym sym ::schema-form form
-                              ::registry registry})))
+                              ::schema-options schema-options})))
                    selected-syms)
              result (instrument-delta!
                       {::changed-syms selected-syms ::targets targets})]
