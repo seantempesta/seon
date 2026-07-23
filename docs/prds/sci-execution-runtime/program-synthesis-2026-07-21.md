@@ -636,6 +636,12 @@ COMPLETELY before dispatching anything.
   (R39 just grew it), and crash-mid-seed must yield provably
   unseeded-or-complete. The raised limit returns to pure
   runaway-breaker duty.
+- R40 APPLIED (2026-07-23 late): frame bound 4→64 MiB (edit sits in
+  protocol.cljc ENTANGLED with the live initpage lane's paging
+  shapes — rides its commit; verify attribution + rerun the
+  transport gate at its return) + input cap 32→128 MiB committed
+  clean (frame ≤ input invariant). The one focused-gate failure is
+  the lane's mid-flight ensure-database reshaping, not the limits.
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
