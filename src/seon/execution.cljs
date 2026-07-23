@@ -804,22 +804,27 @@
            ::digest (source-digest program)
            ::source-by-symbol source-by-symbol)))
 
+(defn- program-acquisition-contract [installed]
+  (let [package-corpus? (contains? installed :seon.packages/package)]
+    {::source-query (if package-corpus?
+                      admitted-source-entity-query
+                      repl-source-entity-query)
+     ::require-edge-query (if package-corpus?
+                            admitted-require-edge-query
+                            repl-require-edge-query)
+     ::namespace-pull-pattern (if package-corpus?
+                                namespace-source-pull-pattern
+                                repl-namespace-source-pull-pattern)
+     ::function-pull-pattern (if package-corpus?
+                               function-source-pull-pattern
+                               repl-function-source-pull-pattern)}))
+
 (defn- ^:async acquire-program!
   [database]
   (let [installed (await (db/installed-schema database))
-        package-corpus? (contains? installed :seon.packages/package)
-        source-query (if package-corpus?
-                       admitted-source-entity-query
-                       repl-source-entity-query)
-        require-edge-query (if package-corpus?
-                             admitted-require-edge-query
-                             repl-require-edge-query)
-        namespace-pull-pattern (if package-corpus?
-                                 namespace-source-pull-pattern
-                                 repl-namespace-source-pull-pattern)
-        function-pull-pattern (if package-corpus?
-                                function-source-pull-pattern
-                                repl-function-source-pull-pattern)
+        {::keys [source-query require-edge-query namespace-pull-pattern
+                 function-pull-pattern]}
+        (program-acquisition-contract installed)
         {::keys [namespace-sources require-edges]}
         (await (namespace-rows! database source-query require-edge-query
                                 namespace-pull-pattern))

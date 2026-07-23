@@ -1,5 +1,6 @@
 (ns seon.execution.host-test
   (:require
+   [clojure.string :as str]
    [cljs.test :refer [async deftest is testing]]
    [seon.db :as db]
    [seon.db.transport.uds :as uds]
@@ -1032,7 +1033,9 @@
 (defn- host-ready-message []
   (assoc (ready-message) ::execution/bun-version "jvm-21.0.2"))
 
-(defn- eval-batch-invocation [invocation-id]
+(defn- eval-batch-invocation
+  ([invocation-id] (eval-batch-invocation invocation-id []))
+  ([invocation-id parsed]
   {::execution/message execution/invoke-message
    ::execution/protocol-version execution/protocol-version
    ::execution/agent-id "agent-1"
@@ -1041,9 +1044,62 @@
    ::execution/function-identity
    {::execution/function-symbol 'seon.execution.runtime/eval-batch!
     ::execution/artifact-digest digest}
-   ::execution/arguments [{:seon.eval/parsed []}]
+   ::execution/arguments [{:seon.eval/parsed parsed}]
    ::execution/deadline-ms 9999999999999
-   ::execution/result-limit-bytes 4096})
+   ::execution/result-limit-bytes 4096}))
+
+(defn- parsed-form [form]
+  {:seon.repl/kind :form
+   :seon.repl/source (pr-str form)
+   :seon.repl/form form})
+
+(deftest bun-package-batch-selection-is-derived-from-parsed-references
+  (let [package-call
+        (parsed-form
+         '(seon.packages.js.fast-deep-equal/equal?
+           {:seon.packages.js.fast-deep-equal/left {:a 1}
+            :seon.packages.js.fast-deep-equal/right {:a 1}}))
+        nested-call
+        (parsed-form '(map seon.packages.js.fast-deep-equal/equal? xs))
+        package-require
+        (parsed-form '(require '[seon.packages.js.fast-deep-equal :as equal]))
+        projected-edge
+        (assoc (parsed-form '(equal/equal? request))
+               :seon.repl/require-edges
+               '#{seon.packages.js.fast-deep-equal})]
+    (doseq [entry [package-call nested-call package-require projected-edge]]
+      (is (true? (@#'host/bun-package-eval-batch?
+                  (eval-batch-invocation "package" [entry])))))
+    (doseq [entry [(parsed-form '(quote
+                                  seon.packages.js.fast-deep-equal/equal?))
+                   (parsed-form '(identity
+                                  "seon.packages.js.fast-deep-equal/equal?"))
+                   (parsed-form '(seon.packages/install! request))]]
+      (is (false? (@#'host/bun-package-eval-batch?
+                   (eval-batch-invocation "ordinary" [entry])))))))
+
+(deftest cross-tier-result-reference-has-specific-steering
+  (let [state @#'host/!host
+        prior @state
+        child-lane @#'host/child-lane
+        host-lane @#'host/host-lane
+        invocation
+        (eval-batch-invocation "cross-tier"
+                               [(parsed-form 'result/eval-from-bun)])]
+    (try
+      (reset! state
+              {::host/generation 9
+               child-lane {"agent-1" {::host/eval-id-order
+                                        ["eval-from-bun"]}}
+               host-lane {}})
+      (is (= "eval-from-bun"
+             (@#'host/cross-tier-result-reference host-lane invocation)))
+      (is (str/includes?
+           (get-in (@#'host/tier-local-result-error
+                    invocation "eval-from-bun")
+                   [::execution/error :seon.error/message])
+           "Result symbols are tier-local"))
+      (finally (reset! state prior)))))
 
 (defn- compiled-render-invocation [invocation-id]
   (assoc
@@ -1152,6 +1208,54 @@
             (.catch
              (fn [error]
                (is false (str "host lane invocation failed: " error))))
+            (.finally
+             (fn []
+               (reset! !connect-native prior-connect)
+               (done))))))))
+
+(deftest bun-package-eval-batch-rides-the-existing-child-lane
+  (async done
+    (let [fixture (fake-host-socket)
+          prior-connect @!connect-native
+          spawned (atom [])
+          child (fake-process 405)
+          options (atom nil)
+          package-entry
+          (parsed-form
+           '(seon.packages.js.fast-deep-equal/equal?
+             {:seon.packages.js.fast-deep-equal/left {:a 1}
+              :seon.packages.js.fast-deep-equal/right {:a 1}}))
+          spawn! (fn [value]
+                   (reset! options value)
+                   (swap! spawned conj value)
+                   (:process child))]
+      (reset! !connect-native (::connect fixture))
+      (configure-with-host! spawn!)
+      (let [completion
+            (host/invoke!
+             (eval-batch-invocation "package-eval-1" [package-entry]))]
+        (-> (turn*)
+            (.then
+             (fn [_]
+               (is (= 1 (count @spawned))
+                   "the computed package reference selects the existing Bun child")
+               (feed! @options (:process child) (ready-message))
+               (turn*)))
+            (.then
+             (fn [_]
+               (is (zero? (count @(::writes fixture)))
+                   "a Bun-local package batch never opens the SCI host stream")
+               (feed! @options (:process child)
+                      (result-message "package-eval-1"
+                                      {:seon.eval/ids ["package-eval-id"]}))
+               completion))
+            (.then
+             (fn [result]
+               (is (= ["package-eval-id"]
+                      (get-in result [::execution/result :seon.eval/ids])))))
+            (.catch
+             (fn [error]
+               (is false (str "package batch routing failed: " error))))
             (.finally
              (fn []
                (reset! !connect-native prior-connect)

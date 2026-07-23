@@ -172,6 +172,16 @@ the anchor stays the state ledger.
 
 ## Process/operator
 
+- **A launch manifest can disable a database-selected execution tier during
+  reconciliation.** A green SCI evaluator plus a correct batch router still
+  yields no host invocation when `:seon.config.execution/host-tier?` is false
+  and agent eval-socket facts have been retracted. Probe the config fact and
+  socket facts before blaming evaluation; after deliberately enabling the
+  database fact, restart without reapplying a manifest that declares false.
+  At pod write-back, a non-empty executable batch with zero recorded attempts
+  must become a recorded core fault and flat `:seon/error`, never an ordinary
+  zero-form turn (`src/seon/agent/turn.cljs:440-490`).
+
 - **Mixed-tier selection is per parsed eval batch, not per agent arc.** The
   router derives Bun locality from executable symbols, loader forms, and
   projected require edges naming `seon.packages.js.*`; ordinary quoted data

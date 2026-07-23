@@ -682,13 +682,15 @@
                   refs (::db/refs request)]
               (js/Promise.resolve
                (cond
-                 (= pattern @#'execution/namespace-source-pull-pattern)
+                 (or (= pattern @#'execution/namespace-source-pull-pattern)
+                     (= pattern @#'execution/repl-namespace-source-pull-pattern))
                  [{:seon.ns/name 'my.agent.agent-1
                    :seon.ns/source "(ns my.agent.agent-1)"}]
 
                  (= pattern @#'execution/require-edge-pull-pattern) [edge]
 
-                 (= pattern @#'execution/function-source-pull-pattern)
+                 (or (= pattern @#'execution/function-source-pull-pattern)
+                     (= pattern @#'execution/repl-function-source-pull-pattern))
                  (mapv (fn [ref]
                          (let [[sym source namespace-name]
                                (first (filter #(= ref (if (= "my.agent.agent-1/run"
@@ -723,14 +725,14 @@
       (with-redefs [db/index-page page
                     db/query query
                     db/pull-many pull-many]
-        (-> (js/Promise.resolve
-             (@#'execution/acquire-program! database))
+        (-> (js/Promise.resolve (@#'execution/acquire-program! database))
             (.then
-             (fn [program]
-               (is (= expected
-                      (select-keys program [::execution/namespace-rows
-                                            ::execution/schema-forms
-                                            ::execution/function-contracts])))
+             (fn [package-program]
+                 (is (= expected
+                        (select-keys package-program
+                                     [::execution/namespace-rows
+                                      ::execution/schema-forms
+                                      ::execution/function-contracts])))
                (is (every? #(= database (::db/db %)) @requests))
                (is (every? #(or (nil? (::db/limit %))
                                 (= 32 (::db/limit %)))
@@ -742,7 +744,7 @@
                                             (first (::db/components %)))
                                       @requests)))
                    "function source and contract cursors page independently")
-               (let [row (first (::execution/namespace-rows program))]
+               (let [row (first (::execution/namespace-rows package-program))]
                  (is (= 'my.agent.agent-1 (:seon.ns/name row)))
                  (is (= ['my.agent.agent-1/helper 'my.agent.agent-1/run]
                         (mapv :seon.fn/sym (:seon.fn/_ns row))))
@@ -751,12 +753,26 @@
                  (is (re-find #"deftest check" (seval/namespace-source row))))
                (is (= #{'my.agent.agent-1/run 'my.agent.agent-1/helper
                         'my.agent.agent-1/check}
-                      (set (keys (::execution/source-by-symbol program)))))
+                      (set (keys (::execution/source-by-symbol package-program)))))
                (done)))
             (.catch
              (fn [error]
                (is false (str "program acquisition rejected: " error))
                (done))))))))
+
+(deftest program-acquisition-contract-follows-installed-package-schema
+  (let [package-contract
+        (@#'execution/program-acquisition-contract
+         {:seon.packages/package {}})
+        repl-contract (@#'execution/program-acquisition-contract {})]
+    (is (= @#'execution/namespace-source-pull-pattern
+           (::execution/namespace-pull-pattern package-contract)))
+    (is (= @#'execution/function-source-pull-pattern
+           (::execution/function-pull-pattern package-contract)))
+    (is (= @#'execution/repl-namespace-source-pull-pattern
+           (::execution/namespace-pull-pattern repl-contract)))
+    (is (= @#'execution/repl-function-source-pull-pattern
+           (::execution/function-pull-pattern repl-contract)))))
 
 (deftest top-level-program-frame-error-reaches-the-child-error-value
   (async done

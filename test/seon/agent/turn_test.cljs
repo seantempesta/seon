@@ -7,6 +7,7 @@
    [seon.config :as config]
    [seon.db :as db]
    [seon.db.id :as db.id]
+   [seon.error :as error]
    [seon.execution :as execution]
    [seon.execution.host :as execution.host]
    [seon.repl.parse :as repl-internal]))
@@ -374,6 +375,41 @@
           (.finally
            (fn []
              (set! execution.host/invoke-compiled! original)
+             (done)))))))
+
+(deftest executable-batch-without-receipts-is-a-recorded-core-error
+  (async done
+    (let [original-invoke execution.host/invoke-compiled!
+          original-record error/record!
+          recorded (atom [])
+          parsed [{:seon.repl/kind :form
+                   :seon.repl/source "(+ 1 2)"}]]
+      (set! execution.host/invoke-compiled!
+            (fn [database _agent-id _function-symbol _arguments _run-fence]
+              (js/Promise.resolve
+               {::execution/message execution/result-message
+                :seon.db/db database
+                ::execution/result {:seon.eval/n-ok 0
+                                    :seon.eval/n-fail 0
+                                    :seon.eval/ids []}})))
+      (set! error/record! #(swap! recorded conj %))
+      (-> (turn/eval-parsed! "agent-1" database parsed
+                             'my.agent.agent-1 "turn-1" "run-1")
+          (.then
+           (fn [result]
+             (is (= :core-bug (:seon.error/kind result)))
+             (is (= 1 (get-in result [:seon.error/data
+                                      :seon.eval/executable-count])))
+             (is (= 0 (get-in result [:seon.error/data
+                                      :seon.eval/recorded-count])))
+             (is (= :core (::error/fault (first @recorded))))))
+          (.catch
+           (fn [exception]
+             (is false (str "silent-drop guard rejected: " exception))))
+          (.finally
+           (fn []
+             (set! execution.host/invoke-compiled! original-invoke)
+             (set! error/record! original-record)
              (done)))))))
 
 (deftest retired-child-eval-error-preserves-the-recovery-signal

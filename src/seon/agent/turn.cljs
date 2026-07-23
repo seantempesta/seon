@@ -445,7 +445,10 @@
          [:or :nil :seon.agent.run/id]]
     :map]}
   [agent-id database parsed starting-ns turn-id run-id]
-  (let [request (cond-> {:seon.eval/parsed parsed
+  (let [executable-count (count (filter #(contains? #{:form :read}
+                                                     (:seon.repl/kind %))
+                                        parsed))
+        request (cond-> {:seon.eval/parsed parsed
                          :seon.eval/starting-ns starting-ns
                          :seon.agent.turn/id-of-turn turn-id}
                   run-id (assoc :seon.agent.run/id-of-run run-id))
@@ -465,7 +468,23 @@
 
       (and (= execution/result-message (::execution/message response))
            (map? (::execution/result response)))
-      (::execution/result response)
+      (let [result (::execution/result response)
+            attempted (+ (or (:seon.eval/n-ok result) 0)
+                         (or (:seon.eval/n-fail result) 0))]
+        (if (and (pos? executable-count) (zero? attempted))
+          (let [failure
+                {:seon.error/message
+                 "The execution tier dropped an executable eval batch without recording a receipt."
+                 :seon.error/kind :core-bug
+                 :seon.error/data
+                 {:seon.agent/id agent-id
+                  :seon.agent.turn/id turn-id
+                  :seon.eval/executable-count executable-count
+                  :seon.eval/recorded-count attempted}}
+                exception (ex-info (:seon.error/message failure) failure)]
+            (error/record! {::error/raw exception ::error/fault :core})
+            failure)
+          result))
 
       :else
       (or (::execution/error response)
