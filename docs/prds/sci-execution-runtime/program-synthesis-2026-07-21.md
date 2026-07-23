@@ -443,6 +443,24 @@ COMPLETELY before dispatching anything.
   window is CLOSED; invoke-plans! prompt arm deleted; guarded-door
   issue resolved; byte identity green. Pod render containment is
   door-complete.
+- EXECUTION-PLANNING DESIGN ACCEPTED (research/execution-planning-
+  design-2026-07-23.md) + owner green-light: plan-execution as the
+  sole placement authority (fail-closed dynamic edges; manifests =
+  verification artifacts on persistent leaves per the owner's JIT
+  instinct; plans derived-never-stored, basis+digest keyed; absorbs
+  router scans, regex purity, ctx schema-ref walking, the bootstrap
+  hand list). EDGE-BUNDLE LANE DISPATCHED (the earliest unsettled
+  contract: call edges, typed attribute edges, uncertainty edges,
+  effect/leaf descriptors, artifact export inventory, digest
+  integration — spec tmp/orchestrator/edge-bundle-spec.md). Next
+  after it: the pure planner (M), then consumers (schema
+  verification, R33 admission, driver enforcement, router deletion)
+  in parallel. LEAF-RUNTIME ruling (owner Q&A): a leaf artifact =
+  the transitive closure of its entry (wire + platform leaves +
+  package wrappers + required cores; SCI optional — presence widens
+  the tier inventory); the invocable surface is the PUBLISHED
+  export inventory, never a naming convention; transparent routing
+  covers the whole inventory.
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
