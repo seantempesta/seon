@@ -96,6 +96,30 @@
   [state]
   (str (pr-str (artifact-value state)) "\n"))
 
+(defn selected-namespaces
+  "Return the exact analyzer namespaces selected by Shadow's build closure."
+  [state]
+  (let [get-source-by-id (requiring-resolve 'shadow.build.data/get-source-by-id)]
+    (into (sorted-set)
+          (keep (fn [resource-id]
+                  (:ns (get-source-by-id state resource-id))))
+          (:build-sources state))))
+
+(defn inventory-value
+  "Derive one canonical function inventory from Shadow's analyzed build.
+
+   This hook owns only Shadow's exact build-source selection. Function
+   classification remains the client indexer's one analyzer derivation."
+  [state]
+  ((requiring-resolve 'seon.client.indexing/analyzer-fn-inventory)
+   (get-in state [:compiler-env :cljs.analyzer/namespaces])
+   (selected-namespaces state)))
+
+(defn inventory-text
+  "Return deterministic EDN bytes for one build inventory sidecar."
+  [state]
+  (str (pr-str (inventory-value state)) "\n"))
+
 (defn digest
   "Return the SHA-256 identity of one program-source artifact text."
   [text]
@@ -133,4 +157,10 @@
   "Atomically publish deterministic program sources after a client flush."
   [state relative-path]
   (atomic-spit! (output-file state relative-path) (artifact-text state))
+  state)
+
+(defn ^{:shadow.build/stage :flush} publish-inventory!
+  "Atomically publish the analyzed inventory of one exact Shadow build."
+  [state relative-path]
+  (atomic-spit! (output-file state relative-path) (inventory-text state))
   state)

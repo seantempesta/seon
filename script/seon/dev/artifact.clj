@@ -14,7 +14,7 @@
            [java.time Instant]
            [java.util.jar JarFile]))
 
-(def current-version 9)
+(def current-version 10)
 
 (def bun-identity-schema
   [:map {:closed true}
@@ -30,6 +30,13 @@
     [:re #"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?"]]
    [:seon.dev.artifact/dependency-git-sha [:re #"[0-9a-f]{40}"]]])
 
+(def ^:private cljs-artifact-inventory-schema
+  [:map {:closed true}
+   [:seon.execution.inventory/availability [:= :available]]
+   [:seon.execution.inventory/exports-by-tier
+    [:map {:closed true} [:bun [:set :string]]]]
+   [:seon.execution.inventory/digest [:re #"[0-9a-f]{64}"]]])
+
 (def artifact-manifest-schema
   [:map {:closed true}
    [:seon.dev.artifact/version [:= current-version]]
@@ -42,7 +49,13 @@
    [:seon.dev.artifact/client-output :string]
    [:seon.dev.artifact/program-source-path :string]
    [:seon.dev.artifact/program-source-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/client-inventory-path :string]
+   [:seon.dev.artifact/client-inventory-digest [:re #"[0-9a-f]{64}"]]
    [:seon.dev.artifact/execution-output :string]
+   [:seon.dev.artifact/execution-inventory-path :string]
+   [:seon.dev.artifact/execution-inventory-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/cljs-artifact-inventory
+    cljs-artifact-inventory-schema]
    [:seon.dev.artifact/runtime-root :string]
    [:seon.dev.artifact/bun-executable :string]
    [:seon.dev.artifact/bun-executable-digest [:re #"[0-9a-f]{64}"]]
@@ -383,6 +396,39 @@
                       {:seon.dev.artifact/path path})))
     (file-digest path)))
 
+(defn program-inventory-path
+  "Return the function-inventory sidecar beside a compiled output."
+  [output]
+  (str (fs/path (fs/parent output) "program-inventory.edn")))
+
+(defn- current-inventory-digest [output]
+  (let [path (program-inventory-path output)]
+    (when-not (fs/regular-file? path)
+      (throw (ex-info "The program-inventory artifact is absent."
+                      {:seon.dev.artifact/path path})))
+    (file-digest path)))
+
+(defn current-cljs-artifact-inventory
+  "Combine selected CLJS build sidecars into one planner-ready Bun inventory."
+  [config]
+  (let [sidecars
+        (mapv (fn [output]
+                (edn/read-string (slurp (program-inventory-path output))))
+              [(:seon.dev.config/client-output config)
+               (:seon.dev.config/execution-output config)])
+        exports
+        (into (sorted-set)
+              (mapcat (fn [sidecar]
+                        (concat
+                         (:seon.dev.program-inventory/public-exports sidecar)
+                         (:seon.dev.program-inventory/internal-terminals
+                          sidecar))))
+              sidecars)]
+    {:seon.execution.inventory/availability :available
+     :seon.execution.inventory/exports-by-tier {:bun exports}
+     :seon.execution.inventory/digest
+     (digest-values ["bun" (pr-str exports)])}))
+
 (defn current-client-digest
   "Hash the complete client closure at its flavor-owned coordinates."
   [config]
@@ -393,6 +439,8 @@
                  "dev/out/cljs-runtime")]
     (digest-paths root [(:seon.dev.config/client-output config)
                         (program-source-path config)
+                        (program-inventory-path
+                         (:seon.dev.config/client-output config))
                         client-runtime])))
 
 (defn current-execution-digest
@@ -449,7 +497,13 @@
    [:seon.dev.artifact/client-digest [:re #"[0-9a-f]{64}"]]
    [:seon.dev.artifact/program-source-path :string]
    [:seon.dev.artifact/program-source-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/client-inventory-path :string]
+   [:seon.dev.artifact/client-inventory-digest [:re #"[0-9a-f]{64}"]]
    [:seon.dev.artifact/execution-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/execution-inventory-path :string]
+   [:seon.dev.artifact/execution-inventory-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/cljs-artifact-inventory
+    cljs-artifact-inventory-schema]
    [:seon.dev.artifact/execution-runtime-digest [:re #"[0-9a-f]{64}"]]
    [:seon.dev.artifact/bootstrap-digest [:re #"[0-9a-f]{64}"]]
    [:seon.dev.artifact/css-digest [:re #"[0-9a-f]{64}"]]
@@ -457,7 +511,9 @@
 
 (defn- derive-application-digest
   [config bun maintained-dependencies writer-digest client-digest
-   program-source-path program-source-digest execution-digest
+   program-source-path program-source-digest
+   client-inventory-path client-inventory-digest
+   execution-digest execution-inventory-path execution-inventory-digest
    execution-runtime-digest bootstrap-digest css-digest]
   (digest-values ["flavor" (:seon.dev.config/artifact-flavor config)
                   "bun-executable" (:seon.dev.artifact/bun-executable bun)
@@ -473,10 +529,14 @@
                   "client" client-digest
                   "program-source-path" program-source-path
                   "program-source" program-source-digest
+                  "client-inventory-path" client-inventory-path
+                  "client-inventory" client-inventory-digest
                   "execution-build-id"
                   (:seon.dev.config/execution-build-id config)
                   "execution-output" (:seon.dev.config/execution-output config)
                   "execution" execution-digest
+                  "execution-inventory-path" execution-inventory-path
+                  "execution-inventory" execution-inventory-digest
                   "execution-runtime" execution-runtime-digest
                   "bootstrap" bootstrap-digest
                   "css" css-digest]))
@@ -494,7 +554,22 @@
         program-source-path
         (str (fs/relativize (fs/path root) (fs/path (program-source-path config))))
         program-source-digest (current-program-source-digest config)
+        client-inventory-path
+        (str (fs/relativize
+              (fs/path root)
+              (fs/path (program-inventory-path
+                        (:seon.dev.config/client-output config)))))
+        client-inventory-digest
+        (current-inventory-digest (:seon.dev.config/client-output config))
         execution-digest (current-execution-digest config)
+        execution-inventory-path
+        (str (fs/relativize
+              (fs/path root)
+              (fs/path (program-inventory-path
+                        (:seon.dev.config/execution-output config)))))
+        execution-inventory-digest
+        (current-inventory-digest (:seon.dev.config/execution-output config))
+        cljs-artifact-inventory (current-cljs-artifact-inventory config)
         execution-runtime-digest (current-execution-runtime-digest config)
         bootstrap-digest (digest-paths root ["out/bootstrap"])
         css-digest (digest-paths root ["resources/public/css/output.css"])
@@ -502,13 +577,20 @@
         (derive-application-digest
          config bun maintained-dependencies writer-digest client-digest
          program-source-path program-source-digest
-         execution-digest execution-runtime-digest bootstrap-digest css-digest)]
+         client-inventory-path client-inventory-digest
+         execution-digest execution-inventory-path execution-inventory-digest
+         execution-runtime-digest bootstrap-digest css-digest)]
     (merge bun
      {:seon.dev.artifact/writer-digest writer-digest
      :seon.dev.artifact/client-digest client-digest
      :seon.dev.artifact/program-source-path program-source-path
      :seon.dev.artifact/program-source-digest program-source-digest
+     :seon.dev.artifact/client-inventory-path client-inventory-path
+     :seon.dev.artifact/client-inventory-digest client-inventory-digest
      :seon.dev.artifact/execution-digest execution-digest
+     :seon.dev.artifact/execution-inventory-path execution-inventory-path
+     :seon.dev.artifact/execution-inventory-digest execution-inventory-digest
+     :seon.dev.artifact/cljs-artifact-inventory cljs-artifact-inventory
      :seon.dev.artifact/execution-runtime-digest execution-runtime-digest
      :seon.dev.artifact/bootstrap-digest bootstrap-digest
      :seon.dev.artifact/css-digest css-digest
@@ -586,7 +668,9 @@
    [:seon.dev.artifact/release-cache-root :string]
    [:seon.dev.artifact/release-client-output :string]
    [:seon.dev.artifact/release-execution-output :string]
-   [:seon.dev.artifact/release-program-source-output :string]])
+   [:seon.dev.artifact/release-program-source-output :string]
+   [:seon.dev.artifact/release-client-inventory-output :string]
+   [:seon.dev.artifact/release-execution-inventory-output :string]])
 
 (defn- cljs-release-command [config build-id config-merge]
   (let [environment (:seon.dev.config/environment config)
@@ -641,20 +725,37 @@
         (:seon.dev.artifact/release-execution-output release)
         program-source-output
         (:seon.dev.artifact/release-program-source-output release)
+        client-inventory-output
+        (:seon.dev.artifact/release-client-inventory-output release)
+        execution-inventory-output
+        (:seon.dev.artifact/release-execution-inventory-output release)
         _ (doseq [[field path]
                   [[:seon.dev.artifact/release-cache-root cache-root]
                    [:seon.dev.artifact/release-client-output client-output]
                    [:seon.dev.artifact/release-execution-output
-                    execution-output]]]
+                    execution-output]
+                   [:seon.dev.artifact/release-client-inventory-output
+                    client-inventory-output]
+                   [:seon.dev.artifact/release-execution-inventory-output
+                    execution-inventory-output]]]
             (release-relative-path! root field path))
         program-source-relative
         (release-relative-path!
          root :seon.dev.artifact/release-program-source-output
          program-source-output)
+        client-inventory-relative
+        (release-relative-path!
+         root :seon.dev.artifact/release-client-inventory-output
+         client-inventory-output)
+        execution-inventory-relative
+        (release-relative-path!
+         root :seon.dev.artifact/release-execution-inventory-output
+         execution-inventory-output)
         release-config
         (update config :seon.dev.config/environment
                 assoc "SHADOW_CLJS" (pr-str {:cache-root cache-root}))]
-    (doseq [path [client-output execution-output program-source-output]]
+    (doseq [path [client-output execution-output program-source-output
+                  client-inventory-output execution-inventory-output]]
       (fs/create-dirs (fs/parent path)))
     (run-step!
      release-config "build release pod"
@@ -665,7 +766,9 @@
        {:output-to client-output
         :compiler-options {:parallel-build false}
         :build-hooks
-        [['seon.dev.program-artifact/publish! program-source-relative]]
+        [['seon.dev.program-artifact/publish! program-source-relative]
+         ['seon.dev.program-artifact/publish-inventory!
+          client-inventory-relative]]
         :devtools {:enabled false :preloads [] :build-notify nil}}
         (not (str/blank?
               (get-in release-config
@@ -684,6 +787,9 @@
       (cond->
        {:output-to execution-output
         :compiler-options {:parallel-build false}
+        :build-hooks
+        [['seon.dev.program-artifact/publish-inventory!
+          execution-inventory-relative]]
         :devtools {:enabled false}}
         (not (str/blank?
               (get-in release-config
@@ -966,7 +1072,11 @@
         required [writer
                   (:seon.dev.config/client-output config)
                   (program-source-path config)
+                  (program-inventory-path
+                   (:seon.dev.config/client-output config))
                   (:seon.dev.config/execution-output config)
+                  (program-inventory-path
+                   (:seon.dev.config/execution-output config))
                   (execution-runtime-path config)
                   bootstrap css]
         missing (remove #(or (fs/regular-file? %) (fs/directory? %)) required)]
@@ -979,7 +1089,22 @@
           program-source-relative-path
           (str (runtime-relative-path config (program-source-path config)))
           program-source-digest (current-program-source-digest config)
+          client-inventory-path
+          (str (runtime-relative-path
+                config
+                (program-inventory-path
+                 (:seon.dev.config/client-output config))))
+          client-inventory-digest
+          (current-inventory-digest (:seon.dev.config/client-output config))
           execution-digest (current-execution-digest config)
+          execution-inventory-path
+          (str (runtime-relative-path
+                config
+                (program-inventory-path
+                 (:seon.dev.config/execution-output config))))
+          execution-inventory-digest
+          (current-inventory-digest (:seon.dev.config/execution-output config))
+          cljs-artifact-inventory (current-cljs-artifact-inventory config)
           execution-runtime-digest (current-execution-runtime-digest config)
           bootstrap-digest (digest-paths root [bootstrap])
           css-digest (digest-paths root [css])
@@ -993,8 +1118,10 @@
           (derive-application-digest
            config bun maintained-dependencies writer-digest client-digest
            program-source-relative-path program-source-digest
-           execution-digest execution-runtime-digest bootstrap-digest
-           css-digest)]
+           client-inventory-path client-inventory-digest
+           execution-digest execution-inventory-path
+           execution-inventory-digest execution-runtime-digest
+           bootstrap-digest css-digest)]
       (validate-manifest!
         (merge bun
         {:seon.dev.artifact/version current-version
@@ -1019,7 +1146,13 @@
          :seon.dev.artifact/program-source-path
          program-source-relative-path
          :seon.dev.artifact/program-source-digest program-source-digest
+         :seon.dev.artifact/client-inventory-path client-inventory-path
+         :seon.dev.artifact/client-inventory-digest client-inventory-digest
          :seon.dev.artifact/execution-digest execution-digest
+         :seon.dev.artifact/execution-inventory-path execution-inventory-path
+         :seon.dev.artifact/execution-inventory-digest
+         execution-inventory-digest
+         :seon.dev.artifact/cljs-artifact-inventory cljs-artifact-inventory
          :seon.dev.artifact/execution-runtime-digest execution-runtime-digest
          :seon.dev.artifact/bootstrap-digest bootstrap-digest
          :seon.dev.artifact/css-digest css-digest

@@ -64,7 +64,9 @@
         (fn [identity]
           (#'artifact/derive-application-digest
            config identity [] digest digest "out/program-sources.edn" digest
-           digest digest digest digest))
+           "out/client/program-inventory.edn" digest
+           digest "out/execution/program-inventory.edn" digest
+           digest digest digest))
         initial (application-digest bun)]
     (doseq [[field changed]
             [[:seon.dev.artifact/bun-executable "/other-bun"]
@@ -121,7 +123,17 @@
          :seon.dev.artifact/client-digest digest-a
          :seon.dev.artifact/program-source-path "out/client/program-sources.edn"
          :seon.dev.artifact/program-source-digest digest-a
+         :seon.dev.artifact/client-inventory-path
+         "out/client/program-inventory.edn"
+         :seon.dev.artifact/client-inventory-digest digest-a
          :seon.dev.artifact/execution-digest digest-a
+         :seon.dev.artifact/execution-inventory-path
+         "out/execution/program-inventory.edn"
+         :seon.dev.artifact/execution-inventory-digest digest-a
+         :seon.dev.artifact/cljs-artifact-inventory
+         {:seon.execution.inventory/availability :available
+          :seon.execution.inventory/exports-by-tier {:bun #{"example/fn"}}
+          :seon.execution.inventory/digest digest-a}
          :seon.dev.artifact/execution-runtime-digest digest-a
          :seon.dev.artifact/bootstrap-digest digest-a
          :seon.dev.artifact/css-digest digest-a
@@ -158,6 +170,7 @@
   (let [directory (fs/create-temp-dir {:prefix "seon-client-digest-test-"})
         output (fs/path directory "out-acme/client/main.js")
         program-source (fs/path directory "out-acme/client/program-sources.edn")
+        inventory (fs/path directory "out-acme/client/program-inventory.edn")
         runtime (fs/path directory
                          "shadow/builds/acme-client/dev/out/cljs-runtime/a.js")
         config {:seon.dev.config/root (str directory)
@@ -170,6 +183,7 @@
       (fs/create-dirs (fs/parent runtime))
       (spit (str output) "main-a")
       (spit (str program-source) "program-a")
+      (spit (str inventory) "inventory-a")
       (spit (str runtime) "runtime-a")
       (let [digest (artifact/current-client-digest config)]
         (is (= digest (artifact/current-client-digest config)))
@@ -194,11 +208,46 @@
         (is (not= digest (artifact/current-execution-digest config))))
       (finally (fs/delete-tree directory)))))
 
+(deftest cljs-inventory-unions-build-sidecars-and-is-export-sensitive
+  (let [directory (fs/create-temp-dir {:prefix "seon-cljs-inventory-test-"})
+        client (fs/path directory "out/client/main.js")
+        execution (fs/path directory "out/execution/main.js")
+        client-sidecar (fs/path directory "out/client/program-inventory.edn")
+        execution-sidecar
+        (fs/path directory "out/execution/program-inventory.edn")
+        config {:seon.dev.config/client-output (str client)
+                :seon.dev.config/execution-output (str execution)}
+        write-sidecar!
+        (fn [path exports terminals]
+          (fs/create-dirs (fs/parent path))
+          (spit (str path)
+                (pr-str
+                 {:seon.dev.program-inventory/public-exports exports
+                  :seon.dev.program-inventory/internal-terminals terminals})))]
+    (try
+      (write-sidecar! client-sidecar ["example/public"] ["vendor/helper"])
+      (write-sidecar! execution-sidecar ["example/execute"] ["vendor/leaf"])
+      (let [initial (artifact/current-cljs-artifact-inventory config)]
+        (is (= {:bun #{"example/public" "example/execute"
+                       "vendor/helper" "vendor/leaf"}}
+               (:seon.execution.inventory/exports-by-tier initial)))
+        (is (re-matches #"[0-9a-f]{64}"
+                        (:seon.execution.inventory/digest initial)))
+        (write-sidecar! client-sidecar
+                        ["example/public" "example/new-export"]
+                        ["vendor/helper"])
+        (is (not= (:seon.execution.inventory/digest initial)
+                  (:seon.execution.inventory/digest
+                   (artifact/current-cljs-artifact-inventory config)))))
+      (finally (fs/delete-tree directory)))))
+
 (deftest current-output-identity-rehashes-every-runtime-component
   (let [component (atom {:writer (apply str (repeat 64 "a"))
                          :client (apply str (repeat 64 "b"))
                          :program-source (apply str (repeat 64 "7"))
                          :execution (apply str (repeat 64 "c"))
+                         :client-inventory (apply str (repeat 64 "1"))
+                         :execution-inventory (apply str (repeat 64 "2"))
                          :execution-runtime (apply str (repeat 64 "d"))
                          :bootstrap (apply str (repeat 64 "e"))
                          :css (apply str (repeat 64 "f"))})
@@ -217,6 +266,18 @@
             #'artifact/current-client-digest (fn [_] (:client @component))
             #'artifact/current-program-source-digest
             (fn [_] (:program-source @component))
+            #'artifact/current-inventory-digest
+            (fn [output]
+              (if (= output (:seon.dev.config/client-output config))
+                (:client-inventory @component)
+                (:execution-inventory @component)))
+            #'artifact/current-cljs-artifact-inventory
+            (fn [_]
+              {:seon.execution.inventory/availability :available
+               :seon.execution.inventory/exports-by-tier
+               {:bun #{"example/fn"}}
+               :seon.execution.inventory/digest
+               (:client-inventory @component)})
             #'artifact/current-execution-digest
             (fn [_] (:execution @component))
             #'artifact/current-execution-runtime-digest
@@ -230,13 +291,18 @@
            (fn [] (artifact/current-output-digests config)))]
     (let [initial (observe)]
       (is (= (select-keys @component
-                          [:writer :client :program-source :execution :execution-runtime
+                          [:writer :client :program-source :client-inventory
+                           :execution :execution-inventory :execution-runtime
                            :bootstrap :css])
              {:writer (:seon.dev.artifact/writer-digest initial)
               :client (:seon.dev.artifact/client-digest initial)
               :program-source
               (:seon.dev.artifact/program-source-digest initial)
+              :client-inventory
+              (:seon.dev.artifact/client-inventory-digest initial)
               :execution (:seon.dev.artifact/execution-digest initial)
+              :execution-inventory
+              (:seon.dev.artifact/execution-inventory-digest initial)
               :execution-runtime
               (:seon.dev.artifact/execution-runtime-digest initial)
               :bootstrap (:seon.dev.artifact/bootstrap-digest initial)
@@ -245,7 +311,11 @@
               [[:writer :seon.dev.artifact/writer-digest]
                [:client :seon.dev.artifact/client-digest]
                [:program-source :seon.dev.artifact/program-source-digest]
+               [:client-inventory
+                :seon.dev.artifact/client-inventory-digest]
                [:execution :seon.dev.artifact/execution-digest]
+               [:execution-inventory
+                :seon.dev.artifact/execution-inventory-digest]
                [:execution-runtime
                 :seon.dev.artifact/execution-runtime-digest]
                [:bootstrap :seon.dev.artifact/bootstrap-digest]
@@ -310,7 +380,11 @@
          :seon.dev.artifact/release-execution-output
          (str (fs/path directory "runtime/execution.js"))
          :seon.dev.artifact/release-program-source-output
-         (str (fs/path directory "runtime/program-sources.edn"))}
+         (str (fs/path directory "runtime/program-sources.edn"))
+         :seon.dev.artifact/release-client-inventory-output
+         (str (fs/path directory "runtime/client-program-inventory.edn"))
+         :seon.dev.artifact/release-execution-inventory-output
+         (str (fs/path directory "runtime/execution-program-inventory.edn"))}
         calls (atom [])]
     (try
       (with-redefs [artifact/run-step!
@@ -339,7 +413,9 @@
         (is (= (:seon.dev.artifact/release-client-output release)
                (:output-to pod-merge)))
         (is (= [['seon.dev.program-artifact/publish!
-                 "runtime/program-sources.edn"]]
+                 "runtime/program-sources.edn"]
+                ['seon.dev.program-artifact/publish-inventory!
+                 "runtime/client-program-inventory.edn"]]
                (:build-hooks pod-merge)))
         (is (= {:enabled false :preloads [] :build-notify nil}
                (:devtools pod-merge)))
@@ -362,7 +438,11 @@
          :seon.dev.artifact/release-execution-output
          (str (fs/path directory "runtime/execution.js"))
          :seon.dev.artifact/release-program-source-output
-         (str (fs/path directory "runtime/program-sources.edn"))}]
+         (str (fs/path directory "runtime/program-sources.edn"))
+         :seon.dev.artifact/release-client-inventory-output
+         (str (fs/path directory "runtime/client-program-inventory.edn"))
+         :seon.dev.artifact/release-execution-inventory-output
+         (str (fs/path directory "runtime/execution-program-inventory.edn"))}]
     (try
       (is (thrown-with-msg?
            Exception #"must stay in the build root"
@@ -387,7 +467,11 @@
          :seon.dev.artifact/release-execution-output
          (str (fs/path directory "runtime/execution.js"))
          :seon.dev.artifact/release-program-source-output
-         (str (fs/path directory "runtime/program-sources.edn"))}
+         (str (fs/path directory "runtime/program-sources.edn"))
+         :seon.dev.artifact/release-client-inventory-output
+         (str (fs/path directory "runtime/client-program-inventory.edn"))
+         :seon.dev.artifact/release-execution-inventory-output
+         (str (fs/path directory "runtime/execution-program-inventory.edn"))}
         calls (atom [])]
     (try
       (with-redefs [artifact/run-step!
@@ -626,7 +710,10 @@
         source (fs/path directory "out/bootstrap/example.txt")
         client (fs/path directory "out/client/main.js")
         program-source (fs/path directory "out/client/program-sources.edn")
+        client-inventory (fs/path directory "out/client/program-inventory.edn")
         execution (fs/path directory "out/execution/main.js")
+        execution-inventory
+        (fs/path directory "out/execution/program-inventory.edn")
         execution-runtime
         (fs/path directory
                  ".shadow-cljs/builds/execution/dev/out/cljs-runtime/a.js")
@@ -842,7 +929,10 @@
         writer (fs/path directory "target/writer.jar")
         client (fs/path directory "out/client/main.js")
         program-source (fs/path directory "out/client/program-sources.edn")
+        client-inventory (fs/path directory "out/client/program-inventory.edn")
         execution (fs/path directory "out/execution/main.js")
+        execution-inventory
+        (fs/path directory "out/execution/program-inventory.edn")
         runtime (fs/path directory
                          ".shadow-cljs/builds/client/dev/out/cljs-runtime/a.js")
         execution-runtime
@@ -866,6 +956,10 @@
       (write-test-jar! writer "writer-a")
       (doseq [[path value] [[client "client"] [execution "execution"]
                             [program-source "program-source"]
+                            [client-inventory
+                             "{:seon.dev.program-inventory/public-exports [\"example/client\"] :seon.dev.program-inventory/internal-terminals []}"]
+                            [execution-inventory
+                             "{:seon.dev.program-inventory/public-exports [\"example/execution\"] :seon.dev.program-inventory/internal-terminals []}"]
                             [runtime "runtime"]
                             [execution-runtime "execution-runtime"]
                             [bootstrap "bootstrap"] [css "css"]]]
@@ -914,7 +1008,17 @@
          :seon.dev.artifact/program-source-path
          "out/client/program-sources.edn"
          :seon.dev.artifact/program-source-digest digest
+         :seon.dev.artifact/client-inventory-path
+         "out/client/program-inventory.edn"
+         :seon.dev.artifact/client-inventory-digest digest
          :seon.dev.artifact/execution-output "/checkout/out/execution/main.js"
+         :seon.dev.artifact/execution-inventory-path
+         "out/execution/program-inventory.edn"
+         :seon.dev.artifact/execution-inventory-digest digest
+         :seon.dev.artifact/cljs-artifact-inventory
+         {:seon.execution.inventory/availability :available
+          :seon.execution.inventory/exports-by-tier {:bun #{"example/fn"}}
+          :seon.execution.inventory/digest digest}
          :seon.dev.artifact/runtime-root "/checkout/runtime/content"
          :seon.dev.artifact/source-input-digest digest
          :seon.dev.artifact/maintained-dependencies

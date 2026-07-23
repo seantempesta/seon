@@ -303,6 +303,10 @@
    :seon.dev.release/execution-member :seon.release.member/execution
    :seon.dev.release/runtime-assets-member :seon.release.member/runtime-assets
    :seon.dev.release/program-source-member :seon.release.member/program-source
+   :seon.dev.release/client-inventory-member
+   :seon.release.member/client-inventory
+   :seon.dev.release/execution-inventory-member
+   :seon.release.member/execution-inventory
    :seon.dev.release/babashka-member :seon.release.member/babashka
    :seon.dev.release/operator-member :seon.release.member/operator
    :seon.dev.release/detach-helper-member :seon.release.member/detach-helper

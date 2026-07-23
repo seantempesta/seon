@@ -59,7 +59,9 @@
    :output-to        "out/client/main.js"
    :main             seon.client/-main
    :build-hooks      [[seon.dev.program-artifact/publish!
-                       "out/client/program-sources.edn"]]
+                       "out/client/program-sources.edn"]
+                      [seon.dev.program-artifact/publish-inventory!
+                       "out/client/program-inventory.edn"]]
    ;; Normal pods ship runtime code, not the platform test graph. Agent-authored
    ;; tests still run through seon.test.runner once their vars are defined.
    :devtools         {:enabled      true
@@ -96,7 +98,9 @@
    :output-to        "out-acme/client/main.js"
    :main             seon.client/-main
    :build-hooks      [[seon.dev.program-artifact/publish!
-                       "out-acme/client/program-sources.edn"]]
+                       "out-acme/client/program-sources.edn"]
+                      [seon.dev.program-artifact/publish-inventory!
+                       "out-acme/client/program-inventory.edn"]]
    ;; `acme.pod` is listed DIRECTLY in :preloads (not only via bin/acme's
    ;; --config-merge) so acme's registration ALWAYS runs at boot — no
    ;; doubt about whether deep-merge concats vs replaces the preload
@@ -126,6 +130,10 @@
   {:target           :node-script
    :output-to        "out-bench/client/main.js"
    :main             seon.client/-main
+   :build-hooks      [[seon.dev.program-artifact/publish!
+                       "out-bench/client/program-sources.edn"]
+                      [seon.dev.program-artifact/publish-inventory!
+                       "out-bench/client/program-inventory.edn"]]
    :devtools         {:enabled  true
                       :preloads [seon.demo]}
    :compiler-options {:warnings-as-errors false
@@ -143,6 +151,8 @@
   {:target           :node-script
    :output-to        "out/execution/main.js"
    :main             seon.execution.runtime/-main
+   :build-hooks      [[seon.dev.program-artifact/publish-inventory!
+                       "out/execution/program-inventory.edn"]]
    :devtools         {:enabled false}
    :compiler-options {:warnings-as-errors false
                       :optimizations      :simple
@@ -180,6 +190,8 @@
   {:target           :node-script
    :output-to        "out-acme/execution/main.js"
    :main             seon.execution.runtime/-main
+   :build-hooks      [[seon.dev.program-artifact/publish-inventory!
+                       "out-acme/execution/program-inventory.edn"]]
    :devtools         {:enabled false}
    :compiler-options {:warnings-as-errors false
                       :optimizations      :simple

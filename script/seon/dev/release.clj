@@ -55,6 +55,9 @@
    :seon.release.member/execution "runtime/execution.js"
    :seon.release.member/runtime-assets "runtime-root"
    :seon.release.member/program-source "runtime/program-sources.edn"
+   :seon.release.member/client-inventory "runtime/client-program-inventory.edn"
+   :seon.release.member/execution-inventory
+   "runtime/execution-program-inventory.edn"
    :seon.release.member/babashka "runtime/bb"
    :seon.release.member/operator "runtime/operator.jar"
    :seon.release.member/detach-helper "runtime/detach.py"
@@ -98,6 +101,8 @@
    [:seon.dev.release/execution-member :qualified-keyword]
    [:seon.dev.release/runtime-assets-member :qualified-keyword]
    [:seon.dev.release/program-source-member :qualified-keyword]
+   [:seon.dev.release/client-inventory-member :qualified-keyword]
+   [:seon.dev.release/execution-inventory-member :qualified-keyword]
    [:seon.dev.release/babashka-member :qualified-keyword]
    [:seon.dev.release/operator-member :qualified-keyword]
    [:seon.dev.release/detach-helper-member :qualified-keyword]
@@ -124,6 +129,8 @@
    :seon.dev.release/execution-member
    :seon.dev.release/runtime-assets-member
    :seon.dev.release/program-source-member
+   :seon.dev.release/client-inventory-member
+   :seon.dev.release/execution-inventory-member
    :seon.dev.release/babashka-member
    :seon.dev.release/operator-member
    :seon.dev.release/detach-helper-member
@@ -607,6 +614,10 @@
    :seon.release.member/runtime-assets
    :seon.dev.release/program-source-member
    :seon.release.member/program-source
+   :seon.dev.release/client-inventory-member
+   :seon.release.member/client-inventory
+   :seon.dev.release/execution-inventory-member
+   :seon.release.member/execution-inventory
    :seon.dev.release/babashka-member :seon.release.member/babashka
    :seon.dev.release/operator-member :seon.release.member/operator
    :seon.dev.release/detach-helper-member
@@ -760,6 +771,8 @@
            [::bootstrap :string]
            [::public-assets :string]
            [::program-source :string]
+           [::client-inventory :string]
+           [::execution-inventory :string]
            [::babashka :string]
            [::babashka-asset :map]
            [::operator :string]
@@ -779,7 +792,8 @@
            [::license :string]]]
     release-manifest-schema]}
   [{::keys [package-root bun bun-version writer pod execution bootstrap
-            public-assets program-source babashka babashka-asset operator
+            public-assets program-source client-inventory execution-inventory
+            babashka babashka-asset operator
             detach-helper
             launcher config brand-css babashka-license bun-license
             datahike-license source sbom notices node-modules package-json
@@ -797,6 +811,10 @@
     (copy-file! pod (fs/path runtime "pod.js"))
     (copy-file! execution (fs/path runtime "execution.js"))
     (copy-file! program-source (fs/path runtime "program-sources.edn"))
+    (copy-file! client-inventory
+                (fs/path runtime "client-program-inventory.edn"))
+    (copy-file! execution-inventory
+                (fs/path runtime "execution-program-inventory.edn"))
     (copy-file! babashka (fs/path runtime "bb"))
     (.setExecutable (io/file (str (fs/path runtime "bb"))) true false)
     (copy-file! operator (fs/path runtime "operator.jar"))
@@ -1001,7 +1019,11 @@
          :seon.dev.artifact/release-execution-output
          (str (fs/path build-root "execution.js"))
          :seon.dev.artifact/release-program-source-output
-         (str (fs/path build-root "program-sources.edn"))}
+         (str (fs/path build-root "program-sources.edn"))
+         :seon.dev.artifact/release-client-inventory-output
+         (str (fs/path build-root "client-program-inventory.edn"))
+         :seon.dev.artifact/release-execution-inventory-output
+         (str (fs/path build-root "execution-program-inventory.edn"))}
         config {:seon.dev.config/root (str root)
                 :seon.dev.config/environment environment}
         selected-config (fs/path (or (get environment "SEON_CONFIG")
@@ -1073,6 +1095,11 @@
         ::public-assets (str (fs/path root "resources/public"))
         ::program-source
         (:seon.dev.artifact/release-program-source-output release-programs)
+        ::client-inventory
+        (:seon.dev.artifact/release-client-inventory-output release-programs)
+        ::execution-inventory
+        (:seon.dev.artifact/release-execution-inventory-output
+         release-programs)
         ::babashka executable
         ::babashka-asset identity
         ::operator (str operator)

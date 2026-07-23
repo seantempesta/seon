@@ -24,6 +24,8 @@
     (spit (str (fs/path root "pod.js")) "pod")
     (spit (str (fs/path root "execution.js")) "execution")
     (spit (str (fs/path root "program-sources.edn")) "{}")
+    (spit (str (fs/path root "client-program-inventory.edn")) "{}")
+    (spit (str (fs/path root "execution-program-inventory.edn")) "{}")
     (spit (str (fs/path root "bb")) "bb")
     (spit (str (fs/path root "operator.jar")) "operator")
     (spit (str (fs/path root "detach.py")) "detach")
@@ -45,6 +47,8 @@
    :seon.release.member/execution "execution.js"
    :seon.release.member/runtime-assets "web"
    :seon.release.member/program-source "program-sources.edn"
+   :seon.release.member/client-inventory "client-program-inventory.edn"
+   :seon.release.member/execution-inventory "execution-program-inventory.edn"
    :seon.release.member/babashka "bb"
    :seon.release.member/operator "operator.jar"
    :seon.release.member/detach-helper "detach.py"
@@ -76,6 +80,10 @@
    :seon.dev.release/execution-member :seon.release.member/execution
    :seon.dev.release/runtime-assets-member :seon.release.member/runtime-assets
    :seon.dev.release/program-source-member :seon.release.member/program-source
+   :seon.dev.release/client-inventory-member
+   :seon.release.member/client-inventory
+   :seon.dev.release/execution-inventory-member
+   :seon.release.member/execution-inventory
    :seon.dev.release/babashka-member :seon.release.member/babashka
    :seon.dev.release/operator-member :seon.release.member/operator
    :seon.dev.release/detach-helper-member :seon.release.member/detach-helper
@@ -222,6 +230,8 @@
               [["bun" "bun"] ["writer.jar" "writer"] ["pod.js" "pod"]
                ["execution.js" "execution"]
                ["program-sources.edn" "{}"]
+               ["client-program-inventory.edn" "{}"]
+               ["execution-program-inventory.edn" "{}"]
                ["bb" "bb"] ["operator.jar" "operator"]
                ["detach.py" "detach"]
                ["seon" "launcher"] ["config/system.edn" "{}"]
@@ -252,6 +262,10 @@
               ::release/public-assets (str (fs/path inputs "public"))
               ::release/program-source
               (str (fs/path inputs "program-sources.edn"))
+              ::release/client-inventory
+              (str (fs/path inputs "client-program-inventory.edn"))
+              ::release/execution-inventory
+              (str (fs/path inputs "execution-program-inventory.edn"))
               ::release/babashka (str (fs/path inputs "bb"))
               ::release/babashka-asset
               {:seon.dev.release/asset

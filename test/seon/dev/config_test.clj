@@ -13,6 +13,9 @@
    :seon.release.member/execution "runtime/execution.js"
    :seon.release.member/runtime-assets "runtime/web"
    :seon.release.member/program-source "runtime/program-sources.edn"
+   :seon.release.member/client-inventory "runtime/client-program-inventory.edn"
+   :seon.release.member/execution-inventory
+   "runtime/execution-program-inventory.edn"
    :seon.release.member/babashka "runtime/bb"
    :seon.release.member/operator "runtime/operator.jar"
    :seon.release.member/detach-helper "runtime/detach.py"
@@ -46,6 +49,10 @@
    :seon.dev.release/execution-member :seon.release.member/execution
    :seon.dev.release/runtime-assets-member :seon.release.member/runtime-assets
    :seon.dev.release/program-source-member :seon.release.member/program-source
+   :seon.dev.release/client-inventory-member
+   :seon.release.member/client-inventory
+   :seon.dev.release/execution-inventory-member
+   :seon.release.member/execution-inventory
    :seon.dev.release/babashka-member :seon.release.member/babashka
    :seon.dev.release/operator-member :seon.release.member/operator
    :seon.dev.release/detach-helper-member :seon.release.member/detach-helper
@@ -71,6 +78,8 @@
              ["runtime/pod.js" "pod"]
              ["runtime/execution.js" "execution"]
              ["runtime/program-sources.edn" "{}"]
+             ["runtime/client-program-inventory.edn" "{}"]
+             ["runtime/execution-program-inventory.edn" "{}"]
              ["runtime/web/style.css" "css"]
              ["runtime/web/resources/public/seon-brand.css" ".brand {}"]
              ["runtime/bb" "bb"]
