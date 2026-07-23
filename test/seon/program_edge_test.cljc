@@ -91,11 +91,11 @@
          (fn [required operation]
            (if (and (vector? operation)
                     (= :db/add (first operation))
-                    (vector? (second operation))
-                    (= ::edge/terminal-symbol
-                       (first (second operation)))
+                    (string? (second operation))
+                    (.startsWith (second operation)
+                                 "seon.program.edge/terminal:")
                     (= ::edge/required-bindings (nth operation 2 nil)))
-             (update required (second (second operation))
+             (update required (second operation)
                      (fnil conj #{}) (nth operation 3))
              required))
          {} tx-data)
@@ -104,10 +104,12 @@
               (keep (fn [row]
                       (when (and (map? row)
                                  (contains? row ::edge/terminal-symbol))
-                        (assoc row ::edge/required-bindings
+                        (-> row
+                            (dissoc :db/id)
+                            (assoc ::edge/required-bindings
                                (get required-by-terminal
-                                    (::edge/terminal-symbol row)
-                                    #{})))))
+                                    (:db/id row)
+                                    #{}))))))
               tx-data)]
     {::edge/function-symbol "fixture.edge/subject"
      ::edge/generation (::edge/generation function-map)
@@ -183,6 +185,19 @@
            (dissoc persisted ::edge/terminals)))
     (is (= (set (::edge/terminals bundle))
            (set (::edge/terminals persisted))))))
+
+(deftest persisted-terminal-connections-reconstruct-the-edge-bundle
+  (let [bundle (analyzed-bundle fixture-form)
+        persisted (tx-bundle (tee-tx bundle))
+        pulled
+        (-> persisted
+            (dissoc ::edge/function-symbol ::edge/terminals)
+            (assoc :seon.fn/sym (::edge/function-symbol persisted)
+                   ::edge/terminal-refs (::edge/terminals persisted)))
+        reconstructed (first (edge/reconstruct-bundles [pulled]))]
+    (is (= bundle reconstructed))
+    (is (= (edge/program-graph-digest [bundle])
+           (edge/program-graph-digest [reconstructed])))))
 
 (deftest graph-digest-changes-with-any-edge-change
   (let [first-bundle (analyzed-bundle fixture-form)

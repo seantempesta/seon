@@ -31,6 +31,7 @@
  [:enum :pure :read :idempotent :external])
 (schema/register! ::required-bindings [:set :string])
 (schema/register! ::terminal-generation :string)
+(schema/register! ::terminal-refs [:set :seon.db/ref])
 
 (schema/register! ::namespace :symbol)
 (schema/register! ::aliases [:map-of :symbol :symbol])
@@ -85,7 +86,7 @@
 (def stored-function-attrs
   "The direct-edge attributes stored on a `:seon.fn` entity."
   #{::generation ::calls ::read-attributes ::written-attributes
-    ::all-at-basis? ::uncertainties})
+    ::all-at-basis? ::uncertainties ::terminal-refs})
 
 ;;; Symbol resolution
 
@@ -474,7 +475,8 @@
         bundle
         (-> walked
             (assoc ::terminals
-                   (vec (vals (::terminal-by-symbol walked))))
+                   (vec (sort-by ::terminal-symbol
+                                 (vals (::terminal-by-symbol walked)))))
             (dissoc ::terminal-by-symbol))
         generation
         (content-hash/sha-256 (pr-str (canonical-bundle-value bundle)))]
@@ -488,6 +490,29 @@
    (pr-str
     (mapv canonical-bundle-value
           (sort-by ::function-symbol bundles)))))
+
+(defn reconstruct-bundles
+  "Reconstruct exact canonical bundles from pulled persisted function rows."
+  {:malli/schema [:=> [:cat [:sequential :map]] [:vector ::bundle]]}
+  [function-rows]
+  (mapv
+   (fn [function-row]
+     {::function-symbol (:seon.fn/sym function-row)
+      ::generation (::generation function-row)
+      ::calls (set (::calls function-row))
+      ::read-attributes (set (::read-attributes function-row))
+      ::written-attributes (set (::written-attributes function-row))
+      ::all-at-basis? (true? (::all-at-basis? function-row))
+      ::uncertainties (set (::uncertainties function-row))
+      ::terminals
+      (mapv
+       (fn [terminal]
+         {::terminal-symbol (::terminal-symbol terminal)
+          ::effect (::effect terminal)
+          ::required-bindings (set (::required-bindings terminal))
+          ::terminal-generation (::terminal-generation terminal)})
+       (sort-by ::terminal-symbol (::terminal-refs function-row)))})
+   (sort-by :seon.fn/sym function-rows)))
 
 ;;; Exact persistence transition
 
@@ -517,13 +542,17 @@
         terminal-data
         (mapcat
          (fn [terminal]
-           (let [terminal-ref [::terminal-symbol (::terminal-symbol terminal)]]
+           (let [terminal-ref [::terminal-symbol (::terminal-symbol terminal)]
+                 terminal-id (str "seon.program.edge/terminal:"
+                                  (::terminal-symbol terminal))]
              (concat
               [[:db.fn/retractAttribute terminal-ref ::required-bindings]
-               {::terminal-symbol (::terminal-symbol terminal)
+               {:db/id terminal-id
+                ::terminal-symbol (::terminal-symbol terminal)
                 ::effect (::effect terminal)
-                ::terminal-generation (::terminal-generation terminal)}]
-              (map #(vector :db/add terminal-ref ::required-bindings %)
+                ::terminal-generation (::terminal-generation terminal)}
+               [:db/add function-ref ::terminal-refs terminal-id]]
+              (map #(vector :db/add terminal-id ::required-bindings %)
                    (sort (::required-bindings terminal))))))
          (sort-by ::terminal-symbol (::terminals bundle)))]
     (vec (concat retracts [function-map] function-adds terminal-data))))
