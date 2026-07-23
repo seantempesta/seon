@@ -390,7 +390,7 @@ the anchor stays the state ledger.
   a traversal chain so cycles and missing aliases fail legibly. Preserve
   terminal storage semantics such as `:seon.db/ref`; do not inline shared
   shapes, weaken config acquisition, or bypass the operator
-  ([[../../../seon/issues/config-schema-alias-blocks-fresh-cluster-open]]).
+  ([[../../../seon/issues/archive/config-schema-alias-blocks-fresh-cluster-open]]).
 - **A database-backed member that requires selected config must depend on the
   config-reconciling pod for a fresh cluster.** Writer readiness alone cannot
   guarantee config singleton facts exist. Put the additive member after pod
