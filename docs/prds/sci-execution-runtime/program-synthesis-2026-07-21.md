@@ -318,6 +318,28 @@ COMPLETELY before dispatching anything.
   kill points) become queue rows pending core hardening, per the
   drill pause.
 
+- OWNER RULINGS R29-R32 (2026-07-23 AM, hands-on triage round):
+  R29 attr authority = mechanism A: registrations are committed
+  :seon.schema facts, global by construction; tiers ACQUIRE the
+  committed projection (never re-run register!); pull-pattern
+  admission added (read-side validation); the bootstrap hand list
+  dies for the computed population. PLUS: namespace-context
+  registration display is DERIVED from the functions present (their
+  arg/return schema references), never separately curated.
+  R30 every durable agent defn REQUIRES a parseable :malli/schema at
+  the admission choke point (scratch namespaces exempt); steering
+  teaches register-first.
+  R31 contract strictness: :any/:maybe are already banned by
+  convention — Sol agent dispatched (owner ask) to audit current
+  usage + whether [:fn] validation functions can guard genuinely
+  polymorphic slots + the wrapper/massaging (coercion) design for
+  platform grounding; ruling completes on its return.
+  R32 wire projection = result-symbol references ONLY, with a
+  RESULT-SYMBOL LIFECYCLE REGISTRY: track which instance/tier each
+  live result lives on (database facts keyed by process identity),
+  and WIPE them when that platform resets or the system restarts —
+  stale-reference class dies with it. Folds into the C1 encoder
+  lane's design.
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
