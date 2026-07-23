@@ -9,6 +9,7 @@
     [seon.db :as db]
     [seon.error :as error]
     [seon.instrument :as instrument]
+    [seon.log :as log]
     [seon.schema :as schema]))
 
 (schema/register! ::status
@@ -251,7 +252,15 @@
             [])
           _ (when (failed-read? page-rows)
               (acquisition-error! :query page-rows))
-          next-rows (into rows page-rows)]
+          next-rows (into rows page-rows)
+          _ (log/info-console!
+             "seon.runtime.admission"
+             "committed acquisition page received"
+             {:seon.runtime.admission/identity-attribute identity-attr
+              :seon.runtime.admission/page-row-count (count page-rows)
+              :seon.runtime.admission/acquired-row-count (count next-rows)
+              :seon.runtime.admission/page-complete?
+              (:datahike.index-page/complete? page)})]
       (if (:datahike.index-page/complete? page)
         next-rows
         (recur (:datahike.index-page/cursor page) next-rows)))))
@@ -275,8 +284,21 @@
 
 (defn- ^:async reconcile-committed!
   [old-projection instrument?]
-  (let [acquired (await (acquire-committed-projection!))
+  (let [_ (log/info-console!
+           "seon.runtime.admission"
+           "committed projection acquisition started")
+        acquired (await (acquire-committed-projection!))
+        _ (log/info-console!
+           "seon.runtime.admission"
+           "committed projection construction started"
+           {:seon.runtime.admission/schema-row-count
+            (count (::schema-rows acquired))
+            :seon.runtime.admission/function-contract-row-count
+            (count (::function-contract-rows acquired))})
         projection (committed-projection acquired)
+        _ (log/info-console!
+           "seon.runtime.admission"
+           "committed projection instrumentation started")
         stats
         (if instrument?
           (instrument/reconcile-projection!
@@ -287,6 +309,11 @@
            ::instrument/n-unstrumented 0
            ::instrument/n-instrumented 0
            ::instrument/verification-gaps []})]
+    (log/info-console!
+     "seon.runtime.admission"
+     "committed projection instrumentation completed"
+     {:seon.runtime.admission/instrumented-count
+      (::instrument/n-instrumented stats)})
     (when (false? (::instrument/ok? stats))
       (let [failure
             (select-keys stats [::instrument/rejected

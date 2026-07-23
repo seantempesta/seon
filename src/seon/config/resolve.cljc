@@ -284,11 +284,11 @@
 
 (def operator-dial-schemas
   "Development-operator protective limits with units and calibration provenance."
-  {:seon.config.operator/pod-readiness-timeout-ms
+  {:seon.config.operator/pod-boot-stall-timeout-ms
    [:int
     {:min 1
      :description
-     "Maximum milliseconds the operator waits for pod readiness before failing loudly. Default 3000000 protects startup ownership from a wedged pod while leaving more than 10x headroom over the measured 2026-07-23 257-second fresh paged initialization baseline; firing names :seon.config.operator/pod-readiness-timeout-ms."}]})
+     "Maximum milliseconds the operator permits without concrete pod boot progress before failing loudly. Default 300000 is a stall breaker, not a total boot-duration cap; log advance, initialization page receipts, boot-phase transitions, and readiness advertisements are progress. It protects startup ownership from a wedged pod and is calibrated above the longest silent phase in the measured 2026-07-23 257-second fresh paged boot. Firing names :seon.config.operator/pod-boot-stall-timeout-ms."}]})
 
 (doseq [[attribute shape] operator-dial-schemas]
   (schema/register! attribute shape))
@@ -1071,9 +1071,9 @@
    [:seon.config.claim-driver/invocation-result-maximum-bytes
     {:optional true}
     :seon.config.claim-driver/invocation-result-maximum-bytes]
-   [:seon.config.operator/pod-readiness-timeout-ms
+   [:seon.config.operator/pod-boot-stall-timeout-ms
     {:optional true}
-    :seon.config.operator/pod-readiness-timeout-ms]
+    :seon.config.operator/pod-boot-stall-timeout-ms]
    [:seon.config/on-core-error      {:optional true} :seon.config/on-core-error]
    [:seon.config/spawn-depth-cap    {:optional true} :seon.config/spawn-depth-cap]
    [:seon.config/always             {:optional true} :seon.config/always]
@@ -1946,10 +1946,10 @@
              (get claim-driver
                   :seon.config.claim-driver/invocation-result-maximum-bytes
                   1048576)
-             :seon.config.operator/pod-readiness-timeout-ms
+             :seon.config.operator/pod-boot-stall-timeout-ms
              (get operator
-                  :seon.config.operator/pod-readiness-timeout-ms
-                  3000000)
+                  :seon.config.operator/pod-boot-stall-timeout-ms
+                  300000)
              :seon.config.render-context/host-timezone
              (get render-context
                   :seon.config.render-context/host-timezone

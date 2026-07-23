@@ -250,7 +250,17 @@
              (request-on-session!
               session (ensure-request selection page) 15000))]
         (when-not (::protocol/success? ensured)
-          (throw (ex-info "Opening the database failed." ensured)))))))
+          (throw (ex-info "Opening the database failed." ensured)))
+        (when page
+          (seon-log/info-console!
+           "seon.db.session"
+           "database initialization page received"
+           {:seon.db.initialization/page-index
+            (:seon.db.initialization/page-index page)
+            :seon.db.initialization/page-count
+            (:seon.db.initialization/page-count page)
+            :seon.db.initialization/phase
+            (:seon.db.initialization/phase page)}))))))
 
 (defn- ^:async ensure-and-acquire! [session selection initialization]
   (let [database-name (::db/database-name selection)

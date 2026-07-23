@@ -2254,11 +2254,17 @@
          :seon.client/created-ids []
          :seon.web/port port
          :seon.web/port-file port-file})
-      (let [_session-open
+      (let [_ (log/info-console!
+               "seon.client/start-runtime!"
+               "boot phase: opening database session")
+            _session-open
             (await (open-startup-session! startup? selected-configuration))
             _ (await
                (validate-restore-database!
                 descriptor restore-startup restore-completion-claim))]
+        (log/info-console!
+         "seon.client/start-runtime!"
+         "boot phase: database session acquired")
         (when reconcile-manifest?
           (let [reconciled
                 (await (reconcile-config! selected-manifest

@@ -60,8 +60,11 @@
     [:vector external-dependency-schema]]
    [:seon.dev.process/http-port-file {:optional true} :string]
    [:seon.dev.process/readiness qualified-keyword?]
-   [:seon.dev.process/ready-timeout-ms [:int {:min 1}]]
-   [:seon.dev.process/ready-timeout-config-key
+   [:seon.dev.process/ready-timeout-ms
+    {:optional true} [:int {:min 1}]]
+   [:seon.dev.process/ready-stall-timeout-ms
+    {:optional true} [:int {:min 1}]]
+   [:seon.dev.process/ready-stall-timeout-config-key
     {:optional true} :qualified-keyword]
    [:seon.dev.process/shutdown-grace-ms [:int {:min 1}]]
    [:seon.dev.process/bootstrap-digest {:optional true}
@@ -510,10 +513,10 @@
            :seon.dev.process/http-port-file
            (::launch/http-port-file descriptor-process)
            :seon.dev.process/readiness :seon.dev.process.readiness/pod
-           :seon.dev.process/ready-timeout-ms
-           (config/pod-readiness-timeout-ms config)
-           :seon.dev.process/ready-timeout-config-key
-           :seon.config.operator/pod-readiness-timeout-ms
+           :seon.dev.process/ready-stall-timeout-ms
+           (config/pod-boot-stall-timeout-ms config)
+           :seon.dev.process/ready-stall-timeout-config-key
+           :seon.config.operator/pod-boot-stall-timeout-ms
            :seon.dev.process/shutdown-grace-ms 5000
            :seon.dev.process/artifact-digest
            (:seon.dev.artifact/application-digest manifest)}
@@ -927,40 +930,62 @@
         (when (not= :seon.dev.process.status/alive (process-status record))
           "process exited before readiness"))))
 
+(defn- log-progress-observation
+  [record]
+  (let [path (:seon.dev.process/log record)]
+    (when (and path (fs/regular-file? path))
+      {:seon.dev.process.log/bytes (fs/size path)
+       :seon.dev.process.log/modified-at
+       (.toMillis (fs/last-modified-time path))})))
+
 (defn wait-ready!
   "Wait until one process lifetime passes its direct readiness probe."
   [config spec record]
-  (let [deadline (+ (System/currentTimeMillis)
-                    (:seon.dev.process/ready-timeout-ms spec))]
-    (loop []
-      (cond
-        (ready? config spec record) record
-        (readiness-failure config record)
-        (throw (ex-info "A Seon process failed before readiness."
-                        {:seon.dev.process/id (:seon.dev.process/id spec)
-                         :seon.dev.process/failure
-                         (readiness-failure config record)
-                         :seon.dev.process/log (:seon.dev.process/log record)}))
-        (< (System/currentTimeMillis) deadline)
-        (do (Thread/sleep 200) (recur))
-        :else
-        (let [config-key
-              (:seon.dev.process/ready-timeout-config-key spec)]
-          (throw
-           (ex-info
-            (cond-> "Timed out waiting for Seon process readiness."
-              config-key
-              (str " Protective limit "
-                   config-key
-                   " fired."))
-            (cond->
-             {:seon.dev.process/id (:seon.dev.process/id spec)
-              :seon.dev.process/log (:seon.dev.process/log record)
-              :seon.dev.process/ready-timeout-ms
-              (:seon.dev.process/ready-timeout-ms spec)}
-              config-key
-              (assoc :seon.dev.process/ready-timeout-config-key
-                     config-key)))))))))
+  (let [now (System/currentTimeMillis)
+        stall-ms (:seon.dev.process/ready-stall-timeout-ms spec)
+        total-deadline (some-> (:seon.dev.process/ready-timeout-ms spec)
+                               (+ now))]
+    (loop [last-progress (log-progress-observation record)
+           last-progress-at now]
+      (let [now (System/currentTimeMillis)
+            progress (log-progress-observation record)
+            advanced? (not= progress last-progress)
+            last-progress-at (if advanced? now last-progress-at)
+            deadline (if stall-ms
+                       (+ last-progress-at stall-ms)
+                       total-deadline)]
+        (cond
+          (ready? config spec record) record
+          (readiness-failure config record)
+          (throw (ex-info "A Seon process failed before readiness."
+                          {:seon.dev.process/id (:seon.dev.process/id spec)
+                           :seon.dev.process/failure
+                           (readiness-failure config record)
+                           :seon.dev.process/log
+                           (:seon.dev.process/log record)}))
+          (< now deadline)
+          (do (Thread/sleep 200)
+              (recur progress last-progress-at))
+          :else
+          (let [config-key
+                (:seon.dev.process/ready-stall-timeout-config-key spec)]
+            (throw
+             (ex-info
+              (cond-> (if stall-ms
+                        "Pod boot stalled before readiness."
+                        "Timed out waiting for Seon process readiness.")
+                config-key
+                (str " Protective limit " config-key " fired."))
+              (cond->
+               {:seon.dev.process/id (:seon.dev.process/id spec)
+                :seon.dev.process/log (:seon.dev.process/log record)
+                :seon.dev.process/last-progress last-progress
+                :seon.dev.process/last-progress-at last-progress-at}
+                stall-ms
+                (assoc :seon.dev.process/ready-stall-timeout-ms stall-ms)
+                config-key
+                (assoc :seon.dev.process/ready-stall-timeout-config-key
+                       config-key))))))))))
 
 (defn- wait-watcher-flush! [config spec record]
   (let [deadline (+ (System/currentTimeMillis)

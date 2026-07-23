@@ -72,24 +72,24 @@
            :seon.config.claim-driver/database-pool-wait-timeout-ms]
           110000))
 
-(defn pod-readiness-timeout-ms
-  "Return the resolved pod-readiness ceiling in milliseconds.
+(defn pod-boot-stall-timeout-ms
+  "Return the resolved pod boot-stall ceiling in milliseconds.
 
-   The limit protects operator startup ownership from a pod that never
-   advertises readiness. Its 3000000 ms default is selected in manifest
-   resolution from the measured 2026-07-23 257-second fresh paged-boot
-   baseline with more than 10x headroom; timeout failure names the owning
-   config key."
+   Each concrete progress observation resets the interval, so total healthy
+   boot duration is unbounded. The 300000 ms default protects operator startup
+   ownership from a wedged pod and is calibrated above the longest silent
+   phase in the measured 2026-07-23 257-second fresh paged boot. Failure names
+   the owning config key."
   [configuration]
   (or
    (get-in configuration
            [:seon.dev.config/resolved-configuration
-            :seon.config.operator/pod-readiness-timeout-ms])
+            :seon.config.operator/pod-boot-stall-timeout-ms])
    (throw
     (ex-info
-     "Missing required operator limit :seon.config.operator/pod-readiness-timeout-ms."
+     "Missing required operator limit :seon.config.operator/pod-boot-stall-timeout-ms."
      {:seon.config/missing
-      :seon.config.operator/pod-readiness-timeout-ms}))))
+      :seon.config.operator/pod-boot-stall-timeout-ms}))))
 
 (defn- validate-configuration! [configuration]
   (when-let [heap (writer-max-heap configuration)]
