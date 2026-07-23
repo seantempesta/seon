@@ -1136,6 +1136,16 @@ denominator grew because all functions are agent-facing now, per
 ruling 19). Absent effect proven non-replayable by construction
 with a regression. Spine step 2 (loop-migration slice) dispatches
 on the design agent's return.
+AUDIT LANES DISPATCHED (owner-directed, 2026-07-23): `issue-triage`
+(all 133 open issues → fixed-archive / dissolves-with-unit /
+real+independent(S/M/L) / unclear, top-10 queue candidates; spec
+`tmp/orchestrator/issue-triage-spec.md`) ∥ `deletion-audit`
+(read-only census: marked shims + callers, cutover-death inventory
+with consumers, dead/orphaned namespaces, duplicate mechanisms
+vs the landed seam, stale tests → safe-now / after-loop /
+at-cutover deletion queue; spec
+`tmp/orchestrator/deletion-audit-spec.md`). Both file-disjoint from
+each other and read-only vs source; safe alongside the design agent.
 LIVE: loop-migration DESIGN agent (owner-directed, 2026-07-23) —
 fresh-eyes grounding in reference-code/datahike + reference-code/sci
 (native CAS/listen!/interrupt primitives vs Seon hand-rolls),
