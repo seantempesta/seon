@@ -43,7 +43,20 @@ COMPLETELY before dispatching anything.
   `research/`): p1-capability-seam · loop-cljc-sci ·
   llm-http-io · jvm-concurrency · jvm-web-sse · writer-throughput
   · render-ctx-portability. Deletion audit + issue triage done.
-- Tree clean at HEAD; no lanes running at the restart boundary.
+- Restart residue resolved (2026-07-23): the 18 staged issue-archive
+  deletions were the triage tail — committed (86579c7f0). The
+  uncommitted claim-epoch retrofit in agent/{loop,run,turn}.cljs is
+  the post-R22 L0 attempt, SUPERSEDED by ruling 24 (it is the exact
+  legacy-loop fence retrofit R24 forbids); diff preserved at
+  tmp/orchestrator/l0-retrofit-superseded-by-r24.patch; files left in
+  tree, PROTECTED in all first-wave specs; U2 consumes or deletes.
+- LANES (first wave, dispatched 2026-07-23): U3 writer admission
+  (spec tmp/orchestrator/u3-writer-admission-spec.md, summary
+  u3-summary.txt) RUNNING; U1 guarded door + U4 render purity specs
+  written (u1-guarded-door-spec.md, u4-render-purity-spec.md),
+  dispatch gated on a tree compile probe over the L0 residue
+  (tmp/orchestrator/l0-tree-compile-probe.log). U2 dispatches when U1
+  lands; U5 next refill; U6 held for owner HTTP talk.
 - Owner answers at wind-down: first wave (U1+U3+U4) AUTHORIZED;
   U5 lane builds the web-render operator member itself; demo
   re-runs are BUG-FINDERS, cheap and at orchestrator discretion —
