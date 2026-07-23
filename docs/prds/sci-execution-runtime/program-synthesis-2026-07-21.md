@@ -698,6 +698,19 @@ COMPLETELY before dispatching anything.
   paged-initialization-misses-public-core-predicate-binding) — the
   client-tier sibling of the writer's requiring-resolve fix; FIRST
   ACTION for the next session, then the checkpoint.
+- PREDFIX LANE DISPATCHED (2026-07-23 late, new session day): the
+  schema-admission codex session (019f8fb5-eb2b-7232-97b4-3785111d6507)
+  RESUMED on the one remaining checkpoint blocker — client-tier SCI
+  reconstruction misses the registered public core-predicate binding
+  seon.db.protocol/ordinary-wire-value? (issue paged-initialization-
+  misses-public-core-predicate-binding; the client sibling of its own
+  writer requiring-resolve fix). Prompt tmp/orchestrator/
+  predfix-prompt.txt; isolated cluster predfix; live reset-boundary
+  proof to pod readiness required. THE FROZEN-TREE CHECKPOINT FIRES
+  ON ITS ACCEPTED RETURN (full bin/test-cljs + bin/test-writer +
+  operator gate, then the live-proof ledger on FRESH-RESET clusters
+  per R38, capped by one demo bug-finder run).
+
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
