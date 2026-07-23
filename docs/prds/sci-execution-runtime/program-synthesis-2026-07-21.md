@@ -1105,10 +1105,19 @@ removal/restart proofs) ∥ `p2-msglc` (message/lifecycle port,
 exemplar `f6d843ee` named as the worked pattern).
 
 **Ruling 17 (owner direction, 2026-07-22): package-host comms follow
-the seon.db integration pattern.** (a) JS packages run IN-PROCESS in
-the pod (the pod IS the Bun env) — bun install + the loader door is
-the complete JS story; no JS host process until isolation/memory
-evidence demands one. (b) WP-J = the per-cluster JVM process serves
+the seon.db integration pattern.** (a) The JS story is a CLJS
+PACKAGED INTERFACE TO THE BUN RUNTIME (owner correction, same
+night): `seon.packages.js.bun` wraps Bun's native surface (file,
+spawn, fetch/serve, sockets, ffi, …) behind the ruling-16 wrapper
+discipline — closed request maps, Malli schemas, flat steering
+errors, effect metadata, corpus-discoverable; the Bun version is the
+package version. In-process (no JS host process); npm packages ride
+the same loader door. This is the structured replacement for
+freeform agent `js/` interop (ruling 15's direct-call clause);
+family capability leaves remain direct implementations — any
+consolidation onto the packaged interface is evidence-driven, later.
+UNIT QUEUED: build `seon.packages.js.bun` after the loader door
+lands (decide seeded-default vs per-cluster corpus placement there). (b) WP-J = the per-cluster JVM process serves
 `seon.packages.jvm.*` leaves over the SAME typed Transit-UDS
 discipline as seon.db (wire maps in/out, descriptor-advertised
 socket, operator member, entry point analogous to seon.db.server);
