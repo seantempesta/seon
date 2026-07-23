@@ -9,8 +9,8 @@
 
    - a LITERAL HICCUP vector for static content — `[:h1 \"hi\"]`
    - a QUALIFIED FN SYMBOL for dynamic content, late-resolved at
-     every render via `seon.eval/lookup-value` (core fns and
-     fns you define yourself both resolve — same single path).
+     every render. Core functions resolve only from the compiled trusted
+     table; authored functions execute only through the guarded SCI door.
 
    Wire it with a raw transact (no sugar — one pattern):
 
@@ -436,30 +436,53 @@
    This fn is itself the worked example of the canvas contract: one
    render emitting tagged compact + expanded blocks, plus the
    `:seon.render/ai` render saying what the human sees. Note it
-   derives its display from ordinary caller-acquired fields and the wall clock.
-   The operation that acquired the agent may also supply `:seon.user/name`
-   and `:seon.render.chat/last-reply`; this formatter performs no database
-   acquisition of its own."
+   derives its display from ordinary caller-acquired fields. The web tier
+   supplies the clock observation under `:seon.render.welcome/*`; the portable
+   formatter never reads a host clock. The operation that acquired the agent
+   may also supply `:seon.user/name` and `:seon.render.chat/last-reply`; this
+   formatter performs no acquisition of its own."
   {:malli/schema
    [:=> [:cat :seon.render/system-input :any]
     :seon.render/html-response]}
   [{entity :seon.agent/entity
     id :seon.agent/id
     uname :seon.user/name
-    reply :seon.render.chat/last-reply}
+    reply :seon.render.chat/last-reply
+    supplied-greet :seon.render.welcome/greeting
+    supplied-date :seon.render.welcome/date
+    supplied-time :seon.render.welcome/time}
    _invoke-selected!]
-  (let [now        (js/Date.)
-        greet      (greeting (.getHours now))
+  (let [now        #?(:cljs
+                      (when-not (and supplied-greet supplied-date
+                                     supplied-time)
+                        (js/Date.))
+                      :clj nil)
+        greet      (or supplied-greet
+                       #?(:cljs (greeting (.getHours now))
+                          :clj "Welcome"))
         greet-line (if uname
                      (str greet ", " uname ".")
                      (str greet "."))
-        date-str   (.toLocaleDateString now "en-US"
-                                        #js {:weekday "long"
-                                             :month   "long"
-                                             :day     "numeric"})
-        time-str   (.toLocaleTimeString now "en-US"
-                                        #js {:hour   "2-digit"
-                                             :minute "2-digit"})
+        date-str   (or supplied-date
+                       #?(:cljs
+                          (.toLocaleDateString
+                           now "en-US"
+                           #js {:weekday "long"
+                                :month "long"
+                                :day "numeric"})
+                          :clj ""))
+        time-str   (or supplied-time
+                       #?(:cljs
+                          (.toLocaleTimeString
+                           now "en-US"
+                           #js {:hour "2-digit" :minute "2-digit"})
+                          :clj ""))
+        clock-line (cond
+                     (and (seq date-str) (seq time-str))
+                     (str date-str " · " time-str)
+                     (seq date-str) date-str
+                     (seq time-str) time-str
+                     :else nil)
         purpose    (:seon.agent/purpose entity)
         purpose-line (or purpose
                          "I'm still finding my purpose — tell me what you need.")
@@ -483,19 +506,20 @@
         [:div {:class "seon-card-expanded flex flex-col gap-2 p-4"}
          (md/md->hiccup reply {:wrap-class "markdown text-sm text-text-100"})
          [:div {:class "text-[10px] font-mono text-text-500 pt-1.5 border-t border-base-800"}
-          (str greet-line " · " date-str " · " time-str)]]
+          (str greet-line (when clock-line (str " · " clock-line)))]]
         ;; Fresh agent, no reply yet — keep the greeting empty-state.
         [:div {:class "seon-card-expanded flex flex-col gap-3 p-4"}
          [:div {:class "text-lg text-text-50"} greet-line]
-         [:div {:class "text-xs font-mono text-signal"}
-          (str date-str " · " time-str)]
+         (when clock-line
+           [:div {:class "text-xs font-mono text-signal"} clock-line])
          [:div {:class "text-sm text-text-200"} purpose-line]
          [:div {:class "text-xs text-text-400 italic"} welcome-line]])]
      :seon.render/ai
      (str "Core welcome canvas. "
           (if reply
             (str "Human sees the latest reply: " (pr-str reply) ".")
-            (str "Human sees " (pr-str greet-line) ", " date-str " " time-str
+            (str "Human sees " (pr-str greet-line)
+                 (when clock-line (str ", " clock-line))
                  ", and purpose " (pr-str purpose-line) "."))
           " Replace it with my.canvas/show! when another view is useful.")}))
 

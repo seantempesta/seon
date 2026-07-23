@@ -65,7 +65,8 @@
     [clojure.string :as str]
     [malli.error :as me]
     [seon.ai.tokens :as tokens]
-    #?(:cljs [seon.config :as config])
+    [seon.render.configuration :as rconfig]
+    [seon.render.view-unit :as view-unit]
     [seon.schema :as schema]
     [seon.time.instant :as instant]))
 
@@ -73,8 +74,16 @@
 ;; owns every touch of the raw value; formatting owns only the later id. These
 ;; are transient rendering contracts, not stored entities.
 (schema/register! ::value :any)
-#?(:cljs
-   (do
+
+(defn value-unit-id
+  "Stable DOM id for one authorized logical value subtree."
+  [render-request value-selector path]
+  (str "seon-value-"
+       (view-unit/identity-token
+        (merge {:seon.agent/id (:seon.agent/id render-request)
+                :seon.render/path-text (pr-str path)}
+               value-selector))))
+(do
      (schema/register! ::eval-id :string)
      (schema/register! ::body :string)
      (schema/register! ::top-type-size :string)
@@ -106,7 +115,7 @@
      (schema/register! ::format-ai-request
                        [:map {:closed true}
                         [::eval-id ::eval-id]
-                        [::prepared ::prepared-ai]])))
+                        [::prepared ::prepared-ai]]))
 
 ;; Value-drill wire contracts stay producer-neutral and pure EDN. Recursive
 ;; sampler invariants are checked by bounded public validators at the later
@@ -243,15 +252,21 @@
 ;; sub-family) for token economy, read through `seon.config`.
 ;; ============================================================
 
-#?(:cljs
-   (defn- render-options [configuration]
-     (let [max-keys (config/value-max-keys configuration)]
-       {:max-depth      (config/value-max-depth configuration)
+(defn- render-options [configuration]
+  (let [max-keys (rconfig/value configuration
+                                :seon.config.render/value-max-keys 8)]
+    {:max-depth      (rconfig/value configuration
+                                    :seon.config.render/value-max-depth 3)
         :max-keys       max-keys
         :max-map-visits (* 4 max-keys)
-        :max-items      (config/value-max-items configuration)
-        :max-string     (config/value-max-string configuration)
-        :shape-sample   (config/value-shape-sample configuration)})))
+     :max-items      (rconfig/value configuration
+                                    :seon.config.render/value-max-items 8)
+     :max-string     (rconfig/value configuration
+                                    :seon.config.render/value-max-string 80)
+     :shape-sample   (rconfig/value
+                       configuration
+                       :seon.config.render/value-shape-sample
+                       8)}))
 
 (defn- verbatim-probe-options
   "Generous bounds used ONLY to test — LAZY-SAFELY — whether `value` is small
@@ -609,17 +624,26 @@
 ;; byte-identical to today. Reads `seon.config` once per call.
 ;; ============================================================
 
-#?(:cljs
-   (defn- whitespace-active?
+(defn- whitespace-active?
   "True iff any explicit-whitespace knob is off its default — the ONLY case
    where [[visible-whitespace]] diverges from `s`. Lets a caller bypass the
    pr-str/quote path for a string value ONLY when the operator asked for it,
    so the default render is byte-identical to today."
   [configuration]
-  (not (and (= (config/render-whitespace configuration) :raw)
-            (= (config/render-tabs configuration) :literal)
-            (= (config/render-trailing-ws configuration) :off)
-            (not (config/render-line-numbers? configuration))))))
+  (not (and (= (rconfig/value configuration
+                               :seon.config.render/whitespace :raw)
+               :raw)
+            (= (rconfig/value configuration
+                               :seon.config.render/tabs :literal)
+               :literal)
+            (= (rconfig/value configuration
+                               :seon.config.render/trailing-ws :off)
+               :off)
+            (not (boolean
+                   (rconfig/value
+                     configuration
+                     :seon.config.render/line-numbers
+                     false))))))
 
 (defn- mark-trailing-ws
   "Glyph only the TRAILING whitespace run of one line (`·` per space, `→` per
@@ -629,8 +653,7 @@
   (str/replace line #"[ \t]+$"
                (fn [m] (-> m (str/replace " " "·") (str/replace "\t" "→")))))
 
-#?(:cljs
-   (defn visible-whitespace
+(defn visible-whitespace
   "Render explicit-whitespace glyphs on string content `s` per the render
    config — the one central place tab/space/indent/trailing-ws become visible.
 
@@ -642,10 +665,15 @@
   {:malli/schema [:=> [:catn [:seon.config/configuration :seon.config/singleton]
                              [:seon.render.value/content :string]] :string]}
   [configuration s]
-  (let [ws     (config/render-whitespace configuration)
-        tabs   (config/render-tabs configuration)
-        trail  (config/render-trailing-ws configuration)
-        lines? (config/render-line-numbers? configuration)]
+  (let [ws     (rconfig/value configuration
+                              :seon.config.render/whitespace :raw)
+        tabs   (rconfig/value configuration
+                              :seon.config.render/tabs :literal)
+        trail  (rconfig/value configuration
+                              :seon.config.render/trailing-ws :off)
+        lines? (boolean
+                 (rconfig/value configuration
+                                :seon.config.render/line-numbers false))]
     (if (and (= ws :raw) (= tabs :literal) (= trail :off) (not lines?))
       s
       (->> (str/split s #"\n" -1)
@@ -658,7 +686,7 @@
                              (and (not= ws :visible)
                                   (= trail :dot))             mark-trailing-ws)]
                  (if lines? (str (inc i) "  " line*) line*))))
-           (str/join "\n"))))))
+           (str/join "\n")))))
 
 (declare sample*)
 
@@ -771,8 +799,7 @@
 
     :else x))
 
-#?(:cljs
-   (defn sample
+(defn sample
   "Depth + breadth bounded SKELETON of `x` (plain data + marker maps).
    `opts` overrides `default-opts`. Admitted map keys and vector indices are
    preserved as paths; display-only map keys carry output-local non-drillable
@@ -783,8 +810,8 @@
                              [:seon.render.value/opts :map]] :any]}
   [configuration x opts]
   (let [opts (merge (render-options configuration) opts)]
-     (sample* x (update opts :max-map-visits
-                        #(max (:max-keys opts) (or % (:max-keys opts)))) 0))))
+    (sample* x (update opts :max-map-visits
+                       #(max (:max-keys opts) (or % (:max-keys opts)))) 0)))
 
 ;; ============================================================
 ;; EMIT — render the skeleton to structure-revealing comment text.
@@ -815,13 +842,12 @@
                     (contains? % :seon.render.value/string-len)))
           (tree-seq coll? #(if (map? %) (vals %) (seq %)) skel))))
 
-#?(:cljs
-   (defn complete-sample?
+(defn complete-sample?
   "True when a bounded sample proves that it contains the whole value."
   {:malli/schema [:=> [:catn [:seon.render.value/tree ::bounded-data]]
                   :boolean]}
   [tree]
-  (not (truncated? tree))))
+  (not (truncated? tree)))
 
 (defn- ind [depth] (apply str (repeat depth "  ")))
 
@@ -1016,14 +1042,17 @@
           [k v]))
       (catch #?(:clj Throwable :cljs :default) _ nil))))
 
-#?(:cljs
-   (defn- prepare-bounded-view
+(defn- prepare-bounded-view
   "Prepare the bounded body and ID-independent drill facts for a value too
    large, deep, or opaque to print whole."
   [configuration value]
   (let [options (render-options configuration)
-        verbatim-cap (config/value-verbatim-cap configuration)
-        width (config/value-width configuration)
+        verbatim-cap (rconfig/value
+                       configuration
+                       :seon.config.render/value-verbatim-cap
+                       1500)
+        width (rconfig/value configuration
+                             :seon.config.render/value-width 72)
         dom   (dominant-string-entry value options (:max-string options))
         skel  (if-some [[dk s] dom]
                 ;; re-clip only the dominant key's value to the body cap —
@@ -1044,10 +1073,9 @@
     (cond-> {::body body}
        clip? (assoc ::drill-hint
                     (cond-> {}
-                      tsz (assoc ::top-type-size tsz)))))))
+                      tsz (assoc ::top-type-size tsz))))))
 
-#?(:cljs
-   (defn prepare-ai
+(defn prepare-ai
   "Prepare one raw eval value for agent-facing text.
 
    This is the ONLY phase allowed to realize, sample, print, or otherwise
@@ -1056,8 +1084,12 @@
    it under any later eval id without repeating lazy effects."
   {:malli/schema [:=> [:cat ::prepare-ai-request] ::prepared-ai]}
   [{::keys [value] configuration :seon.config/configuration}]
-  (let [verbatim-cap (config/value-verbatim-cap configuration)
-        width (config/value-width configuration)]
+  (let [verbatim-cap (rconfig/value
+                       configuration
+                       :seon.config.render/value-verbatim-cap
+                       1500)
+        width (rconfig/value configuration
+                             :seon.config.render/value-width 72)]
     (try
       (cond
       ;; EXPLICIT-CHARACTER view of a STRING value (file content the agent
@@ -1091,10 +1123,10 @@
                      (<= (count printed) verbatim-cap))
               {::body printed}
               (prepare-bounded-view configuration value))))))
-      (catch :default e
+      (catch #?(:clj Throwable :cljs :default) e
         {::body (emit (sample configuration value {}) 0 width)
          ::render-error-message
-         (or (some-> e .-message) (str e))})))))
+         (or (ex-message e) (str e))}))))
 
 (defn partial-continuation
   "Describe honest continuation for one partial value."
@@ -1143,8 +1175,7 @@
 
       :else body)))
 
-#?(:cljs
-   (defn render-ai
+(defn render-ai
   "Agent-facing TEXT for an eval value.
 
    `eval-id` names the live var the
@@ -1167,7 +1198,7 @@
   (format-ai {::eval-id eval-id
               ::prepared (prepare-ai
                            {:seon.config/configuration configuration
-                            ::value value})})))
+                            ::value value})}))
 
 ;; ============================================================
 ;; RENDER-HTML-DATA — the DATA CONTRACT for the interactive drill-down
@@ -1759,8 +1790,7 @@
     (catch #?(:clj Throwable :cljs :default) _
       (drill-failure "Value drill failed while reading the selected value."))))
 
-#?(:cljs
-   (defn render-html-sample-data-in
+(defn render-html-sample-data-in
   "Build HTML data from one already prepared tree and schema projection."
   {:malli/schema [:=> [:catn [:seon.render.value/eval-id :string]
                              [:seon.schema/projection :seon.schema/projection]
@@ -1776,10 +1806,9 @@
                                          "scalar")
        :seon.render.value/truncated? incomplete?
        :seon.render.value/tree       skel}
-      (schema-projection-in projection value incomplete?)))))
+      (schema-projection-in projection value incomplete?))))
 
-#?(:cljs
-   (defn render-html-data-in
+(defn render-html-data-in
   "Build bounded HTML data against one immutable schema projection.
 
    This is the prepared universal projection used at dispatch boundaries:
@@ -1802,10 +1831,9 @@
    (render-html-data-in configuration eval-id projection value {}))
   ([configuration eval-id projection value sample-options]
    (render-html-sample-data-in eval-id projection value
-                               (sample configuration value sample-options)))))
+                               (sample configuration value sample-options))))
 
-#?(:cljs
-   (defn render-html-data
+(defn render-html-data
   "DATA CONTRACT the interactive HTML value-browser consumes.
 
    Returns:
@@ -1832,10 +1860,9 @@
     configuration eval-id
     (or (schema/current-projection)
         (schema/build-projection (schema/snapshot)))
-    value)))
+    value))
 
-#?(:cljs
-   (defn render-ai-data
+(defn render-ai-data
   "Render agent text from an already prepared bounded data projection.
 
    The raw value is deliberately absent: an incomplete custom-dispatch
@@ -1849,13 +1876,17 @@
   [configuration eval-id projection]
   (let [partial? (:seon.render.value/truncated? projection)
         prepared (cond->
-                   {::body (emit (:seon.render.value/tree projection)
-                                 0 (config/value-width configuration))}
+                   {::body
+                    (emit (:seon.render.value/tree projection)
+                          0
+                          (rconfig/value configuration
+                                         :seon.config.render/value-width
+                                         72))}
                    partial?
                    (assoc ::drill-hint
                           {::top-type-size
                            (:seon.render.value/summary projection)}))]
-    (format-ai {::eval-id eval-id ::prepared prepared}))))
+    (format-ai {::eval-id eval-id ::prepared prepared})))
 
 ;; ============================================================
 ;; Live integration:

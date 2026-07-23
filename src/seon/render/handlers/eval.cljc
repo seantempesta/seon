@@ -7,9 +7,9 @@
 
    The transcript section's html twin (`seon.agent.ctx/transcript-block-html`)
    resolves these per-eval symbols (via `seon.render/render-entity-html` /
-   `render-entity-ai`, which call each symbol through
-   `seon.eval/lookup-value`) to render the agent's evals as right-pane
-   cards. One entity, two render shapes — no separate 'what the LLM sees'
+   `render-entity-ai`, which resolve trusted symbols from the compiled
+   table) to render the agent's evals as right-pane cards. One entity, two
+   render shapes — no separate 'what the LLM sees'
    vs 'what the human sees' store. (The agent's prompt TEXT comes from the
    one composer `seon.agent/assemble-context`.)
 
@@ -31,9 +31,11 @@
    readable thing the agent wrote."
   (:require
     [clojure.string :as str]
-    [seon.agent.ctx :as ctx]
+    [seon.agent.ctx.format :as ctx-format]
     [seon.ai.tokens :as tokens]
-    [seon.render :as render]))
+    [seon.render.value :as value]
+    [seon.ui.clojure :as cljhl]
+    [seon.ui.markdown :as md]))
 
 ;; Display budgets, in TOKENS (clipped via seon.ai.tokens/clip-str).
 (def ^:private source-truncate 200)
@@ -96,7 +98,7 @@
                     :else            ":error <no detail>")
         lines     (cond-> []
                     (and narration (not (str/blank? narration)))
-                    (conj (ctx/quote-lines (str/trim narration)))
+                    (conj (ctx-format/quote-lines (str/trim narration)))
                     true (conj header)
                     true (conj (tokens/clip-str (str/trim src) source-truncate))
                     tail (conj tail))]
@@ -136,16 +138,18 @@
   [agent-id eval-id]
   (when (and (string? agent-id) (not (str/blank? agent-id))
              (string? eval-id) (not (str/blank? eval-id)))
-    (let [selector {:seon.render/eval-id eval-id}
-          params (js/URLSearchParams.)]
-      (.append params "eval" eval-id)
-      (.append params "path" "[]")
-      (.append params "offset" "0")
-      {:seon.render.handlers.eval/url
-       (str "/agent/" (js/encodeURIComponent agent-id) "/value?"
-            (.toString params))
-       :seon.render.handlers.eval/root-id
-       (render/value-unit-id {:seon.agent/id agent-id} selector [])})))
+    #?(:cljs
+       (let [selector {:seon.render/eval-id eval-id}
+             params (js/URLSearchParams.)]
+         (.append params "eval" eval-id)
+         (.append params "path" "[]")
+         (.append params "offset" "0")
+         {:seon.render.handlers.eval/url
+          (str "/agent/" (js/encodeURIComponent agent-id) "/value?"
+               (.toString params))
+          :seon.render.handlers.eval/root-id
+          (value/value-unit-id {:seon.agent/id agent-id} selector [])})
+       :clj nil)))
 
 (defn- live-result-disclosure
   "A lazy authorized live result with one short stored fallback."
@@ -155,7 +159,9 @@
       [:details {:class "mt-1"
                  (keyword "data-on:toggle")
                  (str "$event.currentTarget.open && @get("
-                      (js/JSON.stringify url) ")")}
+                      #?(:cljs (js/JSON.stringify url)
+                         :clj (pr-str url))
+                      ")")}
        [:summary {:class "text-xs font-mono text-amber-300/70 cursor-pointer"}
         (str "live result" (when fallback (str " · " fallback)))]
        [:div {:id root-id
@@ -242,11 +248,9 @@
        [:div {:class "text-2xs font-mono text-text-600 mb-1"} (str "eval " eid)]
        (when (and narration (not (str/blank? narration)))
          [:div {:class "markdown mb-1 text-xs"}
-          (render/block :html configuration input
-                        {:seon.render/markdown (str/trim narration)})])
+          (md/md->hiccup (str/trim narration))])
        [:div {:class "text-2xs font-mono text-text-500 mb-0.5"} "code"]
-       (render/block :html configuration input
-                     {:seon.render/source (str/trim src)})
+       (cljhl/clj->hiccup (str/trim src))
        (cond
          ok?
          (live-result-disclosure agent-id eid res-edn)

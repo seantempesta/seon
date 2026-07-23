@@ -10,6 +10,7 @@
     [cljs.reader :as edn]
     [malli.core :as m]
     [malli.registry :as mr]
+    [seon.agent.ctx.format :as ctx-format]
     [seon.agent.ctx.render-fns]
     [seon.ai.tokens :as tokens]
     [seon.config :as config]
@@ -145,16 +146,7 @@
     (.readFileSync (js/require "fs") (file-path->abs path) "utf8")
     (catch :default _ nil)))
 
-(def ^:private leading-marker-re
-  "A leading comment marker on a line: any run of `;`/whitespace plus an
-   optional leading `=>`/`⇒` result arrow + following space. Stripped only
-   when `quote-lines` is asked to (`:strip-markers?`), so a stored
-   comment-preamble (already carrying `;;`) re-prefixes idempotently to ONE
-   `;`. The `↻` repair / `⚠` warning breadcrumb glyphs are NOT stripped —
-   they carry meaning and survive the re-quote as `; ↻ …` / `; ⚠ …`."
-  #"^[\s;]*(?:(?:=>|⇒)\s*)?")
-
-(defn quote-lines
+(def quote-lines
   "The ONE body-text quoter every section routes text through.
 
    Every section routes prose/markdown/values
@@ -172,19 +164,7 @@
    Interior indentation is preserved (only trailing whitespace is
    trimmed), so a multi-line value or an error's caret-aligned source
    slice keeps its shape under the single-`;` prefix."
-  {:malli/schema [:function
-                  [:=> [:cat [:maybe :string]] :string]
-                  [:=> [:cat [:maybe :string] :map] :string]]}
-  ([text] (quote-lines text {}))
-  ([text {:seon.agent.ctx/keys [strip-markers?]}]
-   (->> (str/split-lines (or text ""))
-        (map (fn [line]
-               (let [line (str/trimr line)]
-                 (cond
-                   (str/blank? line) ";"
-                   strip-markers?    (str "; " (str/replace line leading-marker-re ""))
-                   :else             (str "; " line)))))
-        (str/join "\n"))))
+  ctx-format/quote-lines)
 
 (defn file-block-ai
   "The `:seon.render/ai` slot for a file-block section.
@@ -367,20 +347,14 @@
        (str " …⟨⚠ TRUNCATED at " budget " of " total " tokens — display clip, "
             "the underlying value is complete⟩")))))
 
-(defn message-label
+(def message-label
   "Transcript label for a message's `:seon.agent.message/from` ref.
 
    A pulled
    map carrying `:seon.user/id` / `:seon.agent/id`, resolved by REF
    KIND: the user → `user`, this agent itself → `assistant`, any other
    agent → `agent-<id>`."
-  {:malli/schema [:=> [:catn [::from :any] [::own-id :string]] :string]}
-  [from own-id]
-  (cond
-    (:seon.user/id from)             "user"
-    (= own-id (:seon.agent/id from)) "assistant"
-    (:seon.agent/id from)            (str "agent-" (:seon.agent/id from))
-    :else                            "unknown"))
+  ctx-format/message-label)
 
 (defn- read-error-envelope
   "Best-effort EDN decode of a `:seon.eval/error-data` instrument-envelope

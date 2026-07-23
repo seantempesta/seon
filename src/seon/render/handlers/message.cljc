@@ -27,16 +27,17 @@
    this renderer."
   (:require
     [clojure.string :as str]
-    [seon.agent :as agent]
-    [seon.render :as render]))
+    [seon.agent.ctx.format :as ctx-format]
+    [seon.time.instant :as instant]
+    [seon.ui.markdown :as md]))
 
 (defn- hh-mm-ss
-  "`17:44:53` from a js/Date. Empty string when not a date."
-  [at]
-  (if (instance? js/Date at)
-    (let [pad #(if (< % 10) (str "0" %) (str %))]
-      (str (pad (.getHours at)) ":" (pad (.getMinutes at)) ":" (pad (.getSeconds at))))
-    ""))
+  "`17:44:53` from an instant in the explicitly selected timezone."
+  [at timezone]
+  (let [date-time (when at (instant/sv-se-date-time at timezone))]
+    (if (and (string? date-time) (<= 19 (count date-time)))
+      (subs date-time 11 19)
+      "")))
 
 (defn render-ai
   "Format a single message as a single line of LLM-readable text.
@@ -48,7 +49,7 @@
   (let [entity (or node entity)
         from (:seon.agent.message/from entity)
         body (or (:seon.agent.message/content entity) "")]
-    (str "[" (agent/message-label from id) "] " body)))
+    (str "[" (ctx-format/message-label from id) "] " body)))
 
 (defn render-html
   "Chat-bubble-style hiccup card — Phosphor Terminal palette.
@@ -69,11 +70,14 @@
   [{:seon.render/keys [node entity]
     :seon.agent/keys [id] :as input}]
   (let [configuration (:seon.config/configuration input)
+        timezone (get configuration
+                      :seon.config.render-context/host-timezone
+                      "UTC")
         entity (or node entity)
         from   (:seon.agent.message/from entity)
-        label  (agent/message-label from id)
+        label  (ctx-format/message-label from id)
         tos    (->> (:seon.agent.message/to entity)
-                    (map #(agent/message-label % id))
+                    (map #(ctx-format/message-label % id))
                     distinct
                     vec)
         body   (or (:seon.agent.message/content entity) "")
@@ -103,8 +107,7 @@
        (when (seq tos)
          [:span {:class "text-xs font-mono text-text-500"}
           (str "→ " (str/join ", " tos))])
-       (when (instance? js/Date at)
-         [:span {:class "text-xs text-text-500"} (hh-mm-ss at)])]
+       (when (seq (hh-mm-ss at timezone))
+         [:span {:class "text-xs text-text-500"} (hh-mm-ss at timezone)])]
       [:div {:class "markdown mt-0.5 min-w-0"}
-       (render/block :html configuration input
-                     {:seon.render/markdown (str/trim body)})]]]))
+       (md/md->hiccup (str/trim body))]]]))

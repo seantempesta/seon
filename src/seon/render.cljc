@@ -2,9 +2,9 @@
   "Resolve the model and human twins of derived renders.
 
    Each render attribute is a fully-qualified symbol or a literal value.
-   [[render]] resolves symbols through `seon.eval/lookup-value`, selects the
-   registered shape renderer when no explicit value exists, and otherwise
-   uses its universal data renderer.
+   [[render]] classifies symbols before resolution. Trusted core symbols come
+   only from the caller's immutable compiled table; agent-authored symbols
+   execute only through the caller's guarded SCI invocation door.
 
    ## The engine
 
@@ -17,18 +17,18 @@
 
    ## Late-bound symbol lookup
 
-   `seon.eval/lookup-value` walks `js/globalThis` with `cljs.core/munge`
-   per segment — works for core fns (shadow-cljs precompiled
-   bundle) AND agent-defined fns (written by `cljs.js/eval-str` at the
-   same munged paths). Single path, no boot-time wire-up needed."
+   `seon.error/agent-authored-sym?` is the structural trust split. A hostile
+   stored symbol cannot gain compiled authority by choosing a core-looking
+   name: a non-authored symbol absent from the static table is missing."
   (:require
     [clojure.string :as str]
-    [seon.config :as config]
+    #?(:cljs [seon.config :as config])
     [seon.db :as db]
     [seon.error :as err]
     [seon.error.instrument :as einstrument]
-    [seon.eval :as eval]
     [seon.render.canvas :as canvas]
+    [seon.render.configuration :as rconfig]
+    [seon.render.core :as core]
     [seon.render.schema]
     [seon.render.value :as value]
     [seon.code :as code]
@@ -36,8 +36,43 @@
     [seon.schema :as schema]
     [seon.ui.clojure :as cljhl]
     [seon.ui.html :as html]
-    [seon.ui.markdown :as md]
-    [seon.render.view-unit :as view-unit]))
+    [seon.ui.markdown :as md]))
+
+(schema/register! ::trusted-renderers [:map-of :symbol 'fn?])
+(schema/register! ::invoke-authored! 'fn?)
+(schema/register! ::function-symbol :symbol)
+(schema/register! ::arguments [:vector :any])
+(schema/register!
+ ::authored-invocation
+ [:map {:closed true}
+  [::function-symbol ::function-symbol]
+  [::arguments ::arguments]])
+
+(declare unwrap-response)
+
+(defn- error-value?
+  [x]
+  (and (map? x) (string? (:seon.error/message x))))
+
+(defn- symbol-call
+  "Resolve and invoke one stored render symbol through its trust boundary."
+  [input sym arguments]
+  (if (err/agent-authored-sym? sym)
+    (when-let [invoke-authored! (::invoke-authored! input)]
+      (invoke-authored! {::function-symbol sym ::arguments (vec arguments)}))
+    (when-let [f (get (or (::trusted-renderers input) core/renderers) sym)]
+      (apply f arguments))))
+
+(defn- render-result
+  [view value]
+  (if (error-value? value)
+    value
+    (unwrap-response
+     (case view
+       :html :seon.render/html
+       :ai :seon.render/ai
+       view)
+     value)))
 
 ;; ============================================================
 ;; Schemas — every shape this surface reads or writes (spec-05 §15.1).
@@ -301,7 +336,7 @@
         malli? (einstrument/instrument-error? data)
         detail (when malli?
                  (try (einstrument/render-malli-error data)
-                      (catch :default e2
+                      (catch #?(:clj Throwable :cljs :default) e2
                         ;; OUR renderer failing on OUR OWN malli envelope is a
                         ;; core bug (:core); the diagnosis still degrades to the
                         ;; bare base message (detail nil).
@@ -321,7 +356,12 @@
    block). The single seam every render swallow-guard calls."
   {:malli/schema [:=> [:cat :seon.config/singleton :any :any] [:maybe :nil]]}
   [configuration where e]
-  (when (config/render-strict? configuration)
+  (when #?(:cljs (config/render-strict? configuration)
+           :clj
+           (true?
+            (rconfig/value configuration
+                           :seon.config.render-context/render-strict?
+                           false)))
     (throw (ex-info (loud-explain where e)
                     {:seon.render/strict?     true
                      :seon.render/where       where
@@ -350,14 +390,14 @@
   (let [entity (or node entity)]
     (when-let [sym (entity-render entity :html)]
       (try
-        (let [f (eval/lookup-value sym)
-              r (when f (f (assoc input :seon.render/node entity)))]
+        (let [r (symbol-call input sym
+                             [(assoc input :seon.render/node entity)])]
           ;; Converters return BARE hiccup; a per-entity renderer
           ;; (agent-authored, test fixture, the canvas contract) may
           ;; return the {:seon.render/hiccup h …} envelope — unwrapped via
           ;; the ONE shared path so every renderer obeys one contract.
-          (unwrap-response :seon.render/html r))
-        (catch :default e
+          (render-result :seon.render/html r))
+        (catch #?(:clj Throwable :cljs :default) e
           ;; Classify by the render symbol (fault-for): an agent-authored
           ;; converter → :agent, a core `seon.render.handlers.*` converter → :core.
           ;; Record BEFORE strict-fail! (which re-throws in strict mode,
@@ -367,7 +407,7 @@
           ;; STRICT dial: dev/test/benchmark → re-throw LOUD; prod → graceful guard.
           (strict-fail! (:seon.config/configuration input) sym e)
           (canvas/error-card
-            {:seon.error/message (str sym " threw: " (or (.-message e) (str e)))
+            {:seon.error/message (str sym " threw: " (or (ex-message e) (str e)))
              :seon.error/symbol  sym}))))))
 
 ;; ============================================================
@@ -427,9 +467,6 @@
 (defn- value-request? [x]
   (and (map? x) (contains? x :seon.render/value-projection)))
 
-(defn- error-value? [x]
-  (and (map? x) (string? (:seon.error/message x))))
-
 (defn- value-leaf
   "A non-container `render-html-data` skeleton node → a styled inline token.
    Mirrors `seon.render.value`'s marker tokens (datom / opaque / clipped
@@ -445,7 +482,7 @@
 
     (and (map? x) (contains? x :seon.render.value/string-len))
     (let [token (value/clipped-string-token x)
-          suffix-start (.lastIndexOf token "⟨")]
+          suffix-start (str/last-index-of token "⟨")]
       [:span {:class "text-success font-mono break-all"}
        (subs token 0 suffix-start)
        [:span {:class "ml-1"} (subs token suffix-start)]])
@@ -466,12 +503,14 @@
 
 (defn- value-url
   [{:seon.render/keys [value-route-base value-selector]} path offset]
-  (let [[selector-name selector-value] (selector-query-entry value-selector)
-        params (js/URLSearchParams.)]
-    (.append params selector-name (str selector-value))
-    (.append params "path" (pr-str path))
-    (.append params "offset" (str offset))
-    (str value-route-base "?" (.toString params))))
+  #?(:cljs
+     (let [[selector-name selector-value] (selector-query-entry value-selector)
+           params (js/URLSearchParams.)]
+       (.append params selector-name (str selector-value))
+       (.append params "path" (pr-str path))
+       (.append params "offset" (str offset))
+       (str value-route-base "?" (.toString params)))
+     :clj nil))
 
 (defn value-unit-id
   "Stable DOM id for one authorized logical value subtree."
@@ -481,11 +520,7 @@
                 [::path :seon.render.value/path]]
     :string]}
   [render-request value-selector path]
-  (str "seon-value-"
-       (view-unit/identity-token
-         (merge {:seon.agent/id (:seon.agent/id render-request)
-                 :seon.render/path-text (pr-str path)}
-                value-selector))))
+  (value/value-unit-id render-request value-selector path))
 
 (defn- value-identity
   [render-request value-request path]
@@ -494,13 +529,16 @@
                  path))
 
 (defn- drill-control [value-request path offset label]
-  [:button {:type "button"
-            :class (str "text-2xs font-mono text-amber-400/80 "
-                        "hover:text-amber-300 underline underline-offset-2")
-            (keyword "data-on:click")
-            (str "@get(" (js/JSON.stringify
-                            (value-url value-request path offset)) ")")}
-   label])
+  #?(:cljs
+     [:button {:type "button"
+               :class (str "text-2xs font-mono text-amber-400/80 "
+                           "hover:text-amber-300 underline underline-offset-2")
+               (keyword "data-on:click")
+               (str "@get(" (js/JSON.stringify
+                               (value-url value-request path offset)) ")")}
+      label]
+     :clj
+     [:span {:class "text-2xs font-mono text-text-600"} label]))
 
 (declare value-node)
 
@@ -650,7 +688,10 @@
       (schema-statuses projection)
       (when (and interactive? more?
                  (<= (+ offset page-size page-size)
-                     (config/value-max-realized-items configuration)))
+                     (rconfig/value
+                       configuration
+                       :seon.config.render/value-max-realized-items
+                       1024)))
         (drill-control value-request path (+ offset page-size) "next page"))]
      (value-node tree 0 render-request value-request path interactive? false)]))
 
@@ -700,18 +741,23 @@
 (defn- invoke-custom-render
   [view configuration render-request x
    {:seon.render/keys [custom-symbol schema-key]}]
-  (let [f (eval/lookup-value custom-symbol)]
-    (when-not f
+  (let [input (cond-> (assoc render-request
+                             :seon.config/configuration configuration
+                             :seon.render/node x)
+                schema-key (assoc :seon.render/schema-key schema-key))
+        resolved? (if (err/agent-authored-sym? custom-symbol)
+                    (fn? (::invoke-authored! input))
+                    (contains? (or (::trusted-renderers input)
+                                   core/renderers)
+                               custom-symbol))]
+    (when-not resolved?
       (throw (ex-info (str "Missing custom renderer " custom-symbol ".")
                       {:seon.render/custom-symbol custom-symbol})))
     (try
-      (unwrap-response
-        (case view :html :seon.render/html :ai :seon.render/ai)
-        (f (cond-> (assoc render-request
-                          :seon.config/configuration configuration
-                          :seon.render/node x)
-             schema-key (assoc :seon.render/schema-key schema-key))))
-      (catch :default e
+      (render-result
+       view
+       (symbol-call input custom-symbol [input]))
+      (catch #?(:clj Throwable :cljs :default) e
         (throw (ex-info (str custom-symbol " threw: " (err/->message e))
                         {:seon.render/custom-symbol custom-symbol}
                         e))))))
@@ -850,7 +896,7 @@
                                configuration x
                                (generic-data-projection
                                  configuration render-request x)))))
-    (catch :default e
+    (catch #?(:clj Throwable :cljs :default) e
       ;; `block` dispatches to CORE renderers (md->hiccup, clj->hiccup, the
       ;; value panels) — a throw is our machinery (:core). Record BEFORE
       ;; strict-fail! (re-throws in strict mode); recorded? skips a funnel dup.
@@ -881,16 +927,16 @@
   (let [entity (or node entity)]
     (when-let [sym (entity-render entity :ai)]
       (try
-        (let [f (eval/lookup-value sym)
-              r (when f (f (assoc input :seon.render/node entity)))]
+        (let [r (symbol-call input sym
+                             [(assoc input :seon.render/node entity)])]
           ;; Converters return a BARE String; a per-entity renderer may
           ;; return the {:seon.render/ai s …} envelope — unwrapped via the
           ;; ONE shared path (the ai twin of render-entity-html).
-          (unwrap-response :seon.render/ai r))
+          (render-result :seon.render/ai r))
         ;; A throwing AI renderer is LEGIBLE, never nil-vanished — the
         ;; agent reading its context sees its own renderer is broken
         ;; (mirror of the html banner above / the canvas's error render).
-        (catch :default e
+        (catch #?(:clj Throwable :cljs :default) e
           ;; Classify by the render symbol (fault-for): agent-authored
           ;; converter → :agent, core converter → :core. Record BEFORE
           ;; strict-fail! (re-throws in strict mode); recorded? skips a dup.
@@ -899,7 +945,7 @@
           ;; STRICT dial: dev/test/benchmark → re-throw LOUD; prod → legible line.
           (strict-fail! (:seon.config/configuration input) sym e)
           (str "[render error — " sym " threw: "
-               (or (.-message e) (str e)) "]"))))))
+               (or (ex-message e) (str e)) "]"))))))
 
 ;; ============================================================
 ;; The recursive render (context-render keystone).
@@ -928,11 +974,11 @@
    reference or override it. Never a stored :seon.render/id."
   {:malli/schema [:=> [:cat :any] :any]}
   [node]
-  (or (when-let [id-attr (some-> (and (map? node)
+  (or (:seon.agent.ctx/name node)
+      (when-let [id-attr (some-> (and (map? node)
                                       (entity-primary-schema node))
                                  :seon.schema.catalog/id-attr)]
         (get node id-attr))
-      (:seon.agent.ctx/name node)
       (:db/id node)))
 
 (declare render)
@@ -987,14 +1033,21 @@
      3. fn-symbol → the compiled fn in the isolated execution child;
      4. absent → the schema-default (the node's primary schema's converter);
      5. none → the GENERIC default (any data → Clojure / a dump)."
-  [view node]
+  [view node input]
   (let [slot-val (get node view)]
     (cond
       (string? slot-val) (fn [_] slot-val)
       (vector? slot-val) (fn [_] slot-val)
       (symbol? slot-val)
-      (let [f (eval/lookup-value slot-val)]
-        (if f f (fn [_] (missing-render view (renderable-id node) slot-val))))
+      (let [resolved? (if (err/agent-authored-sym? slot-val)
+                        (fn? (::invoke-authored! input))
+                        (contains? (or (::trusted-renderers input)
+                                       core/renderers)
+                                   slot-val))]
+        (if resolved?
+          (fn [input] (render-result view
+                                     (symbol-call input slot-val [input])))
+          (fn [_] (missing-render view (renderable-id node) slot-val))))
       ;; no explicit slot: try the node's primary-schema converter; if no
       ;; schema matches (nil), fall to the generic any-data default.
       :else (fn [input]
@@ -1019,12 +1072,12 @@
     (when (= view :seon.render/ai)
       (str ";; (1 pruned — " (renderable-id node)
            "; (seon.agent/unprune! …) to restore)"))
-    (let [f  (resolve-render view node)
+    (let [f  (resolve-render view node ctx)
           in (assoc ctx :seon.render/node   node
                         :seon.render/render #(render view ctx %))]
       (try
         (unwrap-response view (f in))           ;; bare OR html-response envelope
-        (catch :default e
+        (catch #?(:clj Throwable :cljs :default) e
           ;; Classify by the node's slot value: an agent-authored render
           ;; symbol → :agent, anything else (core section,
           ;; schema/generic default converter) → :core. Record BEFORE
