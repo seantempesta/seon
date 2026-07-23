@@ -1028,6 +1028,13 @@ COMPLETELY before dispatching anything.
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- GUARDBATCH DISPATCHED (owner pre-authorized 'measure and if
+  tradeoff-free then do it'): measure current check ns/step, prototype
+  local-countdown/sync-every-N, land ONLY on material measured win
+  with all seven tradeoff-free conditions green (determinism, bounded
+  overshoot, single-threaded halting falsifier, guard suites,
+  deadline/output-cap untouched, one mechanism, context-reuse
+  regression); calibration addendum with provenance if landed.
 - GUARD BATCH-CHECK CANDIDATE (owner insight, 2026-07-23 eve):
   sync the interpreter-step counter to the shared cell every N
   steps (local countdown in the hot path) — cuts the ~30ns/step
