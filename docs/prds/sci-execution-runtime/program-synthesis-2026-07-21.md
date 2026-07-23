@@ -358,6 +358,23 @@ COMPLETELY before dispatching anything.
   wiki corrected. Classes C3/C12 structurally closed. Follow-up for
   U8a review: test/my/blob_test.cljc is the one content-excluded
   JVM file — the blob JVM leaf should make it dual.
+- R31 FINALIZED (owner, 2026-07-23 midday): :any is the undefined
+  hole — hard-banned in agent contracts; genuinely polymorphic slots
+  become NAMED predicate schemas ([:fn] with :error/message +
+  :gen/schema; agent contracts may REFERENCE core-admitted
+  predicates, the writer never executes agent-authored predicates —
+  provenance+structure admission, no symbol lists). :maybe is
+  DOWNGRADED: judged against the absent-key and error-union laws as
+  files are touched, no dedicated sweep. Opaque boundaries (class A)
+  stay legitimate, lower priority. Hard walker gate applies to NEW/
+  durable agent contracts at three admission points (register!,
+  committed projection construction, durable defn admission); the
+  221-item backlog burns down as lanes touch files. Coercion policy
+  ADOPTED per the census §3 table: validation wrappers everywhere,
+  coercion at the few declared boundaries only, explicit named
+  converters when conversion is the operation. Census:
+  research/schema-strictness-census-2026-07-23.md (576 executable
+  occurrences: 124 A / 229 B / 221 C / 2 D).
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
