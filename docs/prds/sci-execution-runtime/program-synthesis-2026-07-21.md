@@ -970,6 +970,21 @@ COMPLETELY before dispatching anything.
   the store/manifests; the ≤10s target covers a fresh cluster's first
   boot; ephemeral lane clusters stay cheap. Relayed to the running
   design agent mid-flight.
+- R45 LAYERING (owner, same evening): each cluster's DATABASE owns
+  its divergence — schemas/functions/state diverge per cluster from
+  the shared compiled base; the divergence layer's caches are db
+  facts in that cluster's database (the R44 no-history permission's
+  home); resume identity composes release-scoped base identity ×
+  cluster-scoped divergence identity. Relayed to the design agent.
+- FIXSEED STOP #2 RULED (2026-07-23 eve): OPTION 1 — fixtures seed
+  the complete production boot program through the SAME paged
+  initialization (fixtures are clusters in miniature; one seeding
+  path; the schema-only bootstrap rejected as a second semantics);
+  population computed once per test process, reused immutable; its
+  settled extraction (canonical-schema-rows portable + CLJS-captive
+  registration moves) commits first path-limited. The script/**
+  uncommitted hunks are PROCFIX's live work — verified disjoint.
+- R45 vocabulary + maintenance (owner, same evening): the operation
   is PRE-PROCESSING (use that name); and the preprocessed cache is
   kept CURRENT AS CHANGES HAPPEN — every mutation that would
   invalidate it (registration, durable defn, hot reload) updates the
