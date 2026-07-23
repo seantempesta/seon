@@ -1203,9 +1203,16 @@ gate. my.* porting NARROWS to loop-essential-only, derived from what
 real drives actually call (measure, don't guess); the census stays
 the long-term meter but stops gating the loop.
 
-**STAGED NEXT (refill on any free slot):** p2-blob · p2-my-families
-(specs in tmp/orchestrator/, exemplar commit = `f6d843ee`) ·
-agent-facing interface-guidance unit. Known open: drill-harness
+**SPINE SPEC STAGED**: `tmp/orchestrator/loop-slice-spec.md` — the
+loop vertical slice (eval through sci over the landed cores; E2E
+scenario re-run as acceptance; my.* working set MEASURED from
+receipts as the next porting queue). Dispatches the moment pkg-door
+lands (both need execution.cljs).
+
+**STAGED NEXT (refill on any free slot):** p2-blob · loop-essential
+my.* (queue derived from the loop-slice measurement — the old
+p2-my-families full-port spec is superseded by the LOOP-FIRST
+narrowing) · agent-facing interface-guidance unit. Known open: drill-harness
 nil-FileInputStream failure (recorded, pre-writer readiness, not
 seam-owned — needs its own small issue/fix).
 
