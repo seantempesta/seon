@@ -626,6 +626,16 @@ COMPLETELY before dispatching anything.
   client/indexing.clj and must reconcile: first-party privates as
   corpus rows, its build inventory narrowing to third-party
   terminals + export digests — no double coverage).
+- R40 (owner + R27, 2026-07-23 late): the 4 MiB transport frame
+  bound is a per-MESSAGE wire limit, not database capacity (storage
+  unbounded; big user data rides the blob tier by design). A
+  legitimate operation hit it ⇒ it was functioning as a governor:
+  RECALIBRATE upward (≥100× ordinary P99.9 frames; ~64 MiB class)
+  with provenance — folded into the initpage lane's unit. Paging
+  stays REGARDLESS: boot payload grows unboundedly with the corpus
+  (R39 just grew it), and crash-mid-seed must yield provably
+  unseeded-or-complete. The raised limit returns to pure
+  runaway-breaker duty.
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
