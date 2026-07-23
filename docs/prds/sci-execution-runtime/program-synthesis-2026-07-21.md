@@ -1099,6 +1099,32 @@ execution). Acceptance: demo scenario rerun with fs/shell/web/blob
 receipts provably on the sci host tier. The pod's async ceremony
 remains only for pod-internal callers (UI/LLM/scheduler residue).
 
+### RECONCILED COMPLETION PLAN (orchestrator direct audit, 2026-07-23)
+
+Measured state: census 106 = 39 done / 67 blocking (63 cap-pending,
+4 platform-pending). my.plan/canvas/kb/skills are ALREADY .cljc —
+their rows block on HOST BINDINGS, not ports. Genuinely unported:
+my/data, my/ns, my/ui, my/kb/shared, agent/search (5 small files).
+Pod-legit .cljs = UI/render/ctx tier + LLM I/O + client; eval.cljs
+self-host + execution children DIE at cutover (never convert).
+Cleanup residue: 1 marked compat shim (host/context.clj:202), 133
+open issues (vs 387 archived — triage needed), NS-1b HELD, NS-4/5 +
+normalize-5 + Stage-2 DAG pending, wrapper-era W-units (W5-0b, old
+WP-B/J, W3-parity) SUPERSEDED by the seam — struck from the ledger.
+
+SPINE, in order: (1) meta-strip lands+commits (review its acme/
+edits); (2) JVM leaves fs/shell/web/blob + bindings + receipt-
+verified demo rerun (~28 census rows); (3) host bindings for the
+existing my.* cores (plan/canvas/kb/skills/schema — the census
+mass); (4) port the 5 stragglers; (5) loop→CLJ, delete per-agent
+children + eval.cljs self-host (the original W5), census→0, cutover
+assertion flips, U10/U12 drills.
+PORTFOLIO: NS-1b resume · NS-4/5 · normalize-5 · seam observability
+(receipt durations) · prompt-size lever (OWNER DECISION — dominant
+cost) · issue-triage sweep · packages with priority INVERTED by CLJ
+execution (seon.packages.jvm.*/Java interop before the Bun
+interface).
+
 Next-session queue, in order: (1) my.* porting from the MEASURED
 working set (my.plan plan!/done!/tree · my.ns/functions — receipts
 only, list in the loop-slice report); (2) seam observability
