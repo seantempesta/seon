@@ -1112,18 +1112,34 @@ open issues (vs 387 archived — triage needed), NS-1b HELD, NS-4/5 +
 normalize-5 + Stage-2 DAG pending, wrapper-era W-units (W5-0b, old
 WP-B/J, W3-parity) SUPERSEDED by the seam — struck from the ledger.
 
-SPINE, in order: (1) meta-strip lands+commits (review its acme/
-edits); (2) JVM leaves fs/shell/web/blob + bindings + receipt-
-verified demo rerun (~28 census rows); (3) host bindings for the
-existing my.* cores (plan/canvas/kb/skills/schema — the census
-mass); (4) port the 5 stragglers; (5) loop→CLJ, delete per-agent
-children + eval.cljs self-host (the original W5), census→0, cutover
-assertion flips, U10/U12 drills.
+SPINE, RESEQUENCED (owner priority, 2026-07-23: statelessness
+first — the meter follows the architecture, not vice versa):
+(1) meta-strip lands+commits (review its acme/ edits);
+(2) **THE LOOP-MIGRATION SLICE (P4)**: refactor the turn driver
+(turn.cljs/run.cljs) into resumable steps over CAS-claimable
+database run-state — any process advances a claimed run; pod
+demotes toward web UI + LLM I/O + scheduler. Prerequisites ALL
+landed (effect classes, op-id receipts, recovery, sci eval, WP-S2).
+Acceptance = the U12 drill on the demo scenario: kill the pod
+mid-turn, restart, the run completes with zero lost/doubled effects;
+(3) then per-agent child + eval.cljs self-host deletion (original
+W5), census→0, cutover flip, U10 drill.
+PARALLEL PORTFOLIO (no longer gating the loop): JVM leaves
+fs/shell/web/blob + bindings (~28 rows) · my.* host bindings ·
+the 5 straggler ports.
 PORTFOLIO: NS-1b resume · NS-4/5 · normalize-5 · seam observability
-(receipt durations) · prompt-size lever (OWNER DECISION — dominant
-cost) · issue-triage sweep · packages with priority INVERTED by CLJ
-execution (seon.packages.jvm.*/Java interop before the Bun
-interface).
+(receipt durations) · issue-triage sweep · packages with priority
+INVERTED by CLJ execution (seon.packages.jvm.*/Java interop before
+the Bun interface).
+PROMPT-SIZE FINDING CLOSED (2026-07-23, measured from per-turn
+series in the demo evidence): the transcript window BOUNDS per-turn
+prompts correctly (nine-turn plateau at ~50.5-51.3k in the heat
+arc; package arc 34.2k→37.0k over 12 turns). Step-ups are durable
+state legitimately growing (authored namespace/schema/facts/plan
+render current database facts). The standing floor is ~34k of
+ambient context per turn — the deliberate feels-stateful design;
+block token-caps are the existing knobs if the floor ever needs
+tuning. No leak, no decision required.
 
 Next-session queue, in order: (1) my.* porting from the MEASURED
 working set (my.plan plan!/done!/tree · my.ns/functions — receipts
