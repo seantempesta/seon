@@ -1028,6 +1028,11 @@ COMPLETELY before dispatching anything.
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- GUARDBATCH + R27 (owner): the sync interval N is an aero config
+  fact (:seon.config.guard/interpreter-step-sync-interval — schema,
+  docstring stating the trade with measured calibration provenance,
+  documented beside the sibling guard facts/ADR 010), never a
+  literal; lane kill-resumed with the requirement.
 - GUARDBATCH DISPATCHED (owner pre-authorized 'measure and if
   tradeoff-free then do it'): measure current check ns/step, prototype
   local-countdown/sync-every-N, land ONLY on material measured win
