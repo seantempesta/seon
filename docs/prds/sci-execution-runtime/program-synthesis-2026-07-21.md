@@ -489,6 +489,16 @@ COMPLETELY before dispatching anything.
   RESUMING the litellm evaluation agent on its return, pointed at
   jvm-web-sse + writer-throughput research + seon.reactive; owner
   reviews the design.
+- OWNER Q&A (2026-07-23 PM): per-attribute history-off CONFIRMED —
+  :db/noHistory is first-class in the fork (schema.cljc:65,185;
+  Datahike uses it on :db/txInstant); our bridge lacks the facet.
+  QUEUE: (S) add the :seon.db/no-history? facet to the Seon-owned
+  bridge (component-ref facet precedent) — prerequisite for the
+  UI-streaming coalesced-write option (partial-text = no-history,
+  retracted at terminal, zero durable residue). VERIFY-FIRST row:
+  whether :seon.agent.run/last-beat-at can go no-history (recovery
+  notices derive from history joins — check what claim archaeology
+  reads before flipping).
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
