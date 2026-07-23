@@ -352,6 +352,8 @@ Use discoverable code names, not umbrella nouns or synonyms:
 | attributes + connections | entity kind/type | the Datahike model |
 | build, operator, artifact | flavor | shadow-cljs's build; the `bin/seon`/`bin/acme` supervisor scope; the digested output |
 | get-in, path | drill | paged navigation into a nested value by `get-in` path |
+| execution plan, `plan-execution` | bare "plan" for placement | the derived placement/manifest value; `my.plan` is the agent planning toolkit, never shortened across that boundary |
+| provider descriptor row | adapter, integration | one hosted provider's data row under the config singleton |
 | packages/, package.json, deps.edn, node_modules | npm-pkgs, maven-pkgs | per-cluster `data/clusters/<name>/packages/` using each ecosystem's own manifest names |
 | contexts on hosts, binding tables | sandbox, VM, jail | sci's own vocabulary for agent execution |
 
