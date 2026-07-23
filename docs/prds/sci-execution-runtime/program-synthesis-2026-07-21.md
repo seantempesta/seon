@@ -952,6 +952,15 @@ COMPLETELY before dispatching anything.
   cluster application installs them; every boot is a resume. The
   10s figure is a design target for the startup path, not an R27
   runtime limit.
+- R45 vocabulary + maintenance (owner, same evening): the operation
+  is PRE-PROCESSING (use that name); and the preprocessed cache is
+  kept CURRENT AS CHANGES HAPPEN — every mutation that would
+  invalidate it (registration, durable defn, hot reload) updates the
+  keyed cache write-through in the same flow, O(delta), so a restart
+  or resume at ANY moment finds a current cache and is free. Explicit
+  apply covers artifact/schema-generation changes; write-through
+  maintenance covers the running cluster. A restart never re-derives
+  and never waits for a batch step.
 
 ## Rulings index (full text: git b1752173c and design docs)
 
