@@ -85,3 +85,26 @@ the existing child reload/containment behavior above intact while avoiding a
 second prompt driver. The code comment in `seon.agent.turn/render-prompt`
 names U7 as the closing unit: U7 must route these authored render symbols
 through the U1 guarded door and remove this temporary child dependency.
+
+## U7 render-boundary progress — 2026-07-23
+
+Commit `8bd19774e` removes `seon.eval/lookup-value` from the portable render
+walker. Resolution is now structural: core handler/default symbols exist only
+in the immutable `seon.render.core/renderers` table, while an
+`seon.error/agent-authored-sym?` symbol can execute only through the injected
+`:seon.render/invoke-authored!` door. A JVM regression proves a hostile
+core-looking stored symbol cannot fall through to SCI, and an authored
+infinite renderer returns the U1 guard's `:budget` steering value in its render
+slot while another host future completes.
+
+This closes the unbounded fallback at entity/custom-render resolution (guarded
+door boundary item 5), but it does **not** close this issue. The remaining
+temporary dependency is exact and protected: `seon.agent.turn/render-prompt`
+still supplies `seon.agent.ctx.driver/render-prompt!` with
+`invoke-prompt-calls!`; its authored arm constructs
+`seon.execution/invocation-plan` values and calls
+`seon.execution.host/invoke-plans!`. Stored blocks, whole prompts, derived
+render functions, and canvas twins (boundary items 1–4) therefore still use
+option A. Replacing that callback requires a change in the protected turn/host
+spine, so U7 stopped at the consumer contract instead of adding another host
+surface or editing the protected owner.
