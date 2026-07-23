@@ -515,6 +515,17 @@ COMPLETELY before dispatching anything.
   up/status/down + identity + gzip transcripts, U6a/U6b live LLM
   drives incl. JVM-claimant batch+stream, U8a leaf invocations) →
   one demo bug-finder run. Then U9 + P2 dispatch.
+- R36 (owner, 2026-07-23 PM): first-form early completion is KEPT
+  as an explicit mode. :seon.ai/reply-evaluation #{:first-form
+  :batch} orthogonal to :seon.ai/wire-stream? — all four
+  combinations legal, per-agent config facts select ("some LLMs
+  just work much better with immediate eval"). The streaming
+  design's read-to-EOF applies to :batch; :first-form keeps upstream
+  abort + estimated usage. Implementation lane dispatched: (1) the
+  :seon.db/no-history? bridge facet, (2) the streaming refactor per
+  the design with BOTH modes + the presentation sink + partial-text
+  publication, (3) provider descriptor rows (Kimi/Z.AI/OpenRouter/
+  DeepSeek-cached; Gemini row-only-if-compat-qualifies).
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
