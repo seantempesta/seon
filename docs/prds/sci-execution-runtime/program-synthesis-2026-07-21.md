@@ -1028,6 +1028,19 @@ COMPLETELY before dispatching anything.
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- TRADEOFF AUDITS DISPATCHED (owner, 2026-07-23 eve — 'understand
+  the tradeoff better'): (1) interp-bench — sci-on-JVM vs compiled
+  JVM vs (if still executable) Bun self-host on a representative
+  workload matrix, through the REAL guarded door, guard cost
+  isolated, plus a COMPUTED glue-vs-compute-heavy classification of
+  the actual corpus (program-rows.edn sample) feeding P6 placement;
+  (2) runtime-cost — 10-15 agent live load on an isolated cluster:
+  per-turn phase latency from receipts (coordination vs LLM vs eval
+  columns), writer tx/s, jstat GC per JVM, RSS idle/load/after,
+  honest 100-agent extrapolation + R27 -Xmx recommendations. NOT
+  kill drills (C9 pause respected). Checkpoint drive additionally
+  captures the baseline perf ledger. Both on isolated clusters,
+  source-read-only, parallel to the freeze chain.
 - INTERPRETER-STEP RENAME ACCEPTED (946e1a190, verified: zero
   'fuel' left in src/config runtime; steering asserts 'exceeded its
   interpreter-step budget'; no compat alias per R38; deadline/
