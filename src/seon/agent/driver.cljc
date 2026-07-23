@@ -177,9 +177,7 @@
          (db/query
           {::db/db database
            ::db/query pending-input-query
-           ::db/args [agent-id run-id loop.core/hop-cap]
-           ::db/max-results 1
-           ::db/max-result-weight 4096}))]
+           ::db/args [agent-id run-id loop.core/hop-cap]}))]
     (cond
       (run.core/error-value? run) run
       (run.core/error-value? policy) policy
@@ -329,9 +327,7 @@
             (await
              (db/query
               {::db/db database
-               ::db/query open-runs-query
-               ::db/max-results 10000
-               ::db/max-result-weight 524288}))]
+               ::db/query open-runs-query}))]
         (if (run.core/error-value? rows)
           rows
           (loop [remaining (vec (sort rows))
