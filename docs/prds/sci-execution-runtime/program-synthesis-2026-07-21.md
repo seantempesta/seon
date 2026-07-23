@@ -1250,8 +1250,28 @@ second morph via server-side SSE client, incl. gzip.
 web/reactive/call.cljs (308 LOC) flagged as a ruling-25 leaf-host
 contract question.
 
-**CONVERGENCE RESEARCH PORTFOLIO — remaining two lanes running
-(writer throughput · render/ctx inventory); portfolio was four:**
+**WRITER THROUGHPUT RESEARCH RETURNED + committed `ca83b5038` —
+the ceiling is OURS, not Datahike's:** Seon's executor classifies
+transacts :mutation = max ONE in flight per db, slot held through
+the COMMIT callback — so Datahike's built-in commit batching
+(120k-deep queue, batch-every-queued-report-per-flush,
+writer.cljc:206-241) NEVER ENGAGES; every tx pays a solo disk
+commit (~4-18ms → ~60-200 tx/s per db). Turn cost honestly ~9-20 tx
+(median 12) → ~150-500 simultaneously active runs per db TODAY; 1k
+runs ≈ 2-6× over; idle beats fine at 30s cadence, not at 3s.
+ESCAPES, in order: (1) admit >1 in-flight mutation per db (est.
+5-20×, no new mechanism; needs in-flight request-id cache +
+allocation-tx carve-out) — DEFECT-SHAPED, queue as spine-adjacent
+unit after the design-pass verdict; (2) up to 4 parallel
+per-database mutation lanes exist in the executor already; then
+separate operator processes (caveat: all clusters currently share
+ONE writer JVM under one supervisor); (3) cross-run beat batching
+BLOCKED by CAS-mismatch-aborts-whole-tx — OWNER SEMANTICS CALL,
+flagged not chosen. Head reads never contend (parallel :read on
+immutable values). Probe plan A/A'/B/C recorded (not run).
+
+**CONVERGENCE RESEARCH PORTFOLIO — one lane remaining (render/ctx
+inventory); portfolio was four:**
 concurrent read-only lanes locking down the remaining unknowns
 before the all-JVM design pass:** (1) JVM concurrency + guarded
 eval door (LIVE, scope incl. fuel counter) →
