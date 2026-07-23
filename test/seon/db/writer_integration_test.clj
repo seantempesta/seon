@@ -733,7 +733,7 @@
         (writer/stop! server)
         (.delete (File. request-path))))))
 
-(deftest expected-basis-is-enforced-inside-the-serialized-writer
+(deftest expected-basis-is-enforced-inside-the-pipelined-writer
   (let [database-name (str "writer-fence-" (random-uuid))
         request-path (socket-path "fence-request")
         server
@@ -827,7 +827,7 @@
         (is (= 1 (count (filter ::protocol/success? responses)))
             "exactly one same-head request commits")
         (is (= 1 (count (remove ::protocol/success? responses)))
-            "the serialized writer rejects the losing request")
+            "the pipelined writer rejects the losing request")
         (is (true? (::protocol/success? accepted)))
         (is (= protocol/stale-database-value-error
                (::protocol/error-kind wrong-commit)))
@@ -841,7 +841,10 @@
         (is (= protocol/stale-database-value-error
                (::protocol/error-kind rejected)))
         (is (= frozen (:seon.db/expected-db rejected)))
-        (is (= committed (:seon.db/current-db rejected)))
+        (is (contains? #{frozen committed}
+                       (:seon.db/current-db rejected))
+            "the rejection reports the exact committed head visible when its
+             callback materializes, before or after the winning batch publishes")
         (is (= (:t committed) (:max-tx (d/db connection)))
             "the rejected request creates no receipt or transaction")
         (is (= 1 (count stored))
