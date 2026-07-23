@@ -1017,6 +1017,21 @@ COMPLETELY before dispatching anything.
   for ephemeral clusters, EXPLICIT with loud refusal + exact remedy
   for file-backed clusters. The preprocessing design doc is now fully
   ruled; S-ladder implementation unblocked.
+- FIXSEED WRAPPED + ACCEPTED (13183c222 + e84e10bf5, verified: JVM
+  require proof 884 canonical keys / 247 database attributes;
+  schema.cljc+client.cljs clean): boot schema population PORTABLE in
+  the schema authority; canonical-database-attributes COMPUTED from
+  entity-map membership + persistence facets; agent-bootstrap-attrs
+  = computed delegation (hand list DEAD, the fixed genesis list too);
+  production still seeds through the one paged path. Registry-gate
+  red (15F/3E) = attributed fixture-program-rows gap awaiting S2;
+  session resumes on S2's landing. REVIEW FLAG for rowsidecar: its
+  in-flight hook requires babashka.process outside the test-hook
+  classpath and blocked the focused CLJS execution manifest — its
+  return must prove the test build path intact. BOOTFAST (S1)
+  DISPATCHED into the freed schema/client files (REPL probe first,
+  byte-equality gate, R44 fold parallelism, D2 reuse, D4 gap
+  instrumentation).
 - FIXSEED STOP #3 RULED (2026-07-23 eve, convergent): the fixture's
   JVM reconstruction of index-core! rows cannot equal the CLJS
   analyzer's output — the portable answer is the build-emitted exact
