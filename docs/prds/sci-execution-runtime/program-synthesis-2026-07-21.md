@@ -1270,8 +1270,31 @@ BLOCKED by CAS-mismatch-aborts-whole-tx — OWNER SEMANTICS CALL,
 flagged not chosen. Head reads never contend (parallel :read on
 immutable values). Probe plan A/A'/B/C recorded (not run).
 
-**CONVERGENCE RESEARCH PORTFOLIO — one lane remaining (render/ctx
-inventory); portfolio was four:**
+**RENDER/CTX RESEARCH RETURNED + committed `299f7c463` — PORTFOLIO
+COMPLETE (4/4):** family = 13,477 LOC measured (2,216 already
+.cljc + ~1.6k rename-only; genuinely hard core ≈ 7k; the ~420-LOC
+prompt driver dies at cutover). I1-I4 ALREADY LANDED in source
+(result-cache read gone, now derives from max txInstant, readline
+root-only) — triage #1's L sizing is stale input-side. REMAINING
+impurities: I5 file fingerprints + SOUL env; NEW host-timezone in
+cacheable timestamps (ctx.cljs:297-303); 11 ambient-db fallback
+doors (fix = :seon.db/db required block input + loud failure, the
+I8 precedent); vestigial dial; unbuilt stage-5 byte gate. EVAL
+RE-SEAM SHALLOW: one structural split at eval/lookup-value (static
+trusted table vs the guarded door, using the existing
+agent-authored-sym? predicate). CUT: R0 in-pod driver move (M,
+purity fixes folded) → R1 renames (S, my.ui 7 rows) → R2 date shim
+(S) → R3 render core + canvas (M, 11 rows) → R4 ctx port (L ~6.4k,
+waits on the all-JVM seon.db shape). DEFECT FILED: my.canvas :clj
+branch calls nonexistent seon.render.canvas/field-signal — cannot
+actually load on JVM; census .cljc status nominal (S fix).
+
+**ALL FOUR RESEARCH LANES COMPLETE.** The all-JVM design pass
+(ruling 25) now has every section pre-grounded: concurrency
+(vthreads+bulkhead+fuel door), web/SSE (7.8k near-verbatim,
+pre-authorized comeback, /data-from-writer slice), writer scaling
+(admission fix 5-20×, lanes, sharding), render/ctx (R0-R4 cut).
+GATE: owner scope confirmation, per the standing hold.
 concurrent read-only lanes locking down the remaining unknowns
 before the all-JVM design pass:** (1) JVM concurrency + guarded
 eval door (LIVE, scope incl. fuel counter) →
