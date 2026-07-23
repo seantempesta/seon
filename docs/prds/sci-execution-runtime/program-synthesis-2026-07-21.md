@@ -535,6 +535,16 @@ COMPLETELY before dispatching anything.
   evaluation asked for. Embeddings VERIFIED intact: embed-writer
   tests green in the widened gate, Proximum index stores exercised,
   the one SEON_EMBED/Vertex path untouched.
+- P1 COMPLETE (57761ddb4 + 3169c1967): canonical edge bundle landed
+  — alias-resolved call edges both tees, typed attr edges via the new
+  pure dependency-projection seam, uncertainty/effect/binding facts,
+  sibling graph digest with mutation coverage, no stored closures;
+  fixture-proven. Deferred handoff: per-artifact export inventory
+  (execution.cljs freed by U7 — grant with/after P2). P2 PLANNER
+  DISPATCHED (pure plan-execution + manifests + cache key; consumers
+  stay P4/P5; spec tmp/orchestrator/p2-planner-spec.md). CHECKPOINT
+  fires when the streaming lane returns (P2 is file-disjoint and may
+  span it; its gates are localized).
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
