@@ -31,7 +31,7 @@
   [:map {:closed true}
    [:seon.agent/id :string]
    [:seon.agent.run/id {:optional true} :seon.agent.run/id]
-   [:seon.db/db :seon.db/db]
+   [:seon.db/db {:optional true} :seon.db/db]
    [:seon.agent.ctx/profile
     {:optional true}
     :seon.agent.ctx/profile]])
@@ -66,7 +66,7 @@
   [value]
   (render/unwrap-response :seon.render/ai value))
 
-(defn- interactive-hiccup
+(defn interactive-hiccup
   "Rewrite handlers only for agent-authored dynamic renders and literal canvas.
 
    A dynamic render's function namespace is its ordinary Clojure authoring
@@ -87,7 +87,8 @@
       (reactive-transform/transform-hiccup id authoring-ns hiccup)
       hiccup)))
 
-(defn- html-value
+(defn html-value
+  "Normalize one selected HTML invocation result for an agent surface."
   [id block result]
   (if (::execution/ok? result)
     (let [value (render/unwrap-response
@@ -235,11 +236,15 @@
     :datahike.resource/max-results 8
     :datahike.resource/max-result-weight 1024}])
 
-(defn- acquired-member [member]
+(defn acquired-member
+  "Return one successful database acquisition member's value."
+  [member]
   (when (true? (::protocol/success? member))
     (::protocol/result member)))
 
-(defn- prompt-acquisition-error [acquired members]
+(defn prompt-acquisition-error
+  "Return the flat core-bug value for a failed prompt acquisition."
+  [acquired members]
   (let [error
         (or (when (and (map? acquired)
                        (string? (:seon.error/message acquired)))

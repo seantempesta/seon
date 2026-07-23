@@ -296,3 +296,34 @@
          (@#'ctx/transaction-result
            "install!" [:doctrine]
            {:db-before {} :db-after {} :tx-data []}))))
+
+(deftest default-context-bytes-are-restart-stable-at-one-database-value
+  (let [manifest (config/load-manifest-path "config/system.edn")
+        configuration (config/resolve-config-singleton manifest)
+        entity (config/resolve-agent-context "root" nil configuration)
+        blocks (ctx/selected-agent-blocks entity nil)
+        rendered-blocks
+        (mapv (fn [block]
+                (assoc block :seon.render/ai
+                       (str "rendered:"
+                            (name (:seon.agent.ctx/name block)))))
+              blocks)
+        render-on-fresh-process
+        (fn []
+          (:seon.render/text
+           (ctx/rendered-context-from-entity
+            {:seon.agent/entity entity
+             :seon.agent.ctx/selected-blocks rendered-blocks})))
+        first-bytes (render-on-fresh-process)
+        second-bytes (render-on-fresh-process)
+        boundary-index (str/index-of first-bytes ctx/stable-boundary)
+        readline-index (str/index-of first-bytes "rendered:readline")]
+    (is (= (mapv :seon.agent.ctx/name blocks)
+           (mapv :seon.agent.ctx/name rendered-blocks))
+        "every selected default/required block participates")
+    (is (= first-bytes second-bytes)
+        "one immutable database-derived input produces byte-identical context")
+    (is (number? boundary-index))
+    (is (or (nil? readline-index) (< boundary-index readline-index))
+        "the deliberately ephemeral readline tail is after the cache boundary")
+    (println "U4-BYTE-IDENTITY" (pr-str first-bytes))))

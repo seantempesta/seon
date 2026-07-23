@@ -97,17 +97,17 @@
           acquired
 
           (not= 3 (count (::db/results acquired)))
-          (prompt-acquisition-error acquired (::db/results acquired))
+          (ctx-driver/prompt-acquisition-error acquired (::db/results acquired))
 
           (not-every? #(true? (::protocol/success? %))
                       (::db/results acquired))
-          (prompt-acquisition-error acquired (::db/results acquired))
+          (ctx-driver/prompt-acquisition-error acquired (::db/results acquired))
 
           :else
-          (let [entity (or (acquired-member agent-member) {})
+          (let [entity (or (ctx-driver/acquired-member agent-member) {})
                 configuration
                 (db/decode-edn-values
-                 (or (acquired-member config-member) {}))
+                 (or (ctx-driver/acquired-member config-member) {}))
                 canvas-acquisition
                 (await (ctx-canvas/acquire-canvas! id entity database))]
             (if (:seon.error/message canvas-acquisition)
@@ -189,7 +189,7 @@
                               (map
                                (fn [{:keys [index]} result]
                                  [index
-                                  (html-value
+                                  (ctx-driver/html-value
                                    id (nth all-blocks index) result)])
                                targets
                                results))
@@ -201,7 +201,8 @@
                                       hiccup
                                       (cond
                                         (vector? renderer)
-                                        (interactive-hiccup id block renderer)
+                                        (ctx-driver/interactive-hiccup
+                                         id block renderer)
 
                                         (symbol? renderer)
                                         (get hiccup-by-index index)

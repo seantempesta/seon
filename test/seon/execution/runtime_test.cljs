@@ -324,9 +324,10 @@
               (is (= ['my.prompt/first 'seon.prompt/second]
                      (mapv :seon.execution/function-symbol (first @calls))))
               (is (every?
-                    #(nil? (get-in % [:seon.execution/arguments 0 :seon.db/db]))
+                    #(= database
+                        (get-in % [:seon.execution/arguments 0 :seon.db/db]))
                     (first @calls))
-                  "selected functions receive ordinary input, never a db value")
+                  "selected functions receive the pinned database value")
               (is (= ["literal sibling" "first result" "second result"]
                      (mapv :seon.render/text
                            (:seon.agent.ctx/rendered-blocks rendered))))
@@ -383,9 +384,10 @@
                      (mapv :seon.render/text
                            (:seon.agent.ctx/rendered-blocks rendered))))
               (is (every?
-                    #(nil? (get-in % [:seon.execution/arguments 0 :seon.db/db]))
+                    #(= database
+                        (get-in % [:seon.execution/arguments 0 :seon.db/db]))
                     (mapcat identity @calls))
-                  "no derived call receives a local database value")
+                  "derived calls receive the same pinned database value")
               (done)))
           (.catch
             (fn [error]
@@ -508,6 +510,19 @@
              (done)))
           (.catch (fn [error] (is false (str error)) (done)))
           (.finally (fn [] (set! db/execute-many original)))))))
+
+(deftest missing-prompt-database-is-a-loud-flat-core-bug
+  (async done
+    (-> (ctx.driver/render-prompt!
+         {:seon.agent/id "agent-1"}
+         (fn [_] (js/Promise.resolve [])))
+        (.then
+         (fn [rendered]
+           (is (= :core-bug (:seon.error/kind rendered)))
+           (is (str/includes? (:seon.error/message rendered)
+                              "requires :seon.db/db"))
+           (done)))
+        (.catch (fn [error] (is false (str error)) (done))))))
 
 (deftest eval-owner-receives-the-invocation-database-and-program
   (async done
