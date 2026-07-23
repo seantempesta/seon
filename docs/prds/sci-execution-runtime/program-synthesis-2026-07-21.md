@@ -840,6 +840,25 @@ COMPLETELY before dispatching anything.
   ordering; park-until-owner-publication fix shape ruled; post-
   checkpoint Sol unit). CHECKPOINT now waits ONLY on fixseed.
 
+- U9 DELETION PLAN ACCEPTED (2026-07-23 eve, B1/B2 verified from
+  source: research/u9-deletion-plan-2026-07-23.md): the "consumers
+  already re-pointed" assumption was PARTLY FALSE — B1 the live
+  /agent/{id} page still child-renders (datastar.cljs:1093 →
+  invoke-compiled!; the JVM host REFUSES render symbols by design) so
+  U9 does the in-pod agent-view move itself (slice S0a, U4-prompt
+  precedent); B2 scheduled-fns eval (loop.cljs:556 → child) is
+  plausibly ALREADY BROKEN (invoke-now! rejects tier-less eval
+  batches) — LIVE PROBE at the checkpoint drive + OWNER DECISION
+  pending (recommendation: fire = durable turn + wake, JVM claimant
+  evals); B3 self-host lookup-value still backs route handlers/serve
+  controls — one compiled-table mechanism, SEQUENCED WITH the staged
+  R43 spec (shared trusted-table/classifier ownership). Audit drift
+  refreshed (files already halved; 3 new probe Shadow builds join the
+  cut; P1b inventory sidecars are survivors); wire symbol
+  eval-batch! served by JVM while its namespace dies = named risk;
+  census cutover = host_surface_writer_test.clj:23-25 with ~17
+  pending rows to resolve before the flip (U9's final commit).
+
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
