@@ -65,7 +65,32 @@ Proof
 - Scan grep is empty in `src/seon/execution/host.cljs`.
 - `git diff --check` is clean.
 
-Pending at summary write
+Commit
 
-- R38 reset/live proof on cluster p5enforce.
-- Path-limited commit hash.
+- `411627db8c50c7e665cebf09166e25eba71c036c`
+  `Enforce execution plans before eval dispatch`
+
+R38 reset result
+
+The required isolated reset was attempted with:
+
+  SEON_CLUSTER_DIR=data/clusters/p5enforce \
+    bin/seon cluster reset p5enforce
+
+It stopped before any cluster process or database reset because the landed
+transport/config contract is internally inconsistent:
+
+- maximum frame: 67,108,864 bytes
+- derived queued-request maximum: 67,108,864 bytes
+- enforced floor: frame + four-byte header = 67,108,868 bytes
+
+The returned steering was:
+
+  Configured :seon.config.database.executor/maximum-queued-request-bytes
+  is below its operational floor.
+
+This seam is owned by the live init-paging/config lane and its files are
+protected for P5. No workaround or overlapping edit was made. Commit-watch
+showed no coherent sibling fix before this summary was finalized. R38 live
+proof therefore remains blocked specifically at reset configuration admission;
+the localized driver/router proofs above are complete.
