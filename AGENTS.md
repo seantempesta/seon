@@ -131,24 +131,71 @@ invalidates that fact, update the localized authority in the same commit.
 
 ## Current runtime and boundary
 
-Seon is one application with two processes:
+Seon is one application whose cluster runs several supervised processes
+under the one `bin/seon` operator (ruling 26):
 
-- the Node ClojureScript pod owns agents, eval, context/rendering, and the
-  Datastar web UI at `http://127.0.0.1:7890`;
-- the JVM `seon.db.server` is the sole Datahike writer, committed-transaction
-  feed/replay source, and selected heavy-database-work boundary.
+- the **writer JVM** owns transactions and the committed-transaction feed
+  ONLY; agent-authored code never executes there;
+- the **web-render JVM** serves the Datastar web UI as pure derivation
+  over a replica session; nothing agent-controlled runs there;
+- **claimant JVM(s)** run the one portable claim-native driver: runs are
+  claimable database state (claimant + epoch CAS, heartbeat lease, turn
+  phase cursor, durable attempt/eval receipts); sci evals and authored
+  renders execute behind the guarded eval door on a bounded platform
+  pool; one virtual thread per claimed run;
+- the **Bun leaf host** is a disposable js-package runtime (the pod
+  interim also drives render/LLM phases as a phase-limited claimant
+  until its remaining surfaces retire);
+- the **browser** receives static assets and morphed HTML only.
 
-The pod reads its local immutable replica and forwards writes over the typed
-database protocol. A cluster is one database, a root agent, and task agents;
-coordination is database data. The former embedded-Datahike JVM application,
-Integrant lifecycle, core.async topology, JVM renderer/web server, and nREPL
-application path were removed. Git preserves them at
-`runtime-reliability-pre-refactor-2026-07-13`; they are not a second track.
+All coordination is database data; any process may die at any time and a
+survivor resumes from receipts and the phase cursor. Clusters always
+RESET to the latest code and schema — never data migration.
 
-The CLJS sandbox catches model mistakes; it is not a security boundary.
-Isolation comes from processes and the database capability surface. Seon is the
-core: consumer-specific UI, vendor integrations, and domain models belong in
-downstream repositories, never `src/`, `docs/`, or `pod-host/`.
+Sci containment catches model mistakes; it is not a security boundary.
+Isolation comes from processes and the database capability surface. Seon
+is the core: consumer-specific UI, vendor integrations, and domain
+models belong in downstream repositories, never `src/`, `docs/`, or
+`pod-host/`.
+
+## Portable code, platform edges, and SCI
+
+Write portable `.cljc` by default. A `.cljc` is wrong only if it
+contains unconditional platform code.
+
+- **Family core + one leaf per tier.** Every capability family (fs,
+  shell, web, blob, LLM, db) is a pure portable core plus one thin
+  platform leaf per tier; the entry functions are the only
+  reader-conditional site. Platform residue (js/Date, node:fs,
+  java.net.http, SDK objects) lives in leaves or reader-tag islands,
+  never mid-logic.
+- **Async is contagious upward — push it down.** The CLJ path is plain
+  synchronous (virtual threads park); the CLJS leaf awaits. Logic above
+  the leaf is plain portable Clojure; `^:async` markers exist only at
+  the one executor/leaf call.
+- **Agent code needs no conditionals, ever.** Agents write plain Clojure
+  into the corpus (database facts); SCI is one interpreter on every
+  tier, so pure corpus code runs anywhere. Portability is DERIVED, not
+  declared: `plan-execution` computes placement from the indexed call
+  graph (capability edges, package prefixes, purity), and a contract
+  predicate is admissible exactly when its call graph is pure and
+  capability-free.
+- **Every sci invocation passes the one guarded door** (fuel + deadline
+  + output caps, all config facts); durable defns REQUIRE a complete
+  `:malli/schema` (no `:any` — use named predicate schemas for genuine
+  polymorphism); registrations are committed `:seon.schema` facts that
+  tiers ACQUIRE at a basis — loading a namespace never publishes
+  schema.
+- **Boundaries turn values into data.** Wire crossings carry
+  schema-projected ordinary values; tier-local objects cross as
+  result-symbol references; failures are flat error values. The writer
+  compiles core predicates via `requiring-resolve` — it never needs
+  SCI.
+- **Prove portability, don't assume it.** A `.cljc` rename is not a
+  portability proof: require the namespace on the JVM immediately, and
+  put dual-tier tests below a namespace directory so both runners
+  discover them. Read `docs/prds/sci-execution-runtime/conversion-wiki.md`
+  before portable-core work and append new scars.
 
 ## Documentation authority
 
@@ -200,9 +247,11 @@ existing wikilink targets, and no bare URLs.
 
 ## Model, research, and source policy
 
-Claude Code implementation work uses Opus. Haiku is only for quick reads or
-context gathering; Fable is used only when the owner explicitly asks. Codex
-uses its configured coding model—Claude aliases are not portable model names.
+The top-level Fable orchestrator designs, grounds specs, reviews diffs,
+rules on stops, and runs serial integration gates; implementation goes to
+codex sol lanes. Haiku is only for quick reads. Never haiku for coding.
+Codex uses its configured coding model—Claude aliases are not portable
+model names.
 
 For research, use one agent with the complete relevant context rather than many
 agents with slivers. Independent source domains may run in parallel, but one
@@ -400,9 +449,11 @@ code-block comment above a form, and `;;;` is runtime-structure demarcation.
 - Instrumentation is derived from the database program graph and reapplied on
   hot reload. Wrong schemas/calls are fixed at the source. The kill-switch is
   only emergency recovery.
-- `^:async`/`await` is valid only inside a `^:async` function. Agent-facing
-  eval awaits returned Promises; long work remains addressable through its
-  result symbol. Read the `clojurescript` skill before changing self-host eval.
+- `^:async`/`await` is valid only inside a `^:async` function, and only in
+  CLJS leaves. Agent-facing eval awaits returned Promises; long work remains
+  addressable through its result symbol. The self-host (cljs.js) engine is
+  interim and dies at the great deletion — never invest in it; read the
+  `clojurescript` skill before touching it.
 - The database, not atoms, owns important durable state. Atoms are acceptable
   only for genuinely process-local artifacts such as compiler state, a
   connection, or invocation-local coordination.
@@ -585,7 +636,12 @@ or override those shared forks downstream.
 
 ## Provider and optional subsystem boundaries
 
-The default LLM provider remains DeepSeek. DiffusionGemma is opt-in only through
+The default LLM provider remains DeepSeek. Hosted providers are
+DESCRIPTOR ROWS under the config singleton selecting one of two wire
+cores (`:openai-compat`/`:anthropic`) — adding a hosted provider is a
+row plus a catalog entry, never a new adapter arm. Local-worker
+providers (DiffusionGemma/typeahead) stay on their documented compiled
+dispatch. DiffusionGemma is opt-in only through
 explicit provider configuration; never activate it as a side effect. Embeddings
 use the one `seon.embed`/Vertex path when `SEON_EMBED` is enabled. Credentials,
 project IDs, and service-account files stay outside Git. Details live in
