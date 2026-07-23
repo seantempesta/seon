@@ -149,14 +149,16 @@ COMPLETELY before dispatching anything.
   ITEM: push the fork commit to seantempesta/datahike. Probe C
   shared-file scaling gap (1.55-1.96x vs 4x) recorded as its own
   issue — capacity finding, not a blocker.
-- SECOND fork defect queued to U3 on return (found by U5's live
-  attempt; issue config-schema-alias-blocks-fresh-cluster-open):
-  datahike.schema/malli-form->datahike-attribute cannot store a bare
-  registered-alias form (:seon.config.render-context/sha-256 →
-  :seon.content-hash/digest); the bridge already receives the forms
-  map — dereference recursively (fix the bridge, never inline
-  copies). Blocks U5 live graduation + will block U4's live proof;
-  rejection site writer.clj:442 is U3-owned.
+- Schema-alias bridge fix LANDED (0e1954cb6; issue archived): the
+  bridge is SEON-owned (src/seon/db/datahike/schema.clj — U3's
+  correction of my wrong fork attribution), recursive alias
+  dereference with :schema-alias-chain cycle errors; writer-level
+  fresh-database install of the aliased attribute proven (26/164
+  green). U3 lane fully COMPLETE. U5 live graduation + U4 live
+  restart proof both queue into the orchestrator's post-U2
+  integration checkpoint (pod build is R28-broken during the spine
+  window). U6a adapter-core lane DISPATCHED into the freed slot
+  (spec tmp/orchestrator/u6a-adapter-core-spec.md).
 - U4 ACCEPTED ON RETAINED GATES (2026-07-23 overnight): byte-identity
   gate GREEN (cross-process, empty diff, 938-byte renders) — the
   unit's core falsifier; missing-db :core-bug regression green;
