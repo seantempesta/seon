@@ -14,17 +14,37 @@ earlier — consult it only for archaeology, never for current truth.
 units U1-U10, sequencing, decisions, graduation gate. Read it
 COMPLETELY before dispatching anything.
 
-## Restart protocol
+## Restart protocol (rewritten at the 2026-07-23 PM wind-down)
 
-1. Read `unified-plan-2026-07-23.md` completely.
-2. Read this file completely (it is short now).
-3. Before writing EACH unit's dispatch spec, read that unit's cited
-   research sections in full (U1 → jvm-concurrency §guarded-door;
-   U2 → loop-cljc-sci-design whole + concurrency §adoption; U3 →
-   writer-throughput §5.1+probes; U4 → render-ctx inventory+ledger;
-   U5 → jvm-web-sse). You cannot judge a sol lane's return against
-   a spec you did not ground yourself.
-4. Read `conversion-wiki.md` before dispatching.
+1. Read this file COMPLETELY — the dated bullets above the rulings
+   index are the day's ledger, newest first; rulings R9-R40 are the
+   design record. Then `unified-plan-2026-07-23.md` (U-units + the
+   P1-P6 derived-execution program).
+2. SWEEP FOR UNREVIEWED RETURNS FIRST: ls -t tmp/orchestrator/*-summary.txt
+   and *-final*.txt; anything newer than the anchor's last lane bullet
+   is UNREVIEWED — skeptic-review it before any new dispatch (this rule
+   exists because a return sat 55min unreviewed today).
+3. LIVE LANES AT WIND-DOWN (resume with codex exec resume <id>
+   --dangerously-bypass-approvals-and-sandbox from the REPO ROOT;
+   read the lane's summary + the anchor bullet first):
+   - initpage (paged boot initialization + R40 frame recalibration;
+     carries TWO orchestrator hunks in protocol.cljc + resolve.cljc —
+     verify attribution at its commit): thread 019f8fcb-6444-78d2-ba4b-6f0b2a134d39
+   - p1b (artifact inventories + R39 private corpus rows; three
+     rulings issued — registry-as-inventory, build grants, plan.cljc
+     acquisition): thread 019f8fb6-d582-79b3-88b9-795a6522ad92
+4. THEN THE CHECKPOINT (the anchor's POST-U2 list, updated): frozen
+   tree → full bin/test-cljs + bin/test-writer + operator → the live
+   proof ledger on FRESH-RESET clusters (R38) → demo bug-finder run.
+   Serial, orchestrator-owned, logs to files.
+5. THEN U9 the great deletion → P3/P4 → web slice 2 → JVM package
+   leaf host → P6 invoke family (R35 build map).
+6. Standing mechanics unchanged (below) + the day's additions: every
+   stop is probably right (100% were today); rulings/grants resume
+   the SAME session; entangled shared-file hunks get combined commits
+   with attribution; drills stay PAUSED until core hardening (C9).
+7. codex driving: docs/seon/reference/driving-codex-agents.md —
+   NEVER sandbox mode; always < /dev/null; -o summary files.
 
 ## Current state (2026-07-23, restart boundary)
 
