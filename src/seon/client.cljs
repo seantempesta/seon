@@ -1503,7 +1503,11 @@
                :seon.fn/created-at now}
         (true? (:private m)) (assoc :seon.fn/private? true)
         ;; PRESENT ⇒ specced (exact contract in corpus); ABSENT ⇒ unspecced.
-        (some? spec) (assoc :seon.fn/spec spec)))))
+        ;; Private rows are graph/source facts, not published callable
+        ;; contracts; admitting their schemas would instrument an internal
+        ;; helper as though SCI could resolve it from the public namespace.
+        (and (not (true? (:private m))) (some? spec))
+        (assoc :seon.fn/spec spec)))))
 
 
 ;; --- WHOLE-DOWNSTREAM-SURFACE INDEXING (SEON_EXTRA_SRC) ---------------------
