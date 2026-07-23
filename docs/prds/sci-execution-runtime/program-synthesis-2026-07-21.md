@@ -1138,6 +1138,21 @@ restart proofs, then commit; issue
 `cluster-package-corpus-has-no-loader-door` closes on that proof.
 Then `seon.packages.js.bun` (ruling 17a) dispatches.
 
+**p2-msglc RETURNED, reviewed, HELD for live proof**: message +
+lifecycle portable cores landed in tree (7 census rows
+capability-pending→resolved; effects: user/agent/complete/terminate
+:idempotent, wait/pause/resume :external); full CLJS green over the
+combined tree (1560/7712) — this also serially gates the loader-door
+diff. HONEST LIMIT recorded in wiki: a receipt key doesn't stabilize
+generated transaction intent, so two-call PUBLIC replay of message!
+is not claimed; :idempotent is honest for the recovery path
+(allocator/retry receipt-stable); positional arities can't take
+caller op-id without breaking frozen shapes. IN FLIGHT NOW:
+orchestrator serial bin/test-writer gate + loader-door thread resumed
+for its blocked live proofs (require/call, ruling-15 steering,
+removal, restart). Then: msglc live proof, combined commits, issue
+close, `seon.packages.js.bun` dispatch.
+
 **STAGED NEXT (refill on any free slot):** p2-blob · p2-my-families
 (specs in tmp/orchestrator/, exemplar commit = `f6d843ee`) ·
 agent-facing interface-guidance unit. Known open: drill-harness
