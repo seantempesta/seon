@@ -880,7 +880,7 @@
               :interrupt-fn
               (fn []
                 (when-let [holder (::guard/holder (sci.ctx-store/get-ctx))]
-                  (guard/check! holder)))})
+                  ((::guard/check! holder))))})
         report (load-portable-slice! ctx wrapper-registry)
         _ (stamp-shared-base-vars! ctx)]
     {::ctx ctx ::report report ::registry wrapper-registry}))

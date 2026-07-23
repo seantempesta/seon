@@ -42,18 +42,21 @@
 (def ^:private deadline-config-key-index 3)
 (def ^:private output-config-key-index 4)
 
+(declare check-holder!)
+
 (defn holder
   "Create one stable mutable fuel holder for a retained SCI context."
   {:malli/schema [:=> [:cat] ::holder]}
   []
-  {::fuel-cell (long-array 3)
-   ::control-cell (object-array 5)})
+  (let [holder {::fuel-cell (long-array 3)
+                ::control-cell (object-array 5)}]
+    (assoc holder ::check! (fn [] (check-holder! holder)))))
 
 (defn reset!
   "Reset a retained context's holder for one invocation."
   {:malli/schema [:=> [:catn [::holder ::holder] [::policy ::policy]]
                   ::holder]}
-  [{::keys [fuel-cell control-cell] :as holder}
+  [{::keys [^longs fuel-cell ^objects control-cell] :as holder}
    {::keys [fuel mode invocation-class fuel-config-key deadline-config-key
             output-config-key]}]
   (aset fuel-cell remaining-index fuel)
@@ -71,14 +74,14 @@
   {:malli/schema [:=> [:catn [::holder ::holder]
                              [::interrupted? [:or :nil 'fn?]]]
                   ::holder]}
-  [{::keys [control-cell] :as holder} interrupted?]
+  [{::keys [^objects control-cell] :as holder} interrupted?]
   (aset control-cell interrupted-index interrupted?)
   holder)
 
 (defn steps-used
   "The number of SCI safepoints charged in the current invocation."
   {:malli/schema [:=> [:cat ::holder] ::steps-used]}
-  [{::keys [fuel-cell]}]
+  [{::keys [^longs fuel-cell]}]
   (max 0 (- (aget fuel-cell initial-index)
             (aget fuel-cell remaining-index))))
 
@@ -108,7 +111,7 @@
          "smaller result.")))
 
 (defn- policy-data
-  [{::keys [fuel-cell control-cell] :as holder} kind]
+  [{::keys [^longs fuel-cell ^objects control-cell] :as holder} kind]
   (let [config-key (policy-config-key control-cell kind)]
     (cond-> {::policy-kind kind
              ::steps-used (steps-used holder)
@@ -158,10 +161,8 @@
        :seon.error/kind policy-kind
        :seon.error/data (dissoc data ::policy-kind)})))
 
-(defn check!
-  "Charge one SCI safepoint, then check the platform interrupt predicate."
-  {:malli/schema [:=> [:cat ::holder] :nil]}
-  [{::keys [fuel-cell control-cell] :as holder}]
+(defn- check-holder!
+  [{::keys [^longs fuel-cell ^objects control-cell] :as holder}]
   (let [remaining (unchecked-dec (aget fuel-cell remaining-index))]
     (aset fuel-cell remaining-index remaining)
     (when (and (= 1 (aget fuel-cell enforce-index))
@@ -178,11 +179,17 @@
          (assoc data :seon.error/kind :timeout)))))
   nil)
 
+(defn check!
+  "Charge one SCI safepoint, then check the platform interrupt predicate."
+  {:malli/schema [:=> [:cat ::holder] :nil]}
+  [holder]
+  (check-holder! holder))
+
 (defn interrupt-fn
   "Return the SCI safepoint closure for one retained context holder."
   {:malli/schema [:=> [:cat ::holder] 'fn?]}
-  [holder]
-  (fn [] (check! holder)))
+  [{::keys [check!]}]
+  check!)
 
 (defn call!
   "Reset, arm, and execute one SCI invocation through the policy door."
