@@ -1203,7 +1203,31 @@ threads exist + fuel everywhere + output caps + uniform steering)
 as the single door for every sci invocation; overhead + calibration
 honesty required.
 
-**CONVERGENCE RESEARCH PORTFOLIO (owner, 2026-07-23) — four
+**CONCURRENCY RESEARCH RETURNED + committed `1d1954977` — the
+foundation is settled:** VIRTUAL THREADS (one per claimed
+run-driver, plain-sync steps) HYBRID with the existing bounded
+platform eval-pool (host.clj:276) as the CPU bulkhead — all-vthread
+is NOT safe (no preemption: nCPU hot evals would monopolize every
+carrier until deadline; the bulkhead structurally prevents
+whole-process lockup while driver Future.get parks cleanly).
+Environment already clears every historical hazard: JDK 26 (JEP 491
+killed monitor pinning), Clojure 1.12 (LazySeq→ReentrantLock);
+vendored audit clean (pss zero synchronized; superv/core.async only
+inside the writer). GUARDED EVAL DOOR VERDICT: ADOPT — the fuel
+counter needs ZERO fork changes (:interrupt-fn is an arbitrary
+closure at every safepoint incl. the fork's interrupt-aware core
+overrides that close upstream's #348 escape; ~1-3ns/site);
+deterministic thread-free preemption incl. Bun in-process renders;
+budgets = config facts calibrated by measured steps/ms; deadline→
+interrupt stays the JVM wall-clock authority. Gotchas logged:
+interrupt-during-UDS closes the channel (pool member respawn —
+accepted); -Xmx512m is writer-sized, re-budget for claimants;
+pool-wait-timeout 1000ms spurious at 1k waiters — raise;
+call-executor becomes redundant ceremony under vthreads (fold out
+when touched).
+
+**CONVERGENCE RESEARCH PORTFOLIO (owner, 2026-07-23) — remaining
+three lanes running; portfolio was four:**
 concurrent read-only lanes locking down the remaining unknowns
 before the all-JVM design pass:** (1) JVM concurrency + guarded
 eval door (LIVE, scope incl. fuel counter) →
