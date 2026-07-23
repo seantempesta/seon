@@ -385,6 +385,19 @@ at the boundary. Never invent a third umbrella noun merely to make the two
 sides sound uniform. Record the source files and selected dependency revisions
 that establish those names in the owning PRD's dependency ledger.
 
+Ground every name in the source material (owner ruling, 2026-07-23). Seon is
+transaction processing: data arrives from sources (user, scheduled fires,
+remote-call responses), is transformed, partly stored, and partly emitted as
+side effects. Stay close to the metal — no clever coinages, no
+object-oriented reconceptualization of what the dependency already names.
+Before naming anything at an integration point: vendor the dependency as a
+git submodule under `reference-code/`, read its code, find the ideal
+integration point, and use the same names it uses (Datahike says transaction
+id — never rename that to "coordination"; a build artifact of pre-parsed rows
+is transaction data for initialization pages, not a novel noun). Invented
+vocabulary drifts from the dependency and causes integration and debugging
+mistakes; grounded vocabulary is free documentation.
+
 Current route truth is database data in `src/seon/route.cljs`: `/` is root's
 system view, `POST /agents` creates an agent, and `/agent/{id}` is its page.
 

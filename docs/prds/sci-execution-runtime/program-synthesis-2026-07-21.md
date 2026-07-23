@@ -1017,6 +1017,17 @@ COMPLETELY before dispatching anything.
   for ephemeral clusters, EXPLICIT with loud refusal + exact remedy
   for file-backed clusters. The preprocessing design doc is now fully
   ruled; S-ladder implementation unblocked.
+- OWNER RULING R47 (2026-07-23 eve): NAMES GROUND IN THE SOURCE
+  MATERIAL — no invented nouns ("sidecar"/"coordination" class); the
+  system is TRANSACTION PROCESSING (data in from sources → transform
+  → store some → emit side effects), close to the metal; before
+  naming an integration point, vendor the dependency as a submodule,
+  read it, use its exact names (Datahike: tx-data/transaction;
+  initialization: pages/rows/phases). AGENTS.md §Vocabulary updated;
+  the S2 lane was KILL-RESUMED mid-flight so no 'sidecar' name lands
+  in code/schema/wiki — its artifact is pre-parsed transaction data
+  for initialization pages, named in the producers'/consumers' own
+  vocabulary.
 - R43 STOP RULED (2026-07-23 eve, correct stop + real design catch):
   SPEC-provenance is unsafe for trust — an agent can replace SOURCE
   while keeping the identical spec (no-op assertion retains core
