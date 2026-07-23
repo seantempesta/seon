@@ -55,6 +55,21 @@ the anchor stays the state ledger.
 
 ## Async / platform portability
 
+- **A portable SCI guard needs an actual SCI installation on every claimed
+  tier.** The production Bun eval path still calls `cljs.js/eval-str`
+  (`src/seon/eval.cljs:1185-1292`), so there is no `:interrupt-fn` installation
+  site and a synchronous loop cannot be fuel-preempted there. The retired B2
+  probe under `tmp/sci-probe/exec-src/` is not a production seam, and C2 ruled
+  out the Bun SCI tier. Specify whether “Bun proof” means a direct portable SCI
+  conformance test or grant the engine/cutover owner; never claim the current
+  pod is guarded by installing a timer around `cljs.js`.
+- **Config-fact ownership includes `seon.config.resolve`, not only
+  `seon.config`.** New aero keys cannot become validated singleton datoms by
+  editing `config/system.edn` plus `src/seon/config.cljs`: leaf schemas, closed
+  section/manifest shapes, the singleton entity, and flattening live in
+  `src/seon/config/resolve.cljc:54-63,278-302,675-764`. Grant that owner in any
+  unit requiring a new config fact; bypassing it creates an unvalidated or
+  silently absent dial.
 - **Relocating a compiled callee does not relocate a symbolic invocation.**
   `seon.agent.turn/render-prompt` currently sends
   `'seon.execution.runtime/render-prompt!` through
