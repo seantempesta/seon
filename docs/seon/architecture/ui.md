@@ -428,6 +428,30 @@ the browser remains a projection of database state. A missing originating
 session returns an explicit error envelope instead of guessing which tab to
 move.
 
+## Streaming presentation state — no-history attributes end to end
+
+High-frequency "live" display (streamed LLM reply partials, progress text)
+rides the one database path and stays cheap by construction:
+
+- the producing worker folds its stream completely for the real work and
+  publishes COALESCED complete-value snapshots through an isolated
+  non-blocking sink; sink backpressure drops snapshots, never slows the
+  fold;
+- the snapshot attribute is cardinality-one, unindexed, and registered
+  with the `:seon.db/no-history?` facet (`:db/noHistory`): the temporal
+  indexes never accumulate its churn, and the terminal transaction
+  retracts it while asserting the durable fact (the blob-linked reply);
+- delivery cost is the existing chain: the writer's attribute-indexed
+  interest tables wake only feeds subscribed to that attribute; the
+  reactive registry's equality suppression skips recomputation output
+  that did not change; the per-connection latest-wins mailbox hands a
+  slow browser only the newest morph. Nothing new is invented per
+  streaming feature;
+- the coalescing cadence is a config fact; the UI remains a pure function
+  of the database value, so reconnect is repaint and no replay channel
+  exists. Ephemeral display never bypasses the database without an
+  explicit fenced ruling.
+
 ## The live channel — selective Datastar morph SSE
 
 The live channel is **ours** (reitit has no streaming primitives by design).

@@ -361,6 +361,15 @@ Facet column reads `valueType / cardinality / unique|component`. Mixed-`:or`
 attrs note the EDN-string storage. Every attribute below is named, typed, and
 registered via `schema/register!`; the bridge derives the datahike facet.
 
+High-churn presentation attributes (streamed reply partials, progress
+text) additionally carry the `:seon.db/no-history?` facet, which the
+bridge maps to `:db/noHistory`: the temporal indexes keep only the
+current value, so repeated asserts replace rather than accumulate, and
+the terminal retraction leaves no residue. Use it exactly for ephemeral
+display state whose truth lives elsewhere (the blob-linked reply); never
+for domain facts, receipts, claims, or anything recovery or claim
+archaeology reads through history.
+
 **`register!` ≠ bridge-to-datahike.** `schema/register!` adds to the in-memory
 declaration candidate only; it does not publish a new process-global Malli
 projection before the matching database transaction commits. The transact

@@ -433,6 +433,26 @@ Cross-agent visibility follows naturally from queries that do not filter by
 agent. Cache measured expensive derivations; do not bifurcate the architecture
 into stored-fast and derived-slow paths.
 
+Live/streaming-style updates stay on the ONE database path, made cheap by
+construction rather than by a side channel:
+
+- high-churn presentation state (streamed reply partials, progress text) is a
+  cardinality-one, unindexed attribute registered with the
+  `:seon.db/no-history?` facet (→ `:db/noHistory`): current value only, no
+  temporal accumulation, retracted at its terminal in the same tx that
+  settles the real fact;
+- writes are COALESCED complete-value snapshots (cadence is a config fact),
+  published by an isolated non-blocking sink — presentation can lag or drop,
+  it can never slow or fail the producing work;
+- efficiency is the existing chain, not new machinery: attribute-indexed
+  interest delivery wakes only subscribed feeds → `seon.reactive` equality
+  suppression skips unchanged renders → the per-connection latest-wins
+  mailbox gives a slow browser the newest morph only. The UI remains a pure
+  function of the database value; reconnect = repaint.
+
+Never publish ephemeral display state through a second non-database channel
+without an explicit owner ruling fencing it.
+
 Core source, eval history, and analyzer state are views of one code corpus.
 `:seon.fn`, `:seon.ns`, and `:seon.schema` facts come from the analyzer plus
 source strings. Do not reparse source with another graph builder, replay every
