@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 tags: [agent, runtime, issue]
 severity: blocker
 ---
@@ -38,3 +38,12 @@ the guard hot path must never receive a partial policy.
 - A complete five-field positive policy remains accepted.
 - The focused host invocation regression no longer fails through nil guard
   fuel.
+
+## Resolution
+
+Commit `901eee2d3` requires the complete five-field row before positive-value
+validation. The focused guard-policy, portable driver, and lifecycle gate
+passes 11 tests / 44 assertions; absent and partial rows now return the
+existing loud configuration error instead of entering the guard with nil
+fuel. Fresh host fixtures still need to seed the required facts, tracked by
+[[../full-writer-gate-fails-during-runtime-lane-integration]].
