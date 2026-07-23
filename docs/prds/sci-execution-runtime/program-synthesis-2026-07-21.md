@@ -111,6 +111,13 @@ COMPLETELY before dispatching anything.
   drill's non-pod LLM path, though pre-U6 the pod claimant covers
   it); my.blob strict-restart-purity variant for identity files
   (f above); D1 beat-cadence default once U3's numbers land.
+- Config entanglement resolved (2026-07-23 overnight): U4's
+  render-context sections and U3's mutation-admission sections landed
+  interleaved in the one uncommitted config owner; orchestrator
+  combined-commit 3d8c9a9a6 released the file (wiki recipe). U1's
+  config gate condition (a resolve.cljc commit) is now satisfied; U5
+  remains third in the config queue. U6a adapter-core spec drafted
+  (tmp/orchestrator/u6a-adapter-core-spec-draft.md) as next refill.
 - U2 spec DRAFTED (tmp/orchestrator/u2-claim-driver-spec-draft.md) —
   key reconciliation: pre-U6/U7 BOTH tiers run the one portable
   driver as phase-limited claimants (pod: render+LLM; JVM host: eval
