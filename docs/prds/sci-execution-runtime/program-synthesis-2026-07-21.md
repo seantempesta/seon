@@ -1228,6 +1228,22 @@ call included in its arc) ∥ `p2-blob` resumed (one failing helper
 arity found by the serial gate + its enumerated remainder incl.
 sci-load of the complete core and its live proof).
 
+**Ruling 18 (orchestrator, 2026-07-22 ~21:20 — resolves the
+loop-slice seam stop):** mixed-tier arcs are legitimate and are the
+demo. Per-batch tier selection is COMPUTED from the batch's
+namespace references: a batch naming `seon.packages.js.*` (Bun-local
+leaves) routes to the agent's Bun tier; every other batch routes to
+the sci host tier per the slice plan. No hand lists; the parsed
+forms/program graph supply the references. Cross-batch continuity
+flows through the database corpus + facts (both tiers acquire);
+process-local result symbols are TIER-LOCAL (ruling 15's existing
+rule — steering says so). No new mechanism: both eval paths exist;
+the choice becomes data. The typed host→Bun package-leaf-over-wire
+(stop option 2) stays QUEUED under ruling 17 for pure-JVM package
+consumers. The lane's grounded slice plan (host-lane eval-batch
+routing via the existing eval-socket fact, receipts/tee on the host,
+everything else untouched) is ACCEPTED as written.
+
 **STAGED NEXT (refill on any free slot):** p2-blob · loop-essential
 my.* (queue derived from the loop-slice measurement — the old
 p2-my-families full-port spec is superseded by the LOOP-FIRST
