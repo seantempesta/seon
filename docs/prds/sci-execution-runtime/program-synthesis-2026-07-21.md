@@ -1226,8 +1226,32 @@ pool-wait-timeout 1000ms spurious at 1k waiters — raise;
 call-executor becomes redundant ceremony under vthreads (fold out
 when touched).
 
-**CONVERGENCE RESEARCH PORTFOLIO (owner, 2026-07-23) — remaining
-three lanes running; portfolio was four:**
+**WEB/SSE RESEARCH RETURNED + committed `cc2275db2` — the web move
+is smaller and safer than assumed:** tier = ~10.3k LOC of which
+~7.8k moves NEAR-VERBATIM to .cljc (view/render family essentially
+pure; ui/* zero js interop); ~1.5k rewrites at the platform seam;
+~300 of Bun↔Ring translation DELETES. Idiom: http-kit as-channel +
+the vendored datastar-clojure adapter, ONE VTHREAD PER SSE
+CONNECTION (hyperlith shape), KEEPING seon.reactive's
+shared-subscription precision over broadcast; gzip per-event proven
+by the SDK's tiny_gzip profile. OLD-SERVER AUTOPSY: removed
+(6c1079c8d) for Integrant choreography + a second reactive system +
+a duplicate renderer — NEVER for JVM inadequacy; the archive audit
+pre-authorized exactly this comeback (same pure surface + Datastar
+contract; never Integrant/sse-flow/old renderer). Browser story:
+NO browser cljs exists — pure morphed HTML + static datastar.js;
+end state changes nothing browser-side. Parity risk MEDIUM and
+named: feed/reactive registry single-threaded invariants must
+become explicit under vthreads; the gzip-503 scar belongs to the
+Chrome-bridge tool, not the server. FIRST SLICE: serve /data +
+/data/feed FROM THE WRITER PROCESS (already holds the authoritative
+connection — no replica/agent runtime needed); proof = transact →
+second morph via server-side SSE client, incl. gzip.
+web/reactive/call.cljs (308 LOC) flagged as a ruling-25 leaf-host
+contract question.
+
+**CONVERGENCE RESEARCH PORTFOLIO — remaining two lanes running
+(writer throughput · render/ctx inventory); portfolio was four:**
 concurrent read-only lanes locking down the remaining unknowns
 before the all-JVM design pass:** (1) JVM concurrency + guarded
 eval door (LIVE, scope incl. fuel counter) →
