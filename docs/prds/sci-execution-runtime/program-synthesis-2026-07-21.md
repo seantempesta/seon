@@ -1017,6 +1017,16 @@ COMPLETELY before dispatching anything.
   for ephemeral clusters, EXPLICIT with loud refusal + exact remedy
   for file-backed clusters. The preprocessing design doc is now fully
   ruled; S-ladder implementation unblocked.
+- TESTSIMP AUDIT ACCEPTED (research/test-simplification-audit-
+  2026-07-23.md; honest counts incl. pushback): 228 test files /
+  2,296 deftests; migrate 20 raw-genesis transactions (8 host
+  namespaces) + 6 bespoke initializers + 8 repeated schema installs
+  onto the shared fixture entry when it lands; prose pins split 38
+  fragile vs 18 LEGITIMATE exact oracles (keep); C1 property justifies
+  13 deletions + render byte-parity consolidation 5 more (~18-25 net,
+  bounded honest estimate); only ONE stale call-count test (my.plan
+  pre-U7 — already the R43 regression). Implementation lanes queue
+  behind the S2→fixseed chain (same dependency).
 - FIXSEED WRAPPED + ACCEPTED (13183c222 + e84e10bf5, verified: JVM
   require proof 884 canonical keys / 247 database attributes;
   schema.cljc+client.cljs clean): boot schema population PORTABLE in
