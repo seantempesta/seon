@@ -1017,6 +1017,19 @@ COMPLETELY before dispatching anything.
   for ephemeral clusters, EXPLICIT with loud refusal + exact remedy
   for file-backed clusters. The preprocessing design doc is now fully
   ruled; S-ladder implementation unblocked.
+- R43 STOP RULED (2026-07-23 eve, correct stop + real design catch):
+  SPEC-provenance is unsafe for trust — an agent can replace SOURCE
+  while keeping the identical spec (no-op assertion retains core
+  provenance) and inherit core trust. RULED: classification keys on
+  the SOURCE datom's asserting transaction; precedence corpus-source
+  provenance (core→core, agent/unknown→agent) BEFORE exact compiled
+  artifact export (→core), else agent fail-closed; one seam
+  (agent-authored-sym? symbol projection). Its schema.cljc need
+  collides with live bootfast (same build-projection region) —
+  r43trust RESUMES AFTER bootfast lands with the grant
+  (schema.cljc source-authorship projection fields + turn.cljs
+  consumer). It reverted its exploratory edits before stopping; tree
+  carries only rowsidecar's live work.
 - TESTSIMP AUDIT ACCEPTED (research/test-simplification-audit-
   2026-07-23.md; honest counts incl. pushback): 228 test files /
   2,296 deftests; migrate 20 raw-genesis transactions (8 host
