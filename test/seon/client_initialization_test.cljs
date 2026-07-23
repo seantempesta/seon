@@ -5,6 +5,7 @@
    [my.skills :as skills]
    [seon.agent :as agent]
    [seon.agent.ctx :as ctx]
+    [seon.agent.ctx.admin :as ctx.admin]
    [seon.agent.loop :as agent-loop]
    [seon.agent.lifecycle :as lifecycle]
    [seon.ai.generate-code :as generate-code]
@@ -295,7 +296,7 @@
           original-open client/open-database-session!
           original-skills skills/seed-skills-tx-data
           original-reconcile state/reconcile!
-          original-migrate ctx/migrate-plan-surface-default!
+          original-migrate ctx.admin/migrate-plan-surface-default!
           resolved (assoc configuration :seon.config.render/eval-cap 42)
           resolve-count (atom 0)
           opened-configuration (atom nil)
@@ -307,7 +308,7 @@
             (set! client/open-database-session! original-open)
             (set! skills/seed-skills-tx-data original-skills)
             (set! state/reconcile! original-reconcile)
-            (set! ctx/migrate-plan-surface-default! original-migrate)
+            (set! ctx.admin/migrate-plan-surface-default! original-migrate)
             (done))
           manifest {:seon.config/render
                     {:seon.config.render/eval-cap 42}}]
@@ -337,7 +338,7 @@
                 :seon.runtime.state/changed? false
                 :seon.runtime.state/operations 0
                 :seon.runtime.state/attempts 1})))
-      (set! ctx/migrate-plan-surface-default!
+      (set! ctx.admin/migrate-plan-surface-default!
             (fn []
               (js/Promise.resolve
                {::ctx/ok? true ::ctx/changed? false ::ctx/operations 0})))
@@ -368,7 +369,7 @@
   (async done
     (let [original-skills skills/seed-skills-tx-data
           original-reconcile state/reconcile!
-          original-migrate ctx/migrate-plan-surface-default!
+          original-migrate ctx.admin/migrate-plan-surface-default!
           applied-request (atom nil)
           manifest {:seon.config/ai
                     {:seon.ai/provider :deepseek
@@ -380,7 +381,7 @@
           (fn []
             (set! skills/seed-skills-tx-data original-skills)
             (set! state/reconcile! original-reconcile)
-            (set! ctx/migrate-plan-surface-default! original-migrate)
+            (set! ctx.admin/migrate-plan-surface-default! original-migrate)
             (done))]
       (set! skills/seed-skills-tx-data (fn [_directory] []))
       (set! state/reconcile!
@@ -391,7 +392,7 @@
                 :seon.runtime.state/changed? false
                 :seon.runtime.state/operations 0
                 :seon.runtime.state/attempts 1})))
-      (set! ctx/migrate-plan-surface-default!
+      (set! ctx.admin/migrate-plan-surface-default!
             (fn []
               (js/Promise.resolve
                {::ctx/ok? true ::ctx/changed? false ::ctx/operations 0})))
@@ -420,7 +421,7 @@
     (let [original-skills skills/seed-skills-tx-data
           original-reconcile state/reconcile!
           original-host-coordinates agent/reconcile-host-coordinates!
-          original-migrate ctx/migrate-plan-surface-default!
+          original-migrate ctx.admin/migrate-plan-surface-default!
           applied-request (atom nil)
           manifest (config/read-config-file "config/acme.edn")
           expected-ai {:seon.ai/id "config"
@@ -430,7 +431,7 @@
             (set! skills/seed-skills-tx-data original-skills)
             (set! state/reconcile! original-reconcile)
             (set! agent/reconcile-host-coordinates! original-host-coordinates)
-            (set! ctx/migrate-plan-surface-default! original-migrate)
+            (set! ctx.admin/migrate-plan-surface-default! original-migrate)
             (done))]
       (set! skills/seed-skills-tx-data (fn [_directory] []))
       (set! state/reconcile!
@@ -447,7 +448,7 @@
                {::agent/host-coordinate-ok? true
                 ::agent/host-coordinate-changed? false
                 ::agent/host-coordinate-operations 0})))
-      (set! ctx/migrate-plan-surface-default!
+      (set! ctx.admin/migrate-plan-surface-default!
             (fn []
               (js/Promise.resolve
                {::ctx/ok? true ::ctx/changed? false ::ctx/operations 0})))
@@ -473,13 +474,13 @@
   (async done
     (let [original-skills skills/seed-skills-tx-data
           original-reconcile state/reconcile!
-          original-migrate ctx/migrate-plan-surface-default!
+          original-migrate ctx.admin/migrate-plan-surface-default!
           applied-request (atom nil)
           cleanup!
           (fn []
             (set! skills/seed-skills-tx-data original-skills)
             (set! state/reconcile! original-reconcile)
-            (set! ctx/migrate-plan-surface-default! original-migrate)
+            (set! ctx.admin/migrate-plan-surface-default! original-migrate)
             (done))]
       (set! skills/seed-skills-tx-data (fn [_directory] []))
       (set! state/reconcile!
@@ -490,7 +491,7 @@
                 :seon.runtime.state/changed? false
                 :seon.runtime.state/operations 0
                 :seon.runtime.state/attempts 1})))
-      (set! ctx/migrate-plan-surface-default!
+      (set! ctx.admin/migrate-plan-surface-default!
             (fn []
               (js/Promise.resolve
                {::ctx/ok? true ::ctx/changed? false ::ctx/operations 0})))
@@ -516,7 +517,7 @@
   (async done
     (let [original-skills skills/seed-skills-tx-data
           original-reconcile state/reconcile!
-          original-migrate ctx/migrate-plan-surface-default!
+          original-migrate ctx.admin/migrate-plan-surface-default!
           original-host-coordinates agent/reconcile-host-coordinates!
           effects (atom [])
           reconcile-result (atom nil)
@@ -526,7 +527,7 @@
           (fn []
             (set! skills/seed-skills-tx-data original-skills)
             (set! state/reconcile! original-reconcile)
-            (set! ctx/migrate-plan-surface-default! original-migrate)
+            (set! ctx.admin/migrate-plan-surface-default! original-migrate)
             (set! agent/reconcile-host-coordinates! original-host-coordinates)
             (done))
           apply! (fn []
@@ -539,7 +540,7 @@
             (fn [_request]
               (swap! effects conj :reconcile)
               (js/Promise.resolve @reconcile-result)))
-      (set! ctx/migrate-plan-surface-default!
+      (set! ctx.admin/migrate-plan-surface-default!
             (fn []
               (swap! effects conj :migrate)
               (swap! migration-calls inc)
@@ -603,7 +604,7 @@
           original-execute db/execute-many
           original-transact db/transact!
           original-host-coordinates agent/reconcile-host-coordinates!
-          original-migrate ctx/migrate-plan-surface-default!
+          original-migrate ctx.admin/migrate-plan-surface-default!
           singleton {:seon.config/id config/cluster-config-id}
           database (atom {:db-name "default"
                           :t 42
@@ -644,7 +645,7 @@
             (set! db/execute-many original-execute)
             (set! db/transact! original-transact)
             (set! agent/reconcile-host-coordinates! original-host-coordinates)
-            (set! ctx/migrate-plan-surface-default! original-migrate)
+            (set! ctx.admin/migrate-plan-surface-default! original-migrate)
             (done))
           apply! (fn [] (#'client/reconcile-config! {} singleton))]
       ;; Keep the desired population to the real config singleton so the test
@@ -686,7 +687,7 @@
                {::agent/host-coordinate-ok? true
                 ::agent/host-coordinate-changed? false
                 ::agent/host-coordinate-operations 0})))
-      (set! ctx/migrate-plan-surface-default!
+      (set! ctx.admin/migrate-plan-surface-default!
             (fn []
               (if (= 1 (swap! migration-calls inc))
                 (js/Promise.resolve

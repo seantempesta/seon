@@ -24,6 +24,7 @@
     [clojure.string :as str]
     #?(:cljs [seon.config :as config])
     [seon.db :as db]
+    [seon.db.id]
     [seon.error :as err]
     [seon.error.instrument :as einstrument]
     [seon.render.canvas :as canvas]
@@ -165,7 +166,7 @@
   [:map
    [:seon.db/db     {:optional true} :seon.db/db]
    [:seon.agent/id  {:optional true} :seon.agent/id]
-   [:seon.agent.run/id {:optional true} :seon.agent.run/id]
+   [:seon.agent.run/id {:optional true} :seon.db.id/compact-value]
    [:seon.render/at {:optional true} :seon.render/at]
    [:seon.schema/projection {:optional true} :seon.schema/projection]])
 

@@ -1,5 +1,6 @@
 (ns seon.render-portability-test
   (:require [clojure.test :refer [deftest is]]
+            [seon.agent.ctx :as ctx]
             [seon.ns.source :as ns-source]
             [seon.render :as render]
             [seon.render.value :as value]))
@@ -41,3 +42,12 @@
           #{{:seon.ns.require/target 'example.lib
              :seon.ns.require/alias 'x
              :seon.ns.require/refers #{'f}}}))))
+
+(deftest core-context-block-is-byte-identical-at-one-database-value
+  (let [input {::ctx/seed-specs [":my.demo/name"]
+               ::ctx/own-keys #{}
+               ::ctx/schema-rows
+               [{:seon.schema/key :my.demo/name
+                 :seon.schema/form ":string"}]}]
+    (is (= "(register! :my.demo/name :string)"
+           (ctx/referenced-schema-rows-block input)))))

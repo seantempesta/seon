@@ -7,6 +7,7 @@
    parsing and alternate documentation indexes outside this boundary."
   (:require
     [seon.agent.ctx :as ctx]
+    [seon.agent.ctx.admin :as ctx.admin]
     [seon.agent.ctx.namespaces :as ns-cards]
     [seon.db :as db]
     ;; the shared `:seon.result/ok?` discriminator — Core owns it; my.ns
@@ -195,7 +196,7 @@
                                        (vec (sort-by str selected-compact))
                                        ::ns-cards/full-source
                                        (vec (sort-by str selected-full)))
-                        installed (await (ctx/install! updated))]
+                        installed (await (ctx.admin/install! updated))]
                     (if (:seon.agent.ctx/ok? installed)
                       {:seon.result/ok? true
                        ::ns ns-name

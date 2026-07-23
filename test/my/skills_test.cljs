@@ -5,6 +5,7 @@
     [clojure.string :as str]
     [my.skills :as skills]
     [seon.agent.ctx :as ctx]
+    [seon.agent.ctx.admin :as ctx.admin]
     [seon.config :as config]
     [seon.db :as db]
     [seon.schema :as schema]))
@@ -70,17 +71,17 @@
     remove-fn ::remove-fn}
    body]
   (let [saved {::query-fn db/query
-               ::install-fn ctx/install!
-               ::remove-fn ctx/remove!}]
+               ::install-fn ctx.admin/install!
+               ::remove-fn ctx.admin/remove!}]
     (set! db/query (as-query-fn query-fn))
-    (set! ctx/install! install-fn)
-    (set! ctx/remove! remove-fn)
+    (set! ctx.admin/install! install-fn)
+    (set! ctx.admin/remove! remove-fn)
     (-> (js/Promise.resolve (body))
         (.finally
           (fn []
             (set! db/query (::query-fn saved))
-            (set! ctx/install! (::install-fn saved))
-            (set! ctx/remove! (::remove-fn saved)))))))
+            (set! ctx.admin/install! (::install-fn saved))
+            (set! ctx.admin/remove! (::remove-fn saved)))))))
 
 (defn- with-skill-render-fakes
   [{query-fn ::query-fn

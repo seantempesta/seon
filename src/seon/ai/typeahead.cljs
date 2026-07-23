@@ -42,7 +42,7 @@
    `:typeahead-steps` ctx block (`seon.agent.ctx.typeahead-steps` — the
    render twin; this ns stays hiccup-free) derives the last call's
    trace from these rows. The block is NEVER installed by this loop —
-   enabling it is an explicit per-agent `ctx/install!` (owner
+   enabling it is an explicit per-agent `ctx.admin/install!` (owner
    constraint; the enable story lives in typeahead-design.md)."
   (:require
     [cljs.reader :as reader]

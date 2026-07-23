@@ -21,6 +21,7 @@
    `seon.agent.loop` — that is the whole point."
   (:require
     [seon.db :as db]
+    [seon.derive.state :as state]
     [seon.schema :as schema]))
 
 ;; ============================================================
@@ -30,51 +31,8 @@
 ;; `:seon.agent.run/paused-at` ⇒ :paused; else :running.
 ;; ============================================================
 
-(schema/register! :seon.derive/state
-  [:enum :idle :running :paused :terminated])
-
-(schema/register! :seon.derive/agent-state-read-attrs
-  [:set :qualified-keyword])
-
-(def agent-state-read-attrs
-  "Stored attributes read by [[derive-state]].
-
-   Reactive consumers use this one colocated dependency definition instead of
-   maintaining UI-specific guesses about what can change an agent's derived
-   state. The state itself remains a pure projection of a database value; this
-   is only its immutable read-set, never cached status."
-  #{:seon.agent/id
-    :seon.agent/run
-    :seon.agent/terminated-at
-    :seon.agent.run/status
-    :seon.agent.run/paused-at})
-
-;; The three primitives `state-from-primitives` projects. Keys carry the real
-;; attr names; their VALUE schemas are base types so this shape has no
-;; load-time dependency on the attr registrations in seon.agent /
-;; seon.agent.run. `open?` is "is there an open run".
-(schema/register! :seon.derive/primitives
-  [:map
-   [:seon.agent/terminated-at {:optional true} :inst]
-   [:seon.agent.run/open?     {:optional true} :boolean]
-   [:seon.agent.run/paused-at {:optional true} :inst]])
-
-(defn state-from-primitives
-  "THE state rule (pure): project primitives onto the derived state.
-
-   The caller reads the primitives from a db and hands them in;
-   `:seon.agent/terminated-at` present ⇒ :terminated; no open run ⇒ :idle; an
-   open run with `:seon.agent.run/paused-at` ⇒ :paused; else :running."
-  {:malli/schema [:=> [:catn [:seon.derive/primitives :seon.derive/primitives]]
-                  :seon.derive/state]}
-  [{:seon.agent/keys [terminated-at]
-    open?     :seon.agent.run/open?
-    paused-at :seon.agent.run/paused-at}]
-  (cond
-    terminated-at :terminated
-    (not open?)   :idle
-    paused-at     :paused
-    :else         :running))
+(def agent-state-read-attrs state/agent-state-read-attrs)
+(def state-from-primitives state/state-from-primitives)
 
 ;; ============================================================
 ;; Database-backed projections are async. They remain referentially transparent

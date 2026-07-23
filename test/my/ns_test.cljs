@@ -5,6 +5,7 @@
     [clojure.string :as str]
     [my.ns :as my-ns]
     [seon.agent.ctx :as ctx]
+    [seon.agent.ctx.admin :as ctx.admin]
     [seon.agent.ctx.namespaces :as namespaces]
     [seon.db :as db]
     [seon.repl.parse :as repl-internal]))
@@ -95,7 +96,7 @@
   (let [saved-db db/db
         saved-current-agent-id db/current-agent-id
         saved-pull db/pull
-        saved-install ctx/install!
+        saved-install ctx.admin/install!
         block (atom initial-block)
         installs (atom [])]
     (set! db/db
@@ -116,7 +117,7 @@
              (js/Promise.reject (js/Error. "expected map pull")))
             ([_database _pattern _ref]
              (js/Promise.reject (js/Error. "expected map pull")))))
-    (set! ctx/install!
+    (set! ctx.admin/install!
           (fn [updated]
             (reset! block updated)
             (swap! installs conj updated)
@@ -128,7 +129,7 @@
            (set! db/db saved-db)
            (set! db/current-agent-id saved-current-agent-id)
            (set! db/pull saved-pull)
-           (set! ctx/install! saved-install))))))
+           (set! ctx.admin/install! saved-install))))))
 
 (deftest functions-lists-public-fns-as-compact-cards
   (async done

@@ -5,6 +5,7 @@
    [cljs.test :refer [async deftest is]]
    [seon.agent :as agent]
    [seon.agent.ctx :as ctx]
+   [seon.agent.ctx.admin :as ctx.admin]
    [seon.agent.message :as message]
    [seon.config :as config]
    [seon.db :as db]
@@ -318,7 +319,7 @@
     (let [db! db/db
           pull-many db/pull-many
           transact! db/transact!
-          initial-agent-context ctx/initial-agent-context
+          initial-agent-context ctx.admin/initial-agent-context
           pull-request (atom nil)
           transaction (atom nil)
           received-configuration (atom nil)
@@ -347,7 +348,7 @@
                (js/Promise.resolve [nil nil stored-configured-singleton]))
               ([_ _] (js/Promise.reject (js/Error. "unexpected pull-many arity")))
               ([_ _ _] (js/Promise.reject (js/Error. "unexpected pull-many arity")))))
-      (set! ctx/initial-agent-context
+      (set! ctx.admin/initial-agent-context
             (fn [request]
               (reset! received-configuration
                       (:seon.config/configuration request))
@@ -397,7 +398,7 @@
        [[#(set! db/db %) db!]
         [#(set! db/pull-many %) pull-many]
         [#(set! db/transact! %) transact!]
-        [#(set! ctx/initial-agent-context %) initial-agent-context]]))))
+        [#(set! ctx.admin/initial-agent-context %) initial-agent-context]]))))
 
 (deftest delegate-commits-child-and-first-task-once
   (async done
@@ -406,7 +407,7 @@
           db! db/db
           query db/query
           pull-many db/pull-many
-          initial-agent-context ctx/initial-agent-context
+          initial-agent-context ctx.admin/initial-agent-context
           initial-message message/initial-agent-transaction
           allocate! db.id/allocate!
           standalone-message message/agent
@@ -438,7 +439,7 @@
                 [{:seon.agent/id "parent"} stored-configuration]))
               ([_ _] (js/Promise.reject (js/Error. "unexpected pull-many arity")))
               ([_ _ _] (js/Promise.reject (js/Error. "unexpected pull-many arity")))))
-      (set! ctx/initial-agent-context
+      (set! ctx.admin/initial-agent-context
             (fn [request]
               (swap! creation-configurations conj
                      (:seon.config/configuration request))
@@ -524,7 +525,7 @@
         [#(set! db/db %) db!]
         [#(set! db/query %) query]
         [#(set! db/pull-many %) pull-many]
-        [#(set! ctx/initial-agent-context %) initial-agent-context]
+        [#(set! ctx.admin/initial-agent-context %) initial-agent-context]
         [#(set! message/initial-agent-transaction %) initial-message]
         [#(set! db.id/allocate! %) allocate!]
         [#(set! message/agent %) standalone-message]]))))
@@ -535,7 +536,7 @@
           current-agent-id db/current-agent-id
           db! db/db
           pull-many db/pull-many
-          initial-agent-context ctx/initial-agent-context
+          initial-agent-context ctx.admin/initial-agent-context
           allocate! db.id/allocate!
           databases [database database-after latest-database]
           variant-models ["planner-a" "planner-b" "planner-c"]
@@ -565,7 +566,7 @@
                             :seon.ai/agent-model model}])])))
               ([_ _] (js/Promise.reject (js/Error. "unexpected pull-many arity")))
               ([_ _ _] (js/Promise.reject (js/Error. "unexpected pull-many arity")))))
-      (set! ctx/initial-agent-context
+      (set! ctx.admin/initial-agent-context
             (fn [request]
               (swap! selected-models conj
                      (get-in request
@@ -604,7 +605,7 @@
         [#(set! db/current-agent-id %) current-agent-id]
         [#(set! db/db %) db!]
         [#(set! db/pull-many %) pull-many]
-        [#(set! ctx/initial-agent-context %) initial-agent-context]
+        [#(set! ctx.admin/initial-agent-context %) initial-agent-context]
         [#(set! db.id/allocate! %) allocate!]]))))
 
 (deftest unknown-model-variant-does-not-allocate

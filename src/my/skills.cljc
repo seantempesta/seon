@@ -9,6 +9,7 @@
   (:require
     [clojure.string :as str]
     [seon.agent.ctx :as ctx]
+    [seon.agent.ctx.admin :as ctx.admin]
     [seon.ai.tokens :as tokens]
     [seon.db :as db]
     [seon.schema :as schema]))
@@ -202,7 +203,7 @@
     (if-not exists?
       {::ok? false
        ::message (str "no skill " skill-name " — (my.skills/list) to see what's available")}
-      (let [res (await (ctx/install!
+      (let [res (await (ctx.admin/install!
                          {:seon.agent.ctx/name     (block-name skill-name)
                           :seon.agent.ctx/priority load-priority
                           :seon.render/ai          'my.skills/skill-block}))]
@@ -222,7 +223,7 @@
      (my.skills/unload :datahike)"
   {:malli/schema [:=> [:catn [::skill-name :my.skills/name]] ::result]}
   [skill-name]
-  (let [res (await (ctx/remove! (block-name skill-name)))]
+  (let [res (await (ctx.admin/remove! (block-name skill-name)))]
     (if (:seon.agent.ctx/ok? res)
       {::ok? true :my.skills/name skill-name
        ::message (str "unloaded " skill-name)}

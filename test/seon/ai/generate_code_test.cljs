@@ -6,6 +6,7 @@
     [my.plan :as plan]
     [seon.agent :as agent]
     [seon.agent.ctx :as ctx]
+    [seon.agent.ctx.admin :as ctx.admin]
     [seon.agent.message :as message]
     [seon.ai.generate-code :as generate]
     [seon.db :as db]
@@ -610,7 +611,7 @@
 (deftest reconcile-replaces-exact-compact-and-preserves-other-dials
   (async done
     (let [original-pull db/pull
-          original-install ctx/install!
+          original-install ctx.admin/install!
           installed (atom nil)]
       (set! db/pull
             (fn
@@ -626,7 +627,7 @@
                    :seon.agent.ctx.namespaces/current-full? false}]}))
               ([_ _]
                (js/Promise.reject (js/Error. "unexpected pull arity")))))
-      (set! ctx/install!
+      (set! ctx.admin/install!
             (fn [block]
               (reset! installed block)
               (js/Promise.resolve
@@ -652,17 +653,17 @@
           (.finally
            (fn []
              (set! db/pull original-pull)
-             (set! ctx/install! original-install)))
+             (set! ctx.admin/install! original-install)))
           (.then (fn [_] (done)))
           (.catch (fn [error] (is false (str error)) (done)))))))
 
 (deftest reconcile-writes-nothing-without-ranked-evidence
   (async done
     (let [original-pull db/pull
-          original-install ctx/install!
+          original-install ctx.admin/install!
           touched (atom 0)]
       (set! db/pull (fn [_] (swap! touched inc) (js/Promise.resolve {})))
-      (set! ctx/install! (fn [_] (swap! touched inc) (js/Promise.resolve {})))
+      (set! ctx.admin/install! (fn [_] (swap! touched inc) (js/Promise.resolve {})))
       (-> (generate/reconcile-ranked-namespaces!
            {:seon.agent/id "worker-1" :seon.ai.generate-code/ranked []})
           (.then
@@ -672,7 +673,7 @@
           (.finally
            (fn []
              (set! db/pull original-pull)
-             (set! ctx/install! original-install)))
+             (set! ctx.admin/install! original-install)))
           (.then (fn [_] (done)))
           (.catch (fn [error] (is false (str error)) (done)))))))
 

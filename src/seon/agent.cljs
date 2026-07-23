@@ -65,6 +65,7 @@
     [seon.agent.authorization :as authorization]
     [seon.agent.message :as msg]
     [seon.agent.ctx :as ctx]
+    [seon.agent.ctx.admin :as ctx.admin]
     [seon.agent.ctx.namespaces :as ctx-namespaces]
     [seon.agent.ctx.transcript :as ctx-transcript]
     [seon.agent.ctx.warnings :as ctx-warnings]
@@ -571,7 +572,7 @@
         namespace-ref (if namespace-exists?
                         [:seon.ns/name namespace-name]
                         namespace-tempid)
-        context       (ctx/initial-agent-context
+        context       (ctx.admin/initial-agent-context
                        (cond->
                         {:seon.agent/id id
                          :seon.config/configuration configuration}

@@ -10,6 +10,7 @@
     [my.plan.generation :as generation]
     [seon.agent :as agent]
     [seon.agent.ctx :as ctx]
+    [seon.agent.ctx.admin :as ctx.admin]
     [seon.agent.ctx.ns-name :as ns-name]
     [seon.agent.message :as message]
     [seon.db :as db]
@@ -272,7 +273,7 @@
               installed
               (await
                (db/with-agent agent-id
-                 #(ctx/install!
+                 #(ctx.admin/install!
                    (assoc (dissoc block :db/id)
                           :seon.agent.ctx.namespaces/compact compact))))]
           (when (false? (:seon.agent.ctx/ok? installed))

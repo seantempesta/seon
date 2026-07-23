@@ -4,6 +4,7 @@
     [cljs.test :refer [deftest is testing async]]
     [clojure.string :as str]
     [seon.agent.ctx :as ctx]
+    [seon.agent.ctx.admin :as ctx.admin]
     [seon.config :as config]
     [seon.content-hash :as content-hash]
     [seon.db :as db]))
@@ -42,12 +43,12 @@
               (js/Promise.resolve
                {:db-before database :db-after (assoc database :t 43)
                 :tx-data (::db/tx-data request)})))
-      (-> (ctx/migrate-plan-surface-default!)
+      (-> (ctx.admin/migrate-plan-surface-default!)
           (.then
            (fn [first-result]
              (is (= {::ctx/ok? true ::ctx/changed? true ::ctx/operations 1}
                     first-result))
-             (ctx/migrate-plan-surface-default!)))
+             (ctx.admin/migrate-plan-surface-default!)))
           (.then
            (fn [second-result]
              (is (= {::ctx/ok? true ::ctx/changed? false ::ctx/operations 0}
@@ -299,12 +300,12 @@
 (deftest context-transactions-classify-native-database-results
   (is (= {::ctx/ok? false
           ::ctx/error "install! transact failed: writer unavailable"}
-         (@#'ctx/transaction-result
+         (@#'ctx.admin/transaction-result
            "install!" [:doctrine]
            {:seon.error/message "writer unavailable"
             :seon.error/kind :system})))
   (is (= {::ctx/ok? true ::ctx/names [:doctrine]}
-         (@#'ctx/transaction-result
+         (@#'ctx.admin/transaction-result
            "install!" [:doctrine]
            {:db-before {} :db-after {} :tx-data []}))))
 

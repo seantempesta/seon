@@ -20,6 +20,7 @@
     [my.skills :as skills]
     [seon.agent :as agent]
     [seon.agent.ctx :as agent.ctx]
+    [seon.agent.ctx.admin :as agent.ctx.admin]
     [seon.agent.message]
     [seon.agent.web]
     [seon.client :as client]
@@ -313,7 +314,7 @@
           original-routes config/resolve-routes
           original-skills skills/seed-skills-tx-data
           original-host-coordinates agent/reconcile-host-coordinates!
-          original-migrate agent.ctx/migrate-plan-surface-default!
+          original-migrate agent.ctx.admin/migrate-plan-surface-default!
           success (fn [m] (protocol/success m))
           entity-rows
           (fn [identity-attr]
@@ -379,7 +380,7 @@
             (set! config/resolve-routes original-routes)
             (set! skills/seed-skills-tx-data original-skills)
             (set! agent/reconcile-host-coordinates! original-host-coordinates)
-            (set! agent.ctx/migrate-plan-surface-default! original-migrate))]
+            (set! agent.ctx.admin/migrate-plan-surface-default! original-migrate))]
       (set! db/db
             (fn
               ([] (js/Promise.resolve
@@ -413,7 +414,7 @@
                {::agent/host-coordinate-ok? true
                 ::agent/host-coordinate-changed? false
                 ::agent/host-coordinate-operations 0})))
-      (set! agent.ctx/migrate-plan-surface-default!
+      (set! agent.ctx.admin/migrate-plan-surface-default!
             (fn []
               (js/Promise.resolve
                {::agent.ctx/ok? true

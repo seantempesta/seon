@@ -58,6 +58,7 @@
     ;; `fire-due-schedules!` is in the build.
     [seon.agent.schedule]
     [seon.agent.ctx :as agent.ctx]
+    [seon.agent.ctx.admin :as agent.ctx.admin]
     [seon.ai :as ai]
     ;; Core provider namespaces self-register with dispatch at load. Optional
     ;; diffusion providers enter through an explicit development preload.
@@ -1970,7 +1971,7 @@
                   (let [host-coordinates
                         (await (agent/reconcile-host-coordinates! singleton))
                         migrated
-                        (await (agent.ctx/migrate-plan-surface-default!))]
+                        (await (agent.ctx.admin/migrate-plan-surface-default!))]
                     (cond
                       (not (::agent/host-coordinate-ok? host-coordinates))
                       {:seon.error/message

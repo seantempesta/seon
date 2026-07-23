@@ -5,6 +5,30 @@
 
 (def max-safe-integer 9007199254740991)
 
+(defn instant?
+  "Whether `value` is a platform instant."
+  [value]
+  #?(:clj (instance? java.util.Date value)
+     :cljs (instance? js/Date value)))
+
+(defn epoch-millis
+  "Return the epoch milliseconds represented by `instant`."
+  [instant]
+  #?(:clj (.getTime ^java.util.Date instant)
+     :cljs (.getTime instant)))
+
+(defn from-epoch-millis
+  "Construct a platform instant from epoch milliseconds."
+  [milliseconds]
+  #?(:clj (java.util.Date. (long milliseconds))
+     :cljs (js/Date. milliseconds)))
+
+(defn now
+  "Return the current platform instant."
+  []
+  #?(:clj (java.util.Date.)
+     :cljs (js/Date.)))
+
 (defn safe-integer?
   "Whether `value` is an integer in the shared exact numeric range."
   [value]

@@ -567,7 +567,7 @@
             nil)
           (.then
             (fn [text]
-              (is (not (str/includes? text "render failed")))
+              (is (not (str/includes? text "render failed")) text)
               (let [eval-requests
                     (->> @requests
                          (filter
