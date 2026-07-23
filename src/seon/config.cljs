@@ -72,9 +72,30 @@
 (defn process-environment
   "The pod environment as an explicit ordinary string map."
   []
-  (into {}
-        (map (fn [key] [key (aget js/process.env key)]))
-        (js/Object.keys js/process.env)))
+  (let [environment
+        (into {}
+              (map (fn [key] [key (aget js/process.env key)]))
+              (js/Object.keys js/process.env))]
+    (if (seq (get environment "SEON_HOST_TIMEZONE"))
+      environment
+      (assoc environment
+             "SEON_HOST_TIMEZONE"
+             (try
+               (or (some-> (js/Intl.DateTimeFormat.)
+                           .resolvedOptions .-timeZone)
+                   "UTC")
+               (catch :default _ "UTC"))))))
+
+(defn- render-context-file-contents
+  [manifest]
+  (let [fs (js/require "fs")]
+    (into {}
+          (keep (fn [path]
+                  (try
+                    (when (.isFile (.statSync fs path))
+                      [path (.readFileSync fs path "utf8")])
+                    (catch :default _ nil))))
+          (resolve/render-context-file-paths manifest))))
 
 (defn- process-hardware
   "The pod's explicit hardware observations for non-launch callers."
@@ -284,7 +305,11 @@
   ([manifest]
    (resolve-config-singleton manifest (process-hardware)))
   ([manifest hardware]
-   (resolve/resolve-config-singleton manifest (process-environment) hardware)))
+   (resolve/resolve-config-singleton
+    manifest
+    (process-environment)
+    hardware
+    (render-context-file-contents manifest))))
 
 (defn resolve-ai-config
   "The declared cluster-default LLM desired rows.
@@ -571,6 +596,36 @@
    [:=> [:cat :seon.config/singleton] :int]}
   [configuration]
   (get configuration :seon.config.render/database-edn-cap 16384))
+
+(defn guard-agent-eval-fuel
+  "SCI safepoint-step circuit breaker for one agent eval."
+  {:malli/schema [:=> [:cat :seon.config/singleton] :int]}
+  [configuration]
+  (:seon.config.guard/agent-eval-fuel configuration))
+
+(defn guard-authored-render-fuel
+  "SCI safepoint-step circuit breaker for one authored render invocation."
+  {:malli/schema [:=> [:cat :seon.config/singleton] :int]}
+  [configuration]
+  (:seon.config.guard/authored-render-fuel configuration))
+
+(defn guard-plan-fuel
+  "SCI safepoint-step circuit breaker for one plan invocation."
+  {:malli/schema [:=> [:cat :seon.config/singleton] :int]}
+  [configuration]
+  (:seon.config.guard/plan-fuel configuration))
+
+(defn guard-deadline-ms
+  "Wall-clock circuit breaker for one guarded SCI invocation, in milliseconds."
+  {:malli/schema [:=> [:cat :seon.config/singleton] :int]}
+  [configuration]
+  (:seon.config.guard/deadline-ms configuration))
+
+(defn guard-output-cap
+  "Captured SCI stdout/stderr circuit breaker, in characters."
+  {:malli/schema [:=> [:cat :seon.config/singleton] :int]}
+  [configuration]
+  (:seon.config.guard/output-cap configuration))
 
 (defn eval-render-cap
   "Char cap for one eval row's echoed SOURCE + captured STDOUT.
@@ -899,22 +954,29 @@
    swallowed by the graceful guard; when OFF, today's guard-and-continue
    (a live prod agent must not hard-crash on one bad block).
 
-   Read from env `SEON_RENDER_STRICT` (`1`/`true`/`on`/`yes` → ON; anything
-   else / unset → OFF). DEFAULT OFF: a bare pod boot (the live prod agent) is
-   graceful. Turned ON explicitly in dev / test / benchmark contexts
-   (`bin/test-cljs` exports it; a benchmark driver may set it per run) so a
-   silent render failure SCREAMS the moment it happens instead of hiding in a
-   one-line `⚠ … render failed` guard. This is the config seam the
-   `seon.render` guards + the transcript converter route through the one
-   [[seon.render/render]] owner.
+   The selected manifest resolves the environment observation once and stores
+   the resulting database fact. Render callers pass that immutable
+   configuration value explicitly."
+  {:malli/schema [:=> [:cat :seon.config/singleton] :boolean]}
+  [configuration]
+  (true? (:seon.config.render-context/render-strict? configuration)))
 
-   An explicit env dial (not a build `goog.DEBUG` guess) BECAUSE the live
-   `:client` pod is itself a `:devtools`-enabled dev build — build flags cannot
-   tell the prod pod from a test process, but an env var can."
-  {:malli/schema [:=> [:cat] :boolean]}
-  []
-  (contains? #{"1" "true" "on" "yes"}
-             (some-> (env "SEON_RENDER_STRICT") str/lower-case)))
+(defn host-timezone
+  "The manifest-resolved IANA timezone database fact."
+  {:malli/schema [:=> [:cat :seon.config/singleton] :string]}
+  [configuration]
+  (get configuration :seon.config.render-context/host-timezone "UTC"))
+
+(defn file-fingerprint
+  "The transacted SHA-256 identity for one manifest-observed file."
+  {:malli/schema [:=> [:cat :seon.config/singleton :string]
+                  [:maybe :seon.content-hash/digest]]}
+  [configuration path]
+  (some (fn [fingerprint]
+          (when (= path
+                   (:seon.config.render-context/file-path fingerprint))
+            (:seon.config.render-context/sha-256 fingerprint)))
+        (:seon.config.render-context/file-fingerprints configuration)))
 
 ;;; --- Agent + test bounds (not render caps — kept on their own prefixes).
 

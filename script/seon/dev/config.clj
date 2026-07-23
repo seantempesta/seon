@@ -10,7 +10,8 @@
             [seon.launch :as launch])
   (:import [java.nio.charset StandardCharsets]
            [java.nio.file Files StandardCopyOption]
-           [java.security MessageDigest]))
+           [java.security MessageDigest]
+           [java.time ZoneId]))
 
 (def configuration-schema
   [:map
@@ -157,7 +158,12 @@
   "Resolve the boot manifest once and attach its launch references."
   [configuration config-path]
   (let [root (:seon.dev.config/root configuration)
-        environment (:seon.dev.config/environment configuration)
+        environment
+        (cond-> (:seon.dev.config/environment configuration)
+          (str/blank?
+           (get (:seon.dev.config/environment configuration)
+                "SEON_HOST_TIMEZONE"))
+          (assoc "SEON_HOST_TIMEZONE" (str (ZoneId/systemDefault))))
         born? (database-born? configuration)
         explicit (when config-path
                    (let [path (fs/path config-path)]
@@ -187,8 +193,16 @@
                         (str (fs/path root "tmp/seon-operator")))
         generation (next-launch-generation process-dir)
         envelope (config.resolve/resolve-envelope manifest hardware generation)
+        file-contents
+        (into {}
+              (keep (fn [path]
+                      (let [selected (fs/path root path)]
+                        (when (fs/regular-file? selected)
+                          [path (slurp selected)]))))
+              (config.resolve/render-context-file-paths manifest))
         singleton
-        (config.resolve/resolve-config-singleton manifest environment hardware)
+        (config.resolve/resolve-config-singleton
+         manifest environment hardware file-contents)
         manifest-path (str (fs/path process-dir "resolved-manifest.edn"))
         envelope-path
         (str (fs/path process-dir (str "launch-envelope-" generation ".edn")))

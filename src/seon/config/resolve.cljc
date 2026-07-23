@@ -58,8 +58,23 @@
 (schema/register! :seon.config.render-context/file-paths
   [:vector [:string {:min 1}]])
 (schema/register! :seon.config.render-context/render-strict? :boolean)
+(schema/register! :seon.config.render-context/file-path
+  [:and {:seon.db/identity true} [:string {:min 1}]])
+(schema/register! :seon.config.render-context/sha-256
+  :seon.content-hash/digest)
+(schema/register! :seon.config.render-context/file-fingerprint
+  [:map {:seon.db/entity true}
+   [:seon.config.render-context/file-path
+    :seon.config.render-context/file-path]
+   [:seon.config.render-context/sha-256
+    :seon.config.render-context/sha-256]])
+(schema/register! :seon.config.render-context/file-fingerprint-ref
+  [:or {:seon.db/value-type :db.type/ref}
+   :seon.db/ref
+   :seon.config.render-context/file-fingerprint])
 (schema/register! :seon.config.render-context/file-fingerprints
-  [:map-of [:string {:min 1}] :seon.content-hash/digest])
+  [:vector {:seon.db/component true}
+   :seon.config.render-context/file-fingerprint-ref])
 (schema/register! :seon.config.render-context/file-contents
   [:map-of [:string {:min 1}] :string])
 (schema/register! :seon.config/render-context
@@ -89,6 +104,28 @@
 ;; Shared positive-int cap shape — every render/eval/timeout cap knob
 ;; references it (register-once, no inline duplication).
 (schema/register! :seon.config/cap [:int {:min 1}])
+
+(def guard-budget-schemas
+  "SCI circuit breakers, including units, firing semantics, and U1 calibration."
+  {:seon.config.guard/agent-eval-fuel
+   [:int {:min 1 :description "SCI safepoint steps per agent eval. Default 100000000; protects host availability. Firing records an agent fault and returns a :budget steering value. Calibrated above 100x the 2026-07-23 U1 JVM P99.9."}]
+   :seon.config.guard/authored-render-fuel
+   [:int {:min 1 :description "SCI safepoint steps per authored render invocation. Default 100000000; protects host availability. Firing records an agent fault and returns a :budget steering value. Calibrated above 100x the 2026-07-23 U1 JVM P99.9."}]
+   :seon.config.guard/plan-fuel
+   [:int {:min 1 :description "SCI safepoint steps per plan invocation. Default 100000000; protects host availability. Firing records an agent fault and returns a :budget steering value. Calibrated above 100x the 2026-07-23 U1 JVM P99.9."}]
+   :seon.config.guard/deadline-ms
+   [:int {:min 1 :description "Wall-clock milliseconds per SCI invocation. Default 600000; protects host availability when work blocks outside safepoints. Firing records an agent fault and returns a :timeout steering value. Calibrated above 100x the 2026-07-23 U1 JVM P99.9."}]
+   :seon.config.guard/output-cap
+   [:int {:min 1 :description "Characters captured from SCI stdout/stderr per invocation. Default 1638400; protects host heap and context storage. Firing records an agent fault and returns the existing :agent cap steering value. Calibrated above 100x the 2026-07-23 U1 JVM P99.9."}]})
+
+(doseq [[attribute shape] guard-budget-schemas]
+  (schema/register! attribute shape))
+
+(schema/register! :seon.config/guard
+  (into [:map {:closed true}]
+        (map (fn [attribute]
+               [attribute {:optional true} attribute]))
+        (keys guard-budget-schemas)))
 
 (schema/register! :seon.config.render/database-edn-cap   :seon.config/cap)
 (schema/register! :seon.config.render/eval-cap           :seon.config/cap)
@@ -744,6 +781,16 @@
     {:optional true} :seon.config.execution/host-tier?]
    [:seon.config.execution/host-respawn-backoff-ms
     {:optional true} :seon.config.execution/host-respawn-backoff-ms]
+   [:seon.config.guard/agent-eval-fuel
+    {:optional true} :seon.config.guard/agent-eval-fuel]
+   [:seon.config.guard/authored-render-fuel
+    {:optional true} :seon.config.guard/authored-render-fuel]
+   [:seon.config.guard/plan-fuel
+    {:optional true} :seon.config.guard/plan-fuel]
+   [:seon.config.guard/deadline-ms
+    {:optional true} :seon.config.guard/deadline-ms]
+   [:seon.config.guard/output-cap
+    {:optional true} :seon.config.guard/output-cap]
    [:seon.config.model-transport/response-identity-cap
     {:optional true} :seon.config.model-transport/response-identity-cap]
    [:seon.config.model-transport/endpoint-cap
@@ -826,6 +873,7 @@
    [:seon.config/repl-mode     {:optional true} :seon.config/repl-mode]
    [:seon.config/run           {:optional true} :seon.config/run]
    [:seon.config/execution     {:optional true} :seon.config/execution]
+   [:seon.config/guard         {:optional true} :seon.config/guard]
    [:seon.config/model-transport {:optional true} :seon.config/model-transport]
    [:seon.config/namespaces    {:optional true} :seon.config/namespaces-spec]
    [:seon.config/routes        {:optional true} [:vector :seon.config/route-spec]]
@@ -850,6 +898,40 @@
     {:optional true} :seon.config/agent-context-spec]
    [:seon.config/root-context
     {:optional true} :seon.config/root-context-spec]])
+
+(defn render-context-file-paths
+  "The distinct file paths whose bytes must be observed before config resolve."
+  {:malli/schema [:=> [:cat :seon.config/manifest]
+                  :seon.config.render-context/file-paths]}
+  [manifest]
+  (let [declared (get-in manifest
+                         [:seon.config/render-context
+                          :seon.config.render-context/file-paths]
+                         [])
+        block-paths
+        (keep :seon.agent.ctx/file-path
+              (filter map?
+                      (tree-seq coll? seq
+                                (select-keys
+                                 manifest
+                                 [:seon.config/agent-context
+                                  :seon.config/root-context
+                                  :seon.config/context-profiles]))))]
+    (->> (concat declared block-paths)
+         (filter string?)
+         distinct
+         sort
+         vec)))
+
+(defn- file-fingerprints
+  [manifest file-contents]
+  (into []
+        (keep (fn [path]
+                (when-let [content (get file-contents path)]
+                  {:seon.config.render-context/file-path path
+                   :seon.config.render-context/sha-256
+                   (content-hash/sha-256 content)})))
+        (render-context-file-paths manifest)))
 
 ;;; Function arg/return shapes — leaf `[:vector :map]` (full shapes validated
 ;;; downstream); registered once + referenced so the resolver specs don't
@@ -1419,11 +1501,20 @@
    OPTIONAL (no default): included ONLY when the manifest carries it; the exact
    desired-state reconcile retracts a previously stored value when it is later
    omitted."
-  {:malli/schema [:=> [:cat :seon.config/manifest [:map-of :string :string]
-                      :seon.config.resolve/hardware-observations]
-                  :seon.config/singleton]}
-  [manifest environment hardware]
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.config/manifest [:map-of :string :string]
+          :seon.config.resolve/hardware-observations]
+     :seon.config/singleton]
+    [:=> [:cat :seon.config/manifest [:map-of :string :string]
+          :seon.config.resolve/hardware-observations
+          :seon.config.render-context/file-contents]
+     :seon.config/singleton]]}
+  ([manifest environment hardware]
+   (resolve-config-singleton manifest environment hardware {}))
+  ([manifest environment hardware file-contents]
   (let [r   (get manifest :seon.config/render {})
+        render-context (get manifest :seon.config/render-context {})
         run (merge (default-run-policy) (get manifest :seon.config/run {}))
         transport (get manifest :seon.config/model-transport {})
         rep (get manifest :seon.config/repair {})
@@ -1431,6 +1522,7 @@
         root (get manifest :seon.config/root {})
         reactive (get manifest :seon.config/reactive {})
         execution (get manifest :seon.config/execution {})
+        guard (get manifest :seon.config/guard {})
         database (get manifest :seon.config/database {})
         contexts (resolve-context-entities manifest)
         _ (validate-liveness-relations! manifest environment run)
@@ -1460,6 +1552,34 @@
               (get execution :seon.config.execution/host-tier? false))
              :seon.config.execution/host-respawn-backoff-ms
              host-respawn-backoff-ms
+             :seon.config.guard/agent-eval-fuel
+             (get guard :seon.config.guard/agent-eval-fuel 100000000)
+             :seon.config.guard/authored-render-fuel
+             (get guard :seon.config.guard/authored-render-fuel 100000000)
+             :seon.config.guard/plan-fuel
+             (get guard :seon.config.guard/plan-fuel 100000000)
+             :seon.config.guard/deadline-ms
+             (get guard :seon.config.guard/deadline-ms 600000)
+             :seon.config.guard/output-cap
+             (get guard :seon.config.guard/output-cap 1638400)
+             :seon.config.render-context/host-timezone
+             (get render-context
+                  :seon.config.render-context/host-timezone
+                  "UTC")
+             :seon.config.render-context/soul-enabled?
+             (boolean
+              (get render-context
+                   :seon.config.render-context/soul-enabled?
+                   true))
+             :seon.config.render-context/soul-file-path
+             (get render-context
+                  :seon.config.render-context/soul-file-path
+                  "SOUL.md")
+             :seon.config.render-context/render-strict?
+             (boolean
+              (get render-context
+                   :seon.config.render-context/render-strict?
+                   false))
              :seon.config/always     (:seon.config/always nsp)
              :seon.config/on-core-error
              (coerce-enum (get manifest :seon.config/on-core-error :gate) #{:crash :gate :log} :gate)
@@ -1554,6 +1674,9 @@
                             (:seon.config/model-variants manifest))))
       (contains? manifest :seon.config/skills-dir)
       (assoc :seon.config/skills-dir (:seon.config/skills-dir manifest))
+      (seq (file-fingerprints manifest file-contents))
+      (assoc :seon.config.render-context/file-fingerprints
+             (file-fingerprints manifest file-contents))
       true
       (merge contexts
              (into {}
@@ -1562,7 +1685,7 @@
                                       (get repair-class-attributes class)]
                              [attribute enabled?])))
                    (:seon.config.repair/classes rep))
-             (resolve-operational-values manifest hardware)))))
+             (resolve-operational-values manifest hardware))))))
 
 (defn execution-host-respawn-backoff-ms
   "The demand-triggered host reconcile backoff from one resolved singleton."

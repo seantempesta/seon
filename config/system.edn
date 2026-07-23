@@ -72,6 +72,14 @@
  {:seon.config.execution/host-tier? false
   :seon.config.execution/host-respawn-backoff-ms 1000}
 
+ ;; ── GUARDED SCI INVOCATION — loud circuit breakers, never work governors.
+ :seon.config/guard
+ {:seon.config.guard/agent-eval-fuel 100000000
+  :seon.config.guard/authored-render-fuel 100000000
+  :seon.config.guard/plan-fuel 100000000
+  :seon.config.guard/deadline-ms 600000
+  :seon.config.guard/output-cap 1638400}
+
  ;; ── ROOT FLEET PROJECTION — bounded activity and failed-eval lookbacks. This
  ;; is a database dial, so a frozen db value reproduces exactly which recent
  ;; rows root considered. It is a lookback count, not a display-character cap.
@@ -176,6 +184,17 @@
   :seon.config.render/trailing-ws    :off          ; :off | :dot (· on trailing ws)
   :seon.config.render/content-layout :structured   ; :structured | :single-line
   :seon.config.render/line-numbers   false}        ; true → 1-based line gutter
+
+ :seon.config/render-context
+ {:seon.config.render-context/host-timezone
+  #or [#env SEON_HOST_TIMEZONE "UTC"]
+  :seon.config.render-context/soul-enabled?
+  #boolean #or [#env SEON_SOUL "true"]
+  :seon.config.render-context/soul-file-path
+  #or [#env SEON_SOUL_FILE "SOUL.md"]
+  :seon.config.render-context/file-paths ["AGENTS.md"]
+  :seon.config.render-context/render-strict?
+  #boolean #or [#env SEON_RENDER_STRICT "false"]}
 
  ;; ── CORE-FAULT ESCALATION DIAL (error-blame-strict-gate, RULED 2026-07-04) ──
  ;; What a :core-fault seon.error/record! does BEYOND persisting its datom:

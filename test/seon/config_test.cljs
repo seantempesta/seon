@@ -1817,3 +1817,30 @@
         (if (some? saved-m)
           (set! (.-SEON_AI_MODEL env) saved-m)
           (js-delete env "SEON_AI_MODEL"))))))
+
+(deftest render-context-facts-are-resolved-from-explicit-observations
+  (let [manifest
+        {:seon.config/render-context
+         {:seon.config.render-context/host-timezone "America/New_York"
+          :seon.config.render-context/soul-enabled? false
+          :seon.config.render-context/soul-file-path "identity.md"
+          :seon.config.render-context/file-paths ["AGENTS.md"]
+          :seon.config.render-context/render-strict? true}
+         :seon.config/agent-context
+         {:seon.agent/ctx
+          [{:seon.agent.ctx/name :notes
+            :seon.agent.ctx/priority 1
+            :seon.agent.ctx/file-path "NOTES.md"
+            :seon.render/ai 'seon.agent.ctx/file-block-ai}]}}
+        resolved
+        (resolve/resolve-config-singleton
+         manifest {} fixed-hardware
+         {"AGENTS.md" "rules\n" "NOTES.md" "notes\n"})]
+    (is (= ["AGENTS.md" "NOTES.md"]
+           (resolve/render-context-file-paths manifest)))
+    (is (= "America/New_York"
+           (:seon.config.render-context/host-timezone resolved)))
+    (is (false? (:seon.config.render-context/soul-enabled? resolved)))
+    (is (true? (config/render-strict? resolved)))
+    (is (= "444e0fffbd825e9610ff5b199485707a0c895339ae80c15cc8a8aee41b106fda"
+           (config/file-fingerprint resolved "NOTES.md")))))

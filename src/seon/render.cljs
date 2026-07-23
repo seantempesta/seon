@@ -319,9 +319,9 @@
    one-liner). STRICT OFF → return nil, signalling the caller to fall back
    to its graceful guard (a live prod agent must not hard-crash on one bad
    block). The single seam every render swallow-guard calls."
-  {:malli/schema [:=> [:catn [::where :any] [::e :any]] [:maybe :nil]]}
-  [where e]
-  (when (config/render-strict?)
+  {:malli/schema [:=> [:cat :seon.config/singleton :any :any] [:maybe :nil]]}
+  [configuration where e]
+  (when (config/render-strict? configuration)
     (throw (ex-info (loud-explain where e)
                     {:seon.render/strict?     true
                      :seon.render/where       where
@@ -365,7 +365,7 @@
           (when-not (err/recorded? e)
             (err/record! {:seon.error/raw e :seon.error/fault (err/fault-for sym)}))
           ;; STRICT dial: dev/test/benchmark → re-throw LOUD; prod → graceful guard.
-          (strict-fail! sym e)
+          (strict-fail! (:seon.config/configuration input) sym e)
           (canvas/error-card
             {:seon.error/message (str sym " threw: " (or (.-message e) (str e)))
              :seon.error/symbol  sym}))))))
@@ -861,7 +861,7 @@
                         (err/fault-for sym)
                         :core)}))
       ;; STRICT dial: dev/test/benchmark → re-throw LOUD; prod → graceful guard.
-      (strict-fail! :block e)
+      (strict-fail! configuration :block e)
       (let [msg (str "block render failed: " (err/->message e))]
         (case view
           :html (canvas/error-card {:seon.error/message msg :seon.error/where :block})
@@ -897,7 +897,7 @@
           (when-not (err/recorded? e)
             (err/record! {:seon.error/raw e :seon.error/fault (err/fault-for sym)}))
           ;; STRICT dial: dev/test/benchmark → re-throw LOUD; prod → legible line.
-          (strict-fail! sym e)
+          (strict-fail! (:seon.config/configuration input) sym e)
           (str "[render error — " sym " threw: "
                (or (.-message e) (str e)) "]"))))))
 
@@ -1037,7 +1037,8 @@
                                                 :agent :core))}))
           ;; STRICT dial: dev/test/benchmark → re-throw LOUD (block name + full
           ;; malli explain); prod → fall through to the graceful guard below.
-          (strict-fail! (renderable-id node) e)
+          (strict-fail! (:seon.config/configuration ctx)
+                        (renderable-id node) e)
           (if (= view :seon.render/ai)
             (str ";; ⚠ [" (renderable-id node) "] render failed: " (ex-message e))
             (canvas/error-card
