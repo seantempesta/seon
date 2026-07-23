@@ -166,6 +166,15 @@ COMPLETELY before dispatching anything.
   identical on both runners; focused gates green. Live LLM drive
   deferred to the integration checkpoint. U6b (JVM java.net.http
   leaf) remains the HELD morning item.
+- U2 VERIFIED PARTIAL (901eee2d3): one portable claim-native driver
+  on BOTH tiers; legacy loop/promise-registry/!attempts authorities
+  DELETED; LIVE cross-tier handoff proven once with exact receipts
+  (pod render+LLM → JVM eval → pod publish; run q6vd3sazidyb).
+  NOT graduated: writer gate red (guard facts missing from fresh
+  host fixtures), race/pause/kill/U12 falsifiers unproven. RESUMED
+  for completion: fixture seeding → writer green → the falsifiers →
+  U12 drill → full CLJS (obsolete legacy tests delete WITH
+  justification).
 - POST-U2 INTEGRATION CHECKPOINT list (orchestrator, frozen tree):
   full bin/test-cljs + bin/test-writer; U1 live u1guard proof; U4
   live restart byte comparison (context-purity issue closes); U5
