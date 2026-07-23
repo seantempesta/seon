@@ -98,6 +98,21 @@
       (is (empty? (fs/glob (fs/parent output) ".*.tmp")))
       (finally (fs/delete-tree project)))))
 
+(deftest row-derivation-reanalyzes-with-shadow-devtools-disabled
+  (let [state
+        {:shadow.build/config {:devtools {:enabled true}}
+         :shadow.build.modules/config
+         {:main {:entries
+                 ['shadow.cljs.devtools.client.node 'seon.client]}}}]
+    (let [derived
+          (#'program-artifact/disable-shadow-devtools-config state)]
+      (is (false?
+           (get-in derived
+                   [:shadow.build/config :devtools :enabled])))
+      (is (= ['seon.client]
+             (get-in derived
+                     [:shadow.build.modules/config :main :entries]))))))
+
 (deftest row-flush-publishes-the-live-derivation-byte-for-byte
   (let [project (fs/create-temp-dir {:prefix "seon-program-rows-publish-"})
         source-file (fs/path project "src/example/core.cljs")

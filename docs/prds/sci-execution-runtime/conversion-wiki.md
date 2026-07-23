@@ -1124,6 +1124,17 @@ the anchor stays the state ledger.
   consumers must use Datahike and `seon.db.protocol/initialization-pages`
   vocabulary (`transaction data`, rows, pages), never an orchestrator lane
   label.
+- **A copied watch state retains Shadow's injected Node devtools entry.**
+  Replacing only `shadow.module.main.append` does not make the temporary
+  program a run-to-exit build: `shadow.cljs.devtools.client.node` still opens
+  its websocket and retains Bun after the row marker is written. Apply
+  Shadow's own disabled-devtools configuration to the copied state, remove
+  that injected entry, and rerun `shadow.build.api/analyze-modules` before
+  `shadow.build.node/flush-unoptimized`. Do not terminate the correct
+  derivation after a timeout or manipulate its socket. The managed-watcher
+  regression is a first flush that publishes manifest v11 while no
+  `.program-rows-build-*` Bun process remains
+  (`script/seon/dev/program_artifact.clj`).
 - **R28 breakage can survive on a pod surface until build-time derivation
   executes it.** The shell config-fact conversion changed portable
   `run-request` to require the acquired configuration, but the still-alive pod

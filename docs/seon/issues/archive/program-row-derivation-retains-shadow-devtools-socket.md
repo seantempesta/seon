@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: closed
 tags: [issue, build, cljs, flow]
 severity: blocker
 ---
@@ -48,3 +48,19 @@ derivation and one atomic artifact publisher.
   `:seon.dev.artifact/program-row-path` and
   `:seon.dev.artifact/program-row-digest`.
 - The published digest matches the exact `program-rows.edn` bytes.
+
+## Resolution
+
+The temporary derivation now applies Shadow's own
+`:devtools {:enabled false}` configuration semantics to the copied build
+state: it removes the injected `shadow.cljs.devtools.client.node` main entry
+and reruns `shadow.build.api/analyze-modules` before flushing the unoptimized
+Node program. The compiled client indexer remains the one row derivation, but
+the generated program no longer contains the websocket-owning entry.
+
+An isolated `s2fix` managed watcher reached readiness and published manifest
+version 11. Its program-row path and digest were present, the published file's
+SHA-256 matched
+`524e2e001368e9be6b234a3f0403bff51e0804fc99cd2d6d3c9e2ab35af8109b`,
+and no `.program-rows-build-*` Bun process remained. The operator was then
+shut down. Evidence is retained in `tmp/orchestrator/s2fix-gate.log`.

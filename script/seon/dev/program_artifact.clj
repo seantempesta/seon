@@ -12,6 +12,8 @@
 
 (def ^:private program-row-marker "SEON_PROGRAM_ROWS_EDN ")
 (def ^:private prepared-program-rows ::prepared-program-rows)
+(def ^:private shadow-node-devtools-client
+  'shadow.cljs.devtools.client.node)
 
 (defn- canonical-file [root value]
   (.getCanonicalFile
@@ -217,12 +219,29 @@
         (seq goog) (convert-goog goog)
         (seq js) (convert-sources js)))))
 
+(defn- disable-shadow-devtools-config
+  [state]
+  (let [module-config-key :shadow.build.modules/config
+        main-entries-path [module-config-key :main :entries]]
+    (-> state
+        (assoc-in [:shadow.build/config :devtools :enabled] false)
+        (update-in main-entries-path
+                   (fn [entries]
+                     (into [] (remove #{shadow-node-devtools-client}) entries))))))
+
+(defn- disable-shadow-devtools
+  [state]
+  ((requiring-resolve 'shadow.build.api/analyze-modules)
+   (disable-shadow-devtools-config state)))
+
 (defn- derive-program-rows
   [state program-source-text target]
   (let [state
         ((requiring-resolve 'shadow.build.async/wait-for-pending-tasks!)
          state)
-        state (unoptimized-build-state state)
+        state (-> state
+                  disable-shadow-devtools
+                  unoptimized-build-state)
         append-id (main-append-resource-id state)]
     (when-not append-id
       (throw
