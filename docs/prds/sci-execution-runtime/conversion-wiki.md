@@ -712,3 +712,40 @@ the anchor stays the state ledger.
   socket/CAS gate and retry the live proof only after the owning source lane
   commits; do not patch its files or spend provider calls against a stale
   artifact.
+
+## Edge-bundle verified-stop scars (2026-07-23)
+
+- **A dual tee needs the same resolved namespace facts, not only the same
+  source.** The pod owns resolved aliases and refers through analyzer require
+  edges. The JVM recorder currently receives only the source and namespace
+  symbol, so it cannot distinguish `db/query` from another `db` alias or
+  resolve a referred callable from a prior namespace form. Pass the immutable
+  alias and refer tables into both the whole-source read and edge projection;
+  never guess common aliases inside `seon.host.record`.
+- **Read edges consume Datahike's parsed dependency semantics.** The maintained
+  dependency exposes exact query/pull attribute sets and `:all` for dynamic or
+  wildcard cases. A source walker in a new graph namespace would become a
+  second Datalog and pull parser. Expose the pure maintained projection through
+  the `seon.db` boundary, then map `:all` to the graph's explicit
+  all-at-basis fact.
+- **An artifact inventory is not the public function corpus.**
+  `seon.client.indexing/public-fn-vars` deliberately rejects private helpers,
+  and every returned var becomes a public `:seon.fn` row. Capture per-function
+  direct facts during analysis, filter them by Shadow's exact
+  `:build-sources` closure at the existing flush publisher, and bind each
+  sidecar digest into the selected artifact manifest and application digest.
+  A client-only file or namespace-level `:used-vars` reconstruction is not an
+  exact artifact inventory.
+- **Graph identity must be acquired at one immutable database value.** Add
+  normalized direct edges, descriptors, and their analyzed source generation
+  to `seon.execution/canonical-program`, then retain its one ordinary-value
+  digest. Coordinate this edit with any lane changing committed schema or
+  contract acquisition; parallel changes to the same canonical acquisition
+  boundary are not independent.
+- **Installed host metadata is not yet a complete effect inventory.** The
+  capability seam's effect vocabulary is
+  `:pure`/`:read`/`:idempotent`/`:external`, and absence remains external.
+  The current host installer preserves metadata for several wrapper families
+  but drops source effects for the `seon.db` family. Derive graph descriptors
+  from analyzed source/build facts until the installer carries the same
+  metadata; do not infer purity from successful installation.

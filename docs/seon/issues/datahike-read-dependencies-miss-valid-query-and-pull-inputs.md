@@ -58,3 +58,18 @@ parser.
   is selected; over-selection is allowed and a false negative fails.
 - Schema-affecting transactions cannot inherit a result whose interpretation
   may have changed.
+
+## Edge-bundle handoff — 2026-07-23
+
+The maintained checkout at `9c356e32` now contains the pure parsed projections
+`datahike.query/query-dependency-plan` and
+`datahike.pull-api/pull-dependency-plan`, including exact literal attributes,
+lookup-ref identities, and explicit `:all`. The direct-edge program graph
+cannot consume those functions without crossing Seon's database authority:
+outside `src/seon/db/`, direct Datahike calls are forbidden, while no public
+pure `seon.db` projection currently exposes them.
+
+The database owner should expose this one maintained interpretation for
+source-analysis consumers. The edge owner then translates exact attributes
+directly and maps `:all` to its all-at-basis fact. It must not duplicate the
+query or pull parser.

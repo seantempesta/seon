@@ -52,3 +52,17 @@ is FIXED `16a040e6` and archived; this parity gap is what its probes
 tripped over).
 
 Triage 2026-07-23 — **DISSOLVES into the post-P4 census-to-zero/cutover unit**, which owns surface conformance and deletes fallback children/self-host.
+
+## Edge-bundle metadata evidence — 2026-07-23
+
+The same host-surface census must compare capability effect metadata, not only
+symbol resolution. A direct registry probe found
+`seon.agent.message/user :idempotent` and
+`seon.agent.web/fetch :external`, but both `seon.db/db` and
+`seon.db/transact!` had no `:seon.capability/effect`. The source vars declare
+their effects; `register-host-capabilities!` currently copies arglists and
+documentation for the database family but not that metadata.
+
+Acceptance therefore includes exact source-to-installed effect parity for every
+callable wrapper. Missing source metadata remains conservatively external;
+metadata present at the source must not disappear during installation.
