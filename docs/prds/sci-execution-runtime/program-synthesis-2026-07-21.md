@@ -1183,8 +1183,21 @@ Bun renders in the stage-(a) interim are supervised, not
 preemptible). HTTP-leaf timing + stage-(a) skip = the morning owner
 discussion (its owner-decisions section).
 
+**SCOPING HOLD (owner, 2026-07-23): the all-JVM design pass does
+NOT launch until (1) the JVM-concurrency research returns and (2)
+the owner confirms the pass's scope.** Owner requirements for the
+end state: hundreds→thousands of agents across clusters; never
+block on mostly-IO; Bun children's process-parallelism must be
+replaced by something at least as good. RESEARCH LANE LIVE:
+virtual threads vs alternatives for plain-sync Clojure drivers —
+pinning-risk audit of vendored datahike/konserve/sci/superv.async
+on the ACTUAL pinned JDK, hybrid CPU-pool question for hostile
+evals, per-driver memory limits + compensations, writer contention
+at 1k callers, adoption recipe + 1k-driver probe plan → deliverable
+research/jvm-concurrency-research-2026-07-23.md.
+
 **RULING 24 CONFIRMED (owner "okay", 2026-07-23) + RULING 25
-COMMISSIONED: the ALL-JVM END-STATE design pass.** Owner direction:
+COMMISSIONED-THEN-HELD: the ALL-JVM END-STATE design pass.** Owner direction:
 everything core = CLJC/sci on the JVM (driver, eval, render, web/SSE
 server — the pre-refactor JVM server in git history is consultable —
 LLM I/O, writer); Bun demotes to a DISPOSABLE JS-PACKAGE LEAF HOST
