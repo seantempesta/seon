@@ -61,8 +61,11 @@
    projection logic lives ONLY here; `seon.eval` requires this ns for both
    `render-ai` and `project-plain` — see ns-end note.)"
   (:require
+    #?(:clj [clojure.edn :as reader]
+       :cljs [cljs.reader :as reader])
     [clojure.set :as set]
     [clojure.string :as str]
+    [datahike.readers :as datahike-readers]
     [malli.error :as me]
     [seon.ai.tokens :as tokens]
     [seon.render.configuration :as rconfig]
@@ -514,6 +517,28 @@
   (try (project-plain* value)
        (catch #?(:clj Throwable :cljs :default) _
          (opaque-marker value project-plain*))))
+
+(defn sanitize-result-edn
+  "Re-project a legacy opaque result string through the portable value net."
+  [s]
+  (if (and (string? s)
+           (or (str/includes? s "#datahike/")
+               (str/includes? s "#js ")
+               (str/includes? s "#object")))
+    (try
+      (pr-str
+       (project-plain
+        #?(:clj
+           (reader/read-string
+            {:readers datahike-readers/edn-readers
+             :default (fn [tag tagged-value]
+                        {:seon.eval/opaque (str tag)
+                         :seon.eval/summary
+                         (tokens/bounded-pr-str tagged-value 20)})}
+            s)
+           :cljs (reader/read-string s))))
+      (catch #?(:clj Throwable :cljs :default) _ s))
+    s))
 
 ;; ============================================================
 ;; SAMPLE — depth + breadth bounded skeleton of plain data + markers.
@@ -1894,9 +1919,9 @@
 ;; `seon.eval/render-result-edn` (the producer of `:seon.eval/result-edn`,
 ;; the AI text) calls `(render-ai configuration eval-id value)` before its
 ;; final char-cap backstop.
-;; `seon.eval/sanitize-result-edn` (the read-side net for legacy rows)
-;; reuses `project-plain`. The opaque-DETECTION + projection logic lives
-;; ONLY here; `seon.eval` requires this ns — a one-way edge (eval →
-;; render.value), no cycle. The `result/<id>` handle on the `; ⟹` line is
+;; [[sanitize-result-edn]] is the read-side net for legacy rows and reuses
+;; `project-plain`. The opaque-DETECTION + projection logic lives ONLY here;
+;; `seon.eval` requires this ns — a one-way edge (eval → render.value), no
+;; cycle. The `result/<id>` handle on the `; ⟹` line is
 ;; still added downstream by `seon.agent.ctx/format-eval-row` (untouched).
 ;; ============================================================

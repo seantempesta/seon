@@ -11,7 +11,7 @@
     [seon.agent.ctx.namespaces :as ns-cards]
     [seon.db :as db]
     [seon.db.protocol :as protocol]
-    [seon.eval :as seval]
+    [seon.ns.source :as ns-source]
     [seon.repl.parse :as repl-internal]
     [seon.schema :as schema]))
 
@@ -137,7 +137,7 @@
   "Resolve call symbol `sym` to a full `\"ns/name\"` string via the
    eval ns's require `info`, or nil when unresolvable (a local, a core
    fn, an unaliased bare symbol)."
-  [{aliases :seon.eval/aliases refers :seon.eval/refers} sym]
+  [{aliases ::ns-source/aliases refers ::ns-source/refers} sym]
   (if-let [ns-part (namespace sym)]
     (str (get aliases (symbol ns-part) (symbol ns-part)) "/" (name sym))
     (some (fn [[target syms]]
@@ -268,7 +268,7 @@
   (into {}
         (map (fn [row]
                [(:seon.ns/name row)
-                (seval/edges->require-info
+                (ns-source/edges->require-info
                   (set (:seon.ns/require-edges row)))]))
         rows))
 

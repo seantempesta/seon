@@ -6,7 +6,8 @@
    require keys retain the `seon.ns.require` namespace because they describe
    one require edge; the functions that parse and validate those edges live
    here at the namespace-source boundary."
-  (:require [cljs.reader :as reader]
+  (:require #?(:clj [clojure.edn :as reader]
+               :cljs [cljs.reader :as reader])
             [clojure.string :as str]
             [seon.schema :as schema]))
 
@@ -24,6 +25,17 @@
                    [:seon.ns.require/refer-all? {:optional true} :seon.ns.require/refer-all?]
                    [:seon.ns.require/as-alias? {:optional true} :seon.ns.require/as-alias?]])
 (schema/register! ::require-edges [:set ::require-edge])
+(schema/register! ::aliases [:map-of :symbol :symbol])
+(schema/register! ::nses [:set :symbol])
+(schema/register! ::refers [:map-of :symbol [:set :symbol]])
+(schema/register! ::refer-all [:set :symbol])
+(schema/register!
+ ::require-info
+ [:map
+  [::aliases ::aliases]
+  [::nses ::nses]
+  [::refers ::refers]
+  [::refer-all ::refer-all]])
 
 (schema/register! :seon.ns/doc :string)
 (schema/register! :seon.ns/summary [:string {:min 1}])
@@ -48,7 +60,7 @@
                     (and (vector? r) (symbol? (first r)))
                     (let [tns  (first r)
                           opts (try (apply hash-map (rest r))
-                                    (catch :default _ {}))
+                                    (catch #?(:clj Throwable :cljs :default) _ {}))
                           as   (:as opts)
                           asa  (:as-alias opts)
                           refr (:refer opts)]
@@ -78,7 +90,7 @@
             (some? doc) (assoc :seon.ns/doc doc)
             summary (assoc :seon.ns/summary summary)))
         {:seon.ns/require-edges #{}}))
-    (catch :default _
+    (catch #?(:clj Throwable :cljs :default) _
       {:seon.ns/require-edges #{}})))
 
 (defn require-edges-from-source
@@ -86,3 +98,45 @@
   {:malli/schema [:=> [:cat :string] ::require-edges]}
   [source]
   (:seon.ns/require-edges (namespace-info-from-source source)))
+
+(defn edges->require-info
+  "Fold require edges into portable lexical namespace information."
+  {:malli/schema [:=> [:cat ::require-edges] ::require-info]}
+  [edges]
+  (reduce
+   (fn [acc {:seon.ns.require/keys
+             [target alias refers refer-all? as-alias?]}]
+     (cond-> acc
+       (not as-alias?) (update ::nses conj target)
+       alias (assoc-in [::aliases alias] target)
+       (seq refers) (assoc-in [::refers target] (set refers))
+       refer-all? (update ::refer-all conj target)))
+   {::aliases {} ::nses #{} ::refers {} ::refer-all #{}}
+   edges))
+
+(defn scratch-def-note
+  "Derive the persistence warning for one bare scratch `def` source."
+  [source]
+  (let [forms (try
+                (reader/read-string (str "[" source "\n]"))
+                (catch #?(:clj Throwable :cljs :default) _ nil))
+        form (first forms)
+        one? (= 1 (count forms))
+        definition?
+        (and one? (seq? form) (= 'def (first form))
+             (symbol? (second form)))
+        sym (when definition? (second form))
+        init (when (and definition? (<= 3 (count form))) (nth form 2))
+        fn-init? (and (seq? init) (= 'fn (first init)))]
+    (cond
+      fn-init?
+      (str ";; won't persist across reboots: `(def " sym " (fn …))` is a "
+           "value binding, not a defn — write `(defn " sym " …)` to record "
+           "it as a program-graph fn")
+
+      definition?
+      (str ";; won't persist across reboots: `(def " sym " …)` is runtime "
+           "state, not a function — store it with `db/transact!` if it must "
+           "survive")
+
+      :else "")))

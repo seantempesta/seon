@@ -1,6 +1,8 @@
 (ns seon.render-portability-test
   (:require [clojure.test :refer [deftest is]]
-            [seon.render :as render]))
+            [seon.ns.source :as ns-source]
+            [seon.render :as render]
+            [seon.render.value :as value]))
 
 (def pinned-database-value
   {:db-name "u7-byte-parity"
@@ -25,3 +27,17 @@
           {:seon.db/db pinned-database-value
            :seon.config/configuration {}}
           core-function-block))))
+
+(deftest eval-seam-helpers-are-portable
+  (is (= "plain result" (value/sanitize-result-edn "plain result")))
+  (is (= "" (ns-source/scratch-def-note "(defn durable [] 1)")))
+  (is (re-find #"won't persist"
+               (ns-source/scratch-def-note "(def temporary 1)")))
+  (is (= {::ns-source/aliases {'x 'example.lib}
+          ::ns-source/nses #{'example.lib}
+          ::ns-source/refers {'example.lib #{'f}}
+          ::ns-source/refer-all #{}}
+         (ns-source/edges->require-info
+          #{{:seon.ns.require/target 'example.lib
+             :seon.ns.require/alias 'x
+             :seon.ns.require/refers #{'f}}}))))

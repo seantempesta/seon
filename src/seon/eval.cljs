@@ -54,7 +54,7 @@
             [seon.agent.home :as home]
             [seon.ai.tokens :as tokens]
             [seon.analyzer-info :as analyzer-info]
-            [seon.ns.source]
+            [seon.ns.source :as ns-source]
             [seon.config :as config]
             [seon.content-hash :as content-hash]
             [seon.db :as db]
@@ -2179,37 +2179,6 @@
       ;; is the expected "treat as code" signal, not a defect.
       (catch :default _ false))))
 
-(defn scratch-def-note
-  "A reactive 'won't persist' note DERIVED from an eval's source.
-
-   (#7) Pure, no stored attr, re-computed every render so it FOLLOWS the
-   form. Returns a one-line `;;`-comment string when `source` is a bare
-   single `(def …)` (the run-but-don't-tee scratch case the strict
-   persistence policy never tees). Returns \"\" otherwise: a clean
-   `(defn …)`/`(defn- …)`/`(deftest …)`/`(seon.schema/register! …)`
-   PERSISTS (no note), and a non-defining expression defined nothing.
-   \"\" (not nil) so callers blank-check like :seon.eval/output.
-   See docs/prds/agent-runtime/research/simplification-audit-2026-06-17.md."
-  {:malli/schema [:=> [:cat :string] :string]}
-  [source]
-  (let [forms (read-all-forms source)
-        f1    (first forms)
-        one?  (= 1 (count forms))
-        def?  (and one? (seq? f1) (= 'def (first f1)) (symbol? (second f1)))
-        sym   (when def? (second f1))
-        init  (when (and def? (>= (count f1) 3)) (nth f1 2))
-        fn-init? (and (seq? init) (= 'fn (first init)))]
-    (cond
-      fn-init?
-      (str ";; won't persist across reboots: `(def " sym " (fn …))` is a "
-           "value binding, not a defn — write `(defn " sym " …)` to record "
-           "it as a program-graph fn")
-      def?
-      (str ";; won't persist across reboots: `(def " sym " …)` is runtime "
-           "state, not a function — store it with `db/transact!` if it must "
-           "survive")
-      :else "")))
-
 (defn- form-shape
   "A short structural description of a read top-level `form`, for the
    A.2 repair note's `… → <shape>` clause so the agent can sanity-check
@@ -2591,38 +2560,6 @@
                             (not (str/starts-with? (namespace %) "?")))))
         (or (read-all-forms source resolve-opts) [])))
 
-(schema/register! ::aliases   [:map-of :symbol :symbol])
-(schema/register! ::nses      [:set :symbol])
-(schema/register! ::refers    [:map-of :symbol [:set :symbol]])
-(schema/register! ::refer-all [:set :symbol])
-(schema/register! ::require-info
-                  [:map
-                   [::aliases ::aliases]
-                   [::nses ::nses]
-                   [::refers ::refers]
-                   [::refer-all ::refer-all]])
-
-(defn edges->require-info
-  "Fold require-edge maps into the lexical-env shape the SCI cage wants.
-
-   `{::aliases {alias target-sym} ::nses #{target-sym} ::refers
-   {target-sym #{sym}} ::refer-all #{target-sym}}` — targets as ns
-   SYMBOLS. An `:as-alias?` edge contributes its ALIAS only (keyword
-   resolution), never a ::nses entry — its target is NOT loaded.
-   Total: `#{}` of edges folds to the empty info."
-  {:malli/schema [:=> [:cat :seon.ns.source/require-edges] ::require-info]}
-  [edges]
-  (reduce
-    (fn [acc {:seon.ns.require/keys [target alias refers refer-all? as-alias?]}]
-      (let [tsym target]
-        (cond-> acc
-          (not as-alias?) (update ::nses conj tsym)
-          alias        (assoc-in [::aliases alias] tsym)
-          (seq refers) (assoc-in [::refers tsym] (set refers))
-          refer-all?   (update ::refer-all conj tsym))))
-    {::aliases {} ::nses #{} ::refers {} ::refer-all #{}}
-    edges))
-
 (defn ns-require-edges-tx
   "Tx ops making `:seon.ns/require-edges` for `ns-kw` EXACTLY `new-edges`.
 
@@ -2829,37 +2766,6 @@
 ;; instead of data. The opaque-detection + plain-data projection that fixes
 ;; this lives in ONE place — `seon.render.value` (`render-ai` for the
 ;; bounded display skeleton, `project-plain` for the read-side net below).
-
-(defn sanitize-result-edn
-  "READ-SIDE net for the value projection.
-
-   A row written BEFORE the
-   write-side projection landed still holds a raw `#datahike/DB {…}` /
-   `#datahike/Datom […]` (or other opaque-tagged) dump in its stored
-   `:seon.eval/result-edn` string. Re-read it with `cljs.reader` (whose
-   tag table reconstructs the datahike/record handles as real objects),
-   re-project via `seon.render.value/project-plain`, and re-pr-str — so
-   legacy transcript rows sanitize on render WITHOUT a cluster reset.
-
-   Cheap-cases-fast: only the substring-screen (`#datahike/` / `#js ` /
-   `#object`) triggers the read+reproject; an already-clean string (the
-   common case, and every row written post-fix) is returned untouched.
-   Never throws — an unreadable string is returned verbatim (the value the
-   agent already sees today)."
-  {:malli/schema [:=> [:catn [::s :any]] :any]}
-  [s]
-  (if (and (string? s)
-           (or (str/includes? s "#datahike/")
-               (str/includes? s "#js ")
-               (str/includes? s "#object")))
-    (try
-      ;; probe: an unreadable legacy stored string is expected (the reason
-      ;; the substring-screened re-read exists) — return it verbatim, the
-      ;; same value the agent already sees; absence of a clean re-read is
-      ;; not a defect.
-      (pr-str (value/project-plain (reader/read-string s)))
-      (catch :default _ s))
-    s))
 
 (defn render-result-edn
   "Stringify an eval's success VALUE for `:seon.eval/result-edn`.
@@ -3570,7 +3476,9 @@
         keyword-resolution
         (when (symbol? ending-ns)
           {:seon.repl/current-ns ending-ns
-           :seon.repl/aliases (::aliases (edges->require-info require-edges))})
+           :seon.repl/aliases
+           (::ns-source/aliases
+            (ns-source/edges->require-info require-edges))})
         read-attribute-tx
         (into []
               (mapcat
@@ -3782,9 +3690,10 @@
    warning shape, so the repair loop treats both sources identically)."
   [compile-state source ns-sym]
   (let [aliases (try
-                  (::aliases (edges->require-info
-                               (analyzer-info/ns-require-edges
-                                 compile-state ns-sym)))
+                  (::ns-source/aliases
+                   (ns-source/edges->require-info
+                    (analyzer-info/ns-require-edges
+                     compile-state ns-sym)))
                   (catch :default _ {}))
         nses    (get @compile-state :cljs.analyzer/namespaces)
         syms    (volatile! [])

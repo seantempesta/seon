@@ -17,9 +17,10 @@
     [seon.content-hash :as content-hash]
     [seon.db :as db]
     [seon.error.instrument :as einstrument]
-    [seon.eval :as seval]
+    [seon.ns.source :as ns-source]
     [seon.render.handlers.test :as h-test]
     [seon.render.schema]
+    [seon.render.value :as value]
     [seon.schema :as schema]
     [seon.ui.markdown :as md]))
 
@@ -549,7 +550,7 @@
    at [[eval-render-cap]] (a failure has no value to cite).
 
    On SUCCESS a reactive 'won't persist' note is DERIVED from the eval's
-   source via [[seon.eval/scratch-def-note]] and appended as a trailing
+   source via [[seon.ns.source/scratch-def-note]] and appended as a trailing
    `;` line — pure, no stored attr, recomputed each render so it FOLLOWS
    the form. The repair `↻ auto-balanced …` breadcrumb (when a span was
    parinfer-repaired) rides in the preamble, keeping a wrong-but-valid
@@ -662,7 +663,7 @@
            ;; component that is row-capped upstream AND dereferenceable
            ;; via result/<id>, so it earns the larger cap.
            (let [body-cap (or result-body-cap result-body-render-cap)
-                 raw     (str (seval/sanitize-result-edn (or res "nil")))
+                 raw     (str (value/sanitize-result-edn (or res "nil")))
                  full    (count raw)
                  ;; `full?` (the no-clip opt-out) renders the body WHOLE, so
                  ;; the `(N of M)` partial-handle marker must NOT fire.
@@ -715,7 +716,7 @@
          ;; Reactive 'won't persist' note (#7) — DERIVED from source, no
          ;; stored attr; recomputed each render so it follows the form.
          note   (when (and ok? (not comment-only?))
-                  (seval/scratch-def-note src))
+                  (ns-source/scratch-def-note src))
          ;; INLINE the result onto the form's OWN line — the PRD grammar
          ;; `(form) ⟹ <value> ⟸ result/<id>` — when everything is
          ;; single-line: a form present + single-line, no captured stdout
