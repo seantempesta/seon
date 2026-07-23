@@ -1028,6 +1028,13 @@ COMPLETELY before dispatching anything.
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- ADVISORY (owner, 2026-07-23 eve): the codex agents database may
+  be broken (owner repairing) — until the all-clear: no new codex
+  dispatches; strange lane failures attribute ENVIRONMENT-FIRST;
+  accepted work is safe in git; exposure = in-flight uncommitted
+  lane work + session resumability. Three lanes were alive and
+  healthy at the advisory (r43trust, transaction-data, interpreter-
+  step rename).
 - BOOTFAST (S1) ACCEPTED (df2cb508a, verified from gate log):
   build-projection 2,962→210 ms COLD (14.09×), fingerprint
   byte-identical; reducers/fold adds 1.22× on the JVM (CLJS stays
