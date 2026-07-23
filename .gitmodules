@@ -335,3 +335,6 @@
 	path = reference-code/sharp
 	url = https://github.com/lovell/sharp.git
 	shallow = true
+[submodule "reference-code/litellm-clj"]
+	path = reference-code/litellm-clj
+	url = https://github.com/unravel-team/litellm-clj
