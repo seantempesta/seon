@@ -1183,7 +1183,25 @@ Bun renders in the stage-(a) interim are supervised, not
 preemptible). HTTP-leaf timing + stage-(a) skip = the morning owner
 discussion (its owner-decisions section).
 
-**RULING 24 PROPOSED (awaiting owner): BREAK-AND-REPLACE the
+**RULING 24 CONFIRMED (owner "okay", 2026-07-23) + RULING 25
+COMMISSIONED: the ALL-JVM END-STATE design pass.** Owner direction:
+everything core = CLJC/sci on the JVM (driver, eval, render, web/SSE
+server — the pre-refactor JVM server in git history is consultable —
+LLM I/O, writer); Bun demotes to a DISPOSABLE JS-PACKAGE LEAF HOST
+(stateless, kill/restart anytime, serves seon.packages.js.* +
+diffusion worker over the db-pattern wire; ruling 17 inverted). This
+likely ERASES the I/O design's stage-(a) interim, the LLM-leaf
+timing question, and ruling 18's per-batch Bun eval routing (only
+PACKAGE CALLS cross the wire). Design agent LIVE → deliverable
+research/all-jvm-core-design-2026-07-23.md (per-subsystem verdict
+table with honest LOC costs, JVM Datastar/SSE design grounded in
+datastar-clojure/hyperlith + the old server's removal reasons, leaf
+host contract, deletion delta vs the deletion audit, phasing
+composed with ruling 24; breaking-during-port authorized). The
+claim-native driver unit HOLDS for this design's placement verdict
+(likely JVM-first instead of in-pod-first).
+
+**RULING 24 (superseded text preserved): BREAK-AND-REPLACE the
 driver.** Keep the whole claim/epoch/lease/reacquire state machine
 (intrinsic — states move from process memory into data); DELETE the
 migration choreography: no fence retrofit into the legacy Bun loop;
