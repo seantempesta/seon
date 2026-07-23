@@ -17,6 +17,8 @@
 
 (def ^:private corpus-schema-rows
   (var-get #'registry-test/corpus-schema-rows))
+(def ^:private value-sampling-policy
+  (var-get #'registry-test/value-sampling-policy))
 (def ^:private dependencies
   (var-get #'registry-test/dependencies))
 (def ^:private host-session!
@@ -97,7 +99,8 @@
          (str "(require 'seon.db)"
               "(seon.db/transact! {:seon.db/tx-data "
               (pr-str (into corpus-schema-rows
-                            [{:seon.agent/id agent-id}
+                            [value-sampling-policy
+                             {:seon.agent/id agent-id}
                              {:seon.db.process/id :seon.db.process/repl}]))
               "})"))]
     (is (map? (:db-after seed)) (pr-str seed))

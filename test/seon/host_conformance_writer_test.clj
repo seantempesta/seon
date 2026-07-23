@@ -14,6 +14,7 @@
             [seon.db.id :as db.id]
             [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds]
+            [seon.db.writer-test-support :as writer-test]
             [seon.host :as host]
             [seon.host.context :as context]
             [seon.host.eval :as host.eval]
@@ -70,9 +71,11 @@
 
 (def ^:private transaction-requests (atom []))
 
-(defn- run-fence-cas [agent-id run-id]
+(defn- run-fence-cas [agent-id run-id claim-epoch]
   (let [run-ref [:seon.agent.run/id run-id]]
-    [:db.fn/cas [:seon.agent/id agent-id] :seon.agent/run run-ref run-ref]))
+    [[:db.fn/cas [:seon.agent/id agent-id] :seon.agent/run run-ref run-ref]
+     [:db.fn/cas run-ref :seon.agent.run/claim-epoch
+      claim-epoch claim-epoch]]))
 
 (defn- fake-writer-response [request]
   (let [request-id (::protocol/request-id request)]
@@ -88,8 +91,19 @@
       ;; def-sources replay read (restore). Dispatch structurally on the
       ;; query form; every other read keeps the generic agent rows.
       (let [query-form (::protocol/query-form request)
+            query-attributes (set (filter keyword? (flatten (vec query-form))))
             result (cond
-                     (some #{:seon.config/id} (flatten (vec query-form)))
+                     (contains?
+                      query-attributes
+                      :seon.config.guard/agent-eval-fuel)
+                     (mapv writer-test/guard-policy
+                           [:seon.config.guard/agent-eval-fuel
+                            :seon.config.guard/authored-render-fuel
+                            :seon.config.guard/plan-fuel
+                            :seon.config.guard/deadline-ms
+                            :seon.config.guard/output-cap])
+
+                     (contains? query-attributes :seon.config/id)
                      [32 4096 1024 3 80 2 12 16384 :symbols
                       true true true 1 50]
 
@@ -132,7 +146,7 @@
       protocol/transact-operation
       (do
         (swap! transaction-requests conj request)
-        (if (= [(run-fence-cas "fenced-agent" "stale-run")]
+        (if (= (run-fence-cas "fenced-agent" "stale-run" 7)
                (::protocol/transaction-data request))
           {::protocol/success? false
            ::protocol/request-id request-id
@@ -648,7 +662,8 @@
         (send! session
                (invoke-value "held-agent" "with-fence" [(form "(+ 20 22)")]
                              :invocation-database invocation-database
-                             :run-fence {:seon.agent.run/id "held-run"}
+                             :run-fence {:seon.agent.run/id "held-run"
+                                         :seon.agent.run/claim-epoch 6}
                              :turn-id nil))
         (let [with-fence (:seon.execution/result (recv! session))
               requests @transaction-requests
@@ -661,15 +676,16 @@
           (is (= 1 (count requests))
               "the held receiptless batch adds only its fence transaction")
           (is (= invocation-database (:seon.db/db request)))
-          (is (= [(run-fence-cas "held-agent" "held-run")]
+          (is (= (run-fence-cas "held-agent" "held-run" 6)
                  (::protocol/transaction-data request))
-              "the transaction contains exactly one run-pointer CAS")))
+              "the transaction contains the pointer and held-epoch fences")))
       (reset! transaction-requests [])
       (send! session
              (invoke-value "held-agent" "held-recorded"
                            [(form "(do (print \"held-output\") 42)")]
                            :invocation-database invocation-database
-                           :run-fence {:seon.agent.run/id "held-run"}))
+                           :run-fence {:seon.agent.run/id "held-run"
+                                       :seon.agent.run/claim-epoch 6}))
       (let [recorded (:seon.execution/result (recv! session))
             requests @transaction-requests
             transaction-data (mapcat ::protocol/transaction-data requests)]
@@ -697,7 +713,8 @@
           (send! session
                  (invoke-value "fenced-agent" "lost-fence"
                                [(form "(def forbidden 42)")]
-                               :run-fence {:seon.agent.run/id "stale-run"}))
+                               :run-fence {:seon.agent.run/id "stale-run"
+                                           :seon.agent.run/claim-epoch 7}))
           (let [response (recv! session)]
             (is (= :seon.execution.message/result
                    (:seon.execution/message response)))
@@ -711,7 +728,7 @@
       (is (zero? @eval-calls))
       (is (= 1 (count @transaction-requests))
           "the rejected fence is the only transaction, so no receipt exists")
-      (is (= [(run-fence-cas "fenced-agent" "stale-run")]
+      (is (= (run-fence-cas "fenced-agent" "stale-run" 7)
              (::protocol/transaction-data (first @transaction-requests))))
       (finally (close! session)))))
 
@@ -740,7 +757,7 @@
                          :seon.eval/value])))
       (finally (close! session)))))
 
-(deftest sci-output-is-per-form-capped-persisted-and-absent-from-host-stdout
+(deftest sci-output-cap-is-loud-persisted-and-absent-from-host-stdout
   (reset! transaction-requests [])
   (let [[session _ready] (open-session! "printing-agent")
         host-bytes (ByteArrayOutputStream.)
@@ -753,8 +770,13 @@
               [(form "(do (print \"first-only\") 1)")
                (form "(do (print (apply str (repeat 20000 \"flood\"))) 2)")]))
       (let [response (recv! session)]
-        (is (= :seon.execution.message/result
-               (:seon.execution/message response))))
+        (is (= :seon.execution.message/error
+               (:seon.execution/message response)))
+        (is (= :agent
+               (get-in response [:seon.execution/error :seon.error/kind])))
+        (is (= :seon.config.guard/output-cap
+               (get-in response [:seon.execution/error :seon.error/data
+                                 :seon.host.guard/config-key]))))
       (System/setOut original-out)
       (let [outputs (into [] (keep :seon.eval/output) (recorded-tx-data))]
         (is (= 2 (count outputs)))
@@ -791,8 +813,8 @@
                  (get-in response [:seon.execution/error :seon.error/data
                                    :seon.error.sci/class])))
           (is (= :timeout
-                 (get-in response [:seon.execution/error :seon.error/data
-                                   :seon.error/kind]))))))
+                 (get-in response
+                         [:seon.execution/error :seon.error/kind]))))))
       (is (some #(= :interrupted (:seon.eval/status %))
                 (recorded-tx-data))
           "the terminal record commits despite the late interrupt")
@@ -1101,8 +1123,8 @@
                (get-in response [:seon.execution/error
                                  :seon.error/data
                                  :seon.error.sci/class])))
-        (is (= :agent (get-in response [:seon.execution/error
-                                        :seon.error/kind])))
+        (is (= :timeout (get-in response [:seon.execution/error
+                                          :seon.error/kind])))
         (is (< elapsed 5000)))
       ;; sci's in-process interrupt leaves the context healthy — the
       ;; favorable divergence from the poisoned child.

@@ -291,8 +291,9 @@
    ordinary transactions (the same shapes the pod's compiled-program
    reconcile installs); these are the exact registered forms of the
    attributes the U4 recorder persists."
-  [{:seon.schema/key :seon.schema/key
-    :seon.schema/form "[:keyword {:seon.db/identity true}]"}
+  (into
+   [{:seon.schema/key :seon.schema/key
+     :seon.schema/form "[:keyword {:seon.db/identity true}]"}
    {:seon.schema/key :inst :seon.schema/form "inst?"}
    {:seon.schema/key :seon.schema/form :seon.schema/form ":string"}
    {:seon.schema/key :seon.schema/created-at :seon.schema/form ":inst"}
@@ -400,21 +401,24 @@
     :seon.schema/form ":boolean"}
    {:seon.schema/key :seon.config.repair/max-fixes-per-form
     :seon.schema/form ":seon.config/cap"}
-   {:seon.schema/key :seon.config.repair/budget-ms
-    :seon.schema/form ":seon.config/cap"}])
+    {:seon.schema/key :seon.config.repair/budget-ms
+     :seon.schema/form ":seon.config/cap"}]
+   writer-test/guard-schema-rows))
 
 (def ^:private value-sampling-policy
-  {:seon.config/id "cluster"
-   :seon.config.render/value-max-path-segments 32
-   :seon.config.render/value-max-path-bytes 4096
-   :seon.config.render/value-max-realized-items 1024
-   :seon.config.render/value-max-depth 3
-   :seon.config.render/value-max-string 80
-   :seon.config.render/value-shape-sample 8
-   :seon.config.render/value-max-items 12
-   :seon.config.repair/level :symbols
-   :seon.config.repair/max-fixes-per-form 1
-   :seon.config.repair/budget-ms 50})
+  (merge
+   {:seon.config/id "cluster"
+    :seon.config.render/value-max-path-segments 32
+    :seon.config.render/value-max-path-bytes 4096
+    :seon.config.render/value-max-realized-items 1024
+    :seon.config.render/value-max-depth 3
+    :seon.config.render/value-max-string 80
+    :seon.config.render/value-shape-sample 8
+    :seon.config.render/value-max-items 12
+    :seon.config.repair/level :symbols
+    :seon.config.repair/max-fixes-per-form 1
+    :seon.config.repair/budget-ms 50}
+   writer-test/guard-policy))
 
 (def ^:private value-sampling-policy-query
   '[:find [?path-segments ?path-bytes ?realized ?depth ?string ?shape ?items]

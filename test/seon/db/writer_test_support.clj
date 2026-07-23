@@ -1,7 +1,33 @@
 (ns seon.db.writer-test-support
   "Shared admitted database-session fixtures for JVM writer tests."
-  (:require [seon.db.transport.uds :as uds]
+  (:require [seon.config.resolve :as config.resolve]
+            [seon.db.transport.uds :as uds]
             [seon.db.writer :as writer]))
+
+(def ^:private fixture-hardware
+  {:seon.hardware/cores 8
+   :seon.hardware/system-memory-bytes (* 32 1024 1024 1024)
+   :seon.hardware/fd-soft-limit 2048})
+
+(def guard-policy
+  "The production-resolved default SCI guard facts for JVM writer fixtures."
+  (select-keys
+   (config.resolve/resolve-config-singleton
+    {:seon.config/guard
+     {:seon.config.guard/output-cap 16384}}
+    {}
+    fixture-hardware)
+   (keys config.resolve/guard-budget-schemas)))
+
+(def guard-schema-rows
+  "Schema rows for the complete SCI guard policy seeded by host fixtures."
+  (into
+   [{:seon.schema/key :seon.config/cap
+     :seon.schema/form "[:int {:min 1}]"}]
+   (map (fn [[attribute shape]]
+          {:seon.schema/key attribute
+           :seon.schema/form (pr-str shape)}))
+   config.resolve/guard-budget-schemas))
 
 (def read-defaults
   "Generous finite read limits for writer tests not exercising read policy."

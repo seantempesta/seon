@@ -88,12 +88,13 @@
            (:seon.execution/message response))
         (pr-str response))
     (is (map? error) (pr-str response))
-    (is (= :agent (:seon.error/kind error)) (pr-str response))
+    (is (= :timeout (:seon.error/kind error)) (pr-str response))
     (is (= :interrupt
            (get-in error [:seon.error/data :seon.error.sci/class]))
         (pr-str response))
-    (is (= :timeout
-           (get-in error [:seon.error/data :seon.error/kind]))
+    (is (= :seon.config.guard/deadline-ms
+           (get-in error [:seon.error/data
+                          :seon.host.guard/config-key]))
         (pr-str response))
     (is (<= elapsed-ms (+ deadline-duration-ms 200))
         (str label " exceeded deadline + 200ms: " elapsed-ms " ms"))

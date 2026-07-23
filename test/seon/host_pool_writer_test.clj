@@ -226,7 +226,7 @@
             (is (= #{target-id} (into #{} (map second) transaction-attempts)))
             (is (= 2 (count (into #{} (map #(nth % 3)) transaction-attempts))))))))))
 
-(deftest an-active-same-id-conflict-is-polled-until-durable-recovery
+(deftest an-active-same-id-duplicate-waits-for-the-original-commit
   (with-writer-session
     "active-conflict"
     {::db.host/pool-size 2
@@ -249,7 +249,7 @@
             original-call uds/call!
             finish-entered (CountDownLatch. 1)
             release-finish (CountDownLatch. 1)
-            conflict-observed (CountDownLatch. 1)
+            duplicate-observed (CountDownLatch. 1)
             committed-response (atom nil)
             request-ids (atom [])]
         (is (::protocol/success? seed))
@@ -265,27 +265,22 @@
            #'uds/call!
            (fn [{::uds/keys [message] :as input}]
              (when (= target-id (::protocol/request-id message))
-               (swap! request-ids conj (::protocol/request-id message)))
-             (let [response (original-call input)]
-               (when (and (= target-id (::protocol/request-id message))
-                          (= protocol/request-conflict-error
-                             (::protocol/error-kind response))
-                          (true? (::protocol/running? response)))
-                 (.countDown conflict-observed)
-                 (.countDown release-finish))
-               response))}
+               (swap! request-ids conj (::protocol/request-id message))
+               (when (= 2 (count @request-ids))
+                 (.countDown duplicate-observed)
+                 (.countDown release-finish)))
+             (original-call input))}
           (fn []
             (let [call (future (writer-call! session request))]
               (try
                 (is (await-latch! finish-entered))
-                (is (await-latch! conflict-observed))
-                (let [recovered (deref call 5000 {})]
-                  (is (::protocol/success? recovered))
-                  (is (true? (::protocol/recovered? recovered)))
+                (is (await-latch! duplicate-observed))
+                (let [duplicate (deref call 5000 {})]
+                  (is (::protocol/success? duplicate))
                   (is (= (get-in @committed-response [:db-after :t])
-                         (get-in recovered [:db-after :t])))
+                         (get-in duplicate [:db-after :t])))
                   (is (= #{target-id} (set @request-ids)))
-                  (is (<= 3 (count @request-ids))))
+                  (is (= 2 (count @request-ids))))
                 (finally
                   (.countDown release-finish))))))))))
 

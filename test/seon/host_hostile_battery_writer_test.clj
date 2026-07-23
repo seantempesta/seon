@@ -382,7 +382,7 @@
         (close-session! attacker)
         (close-session! survivor)))))
 
-(deftest print-flood-is-capped-persisted-and-absent-from-host-stdout
+(deftest print-flood-is-loud-persisted-and-absent-from-host-stdout
   (let [attacker-id "battery-print-attacker"
         survivor-id "battery-print-survivor"
         turn-id "battery-print-turn"
@@ -400,7 +400,13 @@
                       :turn-id turn-id
                       :sources ["(do (dotimes [_ 20000] (print \"flood\")) :done)"]
                       :duration-ms 10000})]
-        (is (= :done (eval-value response)) (pr-str response)))
+        (is (= :seon.execution.message/error
+               (:seon.execution/message response))
+            (pr-str response))
+        (is (= :seon.config.guard/output-cap
+               (get-in response [:seon.execution/error :seon.error/data
+                                 :seon.host.guard/config-key]))
+            (pr-str response)))
       (System/setOut original-out)
       (let [output (first (turn-outputs turn-id))]
         (is (string? output))
