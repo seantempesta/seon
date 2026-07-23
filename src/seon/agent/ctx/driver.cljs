@@ -366,7 +366,7 @@
              (or (::render-fns/current-ns namespace-value)
                  (symbol (str "my.agent." id)))))))))
 
-(def ^:private agent-view-members
+(def agent-view-members
   [(merge
     {::protocol/operation protocol/pull-operation
      ::protocol/selector
@@ -392,7 +392,7 @@
      ::protocol/entity-id [:seon.config/id config/cluster-config-id]}
     config/configuration-read-profile)])
 
-(def ^:private agent-view-fixed-dependencies
+(def agent-view-fixed-dependencies
   #{:seon.agent/id
     :seon.agent/terminated-at
     :seon.agent/run
@@ -408,4 +408,3 @@
     :seon.render.surface/touch
     :seon.render.surface/focus-touch
     :seon.fn/read-attrs})
-

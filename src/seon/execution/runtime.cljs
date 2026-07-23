@@ -14,6 +14,7 @@
    [my.ui]
    [seon.agent]
    [seon.agent.ctx :as ctx]
+   [seon.agent.ctx.driver :as ctx-driver]
    [seon.agent.ctx.canvas :as ctx-canvas]
    [seon.agent.home :as home]
    [seon.agent.ctx.menu]
@@ -80,7 +81,7 @@
   [{:seon.agent/keys [id]} invoke-selected!]
   (let [database (or (::db/db (db/current-tx-context))
                      (await (db/db)))
-        members (assoc-in agent-view-members [0 ::protocol/entity-id]
+        members (assoc-in ctx-driver/agent-view-members [0 ::protocol/entity-id]
                           [:seon.agent/id id])]
     (if (:seon.error/message database)
       database
@@ -214,7 +215,7 @@
                      (if (seq entity) (page-state entity) :unknown)
                      ::surface/surfaces surfaces
                      :seon.web.datastar/dependencies
-                     (into agent-view-fixed-dependencies
+         (into ctx-driver/agent-view-fixed-dependencies
                            (mapcat ::surface/read-attrs)
                            surfaces)
                      :seon.ui.header/projection

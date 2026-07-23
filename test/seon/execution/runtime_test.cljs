@@ -35,7 +35,7 @@
 
 (deftest prompt-and-agent-view-acquisitions-share-owned-read-profiles
   (let [prompt-members @#'ctx.driver/prompt-acquisition-members
-        view-members @#'runtime/agent-view-members]
+        view-members ctx.driver/agent-view-members]
     (is (= ctx.driver/agent-entity-read-profile
            (select-keys (first prompt-members)
                         (keys ctx.driver/agent-entity-read-profile))))
