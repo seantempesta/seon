@@ -18,7 +18,7 @@ Unable to resolve symbol: seon.db.protocol/ordinary-wire-value?
 
 The reproduced operator evidence is
 `tmp/orchestrator/initpage-up.log`; the pod log is
-`logs/operator/pod/3086e8fc-d146-4138-b96c-4d8d83405eea.log`.
+`logs/operator/pod/be86bc09-9509-418d-bc35-a05e91565d76.log`.
 
 This is not an R39 private-function failure.
 `seon.db.protocol/ordinary-wire-value?` is a public `defn` and is registered as

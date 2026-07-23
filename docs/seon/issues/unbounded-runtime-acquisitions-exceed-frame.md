@@ -97,6 +97,6 @@ Evidence:
   acquire completed.
 
 Pod readiness is currently blocked after initialization by the independent
-P1b private-corpus regression recorded in
-[[private-function-presence-law-incomplete]], not by database framing or seed
-state.
+public core-predicate acquisition defect recorded in
+[[paged-initialization-misses-public-core-predicate-binding]], not by database
+framing or seed state.
