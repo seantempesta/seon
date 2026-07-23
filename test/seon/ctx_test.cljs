@@ -326,4 +326,7 @@
     (is (number? boundary-index))
     (is (or (nil? readline-index) (< boundary-index readline-index))
         "the deliberately ephemeral readline tail is after the cache boundary")
-    (println "U4-BYTE-IDENTITY" (pr-str first-bytes))))
+    (.writeFileSync (js/require "fs")
+                    "tmp/orchestrator/u4-byte-current.txt"
+                    first-bytes
+                    "utf8")))
