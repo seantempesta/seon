@@ -382,6 +382,48 @@ the anchor stays the state ledger.
   before process reconciliation and the cluster tests error while opening
   `AGENTS.md`; never bypass the supervisor to obtain a live proof
   (`tmp/orchestrator/u5-gate-live-up.log`).
+- **A manifest section can be absent while its registered schema still blocks
+  fresh database open.** Database opening installs the complete schema graph,
+  so selecting a minimal manifest does not avoid an unstorable canonical
+  alias. On 2026-07-23 `:seon.config.render-context/sha-256` retained
+  `:seon.content-hash/digest` as its canonical form and stopped the pod before
+  config reconciliation. Fix alias projection at the schema owner; do not
+  weaken config acquisition or bypass the operator.
+- **A database-backed member that requires selected config must depend on the
+  config-reconciling pod for a fresh cluster.** Writer readiness alone cannot
+  guarantee config singleton facts exist. Put the additive member after pod
+  readiness in the managed graph so its fail-closed config acquisition works
+  on both fresh and retained databases.
+- **Writer idempotency needs both an active transport join and an in-flight
+  transaction cache.** The active-request map sees a duplicate request id
+  before `recover-current` can observe its durable receipt. A same-intent
+  transaction retry must join the original completion and receive its
+  canonical response; a different logical hash remains a conflict. Keep the
+  process-local promise map only as a cache, remove its entry after completion,
+  and leave committed receipt transactions as the recovery authority
+  (`src/seon/db/writer.clj`, U3 recovery regression).
+- **Allocation exclusivity is discoverable from transaction structure.**
+  Generated candidates and `seon.db.id/transaction-tempids` identify
+  transactions whose preparation reads the pre-commit database value. Mark
+  only those executor submissions serialized; ordinary mutations pipeline
+  into Datahike's LocalWriter. Never preserve allocation safety with request-id
+  prefixes, operation-name lists, or a second admission path.
+- **Four file-backed databases do not imply four times aggregate commit
+  throughput on one device.** U3 measured real cross-database parallel
+  progress but only 1.55–1.96x aggregate scaling as offered load rose. Use
+  separate low-load and saturated Probe C points to distinguish executor
+  serialization from shared persistence contention, and retain the raw
+  ratios instead of treating the research estimate as measured fact
+  ([[../../../seon/issues/shared-file-persistence-limits-cross-database-writer-scaling]]).
+- **Datahike's expected-basis check currently loses its uncommitted basis
+  under pipelining.** The LocalWriter processing loop threads `:db-after`, but
+  before the next apply it copies the still-committed connection's older
+  `:max-tx` onto that value. Two queued transactions with the same
+  `:datahike/expected-basis-t` can both commit. Fix the maintained Datahike
+  processing loop and add the direct two-request regression; never restore
+  Seon's per-database mutation serializer or invent a Seon-side head cache to
+  conceal the dependency defect
+  ([[../../../seon/issues/datahike-local-writer-rewinds-uncommitted-basis]]).
 
 ## Design rulings that bind conversions
 

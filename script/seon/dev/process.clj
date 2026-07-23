@@ -29,7 +29,7 @@
 (def web-render-id :seon.dev.process/web-render)
 (def pod-id :seon.dev.process/pod)
 (def restore-admin-id :seon.dev.process/restore-admin)
-(def all-process-ids [watcher-id writer-id host-id web-render-id pod-id])
+(def all-process-ids [watcher-id writer-id host-id pod-id web-render-id])
 
 (def ^:private legacy-containment-shutdown-grace-ms 2500)
 
@@ -606,7 +606,7 @@
                :seon.web.server/port 0})]
             :seon.dev.process/environment environment
             :seon.dev.process/dependencies
-            (cond-> []
+            (cond-> [pod-id]
               owns-writer-processes? (conj writer-id))
             :seon.dev.process/http-port-file
             (web-render-port-file config)

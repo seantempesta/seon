@@ -228,7 +228,7 @@
                                 (target-manifest-for configuration))
         host (get spec-map process/host-id)]
     (is (= [process/watcher-id process/writer-id process/host-id
-            process/web-render-id process/pod-id]
+            process/pod-id process/web-render-id]
            (process/start-order spec-map)))
     (is (= [process/watcher-id process/writer-id]
            (:seon.dev.process/dependencies host)))
@@ -3262,7 +3262,7 @@
     (try
       (is (= process/all-process-ids
              (process/start-order ordinary-specs)))
-      (is (= [process/host-id process/web-render-id process/pod-id]
+      (is (= [process/host-id process/pod-id process/web-render-id]
              (process/start-order branch-specs)))
       (is (= #{process/host-id process/web-render-id process/pod-id}
              (set (keys branch-specs))))
@@ -3356,7 +3356,7 @@
     (try
       (is (= #{process/host-id process/web-render-id process/pod-id}
              (set (keys specs))))
-      (is (= [process/host-id process/web-render-id process/pod-id]
+      (is (= [process/host-id process/pod-id process/web-render-id]
              (process/start-order specs)))
       (is (= [process/host-id] (:seon.dev.process/dependencies pod)))
       (is (= [process/watcher-id process/writer-id]
@@ -3398,8 +3398,8 @@
       (is (= #{process/watcher-id process/host-id process/web-render-id
                process/pod-id}
              (set (keys specs))))
-      (is (= [process/watcher-id process/web-render-id process/host-id
-              process/pod-id]
+      (is (= [process/watcher-id process/host-id process/pod-id
+              process/web-render-id]
              (process/start-order specs)))
       (is (= [process/watcher-id process/host-id]
              (:seon.dev.process/dependencies pod)))
