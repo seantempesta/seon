@@ -55,6 +55,19 @@ the anchor stays the state ledger.
 
 ## Async / platform portability
 
+- **Relocating a compiled callee does not relocate a symbolic invocation.**
+  `seon.agent.turn/render-prompt` currently sends
+  `'seon.execution.runtime/render-prompt!` through
+  `seon.execution.host/invoke-compiled!`; that function always constructs an
+  execution invocation, and the only dispatch entry for the symbol is the
+  execution child's `compiled-functions` table. Moving the implementation to
+  a pod-owned namespace while preserving that caller therefore still runs it
+  in the child. A real in-pod render move must rewire the caller to a direct
+  pod call (the deletion audit's ruled seam) or first add an explicitly owned
+  pod-local dispatch boundary; do not disguise a namespace move as a process
+  move (`src/seon/agent/turn.cljs:335-405`,
+  `src/seon/execution/host.cljs:1285-1307`,
+  `src/seon/execution/runtime.cljs:683-693`).
 - **A scalar success with a ruled error-value failure needs an explicit union.**
   `home-dir` could not remain `[] -> :string` after errors-as-values: register
   the exact string-or-flat-error response and regress the absent environment
