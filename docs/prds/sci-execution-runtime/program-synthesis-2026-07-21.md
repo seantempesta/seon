@@ -907,6 +907,25 @@ COMPLETELY before dispatching anything.
   reap + kill-9 regression + live orphan proof); full reconciliation
   redesign queues post-checkpoint.
 
+- OWNER RULING R44 (2026-07-23 eve): (a) PERSISTENT CACHES are
+  permitted as :seon.db/no-history? database attributes when the
+  cache is key to the system and reasonably bounded (keyed
+  derivations only — a cache may SKIP work, never change results;
+  derive-don't-store still governs what qualifies). For the BOOT
+  projection specifically the orchestrator recommendation is an
+  artifact-adjacent file cache (fingerprint-keyed) because the
+  projection is needed BEFORE a database session exists (chicken-and-
+  egg); db no-history caches fit post-attach derivations. (b) CPU
+  PARALLELISM: heavy computation runs on bounded PLATFORM-thread
+  parallelism (reducers/fold or an explicit cores-sized executor —
+  the existing eval-pool bulkhead pattern), never on virtual threads
+  (vthreads = I/O parking concurrency only) and not lazy pmap
+  (chunking/laziness artifacts). Boot folds this in: after D1
+  de-quadraticizes, the per-row contract validation is embarrassingly
+  parallel over the immutable registry → fold across cores; phase
+  overlap (indexing while pages stream) is the second axis. Bootfast
+  spec carries both.
+
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
