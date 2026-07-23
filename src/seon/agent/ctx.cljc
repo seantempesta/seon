@@ -7,22 +7,25 @@
    acquire ordinary values, and `seon.render` guards their rendering."
   (:require
     [clojure.string :as str]
-    [cljs.reader :as edn]
+    [#?(:clj clojure.edn :cljs cljs.reader) :as edn]
     [malli.core :as m]
     [malli.registry :as mr]
     [seon.agent.ctx.format :as ctx-format]
     [seon.agent.ctx.render-fns]
     [seon.ai.tokens :as tokens]
-    [seon.config :as config]
+    [seon.config.resolve :as config.resolve]
     [seon.content-hash :as content-hash]
     [seon.db :as db]
     [seon.error.instrument :as einstrument]
     [seon.ns.source :as ns-source]
     [seon.render.handlers.test :as h-test]
+    [seon.render.configuration :as configuration]
     [seon.render.schema]
     [seon.render.value :as value]
     [seon.schema :as schema]
     [seon.ui.markdown :as md]))
+
+#?(:clj (defmacro await [value] value))
 
 ;; ============================================================
 ;; Block schemas. A block is a plain map in config and a component entity on
@@ -123,15 +126,18 @@
    convention). Returns nil when there is no Bun process (non-pod
    runtime)."
   [path]
-  (some-> (.. js/globalThis -process) .cwd (str "/" path)))
+  #?(:clj (.toString (.toAbsolutePath (java.nio.file.Path/of path (make-array String 0))))
+     :cljs (some-> (.. js/globalThis -process) .cwd (str "/" path))))
 
 (defn- file-exists?
   "True when `path` (resolved against cwd) is a readable file. Never
    throws — a missing fs/file just answers false."
   [path]
   (try
-    (.existsSync (js/require "fs") (file-path->abs path))
-    (catch :default _ false)))
+    #?(:clj (java.nio.file.Files/isReadable
+             (java.nio.file.Path/of (file-path->abs path) (make-array String 0)))
+       :cljs (.existsSync (js/require "fs") (file-path->abs path)))
+    (catch #?(:clj Throwable :cljs :default) _ false)))
 
 (defn read-file-text
   "Live text of file `path` (resolved against cwd), or nil.
@@ -144,8 +150,11 @@
                   [:maybe :string]]}
   [path]
   (try
-    (.readFileSync (js/require "fs") (file-path->abs path) "utf8")
-    (catch :default _ nil)))
+    #?(:clj (java.nio.file.Files/readString
+             (java.nio.file.Path/of (file-path->abs path) (make-array String 0))
+             java.nio.charset.StandardCharsets/UTF_8)
+       :cljs (.readFileSync (js/require "fs") (file-path->abs path) "utf8"))
+    (catch #?(:clj Throwable :cljs :default) _ nil)))
 
 (def quote-lines
   "The ONE body-text quoter every section routes text through.
@@ -178,7 +187,7 @@
   [{{path :seon.agent.ctx/file-path} :seon.render/node
     configuration :seon.config/configuration}]
   (let [text (read-file-text path)
-        expected (config/file-fingerprint configuration path)
+        expected (configuration/file-fingerprint configuration path)
         actual (when (string? text) (content-hash/sha-256 text))]
     (if (and expected (= expected actual))
       (if (str/blank? text) "" (quote-lines text))
@@ -199,7 +208,7 @@
   [{{path :seon.agent.ctx/file-path} :seon.render/node
     configuration :seon.config/configuration}]
   (let [text (read-file-text path)
-        expected (config/file-fingerprint configuration path)
+        expected (configuration/file-fingerprint configuration path)
         actual (when (string? text) (content-hash/sha-256 text))]
     (if (and expected (= expected actual))
       (md/md->hiccup text)
@@ -250,11 +259,7 @@
   "Repo-relative path of the primary identity file: `SEON_SOUL_FILE`
    override, else `SOUL.md`. `nil` when `SEON_SOUL` is explicitly disabled
    (`false`/`0`/`off`/`no`) — the `:soul` block is then omitted entirely."
-  (when-not (contains? #{"false" "0" "off" "no"}
-                       (some-> (config/env-string "SEON_SOUL")
-                               str/lower-case str/trim))
-    (or (config/env-string "SEON_SOUL_FILE")
-        "SOUL.md")))
+  "SOUL.md")
 
 (def agents-file-path
   "Repo-relative path of the cross-tool repo/work-instructions file."
@@ -280,12 +285,12 @@
   "Work-bound shown by the readline when the agent has NO open run (the
    run-model default a new run would seed). Mirrors
    `seon.agent.run/default-turn-limit`."
-  (:seon.config.run/batch-turn-limit (config/default-run-policy)))
+  (:seon.config.run/batch-turn-limit (configuration/default-run-policy)))
 
 (def default-form-limit
   "Work-bound shown by the idle readline in stream mode. Mirrors
    `seon.agent.run/default-form-limit` without introducing the run→ctx cycle."
-  (:seon.config.run/stream-form-limit (config/default-run-policy)))
+  (:seon.config.run/stream-form-limit (configuration/default-run-policy)))
 
 ;; The structural namespace-name rules live in
 ;; [[seon.agent.ctx.ns-name]]; the section and boot-storage rules live in
@@ -296,12 +301,10 @@
 ;; ------------------------------------------------------------
 
 (defn host-timezone
-  "IANA tz string for the running pod, or 'UTC' if Intl is unavailable."
-  {:malli/schema [:=> [:cat] :string]}
-  []
-  (try
-    (or (some-> (js/Intl.DateTimeFormat.) .resolvedOptions .-timeZone) "UTC")
-    (catch :default _ "UTC")))
+  "Return the explicitly supplied configuration's IANA timezone."
+  {:malli/schema [:=> [:cat :seon.config/singleton] :string]}
+  [configuration]
+  (configuration/host-timezone configuration))
 
 (def ^:private default-cache-breakpoint
   "The cache-breakpoint priority when no agent datom is present (byte-parity =
@@ -366,7 +369,7 @@
   [s]
   (when (and (string? s) (not (str/blank? s)))
     (try (edn/read-string s)
-         (catch :default _ nil))))
+         (catch #?(:clj Throwable :cljs :default) _ nil))))
 
 (defn cap-result
   "Truncate a rendered eval-result string to `eval-render-cap`.
@@ -581,8 +584,8 @@
      escape-override :seon.agent.ctx/escape-clipping?
      configuration :seon.config/configuration}
     result-unavailable?]
-   (let [eval-render-cap (config/eval-render-cap configuration)
-         result-body-render-cap (config/result-body-render-cap configuration)
+   (let [eval-render-cap (configuration/eval-render-cap configuration)
+         result-body-render-cap (configuration/result-body-render-cap configuration)
          envelope    (read-error-envelope err-data)
          ;; `:seon.render/full?` (the no-clip opt-out, pinned on this eval
          ;; row) renders every authored component WHOLE past its cap. Absent
@@ -1269,13 +1272,13 @@
                   (let [r (m/-ref sch)]
                     (when (qualified-keyword? r) (swap! acc conj r))))
                 sch))
-      (catch :default _ nil))
+      (catch #?(:clj Throwable :cljs :default) _ nil))
     @acc))
 
 (defn- read-schema-form
   "Read one schema/spec string to data, or nil when it is unreadable."
   [s]
-  (try (edn/read-string s) (catch :default _ nil)))
+  (try (edn/read-string s) (catch #?(:clj Throwable :cljs :default) _ nil)))
 
 (defn- schema-str-refs
   "[[schema-form-refs]] over a stored spec STRING."
@@ -1615,170 +1618,7 @@
   [:map
    [:seon.agent/id :seon.agent/id]
    [:seon.config/configuration :seon.config/singleton]
-   [:seon.agent.ctx/override {:optional true} [:maybe :map]]])
-
-(defn initial-agent-context
-  "Return the complete creation-time context facts for one new agent.
-
-   This is a pure projection of the optional config manifest: agent-level
-   scalar dials and the entire `:seon.agent/ctx` component tree in one map.
-   The caller merges it into the new agent entity so identity, context blocks,
-   and dials commit atomically. Existing agents never call this function during
-   resume; their database facts remain authoritative."
-  {:malli/schema
-   [:=> [:cat ::initial-context-request] :seon.config/agent-context-spec]}
-  [{:seon.agent/keys [id] :seon.agent.ctx/keys [override]
-    configuration :seon.config/configuration}]
-  (config/resolve-agent-context id override configuration))
-
-(defn- upsert-ctx-tx
-  "Tx-data that REPLACES the scoped agent's :seon.agent/ctx with `blocks`:
-   `:db.fn/retractAttribute` the whole component vector — which
-   cascade-retracts the old child block entities (datahike emits a
-   `:db.fn/retractEntity` per component-ref value; plain `:db/retract` returns
-   NO follow-on ops, so it would only sever the agent→block edges and ORPHAN
-   the children) — then re-add `blocks`. An empty `blocks` leaves the attr
-   retracted (no add)."
-  [id blocks]
-  (into [[:db.fn/retractAttribute [:seon.agent/id id] :seon.agent/ctx]]
-        (when (seq blocks)
-          [{:seon.agent/id id :seon.agent/ctx (vec blocks)}])))
-
-(defn ^:async ^:private acquire-context-blocks
-  "Acquire the scoped agent's context components as ordinary maps."
-  [id]
-  (let [entity (await
-                 (db/pull {::db/pull-pattern '[{:seon.agent/ctx [*]}]
-                           ::db/ref [:seon.agent/id id]
-                           ::db/max-work 100000
-                           ::db/max-results 2048
-                           ::db/max-result-weight 262144}))]
-    (if (:seon.error/message entity)
-      entity
-      (->> (:seon.agent/ctx entity)
-           (map decode-block)
-           (sort-by (juxt :seon.agent.ctx/priority
-                          (comp str :seon.agent.ctx/name)))
-           vec))))
-
-(defn- transaction-result
-  [operation names result]
-  (if-let [message (:seon.error/message result)]
-    {::ok? false ::error (str operation " transact failed: " message)}
-    {::ok? true ::names names}))
-
-(def ^:private obsolete-plan-surface 'my.plan.internal/plan-block-html)
-(def ^:private current-plan-surface 'my.plan/plan-surface)
-
-(defn ^:async migrate-plan-surface-default!
-  "Replace the obsolete platform plan renderer on copied context blocks.
-
-   This is the narrow config-apply migration for the former platform default.
-   It matches both `:plan` and the exact encoded obsolete symbol, preserving
-   customized renderers, component identity, and every other block fact."
-  {:malli/schema [:=> [:cat] ::migration-result]}
-  []
-  (let [database (await (db/db))]
-    (if-let [message (:seon.error/message database)]
-      {::ok? false ::error message}
-      (let [rows
-            (await
-             (db/query
-              {::db/db database
-               ::db/query
-               '[:find ?block ?stored
-                 :in $ ?stored
-                 :where
-                 [?block :seon.agent.ctx/name :plan]
-                 [?block :seon.render/html ?stored]]
-               ::db/args [(pr-str obsolete-plan-surface)]
-               ::db/max-work 20000
-               ::db/max-results 4096
-               ::db/max-result-weight 262144}))]
-        (if-let [message (:seon.error/message rows)]
-          {::ok? false ::error message}
-          (let [tx-data
-                (into []
-                      (mapcat
-                       (fn [[block stored]]
-                         [[:db.fn/cas block :seon.render/html stored
-                           (pr-str current-plan-surface)]]))
-                      (sort-by first rows))]
-            (if (empty? tx-data)
-              {::ok? true ::changed? false ::operations 0}
-              (let [result
-                    (await
-                     (db/transact!
-                      {::db/db database
-                       ::db/expected-db database
-                       ::db/tx-data tx-data}))]
-                (if-let [message (:seon.error/message result)]
-                  {::ok? false ::error message}
-                  {::ok? true
-                   ::changed? true
-                   ::operations (count tx-data)})))))))))
-
-(defn ^:async install!
-  "Install context BLOCK(S) into the agent in scope.
-
-   One block map OR a
-   vector of block maps, idempotent UPSERT by :seon.agent.ctx/name (re-installing
-   a name replaces that block, so iterating never accumulates copies). The
-   target is the agent in scope (db/current-agent-id): an agent shapes its OWN
-   context; the creation seed-copy runs install! inside the new agent's scope
-   to copy the default block set in. Errors are values — no agent in scope or
-   a failed transact comes back as {::ok? false ::error …}.
-
-     (seon.agent.ctx/install!
-       {:seon.agent.ctx/name :doctrine :seon.agent.ctx/priority 15
-        :seon.render/ai \"Always reconcile against my.finance.ledger.\"})"
-  {:malli/schema [:=> [:cat ::install-request] ::result]}
-  [block-or-blocks]
-  (let [id (db/current-agent-id)]
-    (if (nil? id)
-      {::ok? false
-       ::error (str "install!: no agent in scope — call inside "
-                    "(seon.db/with-agent id …).")}
-      (let [current (await (acquire-context-blocks id))]
-        (if (:seon.error/message current)
-          {::ok? false ::error (:seon.error/message current)}
-          (let [blocks (if (vector? block-or-blocks)
-                         block-or-blocks
-                         [block-or-blocks])
-                new-names (into #{} (map :seon.agent.ctx/name) blocks)
-                kept (->> current
-                          (remove #(contains? new-names
-                                              (:seon.agent.ctx/name %)))
-                          (mapv #(dissoc % :db/id)))
-                res (await (db/transact!
-                             {:seon.db/tx-data
-                              (upsert-ctx-tx id (into kept blocks))}))]
-            (transaction-result "install!" (vec new-names) res)))))))
-
-(defn ^:async remove!
-  "Remove ONE context block by name from the agent in scope.
-
-   The block is a
-   component child, so dropping it from :seon.agent/ctx cascade-retracts the
-   child entity. Errors are values — no agent in scope or a failed transact
-   comes back as {::ok? false ::error …}. Removing an absent name is a no-op
-   success."
-  {:malli/schema [:=> [:catn [:seon.agent.ctx/name :seon.agent.ctx/name]] ::result]}
-  [nm]
-  (let [id (db/current-agent-id)]
-    (if (nil? id)
-      {::ok? false
-       ::error (str "remove!: no agent in scope — call inside "
-                    "(seon.db/with-agent id …).")}
-      (let [current (await (acquire-context-blocks id))]
-        (if (:seon.error/message current)
-          {::ok? false ::error (:seon.error/message current)}
-          (let [kept (->> current
-                          (remove #(= nm (:seon.agent.ctx/name %)))
-                          (mapv #(dissoc % :db/id)))
-                res (await (db/transact!
-                             {:seon.db/tx-data (upsert-ctx-tx id kept)}))]
-            (transaction-result "remove!" [nm] res)))))))
+   [:seon.agent.ctx/override {:optional true} :map]])
 
 ;; ============================================================
 ;; Render pipeline — the agent's OWN block set, decoded + priority-sorted,
@@ -2066,8 +1906,6 @@
 ;; design §5); THIS half is pure Seon code, buildable + testable with no GPU.
 ;; ============================================================
 
-(def ^:private node-crypto (js/require "crypto"))
-
 (def ^:private chain-root-hash
   "The chain's root parent hash — the analog of vLLM's NONE_HASH
    (kv_cache_utils.py:95-114), a fixed constant prepended before the first
@@ -2080,9 +1918,7 @@
   "Hex SHA-256 of a UTF-8 string (Node crypto). The chain hash function —
    our stand-in for vLLM's `caching_hash_fn` over the tuple."
   [s]
-  (-> (.createHash node-crypto "sha256")
-      (.update (js/Buffer.from s "utf8"))
-      (.digest "hex")))
+  (content-hash/sha-256 s))
 
 (defn- block-chain-hash
   "ONE block's chain hash, mirroring vLLM `hash_block_tokens`

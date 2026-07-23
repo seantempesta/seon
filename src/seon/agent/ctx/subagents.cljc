@@ -8,10 +8,14 @@
   (:require
     [clojure.string :as str]
     [seon.ai.tokens :as tokens]
-    [seon.config :as config]
+    [seon.render.configuration :as configuration]
+    [seon.agent.ctx.acquisition :as acquisition]
     [seon.db :as db]
     [seon.db.protocol :as protocol]
-    [seon.derive :as derive]))
+    [seon.derive.state :as derive]
+    [seon.time.instant :as instant]))
+
+#?(:clj (defmacro await [value] value))
 
 ;; ============================================================
 ;; Shared bits.
@@ -36,8 +40,9 @@
 (defn- age-str
   "Human `Ns`/`Nm`/`Nh` age of instant `t` before `now`, or nil."
   [now t]
-  (when (and (instance? js/Date t) (instance? js/Date now))
-    (let [s (max 0 (quot (- (.getTime now) (.getTime t)) 1000))]
+  (when (and (instant/instant? t) (instant/instant? now))
+    (let [s (max 0 (quot (- (instant/epoch-millis now)
+                            (instant/epoch-millis t)) 1000))]
       (cond
         (< s 60)   (str s "s")
         (< s 3600) (str (quot s 60) "m")
@@ -182,7 +187,7 @@
        (group-by first)
        (map (fn [[child-id child-rows]]
               (let [[_ rid started reason result result-ref]
-                    (last (sort-by (juxt #(.getTime ^js (nth % 2)) second)
+                    (last (sort-by (juxt #(instant/epoch-millis (nth % 2)) second)
                                    child-rows))]
                 [child-id
                  (cond-> {:seon.agent.run/id rid
@@ -232,7 +237,7 @@
                     footer)]
       (tokens/clip-str body section-token-cap))))
 
-(defn ^:async subagents-block
+(defn ^{:async #?(:cljs true :clj false)} subagents-block
   "The DIRECT children you spawned, one compact line each (Piece 3).
 
    Empty when you spawned none (the reactive vanish). Per child: id · derived
@@ -249,12 +254,12 @@
         stage-one
         (if (:seon.error/message database)
           database
-          (await (db/execute-many
+          (await (acquisition/execute
                   {::db/db database
                    ::db/members
                    [(query-member direct-children-query [id] 4096 262144)
                     (pull-member breaker-selector
-                                 [:seon.config/id config/cluster-config-id])
+                                 [:seon.config/id configuration/cluster-config-id])
                     (query-member database-instant-query [] 1 1024)]
                    ::db/max-result-weight 524288})))
         [children-member breaker-member instant-member] (::db/results stage-one)
@@ -277,9 +282,10 @@
             now database-instant
             breaker-n (get breaker-row :seon.config.breaker/crash-count 3)
             breaker-w (get breaker-row :seon.config.breaker/window-ms 1800000)
-            since (js/Date. (- (.getTime now) breaker-w))
+            since (instant/from-epoch-millis
+                    (- (instant/epoch-millis now) breaker-w))
             stage-two
-            (await (db/execute-many
+            (await (acquisition/execute
                      {::db/db database
                       ::db/members
                       [(query-member open-runs-query [child-ids])
@@ -330,7 +336,7 @@
     [?run :seon.agent.run/status :open]
     [(get-else $ ?run :seon.agent.run/paused-at :running) ?paused]])
 
-(defn ^:async orphaned-agents-block
+(defn ^{:async #?(:cljs true :clj false)} orphaned-agents-block
   "LIVE agents whose parent is TERMINATED — root cluster only (Piece 4).
 
    One line each: id · derived state · purpose · parent id. Empty → absent
@@ -345,7 +351,7 @@
                       :seon.error/kind :core-bug})
         acquired (if (:seon.error/message database)
                    database
-                   (await (db/execute-many
+                   (await (acquisition/execute
                            {::db/db database
                             ::db/members
                             [(query-member orphan-query [])

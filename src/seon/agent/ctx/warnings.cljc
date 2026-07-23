@@ -7,10 +7,14 @@
   (:require
     [clojure.string :as str]
     [seon.agent.home :as home]
+    [seon.agent.ctx.acquisition :as acquisition]
     [seon.db :as db]
     [seon.db.protocol :as protocol]
-    [seon.instrument :as instrument]
+    #?(:cljs [seon.instrument :as instrument])
+    [seon.time.instant :as instant]
     [seon.warn :as warn]))
+
+#?(:clj (defmacro await [value] value))
 
 (def ^:private schema-provenance-query
   '[:find ?requested ?process-id
@@ -40,34 +44,37 @@
   [value]
   (when (and (map? value) (string? (:seon.error/message value))) value))
 
-(defn- ^:async pull-page!
+(defn- ^{:async #?(:cljs true :clj false)} pull-page!
   [database pull-pattern refs]
   (if (seq refs)
     (await
-     (db/pull-many
+     (acquisition/call
+      (db/pull-many
       {::db/db database
        ::db/pull-pattern pull-pattern
        ::db/refs (vec refs)
-       ::db/max-result-weight acquisition-page-max-result-weight}))
+       ::db/max-result-weight acquisition-page-max-result-weight})))
     []))
 
-(defn- ^:async query-page!
+(defn- ^{:async #?(:cljs true :clj false)} query-page!
   [database query arguments]
   (await
-   (db/query
+   (acquisition/call
+    (db/query
     {::db/db database
      ::db/query query
      ::db/args arguments
      ::db/max-results acquisition-page-size
-     ::db/max-result-weight acquisition-page-max-result-weight})))
+     ::db/max-result-weight acquisition-page-max-result-weight}))))
 
-(defn- ^:async acquire-identity-pages!
+(defn- ^{:async #?(:cljs true :clj false)} acquire-identity-pages!
   [database identity-attr initial combine-page acquire-page!]
   (loop [cursor nil
          acquired initial]
     (let [page
           (await
-           (db/index-page
+           (acquisition/call
+            (db/index-page
             (cond-> {::db/db database
                      ::db/index :aevt
                      ::db/components [identity-attr]
@@ -75,7 +82,7 @@
                      ::db/limit acquisition-page-size
                      ::db/max-result-weight
                      acquisition-page-max-result-weight}
-              cursor (assoc ::db/cursor cursor))))]
+              cursor (assoc ::db/cursor cursor)))))]
       (if-let [error (database-error page)]
         error
         (let [page-value (await (acquire-page! page))]
@@ -87,7 +94,7 @@
                 (recur (:datahike.index-page/cursor page)
                        next-acquired)))))))))
 
-(defn- ^:async attribute-counts!
+(defn- ^{:async #?(:cljs true :clj false)} attribute-counts!
   [database attributes]
   (loop [remaining (vec attributes)
          counts {}]
@@ -98,13 +105,14 @@
                                          (count remaining)))
             rows
             (await
-             (db/query
+             (acquisition/call
+              (db/query
               {::db/db database
                ::db/query attribute-counts-query
                ::db/args [page-attributes]
                ::db/max-work 5000000
                ::db/max-results 65536
-               ::db/max-result-weight acquisition-page-max-result-weight}))]
+               ::db/max-result-weight acquisition-page-max-result-weight})))]
         (if-let [error (database-error rows)]
           error
           (recur (subvec remaining (count page-attributes))
@@ -123,7 +131,8 @@
 
 (defn- after-cutoff?
   [at cutoff]
-  (and at (or (nil? cutoff) (> (.getTime ^js at) (.getTime ^js cutoff)))))
+  (and at (or (nil? cutoff)
+              (> (instant/epoch-millis at) (instant/epoch-millis cutoff)))))
 
 (defn- eval-page-data
   [entities cutoff now]
@@ -140,8 +149,8 @@
 
          (and duration-ms at
               (>= duration-ms warn/slow-eval-threshold-ms)
-              (> (.getTime ^js at)
-                 (- (.getTime ^js now) (* 60 60 1000))))
+              (> (instant/epoch-millis at)
+                 (- (instant/epoch-millis now) (* 60 60 1000))))
          (update ::warn/slow-evals conj [id duration-ms]))))
    {::warn/failed-evals [] ::warn/fs-results [] ::warn/slow-evals []}
    entities))
@@ -164,8 +173,8 @@
          (fn [{:seon.test/keys [sym last-failed-at last-passed-at]}]
            (when (and last-failed-at
                       (or (nil? last-passed-at)
-                          (> (.getTime ^js last-failed-at)
-                             (.getTime ^js last-passed-at))))
+                          (> (instant/epoch-millis last-failed-at)
+                             (instant/epoch-millis last-passed-at))))
              [sym])))
         entities))
 
@@ -200,12 +209,12 @@
 (def ^:private canvas-pull-pattern
   '[:seon.agent/id :seon.render.canvas/content])
 
-(defn- ^:async acquire-entities!
+(defn- ^{:async #?(:cljs true :clj false)} acquire-entities!
   [database identity-attr pull-pattern page-fn initial combine-page]
   (await
    (acquire-identity-pages!
     database identity-attr initial combine-page
-    (fn ^:async acquire-page [page]
+    (fn ^{:async #?(:cljs true :clj false)} acquire-page [page]
       (let [entities
             (await
              (pull-page! database pull-pattern
@@ -222,7 +231,7 @@
       (update ::warn/schema-forms into (::warn/schema-forms right))
       (update ::warn/attribute-counts merge (::warn/attribute-counts right))))
 
-(defn- ^:async acquire-schema-data!
+(defn- ^{:async #?(:cljs true :clj false)} acquire-schema-data!
   [database]
   (await
    (acquire-identity-pages!
@@ -232,7 +241,7 @@
      ::warn/schema-forms []
      ::warn/attribute-counts {}}
     merge-schema-data
-    (fn ^:async acquire-page [page]
+    (fn ^{:async #?(:cljs true :clj false)} acquire-page [page]
       (let [datoms (:datahike.index-page/datoms page)
             entity-ids (mapv first datoms)
             keys (mapv #(nth % 2) datoms)
@@ -268,11 +277,11 @@
                              schemas)
                        ::warn/attribute-counts counts}))))))))))))
 
-(defn ^:async ^:private acquire-warnings
+(defn ^{:async #?(:cljs true :clj false)} ^:private acquire-warnings
   [agent-id agent database]
   (let [first-result
         (await
-          (db/execute-many
+          (acquisition/execute
             {::db/db database
              ::db/members
              [(query-member latest-user-query)
@@ -351,7 +360,7 @@
                                        ::warn/failing-tests failing
                                        ::warn/canvases canvases})})))))))))))))))
 
-(defn ^:async warnings-block
+(defn ^{:async #?(:cljs true :clj false)} warnings-block
   "Current problems as a `WARNINGS` comment-block, or empty when clean.
 
    A single-`;` block: one explanation + fix example per kind, then
@@ -440,12 +449,13 @@
     (->> rows
          (filter (fn [[_ _ _ inst]]
                    (or (nil? cutoff)
-                       (> (.getTime ^js inst) (.getTime ^js cutoff)))))
+                       (> (instant/epoch-millis inst)
+                          (instant/epoch-millis cutoff)))))
          (sort-by (fn [[_ _ t]] t))
          (mapv (fn [[e msg t inst]]
                  [e msg t inst (get frame0 e "")])))))
 
-(defn ^:async core-faults-block
+(defn ^{:async #?(:cljs true :clj false)} core-faults-block
   "`:core`-fault errors since the last user message — root cluster only.
 
    The derived strict-gate surface of the error-blame design (RULED
@@ -464,7 +474,7 @@
                       :seon.error/kind :core-bug})
         acquired (if (:seon.error/message database)
                    database
-                   (await (db/execute-many
+                   (await (acquisition/execute
                            {::db/db database
                             ::db/members
                             (mapv query-member
@@ -497,7 +507,7 @@
            "\n; Freeze the db a fault saw: (seon.db/as-of <t>) ; "
            "full row: (seon.db/pull '[*] <eid>)"))))
 
-(defn ^:async instrumentation-gaps-block
+(defn ^{:async #?(:cljs true :clj false)} instrumentation-gaps-block
   "Specced fns whose live var lost its malli wrapper — root cluster only.
 
    The derived coverage invariant (C46) as a reactive section: the census
@@ -512,17 +522,20 @@
    off) renders empty — no invariant to hold."
   {:malli/schema [:=> [:cat :seon.render/section-request :any] :string]}
   [input _invoke-selected!]
-  (let [database (or (::db/db input)
+  #?(:clj ""
+     :cljs
+     (let [database (or (::db/db input)
                      {:seon.error/message "Render block requires :seon.db/db."
                       :seon.error/kind :core-bug})
         result (if (:seon.error/message database)
                  database
-                 (await (db/query
+                 (await (acquisition/call
+                         (db/query
                          {::db/db database
                           :seon.db/query program-schema-query
                           ::db/max-work 4000000
                           ::db/max-results 65536
-                          ::db/max-result-weight 4194304})))
+                          ::db/max-result-weight 4194304}))))
         gaps (when-not (:seon.error/message result)
                (instrument/coverage-gaps result))]
     (cond
@@ -543,4 +556,4 @@
              "\n"
              (map (fn [{:seon.instrument/keys [sym reason]}]
                     (str "; " sym "  [" (name reason) "]"))
-                  gaps))))))
+                  gaps)))))))

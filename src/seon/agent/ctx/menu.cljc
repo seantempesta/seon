@@ -9,11 +9,14 @@
     [seon.agent.home :as home]
     [seon.agent.ctx.ns-name :as ns-name]
     [seon.agent.ctx.namespaces :as ns-cards]
+    [seon.agent.ctx.acquisition :as acquisition]
     [seon.db :as db]
     [seon.db.protocol :as protocol]
     [seon.ns.source :as ns-source]
     [seon.repl.parse :as repl-internal]
     [seon.schema :as schema]))
+
+#?(:clj (defmacro await [value] value))
 
 ;; ============================================================
 ;; Glyphs — the model→driver selection vocabulary (①–⑩, all single
@@ -363,14 +366,14 @@
       (seq toolkit) (str toolkit-only-header "\n" (lines 0 toolkit))
       :else "")))
 
-(defn ^:async ^:private acquire-prompt-menu
+(defn ^{:async #?(:cljs true :clj false)} ^:private acquire-prompt-menu
   [{agent-id :seon.agent/id :as input}]
   (let [database (or (::db/db input)
                      {:seon.error/message "Render block requires :seon.db/db."
                       :seon.error/kind :core-bug})]
     (if (:seon.error/message database)
       database
-      (let [initial (await (db/execute-many
+      (let [initial (await (acquisition/execute
                            {::db/db database
                             ::db/members
                             [{::protocol/operation protocol/pull-operation
@@ -409,7 +412,7 @@
                              (remove nil?) distinct vec)
             direct-syms (directly-called-symbols
                           (concat agent-rows cluster-rows))
-            selected (await (db/execute-many
+            selected (await (acquisition/execute
                               {::db/db database
                                ::db/members
                                [{::protocol/operation protocol/pull-many-operation
@@ -453,7 +456,7 @@
 
 (declare acquire-function-menu)
 
-(defn ^:async function-menu-block
+(defn ^{:async #?(:cljs true :clj false)} function-menu-block
   "The `:function-menu` section — recent + toolkit functions, glyph-listed.
 
    ONE menu, TWO derived groups under ONE glyph numbering (P6):
@@ -534,7 +537,7 @@
           ["clamp" ")"]]})
       (concat recent toolkit))))
 
-(defn ^:async ^:no-doc acquire-function-menu
+(defn ^{:async #?(:cljs true :clj false)} ^:no-doc acquire-function-menu
   {:malli/schema
    [:=> [:cat :seon.render/section-request]
     [:or ::menu-value ::direct-error]]}

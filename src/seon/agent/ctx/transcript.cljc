@@ -13,16 +13,20 @@
     [seon.agent.ctx.usage :as usage]
     [seon.agent.home :as home]
     [seon.ai.tokens :as tokens]
-    [seon.config :as config]
+    [seon.render.configuration :as configuration]
+    [seon.agent.ctx.acquisition :as acquisition]
     [seon.db :as db]
     [seon.db.protocol :as protocol]
-    [seon.derive :as derive]
+    [seon.derive.state :as derive]
     [seon.render.handlers.eval :as eval-handler]
     [seon.render :as render]
+    [seon.render.core :as render.core]
     [seon.schema :as schema]
     [seon.time.instant :as instant]))
 
-(def ^:private node-os (js/require "os"))
+#?(:clj (defmacro await [value] value))
+
+#?(:cljs (def ^:private node-os (js/require "os")))
 
 ;; ============================================================
 ;; Config-driven agent-init CP-1 — transcript block config attrs. Tiers
@@ -340,7 +344,7 @@
    stored time — surface it, never paper over it with a live clock."
   {:malli/schema [:=> [:cat :any :string] :string]}
   [inst timezone]
-  (when-not (instance? js/Date inst)
+  (when-not (instant/instant? inst)
     (throw (ex-info (str "seon.agent.ctx.transcript/clock: missing stored time — "
                          "every transcript event time must derive from its "
                          "fixed :at (byte-stability); got " (pr-str inst))
@@ -393,13 +397,13 @@
         ;; The flag rides the event (threaded off the RENDER db by
         ;; [[transcript-block]] — byte-exact); a direct call with no
         ;; threaded flag falls back to the live read.
-        body (ctx/cap-result content (config/message-render-cap configuration)
+        body (ctx/cap-result content (configuration/message-render-cap configuration)
                              (if (boolean? escape?) escape? true))
         who  (if outbound?
                (str "▶ to " (str/join ", " to-labels))
                (str "◀ from " from-label))]
     (str ";;; " who " @ "
-         (clock at (config/host-timezone configuration))
+         (clock at (configuration/host-timezone configuration))
          (when id (str " [" id "]"))
          (when new? " (NEW — unanswered; respond to this)")
          " — \"" body "\"")))
@@ -486,6 +490,11 @@
          " — " count " consecutive failures collapsed; each DEFINED NOTHING. "
          "Fix the form once, not " count " times.")))
 
+(def ^:private transcript-renderers
+  {'seon.agent.ctx.transcript/message->renderable message->renderable
+   'seon.agent.ctx.transcript/eval->renderable eval->renderable
+   'seon.agent.ctx.transcript/coalesced->renderable coalesced->renderable})
+
 (defn- coalesce-events
   "Pure pass over the ordered event stream: drop content-free [[noise-eval?]]
    events, then collapse maximal runs of ≥[[coalesce-min-run]] CONSECUTIVE
@@ -518,12 +527,12 @@
   "Index of the latest turn that began no later than `at`, or zero when the
    event predates the first turn."
   [turn-ats at]
-  (if (instance? js/Date at)
-    (let [at-ms (.getTime ^js at)]
+  (if (instant/instant? at)
+    (let [at-ms (instant/epoch-millis at)]
       (or
         (reduce-kv
           (fn [found idx turn-at]
-            (if (<= (.getTime ^js turn-at) at-ms)
+            (if (<= (instant/epoch-millis turn-at) at-ms)
               idx
               (reduced found)))
           nil
@@ -583,8 +592,12 @@
   [n]
   (let [mib (/ (or n 0) 1048576)]
     (if (>= mib 1024)
-      (str (.toFixed (/ mib 1024) 1) " GiB")
-      (str (.toFixed mib 0) " MiB"))))
+      (str #?(:clj (format "%.1f" (double (/ mib 1024)))
+              :cljs (.toFixed (/ mib 1024) 1))
+           " GiB")
+      (str #?(:clj (format "%.0f" (double mib))
+              :cljs (.toFixed mib 0))
+           " MiB"))))
 
 (defn host-telemetry
   "The bounded Unix host line for root's free dynamic tail.
@@ -594,14 +607,21 @@
    Bun process. Always comment-shaped and clipped below 50 estimated tokens."
   {:malli/schema [:=> [:cat] :string]}
   []
-  (let [[one five fifteen] (js->clj (.loadavg node-os))
-        memory              (.memoryUsage js/process)
+  (let [[one five fifteen]
+        #?(:clj (let [average (.getSystemLoadAverage
+                               (java.lang.management.ManagementFactory/getOperatingSystemMXBean))]
+                  [average average average])
+           :cljs (js->clj (.loadavg node-os)))
+        [rss heap-used]
+        #?(:clj (let [runtime (Runtime/getRuntime)]
+                  [(- (.totalMemory runtime) (.freeMemory runtime))
+                   (- (.totalMemory runtime) (.freeMemory runtime))])
+           :cljs (let [memory (.memoryUsage js/process)]
+                   [(.-rss memory) (.-heapUsed memory)]))
         line                (str "; host · load 1m/5m/15m "
-                                 (.toFixed one 2) "/"
-                                 (.toFixed five 2) "/"
-                                 (.toFixed fifteen 2)
-                                 " · rss " (format-bytes (.-rss memory))
-                                 " · heap " (format-bytes (.-heapUsed memory)))]
+                                 one "/" five "/" fifteen
+                                 " · rss " (format-bytes rss)
+                                 " · heap " (format-bytes heap-used))]
     (tokens/clip-str line 50)))
 
 (defn readline
@@ -638,7 +658,7 @@
                   (not= :open (:seon.agent.run/status run)) 0
                   (= :stream mode) (or run-form-count 0)
                   :else (or run-turn-count 0))
-        policy  (merge (config/default-run-policy)
+        policy  (merge (configuration/default-run-policy)
                        (select-keys input
                                     [:seon.config.run/batch-turn-limit
                                      :seon.config.run/stream-form-limit
@@ -649,9 +669,9 @@
                       (:seon.config.run/batch-turn-limit policy)))
         ;; localized full date+tz so the agent can judge what's expensive.
         ;; This is the ONE legitimate live `now` in the transcript.
-        now     (let [tz (config/host-timezone
+        now     (let [tz (configuration/host-timezone
                           (:seon.config/configuration input))]
-                  (str (instant/sv-se-date-time (js/Date.) tz) " " tz))
+                  (str (instant/sv-se-date-time (instant/now) tz) " " tz))
         steer
         (cond
           (>= loop-k (max 1 (- cap 2)))
@@ -713,7 +733,7 @@
                                 (:seon.agent.turn/evals turn))]
                  (eval->event turn-idx e)))
         kind-rank {:message 0 :eval 1}
-        sorted (sort-by (juxt #(.getTime ^js (::at %))
+        sorted (sort-by (juxt #(instant/epoch-millis (::at %))
                               #(kind-rank (::kind %) 9)
                               #(or (:db/id (::entity %)) (::id %) 0))
                         (concat msgs evs))]
@@ -819,13 +839,13 @@
 
 (declare query-result acquisition-error database-error)
 
-(defn- ^:async acquire-eval-pages
+(defn- ^{:async #?(:cljs true :clj false)} acquire-eval-pages
   "Read eval IDs, then pull independently bounded, cacheable pages."
   [database turns selector]
   (let [ids-response
         (if (seq turns)
           (await
-            (db/execute-many
+            (acquisition/execute
               {::db/db database
                ::db/members
                [(query-member database ordered-eval-ids-query
@@ -843,7 +863,7 @@
         requests
         (mapv
           (fn [eval-page]
-            (db/execute-many
+            (acquisition/execute
               {::db/db database
                ::db/members
                [(query-member database (eval-page-query selector)
@@ -855,7 +875,7 @@
           ;; must become a vector before it reaches `execute-many`.
           (map vec (partition-all eval-page-size eval-ids)))
         responses (if (and (not ids-error) (seq requests))
-                    (array-seq (await (js/Promise.all (into-array requests))))
+                    (await (acquisition/all requests))
                     [])
         error (or ids-error
                   (some #(or (::error %)
@@ -925,7 +945,7 @@
   (= agent-id
      (get-in turn [:seon.agent.turn/run :seon.agent.run/agent :seon.agent/id])))
 
-(defn- ^:async acquire-recent-turns
+(defn- ^{:async #?(:cljs true :clj false)} acquire-recent-turns
   "Acquire certified newest agent turns through a fixed global-time scan."
   [database agent-id window-size]
   (loop [page-number 0
@@ -933,7 +953,7 @@
          retained []]
     (let [index-response
           (await
-           (db/execute-many
+           (acquisition/execute
             {::db/db database
              ::db/members
              [(index-member database :avet [:seon.agent.turn/at]
@@ -946,13 +966,14 @@
         (let [index-member (first (::db/results index-response))
               candidate-ids (mapv first (:datahike.index-page/datoms index-member))
               candidates (if (seq candidate-ids)
-                           (await (db/pull-many
+                           (await (acquisition/call
+                                   (db/pull-many
                                    {::db/db database
                                     ::db/pull-pattern turn-candidate-pattern
                                     ::db/refs candidate-ids
                                     ::db/max-work 100000
                                     ::db/max-results 4096
-                                    ::db/max-result-weight 262144}))
+                                    ::db/max-result-weight 262144})))
                            [])]
           (if (and (map? candidates) (:seon.error/message candidates))
             {::error candidates}
@@ -973,18 +994,19 @@
                        retained)
                 (let [refs (mapv :db/id retained)
                       turns (if (seq refs)
-                              (await (db/pull-many
+                              (await (acquisition/call
+                                      (db/pull-many
                                       {::db/db database
                                        ::db/pull-pattern turn-pull-pattern
                                        ::db/refs refs
                                        ::db/max-work 100000
                                        ::db/max-results 4096
-                                       ::db/max-result-weight 262144}))
+                                       ::db/max-result-weight 262144})))
                               [])
                       usage-response
                       (if (seq refs)
                         (await
-                         (db/execute-many
+                         (acquisition/execute
                           {::db/db database
                            ::db/members
                            (mapv #(assoc (pull-member usage-pull-pattern %
@@ -1075,7 +1097,7 @@
 (defn- database-error [value]
   (when (and (map? value) (string? (:seon.error/message value))) value))
 
-(defn- ^:async acquire-transcript
+(defn- ^{:async #?(:cljs true :clj false)} acquire-transcript
   [{:seon.agent/keys [id entity] :as input} eval-selector]
   (let [database (or (::db/db input)
                      {:seon.error/message "Render block requires :seon.db/db."
@@ -1101,13 +1123,12 @@
         stage-one-results
         (if (database-error database)
           [database {::error database}]
-          (array-seq
-           (await
-            (js/Promise.all
-             #js [(db/execute-many {::db/db database
-                                    ::db/members stage-one-members
-                                    ::db/max-result-weight 131072})
-                  (acquire-recent-turns database id window-size)]))))
+          (await
+           (acquisition/all
+            [(acquisition/execute {::db/db database
+                                   ::db/members stage-one-members
+                                   ::db/max-result-weight 131072})
+             (acquire-recent-turns database id window-size)])))
         stage-one (first stage-one-results)
         recent-turns (second stage-one-results)]
     (if-let [error (or (::error stage-one)
@@ -1153,13 +1174,13 @@
               omitted?
               (conj (query-member database (previous-ns-query cutoff-at) [id cutoff-at]
                                   500000 500000 8192)))
-            joined (array-seq
-                     (await (js/Promise.all
-                              #js [eval-pages
-                                   (db/execute-many
-                                     {::db/db database
-                                      ::db/members stage-two-members
-                                      ::db/max-result-weight 327680})])))
+            joined (await
+                    (acquisition/all
+                     [eval-pages
+                      (acquisition/execute
+                       {::db/db database
+                        ::db/members stage-two-members
+                        ::db/max-result-weight 327680})]))
             eval-page-result (first joined)
             stage-two (second joined)]
         (if-let [error (or (::error eval-page-result)
@@ -1183,7 +1204,7 @@
                  (some-> (query-result latest-ns-member) first)
                  (some-> (query-result assignment-member) first))
                 mode (or (:seon.config/repl-mode configuration) :batch)
-                policy (merge (config/default-run-policy) configuration)
+                policy (merge (configuration/default-run-policy) configuration)
                 state (derive/state-from-primitives
                         (cond-> {:seon.agent.run/open? open?}
                           (:seon.agent/terminated-at entity)
@@ -1219,7 +1240,7 @@
 
 (declare format-transcript-block)
 
-(defn ^:async transcript-block
+(defn ^{:async #?(:cljs true :clj false)} transcript-block
   "Acquire and render the transcript at the active database value."
   {:malli/schema [:=> [:cat :seon.render/section-request :any] :string]}
   [input _invoke-selected!]
@@ -1248,7 +1269,6 @@
   [{cur-ns :seon.eval/ns
     last-action-at ::last-action-at
     turn-count ::turn-count
-    render-fn :seon.render/render
     :as input}]
   (if-let [error (::error input)]
     (str "[transcript] render failed: " (pr-str error))
@@ -1260,7 +1280,10 @@
         ;; is no injected handle — fall back to a local ai render so the
         ;; same code path produces the same String.
         configuration (:seon.config/configuration input)
-        render*  (or render-fn #(render/render :seon.render/ai input %))
+        render-input
+        (assoc input ::render/trusted-renderers
+               (merge render.core/renderers transcript-renderers))
+        render* #(render/render :seon.render/ai render-input %)
         events   (ordered-events input)
         ;; Flag any INBOUND newer than the last action as NEW (UNANSWERED) —
         ;; a fresh wake or a mid-call arrival the agent re-orients to. With no
@@ -1270,8 +1293,8 @@
                          (if (and (= :message (::kind ev))
                                   (not (::outbound? ev))
                                   (or (nil? last-action-at)
-                                      (> (.getTime ^js (::at ev))
-                                         (.getTime ^js last-action-at))))
+                                      (> (instant/epoch-millis (::at ev))
+                                         (instant/epoch-millis last-action-at))))
                            (assoc ev ::new? true)
                            ev))
                        events)
@@ -1321,7 +1344,7 @@
                                             (- max-turn (or (::turn-idx ev) max-turn)))
                                  cap    (decay-cap-for-offset
                                           (mapv #(into {} %) levels) offset
-                                          (config/result-body-render-cap
+                                          (configuration/result-body-render-cap
                                             configuration))]
                              (cond-> (update ev ::entity assoc
                                              :seon.render/result-body-cap cap
@@ -1400,17 +1423,17 @@
       :else
       (let [first-turn-idx (max 0 (- (count turn-ats) retained))
             cutoff         (nth turn-ats first-turn-idx)
-            cutoff-ms      (.getTime ^js cutoff)
+            cutoff-ms      (instant/epoch-millis cutoff)
             preceding      (->> events
                                 (filter #(and (= :message (::kind %))
-                                              (< (.getTime ^js (::at %)) cutoff-ms)))
+                                              (< (instant/epoch-millis (::at %)) cutoff-ms)))
                                 last)
             recent         (filterv
                              (fn [ev]
                                (case (::kind ev)
                                  :eval (>= (or (::turn-idx ev) -1) first-turn-idx)
                                  :usage (>= (or (::turn-idx ev) -1) first-turn-idx)
-                                 :message (>= (.getTime ^js (::at ev)) cutoff-ms)
+                                 :message (>= (instant/epoch-millis (::at ev)) cutoff-ms)
                                  false))
                              events)]
         (if preceding
@@ -1457,7 +1480,7 @@
               turns)
         kind-rank {:message 0 :eval 1 :usage 2}]
     (->> (concat (ordered-events input) usage-events)
-         (sort-by (juxt #(.getTime ^js (::at %))
+         (sort-by (juxt #(instant/epoch-millis (::at %))
                         #(kind-rank (::kind %) 9)
                         #(or (::turn-idx %) 0)))
          vec)))
@@ -1522,7 +1545,7 @@
          :else
          "no events yet — every message and eval this agent makes appears here live")])))
 
-(defn ^:async transcript-block-html
+(defn ^{:async #?(:cljs true :clj false)} transcript-block-html
   "The HTML TWIN of [[transcript-block]]: the agent's flat time-ordered
    event stream rendered as a professional chat (message bubbles + terse eval
    activity rows), oldest-first. The normal surface is bounded by the block's

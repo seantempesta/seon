@@ -7,17 +7,20 @@
    and flat block presence-sets; source indexing and function execution remain
    outside this namespace."
   (:require
-    [cljs.reader :as edn]
+    [#?(:clj clojure.edn :cljs cljs.reader) :as edn]
     [clojure.string :as str]
     [seon.agent.ctx :as ctx]
     [seon.agent.ctx.ns-name :as ns-name]
     [seon.agent.home :as home]
-    [seon.config :as config]
+    [seon.render.configuration :as configuration]
+    [seon.agent.ctx.acquisition :as acquisition]
     [seon.db :as db]
     [seon.db.protocol :as protocol]
     [seon.error.instrument :as einstrument]
     [seon.schema :as schema]
     [seon.time.instant :as instant]))
+
+#?(:clj (defmacro await [value] value))
 
 ;; The compact card renderer is defined at the BOTTOM of this file (its
 ;; helpers cluster there); [[namespaces-block]] above it dispatches the long
@@ -118,7 +121,7 @@
    policy is ordinary config data supplied by the boot indexer."
   [configuration ns-name]
   (contains? (:seon.config/always
-               (config/namespaces-policy configuration))
+               (configuration/namespaces-policy configuration))
              (if (symbol? ns-name) ns-name (symbol (str ns-name)))))
 
 (defn full-source-ns?
@@ -308,31 +311,33 @@
   [value]
   (when (and (map? value) (string? (:seon.error/message value))) value))
 
-(defn- ^:async pull-page!
+(defn- ^{:async #?(:cljs true :clj false)} pull-page!
   [database pull-pattern refs]
   (if (seq refs)
     (await
-     (db/pull-many
+     (acquisition/call
+      (db/pull-many
       {::db/db database
        ::db/pull-pattern pull-pattern
        ::db/refs (vec refs)
-       ::db/max-result-weight acquisition-page-max-result-weight}))
+       ::db/max-result-weight acquisition-page-max-result-weight})))
     []))
 
-(defn- ^:async acquire-namespace-source!
+(defn- ^{:async #?(:cljs true :clj false)} acquire-namespace-source!
   [database namespace-id]
   (loop [start 0
          chunks []]
     (let [chunk
           (await
-           (db/query
+           (acquisition/call
+            (db/query
             {::db/db database
              ::db/query source-chunk-query
              ::db/args [namespace-id start source-chunk-chars]
              ::db/max-results 8
              ;; The query engine accounts for the full bound source before
              ;; projecting `subs`; the wire result remains one bounded chunk.
-             ::db/max-result-weight source-query-max-result-weight}))]
+             ::db/max-result-weight source-query-max-result-weight})))]
       (if-let [error (database-error chunk)]
         error
         (cond
@@ -342,13 +347,14 @@
           :else
           (recur (+ start source-chunk-chars) (conj chunks chunk)))))))
 
-(defn- ^:async acquire-index-entities!
+(defn- ^{:async #?(:cljs true :clj false)} acquire-index-entities!
   [database index components ref-fn pull-pattern]
   (loop [cursor nil
          entities []]
     (let [page
           (await
-           (db/index-page
+           (acquisition/call
+            (db/index-page
             (cond-> {::db/db database
                      ::db/index index
                      ::db/components components
@@ -356,7 +362,7 @@
                      ::db/limit acquisition-pull-page-size
                      ::db/max-result-weight
                      acquisition-page-max-result-weight}
-              cursor (assoc ::db/cursor cursor))))]
+              cursor (assoc ::db/cursor cursor)))))]
       (if-let [error (database-error page)]
         error
         (let [pulled
@@ -372,14 +378,15 @@
                 (recur (:datahike.index-page/cursor page)
                        next-entities)))))))))
 
-(defn- ^:async acquire-namespace-identities!
+(defn- ^{:async #?(:cljs true :clj false)} acquire-namespace-identities!
   [database selected-names include-catalog?]
   (loop [cursor nil
          selected []
          catalog []]
     (let [page
           (await
-           (db/index-page
+           (acquisition/call
+            (db/index-page
             (cond-> {::db/db database
                      ::db/index :aevt
                      ::db/components [:seon.ns/name]
@@ -387,7 +394,7 @@
                      ::db/limit acquisition-page-size
                      ::db/max-result-weight
                      acquisition-page-max-result-weight}
-              cursor (assoc ::db/cursor cursor))))]
+              cursor (assoc ::db/cursor cursor)))))]
       (if-let [error (database-error page)]
         error
         (let [datoms (:datahike.index-page/datoms page)
@@ -412,7 +419,7 @@
                 (recur (:datahike.index-page/cursor page)
                        next-selected next-catalog)))))))))
 
-(defn- ^:async acquire-one-namespace-row!
+(defn- ^{:async #?(:cljs true :clj false)} acquire-one-namespace-row!
   [database [namespace-id _attr namespace-name tx _added?]]
   (let [base (await (pull-page! database namespace-base-selector [namespace-id]))]
     (if-let [error (database-error base)]
@@ -457,7 +464,7 @@
                             :seon.schema/_ns schemas
                             :seon.test/_ns tests}))))))))))))))
 
-(defn- ^:async acquire-selected-namespace-rows!
+(defn- ^{:async #?(:cljs true :clj false)} acquire-selected-namespace-rows!
   [database names include-catalog?]
   (let [identities
         (await
@@ -500,7 +507,7 @@
         (keep #(get-in % [:my.plan/namespace :seon.ns/name]))
         (get-in assignment [:my.plan/parent :my.plan/_parent])))
 
-(defn ^:async ^:private acquire-namespace-rows!
+(defn ^{:async #?(:cljs true :clj false)} ^:private acquire-namespace-rows!
   "Acquire namespace rows at one database value."
   [{id :seon.agent/id :as input}]
   (let [database (or (::db/db input)
@@ -508,7 +515,7 @@
                       :seon.error/kind :core-bug})
         initial (if (:seon.error/message database)
                   database
-                  (await (db/execute-many
+                  (await (acquisition/execute
                            {::db/db database
                             ::db/members (initial-acquisition-members id)
                             ::db/max-result-weight
@@ -529,7 +536,8 @@
           (let [cur-ns (home/current-ns id agent latest-successful-ns
                                         namespace-assignment)
                 current-row
-                (await (db/pull {::db/db database
+                (await (acquisition/call
+                        (db/pull {::db/db database
                                  ::db/pull-pattern
                                  [:seon.ns/name
                                   {:seon.ns/require-edges require-edge-selector}]
@@ -537,7 +545,7 @@
                                  ::db/max-work 100000
                                  ::db/max-results 512
                                  ::db/max-result-weight
-                                 acquisition-page-max-result-weight}))]
+                                 acquisition-page-max-result-weight})))]
             (if (and (map? current-row) (:seon.error/message current-row))
               (acquisition-error "require-edge acquisition" current-row)
               (let [block (some (fn [candidate]
@@ -604,7 +612,7 @@
    ::db/max-results 256
    ::db/max-result-weight acquisition-page-max-result-weight})
 
-(defn ^:async ^:private acquire-one-schema-closure!
+(defn ^{:async #?(:cljs true :clj false)} ^:private acquire-one-schema-closure!
   [database row state]
   (let [own-keys (into #{} (keep :seon.schema/key) (:seon.schema/_ns row))
         sources (into []
@@ -625,8 +633,9 @@
                                      (not (contains? missing %)))
                                frontier)
               response (if (seq unknown)
-                         (await (db/query (schema-frontier-request
-                                           database unknown)))
+                         (await (acquisition/call
+                                 (db/query (schema-frontier-request
+                                           database unknown))))
                          [])]
           (if-let [error (database-error response)]
             (assoc state ::error
@@ -662,7 +671,7 @@
                                 ::schema-rows-by-key rows-by-key'
                                 ::missing-schema-keys missing')))))))))))
 
-(defn ^:async ^:private acquire-schema-rows!
+(defn ^{:async #?(:cljs true :clj false)} ^:private acquire-schema-rows!
   "Acquire each namespace's bounded referenced-schema closure."
   [input]
   (if-let [error (database-error input)]
@@ -846,7 +855,7 @@
          "; contracts with (my.ns/functions {:my.ns/ns 'the.namespace}).\n"
          (str/join "\n" lines))))
 
-(defn ^:async namespaces-block
+(defn ^{:async #?(:cljs true :clj false)} namespaces-block
   "Acquire and render namespaces at the active database value."
   {:malli/schema [:=> [:cat :seon.render/section-request :any] :map]}
   [input _invoke-selected!]
@@ -1077,7 +1086,8 @@
 (defn- parsed-arglists
   "Stored arglists as a nonempty seq of vectors, or nil when unreadable."
   [arglists]
-  (let [parsed (try (edn/read-string arglists) (catch :default _ nil))]
+  (let [parsed (try (edn/read-string arglists)
+                    (catch #?(:clj Throwable :cljs :default) _ nil))]
     (when (and (seq? parsed) (seq parsed) (every? vector? parsed)) parsed)))
 
 (defn- schema-children
@@ -1104,7 +1114,8 @@
   "The `:=>` forms represented by one persisted function spec string."
   [spec]
   (let [form (when-not (str/blank? spec)
-               (try (edn/read-string spec) (catch :default _ nil)))]
+               (try (edn/read-string spec)
+                    (catch #?(:clj Throwable :cljs :default) _ nil)))]
     (when (vector? form)
       (case (first form)
         :=> [form]

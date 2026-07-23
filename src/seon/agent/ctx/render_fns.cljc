@@ -6,12 +6,14 @@
    ordinary acquired data and render twins; context ordering and persistence
    belong to the surrounding context system."
   (:require
-   [cljs.reader :as reader]
+   [#?(:clj clojure.edn :cljs cljs.reader) :as reader]
    [malli.core :as m]
    [seon.ai.tokens :as tokens]
-   [seon.config :as config]
+   [seon.render.configuration :as configuration]
    [seon.db.id :as db.id]
    [seon.schema :as schema]))
+
+#?(:clj (defmacro await [value] value))
 
 (def auto-run-priority
   "Derived render functions appear after stable code context."
@@ -30,7 +32,7 @@
       (if (and out (= :map (m/type out)))
         (into #{} (comp (map first) (filter twin-keys)) (m/entries out))
         #{}))
-    (catch :default _ #{})))
+    (catch #?(:clj Throwable :cljs :default) _ #{})))
 
 (defn- select-render-fn-rows [rows]
   (->> rows
@@ -94,7 +96,7 @@
 (defn- error-card [message]
   [:div {:class "text-error text-xs font-mono"} (str "render error: " message)])
 
-(defn ^:async render-fn-block-ai
+(defn ^{:async #?(:cljs true :clj false)} render-fn-block-ai
   "Invoke one derived function in the child and return its bounded AI twin."
   {:malli/schema [:=> [:cat :seon.render/section-request :any] :string]}
   [input invoke-selected!]
@@ -108,12 +110,12 @@
           (string? text)
           (tokens/clip-str
             text
-            (config/render-fn-token-cap
+            (configuration/render-fn-token-cap
               (:seon.config/configuration input)))
           :else (str ";; ⚠ " (::fn-sym (:seon.render/node input))
                      " returned a non-string :seon.render/ai"))))))
 
-(defn ^:async render-fn-block-html
+(defn ^{:async #?(:cljs true :clj false)} render-fn-block-html
   "Invoke one derived function in the child and return its HTML twin."
   {:malli/schema [:=> [:cat :seon.render/section-request :any]
                   [:maybe :seon.render.canvas/hiccup]]}

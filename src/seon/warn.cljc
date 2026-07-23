@@ -37,10 +37,10 @@
    OPTIONAL on entities (bulk data, value-ish rows, and component
    children legitimately have no natural key)."
   (:require
-    [cljs.reader :as edn]
+    [#?(:clj clojure.edn :cljs cljs.reader) :as edn]
     [clojure.string :as str]
     [seon.db :as db]
-    [seon.eval :as eval]
+    [seon.render.core :as render.core]
     [seon.schema :as schema]))
 
 ;; ============================================================
@@ -138,7 +138,7 @@
   [spec-str]
   (when-not (str/blank? spec-str)
     (try (edn/read-string spec-str)
-         (catch :default _ nil))))
+         (catch #?(:clj Throwable :cljs :default) _ nil))))
 
 (defn- strip-props
   "Drop an optional properties map at position 1 of a Malli vector
@@ -448,7 +448,7 @@
         (keep (fn [[k form]]
                 (when (and k (string? form))
                   (try [k (edn/read-string form)]
-                       (catch :default _ nil)))))
+                       (catch #?(:clj Throwable :cljs :default) _ nil)))))
         (::schema-forms data)))
 
 (defn- marked-entity-id-attrs
@@ -651,7 +651,8 @@
 (defn- fs-denial-response
   "Return the first structured allowlist denial nested in result EDN."
   [edn-str]
-  (let [v (try (edn/read-string edn-str) (catch :default _ nil))]
+  (let [v (try (edn/read-string edn-str)
+               (catch #?(:clj Throwable :cljs :default) _ nil))]
     (->> (tree-seq coll? seq v)
          (filter map?)
          (filter #(= :allowlist (:seon.agent.fs/denial %)))
@@ -807,7 +808,7 @@
                                   :seon.render.canvas/content content)]
                     (when (and (qualified-symbol? decoded)
                                (not (contains? current-authored-symbols decoded))
-                               (nil? (eval/lookup-value decoded)))
+                               (not (contains? render.core/renderers decoded)))
                       {:seon.warn/sym   (str decoded)
                        :seon.warn/where (str "canvas of " aid)}))))
           (sort-by :seon.warn/sym)
@@ -858,10 +859,12 @@
 
 (defn- check-name
   "Best-effort display name for a registry fn — the demunged compiled
-   fn name (e.g. `seon.warn/check-bad-ref`)."
+  fn name (e.g. `seon.warn/check-bad-ref`)."
   [check]
-  (let [n (.-name check)]
-    (if (seq n) (demunge n) "anonymous-check")))
+  #?(:clj (or (some-> check meta :name str) "anonymous-check")
+     :cljs
+     (let [n (.-name check)]
+       (if (seq n) (demunge n) "anonymous-check"))))
 
 (defn- check-error-cluster
   "Synthetic ::check-response for a registry check that THREW instead
@@ -891,7 +894,7 @@
   (->> checks
        (map (fn [check]
               (try (check req)
-                   (catch :default e
+                   (catch #?(:clj Throwable :cljs :default) e
                      (check-error-cluster check e)))))
        (filterv (comp seq :seon.warn/affected))))
 

@@ -10,11 +10,14 @@
     [seon.ai.tokens :as tokens]
     [seon.agent.ctx :as ctx]
     [seon.agent.ctx.render-fns :as render-fns]
-    [seon.config :as config]
+    [seon.render.configuration :as configuration]
+    [seon.agent.ctx.acquisition :as acquisition]
     [seon.db :as db]
     [seon.db.protocol :as protocol]
     [seon.error :as err]
     [seon.render.canvas :as canvas]))
+
+#?(:clj (defmacro await [value] value))
 
 (def ^:private candidate-query
   '[:find ?sym ?spec ?source-tx ?private
@@ -119,7 +122,7 @@
        (sort-by (juxt ::touch (comp str ::surface-sym)))
        last))
 
-(defn ^:async acquire-canvas!
+(defn ^{:async #?(:cljs true :clj false)} acquire-canvas!
   "Acquire canvas identity from ordinary discovery data at one database value."
   [id agent database]
   (let [{entity :seon.render/entity
@@ -134,7 +137,7 @@
 
       :else
       (let [candidates-response
-            (await (db/execute-many
+            (await (acquisition/execute
                      {::db/db database
                       ::db/members [(candidate-member id)]
                       ::db/max-result-weight 1179648}))]
@@ -147,7 +150,7 @@
                     attrs (into #{} (mapcat ::attrs) rows)
                     history-response
                     (when (seq attrs)
-                      (await (db/execute-many
+                      (await (acquisition/execute
                                {::db/db (assoc database :history true)
                                 ::db/members [(history-member id attrs)]
                                 ::db/max-result-weight 1179648})))
@@ -299,7 +302,7 @@
    [{:seon.agent/id id
      :seon.agent/entity entity}]})
 
-(defn ^:async canvas-block
+(defn ^{:async #?(:cljs true :clj false)} canvas-block
   "Show and explain the agent's current live canvas.
 
    The `:canvas` section — what your human currently sees and the compact
@@ -361,7 +364,7 @@
       {:seon.render/ai
        (rendered-canvas-text
         response source
-        (config/render-fn-token-cap (:seon.config/configuration input)))
+        (configuration/render-fn-token-cap (:seon.config/configuration input)))
        ::render-fns/pinned-syms
        (cond-> #{} (symbol? value) (conj value))})
     ;; CONTRACT: this section NEVER vanishes and NEVER surfaces a bare
@@ -369,7 +372,7 @@
     ;; so this backstop only fires on an UNEXPECTED acquisition failure —
     ;; and even then the agent reads a clear, actionable safe-state, not
     ;; a swallowed error keyword. Self-heals on the next clean render.
-    (catch :default e
+    (catch #?(:clj Throwable :cljs :default) e
       {:seon.render/ai
        (str "; Your canvas — loading (safe-state placeholder this turn).\n"
             "; The per-turn canvas derivation hit an unexpected error and\n"

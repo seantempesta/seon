@@ -9,6 +9,8 @@
     [seon.db :as db]
     [seon.schema :as schema]))
 
+#?(:clj (defmacro await [value] value))
+
 (schema/register! ::agent-id [:string {:min 1}])
 (schema/register! ::home-ns :symbol)
 (schema/register! ::require-spec
@@ -109,7 +111,7 @@
 (defn- error-value? [value]
   (and (map? value) (string? (:seon.error/message value))))
 
-(defn ^:async home-requires-for
+(defn ^{:async #?(:cljs true :clj false)} home-requires-for
   "The require specs for agent `id`'s home ns.
 
    Resolved from durable data in precedence:
