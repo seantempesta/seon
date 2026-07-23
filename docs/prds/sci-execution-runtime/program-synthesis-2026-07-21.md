@@ -1188,20 +1188,21 @@ and resumed with the defect-fix mandate + a NEW required proof:
 package-EMPTY cluster boots and completes a plain agent turn. Its
 commit + issue close wait on that.
 
-**OWNER RULING (2026-07-22 late): LOOP-FIRST — the package track
-PARKS after the pkg-door defect fix commits.** The agentic loop on
-sci is the spine, and its dependencies are ALREADY LANDED (db 15,
-message/lifecycle 7, fs/shell/web classified, execution/receipts/
-recovery machinery existing). Packages (seon.packages.js.bun, WP-J,
-further wrappers) are capability EXPANSION, not the loop — parked
-behind the loop milestone exactly like P3a; rulings 16/17 stand as
-recorded design for when it resumes. NEXT SPINE UNIT: the loop
-vertical slice — a real agent's full arc (turn open, context render,
-eval in a sci context over the landed portable cores, receipts,
-recovery) with tonight's E2E drive scenario re-run as the acceptance
-gate. my.* porting NARROWS to loop-essential-only, derived from what
-real drives actually call (measure, don't guess); the census stays
-the long-term meter but stops gating the loop.
+**OWNER RULING (2026-07-22 late, amended same night): BOTH TRACKS,
+DEMO-FOCUSED.** Keep pushing packages AND the loop — but focus on
+what we KNOW we need and drive toward a WORKING DEMO that is clean
+multi-platform. The spine is the loop vertical slice (eval in a sci
+context over the landed portable cores; tonight's E2E scenario green
+as acceptance); the parallel portfolio keeps converting surface to
+.CLJC SCI-COMPATIBLE code aggressively — if CLJ/JVM is where the
+perf is, portable sci-compatible cores are what let computation move
+there transparently, so sci-loadability is an explicit requirement
+on every ported core (the host's load-portable-slice! door is the
+consumer). my.* porting order is PRIORITIZED by the loop-slice's
+measured working set but the porting continues broadly; the census
+stays the meter. Package track: pkg-door finishes its defect fix
+and commits; the queued package units (bun interface, WP-J) proceed
+as portfolio work behind demo-critical units, not parked.
 
 **SPINE SPEC STAGED**: `tmp/orchestrator/loop-slice-spec.md` — the
 loop vertical slice (eval through sci over the landed cores; E2E
