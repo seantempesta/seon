@@ -1028,6 +1028,14 @@ COMPLETELY before dispatching anything.
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- FIXSEED CONSUMPTION ACCEPTED (79493e604): fixtures initialize
+  from compiled program rows — manifest-rooted, SHA-256-verified,
+  the one pager, all bespoke/schema-only/per-test paths DELETED;
+  loud :core-bug on any staleness (the design refusing stale
+  artifacts is the feature). Registry-gate green lands at the
+  checkpoint's fresh frozen-tree build (current artifact = v11 +
+  today's renames). FIXTURES-ARE-CLUSTERS-IN-MINIATURE IS BUILT.
+  ONE lane before the freeze: r43trust.
 - TRADEOFF AUDITS DISPATCHED (owner, 2026-07-23 eve — 'understand
   the tradeoff better'): (1) interp-bench — sci-on-JVM vs compiled
   JVM vs (if still executable) Bun self-host on a representative
