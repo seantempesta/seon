@@ -1148,6 +1148,28 @@ child/self-host tests); preserve subprocess.cljs, eval/receipt.cljc,
 diffusion bootstrap. Sequencing confirms the spine — nothing
 deletable early.
 
+**Ruling 21 (owner, 2026-07-23): context is DERIVED, never stored.**
+Context renders are pure functions FROM the database value; rendered
+artifacts never enter datoms — the datom trail is refs (prompt-blob),
+the basis `:t`, and numeric projections (prompt-chars) ONLY; bytes
+live in the blob tier (verified current-state: already true on the
+prompt path — no Datahike value-size exposure). The REAL defect is
+input impurity (result/<id> membership from a process-local cache —
+same db value renders differently after restart/eviction): that
+database-derived-membership fix folds into the render-port unit with
+triage #1. Ephemeral tail bytes (readline clock, load) stay
+policy-fenced + hard-capped with the prompt blob as history.
+
+**Ruling 22 (orchestrator, resolves the L0 scope stop): the claimant
+IS the driver process — identity is SELF-DERIVED** (own pid + own
+start instant, WP-S2 vocabulary, one string); no operator transport.
+L0's honest Owned set expands to the loop driver acquisition path
+(loop.cljs), the run-fence wire schemas (execution.cljs,
+host/session.clj), lifecycle/core.cljc's portable fence, plus the
+original files; acquire-then-fence two-step per the design
+(exclusive nil→claimant + nil→1 claim BEFORE work; held epoch
+threaded through every pointer+epoch fence). L0 RE-DISPATCHED.
+
 **ISSUE TRIAGE RETURNED + committed `d476204e`**: 132 open → 20
 archived (evidence-based), 28 annotated dissolving-into-units, 73
 real+independent (sized), 11 unclear (probes named). Open backlog
