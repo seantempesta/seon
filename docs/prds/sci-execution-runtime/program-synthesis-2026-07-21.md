@@ -46,43 +46,31 @@ COMPLETELY before dispatching anything.
 7. codex driving: docs/seon/reference/driving-codex-agents.md —
    NEVER sandbox mode; always < /dev/null; -o summary files.
 
-## Current state (2026-07-23, restart boundary)
+## Current state (2026-07-23 PM wind-down — supersedes the morning block)
 
-- THE SEAM is landed across 7 families (db 15 · message 2 ·
-  lifecycle 5 · fs 12 · shell 8 · web 3 · blob 5 — portable .cljc
-  cores, dual-tier gates, live proofs). Loader door + ruling-16
-  package namespaces landed. Mixed-tier per-batch routing landed.
-- The E2E DEMO ran GREEN: one agent, mixed-tier arc (npm package in
-  Bun + sci evals on the JVM host), mid-scenario restart survived,
-  honest perf (13-46 reply tok/s; ~50k/turn bounded prompts).
-- Census (re-baselined under ruling 19): 223 public vars — 46 done,
-  173 capability-pending, 4 platform-pending.
-- Issue backlog triaged: 113 open (top-10 ranked in
-  research/issue-triage-2026-07-23.md); 407 archived.
-- Three designs + four research reports ACCEPTED (all in
-  `research/`): p1-capability-seam · loop-cljc-sci ·
-  llm-http-io · jvm-concurrency · jvm-web-sse · writer-throughput
-  · render-ctx-portability. Deletion audit + issue triage done.
-- Restart residue resolved (2026-07-23): the 18 staged issue-archive
-  deletions were the triage tail — committed (86579c7f0). The
-  uncommitted claim-epoch retrofit in agent/{loop,run,turn}.cljs is
-  the post-R22 L0 attempt, SUPERSEDED by ruling 24 (it is the exact
-  legacy-loop fence retrofit R24 forbids); diff preserved at
-  tmp/orchestrator/l0-retrofit-superseded-by-r24.patch. The compile
-  probe then proved the retrofit INCOMPLETE (run-loop! 3-arity vs the
-  stale 2-arg call at test/seon/runtime/admission_test.cljs:768), so
-  the residue was reverse-applied — tree is HEAD-clean; re-apply the
-  patch only if U2 wants it as reference material.
-- LANES (first wave, all RUNNING 2026-07-23): U1 guarded door
-  (spec tmp/orchestrator/u1-guarded-door-spec.md, thread
-  019f8e36-8d84-7b51-b686-5b37991f8779) · U3 writer admission
-  (u3-writer-admission-spec.md, thread
-  019f8e34-6e63-7e12-8be9-c1fe69c2a98f) · U4 render purity
-  (u4-render-purity-spec.md, thread
-  019f8e36-92ee-7a80-b0ea-e1902bf38f41). Summaries land at
-  tmp/orchestrator/u{1,3,4}-summary.txt; final messages at
-  u{1,3,4}-final-message.txt. U2 dispatches when U1 lands; U5 is the
-  next refill; U6 held for the owner HTTP talk.
+- CONVERSION FIRST WAVE COMPLETE AND ACCEPTED: guarded door (U1) ·
+  writer pipelining + fork basis fix, pushed (U3) · render purity +
+  byte identity (U4) · JVM web/SSE tier (U5) · claim-native portable
+  driver both tiers, legacy loop DELETED, live cross-tier handoff +
+  race + reacquire + U12-segment proven (U2) · portable LLM phase +
+  adapter cores + JVM java.net.http transport, batch+stream (U6a/b) ·
+  four JVM capability leaves + my.* bindings (U8a) · schema admission
+  R30/R31/R34 at three gates · test discovery widened (559-test
+  writer gate + orphan gate) · full ctx family portable (U7) ·
+  streaming R36 modes + no-history partials + SEVEN provider
+  descriptor rows, Gemini qualified (R37).
+- DERIVED-EXECUTION PROGRAM: P1 edge bundle ✓ · P2 plan-execution ✓
+  (+ invocation roots, selected tier, inventory producer) · P5
+  enforcement ✓ (plan-before-dispatch, router scans deleted) ·
+  P1b + R39 IN FLIGHT · P3/P4 queued · P6 invoke family capstone.
+- LIVE LANES + resume handles: see the restart protocol above.
+- NEXT HARD GATE: the frozen-tree checkpoint (full suites + the
+  live-proof ledger on fresh-reset clusters + demo bug-finder),
+  then U9 the great deletion.
+- Rulings R9-R40; drills PAUSED (C9) until core hardening; the
+  bug-class triage (C1-C12) is the class map; ~15 research files
+  dated 2026-07-23 in research/.
+
 - U4 stop #1 (verified correct): R0 impossible without the turn.cljs
   prompt rewire (symbol at :335-336 → invoke-compiled! :398-405 always
   dispatches into the child; host refuses render). RULED: U4 granted
