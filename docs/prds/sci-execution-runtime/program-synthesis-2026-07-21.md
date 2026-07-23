@@ -682,6 +682,22 @@ COMPLETELY before dispatching anything.
   impossible to mistake for complete), never raise the limit for
   normal growth. initpage lane DISPATCHED — the checkpoint's last
   gate.
+- WIND-DOWN FINAL (2026-07-23): BOTH lanes landed, tree CLEAN, all
+  clusters down. initpage: paging proven (10x corpus = 1,092 pages,
+  largest frame 337 KB; crash-mid-seed + forced-restart proofs
+  green) and it REVERSED the R40 64 MiB raise per its spec —
+  orchestrator ACCEPTS on the evidence: with paging + blob-tier,
+  4 MiB is a true runaway breaker (>10x legit frames) and the
+  revert also dissolves P5's queue-floor collision (which the raise
+  itself caused). R40 AMENDED: superseded by paging; the durable law
+  is 'fix the payload shape, not the ceiling'. P1b+R39 landed
+  (inventories both tiers; 1,618 private corpus rows; planner
+  places compiled terminals exactly). THE ONE REMAINING CHECKPOINT
+  BLOCKER: pod startup fails resolving the core predicate binding
+  seon.db.protocol/ordinary-wire-value? on the client tier (issue
+  paged-initialization-misses-public-core-predicate-binding) — the
+  client-tier sibling of the writer's requiring-resolve fix; FIRST
+  ACTION for the next session, then the checkpoint.
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
