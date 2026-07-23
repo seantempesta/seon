@@ -420,6 +420,19 @@ COMPLETELY before dispatching anything.
   R29 acquisition at the run's basis; the ahead-of-time manifest is
   a verification artifact. Implementation unit queues behind the
   planning research's return.
+- R35 BUILD MAP (owner-confirmed, 2026-07-23): (1) insertion point =
+  the existing parse→dispatch gap (the batch router generalizes to
+  call-level plan routing); (2) placement is TOTAL because SCI is
+  itself a platform — SCI-local is the floor, never a failure; (3)
+  the transparent proxy = the existing wrapper-installer mechanism,
+  placement-aware (local impl vs wire-calling stub per var; sync on
+  vthreads, awaited on pod); (4) the wire = ONE new invoke
+  request/response family on the existing seon.db typed protocol
+  (R17; transit-framed, request-id correlated, receipts ride as for
+  db effects) — never a second protocol; (5) agent-code coverage IS
+  full coverage (core is compiled per tier behind the seam). R35
+  implementation spec writes when the execution-planning research
+  returns; owner reviews before dispatch.
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
