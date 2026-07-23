@@ -174,7 +174,8 @@
       (:seon.db/identity props) (assoc :db/unique :db.unique/identity)
       (:seon.db/unique props) (assoc :db/unique :db.unique/value)
       (:seon.db/index props) (assoc :db/index true)
-      (:seon.db/component props) (assoc :db/isComponent true))))
+      (:seon.db/component props) (assoc :db/isComponent true)
+      (:seon.db/no-history? props) (assoc :db/noHistory true))))
 
 (defn malli->datahike-schema
   "Derive ordered Datahike attribute declarations."

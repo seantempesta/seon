@@ -181,7 +181,61 @@
                   [:map [:foo/status {:seon.db/index true} :keyword]])
           attr (find-attr result :foo/status)]
       (is (= :db.type/keyword (:db/valueType attr)))
-      (is (true? (:db/index attr))))))
+      (is (true? (:db/index attr)))))
+
+  (testing ":seon.db/no-history? true -> :db/noHistory true"
+    (let [result (dhs/malli-map->datahike-schema
+                  [:map [:foo/partial-text
+                         [:string {:seon.db/no-history? true}]]])
+          attr (find-attr result :foo/partial-text)]
+      (is (= :db.type/string (:db/valueType attr)))
+      (is (= :db.cardinality/one (:db/cardinality attr)))
+      (is (true? (:db/noHistory attr)))
+      (is (nil? (:db/index attr))))))
+
+(deftest no-history-facet-round-trips-without-temporal-residue
+  (let [config (assoc (mem-cfg) :keep-history? true)
+        partial-attr :seon.db.datahike.schema-test/partial-text
+        entity-id :seon.db.datahike.schema-test/partial-id
+        attribute
+        (dhs/malli-form->datahike-attribute
+         {entity-id [:string {:seon.db/identity true}]
+          partial-attr [:string {:seon.db/no-history? true}]}
+         partial-attr
+         [:string {:seon.db/no-history? true}])]
+    (d/create-database config)
+    (let [conn (d/connect config)]
+      (try
+        (d/transact conn [(dhs/malli-form->datahike-attribute
+                           {entity-id [:string {:seon.db/identity true}]}
+                           entity-id
+                           [:string {:seon.db/identity true}])
+                          attribute])
+        (doseq [prefix ["A" "AB" "ABC"]]
+          (d/transact conn [{entity-id "attempt-1"
+                             partial-attr prefix}]))
+        (is (= "ABC"
+               (d/q [:find '?text '.
+                     :where
+                     ['?attempt entity-id "attempt-1"]
+                     ['?attempt partial-attr '?text]]
+                    @conn)))
+        (d/transact conn [[:db/retract [entity-id "attempt-1"]
+                           partial-attr]])
+        (is (nil?
+             (d/q [:find '?text '.
+                   :where
+                   ['?attempt entity-id "attempt-1"]
+                   ['?attempt partial-attr '?text]]
+                  @conn)))
+        (is (empty?
+             (d/q [:find '?text
+                   :where ['?attempt partial-attr '?text]]
+                  (d/history @conn)))
+            "superseded and retracted prefixes never enter history")
+        (finally
+          (d/release conn)
+          (d/delete-database config))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Enum

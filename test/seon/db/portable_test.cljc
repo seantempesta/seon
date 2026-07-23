@@ -31,12 +31,22 @@
 (def edn-attr :portable.record/value)
 (def id-attr :portable.record/id)
 (def tx-source-attr :portable.tx/source)
+(def partial-text-attr :portable.attempt/partial-text)
 
 (defn- register-contract-schema! []
   (schema/register! id-attr [:string {:seon.db/identity true}])
   (schema/register! set-attr [:set :keyword])
   (schema/register! edn-attr [:or :keyword :map])
   (schema/register! tx-source-attr :keyword))
+
+(deftest no-history-registration-derives-the-portable-datahike-facet
+  (schema/register! partial-text-attr
+                    [:string {:seon.db/no-history? true}])
+  (is (= {:db/ident partial-text-attr
+          :db/valueType :db.type/string
+          :db/cardinality :db.cardinality/one
+          :db/noHistory true}
+         (internal/malli->datahike-attr partial-text-attr))))
 
 (defn- operation [request] (::protocol/operation request))
 

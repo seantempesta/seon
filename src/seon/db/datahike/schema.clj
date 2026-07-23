@@ -118,7 +118,8 @@
     (:seon.db/identity props) (assoc :db/unique :db.unique/identity)
     (:seon.db/unique props)   (assoc :db/unique :db.unique/value)
     (:seon.db/index props)    (assoc :db/index true)
-    (:seon.db/component props) (assoc :db/isComponent true)))
+    (:seon.db/component props) (assoc :db/isComponent true)
+    (:seon.db/no-history? props) (assoc :db/noHistory true)))
 
 (declare ^:private schema->attr-partial)
 
@@ -356,6 +357,7 @@
    - `:enum` infers the type from homogeneous values; throws on mixed types.
    - `:seon.db/identity true` sets `:db/unique :db.unique/identity`.
    - `:seon.db/unique true` sets `:db/unique :db.unique/value`.
+   - `:seon.db/no-history? true` sets `:db/noHistory true`.
    - `:seon.db/ref` becomes `:db.type/ref` (intra-DB ref; values are
      tempids, pos-int eids, or [unique-attr value] lookup-refs). Cross-DB
      handles use plain `:uuid` with `:seon.db/ref-to` metadata and are
