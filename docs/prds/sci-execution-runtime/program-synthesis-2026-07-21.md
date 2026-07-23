@@ -1160,6 +1160,19 @@ for its blocked live proofs (require/call, ruling-15 steering,
 removal, restart). Then: msglc live proof, combined commits, issue
 close, `seon.packages.js.bun` dispatch.
 
+**p2-msglc ACCEPTED + COMMITTED `51c9ff96`** (writer-gate regression
+root-caused: eager JVM requires ran load-time schema/register! into
+process-global declarations — fixed via CLJS-only child schema
+registration + committed program projection on the JVM; full writer
+back to 382/2982 green; live proof done). LANE-ISOLATION INCIDENT:
+the pkg-door resume tried to run its live proof on the e2e lane's
+cluster (e2e-seam-20260722) — STOPPED by orchestrator, re-resumed
+with absolute isolation instructions (own cluster only;
+dedicated-artifact-lane pattern if the shared build role blocks;
+stop-and-report otherwise). Lesson for every future spec: name the
+lane's OWN cluster name explicitly and forbid borrowing live
+clusters.
+
 **STAGED NEXT (refill on any free slot):** p2-blob · p2-my-families
 (specs in tmp/orchestrator/, exemplar commit = `f6d843ee`) ·
 agent-facing interface-guidance unit. Known open: drill-harness
