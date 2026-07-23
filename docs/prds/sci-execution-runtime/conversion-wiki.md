@@ -204,6 +204,16 @@ the anchor stays the state ledger.
 - **Receiptless probes don't record.** Orchestrator eval probes without
   a turn-id are engine-only: no receipts, no corpus, NO replay — never
   use them to "prove" corpus replay.
+- **Sweep inline authored fixtures at the invocation boundary after admission
+  changes.** Durable definitions are source strings scattered across writer
+  suites, so a filename-local update misses siblings. Compute candidates with
+  `rg` over `test/` for `eval-batch!`, `invoke-batch!`,
+  `:seon.repl/source`, and quoted `(defn` forms; then inspect each call's
+  `:seon.eval/starting-ns` against
+  `seon.host.record/transient-ns-syms`. Add the complete concrete
+  `:malli/schema` to every definition expected to succeed. Direct SCI-only
+  evaluations, stored source-row literals, transient probes, and definitions
+  expected to be rejected are not durable-admission fixtures.
 - **Multiple awaits in one eval form hang** at the MCP timeout — one
   awaited op per form, or a ^:async fn.
 - **bin/test-writer doesn't retain a log**: always redirect full gate
