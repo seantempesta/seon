@@ -118,6 +118,31 @@ COMPLETELY before dispatching anything.
   the drill window: U6b JVM LLM leaf, U7 ctx/render port (deps U1+U5
   both landed), U8 JVM fs/shell/web/blob leaves + host bindings,
   triage #6/#8/#10.
+- OWNER DIRECTIVES (2026-07-23 AM): fork commits PUSHED (9c356e32 on
+  seantempesta/datahike main). PRIORITY: chase every bug touching the
+  core spine — function/schema/test persistence must be FLAWLESS
+  (all data well-defined in the one live graph database; agents
+  react to each other through it). Prefer ELIMINATING ERROR CLASSES
+  BY CONSTRUCTION over enumerating tests: move invariants from
+  call-site discipline to one choke point each, then one regression
+  per class. Two designed-out-class candidates from the U12 drill
+  findings: (1) wire-codec TOTALITY — every value either serializes
+  or becomes the ruled tier-local steering error, enforced at the
+  one codec choke point (the clojure.core$* leak); (2) attr
+  registration/usage drift — a computed boot/structural check that
+  every transactable attribute is registered by its owner (the
+  :seon.agent.run/current-turn rejection), no hand lists.
+- FABLE AUDIT LANE dispatched (read-only, freeze-safe): mine
+  tests + git history for every .cljs→.cljc move; per-tier coverage
+  ledger; persistence-spine deep-dive (schema round-trip, corpus
+  replay, receipts CAS); designed-out-classes section;
+  anti-recommendations for dying tiers. Report lands at
+  research/cljc-test-parity-audit-2026-07-23.md.
+- QUEUED after the drill window (source-editing): the core
+  persistence bug-chase lane implementing the audit's designed-out
+  constraints + top regressions; U2's disposition of the two drill
+  findings reviewed skeptically first (neither waves through
+  without root cause + regression).
 - Config entanglement resolved (2026-07-23 overnight): U4's
   render-context sections and U3's mutation-admission sections landed
   interleaved in the one uncommitted config owner; orchestrator
