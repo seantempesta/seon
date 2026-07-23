@@ -1136,6 +1136,18 @@ denominator grew because all functions are agent-facing now, per
 ruling 19). Absent effect proven non-replayable by construction
 with a regression. Spine step 2 (loop-migration slice) dispatches
 on the design agent's return.
+**DELETION AUDIT RETURNED + accepted**
+(`research/deletion-audit-2026-07-23.md`): ZERO safe-now deletions —
+the tree is clean (no orphans, no stale rename refs; NS-series
+held). 2 genuine compat residues (host/context.clj:202-242 →
+migrate callers to seon.db.host after-loop; transcript
+result-handles dial after its writers). Grounded W5 cutover-death
+inventory with weights: execution/runtime.cljs, child bands in
+execution.cljs + execution/host.cljs, eval.cljs (+~5.7k LOC of
+child/self-host tests); preserve subprocess.cljs, eval/receipt.cljc,
+diffusion bootstrap. Sequencing confirms the spine — nothing
+deletable early.
+
 AUDIT LANES DISPATCHED (owner-directed, 2026-07-23): `issue-triage`
 (all 133 open issues → fixed-archive / dissolves-with-unit /
 real+independent(S/M/L) / unclear, top-10 queue candidates; spec
@@ -1155,8 +1167,12 @@ run-fence in place — closes the proven duplicate-turn CAS hole;
 phase-cursor turns over already-durable facts; sci usage confirmed
 optimal; optimality table §8 names the hand-rolls to delete).
 Rulings: (a) claim attrs on run entity, heartbeat lease; (b)
-run-scoped claim + phase-eligibility scheduling; (c) **JVM LLM leaf
-is a named P4 unit right after L3** (owner); (d) **render: in-pod
+run-scoped claim + phase-eligibility scheduling; (c) **AMENDED
+(owner, same night): LLM I/O gets its OWN RESEARCH UNIT first** —
+the whole model-call path designed stateless + sci-friendly
+(attempt receipts, retries/streaming as facts, adapters as data,
+http residue placement); the HTTP-leaf implementation is a MORNING
+discussion, not a scheduled unit; (d) **render: in-pod
 move at W5 first, full ctx/render .cljc port as its own later
 unit** (owner); (e) steal notices only on honest close; (f)
 claimant identity = WP-S2 (pid, start-instant) string; (g) host

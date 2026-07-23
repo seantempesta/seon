@@ -172,6 +172,20 @@ the anchor stays the state ledger.
 
 ## Process/operator
 
+- **A landed seam does not close arbitrary-result ambiguity.** Flat
+  `:seon.error/message`/`:seon.error/kind` errors and portable database calls
+  can coexist while collision-capable successes remain bare:
+  `src/seon/db.cljc:522-541,557-591` still projects query/pull success directly.
+  Triage the public result discriminator separately from transport-envelope
+  portability.
+
+- **Issue closure needs evidence at the issue's full acceptance boundary.**
+  A current source line may disprove the original local mechanism while the
+  note still owns a live, cross-surface, or artifact proof. Classify that case
+  UNCLEAR with the exact missing probe (or REAL when the broader mechanism is
+  still absent); do not archive merely because a focused implementation
+  comment says the source half landed.
+
 - **A launch manifest can disable a database-selected execution tier during
   reconciliation.** A green SCI evaluator plus a correct batch router still
   yields no host invocation when `:seon.config.execution/host-tier?` is false
@@ -284,6 +298,12 @@ the anchor stays the state ledger.
   alternate leaves coupled to direct `node:fs`, `node:path`, and UUID calls.
   Extend that same map with open/close/mkdir/read/write/exists/unlink, path
   algebra, and random-id operations; do not introduce a second effects map.
+- **A cutover-death namespace can contain surviving contracts.** The current
+  execution/eval owners mix shared protocol, durable receipt, rendering, and
+  platform codecs with the per-agent child/self-host engine. Inventory and
+  repoint those consumers before deleting bands: `src/seon/execution.cljs`,
+  `src/seon/execution/host.cljs`, and `src/seon/eval.cljs` are not honest
+  whole-file deletions merely because their engines die.
 
 ## Design rulings that bind conversions
 
@@ -294,3 +314,13 @@ the anchor stays the state ledger.
 - The capability seam carries effect-class metadata (pure/idempotent/
   external) — replay classification and portability share one boundary.
 - Owner tiebreaker: experimentability + reasonability win seams.
+
+## Issue-triage recipe
+
+- **Classify against the owning mechanism before trusting an issue's old
+  filename or acceptance.** A landed partial repair is not closure when the
+  note retains an unproved live boundary; conversely, a child/self-host defect
+  belongs to the explicit post-P4 deletion unit when every cited owner dies at
+  cutover. Use current symbol/file evidence for independent work, an exact
+  planned unit for dissolution, and state the one live probe when neither is
+  decisive.
