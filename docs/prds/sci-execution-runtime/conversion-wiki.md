@@ -69,7 +69,10 @@ the anchor stays the state ledger.
   section/manifest shapes, the singleton entity, and flattening live in
   `src/seon/config/resolve.cljc:54-63,278-302,675-764`. Grant that owner in any
   unit requiring a new config fact; bypassing it creates an unvalidated or
-  silently absent dial.
+  silently absent dial. This also blocks the U5 JVM web-render first slice as
+  dispatched: its required heartbeat cadence, mailbox depth, connection pool,
+  and timeout dials are ruling-27 facts, while the lane owns only
+  `config/system.edn`; grant both config source owners before resuming.
 - **Relocating a compiled callee does not relocate a symbolic invocation.**
   `seon.agent.turn/render-prompt` currently sends
   `'seon.execution.runtime/render-prompt!` through
