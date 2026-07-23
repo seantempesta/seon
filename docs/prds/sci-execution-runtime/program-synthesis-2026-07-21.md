@@ -1028,6 +1028,14 @@ COMPLETELY before dispatching anything.
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- GUARD BATCH-CHECK CANDIDATE (owner insight, 2026-07-23 eve):
+  sync the interpreter-step counter to the shared cell every N
+  steps (local countdown in the hot path) — cuts the ~30ns/step
+  (cell barrier) ~N x with bounded overshoot <=N steps (0.0001% of
+  the 100M budget), determinism + single-threaded halting preserved.
+  CONDITIONED on interp-bench's guard-on/off measurement: material
+  hot-loop delta => implement inside the one guard closure +
+  recalibrate; noise => skip. Queue row, not dispatched.
 - FIXSEED CONSUMPTION ACCEPTED (79493e604): fixtures initialize
   from compiled program rows — manifest-rooted, SHA-256-verified,
   the one pager, all bespoke/schema-only/per-test paths DELETED;
