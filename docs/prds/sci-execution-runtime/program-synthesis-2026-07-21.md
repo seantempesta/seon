@@ -1173,6 +1173,21 @@ stop-and-report otherwise). Lesson for every future spec: name the
 lane's OWN cluster name explicitly and forbid borrowing live
 clusters.
 
+**E2E DRIVE RETURNED + COMMITTED `08c53528`** — the owner's feedback
+loop delivered: config-identity 500 fixed live (BOTH partial-pull
+selectors, regression + HTTP 200 proof; issue closed/archived); full
+cljs 1561/7714 green. THE DRIVE ITSELF found the integration defect
+that matters: the loader-door diff's unconditional
+`:seon.packages/package` acquisition clause kills EVERY agent turn on
+a package-empty cluster (defect #3; issue updated). Honest perf:
+13-60s HTTP/turn, ~34k-token prompts (flag for the owner — prompt
+size is the perf lever), tok/s unfabricatable (no eval receipts
+survive failed turns; turn-id also missing from terminal error log
+lines — weirdness rows 4/5). pkg-door thread stopped a second time
+and resumed with the defect-fix mandate + a NEW required proof:
+package-EMPTY cluster boots and completes a plain agent turn. Its
+commit + issue close wait on that.
+
 **STAGED NEXT (refill on any free slot):** p2-blob · p2-my-families
 (specs in tmp/orchestrator/, exemplar commit = `f6d843ee`) ·
 agent-facing interface-guidance unit. Known open: drill-harness
