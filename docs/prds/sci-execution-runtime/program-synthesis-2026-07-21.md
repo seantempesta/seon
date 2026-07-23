@@ -375,6 +375,23 @@ COMPLETELY before dispatching anything.
   converters when conversion is the operation. Census:
   research/schema-strictness-census-2026-07-23.md (576 executable
   occurrences: 124 A / 229 B / 221 C / 2 D).
+- R33 (owner + design, 2026-07-23 midday): CONTRACTS ARE CORPUS DATA,
+  VALIDATED EVERYWHERE. Agent code is corpus source (database facts),
+  and SCI is one interpreter on every tier — so schemas INCLUDING
+  [:fn] predicates over agent-written fns compile on any tier by
+  resolving through the corpus-loaded SCI env behind the guarded
+  door. No .cljs/.cljc or reader conditionals for agent code ever
+  (conditionals are for OUR platform leaves only). Contract-predicate
+  admission gains ONE computed rule: a predicate's call graph must be
+  pure and capability-free (derived from the indexed program-graph
+  edges — portability is DERIVED, never declared). Every tier
+  validates fully claimant-side; the writer's stance (structural-only
+  vs also core predicates) is downgraded from design constraint to a
+  defense-in-depth policy knob — owner satisfied that SCI containment
+  protects the database; R26's agent-code-never-in-writer stands for
+  liveness/blast-radius reasons, not safety. Follow-up queued to the
+  schema-admission lane on return: the pure-call-graph admission rule
+  + corpus-resident predicate compilation path.
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
