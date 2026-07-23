@@ -49,9 +49,9 @@
        Caveats: prefixes under the model's minimum (4096 tokens on
        Opus 4.x) silently don't cache; verify with usage
        :cache_read_input_tokens on call 2."
-  (:require [clojure.string :as str]
-            ["@anthropic-ai/sdk" :as Anthropic]
+  (:require ["@anthropic-ai/sdk" :as Anthropic]
             [seon.ai :as ai]
+            [seon.ai.anthropic.core :as core]
             [seon.ai.dispatch :as dispatch]
             [seon.agent.ctx :as ctx]
             [seon.error :as error]
@@ -157,38 +157,11 @@
     :map]}
   [{:seon.ai/keys [ctx model max-tokens tools tool-choice] :as request}
    resolution]
-  (let [cfg (:seon.ai/resolved-config resolution)
-        {:seon.render/keys [stable-text volatile-text]} (ctx/split-context ctx)
-        ;; Both halves must be non-blank to split — a boundary-less ctx
-        ;; (tests, stub prompts) degrades to the pre-split wire shape.
-        split?  (not (or (str/blank? stable-text) (str/blank? volatile-text)))
-        tools*  (or tools (:seon.ai/tools cfg))
-        choice* (or tool-choice (:seon.ai/tool-choice cfg))]
-    (cond->
-      {:model      (or model (:seon.ai/model cfg))
-       :max_tokens (or max-tokens (:seon.ai/max-tokens cfg))
-       ;; Block array (not a bare string) so the stable prefix carries
-       ;; cache breakpoints — see the ns docstring's PROMPT CACHING
-       ;; pin. Block 1 = the soul/system prompt; block 2 = the ctx's
-       ;; stable prefix (through :namespaces). cache_control on the
-       ;; LAST system block caches tools + system + stable ctx; only
-       ;; the volatile tail rides after the breakpoint as the user
-       ;; message. 2 of the 4 allowed breakpoints — the first keeps a
-       ;; partial hit alive when the stable ctx changes (reload, new
-       ;; ns) while the soul doesn't.
-       :system     (cond-> [{:type "text"
-                             :text (ai/effective-system-prompt request)
-                             :cache_control {:type "ephemeral"}}]
-                     split? (conj {:type "text"
-                                   :text stable-text
-                                   :cache_control {:type "ephemeral"}}))
-       :messages   [{:role "user" :content (if split? volatile-text ctx)}]}
-      ;; Adaptive-only: any truthy thinking mode (true or an effort
-      ;; string) maps to adaptive; reasoning-effort levels are a
-      ;; deepseek wire concept with no Messages-API equivalent here.
-      (ai/thinking-mode cfg) (assoc :thinking {:type "adaptive"})
-      (some? tools*)         (assoc :tools tools*)
-      (some? choice*)        (assoc :tool_choice choice*))))
+  (core/request-params
+   (assoc request :seon.ai/system-prompt
+          (ai/effective-system-prompt request))
+   resolution
+   (ctx/split-context ctx)))
 
 (defn- request-extra-body
   "The request override, else the already resolved config value."
@@ -200,28 +173,6 @@
 ;; Response parsing — :content is an ARRAY of typed blocks; check
 ;; :stop_reason before reading it.
 ;; ============================================================
-
-(defn- text-of-blocks
-  "Concatenated text of the \"text\" blocks in a Messages API content
-   array — \"thinking\" (and any other typed) blocks are skipped."
-  [content]
-  (->> content
-       (filter #(= "text" (:type %)))
-       (map :text)
-       (apply str)))
-
-(defn- tool-use-blocks
-  "The \"tool_use\" blocks in a Messages API content array (the
-   convenience `:seon.ai/tool-calls` surface). Empty when none."
-  [content]
-  (filterv #(= "tool_use" (:type %)) content))
-
-(def ^:private known-message-keys
-  "Top-level Message keys the adapter consumes directly — the REMAINDER
-   is preserved as :seon.ai/provider-fields (#25). `:parsed_output` is
-   an SDK-added convenience field (not provider data), dropped too."
-  #{:content :usage :id :type :role :model :stop_reason :stop_sequence
-    :parsed_output})
 
 (defn parse-completion
   "Map an assembled Anthropic Message OBJECT to a complete-response.
@@ -238,24 +189,7 @@
                   :seon.ai.anthropic/complete-response]}
   [message]
   (try
-    (let [body        (js->clj message :keywordize-keys true)
-          stop-reason (:stop_reason body)
-          tool-calls  (tool-use-blocks (:content body))
-          extras      (apply dissoc body known-message-keys)]
-      (if (= "refusal" stop-reason)
-        {:seon.ai/text                  ""
-         :seon.ai.anthropic/stop-reason stop-reason
-         :seon.ai/usage                 (:usage body)
-         :seon.ai/error
-         {:seon.ai/msg (str "Anthropic refusal — the model declined this "
-                            "request (stop_reason \"refusal\", empty "
-                            "content). Rephrase or reduce the request; "
-                            "the call is not billed pre-output.")}}
-        (cond-> {:seon.ai/text  (text-of-blocks (:content body))
-                 :seon.ai/usage (:usage body)}
-          stop-reason      (assoc :seon.ai.anthropic/stop-reason stop-reason)
-          (seq tool-calls) (assoc :seon.ai/tool-calls tool-calls)
-          (seq extras)     (assoc :seon.ai/provider-fields extras))))
+    (core/parse-completion (js->clj message :keywordize-keys true))
     (catch :default e
       {:seon.ai/text  ""
        :seon.ai/error {:seon.ai/msg (str "Failed to parse anthropic response: "

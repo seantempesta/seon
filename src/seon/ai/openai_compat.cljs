@@ -48,11 +48,10 @@
    the SDK stream and stops at the first complete form. Native tool
    calling and a generic `:extra-body` (e.g. Qwen's
    `chat_template_kwargs`) ride through when the caller opts in."
-  (:require [clojure.string :as str]
-            ["openai" :as OpenAI]
+  (:require ["openai" :as OpenAI]
             [seon.ai :as ai]
             [seon.ai.dispatch :as dispatch]
-            [seon.ai.tokens :as tokens]
+            [seon.ai.openai-compat.core :as core]
             [seon.error :as error]
             [seon.log :as seon-log]
             [seon.platform :as platform]
@@ -173,32 +172,10 @@
   [{:seon.ai/keys [ctx model temperature max-tokens tools tool-choice stream?]
     :as request}
    resolution]
-  (let [cfg      (:seon.ai/resolved-config resolution)
-        thinking (ai/thinking-mode cfg)
-        compat?  (openai-compat? resolution)
-        temperature* (or temperature (:seon.ai/temperature cfg))
-        tools*   (or tools (:seon.ai/tools cfg))
-        choice*  (or tool-choice (:seon.ai/tool-choice cfg))
-        completion-limit-key
-        (case (:seon.ai/completion-limit-field cfg)
-          :max-completion-tokens :max_completion_tokens
-          :max_tokens)]
-    (cond->
-      {:model          (or model (:seon.ai/model cfg))
-       :messages       [{:role "system" :content (ai/effective-system-prompt request)}
-                        {:role "user"   :content ctx}]}
-      (some? (or max-tokens (:seon.ai/max-tokens cfg)))
-      (assoc completion-limit-key (or max-tokens (:seon.ai/max-tokens cfg)))
-      stream? (assoc :stream true
-                     :stream_options {:include_usage true})
-      (some? temperature*) (assoc :temperature temperature*)
-      ;; :deepseek always sends the vendor :thinking toggle (that API
-      ;; defaults to enabled); :openai-compat never sends it — only the
-      ;; standard :reasoning_effort (see the thinking-mode note above).
-      (not compat?)      (assoc :thinking {:type (if thinking "enabled" "disabled")})
-      (string? thinking) (assoc :reasoning_effort thinking)
-      (some? tools*)         (assoc :tools tools*)
-      (some? choice*)        (assoc :tool_choice choice*))))
+  (core/request-params
+   (assoc request :seon.ai/system-prompt
+          (ai/effective-system-prompt request))
+   resolution))
 
 (defn- request-extra-body
   "The generic extra request fields for this call — `:seon.ai/extra-body`
@@ -207,28 +184,6 @@
   [request resolution]
   (or (:seon.ai/extra-body request)
       (:seon.ai/extra-body resolution)))
-
-(def ^:private known-completion-keys
-  "Top-level ChatCompletion keys the adapter consumes directly — the
-   REMAINDER is preserved as :seon.ai/provider-fields (#25)."
-  #{:choices :usage :id :object :created :model :system_fingerprint})
-
-(defn- response-identity-result
-  "Retain one bounded identity or return a generic bounded marker."
-  [resolution schema-key label value]
-  (when (some? value)
-    (let [cap (get-in resolution
-                      [:seon.ai/resolved-config
-                       :seon.config.model-transport/response-identity-cap])]
-      (cond
-        (nil? cap) nil
-        (and (schema/valid-candidate-value? schema-key value)
-             (<= (count value) cap)) {::identity-value value}
-        :else
-        {::identity-error
-         (ai/bounded-evidence-error
-           (str "Provider response " label " exceeds its evidence bound.")
-           cap)}))))
 
 (defn parse-completion
   "Map an assembled OpenAI ChatCompletion OBJECT to a complete-response.
@@ -249,58 +204,22 @@
                               :seon.ai/config-resolution]]
                   :seon.ai.openai-compat/complete-response]}
   [completion resolution]
-  (let [body       (js->clj completion :keywordize-keys true)
-        choice     (-> body :choices first)
-        message    (:message choice)
-        msg        (:content message)
-        reasoning  (:reasoning_content message)
-        tool-calls (:tool_calls message)
-        finish-reason (:finish_reason choice)
-        truncated? (= "length" finish-reason)
-        model-result
-        (response-identity-result resolution :seon.ai/response-model
-                                  "model identity" (:model body))
-        fingerprint-result
-        (response-identity-result resolution :seon.ai/system-fingerprint
-                                  "system fingerprint"
-                                  (:system_fingerprint body))
-        request-id-result
-        (response-identity-result resolution :seon.ai/request-id
-                                  "request identity" (:id body))
-        response-model (::identity-value model-result)
-        fingerprint (::identity-value fingerprint-result)
-        request-id (::identity-value request-id-result)
-        evidence-error (some ::identity-error
-                             [model-result fingerprint-result request-id-result])
-        extras     (apply dissoc body known-completion-keys)]
+  (let [body (js->clj completion :keywordize-keys true)]
     ;; Diagnosis evidence, not behavior (downstream ask 20): a
     ;; thinking-mode completion can land EVERY token in
     ;; reasoning_content and return empty visible content — the
     ;; turn-outcome guard handles the re-prompt; here we just log that
     ;; the reasoning field was present and dropped.
-    (when (and (zero? (count (or msg "")))
-               (pos? (count (or reasoning ""))))
+    (when (core/empty-content-with-reasoning? body)
       (seon-log/debug!
         {:seon.log/source ::empty-completion
          :seon.log/message
          (str "completion content EMPTY but"
-              " reasoning_content present (~" (tokens/estimate reasoning)
+              " reasoning_content present (~"
+              (core/reasoning-token-estimate body)
               " tokens) — thinking-mode tokens landed in the reasoning"
               " field; dropping it (parsed as before)")}))
-    (cond-> {:seon.ai/text                        (or msg "")
-             :seon.ai.openai-compat/finish-reason finish-reason}
-      truncated? (assoc :seon.ai/truncated? true)
-      (and truncated? (str/blank? (or msg "")))
-      (assoc :seon.ai/error
-             {:seon.ai/msg
-              "Provider exhausted the configured completion limit before returning visible text."})
-      (some? (:usage body)) (assoc :seon.ai/usage (:usage body))
-      (seq tool-calls)      (assoc :seon.ai/tool-calls tool-calls)
-      response-model (assoc :seon.ai/response-model response-model)
-      fingerprint (assoc :seon.ai/system-fingerprint fingerprint)
-      request-id (assoc :seon.ai/request-id request-id)
-      evidence-error (assoc :seon.ai/evidence-error evidence-error)
-      (seq extras)          (assoc :seon.ai/provider-fields extras))))
+    (core/parse-completion body resolution)))
 
 (defn- config-error
   "Errors-as-values envelope for a CALL-TIME config gap (no endpoint /
@@ -425,10 +344,10 @@
    `:seon.ai/estimated? true` so the numbers are never mistaken for
    provider-reported."
   [request text]
-  (let [p (+ (tokens/estimate (ai/effective-system-prompt request))
-             (tokens/estimate (str (:seon.ai/ctx request))))
-        c (tokens/estimate (str text))]
-    {:prompt_tokens p :completion_tokens c :total_tokens (+ p c)}))
+  (core/estimated-usage
+   (assoc request :seon.ai/system-prompt
+          (ai/effective-system-prompt request))
+   text))
 
 (defn ^:async complete
   "Send a chat-completions request to the active provider's endpoint.

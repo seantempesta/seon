@@ -46,8 +46,8 @@
    message."
   (:require [clojure.string :as str]
             [cljs.reader :as reader]
-            ["node:crypto" :as node-crypto]
             [seon.agent.ctx :as ctx]
+            [seon.ai.core :as core]
             [seon.ai.generate-code :as generate-code]
             [seon.ai.provider :as provider]
             [seon.config :as config]
@@ -77,10 +77,7 @@
 (schema/register! ::system-prompt :string)
 (schema/register! ::ctx :string)
 (schema/register! ::usage :map)
-(schema/register! ::msg :string)
 (schema/register! ::endpoint-error [:map [::msg ::msg]])
-(schema/register! ::status :int)
-(schema/register! ::timeout? :boolean)
 ;; TRANSPORT-shaped failure: js/fetch THREW before any HTTP status
 ;; arrived — DNS failure, connection refused/reset, the observed live
 ;; "fetch failed" (2026-06-11). This is the ONE retryable class: the
@@ -89,14 +86,10 @@
 ;; (4xx/5xx) and unparseable bodies are PROCESSING errors (never
 ;; flagged); a wall-clock abort is :seon.ai/timeout? — also never
 ;; flagged, it already burned the full timeout budget.
-(schema/register! ::transport? :boolean)
-(schema/register! ::raw-body :string)
 ;; The server's `Retry-After` for a 429/503, already PARSED to
 ;; milliseconds (delta-seconds or HTTP-date → ms-from-now; never
 ;; negative). Present ONLY when the provider sent the header on a
 ;; retryable HTTP-status error; the agent turn loop's backoff honors it.
-(schema/register! ::retry-after-ms :int)
-(schema/register! ::evidence-error [:string {:min 1}])
 
 ;; Tool/function-calling + extra-request + provider-metadata vocabulary
 ;; (SDK migration, 2026-06-16). These ride third-party-shaped maps: the
@@ -173,22 +166,6 @@
   [signal]
   (boolean (and signal (.-aborted signal))))
 
-;; The errors-are-values envelope for LLM calls. Every failure mode
-;; (timeout, fetch throw, HTTP non-2xx, unparseable body, refusal)
-;; resolves to a response map carrying this under :seon.ai/error —
-;; never a rejected Promise. Callers (seon.agent's turn loop) MUST
-;; surface it.
-(schema/register!
-  ::error
-  [:map
-   [::msg            ::msg]
-   [::status         {:optional true} ::status]
-   [::timeout?       {:optional true} ::timeout?]
-   [::transport?     {:optional true} ::transport?]
-   [::retry-after-ms {:optional true} ::retry-after-ms]
-   [::evidence-error {:optional true} ::evidence-error]
-   [::raw-body       {:optional true} ::raw-body]])
-
 ;; ------------------------------------------------------------
 ;; Retry-After parsing — ONE place so both adapters (anthropic /
 ;; openai-compat) extract the header identically (no duplicate shape).
@@ -202,14 +179,7 @@
    now (clamped non-negative). Blank/unparseable → nil."
   {:malli/schema [:=> [:catn [::header [:maybe :string]]] [:maybe :int]]}
   [header]
-  (when (and (string? header) (not (str/blank? header)))
-    (let [trimmed (str/trim header)
-          secs    (js/Number trimmed)]
-      (if (js/isFinite secs)
-        (max 0 (js/Math.round (* secs 1000)))
-        (let [t (js/Date.parse trimmed)]
-          (when-not (js/isNaN t)
-            (max 0 (- t (js/Date.now)))))))))
+  (core/parse-retry-after-ms header (js/Date.now)))
 
 (defn- header-get
   "Read header `k` (case-insensitively) off either a `Headers` instance
@@ -575,31 +545,6 @@
          ::agent-fallback-variant]
         (keys agent-override-attrs)))
 
-(defn- agent-row-override-values
-  [agent]
-  (reduce-kv
-    (fn [m agent-attr global-attr]
-      (if (contains? agent agent-attr)
-        (assoc m global-attr (get agent agent-attr))
-        m))
-    {}
-    agent-override-attrs))
-
-(defn- agent-row-max-retries
-  [agent]
-  (let [value (::agent-max-retries agent)]
-    (when (int? value) value)))
-
-(defn- agent-row-attempt-timeout-ms
-  [agent]
-  (let [value (::agent-attempt-timeout-ms agent)]
-    (when (int? value) value)))
-
-(defn- agent-row-fallback-variant
-  [agent]
-  (let [value (::agent-fallback-variant agent)]
-    (when (keyword? value) value)))
-
 (schema/register! ::agent-id [:string {:min 1}])
 
 ;; WHERE a resolved value came from — provenance by DERIVATION (the
@@ -651,15 +596,6 @@
    [::provenance ::provenance]
    [::credential-source {:optional true} ::credential-source]])
 
-(defn- extra-body-digest
-  "SHA-256 of the exact database-owned EDN bytes when they parse as a map."
-  [raw]
-  (let [parsed (try (reader/read-string raw) (catch :default _ nil))]
-    (when (map? parsed)
-      (-> (.createHash node-crypto "sha256")
-          (.update raw "utf8")
-          (.digest "hex")))))
-
 (def ^:private model-transport-cap-attrs
   [:seon.config.model-transport/response-identity-cap
    :seon.config.model-transport/endpoint-cap])
@@ -676,46 +612,6 @@
   []
   (vec model-transport-cap-attrs))
 
-(defn- resolve-config-values
-  [row-cfg overrides transport-caps]
-  (let [pick (fn [k defaults]
-               (cond
-                 (contains? overrides k) [(get overrides k) :agent-override]
-                 (contains? row-cfg k)   [(get row-cfg k) :config-row]
-                 (contains? defaults k)  [(get defaults k) :default]))
-        [prov prov-src] (or (pick ::provider {}) [:deepseek :default])
-        defaults (get shipped-defaults prov {})
-        resolved
-        (reduce
-         (fn [acc k]
-           (if-let [[v src] (pick k defaults)]
-             (-> acc
-                 (assoc-in [::resolved-config k] v)
-                 (assoc-in [::provenance k] src))
-             acc))
-         {::resolved-config {::provider prov}
-          ::provenance      {::provider prov-src}}
-         [::model ::temperature ::max-tokens ::completion-limit-field
-          ::thinking ::timeout-ms
-          ::base-url ::api-key-env ::dg-backend])
-        resolved
-        (reduce-kv
-         (fn [acc attr [value source]]
-           (-> acc
-               (assoc-in [::resolved-config attr] value)
-               (assoc-in [::provenance attr] source)))
-         resolved
-         transport-caps)]
-    (if-let [[raw src] (pick ::extra-body-edn defaults)]
-      (let [body (try (reader/read-string raw) (catch :default _ nil))]
-        (if-let [digest (and (map? body) (extra-body-digest raw))]
-          (-> resolved
-              (assoc ::extra-body body)
-              (assoc-in [::resolved-config ::extra-body-digest] digest)
-              (assoc-in [::provenance ::extra-body-digest] src))
-          resolved))
-      resolved)))
-
 (defn resolved-config-from-rows
   "Resolve effective LLM configuration from ordinary pulled maps.
 
@@ -730,35 +626,8 @@
    [:=> [:catn [::config-row ::row] [::agent-row :map]]
     ::resolved-config-response]}
   [config-row agent-row]
-  (let [transport-caps
-        (into {}
-              (keep (fn [attr]
-                      (when (contains? config-row attr)
-                        [attr [(get config-row attr) :config-row]])))
-              model-transport-cap-attrs)
-        attempt-timeout-ms (config/llm-attempt-timeout-ms)
-        provider-resolution
-        (fn [row]
-          (cond->
-           (resolve-config-values
-            (select-keys config-row config-attrs)
-            (agent-row-override-values row)
-            transport-caps)
-            (some? (agent-row-max-retries row))
-            (assoc ::agent-max-retries (agent-row-max-retries row))
-            true
-            (assoc ::agent-attempt-timeout-ms
-                   (or (agent-row-attempt-timeout-ms row)
-                       attempt-timeout-ms))))
-        primary (provider-resolution agent-row)
-        fallback-variant (agent-row-fallback-variant agent-row)
-        fallback-row (get (config/model-variants config-row)
-                          fallback-variant)]
-    (cond-> primary
-      (and fallback-variant (map? fallback-row))
-      (assoc ::fallback-variant fallback-variant
-             ::fallback-config-resolution
-             (provider-resolution fallback-row)))))
+  (core/resolved-config-from-rows
+   shipped-defaults config-row agent-row (config/llm-attempt-timeout-ms)))
 
 (defn bounded-evidence-error
   "Bound an evidence error using one resolved positive cap."
@@ -792,11 +661,8 @@
    \"true\" → true, anything else → the string itself (a
    reasoning-effort level like \"high\"/\"max\")."
   {:malli/schema [:=> [:catn [::row ::row]] ::thinking-value]}
-  [{::keys [thinking]}]
-  (case thinking
-    (nil "false") false
-    "true"        true
-    thinking))
+  [config]
+  (core/thinking-mode config))
 
 ;; ============================================================
 ;; Shared provider-boundary system-prompt resolution — the prompt compiler

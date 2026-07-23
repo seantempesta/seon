@@ -96,6 +96,13 @@ the anchor stays the state ledger.
   requires still fail when an unconditional function body resolves them.
   Keep native bodies in the leaf and make the portable load a focused gate
   (`src/seon/agent/web.cljc:1-20,239-359`).
+- **Provider objects become data exactly once, at the native leaf.** Keep SDK
+  construction, SDK error classes, and `js->clj` in the CLJS adapter; pass the
+  resulting ordinary map to a `.cljc` interpreter. The dual-tier test must call
+  that interpreter from identical response bytes, while the existing public
+  CLJS function remains the SDK-object compatibility edge
+  (`src/seon/ai/{openai_compat,anthropic}.cljs`,
+  `test/seon/ai/portable_test.cljc`).
 - **A prose-closed request needs `{:closed true}` in its Malli map.** Web fetch
   and search documented closed option sets but their schemas admitted unknown
   resource dials; the portable drift test caught the mismatch
