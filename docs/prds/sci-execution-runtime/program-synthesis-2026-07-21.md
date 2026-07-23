@@ -127,6 +127,16 @@ COMPLETELY before dispatching anything.
   (source freeze blocked by U3/U5 uncommitted writer/db files —
   correct call, see issue full-writer-gate-fails-during-runtime-
   lane-integration).
+- U5 first slice LANDED (1cdb048c3): fifth web-render operator
+  member, db.host interest session (public framing, reader vthread,
+  resync), JVM /data + /data/feed (http-kit + datastar SDK, vthread
+  per connection, latest-wins mailbox), nine R27 web-render facts;
+  focused proofs green incl. real transact→second-morph. Live
+  graduation was blocked by a UnixPath/slurp defect in U4's operator
+  config edit (b6183ee9d) — orchestrator fixed top-level (2a2844d7e);
+  U5 resumed for live up/status/down + gzip parity transcripts. Full
+  writer-gate noise attributed to U3's in-flight files (existing
+  integration issue; frozen-tree checkpoint pending).
 - U2 THE SPINE DISPATCHED (spec tmp/orchestrator/
   u2-claim-driver-spec.md, effort=high): both tiers run the one
   portable claim-native driver as phase-limited claimants (pod:
