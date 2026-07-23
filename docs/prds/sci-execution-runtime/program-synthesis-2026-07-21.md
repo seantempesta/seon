@@ -610,6 +610,22 @@ COMPLETELY before dispatching anything.
   one inventory enumerator). P5 resumes after P2's extension lands;
   its wiki entry staged at tmp/orchestrator/p5-wiki-append.md.
   Provenance-fix commit observed (adc25b852) — review on report.
+- R39 (owner, 2026-07-23 late): PRIVATE first-party core helpers
+  become corpus rows; third-party internals stay out (structural —
+  indexing walks first-party only). Differentiator = presence-based
+  :seon.fn/private? true (absent = public; no stored false; the
+  analyzer already retains privacy — the current gap is only the
+  indexing-time filter). Consumer consequences, deliberate: (i)
+  agent-facing DEFAULT context/menu/namespace renders OMIT privates
+  (derived views query the absence); drill/search/source reads
+  REACH them (show-don't-tell — agents can study core internals);
+  (ii) the census keeps counting public vars (its computed rule
+  keys on publicity); (iii) boot population grows — safe once the
+  paging lane lands (ordering: paging FIRST). Implementation queues
+  onto the artifact-inventory lane's return (it owns
+  client/indexing.clj and must reconcile: first-party privates as
+  corpus rows, its build inventory narrowing to third-party
+  terminals + export digests — no double coverage).
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
