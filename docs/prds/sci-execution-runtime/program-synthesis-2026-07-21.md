@@ -526,6 +526,15 @@ COMPLETELY before dispatching anything.
   the design with BOTH modes + the presentation sink + partial-text
   publication, (3) provider descriptor rows (Kimi/Z.AI/OpenRouter/
   DeepSeek-cached; Gemini row-only-if-compat-qualifies).
+- R37 (owner, 2026-07-23 PM): GEMINI IS REQUIRED. Path decided by
+  the streaming lane's compat-surface qualification probe: qualifies
+  → descriptor row; falls short → a genuine third :gemini native
+  wire core (JSONL streaming, own transforms) in the core+leaf
+  pattern, litellm's native gemini.clj as cited reference for the
+  transforms — the owner's requirement is the proven need the
+  evaluation asked for. Embeddings VERIFIED intact: embed-writer
+  tests green in the widened gate, Proximum index stores exercised,
+  the one SEON_EMBED/Vertex path untouched.
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
