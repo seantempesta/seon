@@ -160,11 +160,11 @@
 ;; status is filled only after the real loader reports the block `:loaded`.
 (def ^:private disposition-seeds
   [;; W5-0e blob archive port.
-   ["my.blob/concat!" {::disposition :host/platform-pending ::unit :w5-0e}]
-   ["my.blob/get" {::disposition :host/platform-pending ::unit :w5-0e}]
-   ["my.blob/put!" {::disposition :host/platform-pending ::unit :w5-0e}]
-   ["my.blob/stat" {::disposition :host/capability-pending ::unit :w5-0e}]
-   ["my.blob/text" {::disposition :host/platform-pending ::unit :w5-0e}]
+   ["my.blob/concat!" {::unit :w5-0e}]
+   ["my.blob/get" {::unit :w5-0e}]
+   ["my.blob/put!" {::unit :w5-0e}]
+   ["my.blob/stat" {::unit :w5-0e}]
+   ["my.blob/text" {::unit :w5-0e}]
 
    ;; Computed portable-base canvas rows, then W5-0f toolkit follow-ups.
    ["my.canvas/button" {::unit :w5-0a}]

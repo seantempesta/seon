@@ -38,6 +38,8 @@
    row."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
+            [my.blob :as blob]
+            [my.blob.host :as blob.host]
             [sci.core :as sci]
             [sci.ctx-store]
             [sci.interrupt :as interrupt]
@@ -502,7 +504,18 @@
      'job-status {::wrapper-fn shell.leaf/job-status ::effect :read}
      'job-output {::wrapper-fn shell.leaf/job-output ::effect :read}
      'job-stop! {::wrapper-fn shell.leaf/job-stop! ::effect :external}}})
-  (let [functions ((deref #'agent.web/bind-leaf) (web.host/services {}))]
+  (let [database-functions (bound-database-functions writer)
+        blob-functions
+        (blob/bind-leaf
+         (blob.host/services
+          {::blob.host/current-db! (get database-functions 'db)
+           ::blob.host/query! (get database-functions 'query)
+           ::blob.host/transact! (get database-functions 'transact!)}))
+        functions
+        ((deref #'agent.web/bind-leaf)
+         (web.host/services
+          {::web.host/put! (get blob-functions 'put!)
+           ::web.host/transact! (get database-functions 'transact!)}))]
     (register-host-wrappers!
      {::registry registry
       ::lib 'seon.agent.web
@@ -510,6 +523,23 @@
       {'grants {::wrapper-fn (get functions 'grants) ::effect :read}
        'fetch {::wrapper-fn (get functions 'fetch) ::effect :external}
        'search {::wrapper-fn (get functions 'search) ::effect :external}}}))
+  (let [database-functions (bound-database-functions writer)
+        blob-functions
+        (blob/bind-leaf
+         (blob.host/services
+          {::blob.host/current-db! (get database-functions 'db)
+           ::blob.host/query! (get database-functions 'query)
+           ::blob.host/transact! (get database-functions 'transact!)}))]
+    (register-host-wrappers!
+     {::registry registry
+      ::lib 'my.blob
+      ::wrappers
+      {'put! {::wrapper-fn (get blob-functions 'put!) ::effect :idempotent}
+       'get {::wrapper-fn (get blob-functions 'get) ::effect :read}
+       'concat! {::wrapper-fn (get blob-functions 'concat!)
+                 ::effect :idempotent}
+       'text {::wrapper-fn (get blob-functions 'text) ::effect :read}
+       'stat {::wrapper-fn (get blob-functions 'stat) ::effect :read}}}))
   (register-host-wrappers!
    {::registry registry
     ::lib 'seon.db.id
