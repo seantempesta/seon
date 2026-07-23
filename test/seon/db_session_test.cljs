@@ -28,6 +28,7 @@
 (def ^:private initialization-0
   {:seon.execution/artifact-digest
    "0000000000000000000000000000000000000000000000000000000000000000"
+   :seon.db.initialization/page-rows 64
    :seon.db/attributes []
    :seon.db/program []
    :seon.db/initial-data []})
@@ -37,12 +38,25 @@
          :seon.execution/artifact-digest
          "1111111111111111111111111111111111111111111111111111111111111111"))
 
+(defn- test-page
+  [initialization]
+  {:seon.db.initialization/fingerprint
+   (:seon.execution/artifact-digest initialization)
+   :seon.db.initialization/page-index 0
+   :seon.db.initialization/page-count 1
+   :seon.db.initialization/page-rows
+   (:seon.db.initialization/page-rows initialization)
+   :seon.db.initialization/phase
+   :seon.db.initialization.phase/completion})
+
 (defn- success [request body]
   (protocol/success
    (assoc body ::protocol/request-id (::protocol/request-id request))))
 
 (defn- requested-database [request]
-  (if (= initialization-1 (::db/initialization request))
+  (if (= (:seon.execution/artifact-digest initialization-1)
+         (:seon.db.initialization/fingerprint
+          (:seon.db/initialization-page request)))
     database-1
     database-0))
 
@@ -105,6 +119,7 @@
         original-request! uds/request!
         original-connected? uds/connected?
         original-close! uds/close!
+        original-initialization-pages protocol/initialization-pages
         session {::session true
                  ::uds/version protocol/current-version
                  ::uds/configured-maximum-frame-bytes
@@ -132,6 +147,8 @@
             (let [connected? (::connected? @control)]
               (swap! control assoc ::connected? false)
               connected?)))
+    (set! protocol/initialization-pages
+          (fn [initialization] [(test-page initialization)]))
     (-> (js/Promise.resolve (body control))
         (.finally
          (fn []
@@ -140,7 +157,9 @@
            (set! uds/connect! original-connect!)
            (set! uds/request! original-request!)
            (set! uds/connected? original-connected?)
-           (set! uds/close! original-close!))))))
+           (set! uds/close! original-close!)
+           (set! protocol/initialization-pages
+                 original-initialization-pages))))))
 
 (defn- open!
   ([] (open! nil))
@@ -307,8 +326,9 @@
                                     protocol/acquire-database-operation]
                                    (mapv ::protocol/operation
                                          (::requests @control))))
-                            (is (= [initialization-0 initialization-1]
-                                   (mapv ::db/initialization
+                            (is (= [(test-page initialization-0)
+                                    (test-page initialization-1)]
+                                   (mapv :seon.db/initialization-page
                                          (operation-requests
                                           control
                                           protocol/ensure-database-operation))))

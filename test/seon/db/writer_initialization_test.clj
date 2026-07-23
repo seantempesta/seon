@@ -1,15 +1,17 @@
 (ns seon.db.writer-initialization-test
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
+            [cognitect.transit :as transit]
             [datahike.api :as d]
             [seon.db.branch :as branch]
             [seon.db.executor :as executor]
             [seon.db.protocol :as protocol]
             [seon.db.registry :as registry]
+            [seon.db.transport.uds :as uds]
             [seon.db.writer-test-support :as writer-test]
             [seon.db.writer :as writer]
             [seon.schema :as schema])
-  (:import [java.io File]))
+  (:import [java.io ByteArrayOutputStream File]))
 
 (defn- dependencies []
   {::writer/database-initializer (fn [_connection _database-name] nil)
@@ -49,13 +51,27 @@
               validation-errors))))
 
 (def schema-forms
-  {:seon.db/lookup-ref-value "[:or :string :uuid :keyword :symbol :int]"
+  {:inst "inst?"
+   :seon.db/lookup-ref-value "[:or :string :uuid :keyword :symbol :int]"
    :seon.db/ref
    "[:or :int :string [:tuple :keyword :seon.db/lookup-ref-value]]"
    :seon.schema/key "[:keyword {:seon.db/identity true}]"
    :seon.schema/form ":string"
+   :seon.schema/ns ":seon.db/ref"
    :seon.db.id/generator
    "[:enum :seon.db.id.generator/human-readable :seon.db.id.generator/compact]"
+   :seon.db.id/legacy-value "[:string {:min 14 :max 14}]"
+   :seon.db.id/compact-value
+   "[:or :seon.db.id/legacy-value [:and :string [:re \"^[a-z][a-z0-9]{11}$\"]]]"
+   :my.plan/id
+   "[:and {:seon.db/identity true :seon.db.id/generator :seon.db.id.generator/compact} :seon.db.id/compact-value]"
+   :seon.db.initialization/id "[:string {:seon.db/identity true}]"
+   :seon.db.initialization/fingerprint "[:string {:min 1}]"
+   :seon.db.initialization/page-fingerprint "[:string {:min 1}]"
+   :seon.db.initialization/identities ":string"
+   :seon.db.initialization/page-count "[:int {:min 1}]"
+   :seon.db.initialization/status
+   "[:enum :seon.db.initialization.status/in-progress :seon.db.initialization.status/complete]"
    :seon.agent/id "[:string {:seon.db/identity true}]"
    :seon.db/user ":seon.db/ref"
    :seon.db/process ":seon.db/ref"
@@ -84,6 +100,7 @@
 (def initialization
   {:seon.execution/artifact-digest
    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+   :seon.db.initialization/page-rows 4
    :seon.db/attributes
    [:seon.agent/id :seon.db/user :seon.db/process :seon.db.process/id
     :seon.user/id :seon.ns/name :seon.ns/source :seon.ns/doc :seon.ns/summary
@@ -109,6 +126,255 @@
          schema-forms)
    :seon.db/initial-data [{:seon.user/id "user"}]})
 
+(defn- ensure-initialization!
+  ([runtime database-name initialization]
+   (ensure-initialization! runtime database-name initialization nil))
+  ([runtime database-name initialization connection-id]
+   (reduce
+    (fn [_response page]
+      (writer/handle-request
+       runtime
+       (protocol/ensure-database-request
+        (cond-> {::protocol/request-id
+                 (str "test-ensure/"
+                      (:seon.db.initialization/fingerprint page)
+                      "/"
+                      (:seon.db.initialization/page-index page))
+                 ::protocol/database-name database-name
+                 ::protocol/backend :memory
+                 :seon.db/initialization-page page}
+          connection-id
+          (assoc ::branch/connection-id connection-id)))))
+    nil
+    (protocol/initialization-pages initialization))))
+
+(defn- ensure-page!
+  [runtime database-name page]
+  (writer/handle-request
+   runtime
+   (protocol/ensure-database-request
+    {::protocol/request-id
+     (str "test-page/" (:seon.db.initialization/page-index page))
+     ::protocol/database-name database-name
+     ::protocol/backend :memory
+     :seon.db/initialization-page page})))
+
+(defn- transit-bytes
+  [value]
+  (let [output (ByteArrayOutputStream.)]
+    (transit/write (transit/writer output :json) value)
+    (.size output)))
+
+(deftest ten-times-population-stays-well-below-frame-ceiling
+  (let [schema-rows
+        (filterv #(contains? % :seon.schema/key)
+                 (:seon.db/program initialization))
+        ordinary-rows
+        (filterv #(not (contains? % :seon.schema/key))
+                 (:seon.db/program initialization))
+        synthetic-schema-rows
+        (into []
+              (map (fn [index]
+                     {:seon.schema/key
+                      (keyword "synthetic.schema" (str "value-" index))
+                      :seon.schema/form ":string"}))
+              (range (* 10 (count schema-rows))))
+        synthetic-program-rows
+        (into []
+              (mapcat
+               (fn [index]
+                 (let [namespace-name
+                       (symbol (str "my.synthetic." index))]
+                   [{:seon.ns/name namespace-name
+                     :seon.ns/source (str "(ns " namespace-name ")")}
+                    {:seon.fn/sym (str namespace-name "/answer")
+                     :seon.fn/ns [:seon.ns/name namespace-name]
+                     :seon.fn/source "(defn answer [] 42)"}])))
+              (range (* 5 (count ordinary-rows))))
+        synthetic
+        (-> initialization
+            (assoc :seon.db.initialization/page-rows 64)
+            (assoc :seon.db/program
+                   (into (vec schema-rows)
+                         (concat synthetic-schema-rows
+                                 synthetic-program-rows)))
+            (assoc :seon.db/initial-data
+                   (mapv (fn [index]
+                           {:seon.user/id (str "user-" index)})
+                         (range 10))))
+        pages (protocol/initialization-pages synthetic)
+        requests
+        (mapv
+         (fn [page]
+           (protocol/ensure-database-request
+            {::protocol/request-id
+             (str "frame/" (:seon.db.initialization/page-index page))
+             ::protocol/database-name "synthetic"
+             ::protocol/backend :memory
+             :seon.db/initialization-page page}))
+         pages)
+        sizes (mapv transit-bytes requests)]
+    (is (< (apply max sizes) (* 1024 1024))
+        (pr-str {:maximum-page-bytes (apply max sizes)
+                 :frame-ceiling protocol/maximum-frame-bytes}))
+    (is (every? #(< % protocol/maximum-frame-bytes) sizes))
+    (is (> (count pages) 10)
+        "population growth creates more bounded pages, not larger frames")))
+
+(deftest schema-pages-commit-references-before-generated-identities
+  (let [pages (protocol/initialization-pages initialization)
+        ordered-keys
+        (into []
+              (comp
+               (filter #(= :seon.db.initialization.phase/schema
+                           (:seon.db.initialization/phase %)))
+               (mapcat :seon.db/program)
+               (map :seon.schema/key))
+              pages)
+        positions (zipmap ordered-keys (range))]
+    (is (< (positions :seon.db.id/legacy-value)
+           (positions :seon.db.id/compact-value)
+           (positions :my.plan/id))
+        (pr-str ordered-keys))))
+
+(deftest interrupted-page-prefix-is-unavailable-until-completion
+  (let [database-name (str "writer-interrupted-seed-" (random-uuid))
+        socket-file (File. "tmp" (str database-name ".sock"))
+        server
+        (writer-test/start!
+         {::writer/dependencies (dependencies)
+          ::writer/database-name database-name
+          ::writer/backend :memory
+          ::writer/request-socket-path (.getAbsolutePath socket-file)})
+        runtime (::writer/runtime server)
+        pages (protocol/initialization-pages initialization)
+        split-index (quot (count pages) 2)
+        prefix (subvec pages 0 split-index)
+        suffix (subvec pages split-index)
+        transport
+        (#'writer/transport-connection
+         {::uds/close! (fn [] nil) ::uds/send! (fn [_message] nil)})]
+    (try
+      (doseq [page prefix]
+        (is (::protocol/success?
+             (ensure-page! runtime database-name page))))
+      (let [connection
+            (::registry/conn
+             (registry/lookup-connection
+              {::registry/database-name (keyword database-name)}))
+            db-value (d/db connection)
+            completion (promise)]
+        (is (= :seon.db.initialization.status/in-progress
+               (:seon.db.initialization/status
+                (d/entity db-value
+                          [:seon.db.initialization/id "database"]))))
+        (writer/handle-request!
+         runtime transport
+         (protocol/acquire-database-request
+          {::protocol/request-id "interrupted/acquire"
+           ::protocol/database-name database-name})
+         #(deliver completion %))
+        (let [rejected (deref completion 5000 ::not-delivered)]
+          (is (false? (::protocol/success? rejected)) (pr-str rejected))
+          (is (= protocol/initializer-error
+                 (::protocol/error-kind rejected)))))
+      (doseq [page suffix]
+        (is (::protocol/success?
+             (ensure-page! runtime database-name page))))
+      (let [db-value
+            (d/db
+             (::registry/conn
+              (registry/lookup-connection
+               {::registry/database-name (keyword database-name)})))]
+        (is (= :seon.db.initialization.status/complete
+               (:seon.db.initialization/status
+                (d/entity db-value
+                          [:seon.db.initialization/id "database"]))))
+        (is (= "(defn answer [] 42)"
+               (d/q '[:find ?source .
+                      :where
+                      [?function :seon.fn/sym "my.core/answer"]
+                      [?function :seon.fn/source ?source]]
+                    db-value))))
+      (finally
+        (#'writer/close-transport-connection! runtime transport)
+        (writer/stop! server)
+        (.delete socket-file)))))
+
+(defn- initialized-population
+  [db-value]
+  {:schemas
+   (d/q '[:find ?key ?form
+          :where
+          [?schema :seon.schema/key ?key]
+          [?schema :seon.schema/form ?form]]
+        db-value)
+   :namespaces
+   (d/q '[:find ?name ?source
+          :where
+          [?namespace :seon.ns/name ?name]
+          [?namespace :seon.ns/source ?source]]
+        db-value)
+   :functions
+   (d/q '[:find ?sym ?source ?spec
+          :where
+          [?function :seon.fn/sym ?sym]
+          [?function :seon.fn/source ?source]
+          [(get-else $ ?function :seon.fn/spec "") ?spec]]
+        db-value)
+   :initial-users
+   (d/q '[:find [?id ...] :where [_ :seon.user/id ?id]] db-value)
+   :installed-schema
+   (into {}
+         (comp
+          (filter (comp qualified-keyword? key))
+          (map (fn [[attribute declaration]]
+                 [attribute
+                  (select-keys declaration
+                               [:db/valueType :db/cardinality :db/unique
+                                :db/isComponent :db/index])])))
+         (:schema db-value))})
+
+(deftest page-count-does-not-change-the-initialized-population
+  (let [database-name (str "writer-page-parity-" (random-uuid))
+        single-name (str database-name "-single")
+        paged-name (str database-name "-paged")
+        socket-file (File. "tmp" (str database-name ".sock"))
+        server
+        (writer-test/start!
+         {::writer/dependencies (dependencies)
+          ::writer/database-name database-name
+          ::writer/backend :memory
+          ::writer/request-socket-path (.getAbsolutePath socket-file)})
+        runtime (::writer/runtime server)]
+    (try
+      (is (::protocol/success?
+           (ensure-initialization!
+            runtime single-name
+            (assoc initialization
+                   :seon.db.initialization/page-rows 100000))))
+      (is (::protocol/success?
+           (ensure-initialization!
+            runtime paged-name
+            (assoc initialization
+                   :seon.db.initialization/page-rows 4))))
+      (let [single
+            (d/db
+             (::registry/conn
+              (registry/lookup-connection
+               {::registry/database-name (keyword single-name)})))
+            paged
+            (d/db
+             (::registry/conn
+              (registry/lookup-connection
+               {::registry/database-name (keyword paged-name)})))]
+        (is (= (initialized-population single)
+               (initialized-population paged))
+            "bounded N-page initialization equals the large-page population"))
+      (finally
+        (writer/stop! server)
+        (.delete socket-file)))))
+
 (deftest ensure-admits-one-program-and-converges-without-another-transaction
   (let [database-name (str "writer-initialization-" (random-uuid))
         socket-file (File. "tmp" (str database-name ".sock"))
@@ -120,14 +386,8 @@
           ::writer/request-socket-path (.getAbsolutePath socket-file)})
         runtime (::writer/runtime server)
         ensure
-        (fn [request-id initialization]
-          (writer/handle-request
-           runtime
-           (protocol/ensure-database-request
-            {::protocol/request-id request-id
-             ::protocol/database-name database-name
-             ::protocol/backend :memory
-             :seon.db/initialization initialization})))
+        (fn [_request-id initialization]
+          (ensure-initialization! runtime database-name initialization))
         base-initialization
         (update initialization :seon.db/attributes
                 #(vec (remove #{:seon.render/full?} %)))]
@@ -148,10 +408,10 @@
              (registry/lookup-connection
               {::registry/database-name (keyword database-name)}))]
         (is (::protocol/success? admitted) (pr-str admitted))
-        (is (= (+ before 2) after-first)
-            "fresh admission is one genesis plus one boot transaction")
-        (is (= (inc after-first) after-upgrade)
-            "a populated database installs a newly selected attribute once")
+        (is (< before after-first)
+            "fresh admission advances through bounded page transactions")
+        (is (< after-first after-upgrade)
+            "a populated database admits a changed page population")
         (is (= after-upgrade (:t (:seon.db/db converged)))
             "a converged ensure creates no transaction")
         (is (= "(defn answer [] 42)"
@@ -246,14 +506,8 @@
           ::writer/request-socket-path (.getAbsolutePath socket-file)})
         runtime (::writer/runtime server)
         ensure
-        (fn [request-id initialization]
-          (writer/handle-request
-           runtime
-           (protocol/ensure-database-request
-            {::protocol/request-id request-id
-             ::protocol/database-name database-name
-             ::protocol/backend :memory
-             :seon.db/initialization initialization})))
+        (fn [_request-id initialization]
+          (ensure-initialization! runtime database-name initialization))
         with-event-schema
         (fn [initialization at-form]
           (-> initialization
@@ -287,8 +541,8 @@
             db-value (d/db connection)
             before-rejection (:max-tx db-value)]
         (is (::protocol/success? admitted) (pr-str admitted))
-        (is (= (inc before-index) after-index)
-            "the additive index migration commits exactly once")
+        (is (< before-index after-index)
+            "the additive index migration advances through bounded pages")
         (is (true? (get-in db-value
                            [:schema :example.event/at :db/index])))
         (is (= [(java.util.Date. 1000)]
@@ -300,8 +554,13 @@
           (let [rejected
                 (ensure (str "additive-index/incompatible-" index) candidate)]
             (is (false? (::protocol/success? rejected)) (pr-str rejected))))
-        (is (= before-rejection (:max-tx (d/db connection)))
-            "incompatible type and cardinality changes cannot advance the database"))
+        (is (< before-rejection (:max-tx (d/db connection)))
+            "a rejected later page leaves an explicit incomplete prefix")
+        (is (= :seon.db.initialization.status/in-progress
+               (:seon.db.initialization/status
+                (d/entity (d/db connection)
+                          [:seon.db.initialization/id "database"])))
+            "a rejected prefix cannot be mistaken for a completed seed"))
       (finally
         (writer/stop! server)
         (.delete socket-file)))))
@@ -318,13 +577,7 @@
         runtime (::writer/runtime server)]
     (try
       (let [admitted
-            (writer/handle-request
-             runtime
-             (protocol/ensure-database-request
-              {::protocol/request-id "implicit-index/initialization"
-               ::protocol/database-name database-name
-               ::protocol/backend :memory
-               :seon.db/initialization initialization}))
+            (ensure-initialization! runtime database-name initialization)
             connection
             (::registry/conn
              (registry/lookup-connection
@@ -372,13 +625,8 @@
                        sha-256))]
     (try
       (let [response
-            (writer/handle-request
-             runtime
-             (protocol/ensure-database-request
-              {::protocol/request-id "schema-alias/initialization"
-               ::protocol/database-name database-name
-               ::protocol/backend :memory
-               :seon.db/initialization aliased-initialization}))
+            (ensure-initialization!
+             runtime database-name aliased-initialization)
             connection
             (::registry/conn
              (registry/lookup-connection
@@ -417,8 +665,9 @@
         branch :experiment/initialization
         branch-connection-id
         (assoc (::registry/connection-id main) 1 branch)
-        invalid-initialization
-        (assoc initialization :seon.db/program [])]
+        invalid-page
+        (assoc (first (protocol/initialization-pages initialization))
+               :seon.db/program [])]
     (try
       (let [failed
             (writer/handle-request
@@ -427,7 +676,7 @@
               {::protocol/request-id "initialization/failed"
                ::protocol/database-name failed-name
                ::protocol/backend :memory
-               :seon.db/initialization invalid-initialization}))]
+               :seon.db/initialization-page invalid-page}))]
         (is (false? (::protocol/success? failed)))
         (is (nil?
              (::registry/conn
@@ -447,7 +696,8 @@
                ::protocol/database-name branch-name
                ::protocol/backend :memory
                ::branch/connection-id branch-connection-id
-               :seon.db/initialization initialization}))
+               :seon.db/initialization-page
+               (first (protocol/initialization-pages initialization))}))
             after
             (branch/head
              (d/branch-as-db (::registry/conn main) branch))]
@@ -536,13 +786,7 @@
                      :example/full-source ['my.shared]}]))]
     (try
       (let [response
-            (writer/handle-request
-             runtime
-             (protocol/ensure-database-request
-              {::protocol/request-id "entity-schema/initialization"
-               ::protocol/database-name database-name
-               ::protocol/backend :memory
-               :seon.db/initialization initialization}))
+            (ensure-initialization! runtime database-name initialization)
             db-value
             (d/db (::registry/conn
                    (registry/resolve-connection

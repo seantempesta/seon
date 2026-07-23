@@ -974,3 +974,56 @@ the anchor stays the state ledger.
   resolution and edge projection inside `seon.host.context`; the planner must
   expose a batch/per-root purity projection before the regex classifier can be
   deleted.
+
+## Frame-safe database initialization scars (2026-07-23)
+
+- **A transport ceiling is not a corpus-size governor.** The 4 MiB R27 frame
+  limit correctly rejected the former complete-population ensure request.
+  Fresh initialization now sends ordinary ordered ensure requests whose
+  schema, selected attributes, program, and initial entities are row-paged.
+  Corpus growth creates more frames, not a larger legal frame; do not
+  recalibrate the circuit breaker to admit boot growth.
+- **Schema rows need paging after one fixed bootstrap closure.** Page zero
+  carries only the transitive schema forms required to store genesis,
+  canonical schema rows, and initialization receipts. Once that bounded
+  closure commits, every remaining schema row is ordinary page data. Those
+  rows must be topologically ordered by canonical-schema references before
+  partitioning: a generated identity schema cannot transact before the value
+  schemas it names are committed. Lexical order reproduced this on
+  `:my.plan/id`. Partitioning program rows while retaining one complete schema
+  population merely moves the same unbounded frame.
+- **A committed prefix is unavailable state, not a smaller valid seed.** Each
+  page uses a deterministic durable transaction receipt and records its
+  desired program identities on that receipt. The singleton initialization
+  entity remains `in-progress` across process death; external bare ensure and
+  acquire reject it. The writer's own startup may reopen that database only to
+  retain the connection for deterministic page replay, without running runtime
+  initialization or embedding backfill while the marker is `in-progress`. The
+  final page first proves every predecessor receipt, removes stale boot-owned
+  program identities in bounded transactions, then commits `complete`.
+- **No-op pages still need receipts.** Attribute declaration pages can already
+  be converged, but their ordinal is still part of the restart proof. Commit an
+  empty domain transaction with the normal protocol receipt rather than
+  silently skipping the page; otherwise the next page correctly appears
+  out-of-order after a no-op.
+
+## Per-artifact inventory and private-corpus scars (2026-07-23)
+
+- **Let each artifact’s existing enumerator publish its own truth.** Shadow’s
+  flush hook selects exact `:build-sources` and delegates function
+  classification to the client analyzer indexer; it does not reparse source.
+  The JVM claimant projects its already-captured installed wrapper inventory
+  and preserves that enumerator’s digest exactly. A JVM classpath analyzer is
+  justified only by proof that a reachable compiled terminal is absent from
+  installed bindings.
+- **Inventory bytes are application identity, not diagnostic output.** Publish
+  one sidecar beside every supported CLJS build output, include both sidecar
+  digests in the artifact manifest and application digest, and pass the
+  planner-ready Bun projection through the host launch request. The host merges
+  that value with its claimant-local JVM inventory before planning.
+- **Private is a presence fact, not an indexing exclusion.** First-party
+  private functions retain real `:seon.fn` rows and source with
+  `:seon.fn/private? true`; public rows omit the attribute. Default discovery
+  queries filter private rows, while explicit full-namespace source remains
+  drillable. Third-party functions remain structurally outside the corpus and
+  can appear only as artifact-internal terminals.

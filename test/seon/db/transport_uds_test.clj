@@ -422,7 +422,7 @@
         request (protocol/execute-many-request
                  {::protocol/request-id "many-1"
                   ::protocol/members members})]
-    (is (= 13 protocol/current-version))
+    (is (= 14 protocol/current-version))
     (is (protocol/valid-request? request))
     (is (= request (uds/decode (uds/encode request))))
     (is (= [database database database]

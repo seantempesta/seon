@@ -71,3 +71,32 @@ The initialization path needs the same frame-safe, basis-coherent principle as
 the read consumers, but its write-side protocol must be designed by the
 database initialization/protocol owner. Raising the hard ceiling or deleting
 program facts is not an admissible fix.
+
+## Paged initialization resolution — 2026-07-23
+
+Fresh initialization now uses ordered ordinary ensure requests at protocol
+version 14. Page zero contains the fixed bootstrap schema closure; later schema
+rows are dependency-ordered and row-paged, followed by bounded attribute,
+program, and initial-data pages plus one completion page. The fixed transport
+ceiling remains 4 MiB.
+
+Every page has a deterministic durable transaction receipt and content
+fingerprint. The database initialization singleton stays `in-progress` across
+process death, blocks external bare ensure and acquire, and becomes `complete`
+only after every predecessor receipt and bounded stale-program cleanup.
+
+Evidence:
+
+- current compiled corpus: 6,934 program rows;
+- 10× synthetic corpus: 69,340 rows across 1,092 pages;
+- largest measured Transit request: 337,203 bytes against 4,194,304 bytes;
+- writer large-page/N-page population parity: exact;
+- file-backed writer death/restart: partial acquire rejected before and after
+  death, then deterministic page replay completed with one receipt per page;
+- fresh `initpage` reset: no `frame-too-large` response and initialization
+  acquire completed.
+
+Pod readiness is currently blocked after initialization by the independent
+P1b private-corpus regression recorded in
+[[private-function-presence-law-incomplete]], not by database framing or seed
+state.

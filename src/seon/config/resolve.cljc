@@ -421,9 +421,28 @@
    value at 128x its 256-caller P99.9 offered concurrency on 2026-07-23."
   32768)
 
+(def initialization-page-schemas
+  "Fresh-database paging policy with measured row units."
+  {:seon.config.database.initialization/page-rows
+   [:int
+    {:min 1
+     :description
+     "Maximum corpus or initial-entity rows in one fresh-database initialization page. Default 64 keeps the current measured Transit request hundreds of KiB below the fixed 4 MiB frame ceiling and remains unchanged as corpus row count grows; the schema declaration closure is one separately measured page."}]})
+
+(doseq [[attribute form] initialization-page-schemas]
+  (schema/register! attribute form))
+
+(def default-initialization-page-rows
+  "Rows in one paged fresh-database population request.
+
+   The 64-row default comes from the 2026-07-23 current-corpus Transit-frame
+   measurement and is rechecked against a ten-times synthetic corpus."
+  64)
+
 (def operational-keys
   "Boot-critical configuration attributes carried by every launch."
   [:seon.config.database.writer/jvm-heap-mb
+   :seon.config.database.initialization/page-rows
    :seon.config.database.read/max-work
    :seon.config.database.read/max-results
    :seon.config.database.read/max-result-weight
@@ -459,12 +478,15 @@
    :seon.config.database.transport/codec-workers
    :seon.config.database.transport/codec-worker-queue-capacity])
 
-(doseq [attribute (remove mutation-admission-schemas operational-keys)]
+(doseq [attribute
+        (remove (merge mutation-admission-schemas initialization-page-schemas)
+                operational-keys)]
   (schema/register! attribute :seon.config/cap))
 
 (def enforced-keys
   "Operational attributes enforced by launch constructor surfaces."
   #{:seon.config.database.writer/jvm-heap-mb
+    :seon.config.database.initialization/page-rows
     :seon.config.database.read/max-work
     :seon.config.database.read/max-results
     :seon.config.database.read/max-result-weight
@@ -1638,10 +1660,13 @@
                        "Set :seon.config.database.transport/maximum-frame-bytes to at least 65536."})))
     (let [resolved
           {:seon.config.database.writer/jvm-heap-mb heap-mb
-     :seon.config.database.read/max-work
-     (get database :seon.config.database.read/max-work 100000000)
-     :seon.config.database.read/max-results
-     (get database :seon.config.database.read/max-results 1000000)
+           :seon.config.database.initialization/page-rows
+           (get database :seon.config.database.initialization/page-rows
+                default-initialization-page-rows)
+           :seon.config.database.read/max-work
+           (get database :seon.config.database.read/max-work 100000000)
+           :seon.config.database.read/max-results
+           (get database :seon.config.database.read/max-results 1000000)
      :seon.config.database.read/max-result-weight
      (get database :seon.config.database.read/max-result-weight 3000000)
      :seon.config.database.read/deadline-ms

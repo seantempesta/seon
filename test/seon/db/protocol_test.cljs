@@ -67,7 +67,7 @@
      ::protocol/maximum-frame-bytes 65536})})
 
 (deftest session-opening-shapes-fit-the-fixed-cross-host-bootstrap-ceiling
-  (is (= 13 protocol/current-version))
+  (is (= 14 protocol/current-version))
   (doseq [[shape value] (session-shapes)]
     (is ((if (= shape :request)
            protocol/valid-request?

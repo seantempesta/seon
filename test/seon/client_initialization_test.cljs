@@ -1,6 +1,7 @@
 (ns seon.client-initialization-test
   (:require
    [cljs.test :refer [async deftest is testing]]
+   [cognitect.transit :as transit]
    [malli.core :as m]
    [my.skills :as skills]
    [seon.agent :as agent]
@@ -195,6 +196,7 @@
           #(build (descriptor) configuration))]
     (is (= forward reverse))
     (is (= digest (:seon.execution/artifact-digest forward)))
+    (is (= 64 (:seon.db.initialization/page-rows forward)))
     (is (= client/agent-bootstrap-attrs (:seon.db/attributes forward)))
     (is (every? (set (:seon.db/attributes forward))
                 [:my.plan/namespace :my.plan/claim])
@@ -218,6 +220,52 @@
              {:seon.user/id "user"}
              {:my.kb.shared/id "shared"}])
            (:seon.db/initial-data forward)))))
+
+(deftest ten-times-current-corpus-keeps-every-initialization-frame-bounded
+  (let [build (deref #'client/database-initialization)
+        current (build (descriptor) configuration)
+        current-rows (count (:seon.db/program current))
+        synthetic
+        (-> current
+            (update :seon.db/program
+                    #(into [] cat (repeat 10 %)))
+            (update :seon.db/initial-data
+                    #(into [] cat (repeat 10 %))))
+        pages (protocol/initialization-pages synthetic)
+        writer (transit/writer :json)
+        encoder (js/TextEncoder.)
+        frame-sizes
+        (mapv
+         (fn [page]
+           (.-byteLength
+            (.encode
+             encoder
+             (transit/write
+              writer
+              (protocol/ensure-database-request
+               {::protocol/request-id
+                (str "frame/"
+                     (:seon.db.initialization/page-index page))
+                ::protocol/database-name "synthetic"
+                ::protocol/backend :memory
+                :seon.db/initialization-page page})))))
+         pages)
+        maximum-frame-bytes (apply max frame-sizes)
+        evidence {:current-program-rows current-rows
+                  :synthetic-program-rows
+                  (count (:seon.db/program synthetic))
+                  :page-count (count pages)
+                  :maximum-frame-bytes maximum-frame-bytes
+                  :protocol-frame-ceiling protocol/maximum-frame-bytes}]
+    (js/console.log "INITPAGE_10X_MEASUREMENT" (pr-str evidence))
+    (is (= (* 10 current-rows)
+           (count (:seon.db/program synthetic))))
+    (is (> (count pages) 10)
+        (pr-str evidence))
+    (is (< maximum-frame-bytes (* 1024 1024))
+        (pr-str evidence))
+    (is (every? #(< % protocol/maximum-frame-bytes) frame-sizes)
+        (pr-str evidence))))
 
 (deftest initialization-validates-core-program-before-provenance-exists
   (let [opaque-core-schema

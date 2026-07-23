@@ -87,6 +87,166 @@
      ::protocol/query-form query-form
      ::protocol/arguments arguments})))
 
+(def ^:private initialization-schema-forms
+  {:seon.db/lookup-ref-value
+   "[:or :string :uuid :keyword :symbol :int]"
+   :seon.db/ref
+   "[:or :int :string [:tuple :keyword :seon.db/lookup-ref-value]]"
+   :seon.schema/key "[:keyword {:seon.db/identity true}]"
+   :seon.schema/form ":string"
+   :seon.schema/ns ":seon.db/ref"
+   :seon.ns/name "[:symbol {:seon.db/identity true}]"
+   :seon.ns/source ":string"
+   :seon.fn/sym "[:string {:seon.db/identity true}]"
+   :seon.fn/ns ":seon.db/ref"
+   :seon.fn/source ":string"
+   :seon.db.id/generator
+   "[:enum :seon.db.id.generator/human-readable :seon.db.id.generator/compact]"
+   :seon.agent/id "[:string {:seon.db/identity true}]"
+   :seon.db.process/id
+   "[:and {:seon.db/identity true} [:enum :seon.db.process/boot :seon.db.process/config :seon.db.process/repl]]"
+   :seon.db/user ":seon.db/ref"
+   :seon.db/process ":seon.db/ref"
+   :seon.db.initialization/id "[:string {:seon.db/identity true}]"
+   :seon.db.initialization/fingerprint "[:string {:min 1}]"
+   :seon.db.initialization/page-fingerprint "[:string {:min 1}]"
+   :seon.db.initialization/identities ":string"
+   :seon.db.initialization/page-count "[:int {:min 1}]"
+   :seon.db.initialization/status
+   "[:enum :seon.db.initialization.status/in-progress :seon.db.initialization.status/complete]"
+   :writer.initialization/id "[:string {:seon.db/identity true}]"})
+
+(def ^:private paged-initialization
+  {:seon.execution/artifact-digest
+   "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+   :seon.db.initialization/page-rows 2
+   :seon.db/attributes [:writer.initialization/id]
+   :seon.db/program
+   (into
+    (mapv (fn [[attribute form]]
+            {:seon.schema/key attribute
+             :seon.schema/form form})
+          initialization-schema-forms)
+    [{:seon.ns/name 'writer.initialization
+      :seon.ns/source "(ns writer.initialization)"}
+     {:seon.fn/sym "writer.initialization/ready?"
+      :seon.fn/ns [:seon.ns/name 'writer.initialization]
+      :seon.fn/source "(defn ready? [] true)"}])
+   :seon.db/initial-data [{:writer.initialization/id "complete"}]})
+
+(defn- ensure-initialization-page!
+  [session database-name database-path page]
+  (writer-test/call!
+   session
+   (protocol/ensure-database-request
+    {::protocol/request-id
+     (str "database-initialization/"
+          (:seon.db.initialization/fingerprint page)
+          "/"
+          (:seon.db.initialization/page-index page))
+     ::protocol/database-name database-name
+     ::protocol/backend :file
+     ::protocol/database-path database-path
+     :seon.db/initialization-page page})))
+
+(deftest crash-mid-initialization-restarts-as-honestly-incomplete
+  (let [root (doto (io/file "tmp" (str "writer-init-crash-" (random-uuid)))
+               .mkdirs)
+        database-path (.getAbsolutePath (io/file root "database"))
+        socket-path (.getAbsolutePath (io/file root "writer.sock"))
+        first-log (.getAbsolutePath (io/file root "writer-first.log"))
+        second-log (.getAbsolutePath (io/file root "writer-second.log"))
+        database-name (str "writer-init-crash-" (random-uuid))
+        pages (protocol/initialization-pages paged-initialization)
+        split-index (quot (count pages) 2)
+        first-process
+        (start-writer-process! database-name database-path socket-path first-log)]
+    (try
+      (let [session (writer-test/open-session! socket-path)]
+        (try
+          (doseq [page (subvec pages 0 split-index)]
+            (is (::protocol/success?
+                 (ensure-initialization-page!
+                  session database-name database-path page))))
+          (let [rejected (acquire! session database-name
+                                   "initialization/acquire-before-crash")]
+            (is (false? (::protocol/success? rejected)) (pr-str rejected))
+            (is (= protocol/initializer-error
+                   (::protocol/error-kind rejected))))
+          (finally
+            (writer-test/close-session! session))))
+      (stop-process! first-process)
+      (.delete (io/file socket-path))
+      (let [second-process
+            (start-writer-process!
+             database-name database-path socket-path second-log)]
+        (try
+          (let [session (writer-test/open-session! socket-path)]
+            (try
+              (let [rejected
+                    (acquire! session database-name
+                              "initialization/acquire-after-restart")]
+                (is (false? (::protocol/success? rejected)) (pr-str rejected))
+                (is (= protocol/initializer-error
+                       (::protocol/error-kind rejected))
+                    "the restarted writer cannot publish a partial seed"))
+              (doseq [page pages]
+                (let [response
+                      (ensure-initialization-page!
+                       session database-name database-path page)]
+                  (is (::protocol/success? response)
+                      (pr-str {:page page :response response}))))
+              (let [acquired
+                    (acquire! session database-name
+                              "initialization/acquire-complete")
+                    database (:seon.db/db acquired)
+                    page-request-ids
+                    (mapv
+                     (fn [page]
+                       (str "database-initialization/"
+                            (:seon.db.initialization/fingerprint page)
+                            "/"
+                            (:seon.db.initialization/page-index page)))
+                     pages)
+                    status
+                    (:datahike.query/result
+                     (query!
+                      session database "initialization/query-status"
+                      '[:find ?status .
+                        :where
+                        [?state :seon.db.initialization/id "database"]
+                        [?state :seon.db.initialization/status ?status]]
+                      []))
+                    entity
+                    (:datahike.query/result
+                     (query!
+                      session database "initialization/query-entity"
+                      '[:find ?id .
+                        :where
+                        [_ :writer.initialization/id ?id]]
+                      []))
+                    receipt-count
+                    (:datahike.query/result
+                     (query!
+                      session database "initialization/query-receipts"
+                      '[:find (count ?tx) .
+                        :in $ [?request-id ...]
+                        :where
+                        [?tx :seon.db.protocol/request-id ?request-id]]
+                      [page-request-ids]))]
+                (is (::protocol/success? acquired) (pr-str acquired))
+                (is (= :seon.db.initialization.status/complete status))
+                (is (= "complete" entity))
+                (is (= (count pages) receipt-count)
+                    "prefix replays and resumed pages have one receipt each"))
+              (finally
+                (writer-test/close-session! session))))
+          (finally
+            (stop-process! second-process))))
+      (finally
+        (stop-process! first-process)
+        (delete-tree! root)))))
+
 (deftest crash-with-pipelined-mutations-replays-each-request-once
   (let [root (doto (io/file "tmp" (str "writer-crash-" (random-uuid)))
                .mkdirs)

@@ -169,7 +169,7 @@
 (schema/register! ::release-results :seon.db.protocol/writer-release-results)
 (schema/register! ::stop-response :seon.db.protocol/writer-stop-response)
 (schema/register! ::database-initialized? :boolean)
-(schema/register! ::initialization :seon.db/initialization)
+(schema/register! ::initialization :seon.db/initialization-page)
 (schema/register! ::initialized-db-value :any)
 (schema/register!
  ::initialize-request
@@ -713,7 +713,7 @@
      :tx-meta (public-transaction-meta (:tx-meta report))
      ::protocol/request-id request-id}))
 
-(declare initialize-program!)
+(declare initialization-complete? initialization-state initialize-program-page!)
 
 (defn initialize-connection!
   "Initialize one database connection from the composed writer runtime."
@@ -738,9 +738,12 @@
                  ::registry/connection-id connection-id}))))
   (when (= :seon.db.registry.open/main open-intent)
     (when initialization
-      (initialize-program! runtime connection (name database-name) connection-id
-                           initialization))
-    ((::database-initializer runtime) connection database-name))
+      (initialize-program-page!
+       runtime connection (name database-name) connection-id initialization))
+    (let [db-value (d/db connection)]
+      (when (or (nil? (initialization-state db-value))
+                (initialization-complete? db-value))
+        ((::database-initializer runtime) connection database-name))))
   (cond-> {::database-initialized? true}
     initialization (assoc ::initialized-db-value (d/db connection))))
 
@@ -1667,7 +1670,45 @@
   #{:seon.agent/id
     :seon.db.process/id
     :seon.db/user
-    :seon.db/process})
+    :seon.db/process
+    :seon.ns/name
+    :seon.schema/key
+    :seon.schema/form
+    :seon.schema/ns
+    :seon.db.id/generator
+    :seon.db.initialization/id
+    :seon.db.initialization/fingerprint
+    :seon.db.initialization/page-fingerprint
+    :seon.db.initialization/identities
+    :seon.db.initialization/page-count
+    :seon.db.initialization/status})
+
+(def ^:private initialization-id "database")
+
+(def ^:private initialization-program-identity-attrs
+  [:seon.ns/name :seon.fn/sym :seon.schema/key :seon.test/sym])
+
+(def ^:private initialization-wall-clock-attrs
+  [:seon.fn/created-at :seon.schema/created-at :seon.test/created-at])
+
+(def ^:private boot-program-identities-query
+  '[:find ?entity ?identity-attr ?identity
+    :where
+    (or-join [?entity ?identity-attr ?identity ?source ?tx]
+      (and [?entity :seon.ns/name ?identity]
+           [?entity :seon.ns/source ?source ?tx]
+           [(ground :seon.ns/name) ?identity-attr])
+      (and [?entity :seon.fn/sym ?identity]
+           [?entity :seon.fn/source ?source ?tx]
+           [(ground :seon.fn/sym) ?identity-attr])
+      (and [?entity :seon.schema/key ?identity]
+           [?entity :seon.schema/form ?source ?tx]
+           [(ground :seon.schema/key) ?identity-attr])
+      (and [?entity :seon.test/sym ?identity]
+           [?entity :seon.test/source ?source ?tx]
+           [(ground :seon.test/sym) ?identity-attr]))
+    [?tx :seon.db/process ?process]
+    [?process :seon.db.process/id :seon.db.process/boot]])
 
 (defn- present-root?
   [db-value]
@@ -1685,10 +1726,77 @@
           [_ :seon.db.process/id ?id]]
         db-value)))
 
+(defn- initialization-state
+  [db-value]
+  (when (contains? (:schema db-value) :seon.db.initialization/id)
+    (some-> (d/entity db-value
+                      [:seon.db.initialization/id initialization-id])
+            (select-keys [:seon.db.initialization/id
+                          :seon.db.initialization/fingerprint
+                          :seon.db.initialization/page-count
+                          :seon.db.initialization/status]))))
+
+(defn- initialization-state-data
+  [page status]
+  {:seon.db.initialization/id initialization-id
+   :seon.db.initialization/fingerprint
+   (:seon.db.initialization/fingerprint page)
+   :seon.db.initialization/page-count
+   (long (:seon.db.initialization/page-count page))
+   :seon.db.initialization/status status})
+
+(defn- initialization-page-request-id
+  [page]
+  (str "database-initialization/"
+       (:seon.db.initialization/fingerprint page)
+       "/"
+       (:seon.db.initialization/page-index page)))
+
+(defn- initialization-genesis-request-id
+  [page]
+  (str "database-initialization/"
+       (:seon.db.initialization/fingerprint page)
+       "/genesis"))
+
+(defn- initialization-page-fingerprint
+  [page]
+  (str (hasch/uuid page)))
+
+(defn- committed-page-transaction
+  [db-value page]
+  (when-let [transaction
+             (committed-transaction db-value
+                                    (initialization-page-request-id page))]
+    (let [actual (:seon.db.initialization/page-fingerprint
+                  (d/entity db-value transaction))
+          expected (initialization-page-fingerprint page)]
+      (when-not (= expected actual)
+        (throw
+         (ex-info "An initialization page id was reused for different data."
+                  {::failure-kind protocol/request-conflict-error
+                   ::protocol/request-id
+                   (initialization-page-request-id page)
+                   ::expected-request-hash expected
+                   ::actual-request-hash actual})))
+      transaction)))
+
+(defn- initialization-complete?
+  ([db-value]
+   (= :seon.db.initialization.status/complete
+      (:seon.db.initialization/status (initialization-state db-value))))
+  ([db-value page]
+   (let [state (initialization-state db-value)]
+     (and (= (:seon.db.initialization/fingerprint page)
+             (:seon.db.initialization/fingerprint state))
+          (= (:seon.db.initialization/page-count page)
+             (:seon.db.initialization/page-count state))
+          (= :seon.db.initialization.status/complete
+             (:seon.db.initialization/status state))))))
+
 (defn- genesis-data
   "Derive the native schema and missing provenance identities required before
-   the compiled program can transact with root/boot metadata."
-  [db-value desired-program]
+   a schema page can transact with root/boot metadata."
+  [db-value desired-program page]
   (let [processes (process/genesis-entities)
         schema-declarations
         (compile-schema-declarations db-value desired-program
@@ -1701,7 +1809,11 @@
       true
       (into (remove #(contains? installed-processes
                                 (:seon.db.process/id %)))
-            processes))))
+            processes)
+
+      true
+      (conj (initialization-state-data
+             page :seon.db.initialization.status/in-progress)))))
 
 (defn- identity-attribute
   [db-value declarations row]
@@ -1734,60 +1846,274 @@
         initial-data))
 
 (defn- transact-initialization!
-  [runtime connection database-name connection-id db-value transaction-data
-   transaction-meta]
-  (when (seq transaction-data)
-    (transact-once!
-     runtime connection database-name connection-id
-     (protocol/transaction-request
-      (cond-> {::protocol/request-id
-               (str "database-initialization/" (random-uuid))
-               ::protocol/database-name (name database-name)
-               ::protocol/transaction-data transaction-data
-               :seon.db/expected-db (database-value (name database-name)
-                                                   db-value)}
-        transaction-meta
-        (assoc ::protocol/transaction-meta transaction-meta))))))
+  [runtime connection database-name connection-id transaction-data
+   transaction-meta request-id]
+  (transact-once!
+   runtime connection database-name connection-id
+   (protocol/transaction-request
+    (cond-> {::protocol/request-id
+             request-id
+             ::protocol/database-name (name database-name)
+             ::protocol/transaction-data transaction-data}
+      transaction-meta
+      (assoc ::protocol/transaction-meta transaction-meta)))))
 
-(defn initialize-program!
-  "Admit one compiled program and its required initial entities atomically.
-   No other write is prepared for this connection during admission."
-  [runtime connection database-name connection-id initialization]
-  (let [desired-program (:seon.db/program initialization)
-        attributes (:seon.db/attributes initialization)
-        initial-data (:seon.db/initial-data initialization)
-        boot-meta {:seon.db/user [:seon.agent/id "root"]
+(defn- initialization-program-identity
+  [row]
+  (some (fn [attribute]
+          (when (contains? row attribute)
+            [attribute (get row attribute)]))
+        initialization-program-identity-attrs))
+
+(defn- initialization-row-data
+  [db-value row]
+  (let [row (apply dissoc row initialization-wall-clock-attrs)
+        [identity-attribute identity] (initialization-program-identity row)
+        lookup-ref [identity-attribute identity]
+        installed (:schema db-value)
+        pull-pattern
+        (cond-> []
+          (contains? installed :seon.fn/spec)
+          (conj :seon.fn/spec)
+          (contains? installed :seon.db.id/generator)
+          (conj :seon.db.id/generator)
+          (contains? installed :seon.ns/require-edges)
+          (conj {:seon.ns/require-edges [:db/id]}))
+        current (when (and identity-attribute
+                           (contains? installed identity-attribute))
+                  (when (seq pull-pattern)
+                    (d/pull db-value pull-pattern lookup-ref)))
+        current-edges (->> (:seon.ns/require-edges current)
+                           (keep :db/id)
+                           sort)
+        row (if (contains? row :seon.ns/require-edges)
+              (update row :seon.ns/require-edges
+                      #(vec (sort-by pr-str %)))
+              row)]
+    (cond-> (mapv (fn [eid] [:db.fn/retractEntity eid]) current-edges)
+      (and (= :seon.fn/sym identity-attribute)
+           (not (contains? row :seon.fn/spec))
+           (seq (:seon.fn/spec current)))
+      (conj [:db/retract lookup-ref :seon.fn/spec (:seon.fn/spec current)])
+
+      (and (= :seon.schema/key identity-attribute)
+           (not (contains? row :seon.db.id/generator))
+           (contains? current :seon.db.id/generator))
+      (conj [:db/retract lookup-ref :seon.db.id/generator
+             (:seon.db.id/generator current)])
+
+      true
+      (conj row))))
+
+(defn- initialization-program-page-data
+  [db-value page]
+  (into []
+        (mapcat #(initialization-row-data db-value %))
+        (:seon.db/program page)))
+
+(defn- initialization-page-identities
+  [page]
+  (into #{}
+        (keep (fn [row]
+                (initialization-program-identity row)))
+        (:seon.db/program page)))
+
+(defn- desired-initialization-identities
+  [db-value page]
+  (into #{}
+        (mapcat
+         (fn [index]
+           (let [request-id
+                 (initialization-page-request-id
+                  (assoc page :seon.db.initialization/page-index index))
+                 transaction (committed-transaction db-value request-id)]
+             (when-not transaction
+               (throw
+                (ex-info
+                 "Initialization completion is missing a page receipt."
+                 {::failure-kind protocol/initializer-error
+                  ::protocol/request-id request-id
+                  :seon.db.initialization/page-index index})))
+             (some-> (:seon.db.initialization/identities
+                      (d/entity db-value transaction))
+                     edn/read-string))))
+        (range (:seon.db.initialization/page-index page))))
+
+(defn- assert-complete-initialization-population!
+  [marked]
+  (let [attributes (into #{} (map second) marked)]
+    (doseq [required [:seon.ns/name :seon.fn/sym :seon.schema/key]]
+      (when-not (contains? attributes required)
+        (throw
+         (ex-info "Paged initialization has an incomplete program population."
+                  {::missing-program-population required
+                   :seon.error/kind :core-bug}))))))
+
+(defn- agent-home-name
+  [agent-id]
+  (symbol (str "my.agent." agent-id)))
+
+(defn- completion-cleanup-data
+  [db-value page]
+  (let [boot-identities (d/q boot-program-identities-query db-value)
+        desired-identities (desired-initialization-identities db-value page)
+        _ (assert-complete-initialization-population!
+           (map (fn [[attribute identity]]
+                  [nil attribute identity])
+                desired-identities))
+        agent-home-names
+        (into #{}
+              (map agent-home-name)
+              (d/q '[:find [?id ...]
+                     :where [_ :seon.agent/id ?id]]
+                   db-value))
+        stale-eids
+        (into #{}
+              (keep
+               (fn [[entity identity-attribute identity]]
+                 (when (and
+                        (not (contains? desired-identities
+                                        [identity-attribute identity]))
+                        (not (and (= :seon.ns/name identity-attribute)
+                                  (contains? agent-home-names identity))))
+                   entity)))
+              boot-identities)]
+    (mapv (fn [entity] [:db.fn/retractEntity entity])
+          (sort stale-eids))))
+
+(defn- assert-initialization-page-order!
+  [db-value page]
+  (let [index (:seon.db.initialization/page-index page)
+        count (:seon.db.initialization/page-count page)
+        phase (:seon.db.initialization/phase page)
+        fingerprint (:seon.db.initialization/fingerprint page)
+        state (initialization-state db-value)]
+    (when-not (and (< index count)
+                   (= (= index (dec count))
+                      (= phase :seon.db.initialization.phase/completion))
+                   (or (pos? index)
+                       (= phase :seon.db.initialization.phase/schema)))
+      (throw
+       (ex-info "An initialization page has an invalid position or phase."
+                {::failure-kind protocol/protocol-error
+                 :seon.db/initialization-page page})))
+    (when (and (pos? index)
+               (not= fingerprint
+                     (:seon.db.initialization/fingerprint state)))
+      (throw
+       (ex-info "An initialization page does not continue the active seed."
+                {::failure-kind protocol/initializer-error
+                 :seon.db.initialization/expected-fingerprint
+                 (:seon.db.initialization/fingerprint state)
+                 :seon.db.initialization/actual-fingerprint fingerprint})))
+    (when (and (pos? index)
+               (not (committed-transaction
+                     db-value
+                     (initialization-page-request-id
+                      (assoc page
+                             :seon.db.initialization/page-index (dec index))))))
+      (throw
+       (ex-info "An initialization page arrived before its predecessor."
+                {::failure-kind protocol/initializer-error
+                 :seon.db.initialization/page-index index}))))
+  page)
+
+(defn- transact-cleanup-pages!
+  [runtime connection database-name connection-id page boot-meta]
+  (loop []
+    (let [db-value (d/db connection)
+          transaction-data
+          (vec (take (:seon.db.initialization/page-rows page)
+                     (completion-cleanup-data db-value page)))]
+      (when (seq transaction-data)
+        (let [request-id
+              (str "database-initialization/"
+                   (:seon.db.initialization/fingerprint page)
+                   "/cleanup/"
+                   (hasch/uuid transaction-data))]
+          (when-not (committed-transaction db-value request-id)
+            (transact-initialization!
+             runtime connection database-name connection-id transaction-data
+             boot-meta request-id))
+          (recur))))))
+
+(defn- initialization-page-data
+  [db-value page]
+  (case (:seon.db.initialization/phase page)
+    :seon.db.initialization.phase/schema
+    (initialization-program-page-data db-value page)
+
+    :seon.db.initialization.phase/attributes
+    (compile-schema-declarations db-value []
+                                 (set (:seon.db/attributes page)))
+
+    :seon.db.initialization.phase/program
+    (initialization-program-page-data db-value page)
+
+    :seon.db.initialization.phase/initial-data
+    (missing-initial-data db-value [] (:seon.db/initial-data page))
+
+    :seon.db.initialization.phase/completion
+    [(initialization-state-data
+      page :seon.db.initialization.status/complete)]))
+
+(defn- initialize-program-page!
+  "Commit one ordered initialization page behind durable receipts.
+
+   A prefix remains explicitly in-progress. Only the final page publishes the
+   complete state, after exact-program cleanup has converged."
+  [runtime connection database-name connection-id page]
+  (let [boot-meta {:seon.db/user [:seon.agent/id "root"]
                    :seon.db/process
-                   (process/lookup-ref :seon.db.process/boot)}]
+                   (process/lookup-ref :seon.db.process/boot)}
+        page-meta
+        (assoc boot-meta
+               :seon.db.initialization/page-fingerprint
+               (initialization-page-fingerprint page)
+               :seon.db.initialization/identities
+               (pr-str (vec (sort-by pr-str
+                                     (initialization-page-identities page)))))]
     (locking connection
       (loop [attempt 1]
         (let [result
               (try
-                (let [before-genesis (d/db connection)
-                      genesis (genesis-data before-genesis desired-program)
-                      _ (transact-initialization!
-                         runtime connection database-name connection-id
-                         before-genesis genesis nil)
-                      before-program (d/db connection)
-                      schema-declarations
-                      (compile-schema-declarations before-program
-                                                   desired-program
-                                                   (set/union
-                                                    (set attributes)
-                                                    (declared-entity-attributes
-                                                     desired-program)))
-                      transaction-data
-                      (into (vec schema-declarations)
-                            (concat
-                             (program/compile-tx-data before-program
-                                                      desired-program)
-                             (missing-initial-data before-program
-                                                   schema-declarations
-                                                   initial-data)))]
-                  (transact-initialization!
-                   runtime connection database-name connection-id before-program
-                   transaction-data boot-meta)
-                  (d/db connection))
+                (let [before (d/db connection)]
+                  (cond
+                    (initialization-complete? before page)
+                    before
+
+                    (committed-page-transaction before page)
+                    before
+
+                    :else
+                    (let [_ (assert-initialization-page-order! before page)
+                          first-page?
+                          (zero? (:seon.db.initialization/page-index page))
+                          _ (when (and first-page?
+                                     (not (committed-transaction
+                                           before
+                                           (initialization-genesis-request-id
+                                            page))))
+                              (transact-initialization!
+                               runtime connection database-name connection-id
+                               (genesis-data before
+                                             (:seon.db/program page)
+                                             page)
+                               nil
+                               (initialization-genesis-request-id page)))
+                          _ (when (= :seon.db.initialization.phase/completion
+                                     (:seon.db.initialization/phase page))
+                              (transact-cleanup-pages!
+                               runtime connection database-name connection-id
+                               page boot-meta))
+                          before-page (d/db connection)
+                          transaction-data
+                          (initialization-page-data before-page page)]
+                      (transact-initialization!
+                       runtime connection database-name connection-id
+                       transaction-data page-meta
+                       (initialization-page-request-id page))
+                      (d/db connection))))
                 (catch Throwable throwable throwable))]
           (if (and (instance? Throwable result)
                    (= protocol/stale-database-value-error
@@ -1838,9 +2164,11 @@
       result)))
 
 (defn- handle-ensure-database
-  [runtime transport-connection request]
-  (let [database-name (::protocol/database-name request)
-        initialization (:seon.db/initialization request)
+  ([runtime transport-connection request]
+   (handle-ensure-database runtime transport-connection request false))
+  ([runtime transport-connection request allow-incomplete?]
+   (let [database-name (::protocol/database-name request)
+        initialization (:seon.db/initialization-page request)
         initialized-db (volatile! nil)
         entry
         (try
@@ -1878,21 +2206,33 @@
         connection (::registry/conn entry)
         _ (when (and initialization (nil? @initialized-db))
             (vreset! initialized-db
-                     (initialize-program! runtime connection
-                                          database-name connection-id
-                                          initialization)))
+                     (initialize-program-page!
+                      runtime connection database-name connection-id
+                      initialization)))
+        db-value (or @initialized-db (d/db connection))
+        _ (when (and (not allow-incomplete?)
+                     (nil? initialization)
+                     (not (initialization-complete? db-value))
+                     (initialization-state db-value))
+            (throw
+             (ex-info "The database initialization is incomplete."
+                      {::failure-kind protocol/initializer-error
+                       ::protocol/database-name database-name
+                       :seon.db.initialization/state
+                       (initialization-state db-value)})))
         backend-kind (::registry/backend entry)
         database-path (::registry/path entry)]
-    (enqueue-embedding-backfill! runtime database-name
-                                 connection-id connection)
+    (when (or (nil? (initialization-state db-value))
+              (initialization-complete? db-value))
+      (enqueue-embedding-backfill! runtime database-name
+                                   connection-id connection))
     (protocol/success
      (cond->
        {::protocol/database-name database-name
-        :seon.db/db (database-value database-name
-                                    (or @initialized-db (d/db connection)))
+        :seon.db/db (database-value database-name db-value)
         ::protocol/backend backend-kind}
        database-path
-       (assoc ::protocol/database-path database-path)))))
+       (assoc ::protocol/database-path database-path))))))
 
 (defn- handle-create-branch
   [runtime request]
@@ -3325,22 +3665,41 @@
                     {::protocol/database-name
                      (::protocol/database-name request)})))
   (let [database-name (::protocol/database-name request)
+        before-acquire
+        (registry/resolve-connection
+         {::registry/database-name (keyword database-name)})
+        connection (::registry/conn before-acquire)
+        _ (when-not connection
+            (throw
+             (ex-info "The database is unavailable for acquisition."
+                      {::failure-kind protocol/not-found-error
+                       ::protocol/database-name database-name})))
         result
         (locking (::connection-lock transport-connection)
           (when @(::closed? transport-connection)
             (throw
              (ex-info "The transport connection closed before acquisition."
                       {::protocol/database-name database-name})))
-          (let [result
-                (registry/acquire-database!
-                 {::registry/database-name (keyword database-name)
-                  ::registry/transport-connection transport-connection})]
-            (swap! (::acquisitions transport-connection)
-                   conj [database-name (::registry/connection-id result)])
-            (when (not (false? (::protocol/database-advanced? request)))
-              (swap! (::database-advanced-acquisitions transport-connection)
-                     conj [database-name (::registry/connection-id result)]))
-            result))
+          (locking connection
+            (let [db-value (d/db connection)
+                  state (initialization-state db-value)
+                  _ (when (and state
+                               (not (initialization-complete? db-value)))
+                      (throw
+                       (ex-info "The database initialization is incomplete."
+                                {::failure-kind protocol/initializer-error
+                                 ::protocol/database-name database-name
+                                 :seon.db.initialization/state state})))
+                  result
+                  (registry/acquire-database!
+                   {::registry/database-name (keyword database-name)
+                    ::registry/transport-connection transport-connection})]
+              (swap! (::acquisitions transport-connection)
+                     conj [database-name (::registry/connection-id result)])
+              (when (not (false? (::protocol/database-advanced? request)))
+                (swap! (::database-advanced-acquisitions transport-connection)
+                       conj [database-name (::registry/connection-id result)]))
+              result)))
         resolved
         (registry/resolve-connection
          {::registry/database-name (keyword database-name)
@@ -4442,15 +4801,16 @@
           _ (register-readiness! runtime)]
       (try
         (let [ensure-response
-              (handle-request
-               runtime
+              (handle-ensure-database
+               runtime nil
                (protocol/ensure-database-request
                 (cond->
                  {::protocol/database-name database-name
                   ::protocol/request-id "writer/start"
                   ::protocol/backend backend}
                   database-path
-                  (assoc ::protocol/database-path database-path))))]
+                  (assoc ::protocol/database-path database-path)))
+               true)]
           (when-not (::protocol/success? ensure-response)
             (throw
              (ex-info "Initial database ensure failed."

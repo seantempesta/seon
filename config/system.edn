@@ -116,7 +116,9 @@
  ;; known operation. Aero resolves environment overrides once before these
  ;; become ordinary attributes on the database configuration singleton.
  :seon.config/database
- {:seon.config.database.query/max-work
+ {:seon.config.database.initialization/page-rows
+  #long #or [#env SEON_DB_INITIALIZATION_PAGE_ROWS 64]
+  :seon.config.database.query/max-work
   #long #or [#env SEON_DB_QUERY_MAX_WORK 100000000]
   :seon.config.database.query/max-results
   #long #or [#env SEON_DB_QUERY_MAX_RESULTS 1000000]

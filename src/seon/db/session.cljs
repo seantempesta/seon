@@ -214,25 +214,48 @@
 
 (defn- stable-selection [selection] (dissoc selection ::db/initialization))
 
-(defn- ^:async ensure-and-acquire! [session selection initialization]
+(defn- initialization-page-request-id
+  [page]
+  (str "database-initialization/"
+       (:seon.db.initialization/fingerprint page)
+       "/"
+       (:seon.db.initialization/page-index page)))
+
+(defn- ensure-request
+  [selection initialization-page]
   (let [database-name (::db/database-name selection)
         backend (::db/backend selection)
         database-path (::db/database-path selection)
-        connection-id (::db.branch/connection-id selection)
+        connection-id (::db.branch/connection-id selection)]
+    (protocol/ensure-database-request
+     (cond-> {::protocol/request-id
+              (if initialization-page
+                (initialization-page-request-id initialization-page)
+                (mint-id))
+              ::protocol/database-name database-name
+              ::protocol/backend backend}
+       database-path (assoc ::protocol/database-path database-path)
+       connection-id (assoc ::db.branch/connection-id connection-id)
+       initialization-page
+       (assoc ::db/initialization-page initialization-page)))))
+
+(defn- ^:async ensure-pages!
+  [session selection initialization]
+  (let [pages (if initialization
+                (protocol/initialization-pages initialization)
+                [nil])]
+    (doseq [page pages]
+      (let [ensured
+            (await
+             (request-on-session!
+              session (ensure-request selection page) 15000))]
+        (when-not (::protocol/success? ensured)
+          (throw (ex-info "Opening the database failed." ensured)))))))
+
+(defn- ^:async ensure-and-acquire! [session selection initialization]
+  (let [database-name (::db/database-name selection)
         database-advanced? (::db/database-advanced? selection)
-        ensured
-        (await (request-on-session!
-                session
-                (protocol/ensure-database-request
-                 (cond-> {::protocol/request-id (mint-id)
-                          ::protocol/database-name database-name
-                          ::protocol/backend backend}
-                   database-path (assoc ::protocol/database-path database-path)
-                   connection-id (assoc ::db.branch/connection-id connection-id)
-                   initialization (assoc ::db/initialization initialization)))
-                15000))
-        _ (when-not (::protocol/success? ensured)
-            (throw (ex-info "Opening the database failed." ensured)))
+        _ (await (ensure-pages! session selection initialization))
         acquired
         (await (request-on-session!
                 session

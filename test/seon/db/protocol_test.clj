@@ -77,7 +77,7 @@
      ::protocol/maximum-frame-bytes 65536})})
 
 (deftest session-opening-shapes-are-closed-transit-data-below-bootstrap-ceiling
-  (is (= 13 protocol/current-version))
+  (is (= 14 protocol/current-version))
   (is (= "session/open" protocol/session-open-request-id))
   (is (= "session/control" protocol/session-control-request-id))
   (doseq [[shape value] (session-shapes)]
@@ -99,7 +99,7 @@
                        ::protocol/configuration-key)))))
 
 (deftest database-values-are-complete-closed-and-temporally-unambiguous
-  (is (= 13 protocol/current-version))
+  (is (= 14 protocol/current-version))
   (is (protocol/database-value? db))
   (is (protocol/database-value? (assoc db :as-of 536870928)))
   (is (protocol/database-value? (assoc db :since #inst "2026-07-16")))
@@ -183,10 +183,15 @@
            ::protocol/query-form '[:find ?e :where [?e :person/name]]
            ::protocol/arguments []})))))
 
-(deftest ensure-database-carries-optional-ordinary-package-initialization
-  (let [initialization
-        {:seon.execution/artifact-digest
-         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+(deftest ensure-database-carries-one-ordinary-initialization-page
+  (let [initialization-page
+        {:seon.db.initialization/fingerprint
+         "01234567-89ab-cdef-0123-456789abcdef"
+         :seon.db.initialization/page-index 1
+         :seon.db.initialization/page-count 3
+         :seon.db.initialization/page-rows 64
+         :seon.db.initialization/phase
+         :seon.db.initialization.phase/program
          :seon.db/attributes []
          :seon.db/program
          [{:seon.ns/name 'seon.db
@@ -204,9 +209,9 @@
         initialized
         (protocol/ensure-database-request
          {::protocol/request-id "ensure/initialized"
-          ::protocol/database-name "default"
+         ::protocol/database-name "default"
           ::protocol/backend :memory
-          :seon.db/initialization initialization})
+          :seon.db/initialization-page initialization-page})
         ordinary
         (protocol/ensure-database-request
          {::protocol/request-id "ensure/ordinary"
@@ -214,7 +219,8 @@
           ::protocol/backend :memory})]
     (is (protocol/valid-request? initialized))
     (is (= initialized (transit-roundtrip initialized)))
-    (is (= initialization (:seon.db/initialization initialized)))
+    (is (= initialization-page
+           (:seon.db/initialization-page initialized)))
     (is (= {::protocol/operation protocol/ensure-database-operation
             ::protocol/request-id "ensure/ordinary"
             ::protocol/database-name "default"
@@ -223,15 +229,15 @@
         "ordinary child requests retain the existing small request")
     (is (false?
          (protocol/valid-request?
-          (assoc initialized :seon.db/initialization
-                 (assoc initialization
+          (assoc initialized :seon.db/initialization-page
+                 (assoc initialization-page
                         :seon.db/program
                         [(->HostOwner :native)]))))
         "host-owned values cannot cross the initialization boundary")
     (is (false?
          (protocol/valid-request?
-          (assoc initialized :seon.db/initialization
-                 (assoc initialization
+          (assoc initialized :seon.db/initialization-page
+                 (assoc initialization-page
                         :seon.db/initial-data [{:bare-key true}]))))
         "initial fact maps require namespaced attribute keys")))
 
