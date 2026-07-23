@@ -1104,6 +1104,19 @@ through the ONE corpus authority, prefix-computed admission,
 removal/restart proofs) ∥ `p2-msglc` (message/lifecycle port,
 exemplar `f6d843ee` named as the worked pattern).
 
+**Ruling 17 (owner direction, 2026-07-22): package-host comms follow
+the seon.db integration pattern.** (a) JS packages run IN-PROCESS in
+the pod (the pod IS the Bun env) — bun install + the loader door is
+the complete JS story; no JS host process until isolation/memory
+evidence demands one. (b) WP-J = the per-cluster JVM process serves
+`seon.packages.jvm.*` leaves over the SAME typed Transit-UDS
+discipline as seon.db (wire maps in/out, descriptor-advertised
+socket, operator member, entry point analogous to seon.db.server);
+the p3a stop reports are the reusable operator wiring map. (c)
+Cluster parallelism is the db model: manifests/corpus/sockets/
+processes are cluster-scoped; clusters never coordinate. WHEN: WP-J
+after the loader door lands and the JVM side has a first consumer.
+
 **STAGED NEXT (refill on any free slot):** p2-blob · p2-my-families
 (specs in tmp/orchestrator/, exemplar commit = `f6d843ee`) ·
 agent-facing interface-guidance unit. Known open: drill-harness
