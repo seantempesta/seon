@@ -1028,6 +1028,12 @@ COMPLETELY before dispatching anything.
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- BREAK #1 FIXED (52124e45e, accepted): exactly one stale call site
+  (exhaustive-search proven); fixtures made honest under the
+  provenance classifier (incl. an adjacent stale corpus-implies-core
+  expectation); FULL canonical test build compiles clean (467
+  files); execution suite 41/189 green. CHECKPOINT RE-ENTERED at
+  step 1 (reset + fresh boot, timed).
 - CHECKPOINT BREAK #1 (found by the gate, as designed): the fresh
   build fails — execution_test.cljs:1073 still calls single-arg
   fault-for (R43 focused gates never compiled the full canonical
