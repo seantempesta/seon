@@ -1096,6 +1096,13 @@ the anchor stays the state ledger.
   publish the byte-faithful, digest-bound `program-rows.edn` artifact from the
   live analyzer derivation. Both runtime tiers and fixtures consume those
   rows; neither tier reconstructs them.
+- **Fixture consumption starts from the selected artifact manifest.** Resolve
+  `program-sources.edn` and `program-rows.edn` beneath the manifest's immutable
+  runtime root, verify both exact byte digests, and use the manifest's
+  application digest as initialization identity before reading transaction
+  data. A missing member, stale version, path escape, or digest mismatch is a
+  loud core fault; silently falling back to checkout files would detach the
+  fixture from the build it claims to model.
 - **Pre-parsed transaction data must come from the compiled indexer, not an
   approximation of Shadow metadata.** The flush hook already has the exact
   just-built Shadow state, but that state cannot supply registered Malli forms

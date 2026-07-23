@@ -1,11 +1,15 @@
 (ns seon.db.writer-test-support
   "Shared admitted database-session fixtures for JVM writer tests."
-  (:require [seon.config.resolve :as config.resolve]
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
+            [seon.config.resolve :as config.resolve]
             [seon.db.host :as db.host]
             [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds]
             [seon.db.writer :as writer]
-            [seon.schema :as schema]))
+            [seon.schema :as schema])
+  (:import [java.nio.file Path Paths]
+           [java.security MessageDigest]))
 
 (def ^:private fixture-hardware
   {:seon.hardware/cores 8
@@ -28,21 +32,164 @@
   []
   (schema/canonical-schema-rows (java.util.Date.)))
 
+(defn- bytes->hex
+  [byte-values]
+  (apply str (map #(format "%02x" (bit-and 0xff %)) byte-values)))
+
+(defn- file-digest
+  [path]
+  (let [digest (MessageDigest/getInstance "SHA-256")
+        buffer (byte-array 65536)]
+    (with-open [stream (io/input-stream (str path))]
+      (loop []
+        (let [n-read (.read stream buffer)]
+          (when (pos? n-read)
+            (.update digest buffer 0 n-read)
+            (recur)))))
+    (bytes->hex (.digest digest))))
+
+(defn- selected-artifact-process-path
+  []
+  (let [root (System/getProperty "user.dir")
+        process-dir (or (System/getenv "SEON_PROC_DIR")
+                        "tmp/seon-operator")]
+    (.normalize
+     (.resolve (Paths/get root (make-array String 0))
+               process-dir))))
+
+(defn- sha256-digest?
+  [value]
+  (and (string? value) (boolean (re-matches #"[0-9a-f]{64}" value))))
+
+(defn- assert-program-artifact-manifest!
+  [manifest manifest-path]
+  (let [required-strings
+        [:seon.dev.artifact/runtime-root
+         :seon.dev.artifact/program-source-path
+         :seon.dev.artifact/program-row-path]
+        required-digests
+        [:seon.dev.artifact/application-digest
+         :seon.dev.artifact/program-source-digest
+         :seon.dev.artifact/program-row-digest]]
+    (when-not
+     (and (= 11 (:seon.dev.artifact/version manifest))
+          (every? #(string? (get manifest %)) required-strings)
+          (every? #(sha256-digest? (get manifest %)) required-digests))
+      (throw
+       (ex-info "The selected artifact manifest has no valid program rows."
+                {:seon.dev.artifact/path (str manifest-path)
+                 :seon.dev.artifact/version
+                 (:seon.dev.artifact/version manifest)
+                 :seon.dev.artifact/missing-or-invalid
+                 (into []
+                       (remove
+                        (fn [key]
+                          (let [value (get manifest key)]
+                            (if (some #{key} required-digests)
+                              (sha256-digest? value)
+                              (string? value)))))
+                       (concat required-strings required-digests))
+                 :seon.error/kind :core-bug})))
+    manifest))
+
+(defn- verified-artifact-member
+  [runtime-root relative-path expected-digest label]
+  (let [root (.normalize (Paths/get runtime-root (make-array String 0)))
+        path (.normalize (.resolve root relative-path))]
+    (when-not (.startsWith path root)
+      (throw
+       (ex-info "An artifact manifest member escapes its runtime root."
+                {:seon.dev.artifact/member label
+                 :seon.dev.artifact/runtime-root (str root)
+                 :seon.dev.artifact/path (str path)
+                 :seon.error/kind :core-bug})))
+    (when-not (.isFile (.toFile path))
+      (throw
+       (ex-info "A required artifact manifest member is absent."
+                {:seon.dev.artifact/member label
+                 :seon.dev.artifact/path (str path)
+                 :seon.error/kind :core-bug})))
+    (let [actual-digest (file-digest path)]
+      (when-not (= expected-digest actual-digest)
+        (throw
+         (ex-info "An artifact manifest member digest does not match."
+                  {:seon.dev.artifact/member label
+                   :seon.dev.artifact/path (str path)
+                   :seon.dev.artifact/expected expected-digest
+                   :seon.dev.artifact/actual actual-digest
+                   :seon.error/kind :core-bug}))))
+    path))
+
+(defonce ^:private compiled-base
+  (delay
+    (let [manifest-path
+          (.resolve ^Path (selected-artifact-process-path) "artifact.edn")
+          _ (when-not (.isFile (.toFile manifest-path))
+              (throw
+               (ex-info "The selected artifact manifest is absent."
+                        {:seon.dev.artifact/path (str manifest-path)
+                         :seon.error/kind :core-bug})))
+          manifest
+          (assert-program-artifact-manifest!
+           (edn/read-string (slurp (str manifest-path)))
+           manifest-path)
+          runtime-root (:seon.dev.artifact/runtime-root manifest)
+          program-source
+          (verified-artifact-member
+           runtime-root
+           (:seon.dev.artifact/program-source-path manifest)
+           (:seon.dev.artifact/program-source-digest manifest)
+           :seon.dev.artifact/program-source)
+          program-row
+          (verified-artifact-member
+           runtime-root
+           (:seon.dev.artifact/program-row-path manifest)
+           (:seon.dev.artifact/program-row-digest manifest)
+           :seon.dev.artifact/program-row)
+          artifact (edn/read-string (slurp (str program-row)))
+          rows (:seon.dev.artifact/program-rows artifact)]
+      (when-not (and (vector? rows) (every? map? rows))
+        (throw
+         (ex-info "The verified program-row artifact is malformed."
+                  {:seon.dev.artifact/path (str program-row)
+                   :seon.dev.artifact/value-type (type rows)
+                   :seon.error/kind :core-bug})))
+      {:seon.execution/artifact-digest
+       (:seon.dev.artifact/application-digest manifest)
+       :seon.db/program rows
+       :seon.dev.artifact/program-source-path (str program-source)
+       :seon.dev.artifact/program-row-path (str program-row)})))
+
 (defn seed-canonical-schema!
-  "Commit the computed canonical schema population with boot provenance."
+  "Apply the verified compiled base through production initialization pages."
   [session database-name initial-data]
-  (let [database (db.host/resolve-db! session nil false)]
-    (db.host/call!
-     session
-     (protocol/transaction-request
-      {::protocol/request-id (str (random-uuid))
-       :seon.db/db database
-       ::protocol/transaction-data
-       (into (canonical-schema-rows) initial-data)
-       ::protocol/transaction-meta
-       {:seon.db/user [:seon.agent/id "root"]
-        :seon.db/process
-        [:seon.db.process/id :seon.db.process/boot]}}))))
+  (let [base @compiled-base
+        pages
+        (protocol/initialization-pages
+         {:seon.execution/artifact-digest
+          (:seon.execution/artifact-digest base)
+          :seon.db.initialization/page-rows 64
+          :seon.db/attributes (schema/canonical-database-attributes)
+          :seon.db/program (:seon.db/program base)
+          :seon.db/initial-data (vec initial-data)})]
+    (reduce
+     (fn [_ page]
+       (let [result
+             (db.host/call!
+              session
+              (protocol/ensure-database-request
+               {::protocol/request-id
+                (str "fixture-initialization/"
+                     (:seon.db.initialization/fingerprint page) "/"
+                     (:seon.db.initialization/page-index page))
+                ::protocol/database-name database-name
+                ::protocol/backend :memory
+                :seon.db/initialization-page page}))]
+         (if (::protocol/success? result)
+           result
+           (reduced result))))
+     nil
+     pages)))
 
 (def read-defaults
   "Generous finite read limits for writer tests not exercising read policy."
