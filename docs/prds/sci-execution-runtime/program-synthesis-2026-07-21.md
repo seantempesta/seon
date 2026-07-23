@@ -926,6 +926,22 @@ COMPLETELY before dispatching anything.
   overlap (indexing while pages stream) is the second axis. Bootfast
   spec carries both.
 
+- OWNER RULING R45 (2026-07-23 eve, boot north star): BOOT COST IS
+  PROPORTIONAL TO CHANGE, NOT CORPUS SIZE. (a) RESUME: when the last
+  known state still holds (artifact digest + schema fingerprint +
+  committed basis unchanged), startup is NEAR-INSTANT — load the
+  keyed caches, verify identity, reconnect; re-derive NOTHING that
+  identity proves unchanged. (b) BUILD COMPILES STARTUP: the build
+  step emits boot-ready artifacts (projection cache, program rows,
+  inventories — whatever boot would otherwise derive), digest-bound
+  so a stale artifact can never lie; boot's job shrinks to verify +
+  load + attach. Fresh reset pays derivation ONCE per artifact;
+  every subsequent boot of the same artifact is a resume. This
+  promotes D3 (build-side sidecars) from deferred to the program's
+  end-state and reframes D2's cache as the resume path. Bootfast
+  implements D1/D2/D4 now; the build-compiles-startup unit specs
+  after its re-measurement.
+
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
