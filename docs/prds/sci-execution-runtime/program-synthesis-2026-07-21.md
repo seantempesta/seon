@@ -1188,6 +1188,21 @@ and resumed with the defect-fix mandate + a NEW required proof:
 package-EMPTY cluster boots and completes a plain agent turn. Its
 commit + issue close wait on that.
 
+**OWNER RULING (2026-07-22 late): LOOP-FIRST — the package track
+PARKS after the pkg-door defect fix commits.** The agentic loop on
+sci is the spine, and its dependencies are ALREADY LANDED (db 15,
+message/lifecycle 7, fs/shell/web classified, execution/receipts/
+recovery machinery existing). Packages (seon.packages.js.bun, WP-J,
+further wrappers) are capability EXPANSION, not the loop — parked
+behind the loop milestone exactly like P3a; rulings 16/17 stand as
+recorded design for when it resumes. NEXT SPINE UNIT: the loop
+vertical slice — a real agent's full arc (turn open, context render,
+eval in a sci context over the landed portable cores, receipts,
+recovery) with tonight's E2E drive scenario re-run as the acceptance
+gate. my.* porting NARROWS to loop-essential-only, derived from what
+real drives actually call (measure, don't guess); the census stays
+the long-term meter but stops gating the loop.
+
 **STAGED NEXT (refill on any free slot):** p2-blob · p2-my-families
 (specs in tmp/orchestrator/, exemplar commit = `f6d843ee`) ·
 agent-facing interface-guidance unit. Known open: drill-harness
