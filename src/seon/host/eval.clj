@@ -52,7 +52,11 @@
                 meta
                 :seon.capability/effect))))
 
-(defn- namespace-resolution [ctx ns-sym]
+(defn namespace-resolution
+  "Return the retained P1 symbol resolution used to analyze parsed forms."
+  {:malli/schema [:=> [:cat 'some? :symbol]
+                  :seon.program.edge/resolution]}
+  [ctx ns-sym]
   (let [namespaces (:namespaces @(:env ctx))
         current (get namespaces ns-sym)
         entries

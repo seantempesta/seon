@@ -1,0 +1,71 @@
+P5 — driver plan enforcement + router deletion
+Date: 2026-07-23
+Branch: codex/runtime-reliability-refactor
+Planner contract consumed: e69a03034
+
+Outcome
+
+Implemented the reply-ready pre-dispatch boundary over parsed invocation-form
+roots. The JVM claimant now acquires the planning projection at the claim
+database value, derives the exact plan from the retained P1 namespace
+resolution and installer-owned tier inventory, verifies schema/capability/
+artifact coverage, and only then advances reply-ready -> evaling.
+
+Disposition
+
+- Exact :jvm plan: execute with the plan's selected tier and manifests attached
+  to the invocation; receipt mechanics and terminal phase transition are
+  unchanged.
+- Exact plan selecting another inspected tier: call the existing held-epoch
+  release transaction without advancing the phase or cursor.
+- Unplannable reply: return a flat :seon/error before any phase/receipt write.
+  Evidence names roots/callsites, missing leaves/exports/schema keys,
+  unresolved edges, planned+observed basis/generation, and
+  eligible+inspected tiers.
+- A missing requirement after an exact selected-tier plan is :core-bug.
+
+Router
+
+`src/seon/execution/host.cljs` consumes
+`:seon.execution/selected-tier`. The AST, loader, require-edge, and
+`seon.packages.js.*` prefix classifiers are deleted. Result-symbol ownership
+routing remains. The existing mixed-tier tests now supply plan-selected tiers
+while retaining the same invocation/result payload assertions.
+
+Inventory
+
+The claimant inventory comes only from
+`seon.host.context/register-host-capabilities!`'s landed
+`seon.capability/installed-leaf-inventory` result. No wrapper-table or source
+reconstruction was introduced. Artifact inventory remains unavailable until
+P1b lands, so compiled-only terminals correctly steer rather than dispatch.
+
+Verified stop: pure-block?
+
+The regex classifier was not deleted. `build-base!` classifies source before a
+claim database value exists, and the planner exposes aggregate placement, not
+per-root purity across sibling source definitions. Reconstructing resolutions
+and edge bundles in context would be a forbidden second analyzer/acquirer.
+Exact owner seam and acceptance are recorded in:
+
+  docs/seon/issues/planner-lacks-per-root-purity-projection.md
+
+The required future contract is a planner-owned batch/per-root purity
+projection over parsed forms and retained P1 resolutions.
+
+Proof
+
+- `bin/test-writer seon.agent-driver-writer-test
+  seon.agent.driver-core-test`
+  -> 15 tests, 53 assertions, 0 failures/errors.
+- `SEON_TEST_WAIT=1 bin/test-cljs --test=seon.execution.host-test
+  --test=seon.agent.driver-core-test`
+  -> 45 tests, 203 assertions, 0 failures/errors
+  (`tmp/test-cljs-20260723-124134-12438.log`).
+- Scan grep is empty in `src/seon/execution/host.cljs`.
+- `git diff --check` is clean.
+
+Pending at summary write
+
+- R38 reset/live proof on cluster p5enforce.
+- Path-limited commit hash.

@@ -12,15 +12,10 @@
    - the JVM agent host (`seon.host`), reached over a length-prefixed
      Transit-UDS stream through `seon.db.transport.uds/connect-stream!`.
 
-   Tier assignment is DATA on the agent entity: an agent carrying
-   `::eval-socket-path` has ordinary eval batches and authored calls served by
-   the JVM agent host at that socket. A parsed batch that references the
-   `seon.packages.js.*` namespace family stays on the existing Bun child;
-   compiled prompt/view rendering also remains there until the U11 seam moves
-   it. Absence of the fact keeps today's child for everything
-   (sci-execution-runtime design §9 step 1)."
+   Execution-plan selection is DATA on each eval invocation. `:jvm` uses the
+   agent's `::eval-socket-path`; `:bun` uses the existing child. Compiled
+   prompt/view rendering remains on Bun until the U11 seam moves it."
   (:require
-   [clojure.string :as str]
    [seon.config.resolve :as config.resolve]
    [seon.db :as db]
    [seon.db.branch :as branch]
@@ -815,19 +810,12 @@
                           ::execution/reload-required?])))
 
 (def ^:private eval-batch-symbol 'seon.execution.runtime/eval-batch!)
-(def ^:private bun-package-namespace-prefix "seon.packages.js.")
-
 (declare sample-owner)
 
 (defn- eval-batch-invocation? [invocation]
   (= eval-batch-symbol
      (get-in invocation [::execution/function-identity
                          ::execution/function-symbol])))
-
-(defn- bun-package-namespace? [namespace-symbol]
-  (and (symbol? namespace-symbol)
-       (str/starts-with? (str namespace-symbol)
-                         bun-package-namespace-prefix)))
 
 (defn- executable-symbols
   "Symbols in executable positions, excluding ordinary quoted data."
@@ -837,33 +825,6 @@
     (symbol? form) [form]
     (coll? form) (mapcat executable-symbols form)
     :else []))
-
-(defn- loader-package-reference?
-  "True when one loader form structurally names a Bun package namespace."
-  [form]
-  (and (seq? form)
-       (contains? '#{ns require require-macros use} (first form))
-       (boolean
-        (some bun-package-namespace?
-              (filter symbol? (tree-seq coll? seq (rest form)))))))
-
-(defn- entry-package-reference? [entry]
-  (let [form (:seon.repl/form entry)]
-    (or (some bun-package-namespace?
-              (:seon.repl/require-edges entry))
-        (loader-package-reference? form)
-        (some (fn [sym]
-                (some-> (namespace sym) symbol bun-package-namespace?))
-              (executable-symbols form)))))
-
-(defn- bun-package-eval-batch?
-  "True when an eval batch's parsed program references a Bun package."
-  [invocation]
-  (and (eval-batch-invocation? invocation)
-       (boolean
-        (some entry-package-reference?
-              (get-in invocation [::execution/arguments 0
-                                  :seon.eval/parsed])))))
 
 (defn- result-reference-ids [invocation]
   (into #{}
@@ -1014,38 +975,55 @@
                 (map? diagnostic) (merge diagnostic)))))))))
 
 (defn- invoke-now!
-  "Route the head invocation by tier data plus parsed package references.
+  "Route the head invocation from its selected execution-plan tier.
 
-   Eval batches and source-digest authored calls consult the host coordinate.
-   A batch naming the Bun-local `seon.packages.js.*` family selects the child
-   from parsed program data; every other hosted batch selects SCI.
-   Artifact-digest prompt/view rendering stays on the Bun child. A failed tier
-   read surfaces loudly as an error frame — never a silent fallback that could
-   run an ordinary host-tier eval in a fresh empty child context."
+   Result-symbol ownership remains a runtime fact. Artifact-digest prompt/view
+   rendering stays on the Bun child until its claimant phase moves."
   [invocation]
-  (if-not (or (eval-batch-invocation? invocation)
-              (authored-invocation? invocation))
-    (invoke-in-lane! child-lane nil invocation)
-    (let [lookup (or (::eval-host-coordinate! (host-configuration))
-                     pull-eval-host-coordinate!)]
-      (-> (lookup invocation)
-          (.then
-           (fn [coordinate]
-             (if (::coordinate-error coordinate)
-               (host-error invocation
-                           "The agent's execution tier fact could not be read."
-                           {:seon.error/cause
-                            (get-in coordinate
-                                    [::coordinate-error
-                                     :seon.error/message])})
-               (let [package-batch? (bun-package-eval-batch? invocation)
-                     lane (if package-batch?
-                            child-lane
-                            (if coordinate host-lane child-lane))
-                     socket-path (when (= host-lane lane) coordinate)]
-                 (if-let [eval-id (cross-tier-result-reference lane invocation)]
-                   (tier-local-result-error invocation eval-id)
-                   (invoke-in-lane! lane socket-path invocation))))))))))
+  (if (and (eval-batch-invocation? invocation)
+           (not (contains? #{:jvm :bun}
+                           (:seon.execution/selected-tier invocation))))
+    (js/Promise.resolve
+     (host-error invocation
+                 "The eval batch has no selected execution-plan tier."
+                 {:seon.error/kind :core-bug}))
+    (cond
+      (and (eval-batch-invocation? invocation)
+           (= :bun (:seon.execution/selected-tier invocation)))
+      (if-let [eval-id (cross-tier-result-reference child-lane invocation)]
+        (js/Promise.resolve (tier-local-result-error invocation eval-id))
+        (invoke-in-lane! child-lane nil invocation))
+
+      (not (or (eval-batch-invocation? invocation)
+               (authored-invocation? invocation)))
+      (invoke-in-lane! child-lane nil invocation)
+
+      :else
+      (let [lookup (or (::eval-host-coordinate! (host-configuration))
+                       pull-eval-host-coordinate!)]
+        (-> (lookup invocation)
+            (.then
+             (fn [coordinate]
+               (if (::coordinate-error coordinate)
+                 (host-error invocation
+                             "The agent's execution tier fact could not be read."
+                             {:seon.error/cause
+                              (get-in coordinate
+                                      [::coordinate-error
+                                       :seon.error/message])})
+                 (let [lane (if (eval-batch-invocation? invocation)
+                              host-lane
+                              (if coordinate host-lane child-lane))
+                       socket-path (when (= host-lane lane) coordinate)]
+                   (if (and (= host-lane lane) (nil? socket-path))
+                     (host-error
+                      invocation
+                      "The selected JVM execution tier is unavailable."
+                      {:seon.error/kind :core-bug})
+                     (if-let [eval-id
+                              (cross-tier-result-reference lane invocation)]
+                       (tier-local-result-error invocation eval-id)
+                       (invoke-in-lane! lane socket-path invocation))))))))))))
 
 (defn- unavailable-sample [request message]
   (let [root-request (assoc request

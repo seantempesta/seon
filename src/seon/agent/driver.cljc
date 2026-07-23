@@ -10,6 +10,7 @@
             [seon.agent.run.core :as run.core]
             [seon.config.resolve :as config.resolve]
             [seon.db :as db]
+            [seon.program.plan :as program.plan]
             [seon.schema :as schema]))
 
 #?(:clj (defmacro await [value] value))
@@ -266,6 +267,106 @@
       (:seon.agent/id run)
       (:seon.agent.run/id run)
       claim-epoch)})))
+
+(defn execution-plan-disposition
+  "Classify one exact pre-dispatch plan without opening the eval phase."
+  {:malli/schema
+   [:=> [:cat
+         [:map {:closed true}
+          [:seon.execution/plan :seon.execution/plan]
+          [:seon.execution/planning-projection
+           :seon.execution/planning-projection]
+          [:seon.execution/tier-inventories
+           :seon.execution/tier-inventories]
+          [:seon.execution/invoking-tier :seon.execution/tier]
+          [:seon.execution/roots :seon.execution/roots]
+          [:seon.execution/db-value :seon.db/db]]]
+    :seon.db.protocol/ordinary-wire-value]}
+  [{:seon.execution/keys
+    [plan planning-projection tier-inventories invoking-tier roots db-value]}]
+  (let [placement (:seon.execution/placement plan)
+        selected-tier (:seon.execution/selected-tier plan)
+        eligible-tiers (:seon.execution/eligible-tiers plan)
+        inspected-tiers (set (keys tier-inventories))
+        schema-manifest (:seon.execution/schema-manifest plan)
+        capability-manifest (:seon.execution/capability-manifest plan)
+        inventory (get tier-inventories selected-tier)
+        installed (or (:seon.execution.inventory/bindings inventory) #{})
+        required (:seon.execution/required-bindings capability-manifest)
+        missing-leaves (into #{} (remove installed) required)
+        artifacts (:seon.execution/artifact-inventories planning-projection)
+        exports (get-in artifacts
+                        [:seon.execution.inventory/exports-by-tier
+                         selected-tier] #{})
+        missing-exports
+        (into #{} (remove exports)
+              (:seon.execution/artifact-exports capability-manifest))
+        schema-projection (:seon.execution/schema-projection planning-projection)
+        schema-covered?
+        (program.plan/manifest-covered-by-projection?
+         schema-manifest schema-projection
+         (:seon.execution/schema-fingerprint planning-projection))
+        missing-schema-keys
+        (into #{}
+              (remove #(contains? (:seon.schema.projection/forms
+                                   schema-projection) %))
+              (:seon.execution/schema-keys schema-manifest))
+        evidence
+        {:seon.execution/roots roots
+         :seon.execution/callsites
+         (mapv #(select-keys % [:seon.execution/from
+                               :seon.execution/target])
+               (:seon.execution/unresolved plan))
+         :seon.execution/missing-capability-leaves missing-leaves
+         :seon.execution/missing-artifact-exports missing-exports
+         :seon.execution/missing-schema-keys missing-schema-keys
+         :seon.execution/unresolved (:seon.execution/unresolved plan)
+         :seon.execution/planned-basis
+         {:t (:seon.execution/basis-t planning-projection)
+          :datahike/commit-id (:seon.execution/commit-id planning-projection)}
+         :seon.execution/observed-basis
+         {:t (:t db-value)
+          :datahike/commit-id (:datahike/commit-id db-value)}
+         :seon.execution/planned-generation
+         (:seon.execution/graph-digest planning-projection)
+         :seon.execution/observed-generation
+         (:seon.execution/graph-digest planning-projection)
+         :seon.execution/eligible-tiers eligible-tiers
+         :seon.execution/inspected-tiers inspected-tiers}]
+    (cond
+      (= :unplannable placement)
+      {:seon.agent.driver/disposition :steering
+       :seon.agent.driver/error
+       {:seon.error/message
+        "The parsed reply has no exact execution plan on an inspected tier."
+        :seon.error/kind :agent
+        :seon.error/data evidence}}
+
+      (and selected-tier (not= selected-tier invoking-tier))
+      {:seon.agent.driver/disposition :release
+       :seon.execution/selected-tier selected-tier}
+
+      (nil? selected-tier)
+      {:seon.agent.driver/disposition
+       (if (seq eligible-tiers) :release :steering)
+       :seon.agent.driver/error
+       (when-not (seq eligible-tiers)
+         {:seon.error/message
+          "The parsed reply has no exact execution plan on an inspected tier."
+          :seon.error/kind :agent
+          :seon.error/data evidence})}
+
+      (or (seq missing-leaves) (seq missing-exports) (not schema-covered?))
+      {:seon.agent.driver/disposition :core-fault
+       :seon.agent.driver/error
+       {:seon.error/message
+        "The selected execution tier is missing a requirement from an exact plan."
+        :seon.error/kind :core-bug
+        :seon.error/data evidence}}
+
+      :else
+      {:seon.agent.driver/disposition :execute
+       :seon.execution/selected-tier selected-tier})))
 
 (defn ^:async drive-claim!
   "Advance one held run until close, loss, or a clean tier handoff."

@@ -98,6 +98,9 @@
   [:seon.db/db :seon.db/db]
   [::function-identity ::function-identity]
   [::arguments ::arguments]
+  [:seon.execution/selected-tier {:optional true} :keyword]
+  [:seon.execution/schema-manifest {:optional true} :map]
+  [:seon.execution/capability-manifest {:optional true} :map]
   [::deadline-ms ::deadline-ms]
   [::result-limit-bytes ::result-limit-bytes]
   [::run-fence {:optional true} ::run-fence]])

@@ -1,6 +1,7 @@
 (ns seon.agent-driver-writer-test
   "JVM claim-driver reply-policy regressions."
   (:require [clojure.test :refer [deftest is]]
+            [seon.db :as db]
             [seon.agent.driver.host :as driver.host]
             [seon.agent.turn.core :as turn.core]
             [seon.host.eval :as host.eval]))
@@ -45,3 +46,50 @@
       (fn []
         (#'driver.host/reply-program nil turn "agent")))
     (is (= ["(+ 1 2)" :batch 'my.agent] @received))))
+
+(deftest unplannable-reply-does-not-open-the-eval-phase
+  (let [transactions (atom [])
+        steering
+        {:seon.error/message "No exact execution plan."
+         :seon.error/kind :agent
+         :seon.error/data
+         {:seon.execution/roots ['(unknown/call)]
+          :seon.execution/missing-capability-leaves #{"unknown/call"}
+          :seon.execution/missing-artifact-exports #{}
+          :seon.execution/missing-schema-keys #{}
+          :seon.execution/unresolved
+          [{:seon.execution/reason :unresolved-symbol}]
+          :seon.execution/planned-basis {:t 7}
+          :seon.execution/observed-basis {:t 7}
+          :seon.execution/planned-generation "graph-7"
+          :seon.execution/observed-generation "graph-7"
+          :seon.execution/eligible-tiers #{}
+          :seon.execution/inspected-tiers #{:jvm}}}
+        claim
+        {:seon.db/db {:t 7}
+         :seon.agent.run/claim-epoch 2
+         :seon.agent.driver/run
+         {:seon.agent/id "agent"
+          :seon.agent.run/id "run"
+          :seon.agent.run/current-turn
+          {:seon.agent.turn/id "turn"}}}]
+    (with-redefs-fn
+      {#'driver.host/reply-program
+       (fn [& _] {:seon.repl/eval-entries
+                  [{:seon.repl/kind :form
+                    :seon.repl/form '(unknown/call)}]})
+       #'driver.host/invocation-configuration! (constantly {})
+       #'driver.host/parsed-reply-plan
+       (fn [& _]
+         {:seon.execution/plan {}
+          :seon.agent.driver/disposition
+          {:seon.agent.driver/disposition :steering
+           :seon.agent.driver/error steering}})
+       #'db/transact!
+       (fn [request]
+         (swap! transactions conj request)
+         {:db-after {:t 8}})}
+      (fn []
+        (is (= steering (#'driver.host/eval-step! {} nil claim)))))
+    (is (empty? @transactions)
+        "planning steering precedes phase and receipt transactions")))

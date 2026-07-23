@@ -1036,47 +1036,35 @@
 (defn- eval-batch-invocation
   ([invocation-id] (eval-batch-invocation invocation-id []))
   ([invocation-id parsed]
-  {::execution/message execution/invoke-message
-   ::execution/protocol-version execution/protocol-version
-   ::execution/agent-id "agent-1"
-   ::execution/invocation-id invocation-id
-   :seon.db/db database
-   ::execution/function-identity
-   {::execution/function-symbol 'seon.execution.runtime/eval-batch!
-    ::execution/artifact-digest digest}
-   ::execution/arguments [{:seon.eval/parsed parsed}]
-   ::execution/deadline-ms 9999999999999
-   ::execution/result-limit-bytes 4096}))
+   (eval-batch-invocation invocation-id parsed :jvm))
+  ([invocation-id parsed selected-tier]
+   {::execution/message execution/invoke-message
+    ::execution/protocol-version execution/protocol-version
+    ::execution/agent-id "agent-1"
+    ::execution/invocation-id invocation-id
+    :seon.db/db database
+    ::execution/function-identity
+    {::execution/function-symbol 'seon.execution.runtime/eval-batch!
+     ::execution/artifact-digest digest}
+    ::execution/arguments [{:seon.eval/parsed parsed}]
+    :seon.execution/selected-tier selected-tier
+    :seon.execution/schema-manifest
+    {:seon.execution/schema-keys #{}
+     :seon.execution/predicate-functions #{}
+     :seon.execution/attributes #{}}
+    :seon.execution/capability-manifest
+    {:seon.execution/required-bindings #{}
+     :seon.execution/remote-bindings #{}
+     :seon.execution/effects {}
+     :seon.execution/native-leaves #{}
+     :seon.execution/artifact-exports #{}}
+    ::execution/deadline-ms 9999999999999
+    ::execution/result-limit-bytes 4096}))
 
 (defn- parsed-form [form]
   {:seon.repl/kind :form
    :seon.repl/source (pr-str form)
    :seon.repl/form form})
-
-(deftest bun-package-batch-selection-is-derived-from-parsed-references
-  (let [package-call
-        (parsed-form
-         '(seon.packages.js.fast-deep-equal/equal?
-           {:seon.packages.js.fast-deep-equal/left {:a 1}
-            :seon.packages.js.fast-deep-equal/right {:a 1}}))
-        nested-call
-        (parsed-form '(map seon.packages.js.fast-deep-equal/equal? xs))
-        package-require
-        (parsed-form '(require '[seon.packages.js.fast-deep-equal :as equal]))
-        projected-edge
-        (assoc (parsed-form '(equal/equal? request))
-               :seon.repl/require-edges
-               '#{seon.packages.js.fast-deep-equal})]
-    (doseq [entry [package-call nested-call package-require projected-edge]]
-      (is (true? (@#'host/bun-package-eval-batch?
-                  (eval-batch-invocation "package" [entry])))))
-    (doseq [entry [(parsed-form '(quote
-                                  seon.packages.js.fast-deep-equal/equal?))
-                   (parsed-form '(identity
-                                  "seon.packages.js.fast-deep-equal/equal?"))
-                   (parsed-form '(seon.packages/install! request))]]
-      (is (false? (@#'host/bun-package-eval-batch?
-                   (eval-batch-invocation "ordinary" [entry])))))))
 
 (deftest cross-tier-result-reference-has-specific-steering
   (let [state @#'host/!host
@@ -1232,19 +1220,19 @@
       (reset! !connect-native (::connect fixture))
       (configure-with-host! spawn!)
       (let [completion
-            (host/invoke!
-             (eval-batch-invocation "package-eval-1" [package-entry]))]
+             (host/invoke!
+             (eval-batch-invocation "package-eval-1" [package-entry] :bun))]
         (-> (turn*)
             (.then
              (fn [_]
                (is (= 1 (count @spawned))
-                   "the computed package reference selects the existing Bun child")
+                   "the selected plan tier uses the existing Bun child")
                (feed! @options (:process child) (ready-message))
                (turn*)))
             (.then
              (fn [_]
                (is (zero? (count @(::writes fixture)))
-                   "a Bun-local package batch never opens the SCI host stream")
+                   "a Bun-selected batch never opens the SCI host stream")
                (feed! @options (:process child)
                       (result-message "package-eval-1"
                                       {:seon.eval/ids ["package-eval-id"]}))

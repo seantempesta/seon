@@ -952,3 +952,25 @@ the anchor stays the state ledger.
   default undeclared effects to external, and hash the canonical immutable
   descriptor set. Reconstructing this inventory later from wrapper registries
   loses producer metadata and creates a second authority.
+
+## P5 pre-dispatch and router-consumer scars (2026-07-23)
+
+- **The phase transition belongs after planning, not around it.** Parse the
+  reply, acquire the fenced planning projection, derive and verify placement,
+  and only then commit `:reply-ready → :evaling`. Steering and handoff paths
+  must not create an eval receipt or advance the cursor.
+- **A router consumes selected tier data and nothing weaker.** Passing parsed
+  forms alongside an execution plan does not authorize AST, loader, require,
+  or namespace-prefix inspection. Route from `:seon.execution/selected-tier`
+  and retain only result-symbol ownership checks, because retained values are
+  runtime-local facts rather than placement evidence.
+- **Exact-plan verification changes the failure class.** Before exact
+  placement, missing leaves, exports, schemas, and unresolved edges are
+  steering evidence. After an exact selected-tier plan, the same missing
+  requirement means planner/inventory drift and is a `:core-bug`.
+- **Portable-base purity needs a per-root planner product.** Base construction
+  precedes claim database acquisition, and aggregate invocation placement
+  cannot classify sibling source blocks independently. Do not recreate P1
+  resolution and edge projection inside `seon.host.context`; the planner must
+  expose a batch/per-root purity projection before the regex classifier can be
+  deleted.

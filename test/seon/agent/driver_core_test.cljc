@@ -7,6 +7,7 @@
    [seon.agent.loop.core :as loop.core]
    [seon.agent.run.core :as run.core]
    [seon.agent.turn.core :as turn.core]
+   [seon.schema :as schema]
    [seon.runtime.recovery.core :as recovery.core]))
 
 (def agent-id "agent-u2")
@@ -114,6 +115,103 @@
        (assoc base-run
               :seon.agent.run/current-turn
               {:seon.agent.turn/phase :reply-ready}))))
+
+(defn- disposition-fixture [plan inventory]
+  (let [schema-projection
+        (schema/projection-from-rows
+         {:seon.schema/schema-rows #{}
+          :seon.schema/function-contract-rows #{}})
+        planning-projection
+        {:seon.execution/basis-t 7
+         :seon.execution/commit-id "commit-7"
+         :seon.execution/graph-digest "graph-7"
+         :seon.execution/schema-projection schema-projection
+         :seon.execution/schema-fingerprint
+         (:seon.schema.projection/fingerprint schema-projection)
+         :seon.execution/artifact-inventories
+         {:seon.execution.inventory/availability :available
+          :seon.execution.inventory/exports-by-tier {:jvm #{} :bun #{}}
+          :seon.execution.inventory/digest "artifacts-7"}}]
+    (driver/execution-plan-disposition
+     {:seon.execution/plan plan
+      :seon.execution/planning-projection planning-projection
+      :seon.execution/tier-inventories inventory
+      :seon.execution/invoking-tier :jvm
+      :seon.execution/roots ['(+ 1 2)]
+      :seon.execution/db-value
+      {:t 7 :datahike/commit-id "commit-7"}})))
+
+(def empty-manifests
+  {:seon.execution/schema-manifest
+   {:seon.execution/schema-keys #{}
+    :seon.execution/predicate-functions #{}
+    :seon.execution/attributes #{}}
+   :seon.execution/capability-manifest
+   {:seon.execution/required-bindings #{}
+    :seon.execution/remote-bindings #{}
+    :seon.execution/effects {}
+    :seon.execution/native-leaves #{}
+    :seon.execution/artifact-exports #{}}
+   :seon.execution/unresolved []})
+
+(deftest execution-plan-disposition-fails-before-dispatch-or-releases-for-handoff
+  (let [inventories
+        {:jvm {:seon.execution.inventory/bindings #{}
+               :seon.execution.inventory/remote-bindings #{}
+               :seon.execution.inventory/pure-bindings #{}
+               :seon.execution.inventory/digest "jvm"}
+         :bun {:seon.execution.inventory/bindings #{"bun/leaf"}
+               :seon.execution.inventory/remote-bindings #{}
+               :seon.execution.inventory/pure-bindings #{}
+               :seon.execution.inventory/digest "bun"}}
+        release
+        (disposition-fixture
+         (merge empty-manifests
+                {:seon.execution/placement :constrained
+                 :seon.execution/eligible-tiers #{:bun}
+                 :seon.execution/selected-tier :bun})
+         inventories)
+        steering
+        (disposition-fixture
+         (merge empty-manifests
+                {:seon.execution/placement :unplannable
+                 :seon.execution/eligible-tiers #{}
+                 :seon.execution/unresolved
+                 [{:seon.execution/reason :no-roots
+                   :seon.execution/steering "Supply a parsed invocation root."}]})
+         inventories)]
+    (is (= :release (:seon.agent.driver/disposition release)))
+    (is (= :bun (:seon.execution/selected-tier release)))
+    (is (= :steering (:seon.agent.driver/disposition steering)))
+    (is (= :agent
+           (get-in steering
+                   [:seon.agent.driver/error :seon.error/kind])))
+    (is (= #{:jvm :bun}
+           (get-in steering
+                   [:seon.agent.driver/error :seon.error/data
+                    :seon.execution/inspected-tiers])))))
+
+(deftest exact-plan-missing-requirement-is-a-core-fault
+  (let [result
+        (disposition-fixture
+         (-> empty-manifests
+             (assoc :seon.execution/placement :constrained
+                    :seon.execution/eligible-tiers #{:jvm}
+                    :seon.execution/selected-tier :jvm)
+             (assoc-in [:seon.execution/capability-manifest
+                        :seon.execution/required-bindings]
+                       #{"missing/leaf"}))
+         {:jvm {:seon.execution.inventory/bindings #{}
+                :seon.execution.inventory/remote-bindings #{}
+                :seon.execution.inventory/pure-bindings #{}
+                :seon.execution.inventory/digest "jvm"}})]
+    (is (= :core-fault (:seon.agent.driver/disposition result)))
+    (is (= :core-bug
+           (get-in result [:seon.agent.driver/error :seon.error/kind])))
+    (is (= #{"missing/leaf"}
+           (get-in result
+                   [:seon.agent.driver/error :seon.error/data
+                    :seon.execution/missing-capability-leaves])))))
 
 (deftest recovery-preserves-live-custody-and-steals-only-expired-custody
   (let [claimed (assoc base-run

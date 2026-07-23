@@ -18,6 +18,7 @@
             [seon.host.instrument :as instrument]
             [seon.host.invoke :as invoke]
             [seon.host.session :as session]
+            [seon.program.plan :as plan]
             [seon.repl.parse :as repl.parse])
   (:import [java.nio.file Files Path]
            [java.util.concurrent Callable ExecutorService Future
@@ -220,8 +221,10 @@
        (host.eval/agent-home-ns agent-id)))))
 
 (defn- invocation
-  [agent-id database run-id claim-epoch turn-id program configuration]
-  {:seon.execution/invocation-id (str (random-uuid))
+  [agent-id database run-id claim-epoch turn-id program configuration
+   execution-plan]
+  (merge
+   {:seon.execution/invocation-id (str (random-uuid))
    :seon.execution/agent-id agent-id
    :seon.db/db database
    :seon.execution/function-identity
@@ -239,7 +242,11 @@
    (:seon.config.claim-driver/invocation-result-maximum-bytes configuration)
    :seon.execution/run-fence
    {:seon.agent.run/id run-id
-    :seon.agent.run/claim-epoch claim-epoch}})
+    :seon.agent.run/claim-epoch claim-epoch}}
+   (select-keys execution-plan
+                [:seon.execution/selected-tier
+                 :seon.execution/schema-manifest
+                 :seon.execution/capability-manifest])))
 
 (defn- invocation-configuration! [database]
   (let [singleton
@@ -263,24 +270,14 @@
       configuration)))
 
 (defn- run-eval-batch!
-  [host storage-view run claim-epoch database]
+  [host run claim-epoch database program invocation-configuration
+   execution-plan]
   (let [agent-id (:seon.agent/id run)
         run-id (:seon.agent.run/id run)
         turn (:seon.agent.run/current-turn run)
         turn-id (:seon.agent.turn/id turn)
-        fence (run.core/run-fence agent-id run-id claim-epoch)
-        program (reply-program storage-view turn agent-id)
-        invocation-configuration (invocation-configuration! database)]
-    (cond
-      (:my.blob/error program)
-      {:seon.error/message (:my.blob/error program)
-       :seon.error/kind :core-bug}
-
-      (:seon.error/message invocation-configuration)
-      invocation-configuration
-
-      :else
-      (let [host-session (driver-session host agent-id)
+        fence (run.core/run-fence agent-id run-id claim-epoch)]
+    (let [host-session (driver-session host agent-id)
             task
             (.submit
              ^ExecutorService (:seon.host/eval-pool host)
@@ -288,8 +285,8 @@
              (fn []
                (invoke/execute-invocation!
                host-session
-                (invocation agent-id database run-id claim-epoch
-                            turn-id program invocation-configuration))))
+                (invocation agent-id database run-id claim-epoch turn-id
+                            program invocation-configuration execution-plan))))
             batch (.get ^Future task)
             executable-count
             (count (filter #(contains? #{:form :read}
@@ -316,7 +313,48 @@
               terminal
               {:seon.db/db (:db-after terminal)
                :seon.agent.driver/eval-batch batch
-               :seon.agent.driver/program program})))))))
+               :seon.agent.driver/program program}))))))
+
+(defn- parsed-reply-plan
+  [host database agent-id program]
+  (let [planning-projection (plan/acquire-planning-projection database)]
+    (if (:seon.error/message planning-projection)
+      planning-projection
+      (let [tier-inventory (get-in host [:seon.host/base
+                                         ::context/tier-inventory])
+            tier-inventories
+            {(:seon.execution.inventory/tier tier-inventory) tier-inventory}
+            roots (into []
+                        (keep #(when (= :form (:seon.repl/kind %))
+                                 (:seon.repl/form %)))
+                        (:seon.repl/eval-entries program))
+            retained-ctx (ensure-context! host agent-id)
+            root-resolution
+            (host.eval/namespace-resolution
+             retained-ctx (host.eval/agent-home-ns agent-id))
+            execution-plan
+            (plan/plan-execution
+             {:seon.execution/db-value database
+              :seon.execution/roots roots
+              :seon.execution/root-resolution root-resolution
+              :seon.execution/invocation
+              {:seon.eval/parsed (:seon.repl/eval-entries program)}
+              :seon.execution/tier-inventories tier-inventories
+              :seon.execution/selection-policy
+              {:seon.execution.selection/invoking-tier :jvm
+               :seon.execution.selection/handoff-tier :bun}
+              :seon.execution/planning-projection planning-projection})]
+        (if (:seon.error/message execution-plan)
+          execution-plan
+          {:seon.execution/plan execution-plan
+           :seon.agent.driver/disposition
+           (driver/execution-plan-disposition
+            {:seon.execution/plan execution-plan
+             :seon.execution/planning-projection planning-projection
+             :seon.execution/tier-inventories tier-inventories
+             :seon.execution/invoking-tier :jvm
+             :seon.execution/roots roots
+             :seon.execution/db-value database})})))))
 
 (defn- eval-step!
   [host storage-view
@@ -328,16 +366,50 @@
         turn-id (get-in run [:seon.agent.run/current-turn
                              :seon.agent.turn/id])
         fence (run.core/run-fence agent-id run-id claim-epoch)
-        phase-report
-        (db/transact!
-         {::db/db database
-          ::db/tx-data
-          (turn.core/advance-phase-tx-data
-           fence turn-id :reply-ready :evaling [])})]
-    (if (:seon.error/message phase-report)
-      phase-report
-      (run-eval-batch!
-       host storage-view run claim-epoch (:db-after phase-report)))))
+        program (reply-program storage-view
+                               (:seon.agent.run/current-turn run) agent-id)
+        invocation-configuration (invocation-configuration! database)]
+    (cond
+      (:my.blob/error program)
+      {:seon.error/message (:my.blob/error program)
+       :seon.error/kind :core-bug}
+
+      (:seon.error/message invocation-configuration)
+      invocation-configuration
+
+      :else
+      (let [planned (parsed-reply-plan host database agent-id program)]
+        (if (:seon.error/message planned)
+          planned
+          (let [disposition (:seon.agent.driver/disposition planned)
+                execution-plan (:seon.execution/plan planned)]
+            (case (:seon.agent.driver/disposition disposition)
+              :steering (:seon.agent.driver/error disposition)
+              :core-fault (:seon.agent.driver/error disposition)
+              :release
+              (let [report
+                    (driver/release!
+                     {:seon.agent.driver/run run
+                      :seon.agent.run/claim-epoch claim-epoch
+                      :seon.db/db database})]
+                (if (:seon.error/message report)
+                  report
+                  {:seon.db/db (:db-after report)
+                   :seon.agent.driver/released? true
+                   :seon.execution/selected-tier
+                   (:seon.execution/selected-tier disposition)}))
+              :execute
+              (let [phase-report
+                    (db/transact!
+                     {::db/db database
+                      ::db/tx-data
+                      (turn.core/advance-phase-tx-data
+                       fence turn-id :reply-ready :evaling [])})]
+                (if (:seon.error/message phase-report)
+                  phase-report
+                  (run-eval-batch!
+                   host run claim-epoch (:db-after phase-report) program
+                   invocation-configuration execution-plan))))))))))
 
 (defn- settle-eval-step!
   [host storage-view
