@@ -1028,6 +1028,16 @@ COMPLETELY before dispatching anything.
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- CHECKPOINT BREAK #1 (found by the gate, as designed): the fresh
+  build fails — execution_test.cljs:1073 still calls single-arg
+  fault-for (R43 focused gates never compiled the full canonical
+  test build) → client compile error → program-row derivation fails
+  LOUD → no v11 manifest → watcher flush timeout. ONE causal chain,
+  every stage failing correctly. R43 session resumed: fix every
+  stale call site with honest projection fixtures + prove the class
+  by compiling the FULL canonical test build to zero errors. Wiki
+  lesson queued: lane gates must include the canonical-build compile
+  when a public signature changes.
 - R43 ACCEPTED (69d53311b, verified: prefix regex GONE, classifier
   is provenance-driven with the ruled precedence; the no-op-assertion
   leak regression proven against real Datahike; my.plan dispatch
