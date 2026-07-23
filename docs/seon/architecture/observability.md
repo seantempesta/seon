@@ -88,6 +88,37 @@ flag:
 and small values; large text — a prompt, a raw reply, a big eval result —
 lives in the blob archive behind a datom ref. The DB is never a text dump.
 
+### Receipts are the crash-forensics spine
+
+The run's claimant, claim epoch, heartbeat, turn phase, provider attempts, and
+eval rows form one causally ordered record. They answer four different
+questions without consulting process memory:
+
+- **Who held authority?** Query `:seon.agent.run/claimant` and
+  `:seon.agent.run/claim-epoch` at the relevant database value.
+- **What step was admitted?** Read `:seon.agent.turn/phase` together with the
+  attempt or eval receipt opened before dispatch.
+- **What finished?** Terminal receipt state is a CAS from the open/running
+  state and carries the bounded result, error, output, usage, or response
+  identity.
+- **What did takeover repair?** An abandoned provider attempt becomes
+  `:crashed`; an admitted eval remains terminal or becomes interrupted
+  according to its receipt. The later phase transition records the recovery
+  database transaction.
+
+An `:open` attempt with an `:attempt-open` turn phase is evidence that external
+work was admitted but not durably settled. Absence of an eval receipt at
+`:evaling` means no form was admitted; a `:running` eval receipt means a form
+crossed the execution door but did not terminalize. These distinctions govern
+recovery and remain visible to debug projections.
+
+Datahike temporal history supplies **claim archaeology**. An investigator can
+walk the run's claimant, epoch, and heartbeat changes; join each transition to
+transaction provenance; inspect the cursor and receipts at the same database
+value; and identify the exact transaction that displaced a holder. Expiry
+itself is derived from the historical heartbeat and configured stale interval,
+so forensics never treats a stored `expired?` flag as evidence.
+
 ## The blob archive — `my.blob`
 
 The disk tier of the three-tier storage rule (datoms = projections, blobs =
@@ -109,27 +140,18 @@ capability instead of ad-hoc log files:
   search/embedding capabilities when explicitly requested; `my.blob` does not
   create another index.
 
-Execution-child telemetry follows the same storage law. Bun process handles,
-active invocation timers, and demanded live CPU/RSS samples remain transient in
-the parent execution host. A loopback operator read returns one demanded
-ordinary-data `seon.execution.host/processes` snapshot for root tooling and
-Inspect without asking child event loops to cooperate. Healthy sampling does
-not write transactions. On
-deadline, exit, or explicit forensic capture, one bounded terminal snapshot
-becomes queryable recovery datoms and the complete structured report becomes one
-`:diagnostic` blob. The blob contains sample history, raw or source-mapped stack
-frames, full invocation identity, and complete retained output; the recovery
-entity keeps only measurement units and clipped tails needed for ordinary
-queries and the root system view.
+Claimant telemetry follows the same storage law. JVM thread handles, active
+deadline timers, and demanded CPU or heap samples remain transient in the
+owning process. Healthy sampling does not write transactions. A deadline,
+process exit, or explicit forensic capture may attach one bounded terminal
+projection and one `:diagnostic` blob, but neither replaces the claim, phase,
+and receipt facts.
 
-Stack attribution is evidence, not certainty. A thrown exception supplies an
-ordinary JSC stack. A non-responsive child may receive a short on-demand native
-sample after the soft threshold; generated frames are mapped through the exact
-ClojureScript source map and trimmed to the first agent-authored frame plus its
-callers and the owning Seon boundary. Reports retain raw frames and sample share
-so optimized, native, or blocked-system-call cases can say that attribution is
-incomplete rather than inventing an exact source line. Always-on JSC profiling
-is diagnostic-only unless measured overhead proves it suitable for the default.
+Stack attribution is evidence, not certainty. A thrown exception supplies a JVM
+stack; a non-responsive claimant may receive a bounded on-demand sample. Reports
+retain raw frames and sampling context so optimized, native, or blocked-system-
+call cases can state incomplete attribution rather than invent an exact source
+line.
 
 ## Replay, diff, search
 
@@ -235,7 +257,7 @@ ids through the fork point are identical, but database values always retain
 diverge/reuse after a reset.
 
 No bare-`:t` convenience selector exists; the complete database value names a
-temporal cut inside one retained immutable containing commit. The debug pod starts
+temporal cut inside one retained immutable containing commit. The debug cluster starts
 non-autonomously: opening history installs no ticker, wake trigger, or agent
 host and never resumes agents, schedules, providers, or external-effect workers.
 
@@ -248,16 +270,15 @@ stable forensic flow is fault list → error detail → reproduction bundle →
 non-autonomous historical runtime; operator command names are not part of
 the data model.
 
-Execution-child recovery retains two database values rather than inventing a
-rollback point: the value pinned for the interrupted invocation and the current
-value at which recovery terminalizes it. Their basis transactions and commit IDs
-show exactly what the child saw and which transactions committed before it
-disappeared. The process exit record retains the admitted artifact and source
-identity, PID, signal or exit code, deadline classification, bounded stdout and
-stderr tails, and available resource usage. The next-turn recovery render states
-that a replacement loaded the current database program and that transient
-Promises, handles, and `result/<id>` values were lost. It never claims committed
-effects were undone or silently retries an interrupted effect.
+Claim recovery retains two database values rather than inventing a rollback
+point: the value pinned for the interrupted phase and the current value at which
+takeover terminalizes or advances it. Their basis transactions and commit IDs
+show what the old claimant saw and what committed before replacement. Process
+diagnostics may retain claimant identity, PID, signal or exit code, deadline
+classification, bounded output tails, and available resource usage. The next
+turn may state that replacement loaded the current database program and that
+transient tier-local values were lost. It never claims committed effects were
+undone or silently retries an effect contrary to its class.
 
 ## The forensic agent
 
@@ -276,31 +297,31 @@ saw**, not by a human reading logs:
 - **Per-agent LLM config** selects a cheap reasoning model with thinking ON
   for these runs, so forensic passes are routine, not precious.
 
-This is a composition of existing mechanisms—pod isolation, Datahike branch
+This is a composition of existing mechanisms—claimant isolation, Datahike branch
 roots, seed-copy ctx override via `install!`, as-of reconstruction,
 per-agent provider routing — not a new runtime. A forensic pass is cheap
 enough to run on every puzzling drive.
 
 ## Cluster lifecycle and the composition door
 
-Isolation is the CLUSTER: one shared db + its agents, one Bun pod per
-cluster, all databases hosted by the one JVM database server (the registry). From
+Isolation is the CLUSTER: one shared database and its agents, supervised writer,
+web-render, claimant, and leaf-host processes. From
 inside a cluster there is ONE conn and ONE database — agents never know
 other clusters exist. Database enumeration, fork, release, and deletion are
 typed root/supervisor operations in `seon.db.registry`, never agent protocol
 operations. The supervisor owns the lifecycle:
 
-- creation establishes one registered database name and pod;
+- creation establishes one registered database name and process group;
 - fork requires a complete retained database value and creates a writable Datahike
   branch without physically copying the database;
 - a historical or forensic runtime starts non-autonomously; and
 - destroy quiesces users of the target and removes only resources owned by that
   database name. A branch cannot delete source-database content.
 
-`POST /agents/run` is the one-shot composition door on every pod, built
-purely from the agent primitives: start-or-reuse an agent in the pod's own
+`POST /agents/run` is the one-shot composition door, built
+purely from the agent primitives: start-or-reuse an agent in the cluster's own
 cluster (optional `agent_id` — durable database, so the same agent can be
-driven again across a pod restart), deliver the input through the real wake
+driven again across a claimant restart), deliver the input through the real wake
 path, await the derived `:idle` of the run it woke, return the truthful
 reply plus termination metadata (turns/evals scoped to this request's
 window, closed-reason, timed-out), an ordered `eval_evidence` projection of
@@ -313,7 +334,7 @@ identity and outcome. A response-time final database value is never mislabeled a
 call evidence. Inspect AI copies the projection unchanged and rejects missing
 or drifting transport evidence before capability scoring. Inspect AI drives
 per-sample ephemeral clusters by port through this same production boundary;
-there is no in-process evaluator lifecycle. The answer key never enters the pod
+there is no in-process evaluator lifecycle. The answer key never enters the cluster
 — scoring stays host-side. Benchmark vocabulary is harness-side only.
 
 An explicit `timeout_ms` is a caller-selected experiment bound. When it is
@@ -333,7 +354,7 @@ trace or database-operation log. Inspect consumes this production response
 directly and does not issue arbitrary forms through the writer REPL to
 reconstruct eval rows.
 
-Standard Inspect tasks measure the selected model and scorer. Pod-backed Inspect
+Standard Inspect tasks measure the selected model and scorer. Cluster-backed Inspect
 tasks measure Seon's production agent/runtime behavior through this door; the
 two claims are reported separately and no duplicate evaluator is created.
 Every admitted live run retains both its opening and closing source admission
@@ -367,10 +388,10 @@ the scorer's value, explanation, metadata, and aggregate metrics, and Inspect's
 native score history records who made the classification and why. Passing
 scores carry no manufactured failure label, infrastructure failures remain
 unscored, and no heuristic classifier becomes another evidence authority.
-Long-term planning is a pod-backed Inspect task: one ephemeral cluster spans
-multiple interactions and a pod restart, then host-side scoring reads the
+Long-term planning is a cluster-backed Inspect task: one ephemeral cluster spans
+multiple interactions and a claimant restart, then host-side scoring reads the
 resulting plan and eval facts. Offline good/bad fixtures exercise the same
-scorer without claiming to measure the pod.
+scorer without claiming to measure the cluster.
 
 Every turn uses the one complete ordinary database value plus prompt/reply blob
 refs. `seon.agent.debug/turn` and `turn-diff` reconstruct and compare turns from

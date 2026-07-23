@@ -173,7 +173,7 @@ its caller and data invariants.
 
 ### Tests
 
-Code correctness uses the existing pod, database-server, and operator runners.
+Code correctness uses the existing claimant, writer, and operator runners.
 Agent/model behavior uses Inspect AI. A toolkit function may request the public
 test operation, but it does not own another test registry, result history, or
 runner.
@@ -266,6 +266,13 @@ render tokens, and wall-clock duration. A bound returns an addressable partial
 value or structured error; it never silently reports a partial result as the
 whole.
 
+Protective limits are circuit breakers, not throughput governors. Each is a
+schema'd configuration fact with explicit units, calibration provenance, and a
+default far above legitimate measured work. Runtime code has no alternate
+numeric limit. Firing records a fault and returns the flat steering shape,
+naming the governing config key; it never silently sleeps, queues without
+bound, or drops work. See [[laws]].
+
 Capability failures use one flat public shape: required
 `:seon.error/message` and `:seon.error/kind`, plus optional structured
 `:seon.error/data`. A family may retain its own `ok? false` field and request
@@ -279,8 +286,8 @@ identity fields alongside those keys, but does not nest the error under
 
 Optional diagnostic categories may refine a record, but do not replace this
 axis. Core publication/readiness failures follow the configured escalation at
-their transition; ordinary agent mistakes remain values and do not wedge the
-pod.
+their transition; ordinary agent mistakes remain values and do not wedge a
+claimant.
 
 ## See also
 

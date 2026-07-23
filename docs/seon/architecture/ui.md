@@ -20,6 +20,12 @@ symbol or a datom, so a third party overrides any of it — blocks, canvas,
 layout, the root agent’s view, routes, CSS, client — reusing the same
 primitives, with zero `src/seon` edits.
 
+The web UI runs in the independent **web-render JVM**. It serves HTTP through
+http-kit, frames SSE through the Datastar Clojure SDK, and reads through its own
+immutable replica and database session. It never executes agent-authored code. Claimants evaluate
+authored renders behind the guarded execution door and commit or return ordinary
+render data; the web-render process performs only trusted pure derivation.
+
 ## The block and its two renders
 
 A **block** (`:seon.agent.ctx/block`, registered in [[data-model]]) carries up to
@@ -83,15 +89,17 @@ implicit skill-body injection exists.
 
 ## The render engine
 
-One engine, `seon.render`, renders every page and the prompt. It is a single
-recursive, **guarded** walker over the agent's blocks in two views (`:ai` →
-String, `:html` → hiccup). Renders are projections, never persisted. A throwing or
-hung render yields a `:seon/error` value (see [[data-model]] §6) for THAT render
-only; siblings never crash.
+One engine, `seon.render`, renders every page and the prompt. Every render call
+requires a complete immutable database value under `:seon.db/db`; absence is a
+flat `:core-bug`, never permission to consult an ambient latest value. The
+engine is a single guarded walker over the agent's blocks in two views (`:ai` →
+String, `:html` → hiccup). Renders are projections, never persisted. A failing
+render yields a flat error value (see [[data-model]] §6) for that render only;
+siblings never crash.
 
 **prompt == page by construction.** Both derive from the same blocks at the
-turn's complete ordinary database value. The compiled prompt child acquires
-and formats the AI renders in `:seon.agent.ctx/priority` order; the web UI places
+turn's complete ordinary database value. The prompt driver acquires and formats
+the AI renders in `:seon.agent.ctx/priority` order; the web UI places
 the same blocks' HTML renders into a layout's slots. "What the agent saw at turn
 N" is a re-derive from that exact value; `:t` alone is not a durable bookmark.
 
@@ -100,7 +108,7 @@ layer, `seon.render/block` — `(block view x)` dispatches on the value-KIND `x`
 carries (the namespaced key ON the value, never a stored `:kind`): a **message**
 (`:seon.render/markdown`) → `seon.ui.markdown/md->hiccup`, a **source**
 (`:seon.render/source`) → `clj->hiccup`, a **data** projection → the value panel, a
-**`:seon/error`** → an error card, a literal **hiccup** vector → passthrough, and
+flat **error data** → an error card, a literal **hiccup** vector → passthrough, and
 anything else → the data panel (never throws). The transcript and the canvas both
 route their bodies through it, so every surface "just displays the block."
 
@@ -135,13 +143,19 @@ technical surface wraps or horizontally scrolls, and the canvas has a bounded
 default height. Scale is handled by disclosure and windowing, never smaller
 unbounded text.
 
-**Capability + cache.** The async outer web/context owner acquires the authored
-program and its ordinary inputs at one immutable database value, invokes the owning
-agent's compiled Bun child under the one host deadline, and gives the pure
-synchronous renderer only the ordinary result. Agent-authored renders, layouts,
-and route handlers never run inside the web host or perform leaf RPCs. The
-byte-stable cache prefix at low priority is preserved for provider
-prefix-caching.
+**Capability + cache.** A claimant acquires authored program and ordinary inputs
+at one immutable database value, invokes authored code through the guarded SCI
+door, and exposes only ordinary data to trusted render functions. Agent-authored
+renders, layouts, and route handlers never run inside the web-render process or
+perform leaf RPCs. The byte-stable cache prefix at low priority is preserved
+for provider prefix-caching.
+
+**Byte identity is a design property.** The complete database value, verified
+configuration and file fingerprints, render inputs, and program artifact
+determine the cacheable bytes. Host timezone, process clocks, environment
+reads, ambient database state, and process-local result liveness cannot alter
+them. The same value rendered in a replacement process yields the same bytes;
+only an explicitly separated free-dynamic tail may vary under [[laws]].
 
 **Context assembly is its own domain.** How the prompt bands by dynamism
 (stable prefix / sliding window / free dynamic tail), the
@@ -252,7 +266,7 @@ render-unit, routing, and live-morph mechanism in one route tree:
 
   Host telemetry is a separate optional system-status surface, not prose added
   to every turn. It consumes the operator's one reusable process-status
-  projection and samples pod/writer liveness, CPU, RSS, uptime, and
+  projection and samples process-group liveness, CPU, RSS, uptime, and
   feed pressure on demand. It is one independently refreshed unit on the normal
   feed, persists no rolling projection, and contributes to root's AI context
   only when anomalous.
@@ -265,12 +279,12 @@ render-unit, routing, and live-morph mechanism in one route tree:
   source-block bodies plus HTML twins as closed stubs. HTML discovery projects
   metadata only; opening one twin materializes only that current renderer.
   Raw AI disclosures are lazy slices of the already acquired prompt result,
-  not independent database render units; opening one performs no child call.
+  not independent database render units; opening one performs no authored invocation.
   It uses the same Datastar subscription graph and activation door as every
   other live page, not a provenance-routed debug interest. With no open page it
   owns no database interest or render work.
 - **app** (`/agent/{id}/app/{x}`) — an agent-authored sub-page; its route handler
-  is an agent layout symbol executed by that agent's bounded Bun child.
+  is an agent layout symbol executed by a claimant through the guarded door.
 
 ## The persistent header — one shared render unit
 
@@ -303,14 +317,13 @@ same no-match redirect to `/`.
 
 ## Routing is data — reitit + the capability gate
 
-The front door is **reitit** (vendored `reference-code/reitit`, `.cljc`, runs in
-  the Bun web host) consuming `:seon.route/*` datoms. A route datom carries its pattern,
+The front door is **reitit** (vendored `reference-code/reitit`, `.cljc`, loaded
+by the web-render JVM) consuming `:seon.route/*` datoms. A route datom carries its pattern,
 method, unique name (reverse routing), owning agent (`:seon.route/owner`, rides as
 route-data for auth), and a `:seon.route/handler` symbol that **IS a layout
 symbol** — the same render machinery as a block's html render, not a separate
-mechanism. `db->routes` projects the datoms into reitit's route vector. A small
-boundary translates Bun's WHATWG Request into Ring routing data; handlers return
-WHATWG Response values. The router remains a pure derived value of the route
+mechanism. `db->routes` projects the datoms into reitit's route vector.
+http-kit supplies ordinary Ring request and response data. The router remains a pure derived value of the route
 datoms rebuilt on tx via a reloading thunk. This replaces hand-rolled
 `case`/`cond`/`re-matches` dispatch. (The `:seon.route/*` attributes are
 registered per [[data-model]].)
@@ -338,8 +351,8 @@ registered per [[data-model]].)
   Public agent-authored functions are shared
   cluster capabilities: the caller and original author may differ, and the
   function may live in any allowed application namespace;
-  refusal precedes any invoke; args stay data; the call runs in the owning
-  bounded Bun child → it transacts → the page re-derives and the stream morphs.
+  refusal precedes any invoke; args stay data; the call runs in a claimant
+  through the guarded door → it transacts → the page re-derives and the stream morphs.
   reitit replaces the FRAGILE dispatch, not the SECURE gate.
 - **Interactivity is plain Clojure.** Agents author fn-calls in handler slots; a
   render-time server-side postwalk rewrites a fn-call `(cancel-order! id)` or a
@@ -418,13 +431,11 @@ move.
 ## The live channel — selective Datastar morph SSE
 
 The live channel is **ours** (reitit has no streaming primitives by design).
-Each demanded normalized computation registers its Datahike-produced dependency
-plan through the Bun host's one authority session. Matching committed reports
-advance that registration to an exact `db-after`; unrelated reports never reach
-the computation. There is no web-host Datahike replica, global render listener,
-or transaction broadcast. The agent only transacts datoms; it never opens or
-writes a stream. The Bun web host implements the `view = f(db)` model through
-`seon.reactive` and `seon.web.datastar`.
+The web-render JVM owns one interest-bearing database session. Each demanded
+normalized computation derives from the exact immutable database value supplied
+at open or by a matching committed report. There is no ambient latest database,
+global render listener, or second transaction broadcast. The agent only
+transacts datoms; it never opens or writes a stream.
 
 - **view = f(db), one complete morph.** Reitit route match plus normalized
   path/query defines one semantic subscription key. Initial paint and each
@@ -434,33 +445,18 @@ writes a stream. The Bun web host implements the `view = f(db)` model through
   Equivalent tabs share one render and the same serialized bytes; their view
   IDs own only socket replacement. Frozen as-of subscriptions do no current
   work.
-- **Async work is bounded by the normalized subscription.** One subscription
-  runs at most one database-value-pinned async render and retains at most the newest
-  coherent pending database change. A completion publishes only while the same
-  subscription still owns the latest request; a transaction racing the initial
-  paint requires a new complete `#app-view`. Equivalent sockets share the one
-  invocation and its serialized bytes. Closing the final consumer releases the
-  active/pending ownership, and any later Promise completion is inert. There is
-  no catalog, active-token registry, per-unit fetch route, or partial-render
-  acceptance path.
-- **native stream + configurable compression.** `Bun.serve` returns one direct
-  `ReadableStream` response whose controller owns browser backpressure and
-  disconnect. Loopback development uses identity encoding for observability and
-  latency; remote deployments enable measured compression by configuration.
-  `SEON_FEED_COMPRESSION=gzip` selects Bun's native Rust zlib stream through
-  its standard `node:zlib` namespace; each SSE event uses `Z_SYNC_FLUSH` so it
-  reaches the browser immediately. `Accept-Encoding` remains authoritative and
-  an identity client is never compressed. A standard `CompressionStream` is
-  not used because it buffers event payload until stream closure, and separate
-  per-event gzip members are not used because common HTTP decoders stop after
-  the first member.
-  Compression changes only response bytes, never event or database semantics.
-  One shared heartbeat timer emits inert SSE
-  comments for every writable feed, so reverse proxies can keep otherwise-idle
-  views open without one timer per socket. A
-  backpressured connection retains only its newest derived event and resumes
-  after Bun's `flush(true)` drain boundary; stale UI states never form an
-  unbounded write queue.
+- **Work is bounded by the normalized subscription.** One derivation consumes
+  one explicit database value. Equivalent sockets share the same serialized
+  complete element. Closing the final consumer releases the registration; no
+  later completion can publish into a replacement connection.
+- **http-kit + Datastar SDK own the stream.** The web-render process returns the
+  SDK-owned SSE response. One virtual thread drains each connection. Its
+  configured one-slot mailbox clears any older pending element before offering
+  the newest complete element, so a slow browser cannot form an unbounded queue.
+  The SDK's identity and gzip write profiles change transport bytes only.
+  `Accept-Encoding` remains authoritative. One shared scheduler emits inert
+  heartbeats, and close cleanup removes the connection, interrupts its virtual
+  thread, and releases its admission permit.
 - **Datahike reactive reads, complete rendering.** Datahike derives a
   source-scoped dependency plan from each parsed eager read and its actual
   inputs. A page projection unions the plans from reads that actually execute.
@@ -499,10 +495,8 @@ writes a stream. The Bun web host implements the `view = f(db)` model through
   `data-init="@get('…/feed')"` opens the stream. Two distinct URLs sidestep the
   GET/POST same-URL cache collision that forces hyperlith's same-path-POST `&u=`
   hack, and this matches datastar-clojure's own example (`tiny_gzip.clj`: page `/`,
-  stream GET `/updates`). reitit routes the feed GET to the SSE handler, which rides
-  Bun's native server. One final host function converts ordinary Ring response
-  data to a Bun `Response`; no Node response object or hijack sentinel enters
-  page code.
+  stream GET `/updates`). reitit routes the feed GET to the SDK-backed SSE
+  handler over http-kit; no transport object enters page code.
 - **Transient state is signals; time-travel and reconnect are just re-renders.**
   Transient client state lives in datastar **signals** only, never DOM attrs. Time
   travel is `view = f(db)` over the bitemporal DB—a different
@@ -528,12 +522,11 @@ writes a stream. The Bun web host implements the `view = f(db)` model through
   reverse it (a browser POST → the owning agent's sandbox → result datoms →
   selective derivation → morph). The database is the bus both ways.
 
-Each authored invocation owns one immutable input message and parent-side
-deadline. No process-global input/deadline cell can be overwritten by a nested
-or future concurrent render. A deadline or disconnect poisons that child
-against reuse before termination, so a late result cannot enter a newer render.
-Repeated failure logging/recording uses a bounded FIFO suppression window; it
-cannot retain an unbounded set of broken symbols.
+Each authored invocation owns one immutable input and guarded deadline. No
+process-global input or deadline cell can be overwritten by a nested or future
+render. The claimant's phase and epoch fences prevent a late result from
+entering a newer turn. Repeated failure recording is bounded and cannot retain
+an unbounded set of broken symbols.
 
 The same Datastar subscription mechanism serves root, agent, debug, and data
 views. There is no provenance-routed debug stream or unused generic `/sse`
@@ -541,16 +534,15 @@ registry. Transaction user/process is relevant to agent-derived focus semantics,
 never to dependency invalidation. Legitimate expensive units are bounded before
 building hidden hiccup; collapsed markup alone is not a compute bound.
 
-The streamer is a role inside the Bun web host: it owns one direct authority
-session, while each demanded normalized computation owns its database-scoped
-interest through `seon.reactive`. It derives complete views at exact database
-values and writes browser patches. Page code depends on that data contract
-rather than a transport-global registry.
+The streamer is the web-render process. It owns one direct database session,
+database-scoped interests, complete derivation at exact database values, and
+browser patch delivery. Page code depends on that data contract rather than a
+transport-global registry.
 
 ## Errors render as surfaces
 
-Any render failure becomes a **`:seon/error`** value (the one base shape — see
-[[data-model]] §6) instead of crashing siblings. The html render shows it as an
+Any render failure becomes the flat error value from [[data-model]] §6 instead
+of crashing siblings. The html render shows it as an
 **error card** — friendly message, the offending block/route name and symbol, an
 actionable hint — ancestors and siblings untouched, self-healing on the next
 render. The SAME source feeds the agent's **warnings block** (its ai render), so a
@@ -572,7 +564,7 @@ symbol selected by facts or config through the one render engine.
 ## Malli throughout
 
 Every map is a registered `:malli/schema` — the block, `:seon.route/*`, the
-`:seon/error` value, layout I/O — instrumented like everything else. reitit
+flat error value, layout I/O — instrumented like everything else. reitit
 route-data is open maps, so our malli-validated maps ride as route-data with no
 friction; reitit-malli coercion (vendored, optional) validates/coerces path-params
 / query / body against a route's `:parameters` schema for free, since we
@@ -584,7 +576,7 @@ Strict single-ownership: when a fact you need is owned by another doc, follow th
 link and read it.
 
 - [[architecture]] — the map: glossary, the cross-cutting principles, deployment topology.
-- [[data-model]] — the block / `:seon.route/*` / `:seon/error` schemas these renders read, and the `my.*` domains.
+- [[data-model]] — the block, route, and flat error schemas these renders read, and the `my.*` domains.
 - [[agent-runtime]] — the loop that assembles the prompt, fact-first agent initialization, and the run-status block's data source (`derive-status`).
 - [[toolkit]] — `my.canvas` and the agent functions that drive the canvas.
 - [[context-rebuild]] — the measured arc for knowledge-on-demand (cards +

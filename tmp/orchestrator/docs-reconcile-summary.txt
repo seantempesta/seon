@@ -1,0 +1,172 @@
+Docs reconciliation — architecture targets after the claim-native cutover
+Date: 2026-07-23
+
+OUTCOME
+-------
+
+Reconciled the always-current architecture target with rulings R26-R28 and the
+accepted U1-U6a boundaries. The architecture now describes claim-native runs,
+the five-role process topology, receipt-based recovery, guarded SCI execution,
+required-database-value rendering, the portable capability seam, and loud
+configuration-backed circuit breakers.
+
+No source, test, config, operator, roadmap, issue, or conversion-wiki file was
+changed. No new conversion trap was found. No issue was filed because the
+source/target differences below are already owned by the active program plan
+and are not newly discovered defects.
+
+FILES CHANGED
+-------------
+
+docs/seon/architecture/agent-runtime.md
+
+- Replaced the legacy loop/FSM, per-agent child, Promise-registry, cold-boot
+  repair, and attempt-buffer descriptions with the one portable claim-native
+  driver.
+- Defined run claimant, monotonic claim epoch, heartbeat lease, derived expiry,
+  pointer+epoch work fence, acquire/reacquire/takeover/release, phase-limited
+  leaves, and JVM virtual-thread-per-claim execution.
+- Defined the durable turn cursor
+  :rendered -> :attempt-open -> :reply-ready -> :evaling -> :evaled ->
+  :published.
+- Defined provider attempts as :open-before-dispatch component receipts,
+  terminal open->outcome CAS, and :crashed takeover evidence.
+- Defined eval receipt recovery at :evaling and made the cursor+receipts the
+  authority for lease-aware recovery.
+- Defined the one guarded SCI door: retained-context fuel holder, deadline,
+  output cap, required config facts, one flat steering shape, and finally
+  cleanup.
+
+docs/seon/architecture/architecture.md
+
+- Replaced the dual-runtime/Bun UI topology with R26: writer JVM
+  (transactions+feed only), web-render JVM over its own immutable replica,
+  claimant JVMs, disposable Bun JavaScript leaf host, and static browser.
+- Replaced the canonical flow diagram and downstream artifact boundary.
+- Made the capability seam first-class: portable .cljc core, one native leaf
+  per tier, entry-only reader conditionals, same-source-or-same-artifact law,
+  and delete-the-superseded-path consequence.
+- Recast the runtime domain around claims, epochs, phases, receipts, and guarded
+  evaluation; corrected flat-error, UI, test-boundary, and replica language.
+
+docs/seon/architecture/observability.md
+
+- Added receipts as the crash-forensics spine: claimant/epoch/heartbeat,
+  phase cursor, provider attempt receipts, and eval receipts.
+- Added temporal claim archaeology through Datahike history and transaction
+  provenance; expiry remains derived.
+- Replaced Bun-child telemetry/recovery wording with claimant diagnostics and
+  the pinned-phase/current-takeover database-value pair.
+- Reconciled cluster/Inspect language with replaceable claimant, web-render,
+  writer, and leaf-host processes.
+
+docs/seon/architecture/ui.md
+
+- Made web-render an independent JVM using http-kit, the Datastar Clojure SDK,
+  its own replica/session, virtual-thread-per-connection draining, and
+  latest-wins mailboxes.
+- Required :seon.db/db for every render and made missing database input a flat
+  :core-bug; removed ambient-latest semantics.
+- Made authored rendering claimant-owned behind the guarded SCI door; the
+  web-render process runs trusted pure functions only.
+- Defined byte identity as a property of immutable database value, verified
+  config/file fingerprints, render input, and artifact.
+- Replaced Bun/WHATWG/ReadableStream transport descriptions with Ring/http-kit
+  and SDK-owned identity/gzip SSE.
+- Corrected UI error prose to the flat error value.
+
+docs/seon/architecture/data-model.md
+
+- Added :seon.agent.run/claimant and :seon.agent.run/claim-epoch and stated
+  that expiry is derived from the heartbeat plus configured stale interval.
+- Added :seon.agent.turn/phase and the provider-attempt component table,
+  including the exact outcome enum and open->terminal CAS semantics.
+- Reframed :seon.runtime.recovery/* as optional process diagnostics rather
+  than a second recovery state machine.
+- Added the config-fact contract for guard, claimant, mutation-admission, and
+  web-render circuit breakers.
+- Removed remaining Bun/pod/loop wording in touched sections.
+
+docs/seon/architecture/toolkit.md
+
+- Retained the existing four effect classes and public
+  :seon.capability/op-id semantics as the capability-boundary owner.
+- Added the R27 circuit-breaker rule and corrected the runtime/test vocabulary
+  from pod to claimant.
+
+docs/seon/architecture/laws.md
+
+- Added narrow process-role, claim-and-receipt authority,
+  same-source-or-same-artifact, and delete-the-superseded-path laws.
+- Added R27 limits-as-circuit-breakers, loud firing, and no-shadow-defaults
+  laws.
+
+docs/seon/architecture/decisions/006-separate-jvm.md
+
+- Replaced the obsolete Bun-child supersession text with a pointer to the
+  claimant topology and database-backed authority model.
+
+docs/seon/architecture/decisions/007-runtime-instrumentation.md
+
+- Replaced the long-lived CLJS-pod premise with replaceable claimant contexts.
+
+docs/seon/architecture/decisions/008-database-protocol.md
+
+- Reconciled the protocol with writer-only mutation/feed ownership and
+  process-local immutable replicas in claimant and web-render JVMs.
+
+docs/seon/architecture/decisions/009-claimant-process-topology.md
+
+- New active ADR for R26 and R28's one-mechanism consequence.
+
+docs/seon/architecture/decisions/010-circuit-breaker-limits.md
+
+- New active ADR for R27.
+
+SOURCE/TARGET MISMATCHES FOUND
+------------------------------
+
+These are reported, not resolved:
+
+1. The target places render, LLM, eval, and publish in claimant JVMs. Committed
+   source still splits the one portable driver across
+   src/seon/agent/driver/pod.cljs (render/LLM/publish) and
+   src/seon/agent/driver/host.clj (eval only). This is the planned U6b/U7/U9
+   cutover boundary, not documentation authority.
+
+2. The target web-render JVM owns the complete route/page/feed system.
+   Committed src/seon/web/server.clj currently hand-wires only /data,
+   /data/feed, and static assets; the remaining route/render port is the
+   planned later web-render slice.
+
+3. The target says every required protective limit is a database config fact
+   with no numeric runtime fallback. Committed source still contains protective
+   literals outside the reconciled R27 sections, including LLM retry bounds in
+   src/seon/agent/turn/core.cljc, shell/web defaults in portable capability
+   sources, and invocation deadline/result caps in
+   src/seon/agent/driver/host.clj. The docs follow R27; the source sweep remains
+   program work.
+
+4. Claim and turn schemas remain registered in src/seon/agent/run.cljs and
+   src/seon/agent/turn.cljs while their policy/transaction builders are in
+   portable .cljc cores. The target names portable family ownership; schema
+   owner promotion/deletion is still part of the cutover.
+
+5. The target writer performs transactions and committed-feed publication
+   only, with claimant/web-render reads over process-local replicas. Current
+   src/seon/db/host.clj still exposes remote read/session behavior used by the
+   landed claimant and first web-render slice. The plan/ruling is the target.
+
+6. The guarded door target covers every SCI invocation class. Committed U1
+   integration covers the JVM SCI host; the existing Bun self-host path is
+   deliberately temporary and does not use SCI. This closes when the Bun agent
+   runtime is deleted rather than by adding a compatibility guard.
+
+VALIDATION
+----------
+
+- seon.dev.markdown/validate-file: clean for all twelve changed architecture
+  and decision documents.
+- git diff --check: clean.
+- No build, bin/seon command, REPL eval, source edit, or live-system action was
+  performed.

@@ -41,6 +41,38 @@ sample sizes, and acceptance evidence belong in PRD research and roadmaps.
 - **Partial values identify their bounds.** A clipped or paged result remains
   addressable and never presents itself as complete.
 
+## Runtime
+
+- **Process jobs stay narrow.** The writer performs transactions and emits the
+  committed feed; it never executes agent code or serves HTTP. The web-render
+  process performs trusted database-value derivation and HTTP/SSE delivery; it
+  never executes agent code. Claimants execute agent work. The Bun leaf host is
+  disposable native-effect capacity. Process replacement does not broaden a
+  role.
+- **Claims and receipts outrank process memory.** A run's claimant, epoch, and
+  heartbeat establish custody; the turn phase and attempt/eval receipts
+  establish admitted and completed work. Recovery derives from those facts.
+- **Same source or same artifact.** Cross-runtime policy is one portable
+  `.cljc` core or one shared compiled artifact. Each tier adds one native leaf,
+  with reader conditionals only at entry expressions. Hand-mirrored wrappers
+  and duplicated drivers are not interfaces.
+- **Replacement is one mechanism.** When consumers move to the portable owner,
+  the superseded path is deleted. Compatibility shims and dual-maintained
+  drivers, renderers, or capability surfaces violate the architecture.
+
+## Limits
+
+- **Limits are circuit breakers, never governors.** Every protective limit is
+  a schema'd configuration fact with units, calibration provenance, and a
+  default at least two orders of magnitude above legitimate measured P99.9
+  work. Crossing it is exceptional containment, not normal scheduling.
+- **Firing is loud.** A crossed limit records the owning fault and returns one
+  flat steering error naming the governing config fact. It never silently
+  slows, drops, truncates as complete, or retries.
+- **No shadow defaults.** Runtime code contains no numeric fallback for a
+  protective limit. A missing required fact is a configuration/readiness
+  error.
+
 ## Measurement
 
 - **Measure the behavior being changed.** Aggregate cost metrics do not replace

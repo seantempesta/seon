@@ -7,14 +7,12 @@ tags: [decision, architecture, archive, agent]
 
 # ADR-006: Separate JVM processes for agent isolation
 
-This decision is superseded. Seon does not run one JVM, nREPL, Malli registry,
-or database connection per agent. The local system is one JVM database server
-plus one CLJS pod. Authored code runs in one disposable Bun execution child per
-agent through the pod's data-only execution contract.
+This decision is superseded by [[009-claimant-process-topology]]. Seon does not
+run one full application, database, nREPL, or mutable registry per agent.
+Replaceable claimant JVMs instead compete for database-backed run claims and
+execute one or more held runs with virtual threads.
 
-The parent execution host observes process exit and enforces each invocation's
-deadline; replacement reconstructs the current database program in a fresh
-child. A future container or microVM backend must preserve that same data-only
-execution contract and cannot create another database or function surface.
-Historical details remain recoverable from Git at
-`runtime-reliability-pre-refactor-2026-07-13`.
+Process count is capacity, not identity. Claim epochs, turn phases, and receipts
+preserve authority and recovery across claimant replacement. A future container
+or microVM claimant preserves that same data contract and cannot create another
+database or capability surface. Historical details remain recoverable from Git.

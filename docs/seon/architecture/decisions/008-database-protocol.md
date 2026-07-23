@@ -2,19 +2,17 @@
 type: decision
 status: active
 date: 2026-07-14
-tags: [decision, architecture, database, cljs]
+tags: [decision, architecture, database, runtime]
 ---
 
 # ADR-008: Data-only Transit database protocol
 
 ## Context
 
-One database authority owns each database's ordered writes, immutable indexed
-values, shared query computation, and committed-report source. The first
-authority implementation is the JVM/Datahike service and may host many isolated
-cluster databases concurrently. Bun agent children and the Bun web host are
-clients: they issue operations over explicit immutable database values and never reconstruct a
-Datahike database, index, cache, or transaction feed. Transport details may
+One writer owns each database's ordered transactions and committed-report
+source. Claimant and web-render JVMs read process-local immutable replicas and
+forward writes to that writer. Disposable leaf hosts are clients of the
+capability and database seams but own no durable database state. Transport details may
 differ locally and remotely without changing database semantics.
 
 ## Decision
@@ -28,25 +26,20 @@ and member responses alongside the protocol's operation-level error kind. A
 client can therefore keep user-input and core-bug classification without
 parsing an error string or learning JVM exception types.
 
-The authority is the sole durable writer and indexed-read owner. Clients never
-send closures or database handles; transaction functions such as CAS cross only
-in their data form. One persistent multiplexed session carries independently
-correlated requests, responses, cancellation, and selective database
-interests. Reads require an exact database value, and `execute-many` resolves one
-immutable database value for independent members. Its required outer result
-bound is accepted in member position order, while member work may finish in
-parallel; exact encoded frame bytes remain a separate delivery fence.
-Successful writes wake only matching interests with committed ordinary data; a
-gap reacquires the current database value, never transaction replay into
-a replica. Durable request
-receipts provide same-request mutation recovery without a second write path.
+The writer is the sole durable mutation owner. Clients never send closures or
+database handles; transaction functions such as CAS cross only in their data
+form. One persistent session carries independently correlated mutation
+requests, responses, cancellation, committed changes, and selective interests.
+Successful writes advance replicas with committed ordinary data. A gap
+reacquires a complete current database value before delivery resumes. Durable
+request receipts provide same-request mutation recovery without a second write
+path.
 
-Datahike owns connection/index lifetime, exact committed-value identity,
-completed query caching, identical-query single-flight, and native read
-semantics. Seon owns protocol validation, session acquisition, fair
-multi-database admission, paging, delivery bytes, and errors-as-values. Native
-Datahike, Bun socket, stream, process, Future, and Promise values remain inside
-their host owners.
+Datahike owns replica connection/index lifetime, exact committed-value identity,
+query caching, and native read semantics. Seon owns protocol validation,
+session acquisition, mutation admission, replica catch-up, paging, delivery
+bytes, and errors-as-values. Native Datahike, socket, stream, process, Future,
+and Promise values remain inside their host owners.
 
 ## Consequences
 
@@ -55,8 +48,8 @@ their host owners.
   state machine.
 - Nippy is not a wire contract; any use inside Konserve remains private storage
   encoding.
-- There is no client-side Datahike replica, global transaction broadcast,
-  replay cursor, database broker, or duplicate query cache/listener.
+- Each reader process has one database replica owner; there is no second
+  application cache, database broker, or duplicate invalidation bus.
 - Interests are connection-owned and ephemeral; the database does not persist
   active subscriptions, changed-row summaries, or a second invalidation bus.
 - Backpressure is bounded independently at database admission, encoding, and
@@ -65,7 +58,7 @@ their host owners.
 
 ## Related
 
-- [[architecture]] — the authority, Bun host, and isolated-child topology.
+- [[architecture]] — writer, claimant, web-render, leaf-host, and browser topology.
 - [[data-model]] — transaction provenance and database values.
 - [[agent-runtime]] — CAS fences and lifecycle transitions.
 - [[observability]] — replay and forensic database values.

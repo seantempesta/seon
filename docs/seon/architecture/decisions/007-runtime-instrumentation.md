@@ -2,16 +2,16 @@
 type: decision
 status: active
 date: 2026-02-20
-tags: [decision, architecture, schema, cljs]
+tags: [decision, architecture, schema, runtime]
 ---
 
 # ADR-007: Always-on runtime instrumentation
 
 ## Context
 
-Public function schemas are executable contracts. Agent-authored code and core
-code run in the same long-lived CLJS pod, so input, output, and arity violations
-must surface at the call boundary rather than corrupt later state.
+Public function schemas are executable contracts. Agent-authored code runs in
+replaceable claimant contexts, so input, output, and arity violations surface
+at the call boundary rather than corrupt later state.
 
 ## Decision
 

@@ -14,7 +14,7 @@ the three relationship forms; how an entity's shape is identified; the
 `my.*` domain schemas; and the one flat error value. Vocabulary is
 locked in [[architecture]] (the glossary). This doc owns the **schema**; it
 points at [[ui]] for the render/route/slot machinery, at [[agent-runtime]] for
-the loop/lifecycle that mutates these rows, and at [[toolkit]] for the functions an
+the claim driver and lifecycle that mutate these rows, and at [[toolkit]] for the functions an
 agent calls over them.
 
 ## 1. TL;DR — the entity graph in one paragraph
@@ -455,6 +455,8 @@ is produced (§3).
 | `:seon.agent.run/turn-limit` | `:int` | long / one | work bound (bumpable) |
 | `:seon.agent.run/deadline` | `:inst` | instant / one | absolute clock bound |
 | `:seon.agent.run/last-beat-at` | `:inst` | instant / one | heartbeat |
+| `:seon.agent.run/claimant` | `[:string {:min 1}]` | string / one | optional current process-instance custody; absence means released |
+| `:seon.agent.run/claim-epoch` | `[:int {:min 1}]` | long / one | optional on first acquisition, then monotonic; every held-run mutation fences on the observed value |
 | `:seon.agent.run/paused-at` | `:inst` | instant / one | presence ⇒ derived `:paused` |
 | `:seon.agent.run/remaining-ms` | `:int` | long / one | banked at pause, re-extends deadline at resume |
 | `:seon.agent.run/status` | `[:enum :open :closed]` | keyword / one | value enum |
@@ -463,8 +465,11 @@ is produced (§3).
 | `:seon.agent.run/result-ref` | `:seon.db/ref` | ref / one | optional addressable work product |
 | `:seon.agent.run/closed-at` | `:inst` | instant / one | present when the run closes |
 
-`turn-count` / `now` / `snapshot` are derived-read scalars, not stored datoms.
-The run model + FSM live in [[agent-runtime]].
+Claim expiry is not stored. It is derived from open/unpaused state, claimant,
+epoch, `last-beat-at`, the observation instant, and the configured stale
+interval. Claimant identifies custody; epoch fences authority. `turn-count` /
+`now` / `snapshot` are also derived-read scalars, not stored datoms. The claim
+and run model lives in [[agent-runtime]].
 
 ### 4.4 turn — `:seon.agent.turn/*`
 
@@ -473,6 +478,7 @@ The run model + FSM live in [[agent-runtime]].
 | `:seon.agent.turn/id` | `[:and {:seon.db/identity true :seon.db.id/generator :seon.db.id.generator/compact} :seon.db.id/compact-value]` | string / one / identity | compact |
 | `:seon.agent.turn/at` | `:inst` | instant / one | |
 | `:seon.agent.turn/status` | `[:enum :running :done :error :interrupted]` | keyword / one | value enum; `:interrupted` is asserted only by crash recovery when no runtime remains to close the committed turn normally |
+| `:seon.agent.turn/phase` | `[:enum :rendered :attempt-open :reply-ready :evaling :evaled :published]` | keyword / one | durable recovery cursor; every advance is an observed-phase CAS composed with the run epoch fence |
 | `:seon.agent.turn/run` | `:seon.db/ref` | ref / one | turn → its run |
 | `:seon.agent.turn/cause-message` | `:seon.db/ref` | ref / one | optional; exact inbound human message this turn is assigned to answer |
 | `:seon.agent.turn/rendered-tx` | `:seon.db/ref` | ref / one | basis transaction of the request-scoped database value captured before prompt rendering; historical rendering uses `as-of` |
@@ -486,6 +492,26 @@ The run model + FSM live in [[agent-runtime]].
 | `:seon.agent.turn/usage-estimated?` | `:boolean` | boolean / one | usage came from the canonical token estimator |
 | `:seon.agent.turn/llm-attempts` | `[:vector {:seon.db/component true} :seon.db/ref]` | ref / many / **component** | ordered bounded provider-attempt evidence; absence means no attempt |
 | `:seon.agent.turn/evals` | `[:vector {:seon.db/component true} :seon.db/ref]` | ref / many / **component** | owned evals (cascade-retract) |
+
+Provider attempt rows are component evidence owned by the turn:
+
+| attribute | malli | datahike facet | notes |
+|---|---|---|---|
+| `:seon.ai.attempt/id` | compact generated identity | string / one / identity | retry-instance lookup and CAS target |
+| `:seon.ai.attempt/ordinal` | `:int` | long / one | derived next ordinal from durable siblings |
+| `:seon.ai.attempt/outcome` | `[:enum :open :success :provider-error :adapter-timeout :outer-timeout :crashed]` | keyword / one | `:open` is committed before dispatch; terminal state is an open→terminal CAS |
+| `:seon.ai.attempt/config-digest` | content digest | string / one | non-secret frozen request projection identity |
+| `:seon.ai.attempt/deadline-at` | `:inst` | instant / one | exact admitted outer deadline |
+| `:seon.ai.attempt/provider` / `adapter` | keywords | keyword / one | selected transport path |
+| `:seon.ai.attempt/outer-timeout-ms` / `adapter-timeout-ms` | positive int | long / one | applied timeout layers |
+| `:seon.ai.attempt/stream?` | boolean | boolean / one | frozen request mode |
+| response identity, usage, and error attrs | bounded native values | scalar / one | present only when observed; secrets and raw headers stay absent |
+
+An attempt receipt never stores the whole mutable configuration or secret
+material. The parent turn's rendered transaction reconstructs intent; the
+attempt row preserves non-derivable admission and response evidence. Takeover
+CASes an abandoned `:open` outcome to `:crashed` before retry policy admits
+another external call.
 
 The run's `:seon.agent.run/cause` is only the message that opened the run; later
 human messages can renew that same run. At each turn boundary the runtime selects
@@ -546,11 +572,12 @@ agent fact, does not identify an entity class, and cannot retune an existing
 namespace resident. A stale write reacquires configuration and resolves the
 name again before retrying.
 
-### 4.5 crash recovery — `:seon.runtime.recovery/*`
+### 4.5 optional process diagnostics — `:seon.runtime.recovery/*`
 
-Crash recovery writes one small anchor in the same deterministic transaction as
-the run/turn/pointer repairs. Queryable terminal facts remain datoms; the full
-diagnostic report is a content-addressed blob:
+Claim recovery is already represented by claim epochs, the turn phase, and
+attempt/eval receipts. An exceptional process diagnostic may add one small
+anchor without becoming a second recovery state machine. Queryable terminal
+facts remain datoms; the full diagnostic report is a content-addressed blob:
 
 | attribute | malli | datahike facet | notes |
 |---|---|---|---|
@@ -561,11 +588,11 @@ diagnostic report is a content-addressed blob:
 | `:seon.runtime.recovery/pid` | `:int` | long / one | failed execution process ID |
 | `:seon.runtime.recovery/exit-code` | `:int` | long / one | process exit code when observed |
 | `:seon.runtime.recovery/signal` | `:string` | string / one | terminating signal when observed |
-| `:seon.runtime.recovery/cpu-user-microseconds` | `:int` | long / one | Bun `resourceUsage.cpuTime.user` terminal sample |
-| `:seon.runtime.recovery/cpu-system-microseconds` | `:int` | long / one | Bun `resourceUsage.cpuTime.system` terminal sample |
-| `:seon.runtime.recovery/cpu-total-microseconds` | `:int` | long / one | Bun `resourceUsage.cpuTime.total` terminal sample |
-| `:seon.runtime.recovery/rss-bytes` | `:int` | long / one | Bun live `resourceUsage.rss` terminal sample |
-| `:seon.runtime.recovery/max-rss-bytes` | `:int` | long / one | Bun `resourceUsage.maxRSS` when available |
+| `:seon.runtime.recovery/cpu-user-microseconds` | `:int` | long / one | optional terminal claimant-process sample |
+| `:seon.runtime.recovery/cpu-system-microseconds` | `:int` | long / one | optional terminal claimant-process sample |
+| `:seon.runtime.recovery/cpu-total-microseconds` | `:int` | long / one | optional derived total |
+| `:seon.runtime.recovery/rss-bytes` | `:int` | long / one | optional claimant-process sample |
+| `:seon.runtime.recovery/max-rss-bytes` | `:int` | long / one | optional maximum when available |
 | `:seon.runtime.recovery/elapsed-ms` | `:int` | long / one | parent-observed invocation duration |
 | `:seon.runtime.recovery/stdout-tail` | `[:string {:max 2048}]` | string / one | clipped execution stdout tail |
 | `:seon.runtime.recovery/stderr-tail` | `[:string {:max 2048}]` | string / one | clipped execution stderr tail |
@@ -577,7 +604,7 @@ turn status, and pointer-retraction datoms in that transaction; transaction
 metadata supplies user/process/time, and the commit graph supplies prior/current
 database values. Root's recovery notice and “still needs a decision” prominence are
 projections of that join and whether each affected agent has opened a later run.
-A running eval receipt becomes `:interrupted` with a concise crash error; recovery
+A running eval receipt becomes `:interrupted` with a concise crash error; takeover
 does not invent an eval row when no receipt committed. The diagnostic blob owns
 sample history, raw frames, complete output, and the full invocation report so
 large forensic evidence never becomes datom text.
@@ -721,7 +748,7 @@ analyzer-derived snapshot reconciles every compiled namespace, public function,
 and registered schema into the program graph. Agent-authored namespace,
 function, schema, and test forms enter through the eval analyzer tee. The
 platform test suite belongs only to the dedicated test build; it is not loaded
-into a product pod or copied into the database at boot. The whole live code
+into a product artifact or copied into the database at boot. The whole live code
 corpus is therefore queryable without a second test registry. Agent context
 renders only `my.*` members in full source while compiled members stay
 indexed-but-summarized. The render policy is owned by [[ui]]; the declaration
@@ -998,6 +1025,22 @@ are visible until that next apply.
 The real manifest carries a dial per config concern (not just seeds) — a new
 concern = ONE `:seon.config/<section>` schema + one resolver fn + one key here:
 
+Resource ceilings are **circuit-breaker facts**, never hidden governors. Guard
+fuel/deadline/output caps, claimant heap and pool waits, database
+mutation-admission bounds, web-render connection/mailbox/pool/body bounds, and
+future limits each have:
+
+- a closed Malli schema and database attribute with explicit units;
+- a docstring stating the protected resource and what firing means;
+- a manifest value resolved onto the singleton;
+- calibration provenance and a default far above legitimate measured work; and
+- a loud fault plus flat steering error when crossed.
+
+Runtime code acquires these facts with the operation's database value. It does
+not contain an alternate numeric default, silently queue or drop work, or use a
+limit as a normal throughput control. The timeless law lives in [[laws]]; exact
+section schemas remain colocated with `seon.config.resolve`.
+
 ```clojure
 ;; ns seon.config — the registry of known sections (config.cljs)
 (schema/register! :seon.config/manifest
@@ -1081,11 +1124,11 @@ for the prompt); its **html render** leads with the headline and offers a
 drill-down into `:seon.error/data` (the human error card).
 
 Provider-specific status and retry fields may accompany the same flat core.
-The LLM adapters return errors as values, never a rejected Promise: a
+The LLM adapters return errors as values, never an uncaught transport failure: a
 `:seon.ai/transport?` error gets one bounded retry; a persistent failure closes
 the turn `:seon.agent.turn/status :error`, and the render derives a system line
 from the turn status so the agent SEES the failure in its transcript. The turn
-loop is owned by [[agent-runtime]].
+driver is owned by [[agent-runtime]].
 
 ### 6.1 Persistence per carrier
 
@@ -1183,7 +1226,7 @@ source.
   principles (database-as-bus, derive-everything, failures-as-data with explicit
   core admission,
   roles-as-capabilities, seed-copy-not-merge, code-as-data), deployment topology.
-- [[agent-runtime]] — loop / run / turn / FSM / derived-state, creation-as-idle,
+- [[agent-runtime]] — claims / runs / turns / phases / derived-state, creation-as-idle,
   fact-first initialization, orchestrator-root lifecycle, substrate-message
   quietness, and the one execution-service contract.
 - [[ui]] — block / render / surface / slot / layout, view / root-agent-view / app,

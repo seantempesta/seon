@@ -1,1021 +1,310 @@
 ---
 type: architecture
 status: active
-tags: [architecture, agent, schema, flow]
+tags: [architecture, agent, runtime, database]
 ---
 
-# Agent runtime — the loop, the run, derived state, and lifecycle
+# Agent runtime — claim-native runs, turns, and recovery
 
 > **Target design** (present tense). Implementation state, gaps, order, and
 > evidence live only in [[roadmap]].
 
-This doc owns the **runtime**: how an agent runs, how a **run** bounds its work,
-how the loop is a fold over a data **FSM**, how **state is derived** from
-primitives, how an agent is **created** and **bootstrapped**, how the
-**orchestrator-root** starts and manages other agents, and the **isolation**
-backend that runs agent code. The entity schemas it reads live in
-[[data-model]]; the blocks/renders/pages it feeds live in [[ui]]; the agent's
-action functions live in [[toolkit]]; the cross-cutting principles and the glossary
-live in [[architecture]].
-
-## The model in one paragraph
-
-An agent is normally **`:idle`** — asleep, and the only triggerable state. A
-**trigger** (an inbound **message**, or a due **schedule** fired by the ticker)
-opens a **run**: the bounded unit of work. While the run is open the agent is
-**`:running`** and the loop executes **turns** until a bound fires. A run carries
-**two independent safety bounds** — a generous **work-quantity** ceiling and a
-**wall-clock** deadline — and whichever is hit first closes it. Neither is the
-normal success condition: the agent works until it records the outcome,
-explicitly waits, or a no-progress/error guard proves that more calls are not
-useful. New
-inbound messages **renew the lease** (slide both bounds). The clock bound is
-enforced **externally** by one periodic **ticker**, because a stalled LLM burns
-the clock and cannot self-detect. The **run-id is a fencing token**: a write from
-a superseded or timed-out run is rejected at commit. Everything else — state,
-liveness, history, the fleet view — is a **query** over the bitemporal DB. The
-loop is a **function of that DB**; the only active piece is the one ticker.
-
-## State is derived — the one projection rule
-
-**There is no stored agent state.** The agent's FSM state is a pure projection of
-three primitives, computed each read by `seon.derive/derive-state`:
-
-- `:seon.agent/terminated-at` present ⇒ **`:terminated`**
-- else no open run ⇒ **`:idle`**
-- else the open run carries `:seon.agent.run/paused-at` ⇒ **`:paused`**
-- else **`:running`**
-
-```clojure
-(schema/register! :seon.derive/state [:enum :idle :running :paused :terminated])
-```
-
-Each primitive (the open-run pointer, `paused-at`, `terminated-at`) is its own
-control axis; the state label is only their projection. This is why state never
-drifts: there is nothing to keep in sync. `seon.derive` is the **acyclic leaf** —
-it requires only `seon.db` (to read) and `seon.schema` (to name shapes), so it
-sits below every consumer (the loop, the prompt render, the renderer, the UI, the
-ticker, the wake gate) and the `agent → ctx → render` require cycle evaporates.
-Every consumer reads `seon.derive/derive-state` over the db value it already
-holds; `agent-idle?` and `armable-agent-ids` are **filters** over that rule, never
-re-encodings of it, so the rule cannot fork. Process reconstruction uses the
-separate `resumable-agent-ids` projection: every agent without a termination
-fact, including running and paused agents, needs fresh transient handles after
-a cold start or reload.
-
-## The run — the bounded unit of work
-
-A **run** (`:seon.agent.run/*` — schema in [[data-model]]) is what a trigger
-opens. Its **run-id is the fencing token**; it records `started-at`, its
-`trigger` (`:message` or `:schedule`), the `cause` (the triggering message), the
-two bounds, a per-turn heartbeat `last-beat-at`, a `status` (`:open`/`:closed`),
-and — once closed — a `closed-reason`
-(`:completed`/`:waited`/`:turn-limit`/`:deadline-exceeded`/`:terminated`/
-`:superseded`/`:error`/`:crashed`). A **run replaces any agent-execution
-"session" concept** — there is no separate runtime-session entity. The web UI's
-per-tab `:seon.web.session/*` facts are navigation provenance, not execution
-lifecycle. Runs link back to the agent via `:seon.agent.run/agent`; turns to their
-run via `:seon.agent.turn/run`.
-
-### Outcome first; bounds, lease, and heartbeat second
-
-The two bounds are deliberately separate (the k8s split: a `backoffLimit` count
-vs an `activeDeadlineSeconds` clock):
-
-- **Work-quantity safety ceiling (derived) — denominated by the REPL mode.**
-  The unit is **inference turns under `:batch` and attempted forms under
-  `:stream`** (`:seon.config/repl-mode` — [[context]] §"The REPL mode is a
-  datom"). It is deliberately high and model/resource-profile configurable;
-  hitting it is an abnormal bounded outcome with a continue affordance, not
-  ordinary task flow. Counts derive from turn/eval facts. Formless streaks,
-  repeated equivalent errors, deadlines, explicit `wait`, and successful
-  `complete` provide earlier meaningful stops. New inbound messages renew the
-  safety lease so a message arriving during an LLM call is seen and answered.
-  Local model profiles may admit substantially more work than paid profiles,
-  but both retain a finite operator-owned ceiling.
-- **Wall-clock bound (`deadline`).** A run opens with `deadline = started-at +`
-  the agent's `:seon.agent/default-deadline-ms` (or a generous global default).
-  It is an **absolute instant**, so it survives restart and is a pure DB read;
-  it is the backstop for slow or wedged work, not a target duration.
-- **Lease renewal = the sliding window.** An inbound message during an open run
-  slides both bounds (the work budget grows by the derived inbound count; the
-  deadline pushes out). "The human keeps talking" extends the run. Any process
-  may renew.
-- **Heartbeat.** A coarse `last-beat-at` is written per turn — enough for fleet
-  liveness and stall detection (an open run with a stale beat is stuck even
-  inside its deadline), cheap enough to avoid tx churn (datahike writes are the
-  measured bottleneck; never beat per-second).
-
-### Pause vs the absolute deadline
-
-`pause` **banks** the remaining budget (`remaining-ms = deadline − now`) on the
-run; `resume` re-extends the absolute `deadline` by the banked amount, so a long
-pause does not insta-kill on resume. While paused, the derived `ms-remaining`
-surfaces the banked budget, not `deadline − now` (which would keep decaying).
-
-## The turn — a value-transform, "Snap-to-Tx"
-
-Each **turn** threads **one frozen db value** (re-read once at the top) through
-`next-event`, the prompt render, and the bound checks, so the LLM reasons over a
-single complete `{:db-name :t :as-of :since :history :datahike/commit-id}`
-database value. The
-**next** turn re-reads the latest database value — and
-because there is a single writer, that read sees every other writer's commits, so
-a turn never runs in a private view.
-
-The run's waking message is not automatically the turn's cause: a human message
-may arrive while that run is already open. At turn open, the runtime selects the
-exact inbound address task this turn is assigned to answer and persists its
-message ref as `:seon.agent.turn/cause-message`. Continuation turns may retain
-that message; later queued messages become causes of later turns. A scheduled or
-internal turn may have no human cause. This one fact lets tools target the exact
-originating browser without guessing from the run opener or the latest message.
-
-**The in-tx work-fence.** Every WORK transaction (`beat!`, `open-turn!`,
-`eval-batch!`) **leads** with an in-tx assertion:
-
-```clojure
-;; OV == NV == the current run, as a lookup-ref ([:seon.agent/run] is a REF).
-[:db.fn/cas [:seon.agent/id id] :seon.agent/run [:seon.agent.run/id R] [:seon.agent.run/id R]]
-```
-
-The *database*, not a pre-read predicate, tells the loop it has lost authority: if
-a watchdog, a human, or a newer run moved the `:seon.agent/run` pointer, the tx
-aborts and the work never lands (`compare-and-swap` re-asserts when current==R,
-RAISES otherwise → the whole tx, eval batch included, aborts). This replaces any
-check-then-act ownership pre-read and fences the eval batch atomically with its
-result write. **Ground in** `transaction.cljc:873` (`compare-and-swap`) +
-`db/utils.cljc:109` (`entid` resolves the `:db/unique` lookup-ref entity) — read
-[[library-grounding]] before building the fence. (The mindset — db is a value,
-only values cross the protocol, CAS-as-assertion, never memoize on a db value — is
-[[datahike-primer]].)
-
-### REPL forms — namespaces are places
-
-The eval boundary (`seon.eval/dispatch-repl-form!`) implements the real-REPL
-movement/update semantics the transcript teaches, so an agent's reflexive
-REPL moves work:
-
-Namespaces are shared application places, not per-process containers. The home
-namespace is only a safe starting point. An agent can move into or create an
-allowed domain namespace; once its transaction publishes successfully, the
-namespace declaration, functions, schemas, tests, and require edges belong to
-the cluster program graph and reach every execution child through the normal
-program delta.
-
-- **`(in-ns 'foo)` is THE movement form** — state-preserving switch of the
-  current-ns accumulator (the cursor + namespaces block follow via the
-  recorded `:seon.eval/ns`). A DB-known-but-unloaded ns loads through the
-  one load-fn; a genuinely fresh name is CREATED with the canonical toolkit
-  requires (deliberately richer than the JVM's blank-slate `in-ns`) — never
-  a blank slate, never an error.
-- **`(ns foo …)` declares/UPDATES** — re-eval REPLACES the require set;
-  persisted `:seon.ns/source` + `:seon.ns/require-edges` heal wholesale
-  (component retract cascade, no orphans).
-- **A bare top-level `(require …)` is durable by default** — it loads now
-  AND persists into the ns's database declaration (`require-decl-tx` merges
-  the specs into `:seon.ns/source`), so a fresh child loads the current
-  namespace section with the same dependency. `(alias 'a 'ns)`
-  is the same mechanism (rewritten to a require; error-as-value when the
-  target exists nowhere). `:as-alias` aliases keywords WITHOUT loading and
-  round-trips as an `:seon.ns.require/as-alias?` edge.
-- **Redefinition IS update** — defn/schema/deftest re-eval upserts the
-  projection row in place (body-only redefs rescued for deftests too); an
-  incompatible `register!` re-shape of an installed attr surfaces as a
-  `:seon.db/schema-divergence` envelope naming the migration move.
-- **Tests enter through this same analyzer tee** — a product boot does not load
-  or index the platform test suite. A test becomes a database fact when the
-  agent defines it; the dedicated test build remains ordinary build input.
-- **`ns-unmap` removes** — live var + analyzer def gone, the
-`:seon.fn`/`:seon.test` row retracted (resume + instrumentation forget
-  it); compiled-core fns are refused (the override-guard symmetry).
-  `ns-unalias` drops an alias from the analyzer, declaration, and edges.
-
-**Batch evaluation is namespace-aware and intentionally non-fail-fast.** The
-forgiving parser reads the provider reply once. Its pure projection retains
-every original span, groups repeated declarations as authored sections of one
-namespace, derives generated `:require` edges, and rejects dependency cycles
-before evaluation. Namespace sections run in dependency order. Inside each
-authored section the declaration runs first, recognized `schema/register!`
-forms run next in authored order, and the remaining forms run in authored
-order. Repeating a namespace later in the reply therefore preserves both
-declarations and their local alias context without creating another scheduled
-namespace.
-
-Each attempted form receives its own real eval/result row. An ordinary
-read/compile/runtime error is captured as data, later forms in that namespace
-and independent namespaces remain eligible, and generated dependents wait. A
-failed declaration fences only its following section; a later declaration of
-the same namespace may safely re-establish it. Structurally unowned forms are
-recorded as visible failed evals rather than leaking into the previously active
-namespace. The next turn's transcript therefore contains every attempted
-success and failure, while the ordered eval IDs and skipped source entries give
-goal-driven code generation the same evidence without another evaluator or
-result format. A worker/process crash is different: forms not actually
-attempted receive no fabricated eval/result.
-Only a successfully compiled and evaluated declaration contributes namespace,
-function, schema, test, or require-edge data to the program transaction. A read
-or compile failure records its exact source and error as eval evidence but
-contributes no program data; a runtime failure also restores the prior analyzer
-definitions and schema registry before recording. The program transaction and
-eval outcome are one atomic authority write, so rejection cannot leave a
-partially published declaration. Recovery from malformed persisted source is
-therefore defense against corruption, old releases, or a core defect—not the
-normal edit path.
-One catch at the existing per-entry record boundary handles an unexpected but
-recordable exception: it persists the core-fault eval and continues. If that
-recording transaction itself fails, the batch stops loudly; it never claims the
-later entries ran. There is no outer catch that turns a broken recorder into
-synthetic per-form results.
-
-A Promise returned by one complete top-level form is automatically awaited at
-this same boundary. Its resolved value is recorded before the next form runs;
-if the bounded wait expires, the still-live computation is retained at its
-`result/<id>` handle. The parser never inserts `await` into authored source.
-Inside a `^:async` function, dependencies that must resolve before later local
-expressions still use explicit `await` according to ClojureScript semantics.
-
-## The loop as data — the FSM table + the fold
-
-The loop lives in `seon.agent.loop`, shaped like a flow process for the parts
-worth borrowing — **a defined initial state, one transition function, the whole
-machine as data**. No channels: CLJS channels are single-threaded and buy no
-parallelism; isolation is the worker tier below.
-
-**The machine is one value** (`{state {event → next-state}}`):
-
-```clojure
-(def transitions
-  {:idle       {:trigger     :running}     ; a wake (message/schedule) opens a run
-   :running    {:turn-ok     :running      ; within both bounds → another turn
-                :wait        :idle          ; function: park, wakeable
-                :complete    :idle          ; function: finished; result delivered as a message
-                :turn-limit  :idle          ; work bound hit (clean)
-                :deadline    :idle          ; clock bound hit (ticker; :deadline-exceeded)
-                :superseded  :idle          ; a newer run won the fence
-                :error       :idle          ; the turn threw
-                :pause       :paused
-                :terminate   :terminated}
-   :paused     {:resume      :running       ; "hold, don't kill"
-                :terminate   :terminated}
-   :terminated {}})                         ; terminal
-```
-
-The **effect** of each event mutates a *primitive* (open/close/pause a run, set
-`terminated-at`); the agent's state is then **derived** from those primitives, never
-stored. A fresh agent boots `:idle`; a run opens at `:running`. The driver is
-trivial — a fold of one `transition` over events derived from the run's data each
-iteration:
-
-```
-run-loop!(agent, run):
-  loop:
-    db    = snapshot()                          ; one frozen db value this turn
-    event = next-event(db, agent, run)          ; turn-ok | wait | complete
-                                                ; | turn-limit | deadline | superseded
-                                                ; | error | pause | terminate
-    [state', effects] = transition(state, event)
-    apply!(effects)                             ; beat!, run-turn!, close-run! …
-    if terminal-for-this-run: break
-```
-
-`next-event` reads the event off the run's data: still `:running`, within both
-bounds, and still owning the fence → `:turn-ok` (beat + run a turn); a function inside
-the turn emits `:wait`/`:complete`/`:pause`/`:terminate`; a bound or the ticker
-emits `:turn-limit`/`:deadline`/`:superseded`. Because every branch is data, the
-machine is itself inspectable and renderable.
-
-**Stop policy nuances.** A turn that *attempts* forms but every form errors is not
-a quiet stop — it recurs so the next turn surfaces the errors. Two consecutive
-**zero-form** turns (an `empty-streak` guard) close the run cleanly — a deliberate
-"thinking mode" of up to two empty turns before the loop concludes there is no
-more work. A `wait` parks the agent (wakeable) with its reason on the run's
-`closed-reason`; a `complete` delivers its result as a **message** (to the parent
-or the human) and parks — *unless* the agent already messaged that recipient this
-run: the earlier message IS the answer (derived from the run's message log, no
-stored flag), so `complete` closes without sending a second, answer-clobbering
-message.
-
-The runtime does not declare failure merely because a small arbitrary number
-of turns elapsed. A run normally ends because its outcome was recorded or
-because a falsifiable stagnation/resource condition fired. Inspect compares
-the same task under `:batch` and `:stream` using success, model calls, attempted
-forms, generated tokens, cache reuse, elapsed time, fabrication, and recovery;
-mode selection is measured rather than encoded as model folklore.
-
-**Complete-gate.** `complete` asserts success, so current parsed test facts that
-unambiguously show a failing owning gate refuse that assertion with an error
-value and leave the run open. An absent or unrecognized runner is never silently
-treated as proof of success or failure; non-test work remains ungated. The test
-system owns runner recognition and parsed outcome mechanics. Runtime owns only
-the behavioral invariant: a model-authored claim is not execution evidence,
-while an actual current failing result cannot be overwritten by prose. `pause`
-and messaging remain available for an honest incomplete or failing handoff.
-
-**Durable result + outcome routing (multi-agent).** A `complete` also writes the
-result as **DATA on the run** — `:seon.agent.run/result` (the short answer /
-pointer) and optional `:seon.agent.run/result-ref` — *unconditionally* (even when
-the answered-this-run guard skips the message). Message = wake signal; datom = the
-value a parent reads back at **any** later time (a subagents-section render, a
-query), surviving turns and restarts. Beyond `complete`, **every abnormal close is a
-task OUTCOME the PARENT owns**: `close-run!` (the ONE choke point all closes funnel
-through) messages the parent — child id + `closed-reason` + turn count, `origin
-:agent` **from the child** so it WAKES the parent (never `:core`, which the wake gate
-excludes) — for `:turn-limit`/`:deadline-exceeded` (with a *continue* affordance —
-budget exhausted is not death, re-message to open a fresh run),
-`:error`/`:no-forms`, and `:crashed`. A `:crashed` (wedge) **also escalates to
-root** (deduped when the parent IS root; root's own wedge is parentless → the user).
-`:waited`/`:terminated`/`:superseded` message no one. Every close stamps
-`:seon.agent.run/closed-at` (the breaker's window instant; run duration is
-derivable).
-
-**Heartbeat watchdog (`:crashed`).** A wedged agent never closes its own run, so a
-core scan rides the **one ticker** (`run/close-stale-runs!` — no parallel timer;
-the detection core `run/stale-run-ids` is a **pure fn of (db, now)**): an OPEN,
-non-paused run whose freshness anchor (`last-beat-at`, else `started-at` for a
-never-beat wedge) is older than `:seon.config/watchdog-stale-ms` (default 20 min,
-above the per-turn bound) is closed `:crashed` (→ the parent/root outcome notice +
-the pointer retract that unsticks the agent) **and** recorded as a `:core` fault via
-`seon.error/record!` — a wedge is OUR bug, so it enters the standard triage chain
-(watch-faults → inspect → repro → fork; the dev `:crash` dial exits loudly). Fencing
-already covers the false-positive: a late-beating driver's leading CAS aborts
-against the retracted pointer (a no-op, never a double-drive). **Root self-heals
-through the same path but does NOT auto-rewake** — the close unsticks it (idle +
-wakeable); it resumes on the next natural contact.
-
-**Schedule-wake circuit breaker.** Outside the one bounded self-healing recovery
-turn below, the autonomous repeat-wake source is schedules — a deterministic
-wedge + a periodic schedule is a crash loop. The schedule wake-gate refuses to
-fire for an agent with ≥N `:crashed`
-closes in a recent window (`derive/schedule-breaker-tripped?`, windowed over
-`closed-at`; dials `:seon.config/schedule-breaker`, default N=3 / 30 min) — **derived,
-no stored state**: the window sliding past re-enables it. Human/agent MESSAGES still
-wake it (deliberate contact is not a loop); only schedules are gated. The refusal is
-visible in the subagents-section line.
-
-## Self-healing agents — replace the process, preserve understanding
-
-An execution child is disposable runtime capacity, not the agent's memory. The
-agent's durable understanding is its current database program, plan and other
-facts, transcript evidence, and context derived from one database value. If a
-child exits, wedges in synchronous code, exceeds its parent deadline, or fails
-its protocol, the parent terminates and reaps that complete child generation.
-The next generation starts from the newest admitted execution artifact and
-reconstructs the current namespace sections, functions, schemas, tests, aliases,
-and instrumentation from database program facts. It never replays every eval or
-assumes a process-local value survived.
-
-Persisted authored code can never remove the agent's ability to repair
-persisted authored code. A fresh child first boots the trusted compiled
-artifact and its one `cljs.js` compiler. It then attempts to load the current
-database program. If one persisted namespace, schema, function, or test fails,
-ordinary application invocation remains refused, but the same supervised child
-retains a bounded eval door with the exact database source map. A corrective
-`ns`, schema registration, `defn`, `deftest`, `ns-unmap`, or removal commits
-through the normal program transaction; the replacement child then reconstructs
-only the corrected current program. The failure identifies the source namespace
-and form. There is no SCI fallback, pod-side authored eval, second compiler,
-second registry, or provenance bypass.
-
-Recovery preserves history rather than pretending to reverse execution. Every
-database transaction that committed before the crash remains true. The exact
-running eval is terminalized `:interrupted`, its turn records the process loss,
-and the old run closes `:crashed` under its existing fence. Pending Promises,
-timers, open handles, JavaScript object identity, and live `result/<id>` values
-are explicitly lost. The next turn derives a concise recovery section from
-those facts: it names the interrupted source and process failure, states that a
-fresh child loaded the current program, and tells the agent that transient
-results did not survive. Source text is never rewritten to insert a synthetic
-crash message.
-
-The supervisor opens one bounded recovery run after replacement so the agent
-continues its existing plan instead of waiting for a human to rediscover the
-failure. This is a new run and turn over current database truth, never a replay
-of the interrupted form. Repeated crashes for the same source and artifact
-digest trip a derived breaker and leave the agent idle for its parent, root, or
-the human to inspect; recovery cannot become an autonomous crash loop. Another
-agent may observe and manage this entirely through the same run, error, program,
-and process facts.
-
-Bun cannot restore a dead JavaScriptCore heap. Heap snapshots and structured
-serialization are diagnostic/data tools, not process resurrection. Process
-replacement is the hard bound for native loops that timers, core.async,
-superv.async, partial CPS transforms, and interpreter checks cannot preempt.
-The isolation implementation may later move from an operating-system child to
-a lightweight container or microVM without changing this contract: database
-facts cross the boundary, runtime state does not.
-
-## Triggering + fencing — the reactive wake
-
-Triggering is **DB-reactive**. Each active agent child registers one database
-interest on its direct authority session (`install-wake-trigger!`, idempotent —
-it unlistens the prior request ID first, so a hot reload never doubles up). The
-interest names the existing `:seon.agent.message/to` attribute and exact agent
-entity pattern, so the authority sends only matching committed datoms and the
-report's `:db-after` value to that child. A datom **wakes** the agent iff:
-
-> `to ∋ me` ∧ `from ≠ me` ∧ `origin ∈ {:human :agent}` (never `:core`) ∧ `hops < hop-cap`
-
-The `to`-check is load-bearing in both the authority interest and the receiving
-function; without it one message wakes everyone. Hop-exhausted messages are the
-**dead-letter** — they stay as datoms, render as a reactive warning, and never
-wake. `:core`-origin messages are substrate nudges and are **quiet** by
-construction: they never wake an idle agent. Durable agent initialization does
-not manufacture eval rows.
-
-The addressed event callback runs in the receiving agent process, but the work
-it starts still enters one colocated runtime boundary that explicitly sets
-`user = receiving agent` and `process = REPL`. Timer-driven wake, renew, and
-re-drive use the same boundary. No transaction fiber, callback, or provenance
-context crosses the protocol. The explicit receiving scope prevents an inbound
-caller from becoming the recorded user for the receiver's run transactions.
-
-**Fencing is two-layered, both via the single writer:**
-
-- **The OPEN race.** Opening a run ends with `[:db.fn/cas … :seon.agent/run nil
-  [:seon.agent.run/id R]]` — the pointer must be *absent* — so two concurrent wakes
-  cannot both open a run; the loser's tx aborts (single-writer serialized). Order
-  the tx `[{run-create-map} [:db.fn/cas …]]`: the CAS resolves its NV against the
-  RUNNING in-tx db (`transaction.cljc:1138-1140`), and `entid-strict` RAISES on a
-  run that doesn't exist yet, so the create map MUST precede the CAS. See
-  [[library-grounding]].
-- **The WORK race.** Every work tx leads with the in-tx CAS work-fence above, so a
-  superseded run's writes (including its eval batch) abort at commit.
-
-A wake that arrives while the agent is already `:running` is **absorbed** by the
-open run's sliding window (it renews the lease), not a second run. A stop between
-turns exits cleanly at the next `next-event`; a stop mid-turn is rejected at the
-CAS (hard-aborting an in-flight LLM call is the worker-kill of the isolation tier).
-
-## Database-driven swarm orchestration
-
-A nested swarm is a database work graph, not a process tree used as state. Work
-entities point to prerequisite work, their owning parent agent, and any claimed
-or completed run. Readiness is derived by one query: prerequisites are complete,
-no live claim exists, and the parent's configured concurrency capacity is not
-exhausted. Worker results, failures, and newly exposed work are transactions, so
-the same query always reconstructs the current frontier after restart.
-
-There are two wake paths, and neither polls the whole database:
-
-- An agent-owned coordinator uses the existing addressed-message interest. A
-  worker commits its result and an addressed message to its parent in one
-  transaction. The exact `:seon.agent.message/to` pattern wakes only that parent;
-  the parent rereads the ready frontier and delegates the dependency-ready work.
-- A substrate coordinator registers that ready-frontier query through
-  `seon.reactive/observe!`. Datahike returns the query value plus its
-  source-scoped dependency plan. The writer's reverse interest index selects
-  only matching committed reports; bursts converge on the newest database value,
-  and Clojure `=` suppresses a callback when the derived frontier is unchanged.
-
-In either path, observing readiness never grants ownership. Before launching a
-child, the coordinator commits one claim/fence through the single writer; only
-the successful claimant delegates or ensures the runtime host. The claim and
-child/task relationship are one transaction whenever the domain permits it.
-This makes duplicate callbacks, reconnects, hot reloads, and competing parents
-safe. Completion retracts or supersedes the claim and exposes dependent work;
-that transaction is the next reactive input.
-
-Use one stable reactive registration key per normalized frontier, not one
-listener per task and not one broad transaction listener. One registration owns
-one active derivation and at most the newest pending database value. Independent
-frontiers proceed independently, while the configured settle and maximum-latency
-bounds collapse imports without starving progress. Release the registration when
-the coordinator has no consumer. The exact dependency, cache, equality, and
-cleanup contract is maintained in [[../../prds/archive/reactive-render-units/roadmap]].
-
-## The one ticker — schedules + overdue runs
-
-The DB is **passive about wall-clock**: `now > deadline` is true in the view but
-nothing fires until something checks. So exactly **one periodic ticker** (wired at
-boot beside the wake trigger) does the only active work in the system. Every N
-seconds it:
-
-1. **Fires due schedules** — opens a `:schedule`-triggered run for each due
-   `:seon.agent.schedule/*` on an `:idle` agent (respecting its
-   `concurrency-policy`). A schedule carries its cron expression **and the fn to
-   call** when due (a qualified symbol resolved late, code-as-data) — cron is "at
-   this schedule, run this fn", not merely "wake me".
-2. **Closes overdue runs** — for each `:open` run where `now > deadline` (or the
-   beat is stale): `terminate()` the run's worker, `close-run!` with
-   `:deadline-exceeded`, surface the error, and the agent derives back to `:idle`.
-
-The ticker is **idempotent** (it acts on db state; safe to re-run) and lives **off
-the runaway's thread** — a sync runaway in a worker cannot block it, which is the
-whole point of enforcing the clock bound externally. It retains the immutable
-database configuration acquired at runtime publication. An unexpected watchdog
-or schedule rejection is recorded as a core fault under that configuration, so
-development crash policy cannot be bypassed by a timer callback that merely
-logs and continues.
-
-## The derived fingerprint — `derive-status`
-
-`seon.derive/derive-status` (map-in / map-out, `:seon.derive/status-request` →
-`:seon.derive/status`) returns the agent's complete derived status in one map over
-**one threaded db value**: the derived `state`, `total-turns`, `open-todo-count`,
-`last-human-at`, the last run's `closed-reason`, and — present only while a run is
-open — the run's `status`/`trigger`/`turn-limit`/`deadline`/`last-beat-at`, the
-derived current `turn`, `turns-remaining`, and `ms-remaining`. It is a pure read
-(no writes) composing the same `seon.derive` primitives every other reader reads,
-so the agent-facing run-status block and the human-facing status surface agree by
-construction. The run-status **block** (ai + html renders) is owned by [[ui]];
-this fn is its sole data source.
-
-## Creation = an idle agent entity
-
-**Creating an agent does not start a loop.** Creation transacts one complete
-initial **idle agent value**: its `:seon.agent/id`, optional
-`:seon.agent/default-turn-limit` / `:seon.agent/default-deadline-ms` seeds, the
-configured `:seon.agent/ctx` component set, purpose, and the durable namespace/
-safe declaration facts for a fresh `my.agent.<id>` home namespace.
-`seon.agent.home` is the one lower owner of the id→namespace projection, its
-canonical require specs, the reactive per-agent require read, and the exact
-namespace form; creation, eval, and context rendering consume that same data.
-There is no run, no turn, no wake until a **trigger** arrives. This keeps creation
-explicit and the loop strictly trigger-driven: "start an agent" (create + runtime
-host, idle) and "run an agent" (trigger-driven) are two separate acts. To make a freshly
-created agent work, **send it a message** — that message is the trigger that opens
-run #1.
-
-## Initialization = facts first, safe runtime projection second
-
-Agent creation compiles configured initial EDN into the same canonical entity/
-component/program maps every later reader uses, validates all of them, and
-commits them atomically with the actual submitting user and REPL process. The
-pod observes the committed agent facts through its one runtime interest, then
-installs one wake trigger and hosts the agent. The execution child never owns a
-pod loop, listener registry, provider dispatcher, or another execution-child
-supervisor. Initial context and functions appear because those facts exist, not
-because Seon manufactured quiet eval transcript rows or replayable seed commands.
-
-`:my.agent/purpose` and the reusable home-namespace functions/schemas are normal
-canonical schema/program facts. The purpose value lives on the agent and remains
-agent-editable. A crash after the durable creation transaction needs only the
-ordinary resume path to finish transient hosting; a crash before commit created
-nothing.
-
-**Planning rides the same data.** An agent plans with its **`my.plan` tree** — a
-todo carries a `:my.plan/parent` ref plus status, and parent progress is a derived
-roll-up of its children (top = plans/milestones, leaves = actions). There is no
-separate plan entity; the work-list *is* the plan tree (schema in [[data-model]],
-functions in [[toolkit]]). The derived open-todo count feeds the fingerprint above.
-
-## Cluster boot — exact durable deltas + runtime reconstruction
-
-Bare `bin/seon` and `bin/seon up` are the one usability boundary. In a source
-checkout the operator performs one complete canonical JVM-server + CLJS build,
-atomically publishes the artifact manifest, starts incremental watchers, and
-reconciles only processes whose artifact digest changed. A packaged install
-verifies its immutable shipped manifest. Every managed process starts in a new
-operating-system session, so closing the invoking terminal cannot reap it.
-
-The command returns only after one atomic application-ready signal agrees with
-direct process, socket, and HTTP checks. A log line, old artifact, fixed sleep,
-or repeated polling streak is never readiness truth. An unexpected core-fault
-marker fails the gate as soon as the fault is known. Port files and Unix sockets
-belong to one process lifetime: a fresh spawn removes stale artifacts before
-waiting and refuses to unlink an artifact that is still serving an unregistered
-live process. Thus a reboot cannot turn an old port file into a false-positive
-boot, and an unmanaged listener is reported for adoption or explicit operator
-action rather than silently replaced.
-
-Watcher readiness includes the exact flavor-owned client closure: its published
-output and Shadow runtime directory must hash to the artifact identity admitted
-at launch. A successful hot reload that changes either member therefore makes
-the target degraded until the operator canonically republishes and reconciles
-the artifact. Structured status exposes the non-secret environment and artifact
-digests plus `(pid, operating-system start stamp)` needed to reproduce that
-decision; it never exposes environment values.
-
-The Node reload client reports `:build-complete` only after every selected
-JavaScript import and lifecycle callback completes. An import rejection reports
-`:build-failure`, so Seon keeps program admission closed and never rehosts
-agents or the ticker around a partially replaced namespace population. The next
-build may acquire a fresh publication transition and publish normally without a
-second edit or process restart when the selected core-fault policy keeps the pod
-alive. The failure is recorded under the immutable database configuration, so a
-development `:crash` policy instead persists the fault and exits the pod.
-
-Process ownership is `(pid, operating-system start stamp)`, never a bare PID.
-That identity survives the supervised shell's `exec` into Node/JVM while a
-later reuse of the same PID fails closed and is never signalled. A managed
-launch owns a complete operating-system session: stop sends TERM and, when
-needed, KILL to the process group and does not return until the group is
-drained, so a child from a pre-exec build cannot become a duplicate orphan.
-During a multi-process startup, one invocation-scoped shutdown boundary owns
-only the processes that invocation actually starts. Shutdown admission is
-serialized with detached spawn plus managed-record publication; an interrupt
-therefore either prevents the spawn or waits until its exact identity can be
-drained in reverse dependency order. A converged process from an earlier
-invocation remains alive. A failed inverse retains its exact managed record and
-is reported rather than allowing startup or destructive cleanup to graduate.
-For a planned multi-process transition, the supervisor selects each exact
-managed generation once. Application quiescence evidence carries that same
-generation and is joined to its containment terminal before classification;
-neither a mutable port file nor a later process-record read can cross the cut.
-One nonrenewed monotonic deadline bounds the complete dependency-safe sequence:
-pod application quiescence and containment, then database-server terminal
-release, then watcher containment. Each component is reported as clean, forced,
-or absent; an accepting door without an exact managed record is containment
-uncertainty and stops the transition. Destructive reset may proceed after
-explicitly reported forced absence, but never after uncertainty.
-Managed-record schema evolution derives historical control defaults only while
-reading an attribute whose absence names the older shape; current publications
-remain strict. Historical terminal evidence is never backfilled: a newly added
-field that was not observed remains absent in the returned result even when the
-older complete terminal shape is sufficient to finish cleanup.
-Atomic owner-PID locks serialize each process, while one lifecycle lock spans
-multi-process restart and named-cluster reset transitions from teardown through
-any durable database mutation and final readiness. A second invocation therefore
-cannot reopen the writer while its database is being replaced.
-
-`SEON_CONFIG` is an operation-scoped boot input, not managed-process identity.
-An explicit config operation requires an already-ready compatible pod and sends
-one immutable resolved candidate through its normal database reconciliation
-boundary. A candidate that changes no boot-critical value reconciles database
-facts without replacing a process. A boot-critical change enters the pod's
-narrow writer-replacement phase: executable admission closes, already-admitted
-agent work drains, and the operator stops and relaunches only the writer from
-the candidate launch envelope. The pod then reopens its database session through
-the existing reconnect path, restores listeners and current-value
-resynchronization, proves the running launch values equal the committed config,
-and reopens admission. The watcher and pod remain in their current process
-generations. The applied manifest publishes only after that proof succeeds, and
-the database facts remain the authority after the operation completes.
-
-The cluster runtime has one boot entry and a strict durable/runtime split:
-
-1. Open the durable Datahike database. A fresh database performs the one explicit
-   un-attributed genesis transaction that installs root and the transaction
-   user/process refs; a populated database reuses its native schema/index roots.
-2. Read the named current database value. A fresh-database request
-   explicitly supplies current core and an initial canonical config value
-   (`{}` is valid and materializes the safe floor). A
-   populated-database startup compiles core/config candidates only when that
-   operation explicitly supplies them. Overlay only selected candidates on the
-   current database value in memory; absence never implies current source,
-   environment, or `config/system.edn`.
-3. Validate the complete candidate before any post-genesis write: every Malli
-   reference resolves, every native schema signature is compatible, every
-   program declaration compiles, every selected population contract is valid,
-   and every configured lookup ref has a target in the candidate. Root/boot and
-   root/config managed attributes/component subtrees must be disjoint.
-4. Commit only the validated durable delta: missing compatible native
-   attributes and core facts as `{user root, process boot}`, then any selected
-   config subset as `{user root, process config}`. Equal state emits no
-   transaction. Omitted/removed managed facts are ordinary retractions, so
-   there is no ghost-pruning or config-healing pass.
-5. Publish one validated program candidate: atomically swap in its complete
-   Malli registry, load only its safe committed declarations, instrument the
-   complete loaded program once, install global services/interests once, and
-   recover runtime services. Any validation or instrumentation failure rejects
-   the candidate, records one bounded core fault, and fails admission.
-6. On a provably fresh database only, call the same atomic birth compiler used by
-   `start!` to create one ordinary readable-word agent under root/boot
-   provenance. Root is the coordinator; this child is the initial work agent.
-   Existing/config-repair boots never manage or recreate it.
-7. Reconstruct clean eligible hosts. If the prior runtime crashed, apply the
-   crash rule below instead of resuming interrupted work.
-
-Config is an exact recovery surface for its declared populations/attributes,
-not an owner of the whole database. Native Datahike schema is accumulating
-capability state, not a config desired set. The renderer's entity-schema catalog
-is derived once from the validated Malli registry rather than stored as a second
-append-only decomposition. Compiled route/root-context defaults feed the config
-compiler; root/boot does not reassert them before root/config applies its value.
-Every reconciliation supplies both its process scope and its complete set of
-managed identity attributes. The identity-attribute scope remains explicit even
-when a desired population is empty, so removing the final route or skill still
-produces the correct retraction without sweeping another population written by
-the same process.
-
-Core program ownership is narrower than boot provenance. The current source
-datom must be boot-authored and its identity must belong to the selected desired
-program population. Agent home namespace names are derived from
-`:seon.agent/id` and excluded even when root birth correctly occurred through
-the boot process; a declaration whose current source was authored through the
-REPL is likewise preserved. Thus one desired-program delta performs additions,
-changes, and removals without treating every boot transaction as compiled code.
-
-Instrumentation follows effective definitions. Boot reconstructs wrappers once
-from committed program facts. Thereafter a new or redefined function is
-uninstrumented from Malli's recorded original and instrumented once; a changed schema key reinstruments only
-the transitive function-contract dependents derived through Malli schema refs.
-Removing an optional contract/error fact emits an explicit attribute retraction;
-identity-upsert omission never leaves a stale cold-boot contract behind.
-Mint, resume, config apply, and render do no instrumentation work.
-
-A warm agent birth never calls this sequence. Birth commits the complete durable
-birth value in one transaction under the actual submitting user/REPL process:
-the agent, initial components, home namespace, home-require rows, and safe
-declarations. The pod's runtime interest reacts to that committed transaction
-and creates the transient wake trigger and runtime host. Pause, resume, and
-termination likewise commit ordinary run or agent facts; the pod applies their
-process-local consequences. Runtime reconstruction reads existing facts without
-creating or overwriting initial state.
-
-Runtime “replay” is limited to declaration loading. Scratch/effectful evals,
-Promises, handles, sockets, and external effects are never re-executed to mimic
-a prior runtime; a database value's `:as-of` means database state at that
-temporal cut inside its containing retained commit only.
-The complete transition contract is
-[[docs/prds/archive/runtime-reliability/provenance-and-lifecycle-design]].
-
-The parent execution host performs child-process recovery; the in-child agent
-cannot recover its own blocked JavaScript thread. A clean planned restart first
-quiesces at turn boundaries. An unexpected child exit or deadline CAS-fences the
-exact interrupted run, marks its running turn and eval receipts `:interrupted`,
-closes the run `:crashed`, and retracts its pointer. It does not fabricate an eval
-row for work whose receipt never committed; already committed transactions remain
-true history and no source or external effect is replayed.
-
-That same transaction also asserts one `:seon.runtime.recovery/id` anchor with
-the unexpected-exit reason, bounded terminal process facts, and a ref to the
-full content-addressed diagnostic blob. It does not copy
-affected agent/run/turn refs or prior/current database values: those are derived by
-joining the anchor's transaction to the run/turn/pointer datoms it changed and
-to the commit graph.
-
-The first crash after useful work opens one new bounded recovery run in a clean
-child. Its first prompt includes the interrupted eval's concise crash error and
-the diagnostic-blob ref; it never resumes the interrupted turn or replays its
-effect. A successful later turn clears the condition by ordinary history. If
-the replacement crashes again before completing useful work, no third run opens:
-the existing inbound-message mechanism wakes root with the derived recovery
-evidence. Root can inspect the source, diagnostic blob, and current database,
-repair the program, and explicitly resume. The breaker is derived from recovery
-anchors and later terminal turns, not a mutable retry counter or acknowledgement
-flag. Runtime handles and wake state are rebuilt only after the durable recovery
+An agent is durable database state plus replaceable compute. A trigger opens a
+bounded **run**. Claimant processes compete for that run through database CAS,
+advance one persisted **turn phase** at a time, and release custody whenever
+the next phase belongs elsewhere. No process-local loop, promise registry, or
+attempt buffer is an authority. Killing a claimant loses only transient
+compute; the next claimant resumes from the database facts.
+
+The runtime has one portable `.cljc` driver. Every execution tier calls that
+same driver and supplies a small platform leaf for the phases it can execute.
+The JVM runs one virtual thread per held claim. A virtual thread may park on
+database, model, or bounded eval work without consuming a platform thread for
+the life of the run.
+
+## State is derived
+
+The agent entity stores primitives, not a lifecycle label. `seon.derive`
+projects the visible state from facts:
+
+- `:terminated` when `:seon.agent/terminated-at` is present;
+- `:paused` when the current open run has `:seon.agent.run/paused-at`;
+- `:running` when the agent points to an open run; and
+- `:idle` otherwise.
+
+Run expiry is also derived. A claim is expired when the run remains open and
+unpaused, has a claimant and epoch, and its last heartbeat is older than the
+configured stale interval. There is no stored `expired?`, recovery status, or
+process-alive bit. Wall-clock comparison is performed against one immutable
+observation of the run and the configured lease policy.
+
+## Runs are claimable database state
+
+A run is the bounded unit opened by a message or due schedule. It records its
+identity, owning agent, trigger and cause, work limit, absolute deadline,
+heartbeat, status, and terminal reason. The agent's
+`:seon.agent/run` ref points to the current open run and is part of every work
+fence.
+
+Custody lives on that run:
+
+- `:seon.agent.run/claimant` is the stable identity of one process instance,
+  derived from its process identity and start instant;
+- `:seon.agent.run/claim-epoch` is a monotonic fencing number; and
+- `:seon.agent.run/last-beat-at` is the last committed lease heartbeat.
+
+The first acquisition CASes an absent claimant and epoch to the claimant and
+epoch `1`. Reacquisition of a cleanly released run CASes claimant
+`nil → claimant` and increments the observed epoch. Takeover of an expired
+claim CASes the observed heartbeat and epoch before replacing the claimant and
+heartbeat. A live foreign claim is not stealable.
+
+Every run mutation leads with two assertions:
+
+1. the agent still points to the observed run; and
+2. the run still has the claimant's held epoch.
+
+The claimant string identifies custody for operators and archaeology; the
+epoch is the authority fence. A displaced claimant cannot publish late work
+because its transaction fails at the writer.
+
+Heartbeat, input consumption, release, pause, close, and phase advancement all
+carry the same pointer-plus-epoch fence. A clean release retracts only the
+claimant and retains the monotonic epoch. Closing the run records the terminal
+facts, retracts the claimant, and retracts the agent's current-run ref in one
 transaction.
 
-The same external supervisor quiesces writers/hosts, records durable restore
-intent outside the branch being replaced, preserves an undo head, and
-reconstructs the runtime when an operator promotes a historical Datahike root
-into the live cluster. Runtime reconstruction reads canonical facts from that
-database. Core and config overlays are independently selected, frozen operation
-inputs, not a persistent boot mode. Preserving both is valid; after any overlay
-commits, later no-overlay cold boots use the resulting database facts without
-falling back to current source or `config/system.edn`. Read-only `as-of` and
-isolated debug branches do not disturb the source runtime and start with all
-autonomous loops/schedules/external-effect workers disabled: no ticker, wake
-trigger, or agent host is installed until an explicit forensic action.
+## The portable driver
 
-## The orchestrator-root + agent lifecycle
+`seon.agent.driver` owns the control algorithm:
 
-**Root is one ordinary agent holding capabilities others don't — not special core
-machinery.** There is exactly **one** `:seon.agent/id "root"`, and it is **both**
-the `/`-view owner (the UI role — its system-scoped blocks derive the all-agents
-overview at `/`) **and** the system orchestrator (the lifecycle role — it starts
-and manages other agents). These are two facets of the same elevated grant and the
-same initialization; there is **never** a second in-database orchestrator agent
-or overview entity. The external cluster process supervisor is not an agent.
+1. acquire one immutable database value;
+2. find an open, unpaused run whose next phase the leaf can execute;
+3. derive the exact acquire, reacquire, renew, or takeover transaction;
+4. commit it through `seon.db`;
+5. execute only the phase authorized by the durable cursor;
+6. commit the phase result under the run and phase fences; and
+7. continue, close, or release for a clean tier handoff.
 
-Root carries one concise role-specific context block: understand the fleet,
-start or select an ordinary agent for work, route/delegate to it, and respond to
-crash notices. It does not carry the retired instruction wall. Its operational
-surface is its fully specified home-required namespace cards—principally
-orchestration and UI navigation. Moving root into one of those namespaces makes
-that namespace's full source current and brings in only its colocated or
-state-gated context. This is the same context mechanism as every other agent,
-not a root-only documentation system.
+Claimants advertise capabilities such as render, model I/O, eval, and publish.
+Eligibility is a pure function of that set and the persisted turn phase.
+Claimants do not route by agent identity or keep a private queue of runs.
+Database interests are ephemeral wakeups that request another scan; the scan
+and CAS determine authority.
 
-- **`seon.agent/start!` — the spawn function, a SOFT gate + a hard depth-cap backstop.**
-  A private pure compiler builds the birth transaction. With no namespace,
-  `start!` transacts a new **idle** child agent and writes
-  `:seon.agent/parent` = the caller**. That write *is* the activation of
-  `:seon.agent/parent`; no separate writer exists. Two spawn
-  controls are real. The `/call` HTTP gate separately admits only registered
-  shared browser callbacks whose source transaction was authored by an agent;
-  the route agent and original author may differ, and the callback may live in
-  any allowed application namespace. It neither grants nor mediates an agent's
-  direct call to this core function:
-  - **Soft gate — home-requires.** `start!` sits only in **root's**
-    `:seon.eval/home-requires`
-    (`config/system.edn`'s `:seon.config/root-context`), so an ordinary agent's
-    rendered context never surfaces them. It catches the honest case.
-  - **Hard backstop — a computed depth cap.** A full-qualified
-    `(seon.agent/start! …)` slips past the soft gate, so `start!`'s **own body**
-    walks the `:seon.agent/parent` chain (`seon.agent/spawn-depth`, cycle-guarded)
-    and **refuses** when the caller's depth ≥ `:seon.config/spawn-depth-cap`
-    (default **1**: root at depth 0 spawns, a depth-1 subagent may not). The refusal
-    is the standard **error ENVELOPE** (`{:seon.db/ok? false …}`), datom-free (no
-    child created), never a throw. It is a **config-dialed number, never a name
-    list** — raise the dial + add the spawn requires to the general agent-context to
-    deepen the tree.
-- **Namespace-targeted start is database get-or-create.** An optional
-  `:seon.agent/namespace` symbol selects the ordinary `:seon.ns/name` program
-  entity. The agent's unique namespace ref is the one-resident constraint.
-  If a nonterminated resident already exists, `start!` returns its stable
-  agent id. Otherwise the namespace declaration, resident agent, parent ref,
-  context, and limits commit atomically. Concurrent attempts use the same
-  immutable database-value fence; the loser reacquires and finds the committed
-  resident instead of creating a process-registry race.
-- **Start = durable creation observed by the pod, leaving the child idle.**
-  `start!` commits the child's complete initial facts and returns its id. The
-  pod establishes the safe runtime projection from that same committed
-  transaction. The child does no work until it receives a trigger; to make it
-  work, root (or anyone) sends it a message—that message opens run #1.
-- **Named model selection is birth data, not runtime dispatch state.**
-  `create!`, `mint!`, `start!`, and `delegate!` accept the optional request-only
-  `:seon.config/model-variant` keyword. The chosen sparse
-  `:seon.ai/agent-*` map is copied onto a newly created agent in the same birth
-  transaction. Unknown names allocate nothing. Existing complete IDs remain
-  idempotent, while a namespace-resident start/delegate with a selector returns
-  a user error rather than silently ignoring or mutating the selection.
-  Output-limit wire spelling and the outer attempt fence are ordinary sparse
-  birth attributes too, so a high-latency compatible model can select
-  `max_completion_tokens` and a longer process fence without a model-name
-  branch or a cluster-wide timeout change.
-- **`seon.agent/delegate!` is the atomic birth-plus-first-message operation.**
-  It accepts the same optional namespace. An existing resident receives the
-  message directly; an absent resident, its namespace assignment, and the
-  initial message commit in one transaction before any child is hosted.
-- **`seon.agent/set-namespace!` changes the assignment without changing the
-  agent.** Root may assign any agent; an ordinary agent may assign itself or a
-  descendant. The transaction retracts the previous
-  `:seon.agent/namespace` ref and adds the new one atomically, creating the
-  namespace declaration only when absent. The immutable agent ID and all
-  messages, runs, turns, plans, and authored program facts remain unchanged.
-  Current namespace is derived by comparing the assignment transaction with
-  the latest successful eval transaction: a newer assignment selects the next
-  turn; a later successful eval preserves ordinary `in-ns` movement.
-- **Roles are capability-SETS, not a stored `:kind`/`:role`.** A role is the set
-  of functions its home requires/context makes discoverable plus the guarded
-  operations those functions allow. "Orchestrator" discovers spawn/terminate/
-  system functions; "worker" does not. Discovery is not enforcement: `start!`
-  itself checks caller/depth. The `/call` HTTP gate protects interactive
-  agent-authored callbacks only; namespace is not evidence of ownership, and
-  the gate does not grant core lifecycle functions to an
-  eval. No discriminator field is involved (the attribute-presence rule is
-  owned by [[data-model]]).
-- **Root initialization follows genesis; it is not genesis.** The un-attributed
-  base transaction creates only root's identity plus provenance ref targets.
-  Idempotent root/boot and root/config desired-state transitions then install
-  root's program facts, system-scoped blocks, `/` route/layout, and elevated
-  capabilities. Root identity presence never skips those deltas. Root has no
-  `:seon.agent/parent`, so later `root.start!(child)` recursion still bottoms out
-  cleanly. The `/`-view's "start an agent" affordance invokes a registered root
-  home-namespace callback through `/call`; that callback calls `start!`, whose
-  own body enforces the lifecycle rule.
+Every active tier uses this driver from the same source. Platform leaves own
+only native effects: database sessions, clocks, virtual-thread dispatch,
+provider transport, SCI invocation, and publication I/O. Sync versus async
+ceremony is confined to the entry expression. No tier owns a forked state
+machine or translates through hand-mirrored host wrappers.
 
-## Message intake — auto-todo (write-side)
+On the JVM, a scan starts at most one named virtual thread per run in that
+claimant process. That thread drives the held claim until it closes, loses the
+fence, or reaches a phase the leaf cannot execute. Eval work enters the bounded
+platform eval pool; the claim virtual thread parks for its result.
 
-Message intake is **write-side**, independent of render (render is a pure read
-projection). When an inbound `:human` message lands, `seon.agent.message/message!`
-creates one **address-todo in the same tx** as the message (atomic with the
-message's birth, gated on `:human` origin) — carrying a short clipped preview plus
-a back-ref to the message; the agent pulls the full message by its identity attr
-when it acts. "Addressed" then **derives** from that todo's completion — there is
-no stored handled-flag. The todo's *render* is owned by [[ui]]; the write hook is
-owned here.
+## Turns have a durable phase cursor
 
-## History is derived
+A turn is the durable record of one prompt/model/eval/publish cycle. Its
+`:seon.agent.turn/phase` is the recovery cursor:
 
-The activity timeline — created, woken-by, turn counts, why each run ended — is a
-**derived query** over the bitemporal tx-log: walk the agent's run entities
-(`started-at`, `trigger`, `cause`, `closed-reason`) plus each transition's
-`:db/txInstant`. `:seon.agent.run/cause` already refs the triggering message;
-`:seon.agent.loop/cause` is only a derived response-map text key, not transaction
-metadata. Nothing is stored that the graph/log doesn't already hold; the
-timeline is a function of the DB at render time, self-healing (no log to clear).
-The rendered timeline view lives in [[ui]]; this doc owns only the run-lifecycle
-facts it reads.
+```text
+:rendered
+  → :attempt-open
+  → :reply-ready
+  → :evaling
+  → :evaled
+  → :published
+```
 
-## Nothing wedges — bounded execution through the one chokepoint
+Before a turn exists, the driver treats its phase as `:unstarted`. Rendering
+creates the turn and advances it to `:rendered`. Every later transition uses
+an in-transaction CAS from the observed phase to the next phase, composed with
+the held run fence. A claimant may repeat a read, but it cannot repeat a
+committed phase transition.
 
-Nothing can permanently wedge the web UI host or a sibling agent. All authored
-execution reaches the runtime through **one door** (`seon.eval`, the execution
-service), and the following mechanisms make every hang a value:
+The turn pins the database value used to render the prompt through its rendered
+transaction and prompt blob. It links the raw reply blob, eval receipts,
+provider attempt receipts, usage projections, assigned cause message, and
+terminal status. Large bytes live in the one blob archive; the turn stores
+small projections and refs.
 
-- **One bound: the invocation deadline.** The Bun host owns the outer
-  wall-clock deadline for one child invocation. Async work also uses the one
-  `race-timeout` wrapper for prompt cancellation and useful structured errors.
-  A cooperative timeout closes the child's authority session and aborts owned
-  provider work; a synchronous loop cannot block the parent's timer, so the
-  exact child is poisoned against reuse and terminated after the bounded grace.
-- **One immutable config per provider attempt.** The retry thunk captures one
-  complete ordinary database value, resolves the agent's complete
-  non-secret transport configuration once, and passes that value through
-  dispatch and the adapter without reactive rereads. A later retry may capture
-  a newer value, but both attempts become ordered database facts and any drift
-  invalidates formal capability scoring.
-- **One durable run reaper.** The run deadline + `close-overdue-runs!` repairs
-  durable work whose process disappeared. The Bun host owns live invocation
-  deadlines and `proc.exited` truth; there is no duplicate in-process watchdog
-  or mutable in-flight authority. In-flight work remains derived from open
-  runs and invocation facts.
-- **One fence: the run-id CAS.** A late-settling await from a reaped or
-  superseded run cannot corrupt state — its writes lead with the work-fence
-  and abort at commit. Late results are values, absorbed or discarded.
-- **One leak-bound: the `result/<id>` cache.** Small immutable values pass one
-  bounded, non-serializing structural admission and remain identical. An
-  overweight, lazy, or opaque value becomes a compact descriptor before the
-  transcript or live slot sees it. A never-settling Promise occupies the same
-  capped runtime slot temporarily; its settlement passes the same admission.
-  Value and analyzer handle evict together oldest-first and disappear on
-  restart. A late settlement updates only a slot that is still live; it cannot
-  resurrect evicted work.
-- **One database execution bound.** `seon.db` applies hard query and pull work,
-  result-node, and shallow-weight ceilings inside maintained Datahike execution.
-  Callers may lower but never raise them. Exhaustion is structured
-  `:datahike/budget-exceeded` data and never a silently complete prefix. Query
-  cache admission uses the same bounded weight walk and skips uncertifiable
-  values.
+The cursor divides recovery by effect boundary:
 
-The honest residual is limited to one execution child: a synchronous CPU loop
-blocks that child's event loop, but not its parent, the web UI, or sibling
-agents. The parent terminates the child; durable run recovery closes or retries
-only work whose existing fences permit it.
+- before `:attempt-open`, no provider request has been admitted;
+- at `:attempt-open`, the attempt receipt says whether external work is
+  unresolved;
+- at `:reply-ready`, the exact reply bytes exist;
+- at `:evaling`, eval receipts distinguish unadmitted forms from running or
+  terminal forms;
+- at `:evaled`, all eval evidence is durable; and
+- at `:published`, the turn's externally visible publication is committed.
 
-## Isolation — one execution-service contract
+## Attempt and eval receipts
 
-Eval, agent-authored renders, and interactions call one bounded execution
-service: run a granted function with namespaced arguments and return data. The
-contract owns capability selection, deadline/cancellation signaling, result and
-write bounds, the run CAS fence, structured errors, and cleanup. A backend may
-not bypass the JVM writer or commit an unfenced late result.
+Every provider dispatch first attaches a component attempt row with a unique
+`:seon.ai.attempt/id`, ordinal, frozen non-secret request projection, deadline,
+and `:seon.ai.attempt/outcome :open`. The same transaction advances the turn
+from `:rendered` to `:attempt-open`.
 
-The local deployment executes that contract as compiled ClojureScript inside
-one separately supervised Bun child per active agent. The child owns one
-compiler state and one direct authority session, and the parent owns lifecycle,
-deadline, cancellation, bounded IPC, and terminal `proc.exited` evidence. A
-changed loaded source retires the child instead of attempting to unload stale
-process-global definitions. An idle agent retains durable database facts, not a
-process; a measured bounded warm set may retain children only when cold-ready
-latency justifies its memory. One host-level Bun memory-pressure listener sheds
-idle capacity or skips admission without a heartbeat or recurring RSS poller.
-Parent loss is bounded by the existing process group and Bun no-orphans mode.
-SCI is not the isolation mechanism. Worker pools, platform-specific microVMs,
-and stricter kernel resource limits remain measured implementations of the same
-contract, not another function or database path. The architecture retains three
-independent requirements:
+Settlement CASes the attempt outcome from `:open` to one terminal outcome and
+records bounded response identity, usage, and error evidence. A successful
+response links the content-addressed reply blob and advances the turn to
+`:reply-ready` atomically. A retry appends another `:open` row while retaining
+the `:attempt-open` cursor. Takeover marks an abandoned open attempt
+`:crashed` before retry policy decides whether new external work is allowed.
+There is no in-memory attempt ledger to reconcile.
 
-The execution artifact is one immutable, digest-verified agent runtime image,
-shared by every child of that artifact flavor. It precompiles the
-ClojureScript bootstrap, Seon schemas/functions, the thin remote database
-client, and selected downstream libraries. A child starts from one ordinary
-descriptor containing its agent and database selection, artifact identity, and
-resource profile; it then acquires the database-wide current runtime-authored
-program at the invocation's immutable database value, activates its complete
-schema projection, and loads only the selected namespace sections plus their
-reachable authored dependencies. Transaction provenance records who wrote each
-fact but never creates per-agent program copies or visibility. Compiled package
-namespaces remain the baseline and are not re-evaluated. A new accepted program
-transaction reaches every child naturally on its next invocation; a changed
-program digest replaces the stale child once without an eager broadcast or eval
-history replay. The launcher supplies an explicit
-minimal environment and immutable runtime root rather than inheriting the host
-environment or requiring a source checkout. Mutable compiler state and heap
-remain per child while the operating system can share immutable artifact pages.
+Each eval form similarly receives a durable `:running` receipt before its SCI
+dispatch and a terminal update afterward. The receipt records source,
+namespace, result or error projection, bounded output, and progress evidence.
+If a claimant dies at `:evaling` before any receipt exists, no form was
+admitted and the batch may begin. If receipts exist, takeover terminalizes
+still-running rows as interrupted and advances from their durable evidence.
+Recovery never fabricates success and never replays an already terminal form.
 
-- **capability isolation** exposes only explicitly granted functions;
-- **fault isolation** lets a hung execution be terminated without wedging other
-  agents or the web UI; and
-- **resource isolation** bounds CPU and memory.
+Receipt transitions compose with the held run epoch and the turn phase CAS.
+They are therefore both execution evidence and the write fence against stale
+claimants.
 
-All backends return the same data envelope and transact through the same typed,
-fenced database protocol. Backend selection never changes agent-visible
-semantics.
+## Guarded evaluation door
 
-## What the DB gives us for free — and what we don't adopt
+Every SCI invocation—agent eval, authored render, or plan function—passes
+through one guarded door. A retained SCI context owns one stable fuel holder;
+each invocation resets it from the resolved policy and installs the current
+platform interrupt predicate.
 
-Most durable-execution machinery exists to work around the absence of a
-bitemporal, reactive DB. We have one, so:
+The door enforces three independent abort-only circuit breakers:
 
-- **No continue-as-new (Temporal).** It bounds history because Temporal *replays*
-  full event history. We never replay — the rendered context is a **query over a
-  window** (last-N / since-T / this-run); history accumulates as cheap deltas. Bound
-  the **view**, not the storage.
-- **No external fencing/lease service (Chubby/etcd).** The run-id on the agent
-  record IS the fence; the single writer gives the ordering.
-- **No heartbeat service.** One `last-beat-at` datom; fleet status = one unfiltered
-  query, woken by one database interest.
-- **No core.async.flow port.** JVM-only, and CLJS channels are single-threaded — no
-  parallelism. We borrow its *patterns* (initial state, transition fn, supervision),
-  not its channels.
-- **Dead-letter / history / state-at-T = native.** Hop-exhausted datoms are the
-  dead-letter; Datahike transaction history is the durable audit source; and
-  `as-of` is "state at T". Live processes use selective interests and reread
-  current truth rather than replaying a transaction feed into a replica. Port
-  Datahike's primitives — don't roll our own ([[datahike-primer]]).
+- deterministic fuel charged at SCI safepoints;
+- a wall-clock deadline where the platform can arm one; and
+- bounded captured output.
 
-## Detail docs
+Fuel, deadline, and output caps are required database configuration facts,
+selected by invocation class. They are not scheduling quanta and do not slow
+normal work. Crossing any bound stops through SCI's uncatchable interrupt
+marker, records an agent fault, and returns the one flat steering value:
 
-- [[architecture]] — the map: thesis, glossary, deployment topology, the
-  cross-cutting principles (DB-as-bus, derive-everything, never-crash, roles-as-
-  capabilities, code-as-data, seed-copy), the one-service principle.
-- [[data-model]] — every entity + attribute + datahike facet: the agent record,
-  `:seon.agent.run/*`, `:seon.agent.turn/*`, message, todo, schedule, the
-  `:seon/error` model, and the `my.kb` / `my.plan` (tree) / `my.agent` domain
-  schemas + data-agent-ref scoping.
-- [[ui]] — the block / render / surface / slot / layout system, the seed-copy +
-  variadic `install!`/`remove!` override model, the pages (root agent view / view /
-  app), routing-as-data via reitit + the capability gate, and the gzip-morph
-  SSE live channel.
-- [[toolkit]] — the agent's `my.*` function catalog (purpose, the my.plan planning
-  tree, schedules, code lifecycle, recall).
-- [[roadmap]] — implementation state, gaps, work order, and evidence.
-- [[datahike-primer]] — the source-grounded "work in datahike's grain" mindset (db
-  is a value, only values cross the protocol, CAS-as-assertion,
-  exact database-value caching). Read
-  before touching the loop.
+```clojure
+{:seon.error/message "..."
+ :seon.error/kind :budget
+ :seon.error/data
+ {:seon.host.guard/config-key :seon.config.guard/...
+  :seon.host.guard/invocation-class :agent-eval
+  :seon.host.guard/steps-used 123}}
+```
+
+The diagnostic kind is `:budget`, `:timeout`, or `:agent` for fuel, deadline,
+or output policy; the shape does not fork. Deadline state is disarmed and the interrupt predicate is
+cleared in `finally`, so a retained context cannot leak one invocation's
+policy into the next.
+
+All resource limits follow [[laws]]: configuration facts with schemas,
+docstrings, units, and calibration provenance; defaults far above measured
+legitimate work; loud firing; no runtime numeric fallback.
+
+## Lease-aware recovery
+
+Recovery is ordinary claim acquisition against current facts, not a cold-boot
+cluster repair sweep.
+
+- A live claim remains untouched.
+- A cleanly released open run is reacquired at the next epoch.
+- An expired foreign claim is taken over only through the heartbeat-and-epoch
+  CAS.
+- The phase cursor and receipts determine the next safe step.
+- A stale holder's later mutation fails the same run fence used during normal
+  execution.
+
+Startup reconstructs program declarations and registers database interests,
+then the normal claimant scan offers open work. It does not close every
+apparently running turn, clear process registries, or infer failure merely
+because a different process now hosts the cluster.
+
+Pause is a fenced release: it banks remaining wall-clock time, records
+`:paused-at`, and retracts claimant custody. Resume clears the pause facts,
+extends the deadline from the banked duration, and leaves the run available for
+ordinary reacquisition at a new epoch. Termination and explicit close use the
+same fence and terminal transaction as normal completion.
+
+## Bounds and truthful stopping
+
+A run has separate work and wall-clock bounds. Batch mode counts completed
+turns; stream mode counts attempted forms. The absolute deadline bounds the
+whole run, while guarded-door limits bound each SCI invocation. Provider
+attempts have their own frozen transport deadline and durable receipt.
+
+No-progress is derived from trailing committed eval observations. Repeated
+equivalent no-progress turns close cleanly rather than spinning. A bound,
+deadline, interrupted eval, exhausted provider policy, or failed fence cannot
+masquerade as successful completion. The terminal reason and receipts preserve
+which boundary fired.
+
+## Triggering, schedules, and orchestration
+
+Creation transacts one complete idle agent: identity, optional run defaults,
+home namespace and requirements, context components, purpose, and parent ref.
+Creation does not start hidden execution. A message or due schedule opens a run
+through the single writer; concurrent open attempts race on the same agent-run
+pointer and only one wins.
+
+One scheduler derives due work from schedule facts and opens runs. It does not
+own agent execution or heartbeat state. Messages arriving during an open run
+become explicit consumed-input edges and may extend the run's work window
+without opening a second run.
+
+The root agent is both the `/` system-view owner and the lifecycle
+orchestrator. Its protected functions create, pause, resume, terminate, and
+message agents by transacting the same facts. Roles are capability sets, not
+stored kinds. `:seon.agent/parent` forms the orchestration tree; depth and
+concurrency limits are enforced at the lifecycle transaction boundary.
+
+## Program reconstruction
+
+Authored functions, schemas, tests, namespace declarations, and require edges
+are database program facts. A claimant reconstructs the admitted program from
+those facts, topologically loads declarations, and installs instrumentation
+from the same graph. A source change updates the shared program; it does not
+create a per-agent copy.
+
+Process replacement reloads declarations and current retained context. It does
+not replay scratch evals, provider calls, filesystem effects, Promises, sockets,
+or handles. Receipts and effect classes decide recovery; declaration loading is
+the only program reconstruction.
+
+## Isolation and process ownership
+
+Claimant JVMs execute agent code. The writer JVM executes transactions and
+serves committed-transaction interests only. The web-render JVM evaluates only
+trusted pure projections over acquired database values. The disposable Bun
+leaf host runs JavaScript packages and selected platform workers, not the agent
+driver. See [[architecture]] for the complete topology.
+
+Adding claimant capacity means adding replaceable claimant processes. All of
+them compete through the same run claims, epochs, phase cursors, and receipts.
+No claimant retains a Datahike index or becomes part of the durable agent
+identity.
+
+## What the database gives us
+
+- single-writer CAS establishes one winner for a claim or phase;
+- immutable database values make each decision reproducible;
+- temporal history preserves claim, heartbeat, cursor, and receipt
+  archaeology;
+- refs connect agents, runs, turns, attempts, evals, messages, and blobs;
+- replacement compute resumes from facts rather than process memory; and
+- bitemporality enables historical prompt and policy reconstruction.
+
+Seon adds no external lease service, heartbeat service, workflow queue,
+promise registry, or recovery log. The run facts are the lease and fence; the
+turn phase and receipts are the workflow and recovery record.
+
+## See also
+
+- [[architecture]] — process topology and the portable capability seam.
+- [[data-model]] — run, turn, attempt, eval, and error attributes.
+- [[observability]] — receipt forensics and temporal claim archaeology.
+- [[ui]] — pure database-value renders and the independent web-render process.
+- [[toolkit]] — effect classes and `:seon.capability/op-id`.
+- [[laws]] — circuit-breaker and one-mechanism laws.
+- [[roadmap]] — implementation state and evidence.

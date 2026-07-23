@@ -16,43 +16,40 @@ Every domain detail lives in its own doc — follow the pointer.
 ## Thesis
 
 Seon is a long-lived runtime where AI agents serve one human. Everything is **data
-in a single-writer, multi-reader, bitemporal database**; every moving part — an
-agent loop, a render, a status view — is a **function of that database** evaluated
+in a single-writer, multi-reader, bitemporal database**; every moving part — a
+claim decision, a render, a status view — is a **function of that database** evaluated
 reactively. Isolation, aggregation, and recovery all fall out of that one choice:
 units share *data*, not memory, so they run in parallel, can't corrupt each other,
-and restart cleanly from the DB (which is itself reversible). The loop is data; the
+and restart cleanly from the DB (which is itself reversible). The driver cursor is data; the
 prompt is a render of data; the UI is a reactive projection of data. The context
 unit is the **block** (`:seon.agent.ctx/block`); the prompt, an agent’s **view**,
 and the **root agent's** view (`/`) are each a derivation of the same blocks.
 
-It is **dual-runtime**: a CLJ **database authority** (implemented first by one
-JVM Datahike service, authoritative writer + shared indexed reads + heavy data
-processing, data-only) and a CLJS **agent and web runtime**. Portable `.cljc`
-capability families run from the same source on both tiers; platform leaves bind
-that source to JVM or Bun effects. The JVM does not carry a second application
-or renderer. The derived-state rule and transition table are CLJS
-(`seon.derive` / `seon.agent.loop`), reached from the device the same way every
-read is — through the database protocol against the authority's exact immutable
-database value.
+Seon is a supervised set of replaceable processes around one database. The
+**writer JVM** owns transactions and the committed-transaction feed only; it
+never executes agent-authored code or serves HTTP. Independent **claimant
+JVMs** execute the claim-native driver and guarded agent code. An independent
+**web-render JVM** serves pure database-derived HTML and Datastar SSE from its
+own database session. A disposable **Bun leaf host** contains JavaScript package
+and worker effects. The browser receives static assets and morphed HTML.
 
-**Client/server is the shape.** Exactly one authority owns each database's
-ordered writes, immutable indexed values, and shared query computation. The JVM
-service may host many isolated databases and execute their independent reads and
-writes concurrently while preserving one write order per database. Agent
-processes exchange ordinary protocol data rather than rebuilding Datahike
-indexes in every process. Agent execution scopes and the web UI issue requests
-carrying ordinary database values; no Bun process retains a Datahike replica.
-The work fence is arbitrated at that authority. Each persistent client session retains
-the latest complete database value received from acquisition, an accepted
-transaction, or a committed-transaction interest; omitted-database operations
-use that value without a preliminary authority round trip. Explicit values
-remain immutable snapshot fences. A remote request resolves the complete
+**Client/server is the shape.** Exactly one writer authority owns each
+database's ordered writes and committed reports. Every other process receives
+ordinary immutable database values and typed results through the versioned
+database protocol. A process session retains the latest complete database value
+received from acquisition, a successful transaction, or a database interest;
+an explicit value remains a snapshot fence. A request resolves the complete
 `{:db-name :t :as-of :since :history :datahike/commit-id}` value before
-executing. Database acquisition,
-capabilities, paging, cancellation, selective interests, and retention are
-owned by a versioned database protocol whose semantics do not depend on JVM,
-Bun, Rust, or transport. The JVM/Datahike service is the first conforming
-implementation, not the definition of the interface.
+executing. No claimant, renderer, package host, or browser can commit around
+the writer or invent a second feed.
+
+Portability is a source law, not a deployment compromise. A capability family
+has one `.cljc` core and one small platform leaf per active tier. The core owns
+public data, schemas, validation, interpretation, effect class, and policy.
+Leaves own native sessions, clocks, scheduling, and interop. Reader
+conditionals occur only at entry expressions that bridge synchronous and
+asynchronous ceremony. Cross-runtime behavior is either the same source or the
+same compiled artifact; a hand-mirrored wrapper is not an interface.
 
 ## The core ideas
 
@@ -111,7 +108,7 @@ concept to `ns`/`defn`/`require`/refs/var-meta/a db value.)
    context, or the bench measures prompt-omission. Endgame: the agent adjusts
    its own initial-context config and the loop selects what works.
 6. **Failures are data; core faults fail admission.** Agent and user failures
-   become `:seon/error` values in derived surfaces. A failed core publication or
+   become flat error values in derived surfaces. A failed core publication or
    readiness transition records one bounded core fault and, in development,
    may intentionally fail the process/readiness gate. Units share data rather
    than mutable application state; the writer arbitrates total order and late
@@ -124,8 +121,10 @@ concept to `ns`/`defn`/`require`/refs/var-meta/a db value.)
    interop. Agent-facing entry functions compose core and leaf; their entry
    expression is the only reader-conditional site for sync/async ceremony.
    Cross-runtime code is either the same source or the same compiled artifact;
-   hand-mirrored wrappers are not an interface. Anchors: `seon.db`,
-   `seon.db.leaf`, [[toolkit]].
+   hand-mirrored wrappers are not an interface. Replacing an old tier means
+   repointing consumers and deleting the superseded path, never preserving two
+   drivers, renderers, or capability APIs. Anchors: `seon.db`, `seon.db.leaf`,
+   [[toolkit]].
 8. **One human, one bond; local compute first.** The runtime serves ONE human;
    the canvas is the shared value the pair looks at together. Ordinary
    personal-data work executes on local models when the measured capability
@@ -219,139 +218,97 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
 - **orchestrator-root** — the lifecycle facet of the root agent: it `start!`s and
   manages child agents through `/call`, writing `:seon.agent/parent`. See
   [[agent-runtime]].
-- **run / turn / derive-state** — the bounded unit of work a trigger opens
-  (`seon.agent.run`), the per-iteration value-transform (`seon.agent.loop`), and the
-  one projection rule for agent state (`seon.derive`). See [[agent-runtime]].
-- **database authority / Bun runtime / database interest** — the process that
-  owns indexed database operations; the CLJS agent and web hosts; and one
-  session-owned selective wakeup that causes a database-value-pinned derivation.
+- **run / claim / turn / phase** — the bounded work entity a trigger opens,
+  its claimant-and-epoch custody, one prompt/model/eval record, and that
+  record's persisted recovery cursor. See [[agent-runtime]].
+- **writer / claimant / web-render / leaf host / database interest** — the
+  transaction-and-feed JVM; a replaceable agent-code JVM; the pure HTTP/SSE
+  JVM; a disposable native-effect process; and one session-owned selective
+  wakeup.
 
 ## Deployment topology
 
-The normal local installation has one database-authority service and one Bun
-pod per active cluster, with three logical roles:
+One operator supervises five roles per active cluster:
 
-- **JVM database authority** — one service hosts isolated Datahike connections
-  for many cluster databases. Each database has one ordered writer and immutable
-  indexed values; independent databases and reads execute concurrently through
-  bounded fair pools. Identical queries over the same database value share
-  Datahike's result cache and, where proven, one in-flight computation. Data
-  only; it never executes agent code or serves a second web application.
-- **Bun UI host** — the browser's single front door: one direct authority
-  session plus a normalized reactive registration for each demanded
-  computation. Each registration owns one database-scoped selective interest
-  and derives an agent's **view** (including the root agent's view at `/`) from
-  `:seon.agent/ctx`, holds the route table, and streams patches. The streamer is
-  a **role, not a process**—any protocol client with the capability and interest
-  can play it, so the UI host is relocatable without copying indexes.
-- **Agent execution** — an execution tier evaluates admitted program source and
-  calls capability families through their portable entry functions. Its
-  isolation topology is replaceable: every implementation receives ordinary
-  data, retains no Datahike index, and reconstructs current functions, schemas,
-  tests, and namespaces from database program facts after replacement. Process,
-  worker, container, or device placement does not change the capability seam,
-  database authority, or recovery semantics.
+- **Writer JVM** — owns Datahike transactions, durable mutation receipts, and
+  the committed-transaction feed. Its job is transaction authority only.
+  Agent-authored code never executes here, and this process never serves HTTP.
+- **Web-render JVM** — owns the HTTP front door and Datastar SSE. It uses
+  http-kit and the Datastar Clojure adapter, retains its own immutable replica
+  through a database session, and derives trusted views from required database values. One
+  virtual thread drains each live connection; a one-slot mailbox retains only
+  the newest complete state. Killing it cannot kill a claimant or writer.
+- **Claimant JVMs** — run the one portable claim-native driver. Each reads its
+  local immutable replica and forwards writes to the writer. A claimant uses
+  one virtual thread per held run, submits SCI work through the guarded eval
+  door to a bounded platform pool, performs model I/O, and reads/writes through
+  the database protocol. More capacity means more interchangeable claimants.
+- **Bun leaf host** — runs `seon.packages.js.*` and selected JavaScript-only
+  workers. It has no durable authority. A lost in-flight call becomes the flat
+  capability error from which receipt and effect policy decide recovery.
+- **Browser** — loads static CSS and JavaScript, opens the SSE feed, submits
+  namespaced actions, and applies Datastar's ID-aware morph. It contains no
+  ClojureScript application or database logic.
 
-The JVM authority is one process for the installation, not one process per
-cluster. Dormant databases retain durable facts without an active Bun pod or hot
-connection. Remote servers, thin clients, Tauri, mobile packaging, and stronger
-execution isolation consume the same versioned protocol and may implement only
-the capabilities their platform supports.
+Every non-writer process may be killed and reconstructed from database,
+artifact, and configuration facts. Dormant databases retain durable facts
+without a claimant, renderer, or leaf host. Remote servers, thin clients,
+mobile packaging, and stronger isolation consume the same protocols and may
+implement only the leaves their platform supports.
 
 ### Canonical data flow
 
 ```mermaid
 flowchart TB
   Supervisor["Babashka supervisor\nstart · observe · stop · restart"]
+  Writer["writer JVM\ntransactions · receipts · committed feed"]
+  Web["web-render JVM\nhttp-kit · pure renders · Datastar SSE"]
+  Claimants["claimant JVMs\nclaim driver · guarded SCI · model I/O"]
+  Bun["disposable Bun leaf\nJavaScript packages · workers"]
+  Browser["static browser\nDatastar morph"]
+  Models["model providers"]
 
-  subgraph Bun["Bun runtime"]
-    Web["UI host\nroutes · demanded views · Datastar encoding"]
-    Execution["agent execution tier\nadmitted program · portable capabilities"]
-  end
-
-  subgraph JVM["One JVM Datahike authority"]
-    Sessions["persistent multiplexed sessions\nframing · cancellation · fair admission"]
-    Readers["bounded parallel reads\nquery · pull · entity · index"]
-    DB1["cluster database A\none connection · ordered writes\nimmutable database values + query cache"]
-    DB2["cluster database B\none connection · ordered writes\nimmutable database values + query cache"]
-    Reports["committed transaction reports\ndb-before · db-after · tx-data"]
-  end
-
-  Browser["browser\nDatastar ID-aware morph"]
-  Feed["one SSE feed per browser\nlatest complete pending event"]
-  Models["model providers\nstreamed inference"]
-  Embeddings["embedding workers\nasynchronous and restartable"]
-
+  Supervisor -->|"supervise"| Writer
   Supervisor -->|"supervise"| Web
-  Supervisor -->|"supervise"| Execution
-  Supervisor -->|"supervise"| Sessions
+  Supervisor -->|"supervise"| Claimants
+  Supervisor -->|"supervise"| Bun
 
-  Browser -->|"HTTP action as namespaced data"| Web
-  Web -->|"demand agent-authored render"| Execution
-
-  Execution <-->|"stream model request and response"| Models
-
-  Web -->|"database name + operation + database value"| Sessions
-  Execution -->|"query · pull · transact"| Sessions
-
-  Sessions --> Readers
-  Readers -->|"parallel work against captured value"| DB1
-  Readers -->|"parallel work against captured value"| DB2
-  Sessions -->|"serialized only within database A"| DB1
-  Sessions -->|"serialized only within database B"| DB2
-  DB1 --> Reports
-  DB2 --> Reports
-
-  Reports -->|"embedding-relevant committed facts"| Embeddings
-  Embeddings -->|"transact completed vectors later"| Sessions
-
-  Reports -->|"dependency plans wake matching registrations"| Web
-  Web -->|"affected reads at exact db-after"| Sessions
-  Sessions -->|"ordinary data; identical reads share Datahike work"| Web
-  Execution -->|"complete stable-ID hiccup + read dependencies"| Web
-  Web -->|"one render + serialization per equivalent demand"| Feed
-  Feed -->|"Bun HTTP backpressure; optional measured compression"| Browser
+  Browser <-->|"HTTP · SSE"| Web
+  Web <-->|"database values · interests"| Writer
+  Claimants <-->|"reads · fenced transactions"| Writer
+  Claimants <-->|"streamed inference"| Models
+  Claimants <-->|"typed native calls"| Bun
+  Writer -->|"matching committed db-after"| Web
+  Writer -->|"claimable-run interest"| Claimants
 ```
 
-The database name selects an authority-owned connection; the immutable
-database value selects the exact basis transaction and temporal view. A
-process's no-argument `seon.db/db` returns its current database value, while
-`seon.db/db` with `:seon.db/database-name` acquires another database value from
-the same multiplexed authority session. Reads that combine databases pass the
-required database values as ordinary Datalog sources. This is not a return to
-`*conn*`: connections and native Datahike values remain inside the authority,
-and every execution scope receives only ordinary immutable descriptors and
-results.
+The database name selects a writer-owned durable database and the corresponding
+process-local immutable replica. A database value selects the exact basis
+transaction and temporal view. A process's no-argument `seon.db/db` returns its
+current replica value; an explicit database value remains a frozen read fence.
+Reads that combine databases pass the required database values as ordinary
+Datalog sources. This is not a return to `*conn*`: callers receive database
+values, while replica connections remain inside each process's database leaf.
 
-One committed transaction report is sufficient to select every interested
-registration for one database. Datahike compares the report with the
-source-scoped dependency plans produced by the reads that actually ran.
-Unaffected registrations do no work; affected equivalent demands share one
-registration, advance to the newest exact `db-after`, and share one render.
-Their identical reads over the same immutable database value meet in
-Datahike's value-owned cache and single-flight computation, so agents, browser
-sockets, and renderers reuse database work without a Seon-owned result cache.
-Each interest and cache identity is database-scoped; database A can neither
-wake nor satisfy a read for database B.
+One committed report is sufficient to wake every matching session interest.
+The web-render process groups equivalent demands, derives each complete view
+from the report's exact `db-after`, and replaces any queued older view with the
+newest one. Claimants treat the same feed as a wakeup to rescan claimable runs;
+the claim CAS, not delivery order, decides custody.
 
-Datastar owns the browser's ID-aware morph. Datahike owns indexed computation,
-cache validity, and committed transaction reports. Bun owns agent isolation,
-HTTP delivery, and transport backpressure. Seon owns only the policy between
-them: database selection, dependency union, bounded coalescing, equivalent-view
-fanout, latest-event retention, cancellation, and reconnect from current
-database truth. A disconnected authority session stops new renders; after
-reacquiring the named database and its interest, every live demand receives a
-complete current view rather than a replay of UI events.
+Datastar owns the browser's ID-aware morph. Datahike owns immutable indexed
+replica values; the writer owns committed reports. http-kit owns HTTP connection mechanics. Seon owns database
+selection, exact-value derivation, bounded latest-wins delivery, reconnect from
+current truth, claim fencing, and receipt recovery. A disconnected session
+stops new work; after reacquisition, consumers derive current truth rather than
+replaying process-local events.
 
-Model calls execute in the requesting agent's execution scope, so a slow
-provider cannot block the database authority. Their durable inputs, partial
-status, terminal results, and faults are ordinary database transactions.
-Embedding work is deliberately downstream of committed facts: workers claim
-eligible work, compute independently, and transact vectors when ready. A
-missing or delayed vector can reduce semantic-search recall but never delays
-the originating transaction, an indexed database read, a render, or another
-cluster. Worker death leaves database-visible work available for a replacement
-worker rather than wedging the agent or writer.
+Model calls execute in a claimant, so a slow provider cannot block the writer
+or web-render process. Their admitted attempts and terminal outcomes are
+receipts connected to the turn. Embedding and package work is downstream of
+committed facts and follows the same claim or capability-effect rules; worker
+death leaves database-visible work or a flat boundary error rather than
+wedging the writer.
 
 The default feed sends one complete stable-ID element because Datastar's morph
 engine applies the minimal DOM change while the server retains no DOM mirror.
@@ -364,17 +321,15 @@ second render cache merely to reduce bytes.
 ### Downstream distribution boundary
 
 Seon's source repository is the release producer; a downstream product does
-not require a Seon source checkout. One release operation publishes a
-coordinated standalone database-server uberjar and a relocatable Bun runtime +
-consumer SDK. The runtime package contains the immutable pod closure, self-host
-bootstrap, bounded program-source corpus, static web assets, base config,
-production Bun runtime, semantic operator, and license/notices. The SDK
-contains the public CLJS source/macros and build entry needed to compile a
-consumer's namespaces into the same runtime.
+not require a Seon source checkout. One release operation publishes coordinated
+writer, web-render, claimant, and disposable leaf-host artifacts plus static
+browser assets and the consumer SDK. The artifacts carry the portable source or
+compiled capability cores they share; packaging never regenerates
+tier-specific mirrors.
 
 One compatibility manifest binds the Seon release/source revision, database
-protocol and config/SDK versions, Java/Bun requirements, writer/runtime/
-bootstrap/source/assets digests, maintained Datahike/Konserve dependency
+protocol and config/SDK versions, Java/Bun requirements, writer/web-render/
+claimant/leaf/source/assets digests, maintained Datahike/Konserve dependency
 identities, npm lock, and license/SBOM metadata. A downstream package embeds
 that manifest plus its own source/dependency/config/brand digest. Build and
 startup reject an incompatible or mixed set before database mutation; neither
@@ -382,10 +337,8 @@ selects a mutable “latest” dependency or recompiles in production.
 
 The downstream repository owns its declared Clojure and npm dependencies,
 compiled namespaces/preload, config delta, routes and renders, brand CSS/assets,
-secrets, and deployment policy. It pins a released Seon SDK/runtime and invokes
-the shipped build/operator commands. Development projects add a compiler
-watcher to the same process graph; immutable packaged operation runs only the
-authority and Bun runtime. Product customization composes public data and
+secrets, and deployment policy. It pins one coordinated Seon release and
+invokes the shipped build/operator commands. Product customization composes public data and
 function seams;
 it does not patch Seon source or introduce a second runtime mechanism.
 
@@ -396,17 +349,17 @@ it does not patch Seon source or introduce a second runtime mechanism.
 Units are isolated in **compute** but share one **DB**, so "pull together data from
 all of them" = read the one DB they all write to — there are no silos to aggregate.
 The reactive loop, end to end: a browser action submits a fact → the owning
-database writer commits → the UI host's database-scoped interest receives the
-new `:db-after` value → one database-value-pinned read batch derives the affected
-views → the Bun UI host streams whole-element Datastar **morphs**, which
+database writer commits → the web-render replica and its database-scoped
+interest advance to the new `:db-after` value → one database-value-pinned read batch derives the affected
+views → the web-render JVM streams whole-element Datastar **morphs**, which
 idiomorph diffs client-side. A coalescing throttle collapses a transaction burst
 into one derivation. Reads, writes, heavy capabilities, cancellation, and
 selective interests share one versioned database protocol; only ordinary values
 cross. `:db.fn/cas` is data and crosses fine, closures cannot. Interests are
-session-owned wakeups, not replicas or a global transaction broadcast; reconnect
-resolves the current database value and derives current truth instead of rebuilding
-an index from replay. **No agent code ever touches an SSE connection**—agents
-write facts; the UI host derives and streams. Loopback SSE is uncompressed by
+session-owned wakeups over the process's replica, not a second invalidation bus;
+reconnect reacquires the current replica value and derives current truth.
+**No agent code ever touches an SSE connection**—agents
+write facts; the web-render process derives and streams. Loopback SSE is uncompressed by
 default; remote compression is an explicit measured transport option.
 
 ### Capability seam
@@ -419,8 +372,8 @@ contract for one tier: sessions and sockets, blocking or async scheduling,
 ambient invocation context, clocks and UUIDs, and direct platform interop.
 
 The entry function binds those halves. Reader conditionals occur only at entry
-expressions where Bun awaits a leaf result and JVM code receives it
-synchronously; portable policy below the entry does not fork. A runtime loads
+expressions where an asynchronous tier awaits a leaf result and synchronous JVM
+code receives it directly; portable policy below the entry does not fork. A runtime loads
 the same source or invokes the same compiled artifact. It never reconstructs a
 parallel API with hand-written wrappers. Package hosts enter through the same
 rule: a package wrapper is a platform leaf beneath a portable family call
@@ -428,7 +381,7 @@ surface, not another capability protocol.
 
 ### Derive everything
 
-Everything — the loop, the prompt, an agent's view, a status view, the work
+Everything — the claim decision, the prompt, an agent's view, a status view, the work
 bound, the agent's state — is a **function of the DB at render time**; nothing
 derivable is stored. Agent state is the `seon.derive/derive-state` projection of
 primitives (an open run, `paused-at`, `terminated-at`), never a stored field. The
@@ -442,7 +395,8 @@ on the complete ordinary database value, including `:datahike/commit-id` and any
 ### Failures are data; core faults are explicit
 
 Agent-authored, provider, input, capability, and handler failures are caught at
-their boundary and represented as `:seon/error` values. A core publication or
+their boundary and represented as flat values with `:seon.error/message` and
+`:seon.error/kind`. A core publication or
 readiness failure is recorded once with `:seon.error/fault :core`; development
 fails loudly at the owning transition, while a production boundary may return a
 bounded fallback. Detailed diagnostics are pulled on demand rather than injected
@@ -451,8 +405,9 @@ as a standing census. The full failure map lives in [[data-model]].
 ### Dependency-aware tests, one runner per runtime boundary
 
 Fast feedback is a projection of the same program graph, not a third test
-harness. CLJS correctness uses the one CLJS runner; retained JVM database-server
-correctness uses the one writer runner; agent/model behavior uses Inspect. A
+harness. Portable and claimant correctness use the JVM runner; writer
+correctness uses the writer runner; operator behavior uses the operator runner;
+agent/model behavior uses Inspect. A
 source edit selects declared tests through proven namespace/function/schema
 dependency edges and reports why each test was selected. Selection is
 conservative: incomplete analyzer data, dynamic lookup, macro/build/config
@@ -461,9 +416,9 @@ dependency closure, runtime tier, or full checkpoint. A selector may do extra
 work but must never silently omit a possibly affected test.
 
 The compiler artifact or watch process remains warm only behind an exact source
-fingerprint, and test database/runtime fixtures remain isolated from the live
-pod. Individual vars and affected namespaces therefore reuse current compiled
-code instead of recompiling the whole suite, while the complete checkpoint
+fingerprint, and test database/runtime fixtures remain isolated from live
+clusters. Individual vars and affected namespaces therefore reuse current code,
+while the complete checkpoint
 periodically tests the selector and runner themselves. Disabled suites,
 generated historical results, bespoke drive scripts, and parallel harnesses are
 not an optimization cache; they are deleted once their current behavior is
@@ -505,9 +460,9 @@ code through ordinary context projections. See [[agent-runtime]].
 ### Data model — [[data-model]]
 
 Everything is namespaced datoms in one bitemporal DB; the agent record is the root of
-its context and its loop control, and everything else is reachable from it or derived.
+its context and current-run pointer, and everything else is reachable from it or derived.
 The doc owns every entity/attr/type, the three relationship kinds (datahike ref,
-identity/lookup attr, symbol-as-value late binding), the `:seon/error` model + the
+identity/lookup attr, symbol-as-value late binding), the flat error value + the
 entity-kind-vs-value-enum rule (kind = attribute presence, never a stored
 discriminator), and the domain schemas: `my.kb` (no agent ref → global, one KB all
 agents see), `my.plan` (a TREE via `:my.plan/parent` + derived roll-up, scoped per
@@ -517,19 +472,18 @@ the block. Index every ns's valid forms; render `my.*` in full. See [[data-model
 
 ### Agent runtime — [[agent-runtime]]
 
-The loop is a fold of one transition over events derived from the run's data each
-iteration — a defined initial state, a data transition table, the FSM as data, no
-channels. Creation = an IDLE agent entity (id + optional default-turn-limit/deadline
-seeds + the ctx seed + the home ns); the loop opens a **run** only on a **trigger**
-(an inbound message or a due schedule via the one ticker), bounded two ways
-(turn-limit + wall-clock deadline). A **turn** threads one frozen db value and leads
-every work tx with an in-tx `:db.fn/cas` work-fence, so a superseded run's writes
-abort at commit. The doc owns the run/turn/FSM/derived-state mechanics, creation-as-
-idle-entity, fact-first initialization, the **orchestrator-root** lifecycle
+Runs are claimable database state. Claimant identity, monotonic epoch, and
+heartbeat lease live on the run; expiry is derived. One portable driver on
+every execution tier advances the persisted turn-phase cursor under the held
+pointer-plus-epoch fence. Provider and eval receipts open before dispatch and
+terminalize by CAS, making claimant death recoverable without a process-local
+attempt buffer. Creation still produces an idle agent; messages and due
+schedules open bounded runs. The doc owns claim/run/turn/phase/derived-state
+mechanics, the guarded eval door, fact-first initialization, the
+**orchestrator-root** lifecycle
 (`start!` = a core function surfaced to root, writing `:seon.agent/parent` and
 enforcing its own caller/depth rule; roles-as-capabilities; root = the cluster-boot base case;
-UI-root == orchestrator-root), and the one execution-service contract. Backend
-isolation choices belong to their owning implementation PRD. See
+UI-root == orchestrator-root), and claimant recovery. See
 [[agent-runtime]].
 
 ### UI — [[ui]]
@@ -544,8 +498,8 @@ channel is ours**: each demanded normalized computation owns one
 database-scoped selective interest. A matching report wakes its exact
 database-value-pinned derivation, and equivalent sockets share the resulting
 whole-element **morph** (idiomorph-diffed client-side); reconnect resolves the
-current database value and repaints current truth. No Bun process owns a
-Datahike replica or transaction replay cursor. The doc owns
+current database value and repaints current truth. The independent web-render
+JVM uses required database values and executes no agent code. The doc owns
 block/render/canvas/slot/layout, the page tree, reitit + the gate, the SSE
 channel, and the seed-copy + variadic `install!`/`remove!` override model. See
 [[ui]].
@@ -569,7 +523,7 @@ re-derivable, the assembled prompt
 verbatim as a blob, and the raw reply. `agent-debug/turn` reconstructs any turn;
 `turn-diff` shows what changed between two; a dedicated **forensic agent** runs
 these queries on demand; the `/agents/run` door drives a reproducible task
-through an agent in the pod's own cluster for an external harness. See
+through an agent in the cluster for an external harness. See
 [[observability]].
 
 ## Documentation boundary
@@ -582,9 +536,8 @@ order, dates, measurements, and acceptance evidence.
 
 - [[data-model]] — entity shapes, attributes, relationship forms, error values,
   and the `my.kb`/`my.plan`/`my.agent` schemas.
-- [[agent-runtime]] — loop/run/turn/FSM/derived-state/two-bounds, creation-as-idle,
-  bootstrap-as-seeded-forms, orchestrator-root lifecycle, and the one
-  execution-service contract.
+- [[agent-runtime]] — claim/run/turn/phase/derived-state, guarded evaluation,
+  receipt recovery, creation-as-idle, and orchestrator-root lifecycle.
 - [[ui]] — block/render/canvas/slot/layout, the page tree, reitit + the capability gate,
   the selective Datastar live channel, configurable compression, and the
   seed-copy + `install!`/`remove!` override.
@@ -603,6 +556,6 @@ order, dates, measurements, and acceptance evidence.
 - [[datahike-primer]] — the source-grounded "work in datahike's grain" mindset (db is
   a value, only values cross the database protocol, CAS-as-assertion,
   exact database-value caching). Read before
-  touching the loop.
+  touching claim or transaction logic.
 - [[library-grounding]] — the current concept-to-source read map for Datahike,
-  Malli, ClojureScript/Bun execution, Reitit, Datastar, and the test selectors.
+  Malli, SCI/JVM execution, Bun leaves, Reitit, Datastar, and the test selectors.
