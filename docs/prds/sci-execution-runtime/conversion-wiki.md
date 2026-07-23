@@ -904,3 +904,29 @@ the anchor stays the state ledger.
   forms with the core projection compiler; reserve committed-row acquisition
   for rows that carry their real asserting transaction. Fixture coverage must
   exercise both sides because neither substitutes for the live boot ordering.
+- **Every strictness branch must consult derived admission source.** It is not
+  enough for undefined slots and open maps to distinguish authored contracts
+  if nilability branches remain unconditional. Existing core backlog contracts
+  stay advisory until touched; authored map-value and bare-return nilability
+  remains terminal. Test both sources against the same contract form.
+
+## P1b artifact-inventory verified-stop scar (2026-07-23)
+
+- **A CLJS build inventory does not define the JVM claimant inventory.**
+  Shadow's flush state supplies both the exact `:build-sources` closure and
+  `:compiler-env` analyzer definitions, so one derivation can publish public
+  exports plus private internal terminals without adding private `:seon.fn`
+  rows. The JVM claimant currently runs source through `-M:writer:host`, while
+  `writer-uber` deliberately copies source and avoids Clojure AOT; there is no
+  corresponding JVM build-analysis state. Rule the JVM inventory authority
+  before implementation rather than scanning source or mislabeling the writer
+  jar as a claimant artifact (`build.clj:58-82`,
+  `script/seon/dev/process.clj:562-585`).
+- **Publishing a sidecar is not planner consumption.** The current acquisition
+  path hardcodes artifact inventories unavailable, and selected-flavor sidecar
+  paths plus application-digest membership belong to the build manifest
+  owner. A bounded inventory lane must own or receive explicit handoffs for the
+  build hook/config, manifest digest, and planning-projection acquisition
+  boundaries; a fixture-only available inventory does not make production
+  planning exact (`src/seon/program/plan.cljc:33-43,524-568`,
+  `script/seon/dev/artifact.clj:386-515`).

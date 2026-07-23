@@ -98,6 +98,16 @@
               [:=> [:cat [:maybe :int]] :int]
               :seon.schema/admission agent}))))))
 
+(deftest core-contract-backlog-remains-advisory
+  (is (= [{:seon.schema.advisory/kind :seon.schema.advisory/maybe
+           :seon.schema/identity 'projection.test/core-nilable
+           :seon.schema/path []}]
+         (schema/assert-complete-contract!
+          {:seon.schema/identity 'projection.test/core-nilable
+           :seon.schema/definition [:=> [:cat :int] [:maybe :int]]
+           :seon.schema/admission
+           {:seon.schema.admission/source :core}}))))
+
 (deftest named-predicate-generators-produce-valid-values
   (let [sci-options
         (schema/predicate-sci-options

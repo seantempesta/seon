@@ -70,6 +70,7 @@
    :seon.fn/sym "[:string {:seon.db/identity true}]"
    :seon.fn/ns ":seon.db/ref"
    :seon.fn/source ":string"
+   :seon.fn/spec ":string"
    :seon.fn/doc ":string"
    :seon.fn/arglists ":string"
    :seon.fn/private? ":boolean"
@@ -87,7 +88,8 @@
    [:seon.agent/id :seon.db/user :seon.db/process :seon.db.process/id
     :seon.user/id :seon.ns/name :seon.ns/source :seon.ns/doc :seon.ns/summary
     :seon.fn/sym :seon.fn/ns
-    :seon.fn/source :seon.fn/doc :seon.fn/arglists :seon.fn/private?
+    :seon.fn/source :seon.fn/spec :seon.fn/doc :seon.fn/arglists
+    :seon.fn/private?
     :seon.render/full?]
    :seon.db/program
    (into [{:seon.ns/name 'my.core
@@ -97,6 +99,7 @@
           {:seon.fn/sym "my.core/answer"
            :seon.fn/ns [:seon.ns/name 'my.core]
            :seon.fn/source "(defn answer [] 42)"
+           :seon.fn/spec "[:=> [:cat] :int]"
            :seon.fn/doc "Answer."
            :seon.fn/arglists "([])"
            :seon.fn/private? false}]
@@ -190,16 +193,32 @@
                  [?schema :seon.schema/form ?form ?tx]]
                (d/db connection)
                schema/asserting-transaction-provenance-pattern)
+              function-contract-rows
+              (d/q
+               '[:find ?sym ?spec (pull ?tx ?provenance-pattern)
+                 :in $ ?provenance-pattern
+                 :where
+                 [?function :seon.fn/sym ?sym]
+                 [?function :seon.fn/spec ?spec ?tx]]
+               (d/db connection)
+               schema/asserting-transaction-provenance-pattern)
               projection
               (schema/projection-from-rows
                {:seon.schema/schema-rows schema-rows
-                :seon.schema/function-contract-rows []})]
+                :seon.schema/function-contract-rows
+                function-contract-rows})]
           (is (= :core
                  (get-in projection
                          [:seon.schema.projection/schema-admissions
                           :seon.db/process
                           :seon.schema.admission/source]))
-              "fresh writer boot rows retain recognizable core provenance"))
+              "fresh writer boot schema rows retain recognizable provenance")
+          (is (= :core
+                 (get-in projection
+                         [:seon.schema.projection/function-admissions
+                          'my.core/answer
+                          :seon.schema.admission/source]))
+              "fresh writer boot contract rows retain recognizable provenance"))
         (let [before-domain (d/db connection)
               report
               (d/transact

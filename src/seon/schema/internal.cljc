@@ -123,7 +123,7 @@
                 {:seon.schema/predicate predicate}))))
          (when (= :maybe schema-type)
            (cond
-             (map-value-maybe? compiled path)
+             (and agent-authored? (map-value-maybe? compiled path))
              (contract-error!
               identity definition path :seon.schema/nilable-map-value
               (str identity
@@ -132,7 +132,7 @@
                    "`{:optional true}` on the map entry.")
               {})
 
-             (and (= :output role) (empty? path))
+             (and agent-authored? (= :output role) (empty? path))
              (contract-error!
               identity definition path :seon.schema/nilable-return
               (str identity
