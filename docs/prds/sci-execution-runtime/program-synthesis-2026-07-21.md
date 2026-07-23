@@ -94,6 +94,27 @@ COMPLETELY before dispatching anything.
   listen extension + /data + /data/feed via http-kit +
   datastar-clojure; spec tmp/orchestrator/u5-web-sse-spec.md; R26
   reconciliation: own process, NOT the writer).
+- Further overnight rulings: (e) U4 granted the narrow
+  script/seon/dev/config.clj selected-manifest resolution region +
+  operator config tests (second config caller found). (f) L5 purity
+  mechanism = verified file content + LOUD hash-mismatch refusal vs
+  the transacted fingerprint; NO my.blob byte publication (second
+  content store not ordered) — the strict-restart-purity blob
+  variant is a MORNING OWNER ITEM. (g) U5 config queue position is
+  third (U4 → U1 → U5 on seon.config.resolve); proceeds non-config
+  work now behind accessor seams. (h) U5 transport: dedicated
+  interest-bearing db.host session on PUBLIC framing primitives
+  approved; uds.cljc stays untouched (private-primitive blocks are a
+  separate evidence-based ruling).
+- MORNING OWNER ITEMS (batched): U6 JVM LLM leaf timing (D4 —
+  streaming+normal both settled; it now also gates the LIVE U12
+  drill's non-pod LLM path, though pre-U6 the pod claimant covers
+  it); my.blob strict-restart-purity variant for identity files
+  (f above); D1 beat-cadence default once U3's numbers land.
+- U2 spec DRAFTED (tmp/orchestrator/u2-claim-driver-spec-draft.md) —
+  key reconciliation: pre-U6/U7 BOTH tiers run the one portable
+  driver as phase-limited claimants (pod: render+LLM; JVM host: eval
+  via U1's door); finalize grants + door/listen states at dispatch.
 - Owner answers at wind-down: first wave (U1+U3+U4) AUTHORIZED;
   U5 lane builds the web-render operator member itself; demo
   re-runs are BUG-FINDERS, cheap and at orchestrator discretion —
