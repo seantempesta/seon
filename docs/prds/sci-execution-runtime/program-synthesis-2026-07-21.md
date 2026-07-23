@@ -1052,7 +1052,34 @@ Lane states at wind-down:
   Re-dispatch from `tmp/orchestrator/p3a-bun-worker-spec.md` (or
   resume thread `019f8bbe-4cb6-7663-aa95-1602a21650fb`).
 
-### E2E-FIRST STATE (2026-07-22 night — READ THIS FIRST)
+### DEMO GREEN (2026-07-22 ~22:30 — READ THIS FIRST)
+
+**TONIGHT'S GOAL MET, committed `eb81acb9`.** One durable agent on
+an isolated cluster ran the full heat-resilience scenario in a
+MIXED-TIER arc: npm package call through the loader door in Bun (33
+receipts), every other eval through the live JVM SCI host (186
+receipts turn 1), plan/schema'd facts/set-valued/EDN-slot/deliberate
+error+success across db/fs/shell/web, a clean mid-scenario restart,
+then durable recovery and update (163 receipts) producing the
+brief.edn artifact. Full cljs 1566/7732 and full writer 382/2982
+both 0/0. Root cause of the prior silent SCI path: the manifest had
+reconciled `:seon.config.execution/host-tier?` false (no live lane
+existed); now a non-empty batch with zero recorded attempts is a
+LOUD core fault at the write-back boundary. TERM encore not run
+(optional; queue next session).
+
+Next-session queue, in order: (1) my.* porting from the MEASURED
+working set (my.plan plan!/done!/tree · my.ns/functions — receipts
+only, list in the loop-slice report); (2) seam observability
+follow-up (receipt durations not exported → seam round-trip cost
+unmeasurable; small unit); (3) prompt-size lever (up to ~920k prompt
+tokens per long arc — the dominant cost; owner decision on approach);
+(4) TERM/kill encore drill on the demo scenario; (5) resume package
+track portfolio (seon.packages.js.bun per ruling 17a, WP-J per 17b);
+(6) agent-facing interface-guidance unit (queued weakness). Census
+gate continues as the meter.
+
+### E2E-FIRST STATE (2026-07-22 night — historical)
 
 **THE SEAM IS LANDED AND PROVEN.** Committed: `f6d843ee` (P1c seon.db
 portable core, both tiers, wrappers deleted, op-id replay, effect
