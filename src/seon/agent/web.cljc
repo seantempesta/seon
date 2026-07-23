@@ -18,6 +18,31 @@
 
 #?(:clj (defmacro await [value] value))
 
+(def ^:dynamic *leaf* nil)
+
+(declare grants fetch search)
+
+(defn- bind-leaf
+  "Return the public web functions closed over one JVM platform leaf."
+  [platform-leaf]
+  (into {}
+        (map (fn [v]
+               [(:name (meta v))
+                (fn [& args]
+                  (binding [*leaf* platform-leaf]
+                    (apply @v args)))])
+             [#'grants #'fetch #'search])))
+
+(defn- leaf-fn
+  [key]
+  (or (get *leaf* key)
+      (fn [request]
+        (let [url (::url request)
+              query (::query request)]
+          (if query
+            (int/search-err query "No web platform leaf is installed.")
+            (int/err url "No web platform leaf is installed."))))))
+
 ;; ============================================================
 ;; Schemas — every key registered; shared shapes referenced, not inlined.
 ;; ============================================================
@@ -193,10 +218,7 @@
      ::allowed-domains (::allowed-domains p)
        ::search-backend  (if has-key? search-backend :none)})
      :clj
-     {::enabled? false
-      ::policy :public-only
-      ::allowed-domains []
-      ::search-backend :none}))
+     ((leaf-fn ::grants) {:seon.config/configuration configuration})))
 
 ;; ============================================================
 ;; fetch — the one ^:async function.
@@ -312,7 +334,13 @@
       (int/err url (str "unexpected error in seon.agent.web/fetch: "
                         (or (some-> e .-message) (str e))))))
      :clj
-     (int/err url "No web platform leaf is installed.")))
+     ((leaf-fn ::fetch)
+      (cond-> {::url url
+               ::timeout-ms timeout-ms
+               ::max-preview-tokens max-preview-tokens
+               ::max-age-ms max-age-ms}
+        configuration
+        (assoc :seon.config/configuration configuration)))))
 
 ;; ============================================================
 ;; search — the one ^:async grounded-search function.
@@ -477,4 +505,9 @@
       (int/search-err query (str "unexpected error in seon.agent.web/search: "
                                  (or (some-> e .-message) (str e))))))
      :clj
-     (int/search-err query "No web platform leaf is installed.")))
+     ((leaf-fn ::search)
+      (cond-> {::query query
+               ::max-results max-results
+               ::timeout-ms timeout-ms}
+        configuration
+        (assoc :seon.config/configuration configuration)))))

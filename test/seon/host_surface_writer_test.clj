@@ -256,9 +256,9 @@
    ["seon.agent.shell/py-run" {::unit :w5-0g}]
    ["seon.agent.shell/run" {::unit :w5-0g}]
    ["seon.agent.shell/run-bg!" {::unit :w5-0g}]
-   ["seon.agent.web/fetch" {::disposition :host/capability-pending ::unit :w5-0h}]
-   ["seon.agent.web/grants" {::disposition :host/capability-pending ::unit :w5-0h}]
-   ["seon.agent.web/search" {::disposition :host/capability-pending ::unit :w5-0h}]
+   ["seon.agent.web/fetch" {::unit :w5-0h}]
+   ["seon.agent.web/grants" {::unit :w5-0h}]
+   ["seon.agent.web/search" {::unit :w5-0h}]
 
    ;; W5-0h web capability family.
 

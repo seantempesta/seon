@@ -49,6 +49,8 @@
             [seon.agent.message :as message]
             [seon.agent.message.leaf :as message.leaf]
             [seon.agent.shell.leaf :as shell.leaf]
+            [seon.agent.web :as agent.web]
+            [seon.agent.web.host :as web.host]
             [seon.content-hash :as content-hash]
             [seon.db :as db]
             [seon.db.host :as db.host]
@@ -500,6 +502,14 @@
      'job-status {::wrapper-fn shell.leaf/job-status ::effect :read}
      'job-output {::wrapper-fn shell.leaf/job-output ::effect :read}
      'job-stop! {::wrapper-fn shell.leaf/job-stop! ::effect :external}}})
+  (let [functions ((deref #'agent.web/bind-leaf) (web.host/services {}))]
+    (register-host-wrappers!
+     {::registry registry
+      ::lib 'seon.agent.web
+      ::wrappers
+      {'grants {::wrapper-fn (get functions 'grants) ::effect :read}
+       'fetch {::wrapper-fn (get functions 'fetch) ::effect :external}
+       'search {::wrapper-fn (get functions 'search) ::effect :external}}}))
   (register-host-wrappers!
    {::registry registry
     ::lib 'seon.db.id
