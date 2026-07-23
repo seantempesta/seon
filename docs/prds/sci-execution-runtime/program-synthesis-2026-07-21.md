@@ -877,6 +877,21 @@ COMPLETELY before dispatching anything.
   (accepted today) and it dispatches IMMEDIATELY after the checkpoint
   goes green, with slice S0a (in-pod agent-view move) first.
 
+- BOOT-TIME DESIGN ACCEPTED (2026-07-23 eve, both root causes
+  verified from source: research/boot-time-design-2026-07-23.md):
+  the 271s is NOT primarily re-derivation of build artifacts — it is
+  (1) a QUADRATIC in schema/build-projection (3,298 per-row contract
+  asserts each re-walking the full population; Malli compile itself
+  0.37s) and (2) the projection built TWICE (the schemagate
+  prevalidation fix discards its build; admission rebuilds
+  identically — a fix-introduced regression caught by measurement).
+  35s gap = reconcile-config!+ensure-initial-agent!, unlogged (R42
+  gap). Sidecar consumption demoted to D3. TARGET ≤90s. BOOTFAST
+  lane (D1 de-quadratic + D2 fingerprint-guarded reuse + D4 gap
+  instrumentation) dispatches when fixseed frees schema.cljc —
+  BEFORE the checkpoint, so every live proof boots faster. Issue
+  updated with the corrected breakdown.
+
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency

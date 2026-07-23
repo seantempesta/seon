@@ -21,17 +21,35 @@ Total fresh reset → pod ready: 271s. Pod log span 191s
 - Instrumentation of 925 fns is fast once construction completes.
 - ~80s outside the pod log (writer boot + paged init + watcher build).
 
-## Hypotheses (design inputs, not conclusions)
+## Verified root causes (design accepted 2026-07-23:
 
-- The P1b build sidecars already carry the analyzer function inventory;
-  boot re-analyzes the same corpus from source. Boot should CONSUME
-  build-computed artifacts, not re-derive them.
-- The committed projection is a pure derivation of committed facts —
-  R21's "cache measured expensive derivations" case, basis/digest
-  keyed. A warm projection cache keyed by (basis, graph digest,
-  schema fingerprint) could make reconstruction O(changed).
-- Owner constraint (R42/R27): no guessed budgets; whatever remains slow
-  must be observable (it now is) and justified as real work.
+research/boot-time-design-2026-07-23.md — supersedes the hypotheses)
+
+- build-projection is QUADRATIC (schema.cljc:656-846): 3,298 per-row
+  contract asserts each re-walk the full population (predicate
+  symbols, bound-forms postwalk, fresh registry per call at
+  :438-489). Malli compile itself is fast (0.37s to instrument 925
+  fns once the projection exists).
+- Fresh boot builds the full projection TWICE: the schemagate
+  prevalidation gate (client.cljs ~:1844) discards its build; admission
+  rebuilds the identical population later.
+- The 35s gap = reconcile-config! + ensure-initial-agent! with zero
+  log lines (an R42 observability gap — instrument first).
+- Sidecar consumption (the original hypothesis) is DEMOTED to D3,
+  re-evaluated after D1/D2 land; index-core! still re-derives
+  structure the digest-guarded program-sources.edn carries.
+- Corrected shares: writer boots in 0.2s; cluster wipe ~24s; shadow
+  builds ~13s; pod bundle load ~25s; 97 pages 16s.
+
+## Plan (ranked, target ≤90s fresh reset → pod ready)
+
+D1 de-quadratic the one owner (precomputed registry/compiled-forms
+into the per-row assert; fingerprint byte-equality regression) → D2
+fingerprint-guarded reuse of the boot-frame projection at admission
+(cache can only SKIP, never change) → D4 instrument the 35s gap →
+D3 program-rows sidecar re-evaluated after re-measurement. Sol lane
+"bootfast" runs D1+D2+D4 after the fixseed lane frees schema.cljc,
+BEFORE the checkpoint (every live proof then boots faster).
 
 ## Acceptance
 
