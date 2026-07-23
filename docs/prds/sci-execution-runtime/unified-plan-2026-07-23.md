@@ -25,23 +25,44 @@ Per cluster, supervised by the one operator:
    **Agent-authored code NEVER executes here** (owner ruling,
    absolute). No web serving in the end state. Escape ladder for
    scale lives here (U3) but the process's job never grows.
-2. **Core JVM app** — everything else that is core: the web/SSE
-   tier (http-kit + vendored datastar-clojure, vthread per
-   connection), claimant drivers (one vthread per claimed run,
-   plain-sync steps), sci evals behind the guarded door on the
-   bounded platform eval-pool (the CPU bulkhead), LLM I/O, renders.
-   Reads via its replica/db.host session; writes over the wire.
-   Kill-anytime: claims + receipts make death invisible (U12).
-   Initially ONE such process; splitting web from claimants is a
-   later scale knob, not architecture (flagged owner decision D3).
-3. **Bun leaf host** — DISPOSABLE js-package runtime: serves
+2. **Web/render JVM** (owner ruling, 2026-07-23: rendering is
+   decoupled — pure derivation over a replica; NOTHING agent-
+   controlled runs here, so nothing can take the UI down): the
+   web/SSE tier (http-kit — multi-threaded as the old server was —
+   with the vendored datastar-clojure adapter, vthread per
+   connection) serving derived views from its db.host replica
+   session. Kill/restart/redeploy freely; no claimant fate-sharing.
+3. **Claimant JVM(s)** — the drivers (one vthread per claimed run,
+   plain-sync steps), sci evals AND authored renders behind the
+   guarded door on the bounded platform eval-pool (the CPU
+   bulkhead), LLM I/O. Reads via replica/db.host; writes over the
+   wire. Kill-anytime: claims + receipts make death invisible
+   (U12). Scale = more claimant processes.
+4. **Bun leaf host** — DISPOSABLE js-package runtime: serves
    seon.packages.js.* + the diffusion/typeahead worker over the
    db-pattern wire. No durable state; kill/restart anytime;
    in-flight calls die as flat error values and claimants retry per
    effect class. (The current pod keeps running until U9 retires
    it; interim breakage authorized.)
-4. **Browser** — static assets only (verified: no browser cljs
+5. **Browser** — static assets only (verified: no browser cljs
    exists; morphed HTML + vendored datastar.js).
+
+## Ruling 27 — limits are circuit breakers, never governors
+
+Born of the writer-throttle lesson (a hidden implicit limit hit in
+NORMAL operation): every guard in this plan obeys four laws.
+(a) Every limit is an aero manifest entry resolved to a
+`:seon.config` fact — full Malli schema + docstring stating unit,
+default, what it protects, what firing means, and calibration
+provenance. (b) Defaults are set from MEASUREMENT at ≥100× the
+legitimate P99.9 — normal work never encounters a limit; only
+genuine runaway trips it. (c) Firing is always LOUD: fault datom +
+steering error value; never a silent slowdown or drop. (d) No
+numeric limit literal in runtime code — limits flow through config
+accessors only (the W1 config-facts sweep is the enforcement
+vehicle and folds into U1/U8 acceptance). Applies to fuel,
+deadlines, output caps, pool sizes, heap budgets, beat cadence
+(post-U3 a pure failover-UX dial), and every future dial.
 
 ## Units
 
@@ -178,15 +199,20 @@ U1 ──► U2 ──────────────► U9 ──► U10
 
 ## Open owner decisions
 
-- **D1 (beat cadence):** 30s idle beats are fine at 1k runs; 3s is
-  not (pre-U3). Default: 30s until U3 lands, then revisit.
+- **D1 (beat cadence):** a failover-UX dial, not a throughput knob
+  once U3 lands; config fact per ruling 27. Interim default 30s
+  (pre-U3 writer math); post-U3 set to whatever failover feel you
+  want.
 - **D2 (cross-run beat batching):** blocked by CAS-abort-whole-tx
   semantics; only worth deciding if U3's 5–20× proves insufficient.
-- **D3 (web/claimant process split):** one Core JVM app now; split
-  later purely as a scale knob. Default: one.
+- **D3 — DECIDED (owner, 2026-07-23):** web/render is its OWN
+  process (topology #2) — rendering is pure derivation over a
+  replica and nothing agent-controlled can touch it.
 - **D4 (HTTP leaf timing):** the U6 morning discussion.
-- **D5 (fuel budgets):** config-fact defaults after calibration
-  measurements land with U1.
+- **D5 — REFRAMED by ruling 27:** fuel/deadline budgets are
+  abort-only circuit breakers calibrated at ≥100× measured
+  legitimate P99.9, landed as fully-specced config facts with U1's
+  calibration data; owner blesses the defaults from the numbers.
 
 ## Graduation gate (unchanged in spirit, now concrete)
 
