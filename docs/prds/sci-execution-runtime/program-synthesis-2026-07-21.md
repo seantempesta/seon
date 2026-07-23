@@ -340,6 +340,24 @@ COMPLETELY before dispatching anything.
   and WIPE them when that platform resets or the system restarts —
   stale-reference class dies with it. Folds into the C1 encoder
   lane's design.
+- MIDDAY STATE (2026-07-23): U2 continuation ACCEPTED as verified
+  partial — writer gate green; real two-process race + pause/
+  reacquire/stale-rejection PROVEN; the critical U12 segment proven
+  (pod workload SIGKILL at :reply-ready → JVM claimant next-epoch
+  advance of the same turn, receipts exact). Remaining kill cuts +
+  exact one-turn closure PARKED per the drill pause (C9). U2 session
+  resumed on a NEW focused unit: portable durable LLM phase
+  (attempt CAS + reply publication seam + retry into the core; JVM
+  claimant :llm eligibility behind transport presence; vthread
+  deadline composition) — unblocks the stopped U6b leaf lane (its
+  stop report verified: the phase logic was pod-only).
+- TEST-INTEGRITY ACCEPTED (bbecdfc03): JVM discovery widened to one
+  computed predicate — writer gate now 559 tests / 3,782 assertions
+  GREEN (was 389 blind); three-surface orphan gate green; operator
+  309/1,785 green; two Bun-child legacy suites deleted justified;
+  wiki corrected. Classes C3/C12 structurally closed. Follow-up for
+  U8a review: test/my/blob_test.cljc is the one content-excluded
+  JVM file — the blob JVM leaf should make it dual.
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
