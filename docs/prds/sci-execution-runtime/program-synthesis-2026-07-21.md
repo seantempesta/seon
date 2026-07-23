@@ -298,6 +298,26 @@ COMPLETELY before dispatching anything.
   never benchmarks; the JVM LLM leaf must support BOTH streaming
   and normal sessions (D4 partially settled).
 
+- OWNER RULING (AM #4, standing): kill drills END after the
+  in-flight U2 run — no drill re-runs until core hardening lands;
+  organic crashes are the bug-finders (identify, chase, record all).
+  Concurrency RELAXED: file-disjoint lanes run freely; every spec
+  carries the roll-with-restarts posture (stateless design — any
+  instance recovers; disruptions are free recovery drills). Never
+  stop scheduling fix agents.
+- WIDE WAVE DISPATCHED (2026-07-23 AM, all running in parallel with
+  U2's final drill + the two research agents): test-integrity lane
+  (discovery widening + orphan gate + triage) · U6b JVM LLM leaf
+  (streaming+normal, attempt-receipt regression folded) · U7 ctx/
+  render port (L9 door split structural at resolution; R4 one
+  portable acquisition executor) · U8a JVM fs/shell/web/blob leaves
+  + my.* host bindings. Specs: tmp/orchestrator/{test-integrity,
+  u6b-jvm-llm-leaf,u7-ctx-render-port,u8-jvm-leaves}-spec.md.
+  Bug-chase lane dispatches when the Malli + attr-registration
+  research returns ground it. U2's unproven falsifiers (remaining
+  kill points) become queue rows pending core hardening, per the
+  drill pause.
+
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
