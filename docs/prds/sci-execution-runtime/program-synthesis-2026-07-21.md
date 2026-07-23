@@ -1068,6 +1068,22 @@ existed); now a non-empty batch with zero recorded attempts is a
 LOUD core fault at the write-back boundary. TERM encore not run
 (optional; queue next session).
 
+**Ruling 19 (owner, 2026-07-23 morning): metadata minimalism.**
+(a) `:seon.fn/agent-facing?` is REMOVED everywhere — all functions
+are agent-facing by definition; the census enumerates public vars of
+the surface namespaces (computed, no marker). (b)
+`:seon.capability/effect` is OPTIONAL — absent ⇒ recovery treats the
+fn as `:external` (conservative, never re-run); declaring is an
+opt-in to better replay; the census's effect-required assertion is
+deleted. (c) `:seon.capability/idempotency` annotations are dropped
+(the mechanism embodies it; e.g. blob's content-hash identity IS the
+idempotency). (d) The ONLY required metadata is `:malli/schema`.
+(e) Map-in/map-out + optional namespaced keys stay encouraged, never
+required. (f) `:seon.capability/replayed?` is produced by the
+receipt layer, never by fn bodies; kept as an optional response key
+(orchestrator recommendation) — owner may demote it to
+recovery-internal later; flag any friction.
+
 Next-session queue, in order: (1) my.* porting from the MEASURED
 working set (my.plan plan!/done!/tree · my.ns/functions — receipts
 only, list in the loop-slice report); (2) seam observability
