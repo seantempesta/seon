@@ -40,4 +40,5 @@ round-trips the response, and a second invocation on the same execution
 session returns 42. A later rerun was blocked before this behavior by an
 unrelated in-flight `seon.host.context` arity mismatch; after that lane landed,
 another rerun stopped during concurrent dependency preparation. The original
-green behavior log is retained.
+green behavior log is retained, and the final coherent-tree rerun again passes
+1 test / 7 assertions.
