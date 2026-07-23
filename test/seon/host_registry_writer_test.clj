@@ -22,6 +22,7 @@
             [seon.agent.ctx]
             [seon.agent.home]
             [seon.db.host :as db.host]
+            [seon.db.id :as db.id]
             [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds]
             [seon.db.writer :as writer]
@@ -346,7 +347,8 @@
     {::channel channel ::output output ::input input
      ::ready (uds/read-frame input)}))
 
-(defn- invoke-batch! [session agent-id invocation-id database parsed]
+(defn- invoke-batch!
+  [session agent-id turn-id invocation-id database parsed]
   (uds/write-frame!
    (::output session)
    {:seon.execution/message :seon.execution.message/invoke
@@ -360,7 +362,7 @@
     :seon.execution/arguments
     [{:seon.eval/parsed parsed
       :seon.eval/starting-ns (symbol (str "my.agent." agent-id))
-      :seon.agent.turn/id-of-turn "turn-parity"}]
+      :seon.agent.turn/id-of-turn turn-id}]
     :seon.execution/deadline-ms (+ (System/currentTimeMillis) 30000)
     :seon.execution/result-limit-bytes 1000000})
   (uds/read-frame (::input session)))
@@ -369,8 +371,19 @@
   (let [database-name (str "host-u4-" (random-uuid))
         request-path (socket-path "u4-writer")
         host-socket (socket-path "u4-host")
-        agent-id "parity-agent"
-        caller-agent-id "parity-caller"
+        agent-candidates
+        (db.id/candidate-manifest
+         {:seon.agent/id :seon.db.id.generator/human-readable
+          :seon.agent.turn/id :seon.db.id.generator/compact}
+         [{:seon.db.id/key :fixture/agent
+           :seon.db.id/identity-attr :seon.agent/id}
+          {:seon.db.id/key :fixture/caller
+           :seon.db.id/identity-attr :seon.agent/id}
+          {:seon.db.id/key :fixture/turn
+           :seon.db.id/identity-attr :seon.agent.turn/id}])
+        agent-id (:seon.db.id/value (first agent-candidates))
+        caller-agent-id (:seon.db.id/value (second agent-candidates))
+        turn-id (:seon.db.id/value (nth agent-candidates 2))
         server (writer-test/start! {::writer/dependencies (dependencies)
                                ::writer/database-name database-name
                                ::writer/backend :memory
@@ -396,6 +409,19 @@
              [{:seon.user/id "user"}
               {:seon.db.process/id :seon.db.process/repl}])]
         (is (true? (::protocol/success? genesis)) (pr-str genesis)))
+      (let [database (db.host/resolve-db! session nil false)
+            allocated
+            (db.host/call!
+             session
+             (protocol/transaction-request
+              {::protocol/request-id (str (random-uuid))
+               :seon.db/db database
+               ::protocol/transaction-data
+               [{:seon.agent/id agent-id}
+                {:seon.agent/id caller-agent-id}
+                {:seon.agent.turn/id turn-id}]
+               ::protocol/generated-candidates agent-candidates}))]
+        (is (true? (::protocol/success? allocated)) (pr-str allocated)))
       (let [installed (seed-schema-rows!
                        session
                        [{:seon.user/id "bootstrap"
@@ -412,7 +438,7 @@
                          (pr-str [value-sampling-policy
                                   {:seon.agent/id agent-id}
                                         {:seon.agent/id caller-agent-id}
-                                  {:seon.agent.turn/id "turn-parity"}])
+                                  {:seon.agent.turn/id turn-id}])
                          "})"))]
         (is (map? (:db-after seeded)) (pr-str seeded)))
       (is (:seon.db/ok?
@@ -456,7 +482,7 @@
               (pr-str (::ready live)))
           (let [response
                 (invoke-batch!
-                 live agent-id "parity-invoke-1" head
+                 live agent-id turn-id "parity-invoke-1" head
                  [{:seon.repl/kind :form
                    :seon.repl/source
                    (str "(defn parity-double \"Double x.\" "
@@ -479,9 +505,9 @@
             ;; Eval rows: receipts terminalized under the owning turn
             ;; with the agent connection and the frozen outcome.
             (let [rows (query!
-                        '[:find ?source ?ok ?status ?edn
+                        `[:find ?source ?ok ?status ?edn
                           :where
-                          [?turn :seon.agent.turn/id "turn-parity"]
+                          [?turn :seon.agent.turn/id ~turn-id]
                           [?turn :seon.agent.turn/evals ?eval]
                           [?eval :seon.eval/source ?source]
                           [?eval :seon.eval/ok? ?ok]
@@ -503,7 +529,7 @@
                            '[:find ?source ?arglists ?doc ?ns-sym
                              :where
                              [?fn :seon.fn/sym
-                              "my.agent.parity-agent/parity-double"]
+                              (str "my.agent." agent-id "/parity-double")]
                              [?fn :seon.fn/source ?source]
                              [?fn :seon.fn/arglists ?arglists]
                              [?fn :seon.fn/doc ?doc]
@@ -515,7 +541,8 @@
                      (first fn-row)))
               (is (= "([x])" (second fn-row)) (pr-str fn-row))
               (is (= "Double x." (nth fn-row 2)))
-              (is (= 'my.agent.parity-agent (nth fn-row 3))))
+              (is (= (symbol (str "my.agent." agent-id))
+                     (nth fn-row 3))))
             ;; The :seon.schema row: register! admission plus its tee.
             (is (= [[":my.parity/amount" "[:int {:min 0}]"]]
                    (mapv (fn [[k form]] [(pr-str k) form])
@@ -527,7 +554,7 @@
                             [?row :seon.schema/form ?form]])))))
           (let [authored
                 (invoke-batch!
-                 live agent-id "live-require-author"
+                 live agent-id turn-id "live-require-author"
                  (context/resolve-head! session)
                  [{:seon.repl/kind :form
                    :seon.repl/source "(ns my.shared)"}
@@ -547,7 +574,7 @@
                         "[x] (shared/f x))")}])
                 caller
                 (invoke-batch!
-                 caller-live caller-agent-id "live-require-caller"
+                 caller-live caller-agent-id turn-id "live-require-caller"
                  (context/resolve-head! session)
                  [{:seon.repl/kind :form
                    :seon.repl/source
@@ -606,7 +633,7 @@
             live (host-session! host-socket agent-id database-name)]
         (try
           (let [response (invoke-batch!
-                          live agent-id "parity-invoke-2" head
+                          live agent-id turn-id "parity-invoke-2" head
                           [{:seon.repl/kind :form
                             :seon.repl/source "(parity-double 4)"}])]
             (is (= 8 (get-in response [:seon.execution/result

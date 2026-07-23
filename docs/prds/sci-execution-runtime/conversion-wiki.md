@@ -1070,3 +1070,23 @@ the anchor stays the state ledger.
   healthy work before adding any clock. When a stall breaker remains
   necessary, make it an R27 config fact, document its unit and protection
   boundary, and name that key loudly when it fires.
+
+## Fixture boot-population scars (2026-07-23)
+
+- **Genesis forms were CLJS-captive.** Canonical program-row entity forms and
+  database-attribute selection lived in `seon.client`, so a JVM fixture could
+  load the leaf forms yet still miss the production genesis population.
+  Registration and its computed database projection belong to the portable
+  schema authority; the client delegates to it.
+- **Fixtures are clusters in miniature.** A writer fixture must consume the
+  complete compiled base and apply it through
+  `seon.db.protocol/initialization-pages`, exactly as production does. A
+  schema-only bootstrap or per-test attribute list is a second initialization
+  semantics. This is the construction-level repair for the fragile-test
+  audit's F1 row; do not patch individual tests listed there.
+- **The JVM cannot reproduce CLJS analyzer rows.** Re-reading program source
+  with `seon.host.record` changed function metadata and namespace edges, proving
+  it is a second indexer rather than a portable reconstruction. The build must
+  publish the byte-faithful, digest-bound boot program-row sidecar from the
+  live analyzer derivation. Both runtime tiers and fixtures consume those
+  rows; neither tier reconstructs them.

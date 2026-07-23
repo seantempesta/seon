@@ -219,52 +219,6 @@
    [:seon.eval/error       {:optional true} :seon.eval/error]
    [:seon.eval/error-data  {:optional true} :seon.eval/error-data]])
 
-(schema/register! :seon.fn
-  [:map {:seon.db/entity   true
-         :seon.render/ai   'seon.render.handlers.fn/render-ai
-         :seon.render/html 'seon.render.handlers.fn/render-html}
-   [:seon.fn/sym    :seon.fn/sym]
-   [:seon.fn/ns     :seon.fn/ns]
-   [:seon.fn/source :seon.fn/source]
-   [:seon.fn/source-fingerprint {:optional true}
-    :seon.fn/source-fingerprint]
-   [:seon.fn/execution-tier {:optional true} :seon.fn/execution-tier]
-   ;; analyzer projections — the tee stamps all four on every row it
-   ;; mints (strict persistence: only literal `(defn …)` sources get a
-   ;; :seon.fn row). Optional because boot-indexed and legacy rows may
-   ;; omit them.
-   [:seon.fn/fn-var?    {:optional true} :seon.fn/fn-var?]
-   [:seon.fn/arglists   {:optional true} :seon.fn/arglists]
-   [:seon.fn/doc        {:optional true} :seon.fn/doc]
-   [:seon.fn/private?   {:optional true} :seon.fn/private?]
-   [:seon.fn/spec       {:optional true} :seon.fn/spec]
-   [:seon.fn/schema-error {:optional true} :seon.fn/schema-error]
-   ;; The declared read-set (qualified keyword literals in the source,
-   ;; extracted from the already-read form at tee time — C28). ABSENT =
-   ;; no literals OR a pre-structural row (readers regex-fallback).
-   ;; Registered in seon.eval (the tee that writes it).
-   [:seon.fn/read-attrs {:optional true} :seon.fn/read-attrs]
-   [:seon.fn/created-at {:optional true} :seon.fn/created-at]])
-
-(schema/register! :seon.schema
-  [:map {:seon.db/entity   true
-         :seon.render/ai   'seon.render.handlers.schema/render-ai
-         :seon.render/html 'seon.render.handlers.schema/render-html}
-   [:seon.schema/key    :seon.schema/key]
-   [:seon.schema/form :seon.schema/form]
-   [:seon.schema/ns         {:optional true} :seon.schema/ns]
-   [:seon.schema/created-at {:optional true} :seon.schema/created-at]])
-
-(schema/register! :seon.ns
-  [:map {:seon.db/entity   true
-         :seon.render/ai   'seon.render.handlers.ns/render-ai
-         :seon.render/html 'seon.render.handlers.ns/render-html}
-   [:seon.ns/name   :seon.ns/name]
-   [:seon.ns/source :seon.ns/source]
-   [:seon.ns/doc {:optional true} :seon.ns/doc]
-   [:seon.ns/summary {:optional true} :seon.ns/summary]
-   [:seon.ns/require-edges {:optional true} :seon.ns/require-edges]])
-
 ;; :seon.agent — the agent's OWN entity shape. Its page/canvas operation
 ;; selects the surface renderer after acquiring one immutable agent value;
 ;; the schema does not install a second host-side default reader. No

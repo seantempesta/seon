@@ -387,6 +387,58 @@
     :seon.ns/require-edges
     [:vector {:seon.db/component true} :seon.db/ref]}))
 
+(defonce ^:private _program-graph-entities
+  (update-candidate-forms!
+   merge
+   {:seon.fn
+    [:map {:seon.db/entity true
+           :seon.render/ai 'seon.render.handlers.fn/render-ai
+           :seon.render/html 'seon.render.handlers.fn/render-html}
+     [:seon.fn/sym :seon.fn/sym]
+     [:seon.fn/ns :seon.fn/ns]
+     [:seon.fn/source :seon.fn/source]
+     [:seon.fn/source-fingerprint {:optional true}
+      :seon.fn/source-fingerprint]
+     [:seon.fn/execution-tier {:optional true} :seon.fn/execution-tier]
+     [:seon.fn/fn-var? {:optional true} :seon.fn/fn-var?]
+     [:seon.fn/arglists {:optional true} :seon.fn/arglists]
+     [:seon.fn/doc {:optional true} :seon.fn/doc]
+     [:seon.fn/private? {:optional true} :seon.fn/private?]
+     [:seon.fn/spec {:optional true} :seon.fn/spec]
+     [:seon.fn/schema-error {:optional true} :seon.fn/schema-error]
+     [:seon.program.edge/generation {:optional true}
+      :seon.program.edge/generation]
+     [:seon.program.edge/calls {:optional true} :seon.program.edge/calls]
+     [:seon.program.edge/read-attributes {:optional true}
+      :seon.program.edge/read-attributes]
+     [:seon.program.edge/written-attributes {:optional true}
+      :seon.program.edge/written-attributes]
+     [:seon.program.edge/all-at-basis? {:optional true}
+      :seon.program.edge/all-at-basis?]
+     [:seon.program.edge/uncertainties {:optional true}
+      :seon.program.edge/uncertainties]
+     [:seon.program.edge/terminal-refs {:optional true}
+      :seon.program.edge/terminal-refs]
+     [:seon.fn/read-attrs {:optional true} :seon.fn/read-attrs]
+     [:seon.fn/created-at {:optional true} :seon.fn/created-at]]
+    :seon.schema
+    [:map {:seon.db/entity true
+           :seon.render/ai 'seon.render.handlers.schema/render-ai
+           :seon.render/html 'seon.render.handlers.schema/render-html}
+     [:seon.schema/key :seon.schema/key]
+     [:seon.schema/form :seon.schema/form]
+     [:seon.schema/ns {:optional true} :seon.schema/ns]
+     [:seon.schema/created-at {:optional true} :seon.schema/created-at]]
+    :seon.ns
+    [:map {:seon.db/entity true
+           :seon.render/ai 'seon.render.handlers.ns/render-ai
+           :seon.render/html 'seon.render.handlers.ns/render-html}
+     [:seon.ns/name :seon.ns/name]
+     [:seon.ns/source :seon.ns/source]
+     [:seon.ns/doc {:optional true} :seon.ns/doc]
+     [:seon.ns/summary {:optional true} :seon.ns/summary]
+     [:seon.ns/require-edges {:optional true} :seon.ns/require-edges]]}))
+
 ;; Generated persistent identity syntax is owned by `seon.db.id`, which loads
 ;; before `seon.db` registers slots that refer to `:seon.db/id`.  Keeping an
 ;; older bootstrap copy here let namespace load order silently restore the
@@ -1185,6 +1237,46 @@
             (assoc :seon.schema/ns
                    {:seon.ns/name (symbol (namespace schema-key))}))))))
    (registered-schemas)))
+
+(def ^:private database-attribute-properties
+  #{:seon.db/identity
+    :seon.db/unique
+    :seon.db/index
+    :seon.db/component
+    :seon.db/no-history?
+    :db.secondary/only})
+
+(defn canonical-database-attributes
+  "Compute the complete production database-attribute population.
+
+   Entity-map entries are attributes by construction. Standalone registered
+   forms join that population only when they carry a persistence facet."
+  {:malli/schema [:=> [:cat] [:vector :qualified-keyword]]}
+  []
+  (let [forms (registered-schemas)]
+    (->> forms
+         (reduce-kv
+          (fn [attributes schema-key definition]
+            (let [properties (form/attr-form-properties definition)
+                  entity-attributes
+                  (when (and (form/map-shape? definition)
+                             (true? (:seon.db/entity
+                                     (form/schema-properties definition))))
+                    (into #{}
+                          (keep (fn [entry]
+                                  (let [attribute
+                                        (when (vector? entry) (first entry))]
+                                    (when (qualified-keyword? attribute)
+                                      attribute))))
+                          (form/map-entries definition)))]
+              (cond-> (into attributes entity-attributes)
+                (and (qualified-keyword? schema-key)
+                     (some #(contains? properties %)
+                           database-attribute-properties))
+                (conj schema-key))))
+          #{})
+         (sort-by str)
+         vec)))
 
 (defn registered?
   "Check if a schema keyword is registered."
