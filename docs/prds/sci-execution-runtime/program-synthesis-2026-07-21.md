@@ -1017,6 +1017,17 @@ COMPLETELY before dispatching anything.
   for ephemeral clusters, EXPLICIT with loud refusal + exact remedy
   for file-backed clusters. The preprocessing design doc is now fully
   ruled; S-ladder implementation unblocked.
+- FIXSEED STOP #3 RULED (2026-07-23 eve, convergent): the fixture's
+  JVM reconstruction of index-core! rows cannot equal the CLJS
+  analyzer's output — the portable answer is the build-emitted exact
+  program-row artifact, WHICH IS S2 (rowsidecar), already in flight.
+  Fixseed extraction landed (13183c222); ruled: wrap cleanly (commit
+  the shared-pager genesis fix, document the sidecar-dependent
+  residual, gate red 15F/3E = attributed fixture-program-rows gap,
+  not production), resume on S2's landing. CHECKPOINT SEQUENCING:
+  hold for rowsidecar → fixseed-resume → green registry gate →
+  bootfast → freeze → checkpoint (honest green over speed; parallel
+  lanes fill the wait).
 - PARALLEL FILL (2026-07-23 eve, owner: 'anything else in
   parallel?'): THREE new lanes beside fixseed, all file-disjoint —
   r43trust (implementation: derived-provenance classification,
