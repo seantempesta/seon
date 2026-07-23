@@ -63,6 +63,17 @@ COMPLETELY before dispatching anything.
   tmp/orchestrator/u{1,3,4}-summary.txt; final messages at
   u{1,3,4}-final-message.txt. U2 dispatches when U1 lands; U5 is the
   next refill; U6 held for the owner HTTP talk.
+- U4 stop #1 (verified correct): R0 impossible without the turn.cljs
+  prompt rewire (symbol at :335-336 → invoke-compiled! :398-405 always
+  dispatches into the child; host refuses render). RULED: U4 granted
+  the NARROW turn.cljs prompt-render call path only (per deletion
+  audit :119-121,:213-216); eval dispatch/fences stay U2's. Resumed
+  same session (u4-resume1-out.txt). Wiki gained the
+  symbolic-invocation/process-relocation trap (d05f5ecd6).
+- OVERNIGHT owner directives: R28 (break CLJS, no dual-maintenance,
+  no tests-to-prove-breakage); if the queue drains early — bug
+  fixing, cleanup, live LLM drives as bug-finders, robustness; NO
+  early victory declarations.
 - Owner answers at wind-down: first wave (U1+U3+U4) AUTHORIZED;
   U5 lane builds the web-render operator member itself; demo
   re-runs are BUG-FINDERS, cheap and at orchestrator discretion —
