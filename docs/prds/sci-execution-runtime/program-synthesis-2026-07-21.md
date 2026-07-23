@@ -74,6 +74,26 @@ COMPLETELY before dispatching anything.
   no tests-to-prove-breakage); if the queue drains early — bug
   fixing, cleanup, live LLM drives as bug-finders, robustness; NO
   early victory declarations.
+- Overnight orchestrator rulings (2026-07-23, recorded same-turn):
+  (a) config-owner sequencing — seon.config.resolve.cljc granted to
+  U4 FIRST (its sections commit as U4's first implementation commit),
+  then to U1 for the guard-budget sections; two lanes never own it
+  simultaneously. (b) U4 authored renders = option A: trusted core
+  blocks direct in-pod; authored symbols through the existing generic
+  execution invocation (child containment) as a LOUD temporary
+  dependency until U7's door split; only the compiled render-prompt!
+  child dispatch is deleted. (c) U1 Bun tier re-ruled: production Bun
+  is self-host (no sci) and dies at U9 — the single-threaded
+  falsifier is fuel's thread-free determinism proven on the JVM
+  (deadline lane not armed, deterministic steps-used, no thread deps
+  in the .cljc); no speculative Bun seam. (d) U1 fuel cell =
+  per-retained-CONTEXT holder reset at each door entry, with a
+  second-session context-reuse regression; no dynamic vars in the
+  guard hot path.
+- U5 dispatched (first slice: web-render operator member + db.host
+  listen extension + /data + /data/feed via http-kit +
+  datastar-clojure; spec tmp/orchestrator/u5-web-sse-spec.md; R26
+  reconciliation: own process, NOT the writer).
 - Owner answers at wind-down: first wave (U1+U3+U4) AUTHORIZED;
   U5 lane builds the web-render operator member itself; demo
   re-runs are BUG-FINDERS, cheap and at orchestrator discretion —
