@@ -282,7 +282,7 @@
               database-error {:seon.agent/id "agent-1"} observed)))
           (.then
            (fn [rendered]
-             (is (= database-error rendered)
+             (is (= database-error (dissoc rendered :seon.db/db))
                  "an authority failure remains an explicit error value")
              (done)))
           (.catch
@@ -409,7 +409,8 @@
            (fn [rendered]
              (testing "an existing agent with no prompt data"
                (is (= (empty-render "empty")
-                      (dissoc rendered :seon.ai/config-resolution)))
+                      (dissoc rendered
+                              :seon.ai/config-resolution :seon.db/db)))
                (is (= :deepseek
                       (get-in rendered [:seon.ai/config-resolution
                                         :seon.ai/resolved-config
@@ -420,7 +421,8 @@
            (fn [rendered]
              (testing "a genuinely missing agent"
                (is (= (empty-render "missing")
-                      (dissoc rendered :seon.ai/config-resolution))))
+                      (dissoc rendered
+                              :seon.ai/config-resolution :seon.db/db))))
              (done)))
           (.catch
            (fn [error]
