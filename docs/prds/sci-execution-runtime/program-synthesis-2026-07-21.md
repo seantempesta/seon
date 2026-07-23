@@ -1028,6 +1028,17 @@ COMPLETELY before dispatching anything.
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- R43 ACCEPTED (69d53311b, verified: prefix regex GONE, classifier
+  is provenance-driven with the ruled precedence; the no-op-assertion
+  leak regression proven against real Datahike; my.plan dispatch
+  regression GREEN — the morning's broken render is fixed; all
+  focused gates green incl. dual-tier + reuse-path parity). Static
+  renderer map is resolution-only; trust flows through the one seam.
+  TREE FROZEN (2026-07-23 eve): every lane landed — THE CHECKPOINT
+  RUNS NOW per tmp/orchestrator/checkpoint-runbook-2026-07-23.md
+  (default reset + fresh build first = v11 artifacts for the fixture
+  gate + the real bootfast boot measurement, then full suites, then
+  the live-proof ledger + baseline perf capture + demo drive).
 - INTERP-BENCH ACCEPTED (ddd3880e9): guarded sci vs compiled JVM =
   glue 1.28x, Malli-heavy 1.34x, 10k transform 3.48x, hot loop
   12.20x; guard = 7-15 ns/safepoint (interpretation dominates, not
