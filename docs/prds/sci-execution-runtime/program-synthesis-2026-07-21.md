@@ -473,6 +473,22 @@ COMPLETELY before dispatching anything.
   CLJS compile gate, not only JVM tests). With live proof, the pod
   becomes genuinely optional for the LLM phase (D4 fulfilled:
   streaming + normal).
+- OWNER DIRECTION (2026-07-23 PM): LLM follow-ups queued. (i)
+  Provider unification: mine litellm-clj (vendored 16f25fa1e;
+  core.async — owner + rulings lean inspiration-not-adoption,
+  evaluation running unbiased) into PROVIDER DESCRIPTORS AS DATA
+  (endpoint/auth/quirks/capabilities rows; adding a provider = a
+  row) + richer normalized response metadata on attempt receipts.
+  (ii) UI STREAMING WITHOUT losing multi-form batch: claimant
+  consumes the full stream (recovers the usage chunk) while
+  separately publishing partials; candidate shapes = coalesced
+  latest-wins db writes (~2-3 tx/s per streaming agent vs the ~300
+  tx/s pipelined ceiling; attribute-indexed interests keep other
+  agents unbothered; datastar latest-wins mailboxes drop stale
+  morphs) vs a policy-fenced ephemeral side-channel; design by
+  RESUMING the litellm evaluation agent on its return, pointed at
+  jvm-web-sse + writer-throughput research + seon.reactive; owner
+  reviews the design.
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
