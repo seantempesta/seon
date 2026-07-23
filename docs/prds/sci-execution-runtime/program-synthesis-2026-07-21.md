@@ -761,6 +761,22 @@ COMPLETELY before dispatching anything.
   closure (paged init, writer) + R29 committed-projection acquisition
   (client) — P3 deletes the list.
 
+- OWNER RULINGS (2026-07-23 eve #2): R42 CONFIRMED as progress
+  observability + stall breaker + config fact. STANDING SMELL RULE:
+  every poll loop and every timeout in the codebase is a candidate
+  bad design — hunt them; prefer event-driven detection (queue row
+  for a poll/timeout census). GAS PEDAL: schedule lanes aggressively
+  whenever file-disjoint; agents/lanes are built resilient to resets/
+  restarts and just continue; bail-and-restart is always acceptable
+  on parallel conflict. Checkpoint stays a tight freeze, but prep
+  (specs, fixture repairs disjoint from predfix) runs NOW so the
+  post-checkpoint wave launches instantly.
+- FIXFIXTURE LANE DISPATCHED (2026-07-23 eve): repair the stale R30
+  parity fixture (host_registry_writer_test.clj:591 schema-less
+  parity-double; audit finding #2) + sweep for sibling fixtures the
+  R30 commit missed — so the checkpoint doesn't go red on known-stale
+  fixtures. File-disjoint from predfix.
+
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
