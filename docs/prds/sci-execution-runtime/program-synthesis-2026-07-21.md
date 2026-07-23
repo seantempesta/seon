@@ -1146,7 +1146,26 @@ vs the landed seam, stale tests → safe-now / after-loop /
 at-cutover deletion queue; spec
 `tmp/orchestrator/deletion-audit-spec.md`). Both file-disjoint from
 each other and read-only vs source; safe alongside the design agent.
-LIVE: loop-migration DESIGN agent (owner-directed, 2026-07-23) —
+**LOOP DESIGN ACCEPTED (2026-07-23) + Ruling 20 (owner-ratified
+decisions on its §10):** design =
+`research/loop-cljc-sci-design-2026-07-23.md` (datahike/sci
+file:line-grounded; claim/lease on the EXISTING run entity via
+heartbeat+stale-ms; two-op pointer+epoch fence strengthening
+run-fence in place — closes the proven duplicate-turn CAS hole;
+phase-cursor turns over already-durable facts; sci usage confirmed
+optimal; optimality table §8 names the hand-rolls to delete).
+Rulings: (a) claim attrs on run entity, heartbeat lease; (b)
+run-scoped claim + phase-eligibility scheduling; (c) **JVM LLM leaf
+is a named P4 unit right after L3** (owner); (d) **render: in-pod
+move at W5 first, full ctx/render .cljc port as its own later
+unit** (owner); (e) steal notices only on honest close; (f)
+claimant identity = WP-S2 (pid, start-instant) string; (g) host
+leaf listen extension approved as L4. PHASED CUT = the spine:
+L0 epoch fence (two-driver falsifier) → L1 attempt receipts →
+L2 phase cursor + lease-aware recovery (THE U12 DRILL) →
+L3 portable cores + first JVM claimant → L4 render-move/LLM-leaf/
+listen/two-pod graduation. L0 DISPATCHED.
+LIVE (historical note): loop-migration DESIGN agent —
 fresh-eyes grounding in reference-code/datahike + reference-code/sci
 (native CAS/listen!/interrupt primitives vs Seon hand-rolls),
 run-claim state machine, portable-core vs leaf split for the whole
