@@ -217,7 +217,10 @@
                 (str (fs/path directory "writer-port"))
                 :seon.dev.config/http-port 0
                 :seon.dev.config/http-port-file
-                (str (fs/path directory "pod-port"))})))
+                (str (fs/path directory "pod-port"))
+                :seon.dev.config/resolved-configuration
+                {:seon.config.operator/pod-readiness-timeout-ms
+                 600000}})))
 
 (declare target-manifest-for)
 
@@ -247,7 +250,49 @@
               (:seon.dev.config/launch-descriptor configuration))
              (:my.blob/storage-view request))))
     (is (= [process/watcher-id process/writer-id process/host-id]
-           (get-in spec-map [process/pod-id :seon.dev.process/dependencies])))))
+           (get-in spec-map [process/pod-id :seon.dev.process/dependencies])))
+    (is (= 600000
+           (get-in spec-map
+                   [process/pod-id
+                    :seon.dev.process/ready-timeout-ms])))
+    (is (= :seon.config.operator/pod-readiness-timeout-ms
+           (get-in spec-map
+                   [process/pod-id
+                    :seon.dev.process/ready-timeout-config-key])))))
+
+(deftest pod-readiness-timeout-is-derived-and-fires-with-its-config-key
+  (let [manifest-configuration
+        (dev-config/select-manifest (operator-config) "config/system.edn")
+        base (test-config)
+        configuration
+        (assoc-in
+         (target-config base (:seon.dev.test/directory base))
+         [:seon.dev.config/resolved-configuration
+          :seon.config.operator/pod-readiness-timeout-ms]
+         777000)
+        spec (get (process/specs configuration
+                                 (target-manifest-for configuration))
+                  process/pod-id)
+        timeout-spec
+        (assoc spec :seon.dev.process/ready-timeout-ms 1)
+        pid (.pid (java.lang.ProcessHandle/current))
+        record
+        (live-probe-record
+         configuration
+         {:seon.dev.process/id process/pod-id
+          :seon.dev.process/pid pid
+          :seon.dev.process/start-instant
+          (state/process-start-instant pid)
+         :seon.dev.process/log
+          (str (fs/path (:seon.dev.test/directory base) "pod.log"))})]
+    (is (= 600000
+           (dev-config/pod-readiness-timeout-ms manifest-configuration))
+        "The checked-in Aero manifest resolves the calibrated readiness fact")
+    (is (= 777000 (:seon.dev.process/ready-timeout-ms spec)))
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #":seon.config.operator/pod-readiness-timeout-ms fired"
+         (#'process/wait-ready! configuration timeout-spec record)))))
 
 (deftest host-readiness-cleanup-never-unlinks-a-live-listener
   (let [configuration (test-config)

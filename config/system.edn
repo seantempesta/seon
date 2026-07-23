@@ -187,6 +187,14 @@
   :seon.config.claim-driver/invocation-deadline-ms 120000
   :seon.config.claim-driver/invocation-result-maximum-bytes 1048576}
 
+ ;; ── DEVELOPMENT OPERATOR ──
+ ;; Pod readiness includes fresh paged initialization, schema acquisition,
+ ;; committed projection construction, and instrumentation. The 600 s default
+ ;; is a protective ceiling with at least 10x headroom over the measured
+ ;; 2026-07-23 legitimate fresh-boot baseline; firing remains loud.
+ :seon.config/operator
+ {:seon.config.operator/pod-readiness-timeout-ms 600000}
+
  ;; ── PORTABLE RETRY AND CAPABILITY LIMITS ──
  ;; These values preserve the bounded 2026-07-23 policies while moving their
  ;; authority from portable source literals into the acquired config entity.

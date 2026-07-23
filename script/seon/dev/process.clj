@@ -61,6 +61,8 @@
    [:seon.dev.process/http-port-file {:optional true} :string]
    [:seon.dev.process/readiness qualified-keyword?]
    [:seon.dev.process/ready-timeout-ms [:int {:min 1}]]
+   [:seon.dev.process/ready-timeout-config-key
+    {:optional true} :qualified-keyword]
    [:seon.dev.process/shutdown-grace-ms [:int {:min 1}]]
    [:seon.dev.process/bootstrap-digest {:optional true}
     [:re #"[0-9a-f]{64}"]]
@@ -508,7 +510,10 @@
            :seon.dev.process/http-port-file
            (::launch/http-port-file descriptor-process)
            :seon.dev.process/readiness :seon.dev.process.readiness/pod
-           :seon.dev.process/ready-timeout-ms 120000
+           :seon.dev.process/ready-timeout-ms
+           (config/pod-readiness-timeout-ms config)
+           :seon.dev.process/ready-timeout-config-key
+           :seon.config.operator/pod-readiness-timeout-ms
            :seon.dev.process/shutdown-grace-ms 5000
            :seon.dev.process/artifact-digest
            (:seon.dev.artifact/application-digest manifest)}
@@ -939,9 +944,23 @@
         (< (System/currentTimeMillis) deadline)
         (do (Thread/sleep 200) (recur))
         :else
-        (throw (ex-info "Timed out waiting for Seon process readiness."
-                        {:seon.dev.process/id (:seon.dev.process/id spec)
-                         :seon.dev.process/log (:seon.dev.process/log record)}))))))
+        (let [config-key
+              (:seon.dev.process/ready-timeout-config-key spec)]
+          (throw
+           (ex-info
+            (cond-> "Timed out waiting for Seon process readiness."
+              config-key
+              (str " Protective limit "
+                   config-key
+                   " fired."))
+            (cond->
+             {:seon.dev.process/id (:seon.dev.process/id spec)
+              :seon.dev.process/log (:seon.dev.process/log record)
+              :seon.dev.process/ready-timeout-ms
+              (:seon.dev.process/ready-timeout-ms spec)}
+              config-key
+              (assoc :seon.dev.process/ready-timeout-config-key
+                     config-key)))))))))
 
 (defn- wait-watcher-flush! [config spec record]
   (let [deadline (+ (System/currentTimeMillis)

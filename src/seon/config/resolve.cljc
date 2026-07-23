@@ -282,6 +282,17 @@
 (doseq [[attribute shape] claim-driver-dial-schemas]
   (schema/register! attribute shape))
 
+(def operator-dial-schemas
+  "Development-operator protective limits with units and calibration provenance."
+  {:seon.config.operator/pod-readiness-timeout-ms
+   [:int
+    {:min 1
+     :description
+     "Maximum milliseconds the operator waits for pod readiness before failing loudly. Default 600000 protects startup ownership from a wedged pod while leaving at least 10x headroom over the measured 2026-07-23 fresh paged initialization baseline; firing names :seon.config.operator/pod-readiness-timeout-ms."}]})
+
+(doseq [[attribute shape] operator-dial-schemas]
+  (schema/register! attribute shape))
+
 (schema/register! :seon.config/web-render
   (into [:map {:closed true}]
         (map (fn [attribute]
@@ -293,6 +304,12 @@
         (map (fn [attribute]
                [attribute {:optional true} attribute]))
         (keys claim-driver-dial-schemas)))
+
+(schema/register! :seon.config/operator
+  (into [:map {:closed true}]
+        (map (fn [attribute]
+               [attribute {:optional true} attribute]))
+        (keys operator-dial-schemas)))
 
 (def web-render-attributes
   "Flat singleton attributes consumed by the JVM web-render process."
@@ -1054,6 +1071,9 @@
    [:seon.config.claim-driver/invocation-result-maximum-bytes
     {:optional true}
     :seon.config.claim-driver/invocation-result-maximum-bytes]
+   [:seon.config.operator/pod-readiness-timeout-ms
+    {:optional true}
+    :seon.config.operator/pod-readiness-timeout-ms]
    [:seon.config/on-core-error      {:optional true} :seon.config/on-core-error]
    [:seon.config/spawn-depth-cap    {:optional true} :seon.config/spawn-depth-cap]
    [:seon.config/always             {:optional true} :seon.config/always]
@@ -1161,6 +1181,7 @@
    [:seon.config/model-transport {:optional true} :seon.config/model-transport]
    [:seon.config/web-render      {:optional true} :seon.config/web-render]
    [:seon.config/claim-driver    {:optional true} :seon.config/claim-driver]
+   [:seon.config/operator        {:optional true} :seon.config/operator]
    [:seon.config/namespaces    {:optional true} :seon.config/namespaces-spec]
    [:seon.config/routes        {:optional true} [:vector :seon.config/route-spec]]
    [:seon.config/render        {:optional true} :seon.config/render]
@@ -1808,6 +1829,7 @@
         transport (get manifest :seon.config/model-transport {})
         web-render (get manifest :seon.config/web-render {})
         claim-driver (get manifest :seon.config/claim-driver {})
+        operator (get manifest :seon.config/operator {})
         rep (get manifest :seon.config/repair {})
         web (get manifest :seon.config/web {})
         root (get manifest :seon.config/root {})
@@ -1924,6 +1946,10 @@
              (get claim-driver
                   :seon.config.claim-driver/invocation-result-maximum-bytes
                   1048576)
+             :seon.config.operator/pod-readiness-timeout-ms
+             (get operator
+                  :seon.config.operator/pod-readiness-timeout-ms
+                  600000)
              :seon.config.render-context/host-timezone
              (get render-context
                   :seon.config.render-context/host-timezone
