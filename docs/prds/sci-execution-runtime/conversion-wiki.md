@@ -190,6 +190,13 @@ the anchor stays the state ledger.
   stamped corpus entities before the ledger entity; absence of the ref/ledger
   join makes another cluster unable to acquire the wrapper without a loader
   filesystem branch.
+- **A registered package provenance ref is not necessarily installed.** A
+  cluster with no package rows has no Datahike schema for
+  `:seon.packages/package`; naming it unconditionally in the raw acquisition
+  query fails every agent turn before eval. Install the provenance schema at
+  reconciliation or omit the package query clauses until installed—never
+  assume process-local `schema/register!` makes a database attribute queryable
+  (`src/seon/execution.cljs:343-366`, live E2E 2026-07-22).
 
 - **The CLJS UDS transport has no public server-side framed-text seam.**
   `seon.db.transport.uds/connect-stream!` exposes the existing four-byte

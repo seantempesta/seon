@@ -1239,6 +1239,13 @@
              (set! db/pull pull)
              (done)))))))
 
+(deftest final-agent-evidence-pulls-a-valid-config-singleton
+  (is (= (into [:seon.config/id] (ai/model-transport-pull-pattern))
+         @#'serve/final-cluster-pull-pattern))
+  (is (= (into [:seon.config/id :seon.config/repl-mode]
+               (ai/model-transport-pull-pattern))
+         @#'serve/historical-cluster-pull-pattern)))
+
 (defn- req-with-origin
   ([origin] (req-with-origin origin nil))
   ([origin host]

@@ -1137,6 +1137,10 @@
                              :seon.ai.attempt/endpoint))
           expected)))
 
+(def ^:private historical-cluster-pull-pattern
+  (into [:seon.config/id :seon.config/repl-mode]
+        (ai/model-transport-pull-pattern)))
+
 (defn- ^:async historical-turn-valid?
   [database agent-id rendered-tx attempts]
   (if-not (and (int? rendered-tx) (<= rendered-tx (:t database)))
@@ -1152,9 +1156,7 @@
                            ::db/pull-pattern (ai/agent-config-pull-pattern)
                            ::db/ref [:seon.agent/id agent-id]})
                  (db/pull {::db/db historical
-                           ::db/pull-pattern
-                           (into [:seon.config/repl-mode]
-                                 (ai/model-transport-pull-pattern))
+                           ::db/pull-pattern historical-cluster-pull-pattern
                            ::db/ref [:seon.config/id config/cluster-config-id]})]))
           [config-row agent-row cluster-row] (array-seq values)]
       (if-let [error (some #(when (:seon.error/message %) %)
@@ -1163,7 +1165,10 @@
         (let [resolved
               (:seon.ai/resolved-config
                (ai/resolved-config-from-rows
-                (merge config-row cluster-row) agent-row))
+                (merge config-row
+                       (assoc cluster-row
+                              :seon.config/id config/cluster-config-id))
+                agent-row))
               stream? (= :stream (:seon.config/repl-mode cluster-row))]
           (every?
            (fn [attempt]
@@ -1402,6 +1407,9 @@
                               rendered-tx))))
               turn-rows pulled)))))
 
+(def ^:private final-cluster-pull-pattern
+  (into [:seon.config/id] (ai/model-transport-pull-pattern)))
+
 (defn- ^:async final-agent-task-result
   [database aid injected-at elapsed timeout?]
   (let [values
@@ -1438,7 +1446,7 @@
                          ::db/pull-pattern (ai/agent-config-pull-pattern)
                          ::db/ref [:seon.agent/id aid]})
                (db/pull {::db/db database
-                         ::db/pull-pattern (ai/model-transport-pull-pattern)
+                         ::db/pull-pattern final-cluster-pull-pattern
                          ::db/ref [:seon.config/id config/cluster-config-id]})]))
         [run-rows turn-identities reply-rows config-row agent-row cluster-row]
         (array-seq values)
@@ -1473,7 +1481,10 @@
             resolved
             (:seon.ai/resolved-config
              (ai/resolved-config-from-rows
-              (merge config-row cluster-row) agent-row))
+              (merge config-row
+                     (assoc cluster-row
+                            :seon.config/id config/cluster-config-id))
+              agent-row))
             reply (->> reply-rows
                        (filter (fn [[^js at]]
                                  (>= (.getTime at) injected-at)))
