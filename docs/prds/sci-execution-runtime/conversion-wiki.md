@@ -749,3 +749,29 @@ the anchor stays the state ledger.
   but drops source effects for the `seon.db` family. Derive graph descriptors
   from analyzed source/build facts until the installer carries the same
   metadata; do not infer purity from successful installation.
+
+## U7 R4 context-family port scars (2026-07-23)
+
+- **A portable block family needs its pure dependencies to load on the JVM.**
+  Renaming only the ctx leaves exposed three hidden `.cljs` requirements:
+  home-namespace selection, derived state, and warning formatting. Promote the
+  pure owners in place (or extract the one pure projection and make the old
+  owner consume it); never copy their rules into each block merely to satisfy
+  a require gate.
+- **Async ceremony can be centralized without changing acquisition data.**
+  Keep protocol member maps and pure formatting unchanged. Route every
+  `db/execute-many` stage through one `.cljc` executor whose CLJS branch awaits
+  and whose CLJ branch returns the plain call. Any parallel stage uses that
+  same executor's ordered `all`; block metadata is `:async true` only on CLJS.
+- **Static resolution tables must include internal context converters.**
+  Transcript events store symbols such as
+  `seon.agent.ctx.transcript/eval->renderable`. After generic global lookup is
+  deleted, those compiled symbols must enter a literal symbol-to-function
+  table before recursive rendering. Otherwise a successful acquisition
+  degrades every event into a missing-render error even though the namespace
+  is loaded.
+- **Request value schemas must not depend on stored-identity load order.**
+  A focused transcript test loaded `:seon.render/section-request` before
+  `seon.agent.run/id` existed. Keep the real namespaced request key, but
+  validate its value through the shared compact-id value schema; the stored
+  identity registration stays with its database owner.
