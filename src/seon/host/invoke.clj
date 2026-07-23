@@ -44,19 +44,19 @@
 
 (defn- guard-policy
   [invocation-class policy]
-  {::guard/fuel
+  {::guard/interpreter-step-budget
    (get policy
         (case invocation-class
-          :agent-eval :seon.config.guard/agent-eval-fuel
-          :authored-render :seon.config.guard/authored-render-fuel
-          :plan :seon.config.guard/plan-fuel))
+          :agent-eval :seon.config.guard/agent-eval-interpreter-step-budget
+          :authored-render :seon.config.guard/authored-render-interpreter-step-budget
+          :plan :seon.config.guard/plan-interpreter-step-budget))
    ::guard/mode :enforce
    ::guard/invocation-class invocation-class
-   ::guard/fuel-config-key
+   ::guard/interpreter-step-budget-config-key
    (case invocation-class
-     :agent-eval :seon.config.guard/agent-eval-fuel
-     :authored-render :seon.config.guard/authored-render-fuel
-     :plan :seon.config.guard/plan-fuel)
+     :agent-eval :seon.config.guard/agent-eval-interpreter-step-budget
+     :authored-render :seon.config.guard/authored-render-interpreter-step-budget
+     :plan :seon.config.guard/plan-interpreter-step-budget)
    ::guard/deadline-config-key :seon.config.guard/deadline-ms
    ::guard/output-config-key :seon.config.guard/output-cap})
 

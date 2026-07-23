@@ -11,9 +11,9 @@ tags: [decision, architecture, config, runtime]
 
 A hidden or routinely reached limit becomes an accidental scheduler: it
 silently throttles normal work, obscures capacity defects, and makes behavior
-depend on literals scattered through runtime code. Fuel, deadlines, output
-caps, pools, queues, heap ceilings, connection counts, and body bounds all need
-one policy.
+depend on literals scattered through runtime code. Interpreter-step budgets,
+deadlines, output caps, pools, queues, heap ceilings, connection counts, and
+body bounds all need one policy.
 
 ## Decision
 

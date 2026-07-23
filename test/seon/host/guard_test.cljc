@@ -6,16 +6,17 @@
             [sci.interrupt :as interrupt]
             [seon.host.guard :as guard]))
 
-(def ^:private fuel-key :seon.config.guard.test/fuel)
+(def ^:private interpreter-step-budget-key
+  :seon.config.guard.test/interpreter-step-budget)
 (def ^:private deadline-key :seon.config.guard.test/deadline-ms)
 (def ^:private output-key :seon.config.guard.test/output-cap)
 
 (defn- policy
-  [fuel mode]
-  {::guard/fuel fuel
+  [interpreter-step-budget mode]
+  {::guard/interpreter-step-budget interpreter-step-budget
    ::guard/mode mode
    ::guard/invocation-class :agent-eval
-   ::guard/fuel-config-key fuel-key
+   ::guard/interpreter-step-budget-config-key interpreter-step-budget-key
    ::guard/deadline-config-key deadline-key
    ::guard/output-config-key output-key})
 
@@ -35,34 +36,38 @@
       throwable)))
 
 (defn- run-enforced
-  [holder context source fuel]
+  [holder context source interpreter-step-budget]
   (let [throwable
         (caught
          (fn []
            (guard/call!
             {::guard/holder holder
-             ::guard/policy (policy fuel :enforce)
+             ::guard/policy (policy interpreter-step-budget :enforce)
              ::guard/evaluate! (fn [] (sci/eval-string* context source))})))]
     {:throwable throwable
      :error (guard/steering-error! holder throwable)
-     :steps-used (guard/steps-used holder)}))
+     :interpreter-steps-used (guard/interpreter-steps-used holder)}))
 
-(deftest hostile-loop-stops-by-thread-free-fuel
+(deftest hostile-loop-stops-by-thread-free-interpreter-step-budget
   (let [holder (guard/holder)
         context (guarded-context holder)
-        {:keys [throwable error steps-used]}
+        {:keys [throwable error interpreter-steps-used]}
         (run-enforced holder context "(loop [] (recur))" 25)]
     (is (some? throwable))
     (is (= :budget (:seon.error/kind error)))
-    (is (= 26 steps-used
-           (get-in error [:seon.error/data ::guard/steps-used])))
-    (is (= fuel-key
+    (is (= 26 interpreter-steps-used
+           (get-in error
+                   [:seon.error/data ::guard/interpreter-steps-used])))
+    (is (= interpreter-step-budget-key
            (get-in error [:seon.error/data ::guard/config-key])))
+    (is (str/includes? (:seon.error/message error)
+                       "exceeded its interpreter-step budget"))
     (is (str/includes? (:seon.error/message error) "Split the work"))
-    (is (str/includes? (:seon.error/message error) (str fuel-key)))
+    (is (str/includes? (:seon.error/message error)
+                       (str interpreter-step-budget-key)))
     #?(:clj
        (is (not (.isInterrupted (Thread/currentThread)))
-           "the fuel-only call supplied no deadline armer and never interrupts its thread"))))
+           "the interpreter-step-only call never interrupts its thread"))))
 
 #?(:clj
    (deftest deadline-policy-uses-the-same-door
@@ -87,21 +92,23 @@
        (is (= deadline-key
               (get-in error [:seon.error/data ::guard/config-key]))))))
 
-(deftest native-reduce-stops-at-the-same-fuel-door
+(deftest native-reduce-stops-at-the-same-interpreter-step-door
   (let [holder (guard/holder)
         context (guarded-context holder)
-        {:keys [error steps-used]}
+        {:keys [error interpreter-steps-used]}
         (run-enforced holder context "(reduce + (range))" 40)]
     (is (= :budget (:seon.error/kind error)))
-    (is (= 41 steps-used))
-    (is (= 41 (get-in error [:seon.error/data ::guard/steps-used])))))
+    (is (= 41 interpreter-steps-used))
+    (is (= 41
+           (get-in error
+                   [:seon.error/data ::guard/interpreter-steps-used])))))
 
 (deftest identical-form-and-budget-use-identical-steps
   (let [holder (guard/holder)
         context (guarded-context holder)
         samples
         (mapv (fn [_]
-                (:steps-used
+                (:interpreter-steps-used
                  (run-enforced holder context "(loop [] (recur))" 73)))
               (range 5))]
     (is (= [74 74 74 74 74] samples))))
@@ -118,7 +125,7 @@
                                context
                                "(reduce + (range 100))"))})]
     (is (= 4950 value))
-    (is (pos? (guard/steps-used holder)))))
+    (is (pos? (guard/interpreter-steps-used holder)))))
 
 (deftest output-policy-uses-the-same-flat-steering-shape
   (let [holder (guard/holder)]
@@ -131,7 +138,9 @@
              (get-in error [:seon.error/data :seon.error.sci/class])))
       (is (= output-key
              (get-in error [:seon.error/data ::guard/config-key])))
-      (is (= 7 (get-in error [:seon.error/data ::guard/steps-used])))
+      (is (= 7
+             (get-in error
+                     [:seon.error/data ::guard/interpreter-steps-used])))
       (is (str/includes? (:seon.error/message error) "Reduce the input")))))
 
 #?(:clj

@@ -95,11 +95,11 @@
             result (cond
                      (contains?
                       query-attributes
-                      :seon.config.guard/agent-eval-fuel)
+                      :seon.config.guard/agent-eval-interpreter-step-budget)
                      (mapv writer-test/guard-policy
-                           [:seon.config.guard/agent-eval-fuel
-                            :seon.config.guard/authored-render-fuel
-                            :seon.config.guard/plan-fuel
+                           [:seon.config.guard/agent-eval-interpreter-step-budget
+                            :seon.config.guard/authored-render-interpreter-step-budget
+                            :seon.config.guard/plan-interpreter-step-budget
                             :seon.config.guard/deadline-ms
                             :seon.config.guard/output-cap])
 

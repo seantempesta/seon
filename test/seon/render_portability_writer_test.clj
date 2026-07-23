@@ -4,20 +4,21 @@
             [seon.host.guard :as guard]
             [seon.render :as render]))
 
-(defn- policy [fuel]
-  {::guard/fuel fuel
+(defn- policy [interpreter-step-budget]
+  {::guard/interpreter-step-budget interpreter-step-budget
    ::guard/mode :enforce
    ::guard/invocation-class :authored-render
-   ::guard/fuel-config-key :seon.config.guard/authored-render-fuel
+   ::guard/interpreter-step-budget-config-key
+   :seon.config.guard/authored-render-interpreter-step-budget
    ::guard/deadline-config-key :seon.config.guard/deadline-ms
    ::guard/output-config-key :seon.config.guard/output-cap})
 
-(defn- authored-door [context holder fuel]
+(defn- authored-door [context holder interpreter-step-budget]
   (fn [{::render/keys [function-symbol arguments]}]
     (try
       (guard/call!
        {::guard/holder holder
-        ::guard/policy (policy fuel)
+        ::guard/policy (policy interpreter-step-budget)
         ::guard/evaluate!
         #(apply @(sci/resolve context function-symbol) arguments)})
       (catch Throwable throwable

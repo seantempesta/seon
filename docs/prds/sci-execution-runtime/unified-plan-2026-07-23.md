@@ -8,8 +8,8 @@ tags: [prd, agent, runtime, architecture]
 
 One plan from here to graduation. Synthesizes the accepted designs
 (capability seam · claim/lease loop · LLM/HTTP containment) and the
-four convergence research reports (JVM concurrency+fuel · web/SSE ·
-writer throughput · render/ctx portability), under rulings 9–26.
+four convergence research reports (JVM concurrency+interpreter steps ·
+web/SSE · writer throughput · render/ctx portability), under rulings 9–26.
 The anchor (`program-synthesis-2026-07-21.md`) remains the state
 ledger; THIS file is the implementation queue authority. Every unit
 below is sol-dispatchable; specs derive from its row plus the cited
@@ -60,24 +60,25 @@ genuine runaway trips it. (c) Firing is always LOUD: fault datom +
 steering error value; never a silent slowdown or drop. (d) No
 numeric limit literal in runtime code — limits flow through config
 accessors only (the W1 config-facts sweep is the enforcement
-vehicle and folds into U1/U8 acceptance). Applies to fuel,
-deadlines, output caps, pool sizes, heap budgets, beat cadence
+vehicle and folds into U1/U8 acceptance). Applies to interpreter-step
+budgets, deadlines, output caps, pool sizes, heap budgets, beat cadence
 (post-U3 a pure failover-UX dial), and every future dial.
 
 ## Units
 
 ### U1 — Guarded eval door (S/M) — READY, no dependencies
 
-Fuel counter inside the existing `:interrupt-fn` safepoint closure
+Interpreter-step counter inside the existing `:interrupt-fn` safepoint closure
 (zero sci fork changes; ~1–3 ns/site), one portable `.cljc`
-guarded-eval entry: deadline where threads exist + fuel everywhere +
-output caps + uniform steering error. Budgets are config facts;
+guarded-eval entry: deadline where threads exist + interpreter-step
+budget everywhere + output caps + uniform steering error. Budgets are
+config facts;
 calibration = measured steps/ms per tier (counting-only guard
 first). Every sci invocation (agent eval, authored render, plan fn)
 passes through this one door. Grounding:
 `research/jvm-concurrency-research-2026-07-23.md` §guarded-door.
-Falsifier: a hostile `(loop [] (recur))` halts by fuel on a thread
-AND on a single-threaded host, with the steering value; overhead
+Falsifier: a hostile `(loop [] (recur))` halts by its interpreter-step
+budget on a thread AND on a single-threaded host, with the steering value; overhead
 within the measured envelope on the full suite.
 
 ### U2 — Claim-native driver (L) — READY after U1; THE SPINE
@@ -288,7 +289,7 @@ U1 ──► U2 ──────────────► U9 ──► U10
 - **Demo cadence (owner):** re-runs are BUG-FINDERS at orchestrator
   discretion — cheap, focused on proving the conversion right;
   never benchmark sweeps.
-- **D5 — REFRAMED by ruling 27:** fuel/deadline budgets are
+- **D5 — REFRAMED by ruling 27:** interpreter-step/deadline budgets are
   abort-only circuit breakers calibrated at ≥100× measured
   legitimate P99.9, landed as fully-specced config facts with U1's
   calibration data; owner blesses the defaults from the numbers.
@@ -299,5 +300,5 @@ Kill anything at any time — claimant, writer, leaf host — and the
 demo scenario completes with zero lost or doubled effects; census
 at zero with the cutover assertion flipped; 100 concurrent agents
 on one cluster within the measured writer envelope; every sci
-invocation fuel/deadline-bounded through one door; agent-authored
+invocation interpreter-step/deadline-bounded through one door; agent-authored
 code provably absent from the writer process.

@@ -6,23 +6,23 @@
             [seon.schema :as schema]))
 
 (schema/register! ::holder 'some?)
-(schema/register! ::fuel [:int {:min 0}])
+(schema/register! ::interpreter-step-budget [:int {:min 0}])
 (schema/register! ::mode [:enum :count :enforce])
 (schema/register! ::config-key :qualified-keyword)
 (schema/register! ::invocation-class :keyword)
 (schema/register! ::arm-deadline! 'fn?)
 (schema/register! ::evaluate! 'fn?)
-(schema/register! ::steps-used [:int {:min 0}])
-(schema/register! ::initial-fuel [:int {:min 0}])
-(schema/register! ::remaining-fuel :int)
+(schema/register! ::interpreter-steps-used [:int {:min 0}])
+(schema/register! ::initial-interpreter-step-budget [:int {:min 0}])
+(schema/register! ::interpreter-steps-remaining :int)
 (schema/register! ::policy-kind [:enum :budget :timeout :agent])
 (schema/register!
  ::policy
  [:map {:closed true}
-  [::fuel ::fuel]
+  [::interpreter-step-budget ::interpreter-step-budget]
   [::mode ::mode]
   [::invocation-class ::invocation-class]
-  [::fuel-config-key ::config-key]
+  [::interpreter-step-budget-config-key ::config-key]
   [::deadline-config-key ::config-key]
   [::output-config-key ::config-key]])
 (schema/register!
@@ -38,17 +38,17 @@
 (def ^:private enforce-index 2)
 (def ^:private interrupted-index 0)
 (def ^:private invocation-class-index 1)
-(def ^:private fuel-config-key-index 2)
+(def ^:private interpreter-step-budget-config-key-index 2)
 (def ^:private deadline-config-key-index 3)
 (def ^:private output-config-key-index 4)
 
 (declare check-holder!)
 
 (defn holder
-  "Create one stable mutable fuel holder for a retained SCI context."
+  "Create one stable interpreter-step counter for a retained SCI context."
   {:malli/schema [:=> [:cat] ::holder]}
   []
-  (let [holder {::fuel-cell (long-array 3)
+  (let [holder {::interpreter-step-counter (long-array 3)
                 ::control-cell (object-array 5)}]
     (assoc holder ::check! (fn [] (check-holder! holder)))))
 
@@ -56,15 +56,17 @@
   "Reset a retained context's holder for one invocation."
   {:malli/schema [:=> [:catn [::holder ::holder] [::policy ::policy]]
                   ::holder]}
-  [{::keys [^longs fuel-cell ^objects control-cell] :as holder}
-   {::keys [fuel mode invocation-class fuel-config-key deadline-config-key
+  [{::keys [^longs interpreter-step-counter ^objects control-cell] :as holder}
+   {::keys [interpreter-step-budget mode invocation-class
+            interpreter-step-budget-config-key deadline-config-key
             output-config-key]}]
-  (aset fuel-cell remaining-index fuel)
-  (aset fuel-cell initial-index fuel)
-  (aset fuel-cell enforce-index (if (= :enforce mode) 1 0))
+  (aset interpreter-step-counter remaining-index interpreter-step-budget)
+  (aset interpreter-step-counter initial-index interpreter-step-budget)
+  (aset interpreter-step-counter enforce-index (if (= :enforce mode) 1 0))
   (aset control-cell interrupted-index nil)
   (aset control-cell invocation-class-index invocation-class)
-  (aset control-cell fuel-config-key-index fuel-config-key)
+  (aset control-cell interpreter-step-budget-config-key-index
+        interpreter-step-budget-config-key)
   (aset control-cell deadline-config-key-index deadline-config-key)
   (aset control-cell output-config-key-index output-config-key)
   holder)
@@ -78,45 +80,51 @@
   (aset control-cell interrupted-index interrupted?)
   holder)
 
-(defn steps-used
+(defn interpreter-steps-used
   "The number of SCI safepoints charged in the current invocation."
-  {:malli/schema [:=> [:cat ::holder] ::steps-used]}
-  [{::keys [^longs fuel-cell]}]
-  (max 0 (- (aget fuel-cell initial-index)
-            (aget fuel-cell remaining-index))))
+  {:malli/schema [:=> [:cat ::holder] ::interpreter-steps-used]}
+  [{::keys [^longs interpreter-step-counter]}]
+  (max 0 (- (aget interpreter-step-counter initial-index)
+            (aget interpreter-step-counter remaining-index))))
 
 (defn- policy-config-key
   [control-cell kind]
   (aget control-cell
         (case kind
-          :budget fuel-config-key-index
+          :budget interpreter-step-budget-config-key-index
           :timeout deadline-config-key-index
           output-config-key-index)))
 
 (defn- policy-message
-  [kind config-key used]
+  [kind config-key interpreter-steps-used]
   (case kind
     :budget
-    (str "`" config-key "` stopped this evaluation after " used
-         " guarded steps. Split the work into smaller evaluations or reduce "
-         "the input.")
+    (str "This evaluation exceeded its interpreter-step budget (`" config-key
+         "`) after " interpreter-steps-used
+         " interpreter steps. Split the work into smaller evaluations or "
+         "reduce the input.")
 
     :timeout
     (str "`" config-key "` stopped this evaluation at its deadline after "
-         used " guarded steps. Split the work into smaller evaluations or "
+         interpreter-steps-used
+         " interpreter steps. Split the work into smaller evaluations or "
          "reduce the input.")
 
     (str "`" config-key "` stopped this evaluation after its output cap "
-         "fired at " used " guarded steps. Reduce the input or print a "
+         "fired at " interpreter-steps-used
+         " interpreter steps. Reduce the input or print a "
          "smaller result.")))
 
 (defn- policy-data
-  [{::keys [^longs fuel-cell ^objects control-cell] :as holder} kind]
+  [{::keys [^longs interpreter-step-counter ^objects control-cell] :as holder}
+   kind]
   (let [config-key (policy-config-key control-cell kind)]
     (cond-> {::policy-kind kind
-             ::steps-used (steps-used holder)
-             ::initial-fuel (aget fuel-cell initial-index)
-             ::remaining-fuel (aget fuel-cell remaining-index)
+             ::interpreter-steps-used (interpreter-steps-used holder)
+             ::initial-interpreter-step-budget
+             (aget interpreter-step-counter initial-index)
+             ::interpreter-steps-remaining
+             (aget interpreter-step-counter remaining-index)
              ::invocation-class (aget control-cell invocation-class-index)
              ::config-key config-key}
       true
@@ -128,9 +136,9 @@
                              [::policy-kind ::policy-kind]]
                   :map]}
   [holder kind]
-  (let [{::keys [config-key steps-used] :as data}
+  (let [{::keys [config-key interpreter-steps-used] :as data}
         (policy-data holder kind)
-        message (policy-message kind config-key steps-used)
+        message (policy-message kind config-key interpreter-steps-used)
         throwable (ex-info message
                            (assoc data :seon.error/kind kind))]
     (error/record! {:seon.error/raw throwable
@@ -145,9 +153,10 @@
                              [::policy-kind ::policy-kind]]
                   :any]}
   [holder kind]
-  (let [{::keys [config-key steps-used] :as data} (policy-data holder kind)]
+  (let [{::keys [config-key interpreter-steps-used] :as data}
+        (policy-data holder kind)]
     (interrupt/interrupt!
-     (policy-message kind config-key steps-used)
+     (policy-message kind config-key interpreter-steps-used)
      (assoc data :seon.error/kind kind))))
 
 (defn- policy-throwable-data
@@ -163,9 +172,10 @@
                   [:or :nil :map]]}
   [holder throwable]
   (when-let [{::keys [policy-kind]} (policy-throwable-data throwable)]
-    (let [{::keys [config-key steps-used] :as data}
+    (let [{::keys [config-key interpreter-steps-used] :as data}
           (policy-data holder policy-kind)
-          message (policy-message policy-kind config-key steps-used)]
+          message
+          (policy-message policy-kind config-key interpreter-steps-used)]
       (error/record! {:seon.error/raw throwable
                       :seon.error/fault :agent})
       {:seon.error/message message
@@ -173,11 +183,12 @@
        :seon.error/data (dissoc data ::policy-kind)})))
 
 (defn- check-holder!
-  [{::keys [^longs fuel-cell ^objects control-cell] :as holder}]
-  (let [remaining (unchecked-dec (aget fuel-cell remaining-index))]
-    (aset fuel-cell remaining-index remaining)
-    (when (and (= 1 (aget fuel-cell enforce-index))
-               (neg? remaining))
+  [{::keys [^longs interpreter-step-counter ^objects control-cell] :as holder}]
+  (let [interpreter-steps-remaining
+        (unchecked-dec (aget interpreter-step-counter remaining-index))]
+    (aset interpreter-step-counter remaining-index interpreter-steps-remaining)
+    (when (and (= 1 (aget interpreter-step-counter enforce-index))
+               (neg? interpreter-steps-remaining))
       (stop! holder :budget)))
   (when-let [interrupted? (aget control-cell interrupted-index)]
     (when (interrupted?)

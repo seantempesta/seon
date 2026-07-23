@@ -5,15 +5,16 @@
             [seon.host.eval :as eval]
             [seon.host.guard :as guard]))
 
-(defn- policy [fuel]
-  {::guard/fuel fuel
+(defn- policy [interpreter-step-budget]
+  {::guard/interpreter-step-budget interpreter-step-budget
    ::guard/mode :enforce
    ::guard/invocation-class :agent-eval
-   ::guard/fuel-config-key :seon.config.guard/agent-eval-fuel
+   ::guard/interpreter-step-budget-config-key
+   :seon.config.guard/agent-eval-interpreter-step-budget
    ::guard/deadline-config-key :seon.config.guard/deadline-ms
    ::guard/output-config-key :seon.config.guard/output-cap})
 
-(deftest retained-context-resets-fuel-for-a-second-session
+(deftest retained-context-resets-interpreter-steps-for-a-second-session
   (let [holder (guard/holder)
         retained-ctx
         (sci/init {:interrupt-fn
@@ -45,9 +46,10 @@
               (catch Throwable throwable throwable))
             steering (guard/steering-error! holder thrown)]
         (is (= :budget (:seon.error/kind steering)))
-        (is (= 6 (guard/steps-used holder)))
+        (is (= 6 (guard/interpreter-steps-used holder)))
         (is (= 5 (get-in steering
-                         [:seon.error/data ::guard/initial-fuel])))))))
+                         [:seon.error/data
+                          ::guard/initial-interpreter-step-budget])))))))
 
 (deftest captured-output-crossing-stops-the-eval
   (let [holder (guard/holder)

@@ -179,17 +179,19 @@ claimants.
 ## Guarded evaluation door
 
 Every SCI invocation—agent eval, authored render, or plan function—passes
-through one guarded door. A retained SCI context owns one stable fuel holder;
+through one guarded door. A retained SCI context owns one stable
+interpreter-step counter;
 each invocation resets it from the resolved policy and installs the current
 platform interrupt predicate.
 
 The door enforces three independent abort-only circuit breakers:
 
-- deterministic fuel charged at SCI safepoints;
+- deterministic interpreter steps charged at SCI safepoints;
 - a wall-clock deadline where the platform can arm one; and
 - bounded captured output.
 
-Fuel, deadline, and output caps are required database configuration facts,
+Interpreter-step budgets, deadlines, and output caps are required database
+configuration facts,
 selected by invocation class. They are not scheduling quanta and do not slow
 normal work. Crossing any bound stops through SCI's uncatchable interrupt
 marker, records an agent fault, and returns the one flat steering value:
@@ -200,13 +202,13 @@ marker, records an agent fault, and returns the one flat steering value:
  :seon.error/data
  {:seon.host.guard/config-key :seon.config.guard/...
   :seon.host.guard/invocation-class :agent-eval
-  :seon.host.guard/steps-used 123}}
+  :seon.host.guard/interpreter-steps-used 123}}
 ```
 
-The diagnostic kind is `:budget`, `:timeout`, or `:agent` for fuel, deadline,
-or output policy; the shape does not fork. Deadline state is disarmed and the interrupt predicate is
-cleared in `finally`, so a retained context cannot leak one invocation's
-policy into the next.
+The diagnostic kind is `:budget`, `:timeout`, or `:agent` for interpreter-step
+budget, deadline, or output policy; the shape does not fork. Deadline state is
+disarmed and the interrupt predicate is cleared in `finally`, so a retained
+context cannot leak one invocation's policy into the next.
 
 All resource limits follow [[laws]]: configuration facts with schemas,
 docstrings, units, and calibration provenance; defaults far above measured

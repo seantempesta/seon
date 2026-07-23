@@ -597,23 +597,23 @@
   [configuration]
   (get configuration :seon.config.render/database-edn-cap 16384))
 
-(defn guard-agent-eval-fuel
-  "SCI safepoint-step circuit breaker for one agent eval."
+(defn guard-agent-eval-interpreter-step-budget
+  "SCI interpreter-step circuit breaker for one agent eval."
   {:malli/schema [:=> [:cat :seon.config/singleton] :int]}
   [configuration]
-  (:seon.config.guard/agent-eval-fuel configuration))
+  (:seon.config.guard/agent-eval-interpreter-step-budget configuration))
 
-(defn guard-authored-render-fuel
-  "SCI safepoint-step circuit breaker for one authored render invocation."
+(defn guard-authored-render-interpreter-step-budget
+  "SCI interpreter-step circuit breaker for one authored render invocation."
   {:malli/schema [:=> [:cat :seon.config/singleton] :int]}
   [configuration]
-  (:seon.config.guard/authored-render-fuel configuration))
+  (:seon.config.guard/authored-render-interpreter-step-budget configuration))
 
-(defn guard-plan-fuel
-  "SCI safepoint-step circuit breaker for one plan invocation."
+(defn guard-plan-interpreter-step-budget
+  "SCI interpreter-step circuit breaker for one plan invocation."
   {:malli/schema [:=> [:cat :seon.config/singleton] :int]}
   [configuration]
-  (:seon.config.guard/plan-fuel configuration))
+  (:seon.config.guard/plan-interpreter-step-budget configuration))
 
 (defn guard-deadline-ms
   "Wall-clock circuit breaker for one guarded SCI invocation, in milliseconds."

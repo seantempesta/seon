@@ -146,7 +146,7 @@
                     :seon.error/kind :budget
                     :seon.error/data
                     {:seon.host.guard/config-key
-                     :seon.config.guard/authored-render-fuel}}
+                     :seon.config.guard/authored-render-interpreter-step-budget}}
           door
           {::render/invoke-authored!
            (fn [_] (js/Promise.resolve steering))}

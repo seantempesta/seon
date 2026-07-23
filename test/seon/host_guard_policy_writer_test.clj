@@ -18,9 +18,9 @@
 (deftest complete-positive-guard-policy-is-data
   (with-redefs [context/query-writer-at!
                 (fn [_writer _database _query _arguments] complete-row)]
-    (is (= {:seon.config.guard/agent-eval-fuel 101
-            :seon.config.guard/authored-render-fuel 102
-            :seon.config.guard/plan-fuel 103
+    (is (= {:seon.config.guard/agent-eval-interpreter-step-budget 101
+            :seon.config.guard/authored-render-interpreter-step-budget 102
+            :seon.config.guard/plan-interpreter-step-budget 103
             :seon.config.guard/deadline-ms 104
             :seon.config.guard/output-cap 105}
            (sample/acquire-guard-policy! ::writer ::database)))))

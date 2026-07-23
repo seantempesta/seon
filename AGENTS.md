@@ -356,7 +356,7 @@ Use discoverable code names, not umbrella nouns or synonyms:
 | provider descriptor row | adapter, integration | one hosted provider's data row under the config singleton |
 | packages/, package.json, deps.edn, node_modules | npm-pkgs, maven-pkgs | per-cluster `data/clusters/<name>/packages/` using each ecosystem's own manifest names |
 | contexts on hosts, binding tables | sandbox, VM, jail | sci's own vocabulary for agent execution |
-| step budget, steps | fuel, gas | the guard door's interpreter-step count at sci's `:interrupt-fn` safepoint; `src/seon/host/guard.cljc` ↔ `reference-code/sci` interpreter |
+| interpreter-step budget | fuel, gas | the guard door's interpreter-step count at sci's `:interrupt-fn` safepoint; `src/seon/host/guard.cljc` ↔ `reference-code/sci` interpreter |
 | initialization pages, rows, transaction data | seed bundle, sidecar | paged database population; `src/seon/db/protocol.cljc` (pages/phases) ↔ Datahike tx-data |
 | process record, generation, (pid, start-instant) identity | orphan registry, liveness flag | operator-managed process descriptors; `script/seon/dev/process.clj` + `state.clj` ↔ JDK `ProcessHandle` |
 | pre-processing, apply, resume | warmup, hydration | the explicit derive-once/install/attach operations (R45); `docs/prds/sci-execution-runtime/research/preprocessing-design-2026-07-23.md` until code owners land |

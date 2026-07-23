@@ -284,13 +284,17 @@
                       {:seon.error/kind :core-bug})))))
 
 (def ^:private guard-policy-query
-  '[:find [?agent-fuel ?authored-fuel ?plan-fuel ?deadline-ms ?output-cap]
+  '[:find [?agent-interpreter-step-budget ?authored-interpreter-step-budget
+           ?plan-interpreter-step-budget ?deadline-ms ?output-cap]
     :in $ ?id
     :where
     [?config :seon.config/id ?id]
-    [?config :seon.config.guard/agent-eval-fuel ?agent-fuel]
-    [?config :seon.config.guard/authored-render-fuel ?authored-fuel]
-    [?config :seon.config.guard/plan-fuel ?plan-fuel]
+    [?config :seon.config.guard/agent-eval-interpreter-step-budget
+     ?agent-interpreter-step-budget]
+    [?config :seon.config.guard/authored-render-interpreter-step-budget
+     ?authored-interpreter-step-budget]
+    [?config :seon.config.guard/plan-interpreter-step-budget
+     ?plan-interpreter-step-budget]
     [?config :seon.config.guard/deadline-ms ?deadline-ms]
     [?config :seon.config.guard/output-cap ?output-cap]])
 
@@ -302,9 +306,9 @@
                                       guard-policy-query ["cluster"])
         policy (when (and (vector? row) (= 5 (count row)))
                  (zipmap
-                  [:seon.config.guard/agent-eval-fuel
-                   :seon.config.guard/authored-render-fuel
-                   :seon.config.guard/plan-fuel
+                  [:seon.config.guard/agent-eval-interpreter-step-budget
+                   :seon.config.guard/authored-render-interpreter-step-budget
+                   :seon.config.guard/plan-interpreter-step-budget
                    :seon.config.guard/deadline-ms
                    :seon.config.guard/output-cap]
                   row))]

@@ -1078,7 +1078,7 @@ The real manifest carries a dial per config concern (not just seeds) — a new
 concern = ONE `:seon.config/<section>` schema + one resolver fn + one key here:
 
 Resource ceilings are **circuit-breaker facts**, never hidden governors. Guard
-fuel/deadline/output caps, claimant heap and pool waits, database
+interpreter-step/deadline/output caps, claimant heap and pool waits, database
 mutation-admission bounds, web-render connection/mailbox/pool/body bounds, and
 future limits each have:
 

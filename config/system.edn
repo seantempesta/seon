@@ -81,9 +81,9 @@
 
  ;; ── GUARDED SCI INVOCATION — loud circuit breakers, never work governors.
  :seon.config/guard
- {:seon.config.guard/agent-eval-fuel 100000000
-  :seon.config.guard/authored-render-fuel 100000000
-  :seon.config.guard/plan-fuel 100000000
+ {:seon.config.guard/agent-eval-interpreter-step-budget 100000000
+  :seon.config.guard/authored-render-interpreter-step-budget 100000000
+  :seon.config.guard/plan-interpreter-step-budget 100000000
   :seon.config.guard/deadline-ms 600000
   :seon.config.guard/output-cap 1638400}
 

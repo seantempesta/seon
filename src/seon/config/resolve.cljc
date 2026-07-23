@@ -108,12 +108,12 @@
 
 (def guard-budget-schemas
   "SCI circuit breakers, including units, firing semantics, and U1 calibration."
-  {:seon.config.guard/agent-eval-fuel
-   [:int {:min 1 :description "SCI safepoint steps per agent eval. Default 100000000; protects host availability. Firing records an agent fault and returns a :budget steering value. Calibrated above 100x the 2026-07-23 U1 JVM P99.9."}]
-   :seon.config.guard/authored-render-fuel
-   [:int {:min 1 :description "SCI safepoint steps per authored render invocation. Default 100000000; protects host availability. Firing records an agent fault and returns a :budget steering value. Calibrated above 100x the 2026-07-23 U1 JVM P99.9."}]
-   :seon.config.guard/plan-fuel
-   [:int {:min 1 :description "SCI safepoint steps per plan invocation. Default 100000000; protects host availability. Firing records an agent fault and returns a :budget steering value. Calibrated above 100x the 2026-07-23 U1 JVM P99.9."}]
+  {:seon.config.guard/agent-eval-interpreter-step-budget
+   [:int {:min 1 :description "SCI interpreter steps per agent eval. Default 100000000; protects host availability. Firing records an agent fault and returns a :budget steering value. Calibrated above 100x the 2026-07-23 U1 JVM P99.9."}]
+   :seon.config.guard/authored-render-interpreter-step-budget
+   [:int {:min 1 :description "SCI interpreter steps per authored render invocation. Default 100000000; protects host availability. Firing records an agent fault and returns a :budget steering value. Calibrated above 100x the 2026-07-23 U1 JVM P99.9."}]
+   :seon.config.guard/plan-interpreter-step-budget
+   [:int {:min 1 :description "SCI interpreter steps per plan invocation. Default 100000000; protects host availability. Firing records an agent fault and returns a :budget steering value. Calibrated above 100x the 2026-07-23 U1 JVM P99.9."}]
    :seon.config.guard/deadline-ms
    [:int {:min 1 :description "Wall-clock milliseconds per SCI invocation. Default 600000; protects host availability when work blocks outside safepoints. Firing records an agent fault and returns a :timeout steering value. Calibrated above 100x the 2026-07-23 U1 JVM P99.9."}]
    :seon.config.guard/output-cap
@@ -1016,12 +1016,12 @@
     {:optional true} :seon.config.execution/host-tier?]
    [:seon.config.execution/host-respawn-backoff-ms
     {:optional true} :seon.config.execution/host-respawn-backoff-ms]
-   [:seon.config.guard/agent-eval-fuel
-    {:optional true} :seon.config.guard/agent-eval-fuel]
-   [:seon.config.guard/authored-render-fuel
-    {:optional true} :seon.config.guard/authored-render-fuel]
-   [:seon.config.guard/plan-fuel
-    {:optional true} :seon.config.guard/plan-fuel]
+   [:seon.config.guard/agent-eval-interpreter-step-budget
+    {:optional true} :seon.config.guard/agent-eval-interpreter-step-budget]
+   [:seon.config.guard/authored-render-interpreter-step-budget
+    {:optional true} :seon.config.guard/authored-render-interpreter-step-budget]
+   [:seon.config.guard/plan-interpreter-step-budget
+    {:optional true} :seon.config.guard/plan-interpreter-step-budget]
    [:seon.config.guard/deadline-ms
     {:optional true} :seon.config.guard/deadline-ms]
    [:seon.config.guard/output-cap
@@ -1887,12 +1887,12 @@
               (get execution :seon.config.execution/host-tier? false))
              :seon.config.execution/host-respawn-backoff-ms
              host-respawn-backoff-ms
-             :seon.config.guard/agent-eval-fuel
-             (get guard :seon.config.guard/agent-eval-fuel 100000000)
-             :seon.config.guard/authored-render-fuel
-             (get guard :seon.config.guard/authored-render-fuel 100000000)
-             :seon.config.guard/plan-fuel
-             (get guard :seon.config.guard/plan-fuel 100000000)
+             :seon.config.guard/agent-eval-interpreter-step-budget
+             (get guard :seon.config.guard/agent-eval-interpreter-step-budget 100000000)
+             :seon.config.guard/authored-render-interpreter-step-budget
+             (get guard :seon.config.guard/authored-render-interpreter-step-budget 100000000)
+             :seon.config.guard/plan-interpreter-step-budget
+             (get guard :seon.config.guard/plan-interpreter-step-budget 100000000)
              :seon.config.guard/deadline-ms
              (get guard :seon.config.guard/deadline-ms 600000)
              :seon.config.guard/output-cap
