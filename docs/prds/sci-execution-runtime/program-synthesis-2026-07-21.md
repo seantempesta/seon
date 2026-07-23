@@ -1017,6 +1017,32 @@ COMPLETELY before dispatching anything.
   for ephemeral clusters, EXPLICIT with loud refusal + exact remedy
   for file-backed clusters. The preprocessing design doc is now fully
   ruled; S-ladder implementation unblocked.
+- B2 LIVE-PROVEN BROKEN + R46 SETTLED (2026-07-23 eve): the probe
+  showed the tier-less scheduled eval's ERROR VALUE IS DISCARDED and
+  the turn closes falsely :done with zero receipts (receipt-integrity
+  class, part of the fix). Design accepted (research/scheduled-fns-
+  eval-design-2026-07-23.md). R46 (owner, via structured choices):
+  fire = durable eval-only turn then ordinary LLM wake (agent reacts,
+  incl. to failures); missed fires SKIP + record a visible miss fact;
+  one ordered batch per agent/minute, all forms attempted, stable
+  schedule-id order; CLOCK = JVM CLAIMANT duty effective now (owner
+  said "JVM side for sure", floated writer — orchestrator pushback
+  recorded: R26 keeps the writer tx+feed only; claimant creates
+  CAS-idempotent fire facts keyed schedule×nominal-minute, races
+  safe; scheduled FUNCTION executes behind the guarded sci door;
+  cron strings parsed as data by the core parser). Remaining 22
+  design questions ruled by existing laws (frozen fire basis;
+  content-addressed source blob under its OWN attribute — reply-blob
+  stays LLM evidence; fires are events surviving schedule edits;
+  transcript-visible, work-count-excluded; typed error for absent
+  session). SCHEDFIX lane queues at the front of the post-checkpoint
+  wave (after fixseed frees agent/*).
+- PROCFIX ACCEPTED (fe5e289b9 + 558a9d601, verified path-limited,
+  118/545 green): lifecycle membership graph-derived, target/result
+  equality loud, exact-identity dead-generation reaping; LIVE proof
+  = kill web-render child → ordinary down → fresh reset succeeds →
+  all records absent. Orphaned-record class dead; issue archived.
+  Full reconciliation/onExit redesign remains post-checkpoint.
 - TEST-SIMPLIFICATION AUDIT QUEUED (owner, 2026-07-23 eve): once
   fixseed proves the fixtures-are-clusters-in-miniature mechanism, a
   Sol audit sweeps the whole test surface to migrate suites onto it
