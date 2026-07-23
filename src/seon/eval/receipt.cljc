@@ -7,6 +7,32 @@
     [seon.db.id :as db.id]
     [seon.schema :as schema]))
 
+(schema/register!
+  :seon.eval/id
+  [:and {:seon.db/identity true
+         :seon.db.id/generator :seon.db.id.generator/compact}
+   ::db.id/compact-value])
+(schema/register! :seon.eval/at :inst)
+;; Wall-clock duration per form.
+(schema/register! :seon.eval/duration-ms :int)
+(schema/register! :seon.eval/narration :string)
+(schema/register! :seon.eval/source :string)
+(schema/register! :seon.eval/status
+                  [:enum :running :done :error :interrupted])
+(schema/register! :seon.eval/ok? :boolean)
+(schema/register! :seon.eval/progress? :boolean)
+(schema/register! :seon.eval/result-edn :string)
+;; Captured println/prn output, present only when the form printed.
+(schema/register! :seon.eval/output :string)
+(schema/register! :seon.eval/error :string)
+;; Structured instrumentation envelope stored as pr-str because the
+;; Malli-to-Datahike bridge has no map value type.
+(schema/register! :seon.eval/error-data :string)
+;; The namespace the eval ended in.
+(schema/register! :seon.eval/ns :symbol)
+;; Optional direct ref to the agent whose scope produced the eval.
+(schema/register! :seon.eval/agent :seon.db/ref)
+
 (schema/register! ::receipt-state
                   [:enum :absent :running :done :error :interrupted])
 (schema/register! ::start-request
