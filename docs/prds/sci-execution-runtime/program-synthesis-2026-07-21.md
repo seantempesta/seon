@@ -167,10 +167,16 @@ COMPLETELY before dispatching anything.
   checkpoint (u4render could not launch while the shared :test build
   is broken by the in-flight spine). context-purity issue stays open
   for exactly that live acceptance; my.canvas issue resolved.
-- U3 Seon-side work COMMITTED (observed in log: 3b63b2393 fork pin,
-  a6f45ee01 pipelining, + regressions); lane still running post-fix
-  gates; second fork defect (schema-alias bridge) hands to it on
-  return.
+- U3 ACCEPTED (2026-07-23 overnight): fork fix 9c356e32 proven
+  (same-basis concurrency → exactly one success + :transaction/
+  stale-basis; A′ 32.04x at depth 64; forced-kill recovery green;
+  writer integration 16/120 green); pin 3b63b2393; pipelining
+  a6f45ee01; basis issue archived. Full writer gate red = U2's
+  in-flight host/runtime rebuild (expected; frozen checkpoint
+  settles). U3 resumed once more for the schema-alias bridge fork
+  fix (dereference keyword forms through the forms map). MORNING
+  ITEM: push fork commits (9c356e32 + the bridge fix) to
+  seantempesta/datahike.
 - U2 THE SPINE DISPATCHED (spec tmp/orchestrator/
   u2-claim-driver-spec.md, effort=high): both tiers run the one
   portable claim-native driver as phase-limited claimants (pod:
