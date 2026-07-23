@@ -591,6 +591,16 @@ COMPLETELY before dispatching anything.
   schema-admission session RESUMED priority-zero to route core
   predicates through requiring-resolve on every load path incl.
   standalone boot, with the fixture-vs-boot regression.
+- QUEUE STATE (2026-07-23 late): DISPATCHED — P5 driver enforcement
+  + router deletion (spec tmp/orchestrator/p5-enforcement-spec.md)
+  and P1b per-artifact export inventories (p1b-inventory-spec.md);
+  LIVE — schemagate provenance-recognition fix (checkpoint gate),
+  arch-drift Fable audit (docs). POST-CHECKPOINT ORDER: P3 + P4
+  (behind schemagate's files) → U9 great deletion → web slice 2
+  (routes + /agent pages + entity-scoped interest, measured 1.094ms)
+  → JVM package leaf host (research done) → census stragglers +
+  triage #10/read-cost rows. AGENTS.md gained the testing-mentality
+  law (8a4dcdd1d).
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
