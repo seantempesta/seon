@@ -143,6 +143,15 @@ COMPLETELY before dispatching anything.
   constraints + top regressions; U2's disposition of the two drill
   findings reviewed skeptically first (neither waves through
   without root cause + regression).
+- Docs lane ACCEPTED (ff9196412: 12 docs + R26/R27/R28 ADRs). Its
+  mismatch ledger feeds the queue: #4 = schema registrations still
+  in .cljs while builders are portable — the ROOT-CAUSE CLASS of
+  the drill's current-turn rejection; fix = promote schema
+  registration into the owning portable core (one registration,
+  both tiers), a third designed-out class. #3 = the concrete R27
+  literal sweep worklist (turn/core retry bounds, shell/web
+  defaults, driver/host invocation caps). Others are known
+  U6b/U7/U9 cutover boundaries.
 - Config entanglement resolved (2026-07-23 overnight): U4's
   render-context sections and U3's mutation-admission sections landed
   interleaved in the one uncommitted config owner; orchestrator
