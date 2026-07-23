@@ -814,6 +814,17 @@ the anchor stays the state ledger.
   consult process-global state, or perform async database acquisition inside
   `plan-execution` (`src/seon/db/protocol.cljc:242-250`,
   `src/seon/program/edge.cljc:65-83,483-529`).
+- **Exact persisted bundles need owned terminal connections, not global
+  terminal lookup.** Store terminal descriptors once by their identity, but
+  replace a function's cardinality-many terminal refs in the same exact-set
+  transition as its direct edges. A single pull can then reconstruct canonical
+  bundles and reproduce the in-memory graph digest. Keep acquisition separate:
+  query every edge/schema/contract row at one explicit database value, stamp
+  its basis transaction and commit ID, and make the planner reject a mismatched
+  fence as a flat core bug. Fresh real-writer fixtures must first exercise
+  committed schema installation before an exact-set transition whose leading
+  retractions assume installed attributes (`src/seon/program/edge.cljc`,
+  `src/seon/program/plan.cljc`).
 
 ## Streaming and provider-descriptor verified-stop scars (2026-07-23)
 
