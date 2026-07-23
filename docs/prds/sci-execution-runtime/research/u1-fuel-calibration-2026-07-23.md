@@ -60,3 +60,12 @@ every repetition of a case.
 The complete machine-readable run is retained at
 `tmp/orchestrator/u1-calibration-raw-final.edn`; the committed benchmark
 reproduces it.
+
+## Guard closure cost
+
+The first microbenchmark caught generic array access plus schema-instrumented
+public dispatch at `10,960.872 ns/check`. The production SCI closure now
+captures the retained holder's private, type-hinted array fast path; one million
+warmed checks took `29,857,042 ns`, or `29.857 ns/check`. Raw results are in
+`tmp/orchestrator/u1-guard-microbenchmark.log` and
+`tmp/orchestrator/u1-guard-microbenchmark-final.log`.
