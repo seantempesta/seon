@@ -1028,6 +1028,18 @@ COMPLETELY before dispatching anything.
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- BOOTFAST (S1) ACCEPTED (df2cb508a, verified from gate log):
+  build-projection 2,962→210 ms COLD (14.09×), fingerprint
+  byte-identical; reducers/fold adds 1.22× on the JVM (CLJS stays
+  serial — no parallel reducers, registry can't cross Bun workers);
+  duplicate fresh-boot projection build eliminated via
+  fingerprint-guarded reuse (mismatch → full rebuild); the 35s gap
+  (reconcile-config!/ensure-initial-agent!) now logs progress. Wiki
+  scar staged (bootfast-wiki-scar.md) pending the wiki file's
+  release. Real boot numbers measured at the checkpoint. R43TRUST
+  RESUMED into the freed schema/client/turn files with the grant
+  (authorship fields through BOTH cold and reuse paths, in the
+  fingerprint if classification-affecting).
 - R47 APPLIED TO THE GUARD (owner catch, 2026-07-23 eve): 'fuel' is
   an invented metaphor for what is literally an interpreter STEP
   count at sci's :interrupt-fn safepoint — STEPBUDGET rename lane
