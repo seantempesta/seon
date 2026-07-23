@@ -673,6 +673,15 @@ COMPLETELY before dispatching anything.
   inventories-unavailable → real acquisition granted. R39 (private
   corpus rows) FOLDED into the same lane (owns indexing.clj); its
   live proof sequences through the paged initialization.
+- Provenance recognition ACCEPTED (adc25b852 + b6ecb55df: precommit
+  core validation without fabricated provenance; strict :maybe
+  agent-only per R31; former boot failures pass). NEXT DOMINO =
+  fresh-boot initialization exceeds the 4 MiB frame (today's row
+  growth; error correctly names its R27 key). RULED: PAGE the
+  initialization (bounded frames at any corpus size; partial seed
+  impossible to mistake for complete), never raise the limit for
+  normal growth. initpage lane DISPATCHED — the checkpoint's last
+  gate.
 ## Rulings index (full text: git b1752173c and design docs)
 
 - R9 op-id: `:seon.capability/op-id` optional public idempotency
