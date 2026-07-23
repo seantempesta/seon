@@ -73,3 +73,15 @@ The database owner should expose this one maintained interpretation for
 source-analysis consumers. The edge owner then translates exact attributes
 directly and maps `:all` to its all-at-basis fact. It must not duplicate the
 query or pull parser.
+
+## Projection seam landed — 2026-07-23
+
+`seon.db/read-attribute-dependencies` now exposes the maintained
+`query-dependency-plan` and `pull-dependency-plan` as one pure, read-only,
+portable projection. It returns only the fork's exact qualified-attribute set
+or `:all`, aligns the implicit query database source, and widens malformed or
+misaligned requests. Focused CLJ and CLJS contract tests own this boundary.
+
+This closes the edge-bundle handoff, not the whole issue: cache inheritance,
+listener selection, generated false-negative coverage, and schema-affecting
+transactions remain under the acceptance criteria above.

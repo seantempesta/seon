@@ -775,3 +775,28 @@ the anchor stays the state ledger.
   `seon.agent.run/id` existed. Keep the real namespaced request key, but
   validate its value through the shared compact-id value schema; the stored
   identity registration stays with its database owner.
+
+## Edge-bundle implementation scars (2026-07-23)
+
+- **Direct edges come from the accepted form plus the retained resolver
+  tables.** The self-host analyzer projection does not retain function-body
+  ASTs, while reparsing source with a second analyzer would create another
+  program authority. Both tees now feed the same already-read function form
+  and immutable alias, refer, local, core, macro, and effect facts into one
+  pure projection.
+- **Datahike query inputs must be aligned before asking for dependencies.**
+  Query forms can omit the implicit `$` source while the maintained parsed
+  projection reasons over declared `:in` bindings. The `seon.db` read-only
+  seam inserts only that implicit database argument, then returns the fork's
+  exact attribute set or `:all`; malformed or misaligned inputs widen rather
+  than guessing.
+- **Uncertainty is a first-class direct edge.** Dynamic keyword construction,
+  unresolved calls, open higher-order values, dynamic read/write patterns,
+  and macros whose expansion is unavailable produce explicit uncertainty
+  facts. An empty edge set means analysis proved there was no edge; it never
+  means the projection silently gave up.
+- **A graph digest can remain independent of artifact acquisition.** The
+  canonical edge bundle owns a sibling digest over sorted intrinsic facts and
+  includes each function's analyzed generation. The deferred artifact export
+  inventory can later select bundles without making private helpers public or
+  changing edge identity.
