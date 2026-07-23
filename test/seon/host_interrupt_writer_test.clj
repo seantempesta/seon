@@ -209,11 +209,23 @@
              (:seon.execution/message (::ready session)))
           (pr-str (::ready session)))
       (assert-normal-eval! session agent-id)
-      (let [defined (invoke! session agent-id "(defn total [row] row)" 2000)]
+      (let [defined
+            (invoke!
+             session agent-id
+             (str "(defn total "
+                  "{:malli/schema [:=> [:catn [:row :int]] :int]} "
+                  "[row] row)")
+             2000)]
         (is (= :seon.execution.message/result
                (get-in defined [:response :seon.execution/message]))
             (pr-str defined)))
-      (let [defined (invoke! session agent-id "(defn toll [row] row)" 2000)]
+      (let [defined
+            (invoke!
+             session agent-id
+             (str "(defn toll "
+                  "{:malli/schema [:=> [:catn [:row :int]] :int]} "
+                  "[row] row)")
+             2000)]
         (is (= :seon.execution.message/result
                (get-in defined [:response :seon.execution/message]))
             (pr-str defined)))

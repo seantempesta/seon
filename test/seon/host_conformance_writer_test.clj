@@ -553,8 +553,14 @@
       (send! session
              (invoke-value
               "preflight-terminal-agent" "preflight-seed"
-              [(form "(defn thing-aa [] :aa)")
-               (form "(defn thing-ab [] :ab)")]
+              [(form
+                (str "(defn thing-aa "
+                     "{:malli/schema [:=> [:cat] :keyword]} "
+                     "[] :aa)"))
+               (form
+                (str "(defn thing-ab "
+                     "{:malli/schema [:=> [:cat] :keyword]} "
+                     "[] :ab)"))]
               :turn-id nil))
       (let [seed-response (recv! session)]
         (is (= 2 (get-in seed-response

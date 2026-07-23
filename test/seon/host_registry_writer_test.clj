@@ -591,7 +591,9 @@
                  live agent-id "parity-invoke-1" head
                  [{:seon.repl/kind :form
                    :seon.repl/source
-                   "(defn parity-double \"Double x.\" [x] (* 2 x))"}
+                   (str "(defn parity-double \"Double x.\" "
+                        "{:malli/schema [:=> [:catn [:x :int]] :int]} "
+                        "[x] (* 2 x))")}
                   {:seon.repl/kind :form
                    :seon.repl/source "(parity-double 21)"}
                   {:seon.repl/kind :form
@@ -639,7 +641,9 @@
                              [?fn :seon.fn/doc ?doc]
                              [?fn :seon.fn/ns ?ns]
                              [?ns :seon.ns/name ?ns-sym]]))]
-              (is (= "(defn parity-double \"Double x.\" [x] (* 2 x))"
+              (is (= (str "(defn parity-double \"Double x.\" "
+                          "{:malli/schema [:=> [:catn [:x :int]] :int]} "
+                          "[x] (* 2 x))")
                      (first fn-row)))
               (is (= "([x])" (second fn-row)) (pr-str fn-row))
               (is (= "Double x." (nth fn-row 2)))
