@@ -960,7 +960,16 @@ COMPLETELY before dispatching anything.
   analyzer/env/jit caching for what pre-processing can persist vs
   what must re-materialize; spec a fork extension if a clean
   analysis-cache hook needs one). Implementation units spec from it.
-- R45 vocabulary + maintenance (owner, same evening): the operation
+- R45 addendum (owner, same evening): CHEAP CLUSTER SPIN-UP is the
+  same problem — pre-processing is RELEASE-SCOPED and shared by every
+  cluster (one derivation per artifact, N clusters pay only
+  apply+attach); the design must separate release-scoped identity
+  (artifact digest × schema fingerprint) from cluster-scoped identity
+  (basis) so the expensive part is shared; preprocessed release
+  artifacts stored once by reference, per-cluster storage only for
+  the store/manifests; the ≤10s target covers a fresh cluster's first
+  boot; ephemeral lane clusters stay cheap. Relayed to the running
+  design agent mid-flight.
   is PRE-PROCESSING (use that name); and the preprocessed cache is
   kept CURRENT AS CHANGES HAPPEN — every mutation that would
   invalidate it (registration, durable defn, hot reload) updates the
