@@ -1170,6 +1170,29 @@ original files; acquire-then-fence two-step per the design
 (exclusive nil→claimant + nil→1 claim BEFORE work; held epoch
 threaded through every pointer+epoch fence). L0 RE-DISPATCHED.
 
+**LLM/HTTP I/O DESIGN RETURNED + committed `9b31eb5cb`**
+(`research/llm-http-io-design-2026-07-23.md`): LLM I/O is ~80%
+stateless already (adapters one-attempt value machines, retry
+decisions pure, config one frozen db value); model calls :external
+with attempt identity (turn-id, ordinal) — claimant death → :open
+→ :crashed CAS → steal → next ordinal in budget; renders already
+behind killable boundaries, stage (b) = authored renders under the
+sci host's deadline→Thread.interrupt lane; 17-row failure taxonomy;
+loud zero-attempt mirror for LLM phases; honest gap named (in-pod
+Bun renders in the stage-(a) interim are supervised, not
+preemptible). HTTP-leaf timing + stage-(a) skip = the morning owner
+discussion (its owner-decisions section).
+
+**RULING 24 PROPOSED (awaiting owner): BREAK-AND-REPLACE the
+driver.** Keep the whole claim/epoch/lease/reacquire state machine
+(intrinsic — states move from process memory into data); DELETE the
+migration choreography: no fence retrofit into the legacy Bun loop;
+build the claim-native portable driver once (.cljc, in-pod first,
+JVM at what was L3), delete loop.cljs's driving role in the same
+change; L0-L2 collapse into one build-it-right unit carrying ALL
+the falsifiers (two-driver race, reacquire, five kill points, U12
+drill). L0 retrofit lane STOPPED pending this ruling.
+
 **Ruling 23 (orchestrator, resolves L0 stop #2 — the reacquire
 gap):** (a) `src/seon/agent/lifecycle.cljc` + matching tests join
 L0's Owned (the epoch must thread from the claimant into the
