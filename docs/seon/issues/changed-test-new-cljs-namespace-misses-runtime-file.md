@@ -7,6 +7,12 @@ tags: [issue, cljs, flow]
 
 # Include new CLJS namespaces in changed-test runtime artifacts
 
+## Triage — 2026-07-23
+
+REAL+INDEPENDENT (M), owned by the immutable CLJS test artifact/fingerprint in
+`bin/test-cljs` and `seon.dev.changed-test`. The changed-test artifact remains a
+development gate after P4 and is not covered by runtime cutover acceptance.
+
 ## Problem
 
 The automatic changed-test path selected a newly added `.cljc` namespace and

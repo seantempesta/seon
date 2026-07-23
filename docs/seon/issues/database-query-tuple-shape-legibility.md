@@ -7,6 +7,13 @@ tags: [issue, database, agent]
 
 # Database query tuple results are hard for agents to read
 
+## Triage — 2026-07-23
+
+REAL+INDEPENDENT (S), owned by `seon.db/query` schemas/examples and value
+rendering. The current public schema is still `:any` at
+`src/seon/db.cljc:528-545`, so scalar/tuple/collection/relation shapes remain
+undiscoverable; this is not part of P4.
+
 ## Problem
 
 Agents can confuse Datalog tuple/set results with entity maps and then write

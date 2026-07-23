@@ -7,6 +7,12 @@ tags: [issue, agent, architecture]
 
 # Context block order is static
 
+## Triage — 2026-07-23
+
+REAL+INDEPENDENT (M), owned by context ordering and its database-derived
+observations. P4 changes who advances runs, but does not implement the measured
+stability estimates, epoch/hysteresis, or cache-band ordering required here.
+
 ## Problem
 
 The prompt renderer sorts top-level blocks by a hand-set integer

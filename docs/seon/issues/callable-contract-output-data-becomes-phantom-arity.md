@@ -7,6 +7,14 @@ tags: [issue, agent, schema]
 
 # Prevent output data from becoming a phantom callable arity
 
+## Triage — 2026-07-23
+
+REAL+INDEPENDENT (S), owned by
+`seon.agent.ctx.namespaces/callable-contract`. Current projection code remains
+at `src/seon/agent/ctx/namespaces.cljs:1166-1234`; the issue explicitly records
+this as separate from the completed pure-variadic repair and P4 does not replace
+namespace cards/autocomplete consumers.
+
 ## Problem
 
 The shared compact callable projection renders a bogus second positional arity

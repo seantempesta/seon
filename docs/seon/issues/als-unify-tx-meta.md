@@ -7,6 +7,13 @@ tags: [issue, database, architecture]
 
 # Unify agent and operation AsyncLocalStorage
 
+## Triage — 2026-07-23
+
+REAL+INDEPENDENT (M), owned by `seon.db.fiber`. Current
+`src/seon/db/fiber.cljs:8-18` still creates separate transaction, agent, and
+read-evidence stores, and lines 50-64 still expose separate transaction and
+agent scopes. The loop-migration slice does not subsume this carrier cleanup.
+
 ## Problem
 
 The db layer runs TWO separate AsyncLocalStorage stores: the agent-id ALS and

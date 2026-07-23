@@ -7,6 +7,12 @@ tags: [issue, database, cljs]
 
 # Preserve distinct large BigInts in cardinality-many attributes
 
+## Triage — 2026-07-23
+
+REAL+INDEPENDENT (M), owned by maintained Datahike CLJS transaction/index
+normalization. The database seam and P4 retain Datahike semantics; neither
+planned unit replaces BigInt equality/hash behavior.
+
 ## Problem
 
 Datahike's ClojureScript transaction/index path collapses two distinct native

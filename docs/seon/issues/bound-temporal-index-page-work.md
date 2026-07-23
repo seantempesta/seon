@@ -7,6 +7,13 @@ tags: [issue, database, flow, architecture]
 
 # Bound temporal index-page work
 
+## Triage — 2026-07-23
+
+REAL+INDEPENDENT (L), owned by maintained Datahike temporal index paging. The
+portable database seam still exposes `index-page` at
+`src/seon/db.cljc:715-747`; neither P4 nor child deletion changes the native
+temporal restoration cost described here.
+
 ## Problem
 
 A narrow `index-page` over an earlier `AsOfDB` or `SinceDB` can consume and

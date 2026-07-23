@@ -7,6 +7,14 @@ tags: [issue, pod, database]
 
 # Bun 1.3.14 segfaults on AsyncLocalStorage.enterWith in ESM top-level continuations
 
+## Triage — 2026-07-23
+
+UNCLEAR. `src/seon/db/fiber.cljs:55-59` still contains the sole `enterWith`
+call, contrary to the note's anticipated deletion. Run the note's minimal ESM
+top-level continuation under the currently pinned Bun and trace whether this
+caller can execute at top level; that distinguishes external-fixed/unexposed
+from a live crash risk.
+
 ## Problem
 
 Bun 1.3.14 (macOS Silicon) crashes with

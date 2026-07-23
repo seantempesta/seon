@@ -7,6 +7,12 @@ tags: [issue, agent, cljs]
 
 # Remove undeclared-var warnings from the self-host bootstrap build
 
+## Triage — 2026-07-23
+
+DISSOLVES into the cutover unit “per-agent child + `eval.cljs` self-host
+deletion.” The warning belongs to the self-host bootstrap/analyzer artifact
+which the reconciled spine deletes rather than ports.
+
 ## Problem
 
 Every canonical reset/restart compiles the self-host bootstrap successfully but

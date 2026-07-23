@@ -16,6 +16,7 @@ thunk is now correctly RESOLVED (the runner fix below) but INVOKING it throws:
 
 ```text
 TypeError: Cannot read properties of undefined (reading 'call')
+
 ```
 
 reported as an `:error` event, so the run summary shows `{:test 1 :pass 0
@@ -90,3 +91,8 @@ shape compiled by shadow (the `bin/test-cljs` `:node-test` build) runs its
 - `src/seon/test/runner.cljs` — `resolve-test-fn`
 - `src/seon/eval.cljs` — `ensure-analyzer-ns!`, `raw-eval`
 - `test/seon/test/runner_test.cljs` — the green standard-compiled proofs
+
+## Triage — 2026-07-23
+
+DISSOLVES into the reconciled cutover unit that deletes the `eval.cljs`
+self-host; the defect is confined to that self-host `cljs.test` thunk path.

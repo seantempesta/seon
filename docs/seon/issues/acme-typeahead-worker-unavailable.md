@@ -7,6 +7,12 @@ tags: [issue, agent, milestone, component]
 
 # ACME typeahead worker is unavailable during live Inspect runs
 
+## Triage — 2026-07-23
+
+UNCLEAR. Settle with one readiness request to the configured ACME typeahead
+endpoint while recording the selected worker identity and model digest; no
+current-source fact can establish whether that external worker is available.
+
 ## Problem
 
 ACME is the diffusion/typeahead testbed, but a native generated database

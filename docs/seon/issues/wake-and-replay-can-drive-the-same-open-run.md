@@ -35,3 +35,9 @@ work reconciliation.
 - Focused tests prove two callers invoke `run-loop!` once.
 - Restart and a real inbound message complete without an active-invocation
   refusal.
+
+## Triage — 2026-07-23
+
+DISSOLVES into the P4 loop-migration slice: CAS-claimable database run-state
+replaces the competing local wake/replay pod drivers, and U12 proves restart
+without doubled work.

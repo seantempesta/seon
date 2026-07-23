@@ -105,3 +105,8 @@ and the unhandled-rejection funnel classify the fault.
   database session is live.
 - Frames on a new fault name the throw site, not the ExceptionInfo
   constructor.
+
+Triage 2026-07-23 — **UNCLEAR.** Settle the remaining detached funnel with
+one bad synchronous `eval_cljs` form and one detached async rejection under
+`:seon.config/on-core-error :crash`; both must record `:agent` and leave the pod
+ready.

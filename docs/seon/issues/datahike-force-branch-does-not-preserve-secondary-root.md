@@ -7,6 +7,12 @@ tags: [issue, database, flow]
 
 # Datahike force branch does not preserve secondary root
 
+## Triage — 2026-07-23
+
+REAL+INDEPENDENT (L), owned by maintained Datahike/Proximum forced-branch
+publication. P4 depends on correct branch/database recovery but does not include
+the secondary-root preservation and lost-response convergence acceptance here.
+
 ## Problem
 
 The prior selected Datahike `417649383c65e13f15ea41d394fb1ed742477965`

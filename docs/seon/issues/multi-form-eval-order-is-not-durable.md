@@ -167,3 +167,5 @@ generation and running eval identity. It must leave the writer alive, await
 absence of the owned pod subtree, and let ordinary `bin/seon up` perform the
 existing recovery path. This is containment proof support, not another eval
 runner or persisted phase.
+
+Triage 2026-07-23 — **DISSOLVES into P4 loop migration plus `eval.cljs` deletion**; durable ordering belongs to run-step attempts, not the outgoing batch driver.

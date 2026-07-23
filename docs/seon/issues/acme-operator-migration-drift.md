@@ -7,6 +7,13 @@ tags: [issue, component, agent, database, web]
 
 # ACME cannot migrate safely through the current operator
 
+## Triage — 2026-07-23
+
+REAL+INDEPENDENT (S), owned by the ACME operator adapter. Current live proof in
+this note shows the semantic flavor works, but its retained stale-record
+migration still requires a prior `bin/acme down`; that residual is not part of
+the loop-migration or execution-child deletion units.
+
 ## Problem
 
 The ACME downstream harness still composes the removed shell-supervisor

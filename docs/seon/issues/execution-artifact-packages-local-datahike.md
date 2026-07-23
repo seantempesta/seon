@@ -48,3 +48,5 @@ database API or cache.
   but package size is not a graduation or performance metric.
 - The 1/4/16/32 density matrix uses the remote-only artifact when selecting the
   shipped child cap.
+
+Triage 2026-07-23 — **DISSOLVES into post-P4 child deletion**; the execution artifact whose local Datahike reachability this note governs is removed.

@@ -31,3 +31,8 @@ derivation.
   succeeded.
 - Existing successful and failed receipt tests remain green.
 - A multi-form real agent reply advances past its first successful eval.
+
+## Triage — 2026-07-23
+
+DISSOLVES into the reconciled cutover unit that deletes the `eval.cljs`
+self-host and its child-side `record-eval!` path.

@@ -115,3 +115,5 @@ no-source acceptance fixture.
   inventory test rejects absolute or escaping paths, symlinks, missing or
   changed members, undeclared production npm dependencies, license mismatch,
   and mixed writer/runtime/SDK compatibility identities.
+
+Triage 2026-07-23 — **DISSOLVES into the post-P4 cutover/package-descriptor unit**, which deletes the packaged execution child and self-host bootstrap.

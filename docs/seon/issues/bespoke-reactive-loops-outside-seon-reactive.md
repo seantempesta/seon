@@ -7,6 +7,13 @@ tags: [issue, database, architecture, web]
 
 # Bespoke reactive loops duplicate seon.reactive outside its owner
 
+## Triage — 2026-07-23
+
+REAL+INDEPENDENT (L), owned by `seon.reactive`. Current
+`src/seon/web/router.cljs:344-416` still implements its own projection/listen
+refresh loop, so even though P4 can absorb the `/agents/run` polling portion,
+the router/client reactive duplication survives that unit.
+
 ## Problem
 
 `seon.reactive` owns registered reactive reads (registration, one active

@@ -74,3 +74,5 @@ The repair-capability defect is closed by that proof. Keep this issue open only
 for the first acceptance item: the initial program-load failure must expose its
 source namespace and form directly instead of requiring an IPC value-path
 diagnostic.
+
+Triage 2026-07-23 — **DISSOLVES into post-P4 `eval.cljs` self-host deletion**; repairability must survive through the landed loader door and SCI path.

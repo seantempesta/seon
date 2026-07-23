@@ -7,6 +7,13 @@ tags: [issue, database, flow]
 
 # Align Datahike HTTP remote connection identity
 
+## Triage — 2026-07-23
+
+REAL+INDEPENDENT (M), owned by Datahike HTTP connection serialization and
+registry identity. The note already establishes that Seon does not use this
+transport, and neither P4 nor child deletion changes the maintained dependency
+failure.
+
 ## Problem
 
 Datahike's legacy HTTP writer transport serializes a server-side database

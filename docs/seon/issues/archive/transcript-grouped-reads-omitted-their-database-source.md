@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, database]
 ---
@@ -33,3 +33,10 @@ their query members.
   database value used by the envelope.
 - Focused tests inspect every member in both stages.
 - The real transcript renders rather than emitting an acquisition error.
+
+## Triage closure — 2026-07-23
+
+Current source disproves the missing-member source:
+`src/seon/agent/ctx/transcript.cljs:992-998` associates the same immutable
+`::db/db` onto every grouped pull member as well as the `execute-many`
+envelope.

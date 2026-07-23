@@ -33,3 +33,5 @@ than maintain a hand-written schema subset.
 - A nested authored synchronous renderer hits its parent deadline, retires only
   that agent's child, leaves another agent responsive, and reloads current
   program source in a replacement child.
+
+Triage 2026-07-23 — **DISSOLVES into post-P4 child deletion**; this proof scaffolding targets the outgoing execution-child topology.

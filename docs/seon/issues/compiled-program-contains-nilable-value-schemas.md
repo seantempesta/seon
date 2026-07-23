@@ -7,6 +7,13 @@ tags: [issue, database, schema]
 
 # Compiled program contains nilable value schemas
 
+## Triage — 2026-07-23
+
+REAL+INDEPENDENT (S), owned by schema registration/compiled-program admission.
+Current `src/seon/agent/home.cljs:76-78` still registers `[:maybe ...]` value
+slots and lines 138-140 retain nilable callable inputs, so the claimed
+population-wide closure is not established by current source.
+
 ## Problem
 
 Three maintained schema registrations previously put `:maybe` at the top level

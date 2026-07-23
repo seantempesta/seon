@@ -6,6 +6,14 @@ tags: [issue, agent, cljs]
 
 # D13 repair merge broke the bare-babashka loadability the candidates half had
 
+## Triage — 2026-07-23
+
+UNCLEAR. The checked-in `bb.edn` path is reported green, while only a deployed
+bare-source contract remains disputed. Owner input must decide whether bare
+loading is supported; if yes, run `bin/oracle-server` from an image/directory
+without repository `bb.edn`, otherwise supersede this note as an unsupported
+deployment shape.
+
 ## Observed (2026-07-22)
 
 `bin/oracle-server` failed to load after D13 (05a13dd4):

@@ -68,3 +68,9 @@ maps from that same result.
 - The close transaction's returned coordinate pins the final asynchronous
   pull, so a later head cannot change the returned turn.
 - A failed required member produces one error value and zero provider calls.
+
+## Triage — 2026-07-23
+
+DISSOLVES into the P4 loop-migration slice: resumable database run-state steps
+and the U12 pod-kill/restart proof subsume the remaining frozen step-input and
+byte-identity acceptance.

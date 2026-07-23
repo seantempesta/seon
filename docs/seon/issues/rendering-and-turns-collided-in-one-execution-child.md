@@ -37,3 +37,9 @@ selected renderer calls.
   predecessor.
 - Host tests prove same-agent ordering and existing cross-agent isolation.
 - A real agent turn completes while Datastar feeds are open.
+
+## Triage — 2026-07-23
+
+DISSOLVES into the reconciled cutover unit “per-agent child +
+`eval.cljs` self-host deletion” (`program-synthesis-2026-07-21.md:1125-1126`);
+the collision is confined to the execution child that unit deletes.

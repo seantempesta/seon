@@ -98,3 +98,7 @@ agent loop.
   result with its call ID.
 - Until that proof exists, maintained documentation claims only
   single-response K3 compatibility.
+
+Triage 2026-07-23 — **UNCLEAR.** Run one paid/live Kimi K3 tool-call
+continuation through completion and retain request/response ids, finish reason,
+assistant tool-call payload, and follow-up result.

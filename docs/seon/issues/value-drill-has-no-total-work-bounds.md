@@ -45,3 +45,8 @@ must independently enforce the same resolved maxima.
   `offset + page-size` within the total budget.
 - Explicit values override defaults without weakening hard maxima.
 - Focused config, sampler, protocol, and route tests prove the bounds.
+
+## Triage — 2026-07-23
+
+DISSOLVES into the post-cutover U10 value-drill graduation unit, which owns the
+remaining renderer/route effective-limit and zero-work proofs.

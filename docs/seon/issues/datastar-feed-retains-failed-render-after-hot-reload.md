@@ -7,6 +7,13 @@ tags: [issue, web, flow]
 
 # Invalidate a cached failed Datastar render after its owner reloads
 
+## Triage — 2026-07-23
+
+REAL+INDEPENDENT (M), owned by `seon.web.datastar`'s subscription/cache
+transition. The web UI remains pod-owned after P4, and current
+`src/seon/web/datastar.cljs:393-416` still carries failed render state through
+the observed result, so cutover does not retire this feed behavior.
+
 ## Problem
 
 An agent feed that cached a transcript error continued serving the old complete

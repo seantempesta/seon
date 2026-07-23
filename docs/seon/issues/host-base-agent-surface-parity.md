@@ -50,3 +50,5 @@ an unaudited blackout list.
 Split out of `host-preflight-candidate-ranking-crashes.md` (that crash
 is FIXED `16a040e6` and archived; this parity gap is what its probes
 tripped over).
+
+Triage 2026-07-23 — **DISSOLVES into the post-P4 census-to-zero/cutover unit**, which owns surface conformance and deletes fallback children/self-host.

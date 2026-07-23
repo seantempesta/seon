@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, web]
 ---
@@ -30,3 +30,9 @@ argument map.
 - Canvas blocks carry the selected entity under `:seon.agent/entity`.
 - The existing welcome runtime test asserts the actual argument.
 - The real canvas renders without its fallback error card.
+
+## Triage closure — 2026-07-23
+
+Current source disproves the key mismatch:
+`src/seon/execution/runtime.cljs:527-547` constructs the canvas block with
+`:seon.agent/entity` and uses that same key for the selected-renderer call.

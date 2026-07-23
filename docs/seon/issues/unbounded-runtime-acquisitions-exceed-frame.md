@@ -49,3 +49,9 @@ reading member results.
   collection exception.
 - A fresh 64 KiB `/agents/run` drive has evals greater than zero, no context
   render failures, and no turn error.
+
+## Triage — 2026-07-23
+
+DISSOLVES into P4 loop migration plus the cutover/U12 acceptance: the named
+execution-child acquisition is deleted, and resumable database steps and
+surviving context consumers must pass the bounded restart drive.

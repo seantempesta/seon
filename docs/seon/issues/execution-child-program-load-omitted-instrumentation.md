@@ -72,3 +72,5 @@ through an execution child.
 - A real agent can observe its ID and omit `:seon.agent/id` from
   `my.plan/step!`, receiving a successful plan write.
 - The same agent resumes its existing plan and performs the namespace work.
+
+Triage 2026-07-23 — **DISSOLVES into post-P4 child/`eval.cljs` deletion**; `bef42a75` repaired one generation, while remaining parity must not preserve the outgoing loader.

@@ -7,6 +7,12 @@ tags: [issue, agent, database, research, schema]
 
 # Autocomplete datasets and scoring bypass canonical runtime projections
 
+## Triage — 2026-07-23
+
+REAL+INDEPENDENT (L), owned by the autocomplete artifact/evaluation pipeline.
+Its staged dataset, split, serving-projection, and Inspect evidence contracts
+are outside both the P4 loop-migration acceptance and the cutover deletion.
+
 ## Problem
 
 Autocomplete training and evaluation artifacts are assembled by scratch

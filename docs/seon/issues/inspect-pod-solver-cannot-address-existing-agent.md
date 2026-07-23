@@ -57,3 +57,7 @@ retained metadata, and refusal behavior.
   solver, and one finalized native log proves the addressed agent is `root`;
   the ordinary reachability rows still prove fresh-agent home edges by
   omission.
+
+Triage 2026-07-23 — **UNCLEAR.** The optional field is implemented; run one
+source-frozen finalized root reachability row and require retained
+`pod_agent_id == "root"` plus equal start/end target identities.

@@ -39,3 +39,5 @@ unique resident is the coordinator as self-work that completes from the
 planner's own eval evidence. Blocking the root over its planner's
 ordinary setup form is never acceptable. Covered by one focused test on
 the DAG/dispatch owner.
+
+Triage 2026-07-23 — **DISSOLVES into P4 loop migration**; preserve the self-recipient falsifier in replacement run-state acceptance.

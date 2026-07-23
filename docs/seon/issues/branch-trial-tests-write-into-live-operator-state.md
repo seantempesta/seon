@@ -7,6 +7,12 @@ severity: friction
 
 # Branch trial tests write into the live operator state directory
 
+## Triage — 2026-07-23
+
+REAL+INDEPENDENT (S), owned by the branch-trial harness/process-directory
+selection. Trial pollution of live operator state is independent of the agent
+loop and execution-child cutover.
+
 ## Problem
 
 A branch-lifecycle trial (the `branch-sigint-reuse` harness, run

@@ -45,3 +45,7 @@ workload PID `59340` remained alive and listening after feed open/close,
 returned to zero. This issue therefore owns only the observed stale readiness
 classification when the listener was unavailable; no Bun workload-exit claim
 is retained without correct anchor-group or workload-identity evidence.
+
+Triage 2026-07-23 — **UNCLEAR.** Fault or close the maintained HTTP listener
+after `/_seon/ready` first returns 200, then require readiness withdrawal or
+pod termination before another request is admitted.

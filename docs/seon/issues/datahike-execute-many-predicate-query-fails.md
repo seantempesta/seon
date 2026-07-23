@@ -7,6 +7,12 @@ tags: [issue, database]
 
 # Datahike execute-many predicate query fails
 
+## Triage — 2026-07-23
+
+REAL+INDEPENDENT (M), owned by maintained Datahike compiled-query execution.
+`src/seon/db.cljc:657-713` still exposes `execute-many`; the note's predicate
+failure is independent of the agent loop and child topology.
+
 ## Evidence
 
 On 2026-07-18, the same query and immutable database value produced eight

@@ -7,6 +7,13 @@ tags: [issue, database, flow]
 
 # Share concurrent database session opening
 
+## Triage — 2026-07-23
+
+REAL+INDEPENDENT (M), owned by `seon.db.session`. Current
+`src/seon/db/session.cljs:415-441` shares same-initialization opening, but its
+recursive conflicting-selection path and close-during-opening behavior retain
+the issue's explicitly listed remaining acceptance.
+
 ## Problem
 
 `seon.db/open-session!` is idempotent after one physical session is connected,

@@ -108,3 +108,8 @@ window.
 Re-assert the agent's `:seon.agent/namespace` assignment (retract +
 add of the same home-ns ref) so the newer assignment transaction
 outranks the last `my.kb` eval and the next turn seeds from home.
+
+## Triage — 2026-07-23
+
+DISSOLVES into the reconciled cutover deletion of the `eval.cljs` self-host;
+the described current-namespace wedge is in that self-host namespace state.

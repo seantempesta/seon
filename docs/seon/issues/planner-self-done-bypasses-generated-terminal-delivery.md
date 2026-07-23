@@ -59,3 +59,5 @@ CAS. Content search is not structural identity, and a same-value CAS permits
 concurrent duplicate messages. Historical roots already closed without an
 envelope remain live evidence for this issue; the next fresh generated root
 proves the forward contract.
+
+Triage 2026-07-23 — **DISSOLVES into P4 loop migration**; generated-terminal ownership and delivery become claimed run-state terminal-transition acceptance.

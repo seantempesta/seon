@@ -7,6 +7,14 @@ tags: [issue, web, database, flow, architecture]
 
 # Thread one database value through debug and data feeds
 
+## Triage — 2026-07-23
+
+DISSOLVES into the P4 loop-migration slice followed by “per-agent child +
+`eval.cljs` self-host deletion.” The remaining re-audit defect is specifically
+loss of execution-child prompt read evidence through
+`seon.agent.turn/render-prompt`; that child/pod-loop prompt boundary is replaced
+by the resumable driver and then deleted at cutover.
+
 ## Problem
 
 The debug and data feeds start `capture-reads` with one dereferenced replica

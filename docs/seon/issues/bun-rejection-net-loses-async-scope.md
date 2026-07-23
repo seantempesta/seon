@@ -7,6 +7,13 @@ severity: friction
 
 # Bun's rejection net loses AsyncLocalStorage scope
 
+## Triage — 2026-07-23
+
+REAL+INDEPENDENT (M), owned by `seon.error` plus the one client process safety
+net. The pod remains responsible for web UI, LLM I/O, and scheduling after P4,
+so detached rejections and core-fault policy do not disappear with eval-child
+deletion.
+
 ## Problem
 
 Bun 1.4.0 does not carry AsyncLocalStorage context into the process

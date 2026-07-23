@@ -49,3 +49,9 @@ The issue remains open. The later route and UI units must still prove that a
 marked entry and all descendants emit no drill request, while an admitted
 original scalar key reaches the owning child value through the strict path
 codec.
+
+## Triage — 2026-07-23
+
+DISSOLVES into the post-cutover U10 value-drill graduation unit: current
+`src/seon/render/value.cljc:557-570,742-743` closes the sampler half, while
+U10 owns the remaining route/UI no-drill proof.

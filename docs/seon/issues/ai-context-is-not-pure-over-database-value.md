@@ -7,6 +7,13 @@ tags: [issue, agent, architecture, database]
 
 # AI context is not pure over its database value
 
+## Triage — 2026-07-23
+
+REAL+INDEPENDENT (L), owned by `seon.agent.ctx/render-context`. The P4
+loop-migration slice requires resumability, not byte-identical database-derived
+context across delay/restart; the issue's purity and dynamic-tail acceptance
+therefore remains a separate queue candidate.
+
 Owned by the [[../../prds/archive/frozen-turn-inputs/roadmap]] chunk (impurity rows
 I1-I5; closes at its stage 5 byte-identity gate). Stays open until that
 chunk lands commit plus live proof. The sibling turn-spine rows I6-I8

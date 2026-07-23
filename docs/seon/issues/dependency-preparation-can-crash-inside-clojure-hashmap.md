@@ -7,6 +7,15 @@ tags: [issue, flow]
 
 # Make dependency preparation deterministic under concurrent development
 
+## Triage — 2026-07-23
+
+UNCLEAR. Current `script/seon/dev/artifact.clj:781-849` does place dependency
+preparation under the checkout-wide artifact lock, but the recorded JVM
+`HashMap` failure was intermittent and its cause unproved. Repeatedly race the
+operator and focused preparation while retaining the external CLI failure log;
+zero failures under the current lock closes it, recurrence localizes the
+remaining external/shared-cache path.
+
 ## Problem
 
 `bin/test-cljs` can fail before compilation while running `clojure -X:deps prep`

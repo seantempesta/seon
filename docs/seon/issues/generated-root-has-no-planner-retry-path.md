@@ -81,3 +81,5 @@ message/claim mechanism (bounded retries) or commit the `:blocked`
 terminal with the run's error evidence so the caller receives an honest
 result. No new registry or second scheduler; the existing root observer
 and `commit-generated-terminal!` are the owners.
+
+Triage 2026-07-23 — **DISSOLVES into P4 loop migration**; planner retry/no-wedge behavior belongs to CAS-claimable run-state acceptance and U12.

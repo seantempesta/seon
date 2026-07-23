@@ -7,6 +7,13 @@ severity: friction
 
 # Agent turns lack database read-cost attribution
 
+## Triage — 2026-07-23
+
+REAL+INDEPENDENT (L), owned by turn observability and the database read-evidence
+projection. `src/seon/db.cljc:543-555` exposes query evidence, but no current
+turn-level duration/resource aggregation closes the issue; P4 does not include
+this observability acceptance.
+
 ## Problem
 
 The durable turn/eval graph records exact prompt and model bytes, token counts,

@@ -84,3 +84,5 @@ the process boundary.
   8.6 MiB ready gap. The simultaneous-child modest-hardware proof is green.
   Bundle size by itself is not an acceptance measure, and the remaining gap
   does not justify weakening authored rendering or process isolation.
+
+Triage 2026-07-23 — **DISSOLVES into post-P4 child deletion**; per-agent compiler heaps are the entire measured defect.

@@ -7,6 +7,13 @@ tags: [issue, agent, architecture]
 
 # try in expression position inside a compiled ^:async fn auto-awaits
 
+## Triage — 2026-07-23
+
+DISSOLVES into the cutover unit “per-agent child + `eval.cljs` self-host
+deletion” (reconciled completion-plan spine step 3). The issue's stated owner is
+`src/seon/eval.cljs`; that self-host compiler path is deleted rather than
+converted.
+
 ## Observed
 
 In pod `.cljs` compiled by the JVM CLJS compiler (1.12.145), a

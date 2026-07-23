@@ -7,6 +7,14 @@ tags: [issue, architecture, pod, agent]
 
 # Supply the execution artifact to the production container launch
 
+## Triage — 2026-07-23
+
+DISSOLVES into the cutover unit “per-agent child + `eval.cljs` self-host
+deletion.” Its acceptance requires publishing and launching the execution-child
+artifact; that artifact and launch topology are explicitly deleted at spine
+step 3, so the future container acceptance must be stated against the P4
+runtime instead.
+
 ## Problem
 
 The canonical container starts the database server and compiled Bun pod, but

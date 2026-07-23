@@ -78,3 +78,5 @@ while JSC capacity and mimalloc dirty pages stay at the high-water mark.
 A child's physical footprint measured ≤50 MB with the GPU mapping absent,
 or a grounded explanation of why the mapping is unavoidable, recorded
 with the vmmap evidence.
+
+Triage 2026-07-23 — **DISSOLVES into post-P4 child deletion**; the measured IOAccelerator cost belongs only to per-agent child startup.

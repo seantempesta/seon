@@ -7,6 +7,13 @@ severity: blocker
 
 # Arbitrary database results collide with the error shape
 
+## Triage — 2026-07-23
+
+REAL+INDEPENDENT (M), owned by the public `seon.db` result boundary.
+`src/seon/db.cljc:522-541` still returns a successful arbitrary query value
+bare, while errors are also flat maps; `pull` does the same at lines 557-591.
+The landed flat error shape does not supply the explicit success discriminator.
+
 ## Problem
 
 Public database reads that can return arbitrary user data cannot distinguish a

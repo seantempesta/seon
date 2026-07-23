@@ -7,6 +7,12 @@ tags: [issue, archive, database, research]
 
 # Autocomplete worktrees contain unclassified database and model evidence
 
+## Triage — 2026-07-23
+
+REAL+INDEPENDENT (M), owned by autocomplete evidence preservation and worktree
+disposition. The retained databases/exports and authority drift described here
+are operational research assets, not loop-driver or execution-child behavior.
+
 ## Problem
 
 Retired autocomplete worktrees cannot be cleaned safely because their ignored

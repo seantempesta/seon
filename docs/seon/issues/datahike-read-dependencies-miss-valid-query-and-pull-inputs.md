@@ -7,6 +7,13 @@ tags: [issue, database, web, architecture]
 
 # Derive read dependencies from Datahike's parsed semantics
 
+## Triage — 2026-07-23
+
+REAL+INDEPENDENT (L), owned by Datahike's parsed read-dependency projection.
+Current reactive code consumes database read evidence
+(`src/seon/reactive.cljs:94-126`), so false-negative dependencies still threaten
+cache inheritance/listener selection independently of P4.
+
 ## Problem
 
 Datahike's query dependency projection can omit attributes that change a valid

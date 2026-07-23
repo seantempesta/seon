@@ -140,3 +140,5 @@ agent rather than resuming the destroyed one.
   reclaims the defined private database graph and later creates fresh state.
 - The Inspect task demonstrates whether real models can manage simultaneous
   clearly attributed conversations without additional stored grouping.
+
+Triage 2026-07-23 — **DISSOLVES into P4 loop migration**; namespace-resident DAG dispatch is replaced by claimed run state.

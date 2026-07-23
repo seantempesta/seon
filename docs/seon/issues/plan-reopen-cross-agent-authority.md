@@ -69,3 +69,5 @@ The unforgeable actor dependency and its first bounded proof are specified in
 [[docs/prds/archive/agent-runtime-correctness/research/process-death-containment-audit-2026-07-15]];
 the plan slice must not claim actor-security graduation before that parent-owned
 task capability exists.
+
+Triage 2026-07-23 — **DISSOLVES into P4 loop migration**; its capability-stamped CAS claim is the unforgeable actor boundary this note requires.

@@ -86,3 +86,5 @@ writer, or describe SCI as a security boundary.
 - The child has no database connection, writer/feed, actor selector, or durable
   state. Parent-side capability requests stamp actor/provenance and fence writes
   from the committed task receipt and immutable database coordinate.
+
+Triage 2026-07-23 — **DISSOLVES into P4 loop migration plus the child/`eval.cljs` cutover**, whose claimed runs and U12 drill replace this topology.
