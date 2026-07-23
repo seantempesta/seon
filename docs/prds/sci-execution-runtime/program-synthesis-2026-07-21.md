@@ -1028,6 +1028,15 @@ COMPLETELY before dispatching anything.
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- CHECKPOINT BREAK #2 (same class, client build): shell
+  internal.cljs:120 exec still passes 2 args to core/run-request
+  (3 since the shell config-fact conversion) — R28-era breakage on a
+  STILL-ALIVE pod surface, exposed because the program-row derivation
+  executes the client build. CLIENTFIX lane dispatched: fix the
+  caller via proper config acquisition + compile BOTH canonical
+  builds (client AND test — r43fix proved only :test) to zero
+  first-party arity/undeclared warnings + prove the v11 manifest
+  publishes. Lesson sharpened: the class gate is BOTH builds.
 - BREAK #1 FIXED (52124e45e, accepted): exactly one stale call site
   (exhaustive-search proven); fixtures made honest under the
   provenance classifier (incl. an adjacent stale corpus-implies-core
