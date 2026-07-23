@@ -21,6 +21,15 @@
         (< (System/nanoTime) deadline) (do (Thread/sleep 10) (recur))
         :else false))))
 
+(defn- writer-ready?
+  [socket-path]
+  (try
+    (let [session (writer-test/open-session! socket-path)]
+      (writer-test/close-session! session)
+      true)
+    (catch Throwable _
+      false)))
+
 (defn- start-writer-process!
   [database-name database-path socket-path log-path]
   (let [java (io/file (System/getProperty "java.home") "bin" "java")
@@ -34,7 +43,9 @@
                   (.redirectOutput (io/file log-path)))
         process (.start builder)]
     (when-not
-     (wait-for! #(.exists (io/file socket-path)) 15000)
+     (wait-for! #(and (.exists (io/file socket-path))
+                      (writer-ready? socket-path))
+                15000)
       (.destroyForcibly process)
       (.waitFor process 5 TimeUnit/SECONDS)
       (throw
