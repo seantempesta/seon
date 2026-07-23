@@ -435,6 +435,26 @@ the anchor stays the state ledger.
   external) — replay classification and portability share one boundary.
 - Owner tiebreaker: experimentability + reasonability win seams.
 
+## U4 render-purity recipes
+
+- **A file fingerprint is a component fact, not a map-valued singleton
+  shortcut.** Store one component entity per path with a namespaced path
+  identity and SHA-256 attribute. Both config callers provide exact UTF-8
+  observations to the pure resolver. Render re-reads the file only to verify
+  those bytes and returns a flat `:core-bug` on missing/mismatch; it never
+  silently renders divergent content.
+- **A cross-process byte gate must diff nonempty bytes.** Have the focused
+  regression write the exact rendered context to an ignored artifact, run the
+  same selector in two fresh Bun processes, copy each artifact, assert both
+  byte counts are nonzero, then `diff -u`. Diffing absent log markers produces
+  an empty diff and is a vacuous pass.
+- **The canonical watcher can make a live proof depend on an unrelated test
+  build.** If client/execution compile but the operator refuses readiness
+  because the shared `:test` build is broken in an owner-protected lane, retain
+  both operator and watcher logs, attribute the exact test symbol, and shut
+  the named operator down. Do not bypass `bin/seon` or patch the protected
+  spine merely to manufacture a live result.
+
 ## Issue-triage recipe
 
 - **Classify against the owning mechanism before trusting an issue's old

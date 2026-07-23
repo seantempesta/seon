@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: defect
 tags: [issue, agent, ui, architecture]
 ---
@@ -40,3 +40,15 @@ with `my.canvas` unchanged once the fn exists.
 - `field-signal` produces byte-identical signal names on both platforms for
   the same field keyword (base64url of the printed keyword, `seon_` prefix).
 - The my.canvas census rows stop being blocked by this dangling reference.
+
+## Resolution — 2026-07-23
+
+Resolved by U4 in `488f3dd5e`. The encoding now has one portable owner,
+`seon.render.canvas.field-signal/field-signal`, using the same unpadded
+base64url bytes on the JVM and Bun. `my.canvas` delegates to that owner on both
+platforms instead of naming a nonexistent `.cljs` var.
+
+Focused JVM evidence is retained at
+`tmp/orchestrator/u4-gate-my-canvas-jvm.log`: the writer/host basis evaluated
+`(require 'my.canvas)` successfully. The twelve-namespace R1 JVM load gate also
+remained green at `tmp/orchestrator/u4-gate-r1-jvm.log`.

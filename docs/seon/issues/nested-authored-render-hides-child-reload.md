@@ -75,3 +75,13 @@ resolved against the eval's `:seon.eval/ns` before transaction, while a
 qualified symbol and literal hiccup remain unchanged. The existing eval
 dependency-injection mechanism now carries that current namespace as
 invocation-local data; no renderer fallback or database repair rule is added.
+
+## U4 temporary containment seam — 2026-07-23
+
+U4 moved trusted prompt orchestration into the pod (`488f3dd5e`) but, by owner
+ruling, authored stored blocks, whole-prompt symbols, derived render functions,
+and canvas/AI twins still use `seon.execution.host/invoke-plans!`. This keeps
+the existing child reload/containment behavior above intact while avoiding a
+second prompt driver. The code comment in `seon.agent.turn/render-prompt`
+names U7 as the closing unit: U7 must route these authored render symbols
+through the U1 guarded door and remove this temporary child dependency.

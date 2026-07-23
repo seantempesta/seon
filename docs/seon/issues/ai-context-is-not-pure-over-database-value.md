@@ -80,3 +80,34 @@ free dynamic tail remains captured in the exact prompt blob.
   their recorded coordinate matches the body byte-for-byte; the blob preserves
   the original free-tail bytes.
 - An audit covers every default/required block, not only the transcript.
+
+## U4 implementation evidence — 2026-07-23
+
+Implementation landed in `b6183ee9d`, `488f3dd5e`, `870093199`,
+`59be996e0`, and follow-up test-alignment commits through `e56f4fdca`:
+
+- all eleven ambient database fallbacks are deleted and the pod driver injects
+  the immutable database value into every block call;
+- host timezone, SOUL selection/path, render strictness, and file SHA-256
+  identities are database config facts;
+- file render refuses missing or mismatched bytes with a flat `:core-bug`;
+- process-local result-handle membership no longer changes transcript bytes;
+- the prompt driver is pod-owned and the compiled child prompt dispatch is
+  deleted; and
+- `default-context-bytes-are-restart-stable-at-one-database-value` renders
+  every selected default/root block, checks the free readline tail follows the
+  cache boundary, and writes exact bytes for an external two-process diff.
+
+The retained cross-process gate ran in two fresh Bun processes:
+`tmp/orchestrator/u4-byte-1.txt` and `u4-byte-2.txt` are both 938 bytes and
+`u4-byte-identity.diff` is empty. The missing-database focused gate is green in
+`tmp/orchestrator/u4-gate-runtime-focused.log`.
+
+This issue remains open only for the live operator acceptance. The named
+`u4render` client and execution builds compiled, but the operator refused
+readiness because its mandatory shared `:test` watcher hit the known-broken,
+owner-protected legacy loop test (`seon.agent-loop-test` references removed
+`drive-run-loop!`). Evidence:
+`tmp/orchestrator/u4-live-up.log` and the watcher log named there. R28 forbids
+U4 from repairing that loop-driving area. `u4render` was shut down cleanly;
+`tmp/orchestrator/u4-live-down.log` records all processes absent.
