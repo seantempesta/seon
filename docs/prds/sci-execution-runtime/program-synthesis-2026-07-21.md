@@ -1028,6 +1028,14 @@ COMPLETELY before dispatching anything.
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- R47 APPLIED TO THE GUARD (owner catch, 2026-07-23 eve): 'fuel' is
+  an invented metaphor for what is literally an interpreter STEP
+  count at sci's :interrupt-fn safepoint — STEPBUDGET rename lane
+  dispatched (config facts → :seon.config.guard/*-step-budget;
+  internal counters → steps; steering says 'exceeded its step
+  budget'; deadline/output-cap unchanged — already literal; history
+  keeps its vocabulary; R38 makes the config-key rename
+  migration-free). Six files + tests, all unowned by live lanes.
 - R43 STOP RULED (2026-07-23 eve, correct stop + real design catch):
   SPEC-provenance is unsafe for trust — an agent can replace SOURCE
   while keeping the identical spec (no-op assertion retains core
