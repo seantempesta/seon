@@ -185,6 +185,80 @@ audit's five kill points, two-claimant race variant) · the
 byte-identity render gate. GRADUATION = all green on the demo
 scenario with the census at zero.
 
+## The derived-execution program (added 2026-07-23 PM, owner green-lit)
+
+Grounded in research/execution-planning-design-2026-07-23.md (accepted),
+the bug-class triage, and rulings R29-R35. Extends this plan's queue; the
+original U-units continue in parallel where still open.
+
+### P1 — Edge bundle (L) — DISPATCHED, the earliest unsettled contract
+
+Canonical direct-edge program graph: function→function call edges (both
+tees, one schema owner), typed read/write attribute edges + :all-at-basis
+markers, explicit uncertainty edges for dynamic construction (fail-closed,
+never silently empty), effect/leaf descriptors from the seam metadata,
+per-artifact export inventories (private terminals without public
+:seon.fn rows), all entering the program-graph generation digest.
+Falsifier: exact edge facts for a representative fixture on both tees;
+digest changes when any edge changes. Spec:
+tmp/orchestrator/edge-bundle-spec.md.
+
+### P2 — The pure planner (M) — after P1
+
+plan-execution over the P1 edges: one derivation returning placement
+(:anywhere | :constrained | :unplannable), eligible tiers, schema +
+capability manifests, unresolved edges, cache key (basis + commit +
+graph digest + projection fingerprint + inventory digests). Sole
+placement authority; derived-never-stored (R21). Falsifier: the design's
+§2 folds proven over the P1 fixture corpus, incl. fail-closed
+:unplannable on the dynamic case.
+
+### P3 — Registration completion (M-L) — parallel with P2 (R29)
+
+Pull-pattern admission (read-side validation vs the committed
+projection, steering distinguishing derived projection keys from stored
+attributes); the computed transactable population replacing the
+agent-bootstrap-attrs hand list; manifest verification on persistent
+leaves (full-projection coverage check, the owner's JIT posture).
+Falsifier: the drill's pull-side class cannot recur (regression); the
+hand list is gone; a leaf with a stale projection re-acquires and
+reverifies.
+
+### P4 — R33 predicate admission (M) — after P2
+
+A named [:fn] predicate is admissible iff its plan placement is
+:anywhere; run at schema commit, on reachable-fn change, and at
+projection reconstruction (fail-closed on historical combinations).
+Composes with the schema-admission lane's R30/R31/R34 gates.
+
+### P5 — Driver enforcement + router deletion (M) — after P2
+
+Pre-dispatch plan → verify coverage → compare inventories → provision →
+execute; release-for-handoff when another claimant satisfies; steering
+errors naming missing leaves/schemas/edges/bases. The mixed-tier router
+becomes a planner consumer: its AST/loader/prefix scans DELETE (R18
+becomes consumer behavior). The regex purity classifier
+(host/context.clj pure-block?) deletes into the plan.
+
+### P6 — Transparent distribution (L) — after P2+P5 (R35, the capstone)
+
+The invoke request/response family on the seon.db typed protocol
+(schema-projected args/results, receipts riding as for db effects,
+same-tier call coalescing); the placement-aware wrapper installer
+(local impl vs wire-calling stub per var; sync on vthreads, awaited on
+pod); the R32 result-symbol lifecycle registry (handles tracked per
+instance identity, wiped on that platform's reset/restart, steering to
+re-derive). Falsifier: an agent form whose call graph spans three tiers
+completes with no placement annotation, correct receipts, and a handle
+that survives use, dies loudly on its platform's restart, and steers to
+re-derivation.
+
+Sequencing: P1 → P2 → {P3 ∥ P4 ∥ P5} → P6. The original U7 (ctx port),
+U6b (transport leaf), schema-admission, and U8 portfolio continue in
+their own lanes; U9 (great deletion) additionally waits for P5's router
+deletion; U10 graduation drills resume after the core-hardening queue
+(C-classes) and P3 land.
+
 ## Sequencing
 
 ```text
