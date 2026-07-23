@@ -4,6 +4,7 @@
    [clojure.string :as str]
    [seon.agent.home :as home]
    [seon.agent.ctx :as ctx]
+   [seon.agent.ctx.driver :as ctx.driver]
    [seon.agent.message :as message]
    [seon.ai :as ai]
    [seon.config :as config]
@@ -33,11 +34,11 @@
 (def configuration (config/resolve-config-singleton {}))
 
 (deftest prompt-and-agent-view-acquisitions-share-owned-read-profiles
-  (let [prompt-members @#'runtime/prompt-acquisition-members
+  (let [prompt-members @#'ctx.driver/prompt-acquisition-members
         view-members @#'runtime/agent-view-members]
-    (is (= runtime/agent-entity-read-profile
+    (is (= ctx.driver/agent-entity-read-profile
            (select-keys (first prompt-members)
-                        (keys runtime/agent-entity-read-profile))))
+                        (keys ctx.driver/agent-entity-read-profile))))
     (is (= runtime/agent-entity-read-profile
            (select-keys (first view-members)
                         (keys runtime/agent-entity-read-profile))))
@@ -126,7 +127,9 @@
                    ::protocol/result {:seon.ai/model "frozen-model"}}]}))))
      (-> (db/with-tx-context
            {::db/branch-head point}
-           #(runtime/render-prompt! request invoke-selected!))
+           #(ctx.driver/render-prompt!
+             (assoc request ::db/db database)
+             invoke-selected!))
          (.finally (fn [] (set! db/execute-many original)))))))
 
 (deftest literal-whole-prompt-uses-the-inherited-database-value
@@ -461,8 +464,8 @@
                  {::protocol/success? true ::protocol/result nil}]})))
       (-> (db/with-tx-context
             {::db/branch-head point}
-            #(runtime/render-prompt!
-              {:seon.agent/id "agent-1"}
+            #(ctx.driver/render-prompt!
+              {:seon.agent/id "agent-1" ::db/db database}
               (fn [_] (js/Promise.resolve []))))
           (.then
            (fn [rendered]
@@ -491,8 +494,8 @@
                  {::protocol/success? true ::protocol/result nil}]})))
       (-> (db/with-tx-context
             {::db/branch-head point}
-            #(runtime/render-prompt!
-              {:seon.agent/id "agent-1"}
+            #(ctx.driver/render-prompt!
+              {:seon.agent/id "agent-1" ::db/db database}
               (fn [_]
                 (swap! calls inc)
                 (js/Promise.resolve []))))
