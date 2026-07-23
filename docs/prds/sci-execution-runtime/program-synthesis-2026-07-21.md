@@ -1204,11 +1204,21 @@ stays the meter. Package track: pkg-door finishes its defect fix
 and commits; the queued package units (bun interface, WP-J) proceed
 as portfolio work behind demo-critical units, not parked.
 
+**TONIGHT'S DEMO GOAL (owner, set as harness goal 2026-07-22
+~20:50):** by morning, ONE drive proves the runtime whole — the full
+heat-resilience scenario with evals through sci over the portable
+cores, both platforms on the same .cljc contract, a mid-scenario
+restart shrugged off, an npm package called through the loader door
+in the same arc, and an honest perf table (tok/s, wall clock, seam
+round-trips). Encore: faster + more mid-flight kills.
+
 **SPINE SPEC STAGED**: `tmp/orchestrator/loop-slice-spec.md` — the
-loop vertical slice (eval through sci over the landed cores; E2E
-scenario re-run as acceptance; my.* working set MEASURED from
-receipts as the next porting queue). Dispatches the moment pkg-door
-lands (both need execution.cljs).
+loop vertical slice, acceptance AMENDED to be the demo itself
+(scenario green + package call in the same arc + measurable perf +
+optional mid-turn kill encore). Dispatches the moment pkg-door lands
+(both need execution.cljs). pkg-door status: defect fix in, focused
+suites green, full gate running, two live operators planned
+(pkg-door-live + pkg-door-empty — the zero-package regression).
 
 **STAGED NEXT (refill on any free slot):** p2-blob · loop-essential
 my.* (queue derived from the loop-slice measurement — the old
