@@ -324,6 +324,14 @@ the anchor stays the state ledger.
   Stop at the overlap and have the earlier lane commit or hand off its exact
   hunks; do not reverse another lane's worktree edits or substitute an
   index-only commit for the repository's path-limited-commit rule.
+- **A cross-owner integration gate needs a source freeze, not merely separate
+  test namespaces.** A host test still seeds and transacts through the live
+  writer sources. While the writer lane has uncommitted admission changes, a
+  host-focused gate can fail in writer setup before the host mechanism runs.
+  Preserve that log as interference evidence, finish pure/compile proofs, and
+  rerun the integration gate only after the writer owner reaches a coherent
+  commit; never weaken the host assertion or attribute the setup failure to the
+  guarded door.
 - **Path-limited commits always**; add new untracked owned files
   explicitly in the same commit (a missing test-support file made every
   intermediate writer gate unreproducible for a day).

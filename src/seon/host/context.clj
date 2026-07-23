@@ -53,6 +53,7 @@
             [seon.db.id :as db.id]
             [seon.db.protocol :as protocol]
             [seon.host.record :as record]
+            [seon.host.guard :as guard]
             [seon.repl.parse.repair :as candidates]
             [seon.schema :as schema]
             [seon.time :as time]))
@@ -878,9 +879,8 @@
                            'clojure.string interrupt/clojure-string}
               :interrupt-fn
               (fn []
-                (when (.isInterrupted (Thread/currentThread))
-                  (interrupt/interrupt! "eval deadline exceeded"
-                                        {:seon.error/kind :timeout})))})
+                (when-let [holder (::guard/holder (sci.ctx-store/get-ctx))]
+                  (guard/check! holder)))})
         report (load-portable-slice! ctx wrapper-registry)
         _ (stamp-shared-base-vars! ctx)]
     {::ctx ctx ::report report ::registry wrapper-registry}))
@@ -889,7 +889,10 @@
   "Fork one private agent context from the shared base."
   {:malli/schema [:=> [:cat ::base] ::ctx]}
   [{::keys [ctx]}]
-  (sci/fork ctx))
+  (let [holder (guard/holder)]
+    (assoc (sci/fork ctx)
+           ::guard/holder holder
+           :interrupt-fn (guard/interrupt-fn holder))))
 
 (defn replay-defs!
   "Replay def sources into a context; restore = fork base + this replay.

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 tags: [agent, runtime, issue]
 severity: blocker
 ---
@@ -69,3 +69,14 @@ Before U1 resumes:
 - A context reused by a second wire session consumes only the second session's
   reset fuel cell.
 - Both hostile-loop proofs finish without relying on an outer process kill.
+
+## Resolution
+
+The 2026-07-23 orchestrator rulings removed all three ambiguities. U9 owns
+deletion of the production Bun `cljs.js` engine, so U1 proves the portable
+CLJS guard directly without inventing a second production evaluator. The
+config owner committed first and then granted U1's exact guard section.
+Finally, the stable mutable holder is retained-context-owned and reset by the
+door for every invocation; no dynamic binding sits in the hot path. U1's
+second-session regression proves that a function defined before the second
+session consumes the second invocation's freshly reset budget.

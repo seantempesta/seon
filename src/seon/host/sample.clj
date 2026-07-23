@@ -282,3 +282,34 @@
       policy
       (throw (ex-info "The invocation database lacks a complete value-sampling policy."
                       {:seon.error/kind :core-bug})))))
+
+(def ^:private guard-policy-query
+  '[:find [?agent-fuel ?authored-fuel ?plan-fuel ?deadline-ms ?output-cap]
+    :in $ ?id
+    :where
+    [?config :seon.config/id ?id]
+    [?config :seon.config.guard/agent-eval-fuel ?agent-fuel]
+    [?config :seon.config.guard/authored-render-fuel ?authored-fuel]
+    [?config :seon.config.guard/plan-fuel ?plan-fuel]
+    [?config :seon.config.guard/deadline-ms ?deadline-ms]
+    [?config :seon.config.guard/output-cap ?output-cap]])
+
+(defn acquire-guard-policy!
+  "Acquire the SCI circuit-breaker policy at an invocation database value."
+  {:malli/schema [:=> [:cat :any :seon.db/db] :map]}
+  [writer database]
+  (let [row (context/query-writer-at! writer database
+                                      guard-policy-query ["cluster"])
+        policy (when (and (vector? row) (= 5 (count row)))
+                 (zipmap
+                  [:seon.config.guard/agent-eval-fuel
+                   :seon.config.guard/authored-render-fuel
+                   :seon.config.guard/plan-fuel
+                   :seon.config.guard/deadline-ms
+                   :seon.config.guard/output-cap]
+                  row))]
+    (if (every? pos-int? (vals policy))
+      policy
+      (throw
+       (ex-info "The invocation database lacks a complete SCI guard policy."
+                {:seon.error/kind :core-bug})))))

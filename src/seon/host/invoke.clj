@@ -5,6 +5,7 @@
             [seon.error :as error]
             [seon.host.context :as context]
             [seon.host.eval :as eval]
+            [seon.host.guard :as guard]
             [seon.host.instrument :as instrument]
             [seon.host.sample :as sample]
             [seon.host.session :as session]
@@ -13,8 +14,6 @@
            [java.util.concurrent ExecutorService ScheduledExecutorService TimeUnit]))
 
 (set! *warn-on-reflection* true)
-
-(def maximum-invocation-ms (* 10 60 1000))
 
 (defn record-core-fault!
   "Record one core host fault."
@@ -33,6 +32,33 @@
     (when (= :evaluating @(::session/worker-phase session))
       (.interrupt ^Thread worker)))
   nil)
+
+(defn- arm-deadline!
+  [session worker remaining-ms holder]
+  (guard/install-interrupted! holder #(.isInterrupted ^Thread worker))
+  (let [watchdog ^ScheduledExecutorService (::session/watchdog session)
+        task (.schedule watchdog
+                        ^Runnable #(interrupt-evaluation! session worker)
+                        (long remaining-ms) TimeUnit/MILLISECONDS)]
+    #(.cancel task false)))
+
+(defn- guard-policy
+  [invocation-class policy]
+  {::guard/fuel
+   (get policy
+        (case invocation-class
+          :agent-eval :seon.config.guard/agent-eval-fuel
+          :authored-render :seon.config.guard/authored-render-fuel
+          :plan :seon.config.guard/plan-fuel))
+   ::guard/mode :enforce
+   ::guard/invocation-class invocation-class
+   ::guard/fuel-config-key
+   (case invocation-class
+     :agent-eval :seon.config.guard/agent-eval-fuel
+     :authored-render :seon.config.guard/authored-render-fuel
+     :plan :seon.config.guard/plan-fuel)
+   ::guard/deadline-config-key :seon.config.guard/deadline-ms
+   ::guard/output-config-key :seon.config.guard/output-cap})
 
 (defn- invoke-authored!
   [session database function-symbol source-fingerprint arguments run-fence]
@@ -94,16 +120,25 @@
           compiled? (contains? identity-value
                                :seon.execution/artifact-digest)
           worker (Thread/currentThread)
-          remaining (min maximum-invocation-ms
-                         (max 1 (- (:seon.execution/deadline-ms invocation)
-                                   (session/now-ms))))
-          watchdog ^ScheduledExecutorService (::session/watchdog session)
-          deadline-task (.schedule watchdog
-                                   ^Runnable #(interrupt-evaluation! session worker)
-                                   (long remaining) TimeUnit/MILLISECONDS)
+          invocation-class (if compiled? :agent-eval :authored-render)
+          holder (::guard/holder (::session/ctx session))
           outcome
           (try
-            (cond
+            (let [guard-facts
+                  (sample/acquire-guard-policy!
+                   (::session/writer session) database)
+                  remaining
+                  (min (:seon.config.guard/deadline-ms guard-facts)
+                       (max 1 (- (:seon.execution/deadline-ms invocation)
+                                 (session/now-ms))))]
+              (reset! (::session/worker-phase session) :evaluating)
+              (guard/call!
+               {::guard/holder holder
+                ::guard/policy (guard-policy invocation-class guard-facts)
+                ::guard/arm-deadline!
+                #(arm-deadline! session worker remaining %)
+                ::guard/evaluate!
+                #(cond
             (and compiled?
                  (not= (:seon.execution/artifact-digest identity-value)
                        (get-in @(::session/startup session)
@@ -121,7 +156,11 @@
 
             (= function-symbol 'seon.execution.runtime/eval-batch!)
               (let [sampling-limits (sample/acquire-sampling-policy!
-                                   (::session/writer session) database)
+                                     (::session/writer session) database)
+                    sampling-limits
+                    (assoc sampling-limits
+                           :seon.config.render/database-edn-cap
+                           (:seon.config.guard/output-cap guard-facts))
                   result (binding [context/*agent-id*
                                    (:seon.execution/agent-id
                                     @(::session/startup session))]
@@ -141,7 +180,7 @@
             {::error (session/error-value
                       (str "The JVM host does not serve " function-symbol
                            "; prompt and view rendering stay on the pod.")
-                      :core-bug)})
+                      :core-bug)})}))
             (catch Throwable throwable
               {::error
                (eval/classified-error-value
@@ -150,7 +189,6 @@
                  (:seon.execution/agent-id @(::session/startup session)))
                 throwable)})
             (finally
-              (.cancel deadline-task false)
               (locking (::session/interrupt-lock session)
                 (reset! (::session/worker-phase session) :idle)
                 (Thread/interrupted))))]

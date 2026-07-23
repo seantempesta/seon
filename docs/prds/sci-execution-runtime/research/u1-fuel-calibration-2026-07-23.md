@@ -1,43 +1,62 @@
 ---
 type: research
-status: blocked
+status: complete
 tags: [research, runtime]
 ---
 
 # U1 fuel calibration — 2026-07-23
 
-## Status
+## Method
 
-Calibration did not run. Recording numbers before the production entry and
-both claimed tier installations exist would measure a probe rather than the
-governing mechanism and could not justify Ruling 27 defaults.
+`bench/u1_guard_calibration.clj` ran the production portable guard in
+counting-only mode around JVM SCI. The corpus covers scalar eval, an interpreted
+collection transform, the interrupt-aware native `reduce` override, a plan
+projection, and an authored hiccup renderer. Each case ran ten times. Counting
+mode used the same retained-context holder, reset, safepoint closure, and door
+as enforcement; it omitted the watchdog armer and never stopped work.
 
-## Shortest falsifiers
+The reruled JavaScript acceptance is thread-free semantics, not a speculative
+Bun SCI engine: production Bun remains `cljs.js` until U9 removes it. The
+portable `.cljc` conformance suite separately compiles and runs under CLJS.
 
-- Bun production source falsifier: `src/seon/eval.cljs:1185-1292` calls
-  `cljs.js/eval-str`, not SCI. It has no `:interrupt-fn` installation.
-- Synchronous-loop falsifier: `src/seon/eval.cljs:1294-1355` uses a Promise
-  timer and explicitly reports that JavaScript has no in-thread preemption.
-- Config-fact falsifier: `src/seon/config.cljs:32-36` delegates new manifest
-  schemas to `seon.config.resolve`, while the U1 grant omits
-  `src/seon/config/resolve.cljc`.
-- Session-cell falsifier: `src/seon/host.clj:100-122` reuses retained contexts
-  across wire sessions, so a generated SCI function must not retain a closure
-  over the session that originally defined it.
+Command:
 
-## Raw data
+```bash
+clojure -Sdeps '{:paths ["src" "bench"]}' \
+  -M:writer:host -m u1-guard-calibration
+```
 
-No step or millisecond samples were collected. No defaults were chosen.
+## Distribution and selected defaults
 
-The representative corpus, before/after full-suite timings, and guard
-microbenchmark remain pending until the issue
-[[guarded-eval-door-lacks-a-bun-installation-and-config-owner]] is resolved.
+With ten samples, empirical P99.9 is the observed maximum.
 
-## Required resumed measurement
+| Invocation class | Samples | P99.9 steps | P99.9 ms | P99.9 output chars | Default fuel | Default deadline ms | Default output chars |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| agent eval | 30 | 19,999 | 440.347 | 11,928 | 100,000,000 | 600,000 | 1,638,400 |
+| authored render | 10 | 751 | 15.043 | 7,531 | 100,000,000 | 600,000 | 1,638,400 |
+| plan | 10 | 500 | 35.781 | 9,641 | 100,000,000 | 600,000 | 1,638,400 |
 
-Run counting-only mode through the exact landed entry over the existing eval
-fixtures and authored renders on JVM SCI and the explicitly named CLJS SCI
-tier. Record every sample's invocation class, tier, guarded steps, and elapsed
-milliseconds; compute P99.9 from the raw samples; choose each default at no less
-than 100 times that measured legitimate P99.9; then rerun the same corpus with
-enforcement enabled.
+Every selected default is at least 100× the corresponding observed P99.9.
+These are circuit breakers, not throughput governors. The high common fuel
+default also leaves room for legitimate corpora larger than this bounded
+calibration set.
+
+## Raw samples
+
+Values below are `elapsed-ns`; step and output counts were deterministic for
+every repetition of a case.
+
+- Scalar agent eval: steps `0`, chars `2`, ns
+  `[6787584 286584 437125 464708 217917 173250 189667 185417 275709 191208]`.
+- Collection transform: steps `1500`, chars `11928`, ns
+  `[31050333 17393292 22139375 17376833 16946500 14806833 15824167 15163000 15701042 38763625]`.
+- Native reduce: steps `19999`, chars `8`, ns
+  `[301239583 440347458 256448542 208203417 199929500 206580375 203084792 205852291 422335791 332510042]`.
+- Plan projection: steps `500`, chars `9641`, ns
+  `[35780584 7305166 5767917 6701334 5395917 5452583 5680083 6493542 7516250 7551541]`.
+- Authored render: steps `751`, chars `7531`, ns
+  `[15042750 11442208 8989167 8279666 10544917 9082542 9085250 8978792 10284083 10878500]`.
+
+The complete machine-readable run is retained at
+`tmp/orchestrator/u1-calibration-raw-final.edn`; the committed benchmark
+reproduces it.

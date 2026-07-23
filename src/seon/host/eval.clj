@@ -6,6 +6,7 @@
             [seon.error.sci :as error.sci]
             [seon.host.context :as context]
             [seon.host.graduate :as graduate]
+            [seon.host.guard :as guard]
             [seon.host.instrument :as instrument]
             [seon.host.preflight :as preflight]
             [seon.host.record :as record]
@@ -43,14 +44,16 @@
   "Classify one SCI throwable as an execution error value."
   {:malli/schema [:=> [:cat :any :symbol :any] :map]}
   [ctx home-ns throwable]
-  (let [classified
-        (error.sci/classify
-         {:seon.error.sci/throwable throwable
-          :seon.error.sci/context ctx
-          :seon.error.sci/home-ns home-ns})]
-    (assoc classified :seon.error/message
-           (error.sci/steering-head
-            classified error.sci/default-error-head-token-cap))))
+  (or (when-let [holder (::guard/holder ctx)]
+        (guard/steering-error! holder throwable))
+      (let [classified
+            (error.sci/classify
+             {:seon.error.sci/throwable throwable
+              :seon.error.sci/context ctx
+              :seon.error.sci/home-ns home-ns})]
+        (assoc classified :seon.error/message
+               (error.sci/steering-head
+                classified error.sci/default-error-head-token-cap)))))
 
 (defn- transit-safe-value
   [value]
@@ -115,6 +118,7 @@
           (flush [] nil)
           (close [] nil))]
     {::output-writer writer
+     ::output-exceeded? (fn [] @truncated?)
      ::output-text (fn []
                      (str text (when @truncated?
                                  output-truncation-marker)))}))
@@ -133,9 +137,8 @@
       {:seon.eval/ok? false
        :seon.eval/interrupted? true
        :seon/error
-       (session/error-value "The invocation was interrupted." :agent
-                    {:seon.error.sci/class :interrupt
-                     :seon.error/kind :timeout})}
+       (guard/policy-error! (::guard/holder (::session/ctx session))
+                            :timeout)}
       envelope)))
 
 (defn eval-form!
@@ -151,7 +154,7 @@
   ([session ctx home-ns source]
    (eval-form! session ctx home-ns source 16384))
   ([session ctx home-ns source database-edn-cap]
-   (let [{::keys [output-writer output-text]}
+   (let [{::keys [output-writer output-exceeded? output-text]}
          (output-capture database-edn-cap)]
      (locking (::session/interrupt-lock session)
        (reset! (::session/worker-phase session) :evaluating))
@@ -176,6 +179,13 @@
                    :seon.eval/interrupted? interrupted?
                    :seon/error error}))))
            envelope (finish-evaluation! session envelope)
+           envelope
+           (if (output-exceeded?)
+             {:seon.eval/ok? false
+              :seon.eval/interrupted? true
+              :seon/error
+              (guard/policy-error! (::guard/holder ctx) :agent)}
+             envelope)
            output (output-text)]
        (cond-> envelope
          (seq output) (assoc ::output output))))))
