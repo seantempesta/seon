@@ -1170,6 +1170,20 @@ original files; acquire-then-fence two-step per the design
 (exclusive nil→claimant + nil→1 claim BEFORE work; held epoch
 threaded through every pointer+epoch fence). L0 RE-DISPATCHED.
 
+**Ruling 23 (orchestrator, resolves L0 stop #2 — the reacquire
+gap):** (a) `src/seon/agent/lifecycle.cljc` + matching tests join
+L0's Owned (the epoch must thread from the claimant into the
+portable close/pause/resume builders; pure builders never
+manufacture authority — wiki law from this stop). (b) NON-STALE
+REACQUIRE pinned: a resumed run (claimant absent, epoch present) is
+acquired by claimant nil→me + epoch e→inc(e) + beat, returning
+inc(e) — distinct from L2 expired-lease steal (nobody displaced);
+the increment stales every older held epoch at every fence. (c)
+Claimant retraction on clean close AND pause confirmed per design
+:225-227. (d) Cycle-breaker: additional fence-consumer callers
+inside src/seon/agent/** or src/seon/host/** may be self-added to
+Owned with a report; stop only for genuine design questions.
+
 **ISSUE TRIAGE RETURNED + committed `d476204e`**: 132 open → 20
 archived (evidence-based), 28 annotated dissolving-into-units, 73
 real+independent (sized), 11 unclear (probes named). Open backlog

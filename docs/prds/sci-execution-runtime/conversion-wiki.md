@@ -15,6 +15,19 @@ the anchor stays the state ledger.
 
 ## Datahike/schema shapes (cost us two live boot failures)
 
+- **An old→old epoch CAS is a stale-holder fence, not claim arbitration.**
+  Two drivers holding the same epoch both satisfy `e → e`; exactly-one turn
+  requires an earlier exclusive claim transition (`nil → 1`, or steal
+  `e → (inc e)`) and only the winner may receive/thread the claimed epoch.
+  Never re-read the current epoch inside a work consumer: that lets a stale
+  driver adopt the winner's authority. The loop acquisition and every fence
+  wire producer must carry the held epoch end-to-end
+  (`loop-cljc-sci-design-2026-07-23.md:215-256`).
+- **Owning a pure fence builder does not own its authority input.** Migrating
+  `lifecycle/core.cljc` to accept an epoch is incomplete while
+  `lifecycle.cljc` still pulls no epoch and calls close/pause/resume without the
+  driver-held value. Expand ownership through every production caller; a
+  builder cannot safely re-read and adopt the current epoch for a stale driver.
 - **Cardinality-many pulls return VECTORS, never sets.** The registered
   Malli `[:set X]` is the shape authority; the ONE decode boundary
   (`seon.db/decode-edn-value` + computed `set-valued-attr?` in
