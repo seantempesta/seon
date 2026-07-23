@@ -1834,19 +1834,19 @@
              (sort-by compiled-program-sort-key)
              vec)
         _
-        (admission/committed-projection
-         {::admission/schema-rows
-          (into []
-                (keep (fn [row]
-                        (when-let [key (:seon.schema/key row)]
-                          [key (:seon.schema/form row)])))
-                program)
-          ::admission/function-contract-rows
-          (into []
-                (keep (fn [row]
-                        (when-let [form (:seon.fn/spec row)]
-                          [(:seon.fn/sym row) form])))
-                program)})]
+        (schema/build-projection
+         (into {}
+               (keep (fn [row]
+                       (when-let [key (:seon.schema/key row)]
+                         [key (reader/read-string
+                               (:seon.schema/form row))])))
+               program)
+         (into {}
+               (keep (fn [row]
+                       (when-let [form (:seon.fn/spec row)]
+                         [(symbol (:seon.fn/sym row))
+                          (reader/read-string form)])))
+               program))]
     (when-not artifact-digest
       (throw
        (ex-info "The launch has no compiled execution artifact digest."

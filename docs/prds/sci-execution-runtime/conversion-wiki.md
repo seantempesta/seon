@@ -893,3 +893,14 @@ the anchor stays the state ledger.
   forms, cumulative real usage, JSON-schema response format, tool calls, and
   bounded HTTP error translation. Register Gemini as an OpenAI-compatible row;
   do not introduce a native GenerateContent core.
+
+## Schema admission boot-path scar (2026-07-23)
+
+- **Desired program validation is not committed-row admission.** A fresh boot
+  validates core program data before the writer creates its asserting
+  transaction. Feeding those synthetic identity/form pairs through the
+  committed-row projection correctly invokes its missing-provenance
+  fail-closed rule and misclassifies core contracts. Validate desired core
+  forms with the core projection compiler; reserve committed-row acquisition
+  for rows that carry their real asserting transaction. Fixture coverage must
+  exercise both sides because neither substitutes for the live boot ordering.

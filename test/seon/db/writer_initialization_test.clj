@@ -181,6 +181,25 @@
                 (d/q '[:find [?id ...]
                        :where [_ :seon.db.process/id ?id]]
                      (d/db connection)))))
+        (let [schema-rows
+              (d/q
+               '[:find ?key ?form (pull ?tx ?provenance-pattern)
+                 :in $ ?provenance-pattern
+                 :where
+                 [?schema :seon.schema/key ?key]
+                 [?schema :seon.schema/form ?form ?tx]]
+               (d/db connection)
+               schema/asserting-transaction-provenance-pattern)
+              projection
+              (schema/projection-from-rows
+               {:seon.schema/schema-rows schema-rows
+                :seon.schema/function-contract-rows []})]
+          (is (= :core
+                 (get-in projection
+                         [:seon.schema.projection/schema-admissions
+                          :seon.db/process
+                          :seon.schema.admission/source]))
+              "fresh writer boot rows retain recognizable core provenance"))
         (let [before-domain (d/db connection)
               report
               (d/transact

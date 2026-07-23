@@ -219,6 +219,21 @@
              {:my.kb.shared/id "shared"}])
            (:seon.db/initial-data forward)))))
 
+(deftest initialization-validates-core-program-before-provenance-exists
+  (let [opaque-core-schema
+        {:seon.schema/key :example.core/third-party-value
+         :seon.schema/form ":any"}
+        build (deref #'client/database-initialization)
+        initialization
+        (with-program-builders
+          []
+          [opaque-core-schema]
+          #(build (descriptor) configuration))]
+    (is (= opaque-core-schema
+           (first (:seon.db/program initialization)))
+        (str "the desired core program is validated without fabricating "
+             "a committed transaction"))))
+
 (deftest startup-recovery-accepts-domain-data-and-throws-direct-errors
   (let [recovery-result! (deref #'client/recovery-result!)
         domain-result {::recovery/repaired? false
