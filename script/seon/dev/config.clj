@@ -198,7 +198,9 @@
               (keep (fn [path]
                       (let [selected (fs/path root path)]
                         (when (fs/regular-file? selected)
-                          [path (slurp selected)]))))
+                          ; bb's slurp rejects a raw java.nio Path; the file's
+                          ; established idiom is (slurp (str ...)).
+                          [path (slurp (str selected))]))))
               (config.resolve/render-context-file-paths manifest))
         singleton
         (config.resolve/resolve-config-singleton
