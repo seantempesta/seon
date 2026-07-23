@@ -1,4 +1,4 @@
-(ns seon.host-guard-policy-test
+(ns seon.host-guard-policy-writer-test
   "Guard-policy acquisition rejects absent data before the guarded door."
   (:require [clojure.test :refer [deftest is]]
             [seon.host.context :as context]

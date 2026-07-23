@@ -530,3 +530,42 @@ the anchor stays the state ledger.
   existing shared consumers in `script/seon/dev/changed_test.clj:237-238,
   282-284`. Adding another exclusion means making the file's platform coupling
   explicit enough for this same predicate, never naming the file.
+- **Widened discovery can expose tests whose runtime has already died.**
+  `test/seon/authority_density_test.clj` and
+  `test/seon/execution_process_test.clj` both spawned per-agent Bun execution
+  children. R26/R28 removed that topology; the accepted deletion inventory
+  already classified the execution-process suite for deletion, and its fixture
+  issue was triaged as dissolving with the child path. Delete such a whole
+  dead-runtime assertion instead of repairing its bespoke build/fixture;
+  retain the writer concurrency, host conformance, claim-driver, and portable
+  core tests that exercise the surviving contracts.
+
+## U2 claim-driver falsifier scars (2026-07-23)
+
+- **A process claim does not serialize fibers inside that process.** The
+  `:held` claim transition must accept the same claimant identity so a retained
+  driver can renew its lease. Consequently, a wake listener and scan listener
+  in one pod can both pass the durable fence and create distinct turns at the
+  same epoch unless the claimant retains one addressable local handle per run.
+  Keep that Promise/thread map strictly process-local; database claim and cursor
+  facts remain authority. Both pod and JVM leaves now implement this R1 rule
+  (`seon.agent.driver.pod/dispatch-run!`,
+  `seon.agent.driver.host/start!`).
+- **Portable attribute registration is not by itself fresh-schema
+  installation.** Reset initialization derives installed attributes from the
+  canonical entity schemas. Moving eval receipt registrations into the
+  portable receipt owner made JVM loading honest, but
+  `:seon.eval/progress?` still remained absent until the canonical
+  `:seon.eval` entity schema referenced it. A reset-boundary pull is the
+  falsifier; a populated database or namespace-registry assertion is not.
+- **A kill drill's fixture must encode its claimed cardinality.** The ordinary
+  run budget legitimately permits sequential follow-up turns after publication.
+  A receipt assertion demanding one turn therefore needs a one-turn demo agent
+  (or another explicit close outcome); an unconstrained stub conversation is
+  not evidence of duplicate effects.
+- **Do not complete a cross-tier proof across a broken shared artifact.** The
+  final reset rerun was blocked when an independent render portability edit
+  left `src/seon/render/value.cljc` with an unmatched delimiter. Preserve the
+  already committed cursor/receipt evidence, name the exact compiler error, and
+  stop the owned cluster. Never patch or commit the other lane's in-flight
+  source to manufacture U12 or full-CLJS evidence.
