@@ -1640,6 +1640,28 @@ the variable-weight values they select.
   to pending interest responses and listener-readiness waiters before
   interrupting the reader (`seon.db.host/interest-reader-loop!`).
 
+## Web feed and terminal-fault scars (2026-07-24)
+
+- **A transport mailbox is backpressure, not reactive transaction settling.**
+  The JVM Datastar feed already retained only its latest complete morph, but a
+  fast drain still rendered every committed transaction because it listened to
+  the writer directly. Make `seon.reactive` portable and register the JVM view
+  with the same demanded-read scheduler as the pod; retain the mailbox only
+  between the settled render and a slow socket. A burst regression must count
+  fewer frames than transactions and prove the last frame carries the newest
+  basis (`b9439599d`).
+- **The terminal HTTP catch is the fault-recording door.** Per-handler catches
+  that log and return 500 make core failures disappear from database
+  forensics. Wrap every live handler once, record the caught value through
+  `seon.error/record!`, then return one bounded flat error response. Test both
+  synchronous throws and rejected promises because either can cross the same
+  handler boundary (`19f044328`, `59d57b55c`).
+- **A shipped static asset belongs to the admitted runtime, not the launcher's
+  classpath accident.** The JVM web process receives `SEON_RUNTIME_ROOT`;
+  resolve `resources/public` there before the classpath fallback. A source
+  launch may make `io/resource` appear sufficient while the digested runtime
+  serves 404 for the same JavaScript and CSS paths.
+
 ## Preprocessing start-gate scars (2026-07-24)
 
 - **Canonical equality requires deterministic derived collection order.**

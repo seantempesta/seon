@@ -30,6 +30,19 @@ Commit `762424f91` routes the terminal catch through
 `seon.error/record!` with `:seon.error/fault :core` before logging and
 constructing the HTTP 500 response.
 
+The overnight class audit then found the same omission in the other
+`seon.web.serve` handler catches. Commits `19f044328` and `59d57b55c` replace
+those local terminal catches with one handler-boundary door. The door records
+both a synchronous throw and a rejected promise before returning the same
+bounded, flat JSON 500 shape; expected readiness/configuration responses keep
+their existing non-core status paths.
+
+`bin/test-cljs
+--test=seon.web.serve-test/terminal-fault-door-persists-sync-and-async-core-faults`
+passed 1 test / 5 assertions. It exercised the real persistence hook and
+observed exactly two `:seon.error/fault :core` projections for the two injected
+failures.
+
 Focused proof exercises the real injected persistence hook: the caught
 rejection produced exactly one core-fault transaction projection before the
 response assertions. `bin/test-cljs
@@ -47,9 +60,9 @@ datom did not persist. Full evidence is in
 
 ## Owner
 
-`seon.web.serve/handle-agent-run!` owns the external boundary. It must classify
-and record caught core failures through the one `seon.error` mechanism before
-returning the bounded HTTP error.
+`seon.web.serve/through-terminal-fault-door` owns the external boundary. It
+classifies and records caught core failures through the one `seon.error`
+mechanism before returning the bounded HTTP error.
 
 ## Acceptance
 
