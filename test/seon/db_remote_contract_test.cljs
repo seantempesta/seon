@@ -3,6 +3,9 @@
   (:require
    [clojure.string :as str]
    [cljs.test :refer [async deftest is testing]]
+   ;; Loading the production client corpus completes the canonical schema
+   ;; authority so the paged-initialization fixture is self-contained.
+   [seon.client]
    [seon.db :as db]
    [seon.db.internal :as internal]
    [seon.db.protocol :as protocol]
@@ -290,16 +293,22 @@
            (done))))))
 
 (def ^:private initialization
-  {:seon.execution/artifact-digest
-   "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-   :seon.db/attributes []
-   :seon.db/program
-   [{:seon.ns/name 'seon.db
-     :seon.ns/source "(ns seon.db)"}
-    {:seon.fn/sym "seon.db/query"
-     :seon.fn/ns [:seon.ns/name 'seon.db]
-     :seon.fn/source "(defn query [input] input)"}]
-   :seon.db/initial-data [{:seon.user/id "user"}]})
+  "One production-shaped initialization seeded through the canonical
+   schema authority, exactly like `seon.client/database-initialization`."
+  (let [schema-rows (mapv #(dissoc % :seon.schema/created-at)
+                          (schema/canonical-schema-rows (js/Date.)))]
+    {:seon.execution/artifact-digest
+     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+     :seon.db.initialization/page-rows 64
+     :seon.db/attributes (schema/canonical-database-attributes)
+     :seon.db/program
+     (into schema-rows
+           [{:seon.ns/name 'seon.db
+             :seon.ns/source "(ns seon.db)"}
+            {:seon.fn/sym "seon.db/query"
+             :seon.fn/ns [:seon.ns/name 'seon.db]
+             :seon.fn/source "(defn query [input] input)"}])
+     :seon.db/initial-data [{:seon.user/id "user"}]}))
 
 (defn- operation-requests
   [requests operation]
@@ -484,12 +493,17 @@
                   ::db/initialization initialization})
                 (.then
                  (fn [_]
-                   (let [ensure-request
-                         (first
-                          (operation-requests
-                           @requests protocol/ensure-database-operation))]
-                     (is (= initialization
-                            (::db/initialization ensure-request)))))))))
+                   (let [ensure-requests
+                         (operation-requests
+                          @requests protocol/ensure-database-operation)
+                         pages (protocol/initialization-pages
+                                initialization)]
+                     (is (= pages
+                            (mapv ::db/initialization-page ensure-requests))
+                         "opening forwards every ordered page exactly once")
+                     (is (every? #(= database-name
+                                     (::protocol/database-name %))
+                                 ensure-requests))))))))
         (.then (fn [_] (done)))
         (.catch (fn [error]
                   (is false (str "initialization forwarding rejected: " error))

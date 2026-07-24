@@ -1356,3 +1356,23 @@ the variable-weight values they select.
   severed between calls, then assert error keys before EOF and a healthy
   reconnect (`src/seon/host.clj`,
   `test/seon/host_conformance_writer_test.clj`).
+
+## Computed-bootstrap fixture scar (2026-07-23)
+
+- **A hand-built initialization fixture dies twice under computed-bootstrap
+  enforcement: missing bootstrap forms, then a dangling registry.** After
+  paging landed, `protocol/initialization-pages` rejects any
+  `:seon.db/initialization` whose schema rows lack the bootstrap closure, so
+  fixtures must seed through the canonical producers
+  (`seon.schema/canonical-schema-rows` + `canonical-database-attributes`) —
+  never a hand row list. But the producers project ONLY the schemas the
+  process has loaded, and `register!` permits forward references, so a
+  focused test bundle can yield a population with dangling references (e.g.
+  `:seon.fn` referencing `:seon.program.edge/*` registered in an unloaded
+  namespace). The fix is not a closure namespace list: require the production
+  corpus entry (`seon.client`) so the loaded registry is complete by the
+  application's own require graph, then drop wall-clock attrs
+  (`:seon.schema/created-at`) for a deterministic fingerprint. Forwarding
+  assertions compare the ensure requests' `:seon.db/initialization-page`
+  sequence against `protocol/initialization-pages` of the same fixture value
+  (`test/seon/db_remote_contract_test.cljs`).
