@@ -253,24 +253,24 @@ codex sol lanes. Haiku is only for quick reads. Never haiku for coding.
 Codex uses its configured coding model—Claude aliases are not portable
 model names.
 
-Launch every codex lane harness-tracked and watchable — this exact
-shape, no `nohup`, no trailing `&`, run through the Bash tool with
-`run_in_background: true` and a description naming the lane:
+Launch every codex lane through `bin/lane` as a harness-tracked
+background command (Bash `run_in_background: true`, description naming
+the lane — never `nohup`/`&`, never hand-rolled shell):
 
 ```bash
-codex exec -m gpt-5.6-sol -c model_reasoning_effort=high \
-  --dangerously-bypass-approvals-and-sandbox \
-  -o tmp/orchestrator/<lane>-summary.txt \
-  "<the full spec>" < /dev/null 2>&1 | tee tmp/orchestrator/<lane>-stdout.log
+bin/lane run <name> "<the full spec>"   # or spec on stdin (heredoc)
 ```
 
-Tracked means the lane appears in the user's task panel and its exit
-re-invokes the orchestrator (no watcher loops); `tee` streams the live
-transcript to that panel while persisting the log; background stdout
-never enters the orchestrator's context — read the `-o` summary, then
-query the log selectively with `tail`/`rg`, never a whole-file read.
-`< /dev/null` is mandatory (codex blocks on open stdin). Full
-mechanics, resume recipe, and model dials:
+The script owns the conventions: model/effort dials (`LANE_MODEL`,
+`LANE_EFFORT`, `LANE_SANDBOX=read-only` for audits), the `-o` summary
+in `tmp/orchestrator/<name>-summary.txt`, and `tee`-streamed stdout so
+the user's task panel shows the live transcript while
+`<name>-stdout.log` persists. Tracked means lane exit re-invokes the
+orchestrator — no watcher loops. Lane stdout never enters the
+orchestrator's context: read the summary (`bin/lane summary <name>`),
+then query the log selectively with `tail`/`rg`, never a whole-file
+read. Also: `bin/lane status | watch <name> | resume <name> <sid>`.
+Full mechanics, resume recipe, and model dials:
 `docs/seon/reference/driving-codex-agents.md`.
 
 For research, use one agent with the complete relevant context rather than many

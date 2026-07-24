@@ -33,10 +33,17 @@ file — that is the summary you read back.
 For a read-only investigation instead, swap that one flag for
 `-s read-only -c approval_policy=never`.
 
-## Launching under the Claude Code harness — tracked, never nohup
+## Launching under the Claude Code harness — bin/lane, tracked, never nohup
+
+`bin/lane` is the one launcher — it bakes in every convention below
+(model/effort dials, `-o` summary, `tee`-streamed stdout,
+stdin-via-`-`): `bin/lane run <name> "<spec>"` (or spec on a heredoc),
+plus `status`, `watch`, `summary`, and `resume` subcommands. Do not
+hand-roll `codex exec` shell for lanes; the rest of this section is the
+rationale and the contract the script implements.
 
 When the orchestrator is a Claude Code session, launch every lane as a
-harness-tracked background command: run the plain `codex exec ...` line
+harness-tracked background command: run `bin/lane run ...`
 through the Bash tool with `run_in_background: true` — **no `nohup`, no
 trailing `&`**. Verified 2026-07-24 (probe lane `bmxosu25m`): the lane
 appears in the user's background-tasks panel under the Bash call's

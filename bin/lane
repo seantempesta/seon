@@ -1,0 +1,83 @@
+#!/bin/sh
+# bin/lane — the one way to run codex implementation lanes.
+#
+# The orchestrator launches these as harness-tracked background tasks
+# (Bash run_in_background, description naming the lane) so the user's
+# task panel shows the live transcript and completion re-invokes the
+# orchestrator. Conventions: docs/seon/reference/driving-codex-agents.md.
+#
+#   bin/lane run <name> [spec]      launch a lane; spec as one argument
+#                                   or on stdin (heredoc). Streams the
+#                                   transcript to stdout AND persists
+#                                   tmp/orchestrator/<name>-stdout.log;
+#                                   summary -> <name>-summary.txt.
+#   bin/lane resume <name> <sid> [followup]
+#                                   continue a lane's session by id.
+#   bin/lane watch <name>           follow a lane's live transcript.
+#   bin/lane summary <name>         print a lane's -o summary.
+#   bin/lane status                 running lanes + landed summaries.
+#
+# Dials (env): LANE_MODEL (gpt-5.6-sol), LANE_EFFORT (high),
+# LANE_SANDBOX (full | read-only).
+
+set -eu
+
+dir=tmp/orchestrator
+model=${LANE_MODEL:-gpt-5.6-sol}
+effort=${LANE_EFFORT:-high}
+sandbox=${LANE_SANDBOX:-full}
+
+usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 64; }
+
+[ $# -ge 1 ] || usage
+command=$1; shift
+
+sandbox_flags() {
+  case "$sandbox" in
+    full) printf '%s' '--dangerously-bypass-approvals-and-sandbox' ;;
+    read-only) printf '%s' '-s read-only -c approval_policy=never' ;;
+    *) echo "bin/lane: unknown LANE_SANDBOX '$sandbox'" >&2; exit 64 ;;
+  esac
+}
+
+case "$command" in
+  run)
+    [ $# -ge 1 ] || usage
+    name=$1; shift
+    mkdir -p "$dir"
+    if [ $# -ge 1 ]; then spec=$1; else spec=$(cat); fi
+    [ -n "$spec" ] || { echo "bin/lane: empty spec" >&2; exit 64; }
+    # Spec rides stdin (codex `-`); stdout streams to the panel AND the
+    # log via tee; the summary lands in -o for the orchestrator.
+    printf '%s' "$spec" |
+      codex exec -m "$model" -c model_reasoning_effort="$effort" \
+        $(sandbox_flags) \
+        -o "$dir/$name-summary.txt" - 2>&1 |
+      tee "$dir/$name-stdout.log"
+    ;;
+  resume)
+    [ $# -ge 2 ] || usage
+    name=$1; sid=$2; shift 2
+    codex exec resume "$sid" $(sandbox_flags) "$@" < /dev/null 2>&1 |
+      tee -a "$dir/$name-stdout.log"
+    ;;
+  watch)
+    [ $# -ge 1 ] || usage
+    exec tail -n 40 -f "$dir/$1-stdout.log"
+    ;;
+  summary)
+    [ $# -ge 1 ] || usage
+    exec cat "$dir/$1-summary.txt"
+    ;;
+  status)
+    echo "running codex lanes:"
+    ps -axo pid=,etime=,command= |
+      awk '/codex exec/ && !/vendor/ && !/zsh|sh -c|awk/ {
+        printf "  %s  %s  %.100s\n", $1, $2, substr($0, index($0,$3))
+      }' || true
+    echo "summaries landed in the last hour:"
+    find "$dir" -name '*-summary.txt' -mmin -60 2>/dev/null |
+      while IFS= read -r f; do echo "  $f"; done
+    ;;
+  *) usage ;;
+esac
