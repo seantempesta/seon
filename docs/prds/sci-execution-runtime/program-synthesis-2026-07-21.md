@@ -383,6 +383,17 @@ proven checkpoint cutover. Freeze released earlier: u9delete cutting
 (S1+), writerready closed (loud probe 0a51420e7 + AOT-regex fix
 fcd0825c1 landed; handshake proof pending next clean boot).
 
+GREAT DELETION PROGRESS (~16:30): 40 files / 10,857 lines DELETED.
+Landed: child runtime+builds+integration driver (78aab36a0), child
+host test suite (1dfdfa106), fail-closed dispatch (26783ac36),
+session wire-core promotion w/ JVM proof (e05a6b8ed), execution
+namespaces deleted whole (2911dfbba). Current: session-family
+dispatch entry (portable core + pod leaf over existing wire) + six
+caller repoints, then S2 self-host engine death. Boot policy during
+deletion: attempt only after each coherent commit series (watch
+build otherwise compiles mid-churn). s6: AOT isolated behind opt-in
+(cbab7ba3a), proving+measuring in its own invocations.
+
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 
 ## older restart protocol below until morning)
