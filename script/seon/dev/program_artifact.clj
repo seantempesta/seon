@@ -611,12 +611,25 @@
          :seon.dev.artifact/actual program-row-digest})))
     (when-not (and (map? projection)
                    (map? base-load-plan)
-                   (int?
+                   ;; The compiled CLJS hash is an integer, but the EDN
+                   ;; boundary materializes it as java.lang.Long on the JVM.
+                   ;; Validate its data contract, never the reader's concrete
+                   ;; numeric representation.
+                   (integer?
                     (:seon.schema.projection/fingerprint projection))
                    (string? initialization-fingerprint))
       (throw
        (ex-info "The compiled boot derivation returned an invalid base projection."
-                {:seon.dev.artifact/value-type (type projection)})))
+                {:seon.dev.artifact/value-type (type projection)
+                 :seon.dev.artifact/fingerprint
+                 (:seon.schema.projection/fingerprint projection)
+                 :seon.dev.artifact/fingerprint-type
+                 (some-> projection
+                         :seon.schema.projection/fingerprint
+                         type)
+                 :seon.dev.artifact/base-load-plan-type (type base-load-plan)
+                 :seon.dev.artifact/initialization-fingerprint
+                 initialization-fingerprint})))
     (atomic-spit!
      (output-file state relative-path)
      (str

@@ -205,3 +205,38 @@
              (slurp (str page-plan-output))))
       (is (empty? (fs/glob (fs/parent row-output) ".*.tmp")))
       (finally (fs/delete-tree project)))))
+
+(deftest base-projection-flush-accepts-the-edn-materialized-fingerprint
+  (let [project (fs/create-temp-dir {:prefix "seon-base-projection-publish-"})
+        row-path "out/client/program-rows.edn"
+        projection-path "out/client/base-projection.edn"
+        rows [{:seon.fn/sym "example.core/value"
+               :seon.fn/source "(defn value [] 42)"}]
+        row-text (str "{:seon.dev.artifact/program-rows " (pr-str rows) "}\n")
+        ;; `edn/read-string` turns the CLJS numeric fingerprint into Long.
+        projection (edn/read-string
+                    "{:seon.schema.projection/fingerprint -552006374}")
+        prepared
+        {:seon.dev.artifact/program-row-artifact-digest
+         (program-artifact/digest row-text)
+         :seon.dev.artifact/base-projection projection
+         :seon.dev.artifact/base-load-plan {}
+         :seon.dev.artifact/page-plan
+         {:seon.db/initialization-pages
+          [{:seon.db.initialization/fingerprint "page-plan"}]}}
+        state {:project-dir (.toFile project)
+               :seon.dev.program-artifact/prepared-program-rows
+               {row-path prepared}}
+        output (fs/path project projection-path)]
+    (try
+      (fs/create-dirs (fs/parent output))
+      (spit (str (fs/path project row-path)) row-text)
+      (is (identical?
+           state
+           (program-artifact/publish-base-projection!
+            state row-path projection-path)))
+      (is (= {:seon.dev.artifact/base-projection projection
+              :seon.host.context/base-load-plan {}
+              :seon.db.initialization/fingerprint "page-plan"}
+             (edn/read-string (slurp (str output)))))
+      (finally (fs/delete-tree project)))))
