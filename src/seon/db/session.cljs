@@ -12,6 +12,13 @@
 
 (defonce ^:private !session (atom nil))
 
+(def request-backstop-defaults
+  "Named last-resort database request backstops in milliseconds."
+  {:seon.config.database.session/open-request-backstop-ms 15000
+   :seon.config.database.session/capability-request-backstop-ms 5000
+   :seon.config.database.session/call-request-backstop-ms 15000
+   :seon.config.database.session/transaction-request-backstop-ms 120000})
+
 (defn mint-id
   "Mint one process-local operation or transport identity."
   []
@@ -144,14 +151,29 @@
      (contains? response ::protocol/running?)
      (assoc ::protocol/running? (::protocol/running? response)))})
 
-(defn- request-on-session! [session request timeout-ms]
+(defn- request-backstop-ms
+  [config-key fallback-ms]
+  (or (get (:seon.config/configuration (current-tx-context)) config-key)
+      fallback-ms
+      (get request-backstop-defaults config-key)
+      (throw
+       (ex-info "The database request is missing a named backstop fact."
+                {:seon.error/kind :configuration
+                 ::uds/backstop-config-key config-key}))))
+
+(defn- request-on-session!
+  [session request backstop-config-key fallback-ms]
   (if-not (protocol/valid-request? request)
     (js/Promise.resolve
      (request-error "The database request is invalid."
                     {::protocol/request-id (::protocol/request-id request)
                      ::protocol/error (protocol/explain-request request)}))
-    (-> (uds/request! {::uds/session session ::uds/message request
-                       ::uds/timeout-ms timeout-ms})
+    (-> (uds/request!
+         {::uds/session session
+          ::uds/message request
+          ::uds/timeout-ms
+          (request-backstop-ms backstop-config-key fallback-ms)
+          ::uds/backstop-config-key backstop-config-key})
         (.then
          (fn [response]
            (cond
@@ -248,7 +270,10 @@
       (let [ensured
             (await
              (request-on-session!
-              session (ensure-request selection page) 15000))]
+              session
+              (ensure-request selection page)
+              :seon.config.database.session/open-request-backstop-ms
+              nil))]
         (when-not (::protocol/success? ensured)
           (throw (ex-info "Opening the database failed." ensured)))
         (when page
@@ -273,7 +298,8 @@
                  {::protocol/request-id (mint-id)
                   ::protocol/database-name database-name
                   ::protocol/database-advanced? (not (false? database-advanced?))})
-                15000))]
+                :seon.config.database.session/open-request-backstop-ms
+                nil))]
     (when-not (::protocol/success? acquired)
       (throw (ex-info "Acquiring the database failed." acquired)))
     acquired))
@@ -375,7 +401,9 @@
             (await (request-on-session!
                     session
                     (protocol/capabilities-request
-                     {::protocol/request-id (mint-id)}) 5000))
+                     {::protocol/request-id (mint-id)})
+                    :seon.config.database.session/capability-request-backstop-ms
+                    nil))
             _ (when-not (::protocol/success? capabilities-response)
                 (throw (ex-info "Database capability negotiation failed."
                                 capabilities-response)))
@@ -403,7 +431,8 @@
                         (await (request-on-session!
                                 session
                                 (assoc (::request entry) ::db/db (::db/db acquired))
-                                15000))]
+                                :seon.config.database.session/open-request-backstop-ms
+                                nil))]
                     (when (or (error-value? response)
                               (not (::protocol/success? response)))
                       (throw (ex-info "Restoring a database listener failed."
@@ -421,7 +450,8 @@
                               (protocol/unlisten-request
                                {::protocol/request-id (mint-id)
                                 ::protocol/target-request-id request-id})
-                              15000))))))
+                              :seon.config.database.session/open-request-backstop-ms
+                              nil))))))
             database-name (::db/database-name selection)
             state (-> @!session
                       (assoc ::owner owner ::selection selection ::session session
@@ -500,49 +530,40 @@
              (assoc :seon.error/ex-data (ex-data exception))))))
       (session-error "This process has no open database session." {}))))
 
+(defn- ^:async call-with-backstop!
+  [request backstop-config-key fallback-ms]
+  (let [state (await (active-or-reconnect!))]
+    (if (error-value? state)
+      (update state :seon.error/data assoc
+              ::protocol/request-id (::protocol/request-id request))
+      (await
+       (request-on-session! (::session state) request
+                            backstop-config-key fallback-ms)))))
+
 (defn ^:async call!
   "Deliver one validated protocol request, reconnecting the session if needed."
-  ([request] (await (call! request 15000)))
+  ([request]
+   (await
+    (call-with-backstop!
+     request :seon.config.database.session/call-request-backstop-ms nil)))
   ([request timeout-ms]
-   (let [state (await (active-or-reconnect!))]
-     (if (error-value? state)
-       (update state :seon.error/data assoc
-               ::protocol/request-id (::protocol/request-id request))
-       (await (request-on-session! (::session state) request timeout-ms))))))
+   (await
+    (call-with-backstop!
+     request :seon.config.database.session/call-request-backstop-ms
+     timeout-ms))))
 
 (defn ^:async transaction-call!
-  "Deliver one transaction request, retaining identity across ambiguous retries."
+  "Deliver one transaction request and await its stable writer receipt."
   [request recoverable?]
-  (let [selection (::selection @!session)
-        owner (::owner @!session)]
-    (loop [delay-ms 1 ambiguous? false]
-      (if (and owner (true? (aget owner "closed")))
-        (session-error "The database session was closed by its owner."
-                       {::protocol/request-id (::protocol/request-id request)
-                        :seon.error/ex-data {::uds/closed-by-owner? true}})
-        (let [opened (if (active-session)
-                       true
-                       (if selection
-                         (await (-> (open-session! selection)
-                                    (.then (constantly true))
-                                    (.catch
-                                     (fn [exception]
-                                       (session-error
-                                        (or (.-message exception)
-                                            "The database session failed to reopen.")
-                                        (cond-> {::protocol/request-id
-                                                 (::protocol/request-id request)}
-                                          (ex-data exception)
-                                          (assoc :seon.error/ex-data
-                                                 (ex-data exception))))))))
-                         false))
-              opening-error? (error-value? opened)
-              response (if opening-error? opened (await (call! request 120000)))]
-          (if (or (recoverable? response) (and ambiguous? opening-error?))
-            (do (await (js/Promise. (fn [resolve _]
-                                     (js/setTimeout resolve delay-ms))))
-                (recur (min 250 (* 2 delay-ms)) true))
-            response))))))
+  (let [backstop-key
+        :seon.config.database.session/transaction-request-backstop-ms
+        response (await (call-with-backstop! request backstop-key nil))]
+    (if (recoverable? response)
+      ;; The writer joins this exact immutable request to its active receipt
+      ;; and delivers the original terminal response. A second clock would
+      ;; merely poll an already-addressable completion.
+      (await (call-with-backstop! request backstop-key nil))
+      response)))
 
 (defn ^:async resolve-database!
   "Resolve or acquire a named database, consulting the descriptor cache first."
@@ -619,8 +640,12 @@
           (swap! !session assoc-in [::interest-handlers request-id]
                  {::owner owner ::handler handler ::key public-key
                   ::request request})
-          (let [response (await (request-on-session! (::session state)
-                                                     request 15000))]
+          (let [response
+                (await
+                 (request-on-session!
+                  (::session state) request
+                  :seon.config.database.session/call-request-backstop-ms
+                  nil))]
             (if (and (not (error-value? response))
                      (::protocol/success? response))
               (do (when-let [database (:db-after response)]
@@ -673,7 +698,9 @@
                       (::session state)
                       (protocol/unlisten-request
                        {::protocol/request-id (mint-id)
-                        ::protocol/target-request-id request-id}) 15000))]
+                        ::protocol/target-request-id request-id})
+                      :seon.config.database.session/call-request-backstop-ms
+                      nil))]
           (cond (error-value? response) response
                 (not (::protocol/success? response)) (response-error response)
                 :else true))

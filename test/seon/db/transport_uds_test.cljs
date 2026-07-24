@@ -2,7 +2,8 @@
   "Focused Bun session framing, correlation, and terminal-state tests."
   (:require [cljs.test :refer-macros [async deftest is testing]]
             [seon.db.protocol :as protocol]
-            [seon.db.transport.uds :as uds]))
+            [seon.db.transport.uds :as uds]
+            [seon.error :as error]))
 
 (def ^:private encode-frame @#'uds/encode-frame)
 (def ^:private decode-payload @#'uds/decode-payload)
@@ -319,6 +320,32 @@
         (.catch (fn [error]
                   (is false (str "control settlement failed: " error))
                   (done))))))
+
+(deftest socket-eof-rejects-every-pending-request-before-a-deadline-turn
+  (async done
+    (-> (with-fake-bun
+          []
+          (fn [session fixture]
+            (let [a (uds/request! {::uds/session session
+                                   ::uds/message (request-message "eof/a")})
+                  b (uds/request! {::uds/session session
+                                   ::uds/message (request-message "eof/b")})]
+              (event! fixture "end")
+              (-> (js/Promise.all #js [(.catch a identity)
+                                       (.catch b identity)])
+                  (.then
+                   (fn [errors]
+                     (is (every?
+                          #(= :seon.db.transport.uds.failure/closed
+                              (::uds/failure (ex-data %)))
+                          (array-seq errors)))
+                     (is (zero? ((::uds/pending-count session))))
+                     (is (= 1 @(::close-count fixture)))))))))
+        (.then (fn [_] (done)))
+        (.catch
+         (fn [error]
+           (is false (str "EOF settlement failed: " error))
+           (done))))))
 
 (deftest multiplexed-session-correlates-out-of-order-responses
   (async done
@@ -671,129 +698,110 @@
                   (is false (str "request without deadline failed: " error))
                   (done))))))
 
-(deftest deadline-retains-request-identity-and-capacity-until-response
+(deftest request-backstop-records-a-fault-and-settles-the-caller
   (async done
-    (-> (with-fake-bun
-          []
-          (fn [session fixture]
-            (-> (uds/request!
-                 {::uds/session session
-                  ::uds/message (request-message "deadline")
-                  ::uds/timeout-ms 1})
-                (.then (fn [_]
-                         (is false "an expired request must reject")))
-                (.catch
-                 (fn [error]
-                   (is (= :seon.db.transport.uds.failure/timeout
-                          (::uds/failure (ex-data error))))
-                   (is (= 1 ((::uds/pending-count session)))
-                       "physical work still owns its correlation slot")
-                   (is (= 2 (count @(::writes fixture)))
-                       "the deadline sends one cancellation on the same session")
-                   (-> (uds/request!
-                        {::uds/session session
-                         ::uds/message (request-message "deadline")})
-                       (.then (fn [_]
-                                (is false "a timed-out id cannot be reused")))
-                       (.catch
-                        (fn [duplicate]
-                          (is (= :seon.db.transport.uds.failure/duplicate
-                                 (::uds/failure (ex-data duplicate))))
-                          (inject! fixture
-                                   (encode-frame
-                                    (response-message "deadline" :late)))
-                          (is (zero? ((::uds/pending-count session)))
-                              "the late response only retires physical ownership")
-                          (let [reused
-                                (uds/request!
-                                 {::uds/session session
-                                  ::uds/message (request-message "deadline")})]
+    (let [original-record! error/record!
+          faults (atom [])]
+      (set! error/record! #(swap! faults conj %))
+      (-> (with-fake-bun
+            []
+            (fn [session fixture]
+              (-> (uds/request!
+                   {::uds/session session
+                    ::uds/message (request-message "deadline")
+                    ::uds/timeout-ms 1
+                    ::uds/backstop-config-key
+                    :seon.config.test/request-backstop-ms})
+                  (.then (fn [_]
+                           (is false "an expired request must reject")))
+                  (.catch
+                   (fn [exception]
+                     (is (= :seon.db.transport.uds.failure/timeout
+                            (::uds/failure (ex-data exception))))
+                     (is (zero? ((::uds/pending-count session)))
+                         "the request Promise is terminal at the backstop")
+                     (is (= :seon.config.test/request-backstop-ms
+                            (::uds/backstop-config-key
+                             (ex-data (::error/raw (first @faults))))))
+                     (is (= 2 (count @(::writes fixture)))
+                         "the backstop sends one cancellation")
+                     (-> (uds/request!
+                          {::uds/session session
+                           ::uds/message (request-message "deadline")})
+                         (.then
+                          (fn [_]
+                            (is false "physical ownership prevents id reuse")))
+                         (.catch
+                          (fn [duplicate]
+                            (is (= :seon.db.transport.uds.failure/duplicate
+                                   (::uds/failure (ex-data duplicate))))
                             (inject! fixture
                                      (encode-frame
-                                      (response-message "deadline" :reused)))
-                            reused)))
-                       (.then
-                        (fn [response]
-                          (is (= :reused (::protocol/result response)))
-                          (uds/close! session)))))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [error]
-                  (is false (str "deadline handling failed: " error
-                                 "\n" (.-stack error)))
-                  (done))))))
+                                      (response-message "deadline" :late)))
+                            (let [reused
+                                  (uds/request!
+                                   {::uds/session session
+                                    ::uds/message
+                                    (request-message "deadline")})]
+                              (inject! fixture
+                                       (encode-frame
+                                        (response-message "deadline" :reused)))
+                              reused)))
+                         (.then
+                          (fn [response]
+                            (is (= :reused (::protocol/result response)))
+                            (uds/close! session)))))))))
+          (.finally #(set! error/record! original-record!))
+          (.then (fn [_] (done)))
+          (.catch
+           (fn [exception]
+             (set! error/record! original-record!)
+             (is false (str "deadline handling failed: " exception
+                            "\n" (.-stack exception)))
+             (done)))))))
 
 (deftest transaction-deadline-retains-the-authoritative-response
   (async done
-    (-> (with-fake-bun
-          []
-          (fn [session fixture]
-            (let [request (assoc (request-message "transaction-deadline")
-                                 ::protocol/operation
-                                 protocol/transact-operation)
-                  settled? (atom false)
-                  response
-                  (-> (uds/request!
-                       {::uds/session session
-                        ::uds/message request
-                        ::uds/timeout-ms 1})
-                      (.finally #(reset! settled? true)))]
-              (js/Promise.
-               (fn [resolve _reject]
-                 (js/setTimeout
-                  (fn []
-                    (is (false? @settled?)
-                        "a write deadline cannot claim physical completion")
-                    (is (= 1 ((::uds/pending-count session))))
-                    (is (= 2 (count @(::writes fixture)))
-                        "the deadline sends one cancel beside the transaction")
-                    (inject! fixture
-                             (encode-frame
-                              (response-message "transaction-deadline"
-                                                :authoritative)))
-                    (resolve response))
-                  300))))))
-        (.then
-         (fn [response]
-           (is (= :authoritative (::protocol/result response)))
-           (done)))
-        (.catch
-         (fn [error]
-           (is false (str "transaction deadline failed: " error
-                          "\n" (.-stack error)))
-           (done))))))
-
-(deftest repeated-deadlines-cannot-exceed-physical-in-flight-capacity
-  (async done
-    (-> (with-fake-bun
-          []
-          (fn [session _fixture]
-            (let [requests
-                  (mapv
-                   (fn [index]
-                     (-> (uds/request!
-                          {::uds/session session
-                           ::uds/message (request-message (str "timeout-" index))
-                           ::uds/timeout-ms 1})
-                         (.catch identity)))
-                   (range 256))]
-              (-> (js/Promise.all (into-array requests))
-                  (.then
-                   (fn [errors]
-                     (is (every?
-                          #(= :seon.db.transport.uds.failure/timeout
-                              (::uds/failure (ex-data %)))
-                          (array-seq errors)))
-                     (is (= 256 ((::uds/pending-count session))))
-                     (-> (uds/request!
-                          {::uds/session session
-                           ::uds/message (request-message "over-capacity")})
-                         (.then
-                          (fn [result]
-                            (is (= :seon.db.transport.uds.failure/busy
-                                   (::uds/failure result)))
-                            (is (string? (::uds/message result)))
-                            (uds/close! session))))))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [error]
-                  (is false (str "deadline capacity failed: " error))
-                  (done))))))
+    (let [original-record! error/record!]
+      (set! error/record! (fn [_] nil))
+      (-> (with-fake-bun
+            []
+            (fn [session fixture]
+              (let [request (assoc (request-message "transaction-deadline")
+                                   ::protocol/operation
+                                   protocol/transact-operation)
+                    settled? (atom false)
+                    response
+                    (-> (uds/request!
+                         {::uds/session session
+                          ::uds/message request
+                          ::uds/timeout-ms 1
+                          ::uds/backstop-config-key
+                          :seon.config.test/transaction-backstop-ms})
+                        (.finally #(reset! settled? true)))]
+                (js/Promise.
+                 (fn [resolve _reject]
+                   (js/setTimeout
+                    (fn []
+                      (is (false? @settled?)
+                          "a write deadline cannot claim physical completion")
+                      (is (= 1 ((::uds/pending-count session))))
+                      (is (= 2 (count @(::writes fixture)))
+                          "the deadline sends one cancel beside the transaction")
+                      (inject! fixture
+                               (encode-frame
+                                (response-message "transaction-deadline"
+                                                  :authoritative)))
+                      (resolve response))
+                    300))))))
+          (.finally #(set! error/record! original-record!))
+          (.then
+           (fn [response]
+             (is (= :authoritative (::protocol/result response)))
+             (done)))
+          (.catch
+           (fn [exception]
+             (set! error/record! original-record!)
+             (is false (str "transaction deadline failed: " exception
+                            "\n" (.-stack exception)))
+             (done)))))))

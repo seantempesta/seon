@@ -6,6 +6,7 @@
    session closures; callers exchange ordinary namespaced maps and Promises."
   (:require [cognitect.transit :as t]
             [seon.db.protocol :as protocol]
+            [seon.error :as error]
             [seon.platform :as platform]
             [seon.schema :as schema]))
 
@@ -18,11 +19,11 @@
 
 (def ^:private maximum-frame-bytes protocol/maximum-frame-bytes)
 (def ^:private maximum-pending-requests 256)
+(def ^:private maximum-capacity-waiters 256)
 (def ^:private maximum-queued-bytes (* 2 protocol/maximum-frame-bytes))
 (def ^:private maximum-pending-events 64)
 (def ^:private maximum-queued-event-bytes
   (* 2 protocol/maximum-frame-bytes))
-(def ^:private deadline-tick-ms 250)
 
 (def default-socket-path
   (or (platform/env-val "SEON_DB_SOCK")
@@ -31,6 +32,7 @@
 (schema/register! ::socket-path [:string {:min 1}])
 (schema/register! ::message :map)
 (schema/register! ::timeout-ms [:int {:min 1}])
+(schema/register! ::backstop-config-key :keyword)
 (schema/register! ::on-event! 'fn?)
 (schema/register! ::on-close! 'fn?)
 (schema/register! ::connected? 'fn?)
@@ -71,7 +73,8 @@
  [:map {:closed true}
   [::session ::session]
   [::message ::message]
-  [::timeout-ms {:optional true} ::timeout-ms]])
+  [::timeout-ms {:optional true} ::timeout-ms]
+  [::backstop-config-key {:optional true} ::backstop-config-key]])
 (schema/register! ::on-text! 'fn?)
 (schema/register! ::send-text! 'fn?)
 (schema/register!
@@ -92,6 +95,18 @@
    (failure message kind {}))
   ([message kind data]
    (ex-info message (assoc data ::failure kind))))
+
+(defn- record-backstop!
+  [request-id config-key timeout-ms]
+  (error/record!
+   {::error/raw
+    (ex-info
+     "A database transport request reached its completion backstop."
+     {:seon.error/kind :core-bug
+      ::protocol/request-id request-id
+      ::backstop-config-key config-key
+      ::timeout-ms timeout-ms})
+    ::error/fault :core}))
 
 (defn- valid-opening-success?
   [response client-maximum-frame-bytes]
@@ -314,6 +329,8 @@
            !terminal? (atom false)
            !connect-settled? (atom false)
            !pending (atom {})
+           !retired-request-ids (atom #{})
+           !capacity-waiters (atom [])
            !output (atom (empty-output))
            !events (atom (empty-events))
            !maximum-frame-bytes
@@ -342,28 +359,60 @@
                         (on-close! error)
                         (catch :default _)))
                     0)))
+               (settle-capacity! []
+                 (when (and (not @!terminal?)
+                            (< (+ (count @!pending)
+                                  (count @!retired-request-ids))
+                               maximum-pending-requests))
+                   (let [waiters @!capacity-waiters]
+                     (reset! !capacity-waiters [])
+                     (doseq [{::keys [resolve]} waiters]
+                       (resolve true)))))
+               (wait-for-capacity! []
+                 (cond
+                   @!terminal?
+                   (js/Promise.reject
+                    (failure "Database session is closed."
+                             :seon.db.transport.uds.failure/closed))
+
+                   (>= (count @!capacity-waiters)
+                       maximum-capacity-waiters)
+                   (js/Promise.reject
+                    (failure "Database session has no request capacity."
+                             :seon.db.transport.uds.failure/busy))
+
+                   :else
+                   (js/Promise.
+                    (fn [resolve reject]
+                      (swap! !capacity-waiters conj
+                             {::resolve resolve ::reject reject})))))
                (terminate! [reason]
                  (if @!terminal?
                    false
                    (let [error (as-error reason)
                          socket @!socket
                          connected? @!connected?
-                         pending (vals @!pending)]
+                         pending (vals @!pending)
+                         capacity-waiters @!capacity-waiters]
                      (reset! !terminal? true)
                      (reset! !connected? false)
                      (when-let [timer @!deadline-timer]
-                       (js/clearInterval timer))
+                       (js/clearTimeout timer))
                      (reset! !deadline-timer nil)
                      (when-let [timer @!event-timer]
                        (js/clearTimeout timer))
                      (reset! !event-timer nil)
                      (reset! !pending {})
+                     (reset! !retired-request-ids #{})
+                     (reset! !capacity-waiters [])
                      (reset! !output (empty-output))
                      (reset! !events (empty-events))
                      (settle-connect! error nil)
                      (doseq [{::keys [reject]} pending]
                        (when reject
                          (reject error)))
+                     (doseq [{::keys [reject]} capacity-waiters]
+                       (reject error))
                      (when socket
                        (try
                          (js-invoke socket "close")
@@ -452,6 +501,30 @@
                          @!maximum-frame-bytes))
                        (catch :default error
                          (terminate! error))))))
+               (nearest-deadline-at []
+                 (reduce-kv
+                  (fn [nearest _request-id entry]
+                    (let [deadline-at (::deadline-at entry)]
+                      (cond
+                        (nil? deadline-at) nearest
+                        (nil? nearest) deadline-at
+                        :else (min nearest deadline-at))))
+                  nil
+                  @!pending))
+               (schedule-deadline! []
+                 (when-let [timer @!deadline-timer]
+                   (js/clearTimeout timer))
+                 (reset! !deadline-timer nil)
+                 (when-let [deadline-at
+                            (when-not @!terminal? (nearest-deadline-at))]
+                   (reset!
+                    !deadline-timer
+                    (js/setTimeout
+                     (fn []
+                       (reset! !deadline-timer nil)
+                       (expire-deadlines!)
+                       (schedule-deadline!))
+                     (max 0 (- deadline-at (js/Date.now)))))))
                (expire-deadlines! []
                  (let [now (js/Date.now)
                        expired
@@ -463,10 +536,14 @@
                             entries))
                         []
                         @!pending)]
-                   (doseq [[request-id {::keys [reject] :as expired-entry}]
+                   (doseq [[request-id
+                            {::keys [reject timeout-ms backstop-config-key]
+                             :as expired-entry}]
                            expired]
                      (when-let [current-entry (get @!pending request-id)]
                        (when (identical? expired-entry current-entry)
+                         (record-backstop! request-id backstop-config-key
+                                           timeout-ms)
                          ;; A transaction deadline requests cancellation but
                          ;; cannot assert that the write did not commit. Keep
                          ;; its one physical callback until the authority
@@ -479,13 +556,15 @@
                                        (dissoc ::deadline-at)
                                        (assoc ::timed-out? true)))
                            (do
-                             (swap! !pending assoc request-id
-                                    {::timed-out? true})
+                             (swap! !pending dissoc request-id)
+                             (swap! !retired-request-ids conj request-id)
                              (reject
                               (failure
                                "Database request timed out."
                                :seon.db.transport.uds.failure/timeout
-                               {::protocol/request-id request-id}))))
+                               {::protocol/request-id request-id
+                                ::backstop-config-key backstop-config-key}))
+                             (settle-capacity!)))
                          (enqueue-cancel! request-id))))))
                (deliver-message! [message frame-bytes]
                  (let [request-id (::protocol/request-id message)
@@ -543,10 +622,16 @@
                          (throw
                           (failure "Database message has no request id."
                                    :seon.db.transport.uds.failure/protocol)))
-                       (when-let [{::keys [resolve]} (get @!pending request-id)]
-                         (swap! !pending dissoc request-id)
-                         (when resolve
-                           (resolve message)))))))
+                       (if-let [{::keys [resolve]} (get @!pending request-id)]
+                         (do
+                           (swap! !pending dissoc request-id)
+                           (schedule-deadline!)
+                           (settle-capacity!)
+                           (when resolve
+                             (resolve message)))
+                         (when (contains? @!retired-request-ids request-id)
+                           (swap! !retired-request-ids disj request-id)
+                           (settle-capacity!)))))))
                (receive! [chunk]
                  (when-not @!terminal?
                    (try
@@ -559,7 +644,8 @@
                                              (.-byteLength ^js payload)))))
                      (catch :default error
                        (terminate! error)))))
-               (request-map! [{::keys [message timeout-ms]}]
+               (request-map!
+                 [{::keys [message timeout-ms backstop-config-key] :as request}]
                  (let [request-id (::protocol/request-id message)]
                    (cond
                      @!terminal?
@@ -572,16 +658,25 @@
                       (failure "Database request has no request id."
                                :seon.db.transport.uds.failure/protocol))
 
-                     (contains? @!pending request-id)
+                     (or (contains? @!pending request-id)
+                         (contains? @!retired-request-ids request-id))
                      (js/Promise.reject
                       (failure "Database request id is already pending."
                                :seon.db.transport.uds.failure/duplicate
                                {::protocol/request-id request-id}))
 
-                     (>= (count @!pending) maximum-pending-requests)
+                     (and timeout-ms (not (keyword? backstop-config-key)))
                      (js/Promise.reject
-                      (failure "Database session has no request capacity."
-                               :seon.db.transport.uds.failure/busy))
+                      (failure
+                       "Database request deadline has no governing config fact."
+                       :seon.db.transport.uds.failure/protocol
+                       {::protocol/request-id request-id}))
+
+                     (>= (+ (count @!pending)
+                            (count @!retired-request-ids))
+                         maximum-pending-requests)
+                     (-> (wait-for-capacity!)
+                         (.then (fn [_] (request-map! request))))
 
                      :else
                      (js/Promise.
@@ -606,18 +701,27 @@
                                                ::protocol/operation
                                                (::protocol/operation message)}
                                         timeout-ms
-                                        (assoc ::deadline-at
-                                               (+ (js/Date.now) timeout-ms)))]
+                                        (assoc
+                                         ::deadline-at
+                                         (+ (js/Date.now) timeout-ms)
+                                         ::timeout-ms timeout-ms
+                                         ::backstop-config-key
+                                         backstop-config-key))]
                             (swap! !pending assoc request-id entry)
+                            (schedule-deadline!)
                             (when-not (enqueue-frame! frame)
                               (when-let [owned (get @!pending request-id)]
                                 (when (identical? owned entry)
                                   (swap! !pending dissoc request-id)
+                                  (schedule-deadline!)
+                                  (settle-capacity!)
                                   (reject
                                    (failure "Database session is closed."
                                             :seon.db.transport.uds.failure/closed))))))
                           (catch :default error
                             (swap! !pending dissoc request-id)
+                            (schedule-deadline!)
+                            (settle-capacity!)
                             (reject error))))))))
                (session-map []
                  {::connected? (fn [] @!connected?)
@@ -640,10 +744,6 @@
                  (when (and (not @!terminal?) (not @!connected?))
                    (reset! !socket socket)
                    (reset! !connected? true)
-                   (when-not @!deadline-timer
-                     (reset! !deadline-timer
-                             (js/setInterval expire-deadlines!
-                                             deadline-tick-ms)))
                    (enqueue-frame!
                     (encode-frame
                      (protocol/session-open-request

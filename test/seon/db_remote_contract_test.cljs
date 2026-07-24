@@ -515,133 +515,100 @@
                   (is false (str "initialization forwarding rejected: " error))
                   (done))))))
 
-(deftest transaction-redelivers-one-frozen-request-after-reconnect-failures
+(deftest ambiguous-transaction-awaits-the-stable-writer-receipt
   (async done
     (-> (with-recording-authority
-          {}
-          (fn [{::keys [requests connection-options connect-count connected?
-                        session]}]
-            (-> (open!)
-                (.then
-                 (fn [_]
-                   (let [reconnect-attempts (atom 0)
-                         transaction-attempts (atom 0)
-                         generated-candidates
-                         [{:seon.db.id/key :example/generated
-                           :seon.db.id/identity-attr :example/id
-                           :seon.db.id/value "abcdefghijklmn"}]
-                         tx-data [{:example/id "abcdefghijklmn"
-                                   :example/value "frozen"}]
-                         tx-meta {:seon.db/user [:seon.agent/id "root"]}]
-                     (set! uds/connect!
-                           (fn [options]
-                             (swap! connect-count inc)
-                             (reset! connection-options options)
-                             (if (< (swap! reconnect-attempts inc) 3)
-                               (js/Promise.reject
-                                (ex-info
-                                 "authority is restarting"
-                                 {::uds/failure
-                                  :seon.db.transport.uds.failure/closed}))
-                               (do
-                                 (reset! connected? true)
-                                 (js/Promise.resolve session)))))
-                     (set! uds/request!
-                           (fn [{::uds/keys [message]}]
-                             (swap! requests conj message)
-                             (if (= protocol/transact-operation
-                                    (::protocol/operation message))
-                               (if (= 1 (swap! transaction-attempts inc))
-                                 (do
-                                   (reset! connected? false)
-                                   ((::uds/on-close! @connection-options)
-                                    (ex-info "socket closed" {}))
-                                   (js/Promise.reject
-                                    (ex-info
-                                     "socket closed"
-                                     {::uds/failure
-                                      :seon.db.transport.uds.failure/closed})))
-                                 (js/Promise.resolve
-                                  (assoc (response-for message {})
-                                         ::protocol/recovered? true)))
-                               (js/Promise.resolve (response-for message {})))))
-                     (-> ((deref #'db/submit-transaction!)
-                          {::db/db database
-                           ::db/expected-db database
-                           :seon.db.id/generated-candidates
-                           generated-candidates}
-                          tx-data tx-meta)
-                         (.then
-                          (fn [report]
-                            (let [transactions
-                                  (operation-requests
-                                   @requests protocol/transact-operation)]
-                              (is (= 2 (count transactions)))
-                              (is (= (first transactions) (second transactions))
-                                  "recovery resends the exact immutable request")
-                              (is (= generated-candidates
-                                     (::protocol/generated-candidates
-                                      (first transactions))))
-                              (is (= tx-meta
-                                     (::protocol/transaction-meta
-                                      (first transactions))))
-                              (is (= database
-                                     (:seon.db/expected-db
-                                      (first transactions))))
-                              (is (= 4 @connect-count)
-                                  "one open plus two failed and one successful reconnect")
-                              (is (true?
-                                   (:seon.db.id/recovered-commit? report)))))))))))))
+         {}
+         (fn [{::keys [requests connection-options connect-count connected?
+                       session]}]
+           (-> (open!)
+               (.then
+                (fn [_]
+                  (let [transaction-attempts (atom 0)
+                        receipt-resolve (atom nil)
+                        redelivery-resolve (atom nil)
+                        redelivery
+                        (js/Promise.
+                         (fn [resolve _reject]
+                           (reset! redelivery-resolve resolve)))
+                        receipt
+                        (js/Promise.
+                         (fn [resolve _reject]
+                           (reset! receipt-resolve resolve)))
+                        generated-candidates
+                        [{:seon.db.id/key :example/generated
+                          :seon.db.id/identity-attr :example/id
+                          :seon.db.id/value "abcdefghijklmn"}]
+                        tx-data [{:example/id "abcdefghijklmn"
+                                  :example/value "frozen"}]
+                        tx-meta {:seon.db/user [:seon.agent/id "root"]}]
+                    (set! uds/connect!
+                          (fn [options]
+                            (swap! connect-count inc)
+                            (reset! connection-options options)
+                            (reset! connected? true)
+                            (js/Promise.resolve session)))
+                    (set! uds/request!
+                          (fn [{::uds/keys [message]}]
+                            (swap! requests conj message)
+                            (if (= protocol/transact-operation
+                                   (::protocol/operation message))
+                              (if (= 1 (swap! transaction-attempts inc))
+                                (do
+                                  (reset! connected? false)
+                                  ((::uds/on-close! @connection-options)
+                                   (ex-info "socket closed" {}))
+                                  (js/Promise.reject
+                                   (ex-info
+                                    "socket closed"
+                                    {::uds/failure
+                                     :seon.db.transport.uds.failure/closed})))
+                                (do
+                                  (@redelivery-resolve true)
+                                  receipt))
+                              (js/Promise.resolve
+                               (response-for message {})))))
+                    (let [result
+                          ((deref #'db/submit-transaction!)
+                           {::db/db database
+                            ::db/expected-db database
+                            :seon.db.id/generated-candidates
+                            generated-candidates}
+                           tx-data tx-meta)]
+                      (-> redelivery
+                          (.then
+                           (fn [_]
+                             (let [transactions
+                                   (operation-requests
+                                    @requests protocol/transact-operation)]
+                               (is (= 2 (count transactions)))
+                               (is (= (first transactions)
+                                      (second transactions))
+                                   "recovery resends the exact immutable request")
+                               (is (= generated-candidates
+                                      (::protocol/generated-candidates
+                                       (first transactions))))
+                               (is (= tx-meta
+                                      (::protocol/transaction-meta
+                                       (first transactions))))
+                               (is (= database
+                                      (:seon.db/expected-db
+                                       (first transactions))))
+                               (is (= 2 @connect-count)
+                                   "socket close directly causes one reconnect")
+                               (@receipt-resolve
+                                (assoc (response-for (second transactions) {})
+                                       ::protocol/recovered? true)))))
+                          (.then (fn [_] result))
+                          (.then
+                           (fn [report]
+                             (is (true?
+                                  (:seon.db.id/recovered-commit?
+                                   report)))))))))))))
         (.then (fn [_] (done)))
         (.catch
          (fn [error]
            (is false (str "frozen transaction recovery failed: " error
-                          "\n" (.-stack error)))
-           (done))))))
-
-(deftest transaction-backpressures-through-a-busy-session
-  (async done
-    (-> (with-recording-authority
-          {}
-          (fn [{::keys [requests connect-count]}]
-            (-> (open!)
-                (.then
-                 (fn [_]
-                   (let [transaction-attempts (atom 0)
-                         tx-data [{:example/id "busy-transaction"
-                                   :example/value "eventually committed"}]]
-                     (set! uds/request!
-                           (fn [{::uds/keys [message]}]
-                             (swap! requests conj message)
-                             (if (and (= protocol/transact-operation
-                                         (::protocol/operation message))
-                                      (<= (swap! transaction-attempts inc) 3))
-                               (js/Promise.reject
-                                (ex-info
-                                 "request window is full"
-                                 {::uds/failure
-                                  :seon.db.transport.uds.failure/busy}))
-                               (js/Promise.resolve
-                                (response-for message {})))))
-                     (-> ((deref #'db/submit-transaction!)
-                          {::db/db database}
-                          tx-data {})
-                         (.then
-                          (fn [report]
-                            (let [transactions
-                                  (operation-requests
-                                   @requests protocol/transact-operation)]
-                              (is (= 4 (count transactions)))
-                              (is (apply = transactions)
-                                  "capacity waits retry one frozen request")
-                              (is (= 4 @transaction-attempts))
-                              (is (= 1 @connect-count)
-                                  "busy capacity does not reconnect the session")
-                              (is (= database (:db-after report)))))))))))))
-        (.then (fn [_] (done)))
-        (.catch
-         (fn [error]
-           (is false (str "busy transaction backpressure failed: " error
                           "\n" (.-stack error)))
            (done))))))
 
