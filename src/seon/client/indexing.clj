@@ -22,7 +22,7 @@
    definition isn't in the build either."
   (:require [cljs.env :as env]
             [cljs.util]
-            [clojure.java.io :as io]))
+            [seon.dev.program-inventory :as program-inventory]))
 
 (defn- analyzer-namespaces
   "The CLJS analyzer's namespaces map ({ns-sym ns-map}), or nil outside a
@@ -43,94 +43,11 @@
           (recur (conj seen n)
                  (into (pop todo) (vals (:requires (get nss n))))))))))
 
-(defn- def-meta
-  "Merged view of an analyzer def map and its user `:meta` — user metadata
-   (`:malli/schema`, `:test`, …) lives under `:meta`; analyzer projections
-   (`:private`, `:fn-var`, `:file`, `:line`) sit at the top level."
-  [d]
-  (merge (:meta d) (select-keys d [:private :fn-var :file :line :test])))
-
-(declare first-party-file?)
-
-(defn- analyzed-fn-entries
-  [nss selected-namespaces]
-  (for [namespace-symbol selected-namespaces
-        [_ definition] (:defs (get nss namespace-symbol))
-        :let [metadata (def-meta definition)]
-        :when (and (:fn-var metadata) (:line metadata))]
-    {:seon.dev.program-inventory/symbol (str (:name definition))
-     :seon.dev.program-inventory/private? (true? (:private metadata))
-     :seon.dev.program-inventory/first-party?
-     (first-party-file? (:file metadata))}))
-
-(defn analyzer-fn-inventory
-  "Derive callable symbols once from a selected compiler analysis closure."
-  [nss selected-namespaces]
-  (let [entries (analyzed-fn-entries nss selected-namespaces)]
-    {:seon.dev.program-inventory/public-exports
-     (->> entries
-          (filter :seon.dev.program-inventory/first-party?)
-          (remove :seon.dev.program-inventory/private?)
-          (map :seon.dev.program-inventory/symbol)
-          distinct
-          sort
-          vec)
-     ;; R39 gives first-party private functions real private corpus rows. Only
-     ;; dependency-owned compiled terminals remain sidecar-only; enumerating
-     ;; the classpath or reparsing their source would be a second indexer.
-     :seon.dev.program-inventory/internal-terminals
-     (->> entries
-          (remove :seon.dev.program-inventory/first-party?)
-          (map :seon.dev.program-inventory/symbol)
-          distinct
-          sort
-          vec)
-     :seon.dev.program-inventory/first-party-private
-     (->> entries
-          (filter :seon.dev.program-inventory/first-party?)
-          (filter :seon.dev.program-inventory/private?)
-          (map :seon.dev.program-inventory/symbol)
-          distinct
-          sort
-          vec)}))
-
-(defn- first-party-roots
-  "Roots a def's `:file` may live under to count as first-party: the
-   repo's `src/` root plus, when the
-   `SEON_EXTRA_SRC` env var is set (task #36 — downstream consumers add
-   their own CLJS source root via a `:local/root` dep injected by
-   bin/seon), that extra root. Compile-time JVM-side, so `getenv` is
-   trivially available; unset env = exactly today's single root."
-  []
-  (let [extra (System/getenv "SEON_EXTRA_SRC")]
-    (cond-> [(str (io/file (System/getProperty "user.dir") "src"))]
-      (and extra (not= extra "")) (conj extra))))
-
-(defn- first-party-file?
-  "STRUCTURAL first/third-party boundary (V3-C, 2026-06-10): a def is
-   FIRST-PARTY iff its analyzer `:file` resolves to a file under one of
-   [[first-party-roots]] — the repo's maintained `src/` tree or the
-   `SEON_EXTRA_SRC` downstream root when that env var is set.
-   Third-party code arrives from jars, gitlibs checkouts, or the vendored
-   `reference-code/` dependency mirrors and is excluded.
-   Replaces the `seon.*`/`my.*` name-prefix predicate (`indexed-ns?`):
-   the indexer KNOWS the file path, so the name no longer has to carry
-   the classification."
-  [file]
-  (boolean
-    (when (and file (string? file))
-      (let [roots (first-party-roots)]
-        (if (.startsWith ^String file "/")
-          (some #(.startsWith ^String file ^String %) roots)
-          (when-let [url (io/resource file)]
-            (and (= "file" (.getProtocol url))
-                 (some #(.startsWith (.getPath url) ^String %) roots))))))))
-
 (defmacro public-fn-vars
   "Expand to a vector of `#'`-literals: EVERY public fn var — specced or
-   not — across every first-party namespace (by [[first-party-file?]]) in
-   the calling ns's transitive require closure. Sorted by symbol for
-   deterministic output.
+   not — across every first-party namespace (by
+   [[seon.dev.program-inventory/first-party-file?]]) in the calling ns's
+   transitive require closure. Sorted by symbol for deterministic output.
 
    No `:malli/schema` gate: the program graph indexes the WHOLE public
    first-party surface (owner directive — 'just index everything'). Whether
@@ -142,7 +59,7 @@
         reach (transitive-requires nss (-> &env :ns :name))
         syms  (map symbol
                    (:seon.dev.program-inventory/public-exports
-                    (analyzer-fn-inventory nss reach)))]
+                    (program-inventory/analyzer-fn-inventory nss reach)))]
     `[~@(map (fn [s] (list 'var s)) syms)]))
 
 (defmacro first-party-fn-vars
@@ -153,7 +70,7 @@
   []
   (let [nss (analyzer-namespaces)
         reach (transitive-requires nss (-> &env :ns :name))
-        inventory (analyzer-fn-inventory nss reach)
+        inventory (program-inventory/analyzer-fn-inventory nss reach)
         syms (map symbol
                   (concat
                    (:seon.dev.program-inventory/public-exports inventory)
@@ -164,12 +81,13 @@
   "Expand to a sorted vector of ns NAME STRINGS: every FIRST-PARTY
    namespace in the calling ns's transitive require closure — the
    BUILD-DERIVED compiled-ns set. First-party by the same structural
-   boundary as [[public-fn-vars]] ([[first-party-file?]]): a ns joins iff
-   its source lives under a first-party root — checked via any def's
-   analyzer `:file` (the common case) or, for a ns with NO defs at all
-   (a register!-calls-only root), the classpath resource at the ns's own
-   path (`cljs.util/ns->source`). Third-party nses (jar/gitlibs sources)
-   are excluded by the same check.
+   boundary as [[public-fn-vars]]
+   ([[seon.dev.program-inventory/first-party-file?]]): a ns joins iff its
+   source lives under a first-party root — checked via any def's analyzer
+   `:file` (the common case) or, for a ns with NO defs at all (a
+   register!-calls-only root), the classpath resource at the ns's own path
+   (`cljs.util/ns->source`). Third-party nses (jar/gitlibs sources) are
+   excluded by the same check.
 
    This is the computed replacement for hand-maintained compiled-root
    name sets (the `fn-less-compiled-roots #{\"my.kb\"}` class): a
@@ -179,11 +97,12 @@
   (let [nss   (analyzer-namespaces)
         reach (transitive-requires nss (-> &env :ns :name))
         fp?   (fn [n]
-                (or (some #(first-party-file? (:file (def-meta (val %))))
+                (or (some #(program-inventory/first-party-definition?
+                            (val %))
                           (:defs (get nss n)))
                     (when-let [url (cljs.util/ns->source n)]
                       (and (= "file" (.getProtocol url))
                            (let [p (.getPath url)]
                              (boolean (some #(.startsWith p ^String %)
-                                            (first-party-roots))))))))]
+                                            (program-inventory/first-party-roots))))))))]
     `[~@(sort (map str (filter fp? reach)))]))

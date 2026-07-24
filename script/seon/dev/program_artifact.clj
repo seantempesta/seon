@@ -3,7 +3,8 @@
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.java.shell :as shell]
-            [clojure.string :as str])
+            [clojure.string :as str]
+            [seon.dev.program-inventory :as program-inventory])
   (:import [java.io File]
            [java.nio.charset StandardCharsets]
            [java.nio.file CopyOption DirectoryNotEmptyException Files
@@ -117,9 +118,9 @@
   "Derive one canonical function inventory from Shadow's analyzed build.
 
    This hook owns only Shadow's exact build-source selection. Function
-   classification remains the client indexer's one analyzer derivation."
+   classification remains the program inventory's one structural derivation."
   [state]
-  ((requiring-resolve 'seon.client.indexing/analyzer-fn-inventory)
+  (program-inventory/analyzer-fn-inventory
    (get-in state [:compiler-env :cljs.analyzer/namespaces])
    (selected-namespaces state)))
 

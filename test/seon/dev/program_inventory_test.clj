@@ -1,7 +1,7 @@
-(ns seon.client-indexing-test
+(ns seon.dev.program-inventory-test
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is]]
-            [seon.client.indexing :as indexing]))
+            [seon.dev.program-inventory :as program-inventory]))
 
 (deftest analyzer-inventory-keeps-vendored-dependencies-out-of-public-corpus
   (let [root (System/getProperty "user.dir")
@@ -26,9 +26,10 @@
             :fn-var true
             :line 1
             :file
-            (str (io/file root "reference-code/datahike/src/datahike/api.cljc"))}}}}
+            (str (io/file root
+                          "reference-code/datahike/src/datahike/api.cljc"))}}}}
         inventory
-        (indexing/analyzer-fn-inventory
+        (program-inventory/analyzer-fn-inventory
          namespaces #{'example.core 'datahike.api})]
     (is (= ["example.core/public"]
            (:seon.dev.program-inventory/public-exports inventory)))

@@ -585,6 +585,13 @@ the anchor stays the state ledger.
   dead-runtime assertion instead of repairing its bespoke build/fixture;
   retain the writer concurrency, host conformance, claim-driver, and portable
   core tests that exercise the surviving contracts.
+- **Writer eligibility cannot see through a JVM-looking test namespace.**
+  Discovery intentionally classifies the selected `ns` form, not an unloaded
+  transitive require graph. A test of pure build inventory classification must
+  target `seon.dev.program-inventory` under the operator-owned test root; it
+  must not require the `seon.client.indexing` analyzer leaf and accidentally
+  pull `cljs.env` onto the writer classpath. The build publishes inventory
+  data; writer-side consumers read that artifact and never load the analyzer.
 
 ## U2 claim-driver falsifier scars (2026-07-23)
 
