@@ -1028,6 +1028,17 @@ COMPLETELY before dispatching anything.
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- CHECKPOINT SUITE RESULTS (first full sweep since morning):
+  OPERATOR GREEN 316/1,831. CLJS = TIMEOUT not failures (compile
+  13s/56 ns, then javascript-exit 124 at the 30min cap, complete?
+  false, zero recorded reds) — a HANG; cljshang lane bisecting from
+  the log tail. WRITER = classpath break at load —
+  seon.client.indexing (CLJS analyzer) entered writer scope
+  (FileNotFoundException cljs/env); writercp lane tracing the
+  require chain (writer consuming the analyzer would be a design
+  regression vs the S2 artifact model — fix at the owner, classpath
+  add is last resort). Default cluster reset itself was GREEN
+  (314s full readiness). Breaks #6/#7 of the serial chain.
 - BREAK #5 FIXED — CHAIN EXHAUSTED (7a1c5de68 + 647613f97,
   accepted): acquisition paged by canonical row (one identity = the
   exact expansion unit since result-weight charges string contents);
