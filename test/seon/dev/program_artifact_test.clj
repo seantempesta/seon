@@ -176,7 +176,10 @@
             :seon.dev.artifact/program-row-artifact-digest
             (program-artifact/digest row-artifact-text)
             :seon.dev.artifact/page-plan page-plan
-            :seon.dev.artifact/page-plan-text page-plan-text})}
+            :seon.dev.artifact/page-plan-text page-plan-text})
+         #'program-artifact/derive-base-load-plan
+         (fn [_state]
+           {:seon.host.context/units []})}
         #(let [changed state]
            (program-artifact/publish!
             changed "out/client/program-sources.edn")
@@ -186,6 +189,11 @@
                   "out/client/program-sources.edn"
                   "out/client/program-rows.edn")]
              (is (not (identical? changed row-state)))
+             (is (= {:seon.host.context/units []}
+                    (get-in row-state
+                            [:seon.dev.program-artifact/prepared-program-rows
+                             "out/client/program-rows.edn"
+                             :seon.dev.artifact/base-load-plan])))
              (is (identical?
                   row-state
                   (program-artifact/publish-page-plan!

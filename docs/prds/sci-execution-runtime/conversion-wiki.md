@@ -1664,6 +1664,12 @@ the variable-weight values they select.
 
 ## Preprocessing start-gate scars (2026-07-24)
 
+- **Release and watch must prepare the same sidecar inputs.** The release-only
+  `:optimize-prepare` hook derived the SCI base-load plan, while the ordinary
+  watch flush reconstructed only program rows and then correctly refused its
+  nil plan. Put both paths through one prepared-program derivation; publication
+  remains equally strict in either build mode
+  (`script/seon/dev/program_artifact.clj`).
 - **Validate sidecar numeric data across EDN, not by JVM primitive class.** A
   compiled CLJS projection fingerprint crosses the Bun `pr-str` → JVM
   `edn/read-string` boundary as `java.lang.Long`, even when its CLJS source is

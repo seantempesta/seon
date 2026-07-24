@@ -484,22 +484,26 @@
   (atomic-spit! (output-file state relative-path) (inventory-text state))
   state)
 
+(defn- prepare-program
+  "Derive the one prepared program value used by release and watch flushes."
+  [state program-source-relative-path relative-path program-source-text]
+  (assoc (derive-program-rows state program-source-text
+                              (output-file state relative-path))
+         :seon.dev.artifact/base-load-plan (derive-base-load-plan state)
+         :seon.dev.artifact/program-source-digest
+         (digest program-source-text)
+         :seon.dev.artifact/program-source-relative-path
+         program-source-relative-path
+         :seon.dev.artifact/program-source-text program-source-text))
+
 (defn ^{:shadow.build/stage :optimize-prepare} prepare-program-rows!
   "Prepare exact compiled boot rows before release optimization rewrites code."
   [state program-source-relative-path relative-path
    _base-projection-relative-path _page-plan-relative-path]
   (let [program-source-text (artifact-text state)
         prepared
-        (assoc (derive-program-rows
-               state program-source-text (output-file state relative-path))
-               :seon.dev.artifact/base-load-plan
-               (derive-base-load-plan state)
-               :seon.dev.artifact/program-source-digest
-               (digest program-source-text)
-               :seon.dev.artifact/program-source-relative-path
-               program-source-relative-path
-               :seon.dev.artifact/program-source-text
-               program-source-text)
+        (prepare-program state program-source-relative-path relative-path
+                         program-source-text)
         _ (swap! !prepared-program-rows
                  assoc (prepared-key state relative-path) prepared)
         _ (swap! !prepared-program-sources
@@ -538,14 +542,8 @@
           prepared-before
           (when-not (= :release (:mode state))
             (let [prepared
-                  (assoc
-                   (derive-program-rows state program-source-text target)
-                   :seon.dev.artifact/program-source-digest
-                   program-source-digest
-                   :seon.dev.artifact/program-source-relative-path
-                   program-source-relative-path
-                   :seon.dev.artifact/program-source-text
-                   program-source-text)]
+                  (prepare-program state program-source-relative-path
+                                   relative-path program-source-text)]
               (swap! !prepared-program-rows
                      assoc (prepared-key state relative-path) prepared)
               prepared)))
