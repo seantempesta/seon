@@ -1,4 +1,4 @@
-# src/seon/web — the pod's HTTP/SSE front door
+# src/seon/web — HTTP/SSE derivation on pod and JVM tiers
 
 **Read before editing:** `docs/seon/architecture/ui.md` (the live channel +
 routing + page tree), `observability.md` (cluster lifecycle, the
@@ -37,6 +37,14 @@ note the browser 503s long-lived SSE; verify feeds with a server-side client).
   Loopback responses use identity encoding. Remote deployments opt into
   `SEON_FEED_COMPRESSION=gzip`; the same feed negotiates `Accept-Encoding` and
   uses Bun's native zlib `Z_SYNC_FLUSH` stream without changing render work.
+- **`server.clj` + `feed.clj`** — the first JVM web-render slice: readiness,
+  `/data`, `/data/feed`, and shipped static assets. Equivalent data views
+  register with the same portable `seon.reactive` scheduler as the pod; the
+  depth-one mailbox begins after the settled render and owns only slow-socket
+  backpressure. Static assets resolve from
+  `$SEON_RUNTIME_ROOT/resources/public` before the source-launch classpath
+  fallback. The JVM SDK feed uses `http-kit/gzip-profile` under the same
+  explicit `SEON_FEED_COMPRESSION=gzip` negotiation.
 - **`view_unit.cljs`** — stable opaque presentation identity only. It does not
   own rendering, caching, invalidation, database access, or a feed. Do not grow
   it into a second renderer or dependency graph.
