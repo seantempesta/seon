@@ -52,10 +52,14 @@ detached lanes, an invisible fleet, and an owner asking "what are you
 waiting for?"). Tracked launches delete that whole failure class.
 
 Mechanics that still apply unchanged: `< /dev/null` (stdin gotcha
-below), `-o` summary files, per-run stdout redirect into
-`tmp/orchestrator/<lane>-stdout.log`, and independent verification of
-the diff. Give each Bash call a description naming the lane (that
-string is what the user's panel shows). Detached `nohup` remains
+below), `-o` summary files, and independent verification of the diff.
+Stream stdout through `tee`, never a bare `>` redirect —
+`codex exec [flags] "<spec>" < /dev/null 2>&1 | tee
+tmp/orchestrator/<lane>-stdout.log` — so the user's task panel shows
+the lane's live transcript while the log file still persists (owner
+request 2026-07-24: watchable agents). Give each Bash call a
+description naming the lane (that string is what the user's panel
+shows). Detached `nohup` remains
 acceptable only when a lane must survive the orchestrator session
 itself dying — the rare case, not the default.
 
