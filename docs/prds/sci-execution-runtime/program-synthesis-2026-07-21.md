@@ -1156,6 +1156,22 @@ MORNING ITEMS (accumulating):
   terminal eval receipts. The orchestrator's default rebuild and final
   re-drive are the dependency-ready refill; do not archive the config issue
   before those datoms exist.
+- ★★★ PROVABLY ALIVE — VERIFIED FROM DATOMS (2026-07-24 ~5:45am,
+  canonical DEFAULT cluster, orchestrator-verified in canondrive-
+  gate.log, NOT just lane-reported): agent hip-pugs-shop PLANNED
+  ([root :my.plan/title ... 536874314]), defined its OWN schema +
+  WROTE 3 facts ([8405 :my.canondrive.memory/claim "Apollo 11
+  launched..." 536874408]), READ them back a later turn (eval
+  emio0g4ozpk0 :done ok 536874436, all 3 rows), and SYNTHESIZED
+  correctly (tx 536874453). 11 turns / 11 :success attempts / no
+  wedge / both runs released / cluster UP. THE PROVABLY-ALIVE BAR IS
+  MET. CAVEAT: the final lifecycle/complete form hit the separate
+  known edge (jvm-claimant-rejects-visible-reply-without-exact-
+  execution-plan) — released correctly, no wedge; agent WORK alive,
+  final-form polish edge remains. NOT GRADUATION (that needs U9 +
+  census-zero + U10/U12 drills + the web-UI bugs) — alive ≠
+  graduated; the loop continues. lifecycle-complete lane dispatched
+  to remove the caveat.
 - ★★ MEMORY LAYER PROVEN — CROSS-TURN MEMORY ALIVE (planschema
   0ae0fda9e + f6dd94682 + 3fd9137f6, 2026-07-24 ~5:30am, isolated-
   cluster live proof): my.plan/plan! persisted a full nested plan,
