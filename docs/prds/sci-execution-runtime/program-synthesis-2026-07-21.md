@@ -304,6 +304,17 @@ Default cluster DOWN until watch flush green → then re-drive-3
 (alive caveat) on the S4 boot path. Fleet: s4-resume ∥ webui ∥
 c1codec(+3 read-only sub-audits) ∥ clock.
 
+C1 LANDED (~14:00): codec totality f7c5571d6 (no value throws at the
+wire; R41 loud degrade) + standing schema-driven encode→decode
+property ab8598db4 (registry-derived leaves, one property not a
+suite) + the boot-blocking wire-type class fix (decoded Long vs int?
+probe → integer? both paths, zero decoded-wire int? remain). s4
+resumed to apply+boot default green → re-drive-3. Bring-up fix chain
+so far: b28cadfee EDN fingerprint · ddf2c5aa6 watch base-load-plan ·
+7f045d1d2 apply routing + containment terminal · f7c5571d6 readiness
+wire-type. Fleet: s4 (default bring-up) ∥ webui ∥ c1codec (resumed,
+remaining codec work) ∥ clock.
+
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 
 ## older restart protocol below until morning)
