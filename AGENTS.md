@@ -48,6 +48,15 @@ proceed, recording why. Research and implementation always run
 concurrently. Timeouts are last resorts; interfaces express their
 dependencies and publish their own readiness.
 
+DEVELOPMENT VELOCITY OUTRANKS THE QUEUE (owner-ruled 2026-07-24 PM):
+anything extremely slow that taxes every fix cycle — a 300s restart, a
+14s JVM load, a blocked test runner, a stale artifact gate, a rebuild
+that recomputes what a cache already knows — is attacked IMMEDIATELY in
+a parallel lane the moment it is identified, never waited on and never
+parked behind feature work. The fix loop's speed is the multiplier on
+everything else; treat a slow loop as a production incident for
+development.
+
 ## Sustained program cadence
 
 The top-level agent keeps the complete active-program ledger visible while it

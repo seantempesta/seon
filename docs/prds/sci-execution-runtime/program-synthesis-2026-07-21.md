@@ -350,6 +350,15 @@ green boot → s4 final measure → re-drive-3 → W-R50-1/2 claimant
 settlement → S6 JVM classload → next U9 slice; s5maintain continues;
 reviews/anchor per landing; 15-min clock stays on.
 
+GOAL v2 RULED (~15:15, supersedes window queue order): THE GREAT
+DELETION IS THE SPINE (AGENTS.md standing goal). u9delete lane
+dispatched on the full remaining slice order (S0 rewires → S1 child
+retirement → S2 self-host death → S3 protocol promotion → S4
+census-flip); suite breakage authorized; no ports — fresh design or
+no replacement; blockers only = live dependency the surviving owner
+cannot serve. W-R50-1/2 + S6 requeue BEHIND deletion. Still in
+flight: writerready (default boot) ∥ s5maintain (S5 commits).
+
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 
 ## older restart protocol below until morning)
