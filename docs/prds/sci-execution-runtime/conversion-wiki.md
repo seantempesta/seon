@@ -1664,6 +1664,12 @@ the variable-weight values they select.
 
 ## Preprocessing start-gate scars (2026-07-24)
 
+- **Validate sidecar numeric data across EDN, not by JVM primitive class.** A
+  compiled CLJS projection fingerprint crosses the Bun `pr-str` → JVM
+  `edn/read-string` boundary as `java.lang.Long`, even when its CLJS source is
+  an integer. The flush hook must accept `integer?` and report the failed
+  field/type; `int?` false-positives on the valid plain projection map and
+  blocks the watcher before publication (`script/seon/dev/program_artifact.clj`).
 - **Canonical equality requires deterministic derived collection order.**
   Projection fingerprints intentionally ignore derived catalogs, so equal
   fingerprints did not expose a catalog vector whose order depended on hash-map
