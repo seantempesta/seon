@@ -163,6 +163,18 @@
            (:seon.ns/require-edges info)))
     (is (m/validate :seon.ns.source/namespace-info info))))
 
+(deftest namespace-info-selects-the-cljs-branch-of-portable-source
+  (let [source
+        (str "(ns my.portable\n"
+             "  \"Portable namespace documentation.\"\n"
+             "  #?(:clj (:require [clojure.string :as str])\n"
+             "     :cljs (:require [cljs.string :as str])))")
+        info (ns.source/namespace-info-from-source source)]
+    (is (= "Portable namespace documentation." (:seon.ns/doc info)))
+    (is (= #{{:seon.ns.require/target 'cljs.string
+              :seon.ns.require/alias 'str}}
+           (:seon.ns/require-edges info)))))
+
 (deftest namespace-info-remains-fail-soft-for-doc-quality
   (let [long-summary (apply str (repeat 120 "x"))
         info (ns.source/namespace-info-from-source

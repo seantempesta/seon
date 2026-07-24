@@ -1240,6 +1240,14 @@ the variable-weight values they select.
   `#?(:clj (thunk) :cljs (await (thunk)))`; never shadow the CLJS async
   transform with a portable identity macro (`src/seon/retry.cljc`).
 
+- **Namespace metadata parsing must allow reader conditionals.** A `.cljc`
+  namespace can put its platform-specific requires behind `#?` while keeping
+  one shared docstring. `cljs.reader/read-string` rejects that source and a
+  fail-soft parser then silently drops both documentation and require edges.
+  Use the maintained tools reader with `:read-cond :allow` and the current
+  platform feature set at the one namespace-source boundary
+  (`src/seon/ns/source.cljc`).
+
 ## Computed cold-boot schema population scar (2026-07-23)
 
 - **A computed inventory is only as complete as its persisted-entity

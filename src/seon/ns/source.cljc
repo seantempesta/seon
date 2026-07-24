@@ -6,8 +6,8 @@
    require keys retain the `seon.ns.require` namespace because they describe
    one require edge; the functions that parse and validate those edges live
    here at the namespace-source boundary."
-  (:require #?(:clj [clojure.edn :as reader]
-               :cljs [cljs.reader :as reader])
+  (:require #?(:clj [clojure.tools.reader :as reader]
+               :cljs [cljs.tools.reader :as reader])
             [clojure.string :as str]
             [seon.schema :as schema]))
 
@@ -44,6 +44,14 @@
                    [:seon.ns/doc {:optional true} :seon.ns/doc]
                    [:seon.ns/summary {:optional true} :seon.ns/summary]
                    [:seon.ns/require-edges ::require-edges]])
+
+(defn- read-source
+  "Read one portable source form for the compiling platform."
+  [source]
+  (reader/read-string
+   {:read-cond :allow
+    :features #{#?(:clj :clj :cljs :cljs)}}
+   source))
 
 (defn- require-edges-from-form
   "Return the reified require edges declared by one parsed namespace form."
@@ -82,7 +90,7 @@
   {:malli/schema [:=> [:cat :string] ::namespace-info]}
   [source]
   (try
-    (let [form (reader/read-string source)]
+    (let [form (read-source source)]
       (if (and (seq? form) (= 'ns (first form)))
         (let [doc (when (string? (nth form 2 nil)) (nth form 2))
               summary (some-> doc str/split-lines first str/trim not-empty)]
@@ -118,7 +126,7 @@
   "Derive the persistence warning for one bare scratch `def` source."
   [source]
   (let [forms (try
-                (reader/read-string (str "[" source "\n]"))
+                (read-source (str "[" source "\n]"))
                 (catch #?(:clj Throwable :cljs :default) _ nil))
         form (first forms)
         one? (= 1 (count forms))
