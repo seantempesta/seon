@@ -470,6 +470,19 @@ argv change) at the next coherent-tree boot. R45 SCOREBOARD (from
 writer 2.05s pending cutover · S1-S6 all landed. Remaining: cutover
 checkpoint, green default, re-drive-3, u9delete2 convergence.
 
+EVENING CONVERGENCE (~18:45): U9 COMPLETE — u9delete2 landed 16
+files/9,496 lines (cumulative 56 files / 20,353 lines): identity
+plumbing, digest-pair session admission, host-lane client leaf,
+render rewires, SELF-HOST ENGINE DELETED, client compiles; operator
+handoff landed top-level (d4ccd50f8). R52 COMPLETE (c3bf1c832):
+interactions transactional end-to-end, 22/103 CLJS + writer
+integration + 300-trial property green; claim-cycle latency recorded
+as evidence, no waits. LAST BOOT BLOCKER: watcher still requests the
+deleted execution build (issue filed) — execbuildretire lane
+dispatched with the execution-* vocabulary-collision warning (child
+keys die; client-identity keys survive). Then: green default →
+S6 cutover checkpoint → re-drive-3.
+
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 
 ## older restart protocol below until morning)
