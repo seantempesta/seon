@@ -1086,6 +1086,18 @@ MORNING ITEMS (accumulating):
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- BN-2/3/4 FIXED (fa3cb6c37, accepted): release package preserves
+  the checkout build layout with all four members digest-verified
+  (application SHA e1b9490…); standalone bin/test-writer resolves
+  the ONE current manifest via SEON_WRITER_ARTIFACT_MANIFEST and
+  fails loud with the exact remedy on a clean slate (no more silent
+  stale-state consumption); acme.pod load = registration only, the
+  12s timer runs only from -main (measured: ACME derivation 23.06s
+  vs client 21.67s — the deterministic stall gone). BN LEDGER:
+  2,3,4,7,8,9,11 fixed = 7 of 11; BN-1/9 live (critical path);
+  BN-5/10 + BN-6 queued on it. Fix-tonight commits observed
+  (d0a73db8e ensure refusal, 1115c3f35 owner-close sync) — review
+  at those lanes' returns.
 - BN-7 FIXED (56ed96dd9, accepted — the computed rule was SOUND;
   six incomplete entity DECLARATIONS completed, no list restored;
   parity regression strengthened). Watch item resolved: kb/ctx/
