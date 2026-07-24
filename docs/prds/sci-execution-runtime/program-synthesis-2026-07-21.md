@@ -330,6 +330,19 @@ measure, re-drive-3, webui live proof, c1codec focused writer test.
 Dirty leftovers watch: db/id/schema.cljc + restore/schema.cljc
 tracked-modified, owner unclear — adjudicate before next freeze.
 
+S5 CHECKPOINT (~14:55): `fff97062b` carries the complete divergence delta in
+the accepted Bun and JVM program transactions, with the exact expected-basis
+fence, process-local recomposition, and the portable identity-only transition.
+`b4e8fde20` repairs the CLJS repair leaf's named async context and its
+forward-definition test warning. Focused execution/test compilation is green;
+client source compilation reaches only the known missing-manifest flush guard.
+Writer alias proof: `seon.host-projection-writer-test` 13/40/0/0. The broader
+registry proof and live `s5maintain` kill matrix remain blocked on the shared
+artifact/writer-readiness repair: rerun `bin/seon cluster apply s5maintain`,
+`bin/seon cluster open s5maintain`, burst separate durable registrations while
+restarting at the documented transaction/publication cuts, then inspect the
+cache row and `SEON-CORE-FAULT divergence cache delta-only repair` marker.
+
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 
 ## older restart protocol below until morning)
