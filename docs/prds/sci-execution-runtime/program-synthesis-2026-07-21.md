@@ -1156,6 +1156,18 @@ MORNING ITEMS (accumulating):
   terminal eval receipts. The orchestrator's default rebuild and final
   re-drive are the dependency-ready refill; do not archive the config issue
   before those datoms exist.
+- ★★ MEMORY LAYER PROVEN — CROSS-TURN MEMORY ALIVE (planschema
+  0ae0fda9e + f6dd94682 + 3fd9137f6, 2026-07-24 ~5:30am, isolated-
+  cluster live proof): my.plan/plan! persisted a full nested plan,
+  3 memory schemas committed, MEMORY READ-BACK returned
+  'CLAIMANT_MEMORY_ALIVE' across turns, all 7 turns terminal, no
+  orphans. The provably-alive bar met on the lane's cluster. Fixes:
+  claimant my.* schema lookup via committed projection; /agents/run
+  timeout terminalizes the turn; portable seon.db.id/allocate!.
+  One SEPARATE edge on the final lifecycle/complete form (existing
+  issue jvm-claimant-rejects-visible-reply-without-exact-execution-
+  plan) — did NOT wedge or invalidate plan/memory. REBUILDING DEFAULT
+  for the CANONICAL cross-turn-memory re-drive.
 - ★ DRIVE7 — EVAL WORKS, REACHED THE MEMORY LAYER (2026-07-24 ~5am):
   11/11 DeepSeek attempts :success with NON-EMPTY replies (reply-text
   fix proven; claimant2 lane independently replicated it — 163-byte
