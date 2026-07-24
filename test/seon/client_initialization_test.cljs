@@ -895,12 +895,18 @@
           effects (atom [])
           attached? (atom false)
           finish-resume (atom nil)
-          rehost-started-resolve (atom nil)
-          rehost-started
+          reload-settled-resolve (atom nil)
+          reload-settled
           (js/Promise.
-           (fn [resolve _] (reset! rehost-started-resolve resolve)))
+           (fn [resolve _] (reset! reload-settled-resolve resolve)))
           finish (atom nil)
-          finished (js/Promise. (fn [resolve _] (reset! finish resolve)))]
+          finished (js/Promise. (fn [resolve _] (reset! finish resolve)))
+          publish!
+          (fn []
+            (swap! effects conj :publish)
+            (js/Promise.resolve
+             {::admission/published? true
+              ::admission/instrumentation {}}))]
       (reset! client/!state (shadow-ready-state))
       (set! db/attached? #(deref attached?))
       (set! db/db
@@ -921,17 +927,20 @@
               (reset! attached? true)
               (js/Promise.resolve {::db/db {:db-name "default"}})))
       (set! admission/publish-committed!
-            (fn []
-              (swap! effects conj :publish)
-              (js/Promise.resolve
-               {::admission/published? true
-                ::admission/instrumentation {}})))
+            (fn
+              ([] (publish!))
+              ([_request] (publish!))))
       (set! admission/mark-unavailable!
-            (fn [_] (swap! effects conj :unavailable) true))
+            (fn [failure]
+              (swap! effects conj :unavailable)
+              (@reload-settled-resolve
+               {::reload-outcome :unavailable
+                ::reload-failure failure})
+              true))
       (set! lifecycle/resume!
             (fn [request]
               (swap! effects conj [::resume request])
-              (@rehost-started-resolve true)
+              (@reload-settled-resolve {::reload-outcome :rehost})
               (js/Promise.
                (fn [resolve _]
                  (reset! finish-resume resolve)))))
@@ -948,36 +957,44 @@
               (@finish true)))
       (is (true? (client/shadow-build-notify! {:type :build-start})))
       (is (true? (client/shadow-build-notify! {:type :build-complete})))
-      (-> rehost-started
+      (-> reload-settled
           (.then
-           (fn [_]
-             (is (= [:close
-                     [::ensure-acquire
-                      {::client/initialize? true
-                       ::client/configuration configuration}]
-                     :publish
-                     [::resume {:seon.agent/id "root"}]]
-                    @effects)
-                 "a running runtime recovers its lost session before rehosting")
-             (@finish-resume
-              {:seon.agent.lifecycle/resumed? true
-               :seon.agent/id "root"})
-             finished))
+           (fn [{::keys [reload-outcome reload-failure] :as settled}]
+             (is (= :rehost reload-outcome)
+                 (str "reload became unavailable before rehosting: "
+                      (pr-str reload-failure)))
+             (if (= :rehost reload-outcome)
+               (do
+                 (is (= [:close
+                         [::ensure-acquire
+                          {::client/initialize? true
+                           ::client/configuration configuration}]
+                         :publish
+                         [::resume {:seon.agent/id "root"}]]
+                        @effects)
+                     "a running runtime recovers its lost session before rehosting")
+                 (@finish-resume
+                  {:seon.agent.lifecycle/resumed? true
+                   :seon.agent/id "root"})
+                 (-> finished
+                     (.then (fn [_] settled))))
+               settled)))
           (.then
-           (fn [_]
-             (is (= [:close
-                     [::ensure-acquire
-                      {::client/initialize? true
-                       ::client/configuration configuration}]
-                     :publish
-                     [::resume {:seon.agent/id "root"}]
-                     [::restore-schedulers
-                      {::db/db {:db-name "default"}
-                       :seon.config/model-variant :execution}]
-                     [:ticker configuration]
-                     :heartbeat]
-                    @effects)
-                 "reload has one ensure/acquire, publication, and rehost order")))
+           (fn [{::keys [reload-outcome]}]
+             (when (= :rehost reload-outcome)
+               (is (= [:close
+                       [::ensure-acquire
+                        {::client/initialize? true
+                         ::client/configuration configuration}]
+                       :publish
+                       [::resume {:seon.agent/id "root"}]
+                       [::restore-schedulers
+                        {::db/db {:db-name "default"}
+                         :seon.config/model-variant :execution}]
+                       [:ticker configuration]
+                       :heartbeat]
+                      @effects)
+                   "reload has one ensure/acquire, publication, and rehost order"))))
           (.catch
            (fn [error]
              (is false (str "completed reload rejected: " error

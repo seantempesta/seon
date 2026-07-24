@@ -1202,3 +1202,26 @@ expansion request, so concurrent commits cannot tear the result. Corpus growth
 then increases the number of bounded reads rather than any read's payload.
 This is the read-side sibling of paged initialization: page both the keys and
 the variable-weight values they select.
+
+## CLJS multi-arity test-stub and detached-chain scars (2026-07-23)
+
+- **A replaced CLJS var must preserve the production var's arity shape.**
+  Adding a second arity changes compiled call sites to invoke generated
+  `cljs$core$IFn$_invoke$arity$N` properties. Replacing that var in a test
+  with a single-arity anonymous function can therefore throw a JavaScript
+  `TypeError` even when the exercised call uses the stub's apparent arity.
+  Define every production arity on the stub, or route them through one local
+  implementation.
+- **A detached product chain needs a test latch on every terminal rail.**
+  `shadow-build-notify!` returns a synchronous notification acknowledgement
+  while its publication Promise intentionally converts failures into
+  `admission/mark-unavailable!`. A test waiting only for the later rehost
+  callback never observes that failure and never calls `done`. Resolve the
+  test's latch from both rehost and unavailable, assert which outcome arrived,
+  and keep cleanup plus `done` in `.finally`.
+- **The last printed test can be only a landmark.** The full-suite tail ended
+  at the synchronous `INITPAGE_10X_MEASUREMENT`, but that exact test completed
+  alone. The namespace reproduced the timeout; exact-var halves then isolated
+  the later reload test. Preserve this order of falsifiers: tail, namespace,
+  exact selector, then exact-var halves only when namespace output has no
+  per-test start marker.
