@@ -15,7 +15,9 @@
   :seon.db.id/compact-value])
 (schema/register!
  :seon.db.restore/generated-id
- [:and :string [:re "^[a-z][a-z0-9]{11}$"]])
+ [:and {:gen/elements ["a00000000000" "z99999999999"]}
+  :string
+  [:re "^[a-z][a-z0-9]{11}$"]])
 (schema/register!
  :seon.db.restore/plan-digest
  [:string {:min 64 :max 64 :seon.db/identity true}])

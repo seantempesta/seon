@@ -22,11 +22,15 @@
 (schema/register! :seon.db.id/legacy-value [:string {:min 14 :max 14}])
 (schema/register!
  :seon.db.id/word-value
- [:and :string [:re word-pattern-source]])
+ [:and {:gen/elements ["a-b-c" "word-0-id"]}
+  :string
+  [:re word-pattern-source]])
 (schema/register!
  :seon.db.id/compact-value
  [:or :seon.db.id/legacy-value
-  [:and :string [:re compact-pattern-source]]])
+  [:and {:gen/elements ["a00000000000" "z99999999999"]}
+   :string
+   [:re compact-pattern-source]]])
 (schema/register!
  :seon.db.id/agent-value
  [:or [:= "root"] :seon.db.id/legacy-value :seon.db.id/word-value])
