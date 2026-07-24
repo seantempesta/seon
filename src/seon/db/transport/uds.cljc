@@ -1581,9 +1581,7 @@
                    (recur)))
                (catch Throwable throwable
                  (when-not (.get closed?)
-                   (binding [*out* *err*]
-                     (println "[database-request] selector stopped:"
-                              (.getMessage throwable)))))
+                   (log/error throwable "Database request selector stopped.")))
                (finally
                  (try (.close server) (catch Throwable _))
                  (doseq [session (vals @connections)]
