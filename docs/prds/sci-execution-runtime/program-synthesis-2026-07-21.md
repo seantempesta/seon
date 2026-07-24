@@ -1086,6 +1086,13 @@ MORNING ITEMS (accumulating):
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- BN-7 FIXED (56ed96dd9, accepted — the computed rule was SOUND;
+  six incomplete entity DECLARATIONS completed, no list restored;
+  parity regression strengthened). Watch item resolved: kb/ctx/
+  testrun edits = BN-7's declarations; retry commits (294f3dd02,
+  1f14ef6e2) = the BN-1 lane's red-cluster fixes, verify at its
+  return. BN LEDGER: 7,8,9,11 fixed; BN-1/9 (critical) + BN-2/3/4
+  live; BN-5/10, BN-6 queued on BN-1.
 - ISSUE TRIAGE ACCEPTED + COMMITTED (7df2bd115): honest count
   126→121 open (5 source-verified archives; the old '113' was
   wrong); 42 blockers / 71 friction / 8 cleanup; 54 fold-into-unit
