@@ -247,6 +247,17 @@ lifecycle (operator / process boot / db coordination) vs integrant
 source, per-wedge-class fit, migration cost vs thinner
 readiness-interface + superv.async path; owner decides on the report.
 
+R51 RULED (~11:40, owner): NO integrant — Option B ratified from
+research/integrant-evaluation-2026-07-24.md (orchestrator-verified:
+zero wedge coverage, config-through-DB conflict, prior "never
+resurrect" ruling stands). The R50-corollary path IS the lifecycle
+program: readiness-publishing interfaces + vthread joins/onExit/
+WatchService + db-interest settlement + named-fact backstops that
+fault loudly = the W-R50-1..5 queue. Integrant submodule stays as
+reference only; `rg integrant src/` must stay empty (standing
+acceptance). Fleet at ruling: s4startgate ∥ webui ∥ dbreceipts ∥
+15-min supervision clock.
+
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 
 ## older restart protocol below until morning)
