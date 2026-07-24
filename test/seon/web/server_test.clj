@@ -1,6 +1,7 @@
 (ns seon.web.server-test
   "JVM `/data` shim and identity/gzip Datastar feed regressions."
-  (:require [clojure.string :as str]
+  (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.db.host :as db.host]
             [seon.db.protocol :as protocol]
@@ -9,7 +10,7 @@
             [seon.web.feed :as feed]
             [seon.web.server :as server])
   (:import [java.io BufferedReader File InputStream InputStreamReader]
-           [java.net HttpURLConnection URL]
+           [java.net HttpURLConnection SocketTimeoutException URL]
            [java.nio.charset StandardCharsets]
            [java.util.zip GZIPInputStream]))
 
@@ -81,6 +82,17 @@
         (and (empty? line) (seq lines)) lines
         :else (recur (conj lines line))))))
 
+(defn- read-events-until-timeout
+  [{:keys [^HttpURLConnection connection ^BufferedReader reader]} timeout-ms]
+  (.setReadTimeout connection timeout-ms)
+  (loop [events []]
+    (let [event (try
+                  (read-event reader)
+                  (catch SocketTimeoutException _ ::timeout))]
+      (if (and (vector? event) (seq event))
+        (recur (conj events event))
+        events))))
+
 (defn- close-feed!
   [{:keys [^BufferedReader reader ^HttpURLConnection connection]}]
   (try (.close reader) (catch Throwable _))
@@ -94,6 +106,26 @@
     {::protocol/request-id request-id
      :seon.db/db database
      ::protocol/transaction-data transaction-data})))
+
+(deftest shipped-static-assets-resolve-from-runtime-root
+  (let [root (io/file "tmp" (str "web-runtime-" (random-uuid)))
+        assets [["public/js/datastar.js" "export const ready = true;"]
+                ["public/css/output.css" "#app-view { display: block; }"]]]
+    (try
+      (doseq [[path content] assets]
+        (let [file (io/file root "resources" path)]
+          (.mkdirs (.getParentFile file))
+          (spit file content)))
+      (with-redefs-fn
+        {#'server/runtime-root (constantly (.getAbsolutePath root))}
+        #(doseq [[path content] assets]
+           (let [result ((deref #'server/resource-response)
+                         path "text/plain; charset=utf-8")]
+             (is (= 200 (:status result)))
+             (is (= content (slurp (:body result)))))))
+      (finally
+        (doseq [file (reverse (file-seq root))]
+          (io/delete-file file true))))))
 
 (deftest data-shim-and-identity-feed-deliver-a-second-morph
   (let [database-name (str "web-server-" (random-uuid))
@@ -121,7 +153,11 @@
            ::server/database-call-timeout-ms 3000
            ::server/interest-reconnect-backoff-ms 10
            ::server/data-page-size 50
-           ::server/maximum-request-body-bytes 1048576}})
+           ::server/maximum-request-body-bytes 1048576
+           ::server/reactive-policy
+           {:seon.config/reactive-settle-ms 200
+            :seon.config/reactive-structural-settle-ms 200
+            :seon.config/reactive-max-latency-ms 1000}}})
         port (org.httpkit.server/server-port (::server/http-server web-server))
         base-url (str "http://127.0.0.1:" port)
         feed-service (::server/feed-service web-server)]
@@ -155,6 +191,25 @@
             (is (::protocol/success? report) (pr-str report))
             (is (some #(str/includes? % "datastar-patch-elements")
                       identity-event)))
+          (let [database (db.host/resolve-db! (::server/writer web-server))
+                reports
+                (mapv
+                 (fn [index]
+                   (transact!
+                    (::server/writer web-server) database
+                    (str "web-server/burst-" index)
+                    [{:web-server/value (str "value-" index)}]))
+                 (range 20))
+                events (read-events-until-timeout identity 500)
+                latest-t (get-in (last reports) [:db-after :t])]
+            (is (every? ::protocol/success? reports) (pr-str reports))
+            (is (pos? (count events)))
+            (is (< (count events) 20)
+                (str "the shared reactive settle chain must collapse the "
+                     "20-transaction burst, got " (count events) " frames"))
+            (is (some #(str/includes? % (str "basis t=" latest-t))
+                      (last events))
+                "the final coalesced morph carries the newest database value"))
           (finally
             (close-feed! identity))))
       (is (wait-until!
