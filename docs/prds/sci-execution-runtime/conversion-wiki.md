@@ -1754,3 +1754,12 @@ the variable-weight values they select.
   injected scheduled-eval and pod-drive callbacks prevents a trigger source
   from becoming a second claimant (`src/seon/agent/schedule.cljs`,
   `src/seon/agent/loop.cljs`).
+
+## U9 S1 child-artifact retirement scar (2026-07-24)
+
+- **A wire symbol is data, not a load edge.** The JVM claimant may continue
+  carrying the historical eval-batch symbol until its promoted protocol owner
+  renames it in one cut. Deleting the Bun child composition root, its Shadow
+  targets, and its measurement harness therefore removes executable reachability
+  without preserving the child runtime just to satisfy a symbol-valued
+  protocol field.

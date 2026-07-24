@@ -184,24 +184,6 @@
                       :optimizations      :simple
                       :externs           ["externs/node_fs.js"]}}
 
-  ;; Per-agent execution child for the DEFAULT artifact flavor. It is compiled
-  ;; once and started lazily by the Bun host. A downstream flavor must declare
-  ;; its own build id and output path (as :acme-client does); it must never
-  ;; publish or watch this default output. The child talks to the database
-  ;; authority directly; parent IPC carries only bounded Transit data.
-  ;; It deliberately has no devtools connection: a child is supervised runtime
-  ;; capacity, not another REPL target, and dormant agents retain no process.
-  :execution
-  {:target           :node-script
-   :output-to        "out/execution/main.js"
-   :main             seon.execution.runtime/-main
-   :build-hooks      [[seon.dev.program-artifact/publish-inventory!
-                       "out/execution/program-inventory.edn"]]
-   :devtools         {:enabled false}
-   :compiler-options {:warnings-as-errors false
-                      :optimizations      :simple
-                      :externs           ["externs/node_fs.js"]}}
-
   ;; Test-only real-process client for the JVM authority retained-state proof.
   ;; It uses the canonical `seon.db` Bun session and never constructs a local
   ;; database. `seon.authority-density-test` owns orchestration and assertions;
@@ -210,32 +192,6 @@
   {:target           :node-script
    :output-to        "out/authority-density/client.js"
    :main             seon.db.authority-density-child/-main
-   :devtools         {:enabled false}
-   :compiler-options {:warnings-as-errors false
-                      :optimizations      :simple
-                      :externs           ["externs/node_fs.js"]}}
-
-  ;; Test-only controller for the real two-child program publication proof.
-  ;; The maintained writer test owns the JVM authority and assertions; this
-  ;; build only drives the production execution host and children.
-  :execution-integration-client
-  {:target           :node-script
-   :output-to        "out/execution-integration/client.js"
-   :main             seon.execution.integration-driver/-main
-   :devtools         {:enabled false}
-   :compiler-options {:warnings-as-errors false
-                      :optimizations      :simple
-                      :externs           ["externs/node_fs.js"]}}
-
-  ;; ACME owns a distinct execution artifact just as it owns :acme-client.
-  ;; bin/acme supplies the downstream source root and preload through the same
-  ;; flavor-selected Shadow cache; no default watcher writes this output.
-  :acme-execution
-  {:target           :node-script
-   :output-to        "out-acme/execution/main.js"
-   :main             seon.execution.runtime/-main
-   :build-hooks      [[seon.dev.program-artifact/publish-inventory!
-                       "out-acme/execution/program-inventory.edn"]]
    :devtools         {:enabled false}
    :compiler-options {:warnings-as-errors false
                       :optimizations      :simple
@@ -426,48 +382,4 @@
    :compiler-options {:warnings-as-errors false
                       :warnings           {:redef false}}}
 
-  ;; B2-EXPERIMENTAL (docs/prds/sci-execution-runtime, stage B2). A sci-engined
-  ;; execution-child ARTIFACT VARIANT: identical to :execution except the
-  ;; compiled-function map routes eval-batch! through a sci engine
-  ;; (seon.execution.sci-runtime, source under tmp/sci-probe/exec-src — a
-  ;; harness path, not src/). NO operator flavor selects this build; it is
-  ;; compiled one-off in a separate Shadow cache (SHADOW_CLJS cache-root
-  ;; override) and driven only by the B2 measurement driver below. Delete both
-  ;; blocks when the PRD's decision gate lands.
-  :execution-sci
-  {:target           :node-script
-   :output-to        "out-b2/execution-sci/main.js"
-   :main             seon.execution.sci-runtime/-main
-   :devtools         {:enabled false}
-   :compiler-options {:warnings-as-errors false
-                      :optimizations      :simple
-                      :externs           ["externs/node_fs.js"]}}
-
-  ;; B2-EXPERIMENTAL measurement driver: spawns the production execution host
-  ;; against an explicit execution artifact (normal or sci) on a BRANCH
-  ;; database and drives real turns through seon.agent.turn/run-turn! with a
-  ;; scripted llm-fn, sampling vmmap per phase. Mirrors the maintained
-  ;; :execution-integration-client pattern; never a production entrypoint.
-  :b2-driver
-  {:target           :node-script
-   :output-to        "out-b2/driver/main.js"
-   :main             seon.execution.b2-driver/-main
-   :devtools         {:enabled false}
-   :compiler-options {:warnings-as-errors false
-                      :optimizations      :simple
-                      :externs           ["externs/node_fs.js"]}}
-
-  ;; U1.5-EXPERIMENTAL real-turn drive (docs/prds/sci-execution-runtime).
-  ;; Drives the PRODUCTION pod dispatch (tier-as-data → JVM seon.host over
-  ;; Transit-UDS) with real turns on a branch database, including the host
-  ;; kill drill. Compiled one-off in the same separate Shadow cache as the
-  ;; B2 blocks; no operator flavor selects it. Delete with the B2 blocks
-  ;; when the PRD's decision gate lands.
-  :u15-driver
-  {:target           :node-script
-   :output-to        "out-b2/u15-driver/main.js"
-   :main             seon.execution.u15-driver/-main
-   :devtools         {:enabled false}
-   :compiler-options {:warnings-as-errors false
-                      :optimizations      :simple
-                      :externs           ["externs/node_fs.js"]}}}}
+  }}
