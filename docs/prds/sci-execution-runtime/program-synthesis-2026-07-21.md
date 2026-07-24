@@ -579,6 +579,16 @@ publishes new release digest each run (breaks R45 determinism —
 serious; standing byte-identical regression required). operatorboot
 lane owns all three + the five-ready timed proof.
 
+★★★ DEFAULT GREEN (~19:50): ALL FIVE READY on the post-deletion
+system. MEASURED: reset 7.44s · apply 38.61s · first up 36.60s ·
+UNCHANGED UP 9.07s (was 300-455s this morning) · release digest
+byte-identical across ups · operator suite 333/1,910 green.
+operatorboot ACCEPTED (6 commits 9e061cad6..087bece3b; generation
+leak was the digest nondeterminism; all three issues archived).
+The R45 program is LIVE. Next: re-drive-3 (alive caveat) on this
+system, then S6 AOT cutover checkpoint, then the remaining U9 S4
+census-flip residue + graduation drills queue.
+
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 
 ## older restart protocol below until morning)
