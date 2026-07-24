@@ -394,6 +394,19 @@ deletion: attempt only after each coherent commit series (watch
 build otherwise compiles mid-churn). s6: AOT isolated behind opt-in
 (cbab7ba3a), proving+measuring in its own invocations.
 
+PROVISIONAL RULING R52 (~16:50, NEEDS OWNER RATIFICATION):
+interactions are TRANSACTIONS. web.reactive.call synchronous
+interaction contract dies with the child era: handler = validate +
+transact interaction fact + ack; execution = existing claimant
+machinery; result = committed facts; UI updates via the one
+interest→reactive→morph chain (reconnect = repaint). Rationale: the
+documented one-database-path law; no request-correlated sync results
+exist in the target topology. Risk to watch: interaction latency =
+one claim cycle — any canvas control that breaks on losing inline
+return values gets recorded as UI-latency-risk evidence, never a
+wait hack. Caller table: client.cljs + web/serve.cljs dead bands ·
+ctx/driver + turn + datastar local · reactive/call = this ruling.
+
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 
 ## older restart protocol below until morning)
