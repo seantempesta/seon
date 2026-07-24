@@ -10,7 +10,8 @@
   (:require
    [clojure.string :as str]
    [malli.core :as m]
-   [seon.db :as db]
+   #?(:bb [seon.db :as-alias db]
+      :default [seon.db :as db])
    [seon.db.id.schema :as id.schema]
    [seon.schema :as schema]
    #?@(:bb []
