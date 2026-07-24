@@ -269,7 +269,8 @@
             (is (= resolved-manifest-path
                    (get first-environment
                         "SEON_RESOLVED_MANIFEST_PATH")))
-            (is (= (#'config/sha-256 (slurp resolved-manifest-path))
+            (is (= (config/config-manifest-digest
+                    (slurp resolved-manifest-path))
                    (get first-environment
                         "SEON_RESOLVED_MANIFEST_SHA_256")))
             (is (= "64"

@@ -448,6 +448,27 @@
                       {:seon.dev.artifact/path path})))
     (file-digest path)))
 
+(defn current-page-plan-config-manifest-digest
+  "Read the config-manifest digest that keys the current page plan."
+  [config]
+  (let [path (page-plan-path config)]
+    (when-not (fs/regular-file? path)
+      (throw (ex-info "The page-plan artifact is absent."
+                      {:seon.dev.artifact/path path})))
+    (let [value (edn/read-string (slurp path))
+          manifest-digest
+          (get-in value
+                  [:seon.dev.artifact/page-plan
+                   :seon.db.initialization/config-manifest-digest])]
+      (when-not (and (string? manifest-digest)
+                     (re-matches #"[0-9a-f]{64}" manifest-digest))
+        (throw
+         (ex-info "The page-plan artifact has no config-manifest identity."
+                  {:seon.dev.artifact/path path
+                   :seon.dev.artifact/config-manifest-digest
+                   manifest-digest})))
+      manifest-digest)))
+
 (defn program-inventory-path
   "Return the function-inventory artifact beside a compiled output."
   [output]
@@ -673,6 +694,11 @@
   (try
     (let [manifest (read-manifest config)
           output-digests (current-output-digests config)
+          selected-config-manifest-digest
+          (get-in config
+                  [:seon.dev.config/launch-descriptor
+                   :seon.launch/resolved-manifest
+                   :seon.launch/sha-256])
           expected-identity
           {:seon.dev.artifact/flavor
            (:seon.dev.config/artifact-flavor config)
@@ -687,6 +713,9 @@
                     (select-keys manifest (keys expected-identity)))
                  (= (:seon.dev.artifact/source-input-digest manifest)
                     (source-input-digest config))
+                 (or (nil? selected-config-manifest-digest)
+                     (= selected-config-manifest-digest
+                        (current-page-plan-config-manifest-digest config)))
                  (= output-digests
                     (select-keys manifest
                                  (keys output-digests))))
@@ -1214,6 +1243,22 @@
           page-plan-relative-path
           (str (runtime-relative-path config (page-plan-path config)))
           page-plan-digest (current-page-plan-digest config)
+          page-plan-config-manifest-digest
+          (current-page-plan-config-manifest-digest config)
+          selected-config-manifest-digest
+          (get-in config
+                  [:seon.dev.config/launch-descriptor
+                   :seon.launch/resolved-manifest
+                   :seon.launch/sha-256])
+          _ (when-not (= selected-config-manifest-digest
+                         page-plan-config-manifest-digest)
+              (throw
+               (ex-info
+                "The page plan does not match the selected config manifest."
+                {:seon.launch/selected-config-manifest-digest
+                 selected-config-manifest-digest
+                 :seon.db.initialization/config-manifest-digest
+                 page-plan-config-manifest-digest})))
           client-inventory-path
           (str (runtime-relative-path
                 config

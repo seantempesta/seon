@@ -2,6 +2,7 @@
   (:require [babashka.fs :as fs]
             [clojure.edn :as edn]
             [clojure.test :refer [deftest is]]
+            [seon.dev.config :as config]
             [seon.dev.program-artifact :as program-artifact]))
 
 (defn- source [file resource-name]
@@ -117,7 +118,7 @@
   (let [project (fs/create-temp-dir {:prefix "seon-page-plan-manifest-"})
         selected (fs/path project "resolved-manifest.edn")
         text "{:seon.config/database {}}\n"
-        sha-256 (program-artifact/digest text)
+        sha-256 (config/config-manifest-digest text)
         environment
         {"SEON_RESOLVED_MANIFEST_PATH" (str selected)
          "SEON_RESOLVED_MANIFEST_SHA_256" sha-256

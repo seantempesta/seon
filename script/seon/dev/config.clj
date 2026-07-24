@@ -142,7 +142,10 @@
           (fs/directory? database-path)
           (some fs/regular-file? (fs/list-dir database-path))))))
 
-(defn- sha-256 [text]
+(defn config-manifest-digest
+  "Return the SHA-256 identity of canonical resolved-manifest bytes."
+  {:malli/schema [:=> [:cat :string] [:re #"[0-9a-f]{64}"]]}
+  [text]
   (let [digest (MessageDigest/getInstance "SHA-256")]
     (.update digest (.getBytes text StandardCharsets/UTF_8))
     (apply str (map #(format "%02x" (bit-and 0xff %)) (.digest digest)))))
@@ -238,7 +241,7 @@
         envelope-path
         (str (fs/path process-dir (str "launch-envelope-" generation ".edn")))
         manifest-text (pr-str manifest)
-        manifest-sha-256 (sha-256 manifest-text)
+        manifest-sha-256 (config-manifest-digest manifest-text)
         initialization-page-rows
         (:seon.config.database.initialization/page-rows singleton)
         _ (atomic-write-edn! manifest-path manifest)
@@ -279,6 +282,14 @@
                           "config" "applied.edn")]
       (atomic-write-edn! target
                          (:seon.dev.config/resolved-manifest configuration))))
+  configuration)
+
+(defn delete-applied-manifest!
+  "Delete the retained manifest when resetting its cluster application."
+  [configuration]
+  (fs/delete-if-exists
+   (fs/path (:seon.dev.config/cluster-dir configuration)
+            "config" "applied.edn"))
   configuration)
 
 (defn- unquote-value [value]

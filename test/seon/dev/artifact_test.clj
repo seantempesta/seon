@@ -156,9 +156,12 @@
          :seon.dev.artifact/application-digest digest-a}
         config {:seon.dev.config/artifact-flavor
                 :seon.dev.artifact.flavor/default
-                :seon.dev.config/client-build-id "client"
-                :seon.dev.config/shadow-cache-root "/repo/.shadow-cljs"
-                :seon.dev.config/client-output "/repo/out/client/main.js"}
+                 :seon.dev.config/client-build-id "client"
+                 :seon.dev.config/shadow-cache-root "/repo/.shadow-cljs"
+                 :seon.dev.config/client-output "/repo/out/client/main.js"
+                 :seon.dev.config/launch-descriptor
+                 {:seon.launch/resolved-manifest
+                  {:seon.launch/sha-256 digest-a}}}
         manifest (merge output-digests
                         {:seon.dev.artifact/flavor
                          :seon.dev.artifact.flavor/default
@@ -169,11 +172,17 @@
                          "/repo/out/client/main.js"
                          :seon.dev.artifact/source-input-digest digest-a})
         input-digest (atom digest-a)
+        page-plan-config-digest (atom digest-a)
         observed-outputs (atom output-digests)]
     (with-redefs [artifact/read-manifest (constantly manifest)
                   artifact/source-input-digest (fn [_] @input-digest)
+                  artifact/current-page-plan-config-manifest-digest
+                  (fn [_] @page-plan-config-digest)
                   artifact/current-output-digests (fn [_] @observed-outputs)]
       (is (= manifest (artifact/current-manifest config)))
+      (reset! page-plan-config-digest digest-b)
+      (is (nil? (artifact/current-manifest config)))
+      (reset! page-plan-config-digest digest-a)
       (reset! input-digest digest-b)
       (is (nil? (artifact/current-manifest config)))
       (reset! input-digest digest-a)
@@ -977,6 +986,7 @@
                          ".shadow-cljs/builds/client/dev/out/cljs-runtime/a.js")
         bootstrap (fs/path directory "out/bootstrap/a.js")
         css (fs/path directory "resources/public/css/output.css")
+        config-manifest-digest (apply str (repeat 64 "c"))
         dependencies (atom (#'artifact/maintained-dependencies-from
                             (maintained-deps)))
         config {:seon.dev.config/root (str directory)
@@ -986,14 +996,21 @@
                 (str (fs/path directory ".shadow-cljs"))
                 :seon.dev.config/client-build-id "client"
                 :seon.dev.config/artifact-flavor
-                :seon.dev.artifact.flavor/default}]
+                :seon.dev.artifact.flavor/default
+                :seon.dev.config/launch-descriptor
+                {:seon.launch/resolved-manifest
+                 {:seon.launch/sha-256 config-manifest-digest}}}]
     (try
       (write-test-jar! writer "writer-a")
       (doseq [[path value] [[client "client"]
                             [program-source "program-source"]
                             [program-row "program-row"]
                             [base-projection "base-projection"]
-                            [page-plan "page-plan"]
+                            [page-plan
+                             (pr-str
+                              {:seon.dev.artifact/page-plan
+                               {:seon.db.initialization/config-manifest-digest
+                                config-manifest-digest}})]
                             [client-inventory
                              "{:seon.dev.program-inventory/public-exports [\"example/client\"] :seon.dev.program-inventory/internal-terminals []}"]
                             [runtime "runtime"]

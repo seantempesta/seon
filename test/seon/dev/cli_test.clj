@@ -1109,12 +1109,15 @@
                        {:seon.launch/packages-dir
                         (str (fs/path cluster "packages"))}
                        :seon.dev.config/environment {}}
+        applied-manifest (fs/path cluster "config/applied.edn")
         requests (atom [])
         reset-packages (atom [])
         reconciled (atom [])]
     (try
       (fs/create-dirs database)
       (spit (str (fs/path database "old.ksv")) "old database")
+      (fs/create-dirs (fs/parent applied-manifest))
+      (spit (str applied-manifest) "{:old true}")
       (with-redefs-fn
         {#'state/with-lock (fn [_configuration _owner _timeout thunk]
                             (thunk))
@@ -1133,6 +1136,7 @@
          #'cli/reconcile-development!
          (fn [selected stop-results]
            (is (not (fs/exists? database)))
+           (is (not (fs/exists? applied-manifest)))
            (swap! reconciled conj [selected stop-results])
            {:seon.dev.target/status :seon.dev.target.status/ready
             :seon.dev.target/stop-results stop-results})}
@@ -1167,10 +1171,13 @@
                        :seon.dev.config/cluster-dir (str cluster)
                        :seon.dev.config/cluster-name "default"
                        :seon.dev.config/environment {}}
+        applied-manifest (fs/path cluster "config/applied.edn")
         reconciled? (atom false)]
     (try
       (fs/create-dirs database)
       (spit (str (fs/path database "old.ksv")) "old database")
+      (fs/create-dirs (fs/parent applied-manifest))
+      (spit (str applied-manifest) "{:old true}")
       (is (thrown-with-msg?
            clojure.lang.ExceptionInfo
            #"uncertain"
@@ -1185,6 +1192,7 @@
               (fn [& _] (reset! reconciled? true))}
              #(#'cli/reset-cluster! configuration ["default"]))))
       (is (fs/exists? (fs/path database "old.ksv")))
+      (is (fs/exists? applied-manifest))
       (is (false? @reconciled?))
       (finally (fs/delete-tree root {:force true})))))
 

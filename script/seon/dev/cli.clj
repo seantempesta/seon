@@ -843,6 +843,7 @@
                    (disj (set (process/target-process-ids configuration))
                          process/watcher-id))]
               (when (fs/exists? database) (fs/delete-tree database))
+              (config/delete-applied-manifest! configuration)
               (cluster/reset-package-skeleton!
                (:seon.dev.config/launch-descriptor configuration))
               (reconcile-development! (select-config configuration nil)
