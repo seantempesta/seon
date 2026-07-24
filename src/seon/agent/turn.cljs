@@ -14,8 +14,8 @@
     [seon.db :as db]
     [seon.db.id :as db.id]
     [seon.error :as error]
-    [seon.execution :as execution]
-    [seon.execution.host :as execution.host]
+    [seon.host.session :as host.session]
+    [seon.host.session.leaf :as host.session.leaf]
     [seon.agent.ctx.driver :as ctx.driver]
     [seon.log :as seon-log]
     [seon.render :as render]
@@ -373,9 +373,9 @@
 
 (defn- execution-child-retired?
   [value]
-  (or (true? (::execution/child-retired? value))
+  (or (true? (:seon.execution/child-retired? value))
       (true? (get-in value [:seon.error/data
-                            ::execution/child-retired?]))))
+                            :seon.execution/child-retired?]))))
 
 (defn- execution-child-evidence [value]
   (when (execution-child-retired? value)
@@ -383,7 +383,7 @@
           nested (when (map? data) (:seon.error/data data))]
       (cond
         (and (map? nested)
-             (true? (::execution/child-retired? nested))) nested
+             (true? (:seon.execution/child-retired? nested))) nested
         (map? data) data
         :else value))))
 
@@ -411,55 +411,57 @@
    {function-symbol ::render/function-symbol
     arguments ::render/arguments}]
   (try
-    (let [invocations
+    (let [frame
           (await
-           (execution/prepare-invocations!
-            {:seon.db/db database
-             ::execution/invocation-plans
-             [(execution/invocation-plan
-               agent-id function-symbol arguments)]}))
-          result (await (execution.host/invoke! (first invocations)))]
-      (if (::execution/ok? result)
-        (::execution/value result)
-        (::execution/error result)))
+           (host.session.leaf/invoke-authored!
+            {::host.session.leaf/database database
+             ::host.session.leaf/agent-id agent-id
+             ::host.session.leaf/function-symbol function-symbol
+             ::host.session.leaf/arguments arguments}))]
+      (if (= host.session/result-message
+             (:seon.execution/message frame))
+        (:seon.execution/result frame)
+        (or (:seon.execution/error frame)
+            {:seon.error/message "The authored prompt render failed."
+             :seon.error/kind :agent})))
     (catch :default exception
       (error/->map exception))))
 
 (defn ^:async ^:private invoke-prompt-call!
   "Run a core prompt directly or an authored render through its seam."
   [database agent-id render-door call]
-  (let [function-symbol (::execution/function-symbol call)]
+  (let [function-symbol (:seon.execution/function-symbol call)]
     (if-not (error/agent-authored-sym?
              function-symbol (schema/current-projection))
       (try
         (if-let [function-value (render.core/resolve-compiled function-symbol)]
-          (let [base-arguments (::execution/arguments call)
+          (let [base-arguments (:seon.execution/arguments call)
                 arguments
                 (cond-> base-arguments
-                  (and (::execution/invoke-selected? call)
+                  (and (:seon.execution/invoke-selected? call)
                        (supports-arity?
                         function-value (inc (count base-arguments))))
                   (conj #(invoke-prompt-calls!
                           database agent-id render-door %)))
                 value (await (apply function-value arguments))]
-            {::execution/ok? true ::execution/value value})
-          {::execution/ok? false
-           ::execution/error
+            {:seon.execution/ok? true :seon.execution/value value})
+          {:seon.execution/ok? false
+           :seon.execution/error
            {:seon.error/message
             "The selected compiled prompt function is not loaded."
             :seon.error/kind :core-bug
             :seon.error/data
-            {::execution/function-symbol function-symbol}}})
+            {:seon.execution/function-symbol function-symbol}}})
         (catch :default exception
           (error/record! {::error/raw exception ::error/fault :core})
-          {::execution/ok? false
-           ::execution/error (error/->map exception)}))
-      {::execution/ok? true
-       ::execution/value
+          {:seon.execution/ok? false
+           :seon.execution/error (error/->map exception)}))
+      {:seon.execution/ok? true
+       :seon.execution/value
        (await
         ((::render/invoke-authored! render-door)
          {::render/function-symbol function-symbol
-          ::render/arguments (::execution/arguments call)}))})))
+          ::render/arguments (:seon.execution/arguments call)}))})))
 
 (defn ^:async ^:private invoke-prompt-calls!
   [database agent-id render-door calls]
@@ -511,19 +513,19 @@
            (assoc request ::db/db database)
            invoke-selected!))
          response {:seon.db/db (:seon.db/db rendered)
-                   ::execution/message execution/result-message
-                   ::execution/result (dissoc rendered :seon.db/db)}]
+                   :seon.execution/message host.session/result-message
+                   :seon.execution/result (dissoc rendered :seon.db/db)}]
      (cond
        (not= database (:seon.db/db response))
        {:seon.error/message
-        "The execution child returned a prompt from another database value."
+        "The prompt renderer returned another database value."
         :seon.error/kind :core-bug
         :seon.error/data
         {:seon.db/expected-db database
          :seon.db/db (:seon.db/db response)}}
 
-       (= execution/result-message (::execution/message response))
-       (let [rendered (::execution/result response)
+       (= host.session/result-message (:seon.execution/message response))
+       (let [rendered (:seon.execution/result response)
              text (:seon.render/text rendered)
              system-prompt (:seon.ai/system-prompt rendered)
              resolution (:seon.ai/config-resolution rendered)]
@@ -543,7 +545,7 @@
             :seon.error/kind :core-bug}))
 
        :else
-       (or (::execution/error response)
+       (or (:seon.execution/error response)
            {:seon.error/message "The execution child did not return a prompt."
             :seon.error/kind :core-bug})))))
 
@@ -688,7 +690,7 @@
                      :seon.agent.turn/status :error
                      :seon.error/data        message}
                      child-retired?
-                     (assoc ::execution/child-retired? true
+                     (assoc :seon.execution/child-retired? true
                             :seon.error/data child-evidence))
                    e))))))
 
