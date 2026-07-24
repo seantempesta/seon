@@ -5,7 +5,8 @@
    sleeps, UUID generation, and ambient invocation access. Portable request
    construction and response interpretation remain in `seon.db`."
   (:require [seon.db.protocol :as protocol]
-            [seon.db.transport.uds :as uds])
+            [seon.db.transport.uds :as uds]
+            [seon.error :as error])
   (:import [java.nio.channels Channels SocketChannel]
            [java.util.concurrent Callable ExecutorService Executors]
            [java.util.concurrent.locks Condition ReentrantLock]))
@@ -18,8 +19,7 @@
    ::pool-wait-timeout-ms 110000
    ::call-deadline-ms 120000
    ::interest-call-timeout-ms 120000
-   ::interest-reconnect-backoff-ms 250
-   ::request-conflict-backoff-ms 10})
+   ::interest-reconnect-backoff-ms 250})
 
 (declare close-member-session! pool-error protocol-error-value)
 
@@ -68,9 +68,21 @@
        backend (assoc ::backend backend)
        database-path (assoc ::database-path database-path))
      (select-keys options
-                  [::call-deadline-ms
+                  [::pool-wait-timeout-ms
+                   ::call-deadline-ms
                    ::interest-call-timeout-ms
                    ::interest-reconnect-backoff-ms]))))
+
+(defn- record-backstop!
+  [writer config-key message data]
+  (error/record!
+   {::error/raw
+    (ex-info message
+             (merge {:seon.error/kind :core-bug
+                     ::config-key config-key}
+                    data))
+    ::error/fault :core})
+  nil)
 
 (defn- required-interest-option
   [writer option]
@@ -136,8 +148,13 @@
         timeout ::interest-timeout
         response (deref result (long timeout-ms) timeout)]
     (if (= timeout response)
-      (pool-error writer :interest-timeout
-                  "The database interest request reached its deadline.")
+      (do
+        (record-backstop!
+         writer ::interest-call-timeout-ms
+         "A database interest request reached its completion backstop."
+         {::interest-call-timeout-ms timeout-ms})
+        (pool-error writer :interest-timeout
+                    "The database interest request reached its deadline."))
       response)))
 
 (defn- interest-roundtrip!
@@ -219,41 +236,57 @@
   nil)
 
 (defn- fail-interest-pending!
-  [{::keys [interest-state]}]
+  [{::keys [interest-state]} outcome]
   (let [pending (::pending @interest-state)]
     (swap! interest-state assoc ::pending {})
-    (run! #(deliver % ::retry-after-restore) (vals pending)))
+    (run! #(deliver % outcome) (vals pending)))
+  nil)
+
+(defn- fail-interest-listeners!
+  [{::keys [interest-state]} outcome]
+  (let [listeners (vals (::listeners @interest-state))]
+    (run!
+     (fn [{::keys [ready]}]
+       (when-not (realized? ready)
+         (deliver ready outcome)))
+     listeners))
   nil)
 
 (defn- interest-reader-loop!
   [{::keys [interest-state interest-control-lock] :as writer}]
   (loop [restored? false]
     (when-not (::closed? @interest-state)
-      (try
-        (let [{::keys [session input output maximum-frame-bytes database]}
-              (open-interest-session! writer)]
-          (locking interest-control-lock
-            (restore-interest-listeners!
-             writer input output maximum-frame-bytes database restored?))
-          (loop []
-            (when-not (::closed? @interest-state)
-              (if (read-interest-message! writer input maximum-frame-bytes)
-                (recur)
-                (throw (ex-info "The database interest session reached EOF."
-                                {})))))
-          (close-member-session! session))
-        (catch Throwable _
-          (when-let [session (::session @interest-state)]
+      (let [ready? (atom false)]
+        (try
+          (let [{::keys [session input output maximum-frame-bytes database]}
+                (open-interest-session! writer)]
+            (locking interest-control-lock
+              (restore-interest-listeners!
+               writer input output maximum-frame-bytes database restored?))
+            (reset! ready? true)
+            (loop []
+              (when-not (::closed? @interest-state)
+                (if (read-interest-message! writer input maximum-frame-bytes)
+                  (recur)
+                  (throw (ex-info "The database interest session reached EOF."
+                                  {})))))
             (close-member-session! session))
-          (swap! interest-state dissoc ::session ::database)
-          (fail-interest-pending! writer)
-          (when-not (::closed? @interest-state)
-            (try
-              (Thread/sleep
-               (long (required-interest-option
-                      writer ::interest-reconnect-backoff-ms)))
-              (catch InterruptedException _
-                (.interrupt (Thread/currentThread)))))))
+          (catch Throwable _
+            (when-let [session (::session @interest-state)]
+              (close-member-session! session))
+            (swap! interest-state dissoc ::session ::database)
+            (fail-interest-pending! writer ::retry-after-restore)
+            ;; EOF/socket close is the reconnect event. Only a failed respawn
+            ;; is delayed, so this dial rate-limits attempts rather than
+            ;; detecting writer readiness.
+            (when (and (not @ready?)
+                       (not (::closed? @interest-state)))
+              (try
+                (Thread/sleep
+                 (long (required-interest-option
+                        writer ::interest-reconnect-backoff-ms)))
+                (catch InterruptedException _
+                  (.interrupt (Thread/currentThread))))))))
       (recur true))))
 
 (defn- ensure-interest-reader!
@@ -320,6 +353,13 @@
       (if (= ::interest-timeout result)
         (do
           (swap! interest-state update ::listeners dissoc request-id)
+          (record-backstop!
+           writer ::interest-call-timeout-ms
+           "Database interest registration reached its completion backstop."
+           {::protocol/request-id request-id
+            ::interest-call-timeout-ms
+            (required-interest-option writer
+                                      ::interest-call-timeout-ms)})
           (pool-error writer :interest-timeout
                       "Registering the database interest reached its deadline."))
         result))))
@@ -600,14 +640,27 @@
                          writer :interrupted
                          "Waiting for a database writer connection was interrupted."))
                       (recur))))))))]
-    (if (= ::open-member decision)
+    (cond
+      (= ::open-member decision)
       (finish-opening! writer (open-member! writer))
+
+      (= :pool-exhausted
+         (get-in decision [:seon.error/data ::pool-reason]))
+      (do
+        (record-backstop!
+         writer ::pool-wait-timeout-ms
+         "A database pool wait reached its completion backstop."
+         {::pool-wait-timeout-ms wait-timeout-ms})
+        decision)
+
+      :else
       decision)))
 
 (defn- replace-member!
   [writer]
   (let [member (acquire-member!
-                writer (::pool-wait-timeout-ms defaults))]
+                writer (required-interest-option writer
+                                                 ::pool-wait-timeout-ms))]
     (when-not (error-value? member)
       (release-member! writer member))
     member))
@@ -629,6 +682,11 @@
     (run! #(close-member-session! (::session %)) members)
     (.shutdownNow ^ExecutorService call-executor)
     (swap! interest-state assoc ::closed? true)
+    (let [closed-error
+          (pool-error writer :session-closed
+                      "The database writer session is closed.")]
+      (fail-interest-pending! writer closed-error)
+      (fail-interest-listeners! writer closed-error))
     (when-let [session (::session @interest-state)]
       (close-member-session! session))
     (when-let [thread @interest-thread]
@@ -652,6 +710,11 @@
         (if (= timeout response)
           (do
             (evict-member! writer member)
+            (record-backstop!
+             writer ::call-deadline-ms
+             "A database writer call reached its completion backstop."
+             {::protocol/request-id (::protocol/request-id request)
+              ::call-deadline-ms deadline-ms})
             {::call-outcome :deadline})
           (do
             (release-member! writer member)
@@ -672,7 +735,8 @@
   [writer request budget-ms]
   (let [started (System/nanoTime)
         wait-ms (min (long budget-ms)
-                     (long (::pool-wait-timeout-ms defaults)))
+                     (long (required-interest-option
+                            writer ::pool-wait-timeout-ms)))
         member (acquire-member! writer wait-ms)]
     (if (error-value? member)
       {::call-outcome :error ::response member}
@@ -697,67 +761,30 @@
      (or (::protocol/error-kind response)
          (get-in response [:seon.error/data ::protocol/error-kind]))))
 
-(defn- sleep-before-recovery-poll!
-  [remaining]
-  (let [backoff-ms
-        (min remaining
-             (long (::request-conflict-backoff-ms defaults)))]
-    (try
-      (Thread/sleep (long backoff-ms))
-      true
-      (catch InterruptedException _
-        (.interrupt (Thread/currentThread))
-        false))))
-
 (defn- recovery-write!
   [writer request]
-  (let [budget-ms (long (::call-deadline-ms defaults))
-        deadline (+ (System/nanoTime)
-                    (.toNanos java.util.concurrent.TimeUnit/MILLISECONDS
-                              budget-ms))]
-    (loop []
-      (let [remaining (.toMillis java.util.concurrent.TimeUnit/NANOSECONDS
-                                 (max 0 (- deadline (System/nanoTime))))]
-        (if (zero? remaining)
-          (pool-error writer :request-conflict-timeout
-                      "The database writer is still settling the original write."
-                      {::protocol/request-id (::protocol/request-id request)
-                       ::protocol/error-kind protocol/request-conflict-error
-                       ::protocol/running? true})
-          (let [{::keys [call-outcome response failure]}
-                (call-attempt! writer request remaining)]
-            (case call-outcome
-              :response
-              (if (active-request-conflict? response)
-                (if (sleep-before-recovery-poll! remaining)
-                  (recur)
-                  (pool-error writer :interrupted
-                              "Database write recovery was interrupted."))
-                response)
-
-              :error
-              (if (release-in-flight? response)
-                (if (sleep-before-recovery-poll! remaining)
-                  (recur)
-                  (pool-error writer :interrupted
-                              "Database write recovery was interrupted."))
-                response)
-
-              :deadline
-              (pool-error writer :write-recovery-deadline
-                          "The database write recovery reached its deadline."
-                          {::protocol/request-id (::protocol/request-id request)})
-
-              :failure
-              (pool-error writer :write-recovery-failed
-                          "The database write recovery connection failed."
-                          {::protocol/request-id (::protocol/request-id request)
-                           ::failure (str failure)}))))))))
+  (let [deadline-ms
+        (long (required-interest-option writer ::call-deadline-ms))
+        {::keys [call-outcome response failure]}
+        (call-attempt! writer request deadline-ms)]
+    (case call-outcome
+      :response response
+      :error response
+      :deadline
+      (pool-error writer :write-recovery-deadline
+                  "The database write recovery reached its backstop."
+                  {::protocol/request-id (::protocol/request-id request)})
+      :failure
+      (pool-error writer :write-recovery-failed
+                  "The database write recovery connection failed."
+                  {::protocol/request-id (::protocol/request-id request)
+                   ::failure (str failure)}))))
 
 (defn call!
   "Dispatch one bounded wire round-trip through the retained pool."
   ([writer request]
-   (call! writer request (::call-deadline-ms defaults)))
+   (call! writer request
+          (required-interest-option writer ::call-deadline-ms)))
   ([{::keys [recoverable-transaction-delivery?] :as writer}
     request timeout-ms]
   (let [recoverable? (boolean (recoverable-transaction-delivery? request))
@@ -765,8 +792,14 @@
         {::keys [call-outcome response failure]}
         (call-attempt! writer request deadline-ms)]
     (case call-outcome
-      :response response
-      :error response
+      :response
+      (if (and recoverable? (active-request-conflict? response))
+        (recovery-write! writer request)
+        response)
+      :error
+      (if (and recoverable? (release-in-flight? response))
+        (recovery-write! writer request)
+        response)
       :deadline
       (if recoverable?
         (recovery-write! writer request)
@@ -899,8 +932,7 @@
      :seon.db.leaf/transaction-call!
      (fn [request _recoverable?]
        (call! writer request
-              (or (::call-deadline-ms writer)
-                  (::call-deadline-ms defaults))))
+              (required-interest-option writer ::call-deadline-ms)))
      :seon.db.leaf/resolve-db! resolve!
      :seon.db.leaf/read-db! read!
      :seon.db.leaf/request-db! request!

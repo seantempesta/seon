@@ -59,7 +59,7 @@
           ::db.host/backend :memory
           ::db.host/pool-size 2
           ::db.host/interest-call-timeout-ms 3000
-          ::db.host/interest-reconnect-backoff-ms 10})
+          ::db.host/interest-reconnect-backoff-ms 1000})
         events (atom [])]
     (try
       (let [head (db.host/resolve-db! session)
@@ -92,11 +92,12 @@
               (::db.host/session @(::db.host/interest-state session))]
           (uds/close-session! old-session))
         (is (wait-until!
-             3000
+             500
              #(some (fn [event]
                       (= protocol/resynchronization-event
                          (::protocol/event event)))
-                    @events)))
+                    @events))
+            "socket close triggers reconnect without waiting for respawn rate-limit")
         (let [resynchronization
               (last
                (filter #(= protocol/resynchronization-event

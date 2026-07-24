@@ -5,7 +5,8 @@
             [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds]
             [seon.db.writer-test-support :as writer-test]
-            [seon.db.writer :as writer])
+            [seon.db.writer :as writer]
+            [seon.error :as error])
   (:import [java.io File]
            [java.nio.channels SocketChannel]
            [java.util.concurrent CountDownLatch TimeUnit]))
@@ -134,6 +135,7 @@
             victim (first (pool-members session))
             entered (CountDownLatch. 1)
             release-slow (CountDownLatch. 1)
+            faults (atom [])
             execute-read! (var-get #'writer/execute-read!)]
         (with-redefs-fn
           {#'writer/execute-read!
@@ -142,7 +144,8 @@
                       (get-in work [::writer/request ::protocol/request-id]))
                (.countDown entered)
                (.await release-slow))
-             (execute-read! runtime work))}
+             (execute-read! runtime work))
+           #'error/record! #(swap! faults conj %)}
           (fn []
             (let [call (future
                          (writer-call! session
@@ -154,6 +157,10 @@
                   (is (= :call-deadline
                          (get-in outcome [:seon.error/data
                                           ::db.host/pool-reason])))
+                  (is (= ::db.host/call-deadline-ms
+                         (get-in (ex-data
+                                  (::error/raw (first @faults)))
+                                 [::db.host/config-key])))
                   (is (not (.isOpen ^SocketChannel
                                     (::uds/channel (::db.host/session victim)))))
                   (let [replacement (first (pool-members session))]
@@ -230,8 +237,7 @@
   (with-writer-session
     "active-conflict"
     {::db.host/pool-size 2
-     ::db.host/call-deadline-ms 100
-     ::db.host/request-conflict-backoff-ms 5}
+     ::db.host/call-deadline-ms 100}
     (fn [_server session]
       (let [head (db.host/resolve-db! session)
             seed (writer-call!
