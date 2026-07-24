@@ -390,9 +390,10 @@
                 "program-sources.edn")))
 
 (defn current-program-source-digest
-  "Hash the exact flavor-owned program-source artifact bytes."
+  "Hash the selected or flavor-owned program-source artifact bytes."
   [config]
-  (let [path (program-source-path config)]
+  (let [path (or (:seon.dev.config/program-source config)
+                 (program-source-path config))]
     (when-not (fs/regular-file? path)
       (throw (ex-info "The program-source artifact is absent."
                       {:seon.dev.artifact/path path})))
