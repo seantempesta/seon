@@ -68,6 +68,13 @@ shows). Detached `nohup` remains
 acceptable only when a lane must survive the orchestrator session
 itself dying — the rare case, not the default.
 
+To make an already-detached lane watchable after the fact, launch a
+tracked background `tail -n 40 -f tmp/orchestrator/<lane>-stdout.log`
+whose description names the lane — the panel entry then streams that
+lane's live transcript. Kill the follower when the lane lands.
+Supervisor/watcher loops are intentionally silent between events; give
+the user a `tail -f` follower to watch, never the watcher.
+
 ## CRITICAL gotcha — always redirect stdin
 
 `codex exec` reads stdin whenever stdin is not a TTY and **blocks until EOF**.
