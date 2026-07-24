@@ -60,6 +60,42 @@ still need one exact JVM execution plan and two successful receipts. Focused
 portable planner coverage is green; the current-artifact writer gate and the
 source-frozen live re-drive remain pending.
 
+## 2026-07-24 live re-drive: planner exception and open-run wedge
+
+The source-frozen default-cluster re-drive at HEAD `ab0913794` found a stronger
+failure in the same exact-plan boundary. Agent `bright-candies-relax` persisted
+the requested plan and two schema registrations over four terminal `:done`
+turns. Its fifth DeepSeek attempt, `va7r5y0r4qnx`, succeeded with HTTP 200 and
+left turn `m7mia62w9xhq` at `:reply-ready`.
+
+That reply contained a prose lead-in followed by the valid form
+`(seon.schema/register! :my.lifecycle.recovery3.memory/finding :string)`.
+While specializing the parsed roots, `seon.program.edge/resolved-target`
+passed an unresolved unqualified prose symbol through
+`canonical-target`. `canonical-target` called `clojure.core/namespace` on nil,
+raising an uncaught `NullPointerException`. The exception escaped the claimant
+virtual thread instead of becoming the existing flat steering error.
+
+Exact retained datoms at basis transaction `536874862`, before the request
+deadline:
+
+- run entity `8929`, id `bajoa6encx81`, was `:open`, claimed at epoch 10;
+- turn entity `8966`, id `m7mia62w9xhq`, was `:running` at
+  `:reply-ready`;
+- attempt entity `8967`, id `va7r5y0r4qnx`, is `:success` with response status
+  200; and
+- the agent had a current-run ref to entity `8929`.
+
+The claimant wrote no error or later receipt after the exception. At the
+900-second `/agents/run` deadline, transaction `536874863` eventually closed
+the run `:superseded`, retracted claimant/current-run custody, and published
+the turn `:interrupted` with error
+`The run closed :superseded before the active turn published.` This leaves no
+permanent claimant residue, but the claimant was stuck until the outer request
+deadline and never returned the existing steering value. That directly
+falsifies Acceptance. Full evidence is appended to
+`tmp/orchestrator/lifecycle-redrive-gate.log`.
+
 ## Acceptance
 
 - The same two visible registered forms derive one exact JVM execution plan.

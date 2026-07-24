@@ -155,6 +155,25 @@ source-frozen default rebuild: publish the current artifact, run the focused
 writer selection, then perform the one lifecycle live re-drive and record the
 agent-to-user message plus `:published`/`:done` turn and released run custody.
 
+LIFECYCLE RE-DRIVE VERDICT (~10:33): still NOT CAVEAT-CLEARED. The published
+claimant timeout config fact first required one explicit
+`config apply`; after that, fresh agent `bright-candies-relax` persisted the
+requested plan and two memory schemas across four `:done` turns, with five
+DeepSeek HTTP-200 `:success` attempts. Its fifth reply combined prose with the
+next valid schema form. `seon.program.edge/resolved-target` passed an
+unresolved unqualified prose symbol to `canonical-target`, which called
+`namespace` on nil. The uncaught JVM `NullPointerException` escaped the
+claimant virtual thread. Run `bajoa6encx81` stayed open/claimed and turn
+`m7mia62w9xhq` stayed `:running/:reply-ready` until the 900-second request
+deadline. Deadline cleanup eventually released custody as
+`:closed/:superseded` and `:published/:interrupted`, not `:done`; no final
+memory write/read or formless synthesis message exists. The exact-plan issue
+is reopened with the claimant-progress failure, and the formless-delivery
+issue remains open pending one clean integrated re-drive.
+Bonus U9 feed proof also failed: the in-pod path is active, but
+`render-agent-view!` omits `:seon.agent.ctx/name` on its third surface and the
+feed emits `render error: :malli.core/invalid-output`.
+
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 
 ## older restart protocol below until morning)

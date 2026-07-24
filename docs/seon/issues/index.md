@@ -37,9 +37,9 @@ See `README.md` for the convention.
 | [Let the common Inspect pod solver address an existing agent](inspect-pod-solver-cannot-address-existing-agent.md) | blocker | agent |
 | [Make the downstream runtime package self-contained](downstream-runtime-package-is-not-self-contained.md) | blocker | Core |
 | [Make writer drain proof consumable by the operator](planned-restart-cannot-observe-writer-drain-result.md) | blocker | Core |
-| [Page-plan build hook used the writer-only manifest boundary incorrectly](page-plan-hook-used-writer-only-manifest-reader.md) | blocker | general |
 | [Plan a visible JVM claimant reply on an inspected tier](jvm-claimant-rejects-visible-reply-without-exact-execution-plan.md) | blocker | agent |
 | [Pod remains ready after losing its web listener](pod-remains-ready-after-web-listener-loss.md) | blocker | UI |
+| [Preserve context identity in the in-pod agent view](in-pod-agent-view-omits-context-name.md) | blocker | UI |
 | [Private-function presence law is incomplete outside core indexing](private-function-presence-law-incomplete.md) | blocker | general |
 | [Project a turn's rendered transaction ref as its basis transaction](turn-debug-must-project-rendered-transaction-ref.md) | blocker | agent |
 | [Projected map keys are not drill paths](projected-map-keys-are-not-drill-paths.md) | blocker | UI |

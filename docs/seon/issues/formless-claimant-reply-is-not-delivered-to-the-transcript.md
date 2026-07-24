@@ -68,6 +68,35 @@ a cluster to produce one. The next source-frozen default rebuild must run the
 writer regression and then repeat the live lifecycle drive. That live
 re-drive remains required even after the writer regression passes.
 
+## 2026-07-24 resumed live re-drive
+
+The rebuilt default cluster carried `83fd9792d`, `87b7637bd`, and
+`e74cae74a` at HEAD `ab0913794`. The first fresh agent failed closed before a
+model call because the new claimant timeout fact had not been applied to the
+config singleton. `bin/seon config apply config/system.edn` reconciled the
+published configuration without a reset or restart, and a second fresh agent,
+`bright-candies-relax`, began the clean acceptance run.
+
+That run persisted the requested root plan plus all three children at basis
+transaction `536874801`, then registered the memory id and ordinal schemas at
+transactions `536874817` and `536874834`. All five DeepSeek attempts were
+`:success` with response status 200. The fifth reply never reached evaluation:
+the exact-plan analyzer threw an uncaught `NullPointerException` while
+resolving a prose symbol before the valid schema form. Run `bajoa6encx81`
+stayed open and claimed with turn `m7mia62w9xhq` `:running` at
+`:reply-ready` until the 900-second request deadline. Deadline cleanup then
+closed the run `:superseded` and made the turn `:published/:interrupted` with
+an error, never `:done`.
+
+The final memory write/read and bare synthesis were therefore never reached.
+The exact final-content query returns no message, and no final
+`:published`/`:done` turn exists. This issue stays open: the source-level
+delivery correction is present, but the required integrated live proof is
+blocked by
+[[jvm-claimant-rejects-visible-reply-without-exact-execution-plan]]'s
+planner exception and nothing-wedges failure. Evidence is appended to
+`tmp/orchestrator/lifecycle-redrive-gate.log`.
+
 ## Acceptance
 
 - A successful plain synthesis with no dispatchable forms bypasses exact-plan
