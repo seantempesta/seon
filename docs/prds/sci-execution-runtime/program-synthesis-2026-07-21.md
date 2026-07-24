@@ -1086,6 +1086,15 @@ MORNING ITEMS (accumulating):
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- BREAK #8 FIXED (32e7b75eb, accepted — the containment-correct
+  answer): the fixture spliced canonical tx data into an evaluated
+  SCI form (symbol VALUES analyzed as code); fix keeps host schema
+  data outside agent SCI, no binding widened; bonus real fix =
+  acquisition max-results counted tuple CELLS not rows. BREAK #9
+  surfaced (claimant invocation 7-arg arity) + a stale prose pin
+  (writer error got MORE specific) — break9 lane dispatched; r43's
+  wiki scar staged (wiki lane-owned). CHAIN LEDGER: 9 breaks found,
+  8 fixed, #9 + 64F/2E cljs reds in flight.
 - BREAK #6 FIXED (1b30bb578, accepted): the CLJS hang = a
   single-arity stub of multi-arity publish-committed! throwing on
   the unavailable rail while the test awaited only success — done
