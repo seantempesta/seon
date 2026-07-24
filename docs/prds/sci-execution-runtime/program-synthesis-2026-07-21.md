@@ -1140,6 +1140,16 @@ MORNING ITEMS (accumulating):
   (settleclose 1a47c1062 + 5cc3b32e1: break-8 fixture class swept
   suite-wide, program-source digest selection fixed). A REAL
   MILESTONE — but NOT graduation: the goal's bar is PROVABLY ALIVE.
+- ★ NOTHING-WEDGES INVARIANT NOW HOLDS (094e7a7e6, 2026-07-24 ~3:30am):
+  claimant timeout inheritance shared pod/JVM; phase errors now persist
+  a fault, terminalize the open attempt, close the run :error, and
+  RELEASE custody — the lane's own live proof hit a new error at epoch
+  2 and FAULTED VISIBLY + released, no wedge (writer 22/137, driver
+  12/53, config 4/57 green). It then peeled the next layer itself: a
+  JVM claimant remote-identity ALLOCATION error, fixed (62cd2348b +
+  356519dd0 + 08942c9f9). Rebuild+re-drive carrying all of it. LADDER
+  now: pod contract → pod crash → routing → claimant config/wedge →
+  claimant allocation.
 - ★ FINAL-DRIVE VERDICT (2026-07-24, ~3am): NOT-ALIVE, but the
   pod-LLM removal WORKED — the JVM claimant (epoch 2) now picks up
   turns (one layer deeper: we're inside the claimant attempt path).
