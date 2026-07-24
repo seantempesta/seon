@@ -182,13 +182,17 @@
 (def ^:private config-digest
   "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789")
 
+(def ^:private canonical-test-schema-rows
+  "One wall-clock-stable schema population shared by page-plan fixtures."
+  (client/index-schemas))
+
 (defn- build-page-plan
   [program page-rows]
   (client/build-page-plan
    {:seon.execution/artifact-digest digest
     :seon.db.initialization/config-manifest-digest config-digest
     :seon.db.initialization/page-rows page-rows
-    :seon.db/program program}))
+    :seon.db/program (into canonical-test-schema-rows program)}))
 
 (deftest page-plan-is-one-deterministic-complete-value
   (let [program
@@ -227,7 +231,7 @@
           :seon.db.initialization/config-manifest-digest
           "123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0"
           :seon.db.initialization/page-rows 64
-          :seon.db/program program})]
+          :seon.db/program (into canonical-test-schema-rows program)})]
     (is (not=
          (:seon.db.initialization/fingerprint
           (first (:seon.db/initialization-pages first-plan)))
@@ -290,26 +294,42 @@
             (set! db/transact! original-transact)
             (done))]
       (set! db/db
-            (fn [] (js/Promise.resolve
-                    {:db-name "r45s3" :t 42
-                     :datahike/commit-id (random-uuid)})))
+            (fn
+              ([]
+               (js/Promise.resolve
+                {:db-name "r45s3" :t 42
+                 :datahike/commit-id (random-uuid)}))
+              ([_request]
+               (js/Promise.resolve
+                {:db-name "r45s3" :t 42
+                 :datahike/commit-id (random-uuid)}))))
       (set! db/entity
-            (fn [_database _ref]
-              (js/Promise.resolve
-               (assoc expected
-                      :seon.db.initialization/id "database"
-                      :seon.db.initialization/page-count 9
-                      :seon.db.initialization/status
-                      :seon.db.initialization.status/complete))))
+            (fn
+              ([_ref]
+               (js/Promise.resolve
+                (assoc expected
+                       :seon.db.initialization/id "database"
+                       :seon.db.initialization/page-count 9
+                       :seon.db.initialization/status
+                       :seon.db.initialization.status/complete)))
+              ([_database _ref]
+               (js/Promise.resolve
+                (assoc expected
+                       :seon.db.initialization/id "database"
+                       :seon.db.initialization/page-count 9
+                       :seon.db.initialization/status
+                       :seon.db.initialization.status/complete)))))
       (set! db/transact!
             (fn [_request]
               (swap! transactions inc)
               (js/Promise.resolve {})))
-      (-> (#'client/stamp-applied-identity! expected)
+      (-> (js/Promise.resolve nil)
           (.then
-           (fn [result]
-             (is (false? (:seon.cluster.apply/changed? result)))
-             (is (zero? @transactions))))
+           (fn ^:async run []
+             (let [result
+                   (await (#'client/stamp-applied-identity! expected))]
+               (is (false? (:seon.cluster.apply/changed? result)))
+               (is (zero? @transactions)))))
           (.catch #(is false (str %)))
           (.finally cleanup!)))))
 
