@@ -56,7 +56,8 @@
          "agent" {:db-name "claimant" :t 1} "run" 3 "turn"
          {:seon.repl/eval-entries []}
          {:seon.config.claim-driver/invocation-deadline-ms 4321
-          :seon.config.claim-driver/invocation-result-maximum-bytes 9876})
+          :seon.config.claim-driver/invocation-result-maximum-bytes 9876}
+         {})
         after (System/currentTimeMillis)]
     (is (<= (+ before 4321)
             (:seon.execution/deadline-ms invocation)

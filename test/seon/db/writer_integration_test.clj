@@ -466,13 +466,14 @@
         nil))))
 
 (deftest existing-database-must-already-match-the-protocol-candidate
-  (doseq [[label initial-tx]
-          [["missing" nil]
+  (doseq [[label initial-tx expected-detail]
+          [["missing" nil ::writer/missing-schema]
            ["incompatible"
             [{:db/ident ::protocol/request-id
               :db/valueType :db.type/keyword
               :db/cardinality :db.cardinality/one
-              :db/unique :db.unique/identity}]]]]
+              :db/unique :db.unique/identity}]
+            ::writer/incompatible-schema]]]
     (let [database-name (str "writer-protocol-candidate-" label "-"
                              (random-uuid))
           database-keyword (keyword database-name)
@@ -484,14 +485,23 @@
           request-path (socket-path (str label "-request"))]
       (try
         (d/create-database config)
-        (is (thrown-with-msg?
-             clojure.lang.ExceptionInfo
-             #"Initial database ensure failed"
-             (writer-test/start!
-              {::writer/dependencies (dependencies)
-               ::writer/database-name database-name
-               ::writer/backend :memory
-               ::writer/request-socket-path request-path})))
+        (let [exception
+              (try
+                (let [server
+                      (writer-test/start!
+                       {::writer/dependencies (dependencies)
+                        ::writer/database-name database-name
+                        ::writer/backend :memory
+                        ::writer/request-socket-path request-path})]
+                  (writer/stop! server)
+                  nil)
+                (catch clojure.lang.ExceptionInfo exception
+                  exception))
+              failure-data (ex-data exception)]
+          (is (instance? clojure.lang.ExceptionInfo exception))
+          (is (= protocol/protocol-error
+                 (::writer/failure-kind failure-data)))
+          (is (seq (get failure-data expected-detail))))
         (is (empty? (::registry/databases (registry/list-databases {})))
             "a rejected schema never publishes a registry entry")
         (finally
