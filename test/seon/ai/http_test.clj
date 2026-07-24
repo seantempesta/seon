@@ -304,7 +304,7 @@
       (finally
         (.stop instance 0)))))
 
-(deftest watchdog-interrupt-of-hung-http-is-a-flat-timeout
+(deftest hung-http-timeout-is-a-flat-timeout
   (let [release (CountDownLatch. 1)
         entered (CountDownLatch. 1)
         instance
@@ -328,13 +328,34 @@
                (request (.getPort (.getAddress instance)) true 100))]
           (is (.await entered 1 TimeUnit/SECONDS))
           (is (true? (get-in result [:seon.ai/error :seon.ai/timeout?])))
-          (is (true? (get-in result [:seon.ai/error
-                                     :seon.ai/outer-timeout?])))
-          (is (str/includes? (get-in result [:seon.ai/error
-                                             :seon.ai/msg])
-                             "claimant deadline"))
+          (is (string? (get-in result [:seon.ai/error :seon.ai/msg])))
           (is (map? result))))
       (finally
         (.countDown release)
         (.shutdownNow watchdog)
         (.stop instance 0)))))
+
+(deftest claimant-watchdog-timeout-is-a-flat-timeout
+  (let [release (CountDownLatch. 1)
+        entered (CountDownLatch. 1)
+        watchdog (Executors/newScheduledThreadPool 1)
+        bounded (deref #'driver.host/bounded-llm-transport!)]
+    (try
+      (let [result
+            (bounded
+             {:seon.host/watchdog watchdog
+              :seon.agent.driver/llm-transport!
+              (fn [_]
+                (.countDown entered)
+                (.await release 5 TimeUnit/SECONDS))}
+             (request 1 false 25))]
+        (is (.await entered 1 TimeUnit/SECONDS))
+        (is (true? (get-in result [:seon.ai/error :seon.ai/timeout?])))
+        (is (true? (get-in result [:seon.ai/error
+                                   :seon.ai/outer-timeout?])))
+        (is (str/includes? (get-in result [:seon.ai/error :seon.ai/msg])
+                           "claimant deadline"))
+        (is (map? result)))
+      (finally
+        (.countDown release)
+        (.shutdownNow watchdog)))))
