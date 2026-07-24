@@ -253,12 +253,12 @@ codex sol lanes. Haiku is only for quick reads. Never haiku for coding.
 Codex uses its configured coding model—Claude aliases are not portable
 model names.
 
-Launch every codex lane through `bin/lane` as a harness-tracked
+Launch every codex lane through `bin/codex-agent` as a harness-tracked
 background command (Bash `run_in_background: true`, description naming
 the lane — never `nohup`/`&`, never hand-rolled shell):
 
 ```bash
-bin/lane run <name> "<the full spec>"   # or spec on stdin (heredoc)
+bin/codex-agent run <name> "<the full spec>"   # or spec on stdin (heredoc)
 ```
 
 The script owns the conventions: model/effort dials (`LANE_MODEL`,
@@ -267,9 +267,9 @@ in `tmp/orchestrator/<name>-summary.txt`, and `tee`-streamed stdout so
 the user's task panel shows the live transcript while
 `<name>-stdout.log` persists. Tracked means lane exit re-invokes the
 orchestrator — no watcher loops. Lane stdout never enters the
-orchestrator's context: read the summary (`bin/lane summary <name>`),
+orchestrator's context: read the summary (`bin/codex-agent summary <name>`),
 then query the log selectively with `tail`/`rg`, never a whole-file
-read. Also: `bin/lane status | watch <name> | resume <name> <sid>`.
+read. Also: `bin/codex-agent status | watch <name> | resume <name> <sid>`.
 Full mechanics, resume recipe, and model dials:
 `docs/seon/reference/driving-codex-agents.md`.
 

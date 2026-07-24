@@ -1,26 +1,32 @@
 #!/bin/sh
-# bin/lane — the one way to run codex implementation lanes.
+# bin/codex-agent — the one way to run codex implementation lanes.
 #
 # The orchestrator launches these as harness-tracked background tasks
 # (Bash run_in_background, description naming the lane) so the user's
 # task panel shows the live transcript and completion re-invokes the
 # orchestrator. Conventions: docs/seon/reference/driving-codex-agents.md.
 #
-#   bin/lane run <name> [spec]      launch a lane; spec as one argument
+#   bin/codex-agent run <name> [spec]      launch a lane; spec as one argument
 #                                   or on stdin (heredoc). Streams the
 #                                   transcript to stdout AND persists
 #                                   tmp/orchestrator/<name>-stdout.log;
 #                                   summary -> <name>-summary.txt.
-#   bin/lane resume <name> <sid> [followup]
+#   bin/codex-agent resume <name> <sid> [followup]
 #                                   continue a lane's session by id.
-#   bin/lane watch <name>           follow a lane's live transcript.
-#   bin/lane summary <name>         print a lane's -o summary.
-#   bin/lane status                 running lanes + landed summaries.
+#   bin/codex-agent watch <name>           follow a lane's live transcript.
+#   bin/codex-agent summary <name>         print a lane's -o summary.
+#   bin/codex-agent status                 running lanes + landed summaries.
 #
 # Dials (env): LANE_MODEL (gpt-5.6-sol), LANE_EFFORT (high),
 # LANE_SANDBOX (full | read-only).
 
 set -eu
+
+# codex-cli 0.144.6 logs a spurious models-cache error on every load/TTL
+# renew (missing `supports_reasoning_summaries`; harmless — see
+# docs/seon/reference/driving-codex-agents.md §Known harmless noise).
+# Mute just that subsystem so lane transcripts stay clean.
+export RUST_LOG=${RUST_LOG:-codex_models_manager=off}
 
 dir=tmp/orchestrator
 model=${LANE_MODEL:-gpt-5.6-sol}
@@ -36,7 +42,7 @@ sandbox_flags() {
   case "$sandbox" in
     full) printf '%s' '--dangerously-bypass-approvals-and-sandbox' ;;
     read-only) printf '%s' '-s read-only -c approval_policy=never' ;;
-    *) echo "bin/lane: unknown LANE_SANDBOX '$sandbox'" >&2; exit 64 ;;
+    *) echo "bin/codex-agent: unknown LANE_SANDBOX '$sandbox'" >&2; exit 64 ;;
   esac
 }
 
@@ -46,7 +52,7 @@ case "$command" in
     name=$1; shift
     mkdir -p "$dir"
     if [ $# -ge 1 ]; then spec=$1; else spec=$(cat); fi
-    [ -n "$spec" ] || { echo "bin/lane: empty spec" >&2; exit 64; }
+    [ -n "$spec" ] || { echo "bin/codex-agent: empty spec" >&2; exit 64; }
     # Spec rides stdin (codex `-`); stdout streams to the panel AND the
     # log via tee; the summary lands in -o for the orchestrator.
     printf '%s' "$spec" |
