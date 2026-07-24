@@ -269,9 +269,16 @@ the user's task panel shows the live transcript while
 orchestrator — no watcher loops. Lane stdout never enters the
 orchestrator's context: read the summary (`bin/codex-agent summary <name>`),
 then query the log selectively with `tail`/`rg`, never a whole-file
-read. Also: `bin/codex-agent status | watch <name> | resume <name> <sid>`.
-Full mechanics, resume recipe, and model dials:
-`docs/seon/reference/driving-codex-agents.md`.
+read. Also: `bin/codex-agent status | watch <name> | stop <name> |
+resume <name> "<followup>"` (resume auto-reads the session id and keeps
+the lane's full context).
+
+Never let a lane keep working on a direction that new information has
+invalidated (owner ruling 2026-07-24): spot-check running lanes'
+transcripts selectively, and on a wrong turn `stop` the lane, then
+`resume` it with the correction — stopping is cheap because resume
+loses nothing but the in-flight turn. Full mechanics, resume recipe,
+and model dials: `docs/seon/reference/driving-codex-agents.md`.
 
 For research, use one agent with the complete relevant context rather than many
 agents with slivers. Independent source domains may run in parallel, but one
