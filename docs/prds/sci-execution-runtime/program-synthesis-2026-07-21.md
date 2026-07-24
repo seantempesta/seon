@@ -1086,6 +1086,14 @@ MORNING ITEMS (accumulating):
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- BN-5/10 STOPPED CORRECTLY at the overlap gate (its consumers =
+  BN-1's live files run.cljs/serve.cljs); requeues on BN-1's commit;
+  BN-1 (claim-epoch) is the wave's critical path. WATCH ITEM: tree
+  shows edits in src/seon/retry.cljc + my/kb + agent/testrun +
+  agent/ctx and the portable-retry issue archived — NO dispatched
+  lane owns those paths; verify at the issue-triage lane's return
+  whether it exceeded its docs-only write boundary (its spec said
+  fix-tonight candidates go to the orchestrator, not self-fix).
 - BN LEDGER (running): #8 benchmark ✓ (ef0680725) · #9 claimant
   arity + prose pins ✓ (0b3976ad0) · #11 transcript direct-call ✓
   (same commit; PRODUCTION IMPACT DEFINITIVELY NO — fixture-only) ·
