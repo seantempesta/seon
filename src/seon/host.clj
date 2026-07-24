@@ -16,7 +16,8 @@
             [seon.host.invoke :as invoke]
             [seon.host.sample :as sample]
             [seon.host.session :as session]
-            [seon.schema :as schema])
+            [seon.schema :as schema]
+            [taoensso.timbre :as log])
   (:import [java.net StandardProtocolFamily UnixDomainSocketAddress]
            [java.nio.file Files Path]
            [java.nio.channels ServerSocketChannel SocketChannel]
@@ -99,9 +100,9 @@
 
       :else
       (let [head (context/resolve-head! (::writer host))]
-        (if (:seon/error head)
+        (if (:seon.error/message head)
           (session/startup-error session
-                         (get-in head [:seon/error :seon.error/message]))
+                                 (:seon.error/message head))
           (let [agent-id (:seon.execution/agent-id startup)
                 instrument-state (::instrument/state host)
                 ctx
@@ -148,6 +149,17 @@
               (:seon.execution/artifact-digest startup)
               :seon.db/db head})
             (assoc session ::session/ctx ctx)))))))
+
+(defn- session-fault-log-value
+  [throwable]
+  (let [failure (error/->map throwable)]
+    (assoc (select-keys failure
+                        [:seon.error/message
+                         :seon.error/kind
+                         :seon.error/data])
+           :seon.error/fault :core
+           :seon.error/kind
+           (or (:seon.error/kind failure) :core-bug))))
 
 (defn- serve-session!
   "Run one pod session: startup handshake, then the message loop."
@@ -220,7 +232,8 @@
                       (recur))))))))
       (catch Throwable throwable
         (when-not @startup-timed-out?
-          (invoke/record-core-fault! throwable)))
+          (invoke/record-core-fault! throwable)
+          (log/error (pr-str (session-fault-log-value throwable)))))
       (finally
         (.cancel timeout-task false)
         (reset! (::session/live-values session) {::session/order [] ::session/values {}})

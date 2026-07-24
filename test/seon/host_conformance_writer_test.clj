@@ -7,7 +7,8 @@
    shape-for-shape. The writer is a local fake `uds/start-request-server!`
    handler (the same self-contained pattern as `seon.db.transport-uds-test`)
    so the suite needs no live cluster."
-  (:require [clojure.string :as str]
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is use-fixtures]]
             [datalog.parser :as datalog.parser]
             [seon.ai.tokens :as tokens]
@@ -23,7 +24,8 @@
             [seon.host.sample :as host.sample]
             [seon.host.session :as host.session]
             [seon.render.value :as render.value]
-            [seon.schema :as schema])
+            [seon.schema :as schema]
+            [taoensso.timbre :as log])
   (:import [java.io ByteArrayInputStream ByteArrayOutputStream DataOutputStream
             File IOException OutputStream PrintStream]
            [java.net StandardProtocolFamily UnixDomainSocketAddress]
@@ -135,6 +137,7 @@
                   (cond
                     (some #{:seon.schema/form} (flatten (vec query-form))) []
                     (some #{:seon.fn/spec} (flatten (vec query-form))) []
+                    (some #{:seon.fn/source} (flatten (vec query-form))) []
                     :else fake-agent-rows)}))
              (::protocol/members request))}
 
@@ -178,23 +181,28 @@
 
 (def ^:private ^:dynamic *host* nil)
 (def ^:private ^:dynamic *host-socket* nil)
+(def ^:private ^:dynamic *writer* nil)
+(def ^:private ^:dynamic *writer-socket* nil)
 
 (use-fixtures :once
   (fn [run-tests!]
     (let [writer-socket (socket-path "host-fake-writer")
-      host-socket (socket-path "host-conformance")
-          writer (start-fake-writer! writer-socket)
+          host-socket (socket-path "host-conformance")
+          writer (atom (start-fake-writer! writer-socket))
           started (host/start!
                    {::host/socket-path host-socket
                     ::context/writer-socket-path writer-socket
                     ::context/database-name "host-conformance"})]
       (try
         (binding [*host* started
-                  *host-socket* host-socket]
+                  *host-socket* host-socket
+                  *writer* writer
+                  *writer-socket* writer-socket]
           (run-tests!))
         (finally
           (host/stop! started)
-          (uds/close-request-server! writer))))))
+          (when-let [server @writer]
+            (uds/close-request-server! server)))))))
 
 ;;; Harness client — plays the pod side of the inventoried contract.
 
@@ -430,6 +438,40 @@
       (is (= database (:seon.db/db ready)))
       (finally (close! session)))))
 
+(deftest writer-loss-between-sessions-returns-startup-error-data
+  (let [[healthy ready] (open-session! "before-writer-loss")]
+    (try
+      (is (= :seon.execution.message/ready
+             (:seon.execution/message ready)))
+      (finally
+        (close! healthy))))
+  (let [stopped @*writer*]
+    (reset! *writer* nil)
+    (uds/close-request-server! stopped)
+    (try
+      (let [session (session!)]
+        (try
+          (send! session (startup-value "during-writer-loss"))
+          (let [response (recv! session)
+                failure (:seon.execution/error response)]
+            (is (= :seon.execution.message/error
+                   (:seon.execution/message response)))
+            (is (= "startup"
+                   (:seon.execution/invocation-id response)))
+            (is (string? (:seon.error/message failure)))
+            (is (keyword? (:seon.error/kind failure)))
+            (is (nil? (recv! session))))
+          (finally
+            (close! session))))
+      (finally
+        (reset! *writer* (start-fake-writer! *writer-socket*)))))
+  (let [[recovered ready] (open-session! "after-writer-loss")]
+    (try
+      (is (= :seon.execution.message/ready
+             (:seon.execution/message ready)))
+      (finally
+        (close! recovered)))))
+
 (deftest one-session-thread-start-failure-does-not-end-accepting
   (reset! transaction-requests [])
   (let [original (var-get #'host/start-session-thread!)
@@ -473,22 +515,35 @@
 
 (deftest session-reader-throw-records-a-fault-and-only-that-session-dies
   (reset! transaction-requests [])
-  (let [[session _ready] (open-session! "reader-fault-agent")
-        raw (DataOutputStream. ^OutputStream (::output session))]
-    (try
-      (.writeInt raw -1)
-      (.flush raw)
-      (is (nil? (recv! session)))
-      (await-condition!
-       #(some (fn [row] (= :core (:seon.error/fault row)))
-              (recorded-tx-data))
-       "session reader fault record")
-      (let [[replacement ready] (open-session! "after-reader-fault")]
-        (try
-          (is (= :seon.execution.message/ready
-                 (:seon.execution/message ready)))
-          (finally (close! replacement))))
-      (finally (close! session)))))
+  (let [logs (atom [])]
+    (with-redefs-fn
+      {#'log/-log! (fn [& arguments] (swap! logs conj arguments))}
+      (fn []
+        (let [[session _ready] (open-session! "reader-fault-agent")
+              raw (DataOutputStream. ^OutputStream (::output session))]
+          (try
+            (.writeInt raw -1)
+            (.flush raw)
+            (is (nil? (recv! session)))
+            (await-condition!
+             #(some (fn [row] (= :core (:seon.error/fault row)))
+                    (recorded-tx-data))
+             "session reader fault record")
+            (await-condition! #(= 1 (count @logs)) "session fault log")
+            (let [[_configuration level _namespace _file _line _column
+                   _id _kind vargs-delay] (first @logs)
+                  [line] (force vargs-delay)
+                  logged (edn/read-string line)]
+              (is (= :error level))
+              (is (= :core (:seon.error/fault logged)))
+              (is (keyword? (:seon.error/kind logged)))
+              (is (string? (:seon.error/message logged))))
+            (let [[replacement ready] (open-session! "after-reader-fault")]
+              (try
+                (is (= :seon.execution.message/ready
+                       (:seon.execution/message ready)))
+                (finally (close! replacement))))
+            (finally (close! session))))))))
 
 (deftest invalid-startup-errors-with-the-startup-invocation-id
   (let [session (session!)]
