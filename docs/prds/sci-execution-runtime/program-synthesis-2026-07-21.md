@@ -1140,6 +1140,13 @@ MORNING ITEMS (accumulating):
   (settleclose 1a47c1062 + 5cc3b32e1: break-8 fixture class swept
   suite-wide, program-source digest selection fixed). A REAL
   MILESTONE — but NOT graduation: the goal's bar is PROVABLY ALIVE.
+- ★ LIVE PROOFS RUNNING (2026-07-24, cluster verified ready, root
+  / = HTTP 200): livedrive (DeepSeek multi-turn agent with cross-turn
+  db memory — the provably-alive test) + webverify (runbook:
+  transact→SSE-datastar-morph server-side capture, responsiveness,
+  console/status) both driving the live default cluster. Anomalies
+  → issues. This is the goal's actual bar; graduation is not claimed
+  until an agent completes real work + the UI morphs on db change.
 - ★ PRIORITY-ZERO LIVE BLOCKER CLOSED (`c2c5faeff`, 2026-07-24):
   direct replay proved the successful schema/contract rows reconstruct,
   falsifying the forward-reference hypothesis. The omitted third
