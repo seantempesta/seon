@@ -25,3 +25,9 @@ representation-boundary mistake.
 The hook validates the numeric data contract with `integer?` and includes the
 fingerprint and relevant value classes in a real failure. The regression sends
 an EDN-materialized Long through the actual flush publication path.
+
+The improved failure then exposed a second preparation gap: the release
+`:optimize-prepare` stage derived the host base-load plan, while the ordinary
+watch flush built only program rows. Both modes now use the same prepared
+program derivation, so the strict publisher receives the plan instead of
+weakening its nil refusal.
