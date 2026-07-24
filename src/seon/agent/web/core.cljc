@@ -1,4 +1,4 @@
-(ns seon.agent.web.internal
+(ns seon.agent.web.core
   "Own portable web request policy and response interpretation."
   (:require
    [clojure.string :as str]

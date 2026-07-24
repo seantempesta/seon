@@ -4,7 +4,7 @@
   (:require
    [clojure.string :as str]
    [seon.agent.web :as web]
-   [seon.agent.web.internal :as internal]
+   [seon.agent.web.core :as internal]
    [seon.ai.tokens :as tokens])
   (:import
    (java.io ByteArrayOutputStream InputStream)

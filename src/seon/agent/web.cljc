@@ -10,7 +10,7 @@
   (:require
     [clojure.string :as str]
     #?(:cljs [my.blob :as blob])
-    [seon.agent.web.internal :as int]
+    [seon.agent.web.core :as int]
     #?(:cljs [seon.agent.web.pod :as pod])
     [seon.ai.tokens :as tokens]
     #?(:cljs [seon.db :as db])

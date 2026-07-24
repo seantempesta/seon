@@ -222,7 +222,7 @@
 
 (defn ^:async host-block-reason
   "A short reason string when the parsed URL's host is refused by `policy`,
-   `:seon.agent.web.internal/dns-fail` when it cannot be resolved, or nil
+   `:seon.agent.web.core/dns-fail` when it cannot be resolved, or nil
    when it is reachable. Dispatches on the policy mode:
      :open        — never refuses (only DNS failure surfaces);
      :public-only — refuses loopback/RFC-1918/link-local/ULA (checked on

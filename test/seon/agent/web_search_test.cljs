@@ -21,7 +21,7 @@
     [cljs.test :refer [deftest is testing async use-fixtures]]
     [clojure.string :as str]
     [seon.agent.web :as web]
-    [seon.agent.web.internal :as int]
+    [seon.agent.web.core :as int]
     [seon.agent.web.pod :as pod]
     [seon.ai.tokens :as tokens]
     [seon.config :as config]

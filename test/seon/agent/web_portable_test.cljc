@@ -5,7 +5,7 @@
    [clojure.string :as str]
    [malli.core :as m]
    [seon.agent.web :as web]
-   [seon.agent.web.internal :as internal]
+   [seon.agent.web.core :as internal]
    [seon.config.resolve]
    #?(:cljs [cljs.test :refer [async deftest is testing]]
       :clj [clojure.test :refer [deftest is testing]])))

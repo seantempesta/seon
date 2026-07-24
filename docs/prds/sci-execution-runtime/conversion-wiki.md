@@ -1247,6 +1247,13 @@ the variable-weight values they select.
   Use the maintained tools reader with `:read-cond :allow` and the current
   platform feature set at the one namespace-source boundary
   (`src/seon/ns/source.cljc`).
+- **A portable family core is public structure, not `.internal`.** If both a
+  parent namespace and a platform leaf consume the same pure policy and
+  response transformations, the shared namespace is the family `core`.
+  Calling it `.internal` either violates the parent-only require law or forces
+  an allowlist that conceals the real ownership. Rename the mechanism in
+  place, update every consumer, and delete the misleading legacy namespace
+  (`seon.agent.web.core`).
 
 ## Computed cold-boot schema population scar (2026-07-23)
 
@@ -1264,3 +1271,27 @@ the variable-weight values they select.
   contract as test evidence and assert that the computed population is its
   superset. Also assert a persisted declaration that the old list omitted, so
   the regression proves computation can grow beyond frozen history.
+
+## Build artifact boundary scars (2026-07-23)
+
+- **Package the compiled build beside the inventory path its consumer
+  derives.** Checkout builds place each `main.js` beside
+  `program-inventory.edn`; a source-free release must preserve that directory
+  relationship for both the client and execution builds. Distinct manifest
+  members are insufficient when package assembly flattens both builds into one
+  directory.
+- **A standalone fixture must select an exact current artifact manifest.**
+  Test setup must not inherit `tmp/seon-operator/artifact.edn` from an earlier
+  operator run. Resolve the manifest through the one artifact mechanism and
+  pass its exact path to the fixture, or fail before tests with the operator
+  command that produces it.
+- **A Shadow preload executes at namespace load during transaction-data
+  derivation.** Keep preload registration definition-only. Timers and other
+  application-startup effects belong in the real `-main`, because the
+  temporary compiled derivation loads preloads but must exit after emitting
+  initialization rows.
+- **Release preparation and flush must publish one source snapshot.** Shadow's
+  release optimization can change the analyzer source set between
+  `:optimize-prepare` and `:flush`. Carry the exact pre-optimization program
+  source text through the existing hook state with its derived rows, so the
+  digest guard binds one coherent build transaction.
