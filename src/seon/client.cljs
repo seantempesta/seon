@@ -76,8 +76,8 @@
     [seon.execution.host :as execution.host]
     [seon.log :as log]
     ;; Render protocol — A-2. Required here so the build includes it.
-    ;; Symbol-lookup for render slots lives in seon.eval/lookup-value
-    ;; (walks goog-global with cljs.core/munge); no boot-time wire-up
+    ;; Symbol lookup for compiled render slots lives in
+    ;; seon.render.core/resolve-compiled; no boot-time wire-up
     ;; needed.
     [seon.render]
     ;; Canvas render namespace — required so the build includes it.
@@ -198,7 +198,7 @@
     [my.plan]
     ;; Context-block namespaces: each owns one block fn (+ optional HTML twin)
     ;; that the manifest may wire by SYMBOL — required here so the build includes them and
-    ;; their munged symbols resolve via seon.eval/lookup-value at
+    ;; their munged symbols resolve through seon.render.core at
     ;; render time (no require cycle: the section nses require seon.agent.ctx
     ;; for the shared read API, seon.agent.ctx names them only as symbols).
     [seon.agent.ctx.namespaces :as nss]

@@ -1,8 +1,8 @@
 (ns seon.agent.turn
   "Pod-owned leaves for the portable claim-native turn driver.
 
-   This namespace owns turn schemas plus render, LLM, publication, and
-   scheduled-eval leaves. Cursor and receipt policy live in
+   This namespace owns turn schemas plus render and publication leaves.
+   Cursor and receipt policy live in
    `seon.agent.turn.core`; the portable driver owns orchestration."
   (:require
     [my.plan :as plan]
@@ -14,12 +14,12 @@
     [seon.db :as db]
     [seon.db.id :as db.id]
     [seon.error :as error]
-    [seon.eval :as seval]
     [seon.execution :as execution]
     [seon.execution.host :as execution.host]
     [seon.agent.ctx.driver :as ctx.driver]
     [seon.log :as seon-log]
     [seon.render :as render]
+    [seon.render.core :as render.core]
     [seon.schema :as schema]))
 
 ;; ============================================================
@@ -371,9 +371,6 @@
    [:seon.agent.ctx/rendered-blocks {:optional true} [:vector :map]]])
 (schema/register! ::prompt-result [:or ::rendered-prompt ::prompt-error])
 
-(def ^:private eval-batch-function
-  'seon.execution.runtime/eval-batch!)
-
 (defn- execution-child-retired?
   [value]
   (or (true? (::execution/child-retired? value))
@@ -435,7 +432,7 @@
     (if-not (error/agent-authored-sym?
              function-symbol (schema/current-projection))
       (try
-        (if-let [function-value (seval/lookup-value function-symbol)]
+        (if-let [function-value (render.core/resolve-compiled function-symbol)]
           (let [base-arguments (::execution/arguments call)
                 arguments
                 (cond-> base-arguments
@@ -549,60 +546,6 @@
        (or (::execution/error response)
            {:seon.error/message "The execution child did not return a prompt."
             :seon.error/kind :core-bug})))))
-
-(defn ^:async eval-parsed!
-  "Evaluate parsed model output in the agent's existing execution child."
-  {:malli/schema
-   [:=> [:cat :seon.agent/id :seon.db/db
-         [:vector :map] :symbol :seon.agent.turn/id
-         [:or :nil :seon.agent.run/id]]
-    :map]}
-  [agent-id database parsed starting-ns turn-id run-id]
-  (let [executable-count (count (filter #(contains? #{:form :read}
-                                                     (:seon.repl/kind %))
-                                        parsed))
-        request (cond-> {:seon.eval/parsed parsed
-                         :seon.eval/starting-ns starting-ns
-                         :seon.agent.turn/id-of-turn turn-id}
-                  run-id (assoc :seon.agent.run/id-of-run run-id))
-        response
-        (await
-         (apply execution.host/invoke-compiled!
-                (cond-> [database agent-id eval-batch-function [request]]
-                  run-id (conj {:seon.agent.run/id run-id}))))]
-    (cond
-      (not= database (:seon.db/db response))
-      {:seon.error/message
-       "The execution child returned eval results from another database value."
-       :seon.error/kind :core-bug
-       :seon.error/data
-       {:seon.db/expected-db database
-        :seon.db/db (:seon.db/db response)}}
-
-      (and (= execution/result-message (::execution/message response))
-           (map? (::execution/result response)))
-      (let [result (::execution/result response)
-            attempted (+ (or (:seon.eval/n-ok result) 0)
-                         (or (:seon.eval/n-fail result) 0))]
-        (if (and (pos? executable-count) (zero? attempted))
-          (let [failure
-                {:seon.error/message
-                 "The execution tier dropped an executable eval batch without recording a receipt."
-                 :seon.error/kind :core-bug
-                 :seon.error/data
-                 {:seon.agent/id agent-id
-                  :seon.agent.turn/id turn-id
-                  :seon.eval/executable-count executable-count
-                  :seon.eval/recorded-count attempted}}
-                exception (ex-info (:seon.error/message failure) failure)]
-            (error/record! {::error/raw exception ::error/fault :core})
-            failure)
-          result))
-
-      :else
-      (or (::execution/error response)
-          {:seon.error/message "The execution child did not return eval results."
-           :seon.error/kind :core-bug}))))
 
 ;; ============================================================
 ;; The turn bracket — open-turn! folds the prompt projection + the current

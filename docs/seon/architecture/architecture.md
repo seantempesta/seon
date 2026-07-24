@@ -154,8 +154,9 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
   header = DOM `#surface-<name>`), NOT a datahike identity.
 - **render** — a block's output; the one word for the projection. Engine:
   `seon.render`. A render is never stored.
-- **ai render** — a block's prompt-text output (a string, or a symbol late-resolved
-  via `seon.eval/lookup-value`). `:seon.render/ai`.
+- **ai render** — a block's prompt-text output (a string, or a symbol
+  late-resolved through `seon.render.core/resolve-compiled`).
+  `:seon.render/ai`.
 - **html render** — `:seon.render/html` selects the function that produces the
   human render; its response carries `:seon.render/hiccup`, which becomes a
   surface.

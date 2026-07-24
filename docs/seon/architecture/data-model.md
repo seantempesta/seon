@@ -203,7 +203,8 @@ per-agent upsert key, not a global identity.
 ### 2.3 symbol-as-value — late binding to the program graph (NOT a ref)
 
 A render fn, a route handler, and a schedule fn are stored as **symbol values**,
-resolved late at use time via `seon.eval/lookup-value`. They are NOT datahike
+resolved late at use time through `seon.render.core/resolve-compiled`. They are
+NOT datahike
 refs — there is no entity to point at; the symbol names a var in the running
 program, which the program-graph entities (`:seon.fn`, `:seon.ns`) also describe,
 but the binding is by NAME at call time, not by eid at write time. This is what

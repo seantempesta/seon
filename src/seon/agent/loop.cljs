@@ -6,21 +6,17 @@
    turn uses one pinned database value; run fencing, turn execution, and
    schedule matching remain delegated to their owning namespaces."
   (:require
-    [clojure.string :as str]
     [seon.agent.driver :as driver]
     [seon.agent.driver.pod :as driver.pod]
-    [seon.agent.home :as home]
     [seon.agent.message :as message]
     [seon.agent.run :as run]
     [seon.agent.schedule :as schedule]
-    [seon.agent.turn :as turn]
     [seon.config :as config]
     [seon.db :as db]
     [seon.db.protocol :as db.protocol]
     [seon.derive :as derive]
     [seon.error :as error]
     [seon.log :as seon-log]
-    [seon.repl.parse :as repl-internal]
     [seon.runtime.admission :as admission]
     [seon.schema :as schema]
     [seon.warn :as warn]))
@@ -485,78 +481,6 @@
             (str "drive-run! threw: " (or (.-message e) e))}))))
      0)))
 
-;; ============================================================
-;; Scheduled-fn execution — the action half of cron. Injected into
-;; [[seon.agent.schedule/fire-due-schedules!]] (which can't require this ns —
-;; it's a leaf the ticker calls). When a schedule fires, the DUE schedules' fns
-;; run HERE as a SCHEDULE-FIRE turn on the just-opened :schedule run: each
-;; `(the-fn)` is eval-batched in the agent's scope (the SAME path
-;; bootstrap-turn-0 and every LLM turn use), recorded as a `:seon.eval` the
-;; agent re-reads next turn — so the fired agent sees "the schedule fired and
-;; ran THIS", not a blind wake.
-;;
-;; The turn is stamped `:seon.agent.turn/scheduled? true`: it KEEPS the run
-;; stamp (so the transcript's agent→runs→turns walk renders its evals — the
-;; agent must SEE the result) but the loop's work-count query excludes it, so
-;; a fire never burns a turn from the run's work budget (turn-limit). Without
-;; that marker every cron tick stole an LLM turn — at turn-limit fires the run
-;; would close `:turn-limit` having done zero LLM work (#66).
-;;
-;; A broken scheduled fn records a failed eval (errors are values), never
-;; crashing the ticker. The existing per-agent execution child owns eval and
-;; its compiler, so this needs no compiler in the pod or per-agent loop input.
-;; ============================================================
-
-(schema/register! ::exec-request
-  [:map
-   [:seon.agent/id           :seon.agent/id]
-   [:seon.agent.schedule/fns :seon.agent.schedule/fns]])
-
-(defn ^:async exec-scheduled-fns!
-  "Run the due schedule `fns` for `id` as ONE schedule-fire turn.
-
-   On the agent's currently-open run — each fn invocation eval-batched in the agent's scope and
-   recorded as a `:seon.eval` (with a `;` narration noting the schedule fired).
-   The turn is stamped `:seon.agent.turn/scheduled? true` so it RENDERS in the
-   transcript (run-stamped) yet does NOT count toward turn-limit
-   (the loop's work-count query excludes it — #66). A no-op when the agent
-   has no open run (a supersede/close raced the fire). Errors are values
-   (eval-batch! records a failed eval per form). Injected into
-   [[seon.agent.schedule/fire-due-schedules!]] as `:seon.agent.schedule/exec-fn!`.
-   `^:async`."
-  {:malli/schema [:=> [:cat ::exec-request] :any]}
-  [{:seon.agent/keys [id] fns :seon.agent.schedule/fns}]
-  (let [database (await (acquire-agent-state id))]
-    (if (database-error? database)
-      database
-      (await
-       (db/with-agent id
-         (fn ^:async run-scheduled! []
-           (when-let [run-id (::current-run-id database)]
-             (let [database-value (::db/db database)
-                   source  (str/join "\n"
-                           (map (fn [s]
-                                  (str ";; schedule fired — running " s "\n(" s ")"))
-                                fns))]
-             (await
-              (db/with-tx-context
-               {:seon.db/user [:seon.agent/id id]
-                :seon.db/process
-                [:seon.db.process/id :seon.db.process/repl]}
-               (fn ^:async open-scheduled-turn! []
-                 (await
-                  (turn/open-turn!
-                   {:seon.agent/id               id
-                    :seon.agent.run/id-of-run    run-id
-                    :seon.agent.turn/scheduled?  true
-                    :seon.agent.turn/prompt-text ""
-                    :seon.db/db database-value}
-                   (fn ^:async eval-scheduled! [turn-id]
-                     (await
-                      (turn/eval-parsed!
-                       id database-value (repl-internal/parse-forms source)
-                       (home/home-ns id) turn-id run-id))))))))))))))))
-
 (defn ^:async install-wake-trigger!
   "Register the inbound-message wake trigger for this agent.
 
@@ -634,8 +558,7 @@
 ;; each tick (1) closes overdue runs ([[seon.agent.run/close-overdue-runs!]],
 ;; the deadline watchdog) then (2) fires due schedules
 ;; ([[seon.agent.schedule/fire-due-schedules!]]), RUNNING each due schedule's fn
-;; via [[exec-scheduled-fns!]] and DRIVING each opened run via [[drive-run!]]
-;; (both injected so seon.agent.schedule need not require this ns).
+;; by opening claimable runs. Database interests wake the claimant driver.
 ;; Idempotent + single-instance (the `!ticker` atom holds the interval id;
 ;; re-install clears the prior). An unexpected rejection is a core fault and
 ;; follows the already-acquired database configuration's one fault policy.
@@ -664,9 +587,7 @@
            driver.pod/leaf db/*leaf* driver/scan!))
       (.then (fn [_]
                (schedule/fire-due-schedules!
-                 {:seon.agent/now               now
-                  :seon.agent.schedule/exec-fn! exec-scheduled-fns!
-                  :seon.agent.schedule/drive!   drive-run!})))
+                 {:seon.agent/now now})))
       (.catch (fn [e]
                 (error/with-configuration
                   configuration

@@ -2,11 +2,11 @@
   "Immutable compiled renderer functions shared by both runtimes.
 
    Every entry is an ordinary require plus a literal symbol-to-function
-   association. This map resolves compiled functions; it does not classify
-   trust. The active schema projection derives trust from source transaction
-   provenance and exact artifact exports."
-  (:require [seon.render.canvas :as canvas]
-            #?(:cljs [seon.eval :as eval])
+  association. This map resolves compiled functions; it does not classify
+  trust. The active schema projection derives trust from source transaction
+  provenance and exact artifact exports."
+  (:require #?(:cljs [goog.object :as gobj])
+            [seon.render.canvas :as canvas]
             [seon.render.handlers.eval :as handler-eval]
             [seon.render.handlers.fn :as handler-fn]
             [seon.render.handlers.message :as handler-message]
@@ -21,7 +21,10 @@
      (when (qualified-symbol? sym)
        (requiring-resolve sym))
      :cljs
-     (eval/lookup-value sym)))
+     (when (qualified-symbol? sym)
+       (when-let [namespace-object
+                  (cljs.core/find-ns-obj (symbol (namespace sym)))]
+         (gobj/get namespace-object (cljs.core/munge (name sym)))))))
 
 (def renderer-functions
   "Compiled render-core symbol-to-function resolution."

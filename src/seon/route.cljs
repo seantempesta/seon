@@ -4,7 +4,7 @@
    Each `:seon.route` entity is a datom a `db->routes` fn (the UI lane,
    `seon.web.router`) projects into a reitit route vector — GROUP rows by
    `:seon.route/pattern`, nest per `:seon.route/method`, resolve
-   `:seon.route/handler` via `seon.eval/lookup-value`, and map the optional
+   `:seon.route/handler` through the compiled runtime, and map the optional
    `:seon.route/middleware` keyword through reitit's registry. The router is a
    pure derived value of these datoms, rebuilt on tx. This replaces the
    hand-rolled `case`/`cond`/`re-matches` dispatch.
@@ -16,7 +16,7 @@
    ## The handler value — a symbol resolved late
 
    `:seon.route/handler` stores a native `:db.type/symbol` (datahike has a
-   symbol type), resolved late at request time via `eval/lookup-value` — the
+   symbol type), resolved late at request time through the compiled runtime —
    same late-binding the render engine uses for `:seon.render/html` symbols, so
    a route can name a handler before (or after) it exists, and a redefine takes
    effect with no re-transact. The seeded core handlers below name the EXISTING

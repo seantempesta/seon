@@ -103,13 +103,7 @@
                 :seon.agent.run/deadline
                 (js/Date. (+ (.getTime now) 60000))})))
       (-> (sched/fire-due-schedules!
-             {:seon.agent/now now
-              :seon.agent.schedule/exec-fn!
-              (fn [request]
-                (swap! effects conj [:exec (:seon.agent.schedule/fns request)])
-                (js/Promise.resolve request))
-              :seon.agent.schedule/drive!
-              (fn [request] (swap! effects conj [:drive request]))})
+             {:seon.agent/now now})
             (.then
              (fn [result]
                (is (= [{:seon.agent/id "agent-a"
@@ -130,9 +124,7 @@
                           (::protocol/selector configuration-member)))
                    (is (= [:seon.config/id config/cluster-config-id]
                           (::protocol/entity-id configuration-member)))))
-               (is (= [:db :open [:exec ['my.jobs/run]]
-                       [:drive {:seon.agent/id "agent-a"}]]
-                      @effects))))
+               (is (= [:db :open] @effects))))
             (.catch (fn [exception]
                       (is false (str "fire-due-schedules! threw: " exception))))
             (.finally

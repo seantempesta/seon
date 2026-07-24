@@ -1034,7 +1034,7 @@
   "Serve the per-agent view shim page (the seeded :seon.route/agent handler).
    A Ring handler: takes the Ring request `r` and its `{id}` path-param.
    Invalid ids redirect home. Public — db->routes resolves its symbol
-   via eval/lookup-value at request time."
+   through the compiled runtime at request time."
   [r]
   (let [id (get-in r [:path-params :id])]
     (cond

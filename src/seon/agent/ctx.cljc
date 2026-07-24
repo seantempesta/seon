@@ -64,7 +64,7 @@
 ;; The block map contract (validated at seon.agent.ctx/install! AND
 ;; at transact! like everything else). :seon.render/ai is the ONE slot:
 ;; a string renders verbatim (doctrine — content as source); a
-;; qualified symbol resolves LATE via seon.eval/lookup-value at every
+;; qualified symbol resolves LATE through seon.render.core at every
 ;; render. Optional :seon.render/html twin (symbol or hiccup literal).
 (schema/register! :seon.agent.ctx/block
   [:map {:seon.db/entity true}

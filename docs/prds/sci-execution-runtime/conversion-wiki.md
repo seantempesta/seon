@@ -1738,3 +1738,19 @@ the variable-weight values they select.
   only those overlay identities. Emit one loud marker without a follow-up
   fault transaction: that transaction would advance the basis again and cause
   a repair loop (`seon.runtime.admission`).
+
+## U9 pre-deletion rewire scars (2026-07-24)
+
+- **Compiled resolution and trust classification are separate operations.**
+  `seon.render.core/resolve-compiled` asks the platform language runtime for a
+  qualified compiled var; the committed schema projection still decides
+  whether the symbol is trusted or must enter the guarded authored door.
+  Reusing that one resolver for renders, routes, and lifecycle controls removes
+  the self-host compiler dependency without replacing provenance with a hand
+  list (`src/seon/render/core.cljc`).
+- **A due schedule opens database work; it never evaluates agent code.** The
+  scheduler now commits only the `:schedule` run. Database interest wakes the
+  claim-native driver, which exclusively owns later phases. Deleting the
+  injected scheduled-eval and pod-drive callbacks prevents a trigger source
+  from becoming a second claimant (`src/seon/agent/schedule.cljs`,
+  `src/seon/agent/loop.cljs`).

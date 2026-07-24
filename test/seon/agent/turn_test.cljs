@@ -7,7 +7,6 @@
    [seon.db :as db]
    [seon.db.id :as db.id]
    [seon.db.protocol :as protocol]
-   [seon.error :as error]
    [seon.execution :as execution]
    [seon.execution.host :as execution.host]
    [seon.render :as render]
@@ -308,109 +307,6 @@
             (fn []
               (set! ctx.driver/render-prompt! original)
               (done)))))))
-
-(deftest parsed-reply-uses-the-same-agent-child-and-database-value
-  (async done
-    (let [original execution.host/invoke-compiled!
-          observed (atom nil)
-          parsed [{:seon.repl/kind :form
-                   :seon.repl/source "(+ 1 2)"}]]
-      (set! execution.host/invoke-compiled!
-            (fn [database agent-id function-symbol arguments run-fence]
-              (reset! observed [database agent-id function-symbol arguments
-                                run-fence])
-              (js/Promise.resolve
-               {::execution/message execution/result-message
-                :seon.db/db database
-                ::execution/result {:seon.eval/n-ok 1
-                                    :seon.eval/n-fail 0
-                                    :seon.eval/ids ["eval-1"]}})))
-      (-> (js/Promise.resolve
-           (turn/eval-parsed! "agent-1" database parsed 'my.agent.agent-1
-                              "turn-1" "run-1"))
-          (.then
-           (fn [result]
-             (is (= {:seon.eval/n-ok 1
-                     :seon.eval/n-fail 0
-                     :seon.eval/ids ["eval-1"]}
-                    result))
-              (is (= [database "agent-1"
-                      'seon.execution.runtime/eval-batch!
-                      [{:seon.eval/parsed parsed
-                        :seon.eval/starting-ns 'my.agent.agent-1
-                        :seon.agent.turn/id-of-turn "turn-1"
-                        :seon.agent.run/id-of-run "run-1"}]
-                      {:seon.agent.run/id "run-1"}]
-                     @observed))))
-          (.catch
-           (fn [error]
-             (is false (str "eval invocation rejected: " error))))
-          (.finally
-           (fn []
-             (set! execution.host/invoke-compiled! original)
-             (done)))))))
-
-(deftest executable-batch-without-receipts-is-a-recorded-core-error
-  (async done
-    (let [original-invoke execution.host/invoke-compiled!
-          original-record error/record!
-          recorded (atom [])
-          parsed [{:seon.repl/kind :form
-                   :seon.repl/source "(+ 1 2)"}]]
-      (set! execution.host/invoke-compiled!
-            (fn [database _agent-id _function-symbol _arguments _run-fence]
-              (js/Promise.resolve
-               {::execution/message execution/result-message
-                :seon.db/db database
-                ::execution/result {:seon.eval/n-ok 0
-                                    :seon.eval/n-fail 0
-                                    :seon.eval/ids []}})))
-      (set! error/record! #(swap! recorded conj %))
-      (-> (turn/eval-parsed! "agent-1" database parsed
-                             'my.agent.agent-1 "turn-1" "run-1")
-          (.then
-           (fn [result]
-             (is (= :core-bug (:seon.error/kind result)))
-             (is (= 1 (get-in result [:seon.error/data
-                                      :seon.eval/executable-count])))
-             (is (= 0 (get-in result [:seon.error/data
-                                      :seon.eval/recorded-count])))
-             (is (= :core (::error/fault (first @recorded))))))
-          (.catch
-           (fn [exception]
-             (is false (str "silent-drop guard rejected: " exception))))
-          (.finally
-           (fn []
-             (set! execution.host/invoke-compiled! original-invoke)
-             (set! error/record! original-record)
-             (done)))))))
-
-(deftest retired-child-eval-error-preserves-the-recovery-signal
-  (async done
-    (let [original execution.host/invoke-compiled!]
-      (set! execution.host/invoke-compiled!
-            (fn [database _agent-id _function-symbol _arguments _run-fence]
-              (js/Promise.resolve
-               {::execution/message execution/error-message
-                :seon.db/db database
-                ::execution/error
-                {:seon.error/message "The invocation timed out."
-                 :seon.error/kind :agent
-                 :seon.error/data {::execution/child-retired? true}}})))
-      (-> (turn/eval-parsed!
-           "agent-1" database [] 'my.agent.agent-1 "turn-1" "run-1")
-          (.then
-           (fn [result]
-             (is (= "The invocation timed out."
-                    (:seon.error/message result)))
-             (is (true? (get-in result [:seon.error/data
-                                        ::execution/child-retired?])))))
-          (.catch (fn [error]
-                    (is false (str "eval invocation rejected: " error))))
-          (.finally
-           (fn []
-             (set! execution.host/invoke-compiled! original)
-             (done)))))))
 
 (deftest open-turn-stores-the-basis-transaction-and-consumes-native-results
   (async done

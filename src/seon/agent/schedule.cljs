@@ -217,23 +217,11 @@
             :else (recur (js/Date. (+ (.getTime t) 60000)) (inc n))))))))
 
 ;; ============================================================
-;; fire-due-schedules! — the schedule half of the one ticker
-;; ([[seon.agent.loop/install-ticker!]]). For each agent that OWNS schedules,
-;; if any of its schedules is `due?` at `now` AND the agent is :idle, open a
-;; `:schedule`-triggered run and drive it. "Firing" = the wake-on-schedule
-;; semantics (open + drive a `:schedule` run).
-;;
-;; fn-exec: each schedule carries `:seon.agent.schedule/fn` (code-as-data,
-;; "run THIS fn when due"). On a fire, the DUE schedules' fns are handed to the
-;; injected `:seon.agent.schedule/exec-fn!` (seon.agent.loop/exec-scheduled-fns!,
-;; injected to avoid a require cycle — same pattern as `drive!`): it eval-batches
-;; `(the-fn)` as a SCHEDULE-FIRE turn on the just-opened run, in the agent's
-;; scope, so the agent's first driven turn re-reads "the schedule fired and ran
-;; THIS" instead of waking blind. That turn is stamped
-;; `:seon.agent.turn/scheduled? true` — it renders in the transcript but does
-;; NOT count toward the run's work bound (scheduled turns are excluded).
-;; A broken scheduled fn records a failed eval (errors are values) and never
-;; crashes the ticker. Absent exec-fn! (tests) ⇒ open-only.
+;; fire-due-schedules! — the schedule half of the one ticker. For each agent
+;; that OWNS schedules, if any schedule is `due?` at `now` and the agent is
+;; idle, open one `:schedule`-triggered run. The scheduler stops there:
+;; database interest wakes an eligible claimant, and the claim-native driver
+;; owns every execution phase. No scheduler callback evaluates agent code.
 ;;
 ;; concurrency-policy: the default :forbid ("don't open a 2nd run on a
 ;; :running agent") is satisfied because we fire ONLY when the agent is :idle
@@ -263,17 +251,7 @@
 
 (schema/register! ::fire-due-request
   [:map
-   [:seon.agent/now             :inst]
-   ;; The scheduled-fn executor (seon.agent.loop/exec-scheduled-fns!), injected
-   ;; by the ticker to avoid a require cycle. Given {:seon.agent/id _
-   ;; :seon.agent.schedule/fns [syms]}, it eval-batches the due fns as a
-   ;; schedule-fire turn (`:seon.agent.turn/scheduled? true` — doesn't count
-   ;; toward turn-limit) on the just-opened run. AWAITED (so the fire's effect
-   ;; lands before the LLM drive). Absent (tests) ⇒ open-only, no fn-exec.
-   [:seon.agent.schedule/exec-fn! {:optional true} 'fn?]
-   ;; The run driver (seon.agent.loop/drive-run!), injected by the ticker to
-   ;; avoid a require cycle. Absent (tests) ⇒ open-only, no drive.
-   [:seon.agent.schedule/drive! {:optional true} 'fn?]])
+   [:seon.agent/now :inst]])
 
 (schema/register! ::fire-due-response
   [:map
@@ -410,7 +388,7 @@
                             :seon.agent.schedule/now now})))
            (mapv second)))))
 
-(defn ^:async ^:private fire-schedule! [id due-fns exec-fn! drive!]
+(defn ^:async ^:private fire-schedule! [id]
   (let [snapshot
         (await
          (run/open-run! {:seon.agent/id id
@@ -423,32 +401,20 @@
           :else snapshot))
       (if-not (admission/available?)
         {:seon/error (:seon/error (admission/unavailable))}
-        (do
-          (when exec-fn!
-            (await (exec-fn! {:seon.agent/id id
-                              :seon.agent.schedule/fns due-fns})))
-          (when (fn? drive!)
-            (drive! {:seon.agent/id id}))
-          {:seon.agent/id id
-           :seon.agent.run/id (:seon.agent.run/id snapshot)})))))
+        {:seon.agent/id id
+         :seon.agent.run/id (:seon.agent.run/id snapshot)}))))
 
 (defn ^:async fire-due-schedules!
-  "Open, run, and drive a `:schedule` run for every due :idle agent.
+  "Open a `:schedule` run for every due idle agent.
 
-   For every :idle agent with a schedule `due?` at
-   `now` (respecting the double-fire guard), RUN the due schedules' fns on the
-   opened run via the injected `:seon.agent.schedule/exec-fn!` (the ticker passes
-   [[seon.agent.loop/exec-scheduled-fns!]] — eval-batched as a schedule-fire turn
-   in the agent's scope, not counted toward turn-limit), then drive each run via the injected
-   `:seon.agent.schedule/drive!` ([[seon.agent.loop/drive-run!]]). Both injections
-   absent (tests) ⇒ open-only. Map-in / map-out: returns
+   For every idle agent with a schedule due at `now`, respecting the
+   double-fire guard, transact one run and return
    `{:seon.agent.schedule/fired [{:seon.agent/id _ :seon.agent.run/id _} …]}` for
-   the runs it opened. A pure function of the DB otherwise (no stored firing
-   state). `^:async`."
+   the runs opened. Claimants wake from database interest and own all later
+   execution; the scheduler never invokes agent code or drives the run."
   {:malli/schema [:=> [:cat ::fire-due-request]
                   [:or ::fire-due-response ::direct-error]]}
-  [{now :seon.agent/now exec-fn! :seon.agent.schedule/exec-fn!
-    drive! :seon.agent.schedule/drive!}]
+  [{now :seon.agent/now}]
   (if-not (admission/available?)
     {:seon.agent.schedule/fired []
      :seon/error (:seon/error (admission/unavailable))}
@@ -505,8 +471,7 @@
                     (if-not (seq due-fns)
                       (recur more fired)
                       (let [outcome
-                            (await
-                             (fire-schedule! id due-fns exec-fn! drive!))]
+                            (await (fire-schedule! id))]
                         (cond
                           (error-value? outcome) outcome
                           (:seon/error outcome)

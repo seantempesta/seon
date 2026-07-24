@@ -19,7 +19,7 @@
    ## Handlers resolve LATE — a symbol per route
 
    `:seon.route/handler` is a `:db.type/symbol`; [[route-handler]] resolves it
-   at REQUEST time via `seon.eval/lookup-value` (the same late-binding the
+   at REQUEST time through `seon.render.core/resolve-compiled` (the same late-binding the
    render engine uses), so a redefine takes effect with no router rebuild. Each
    seeded handler is a Ring handler that takes the Ring request `r`, reads its
    WHATWG Request from `:seon.http/request`, and uses reitit's path params, so
@@ -46,18 +46,18 @@
   (:require
     [clojure.string :as str]
     [seon.db :as db]
-    [seon.eval :as seval]
     [seon.log :as log]
+    [seon.render.core :as render.core]
     [seon.runtime.admission :as admission]
     ;; Build-inclusion only (no alias): db->routes resolves datastar's core
     ;; handler symbols (`serve-root!`,
-    ;; `serve-agent-page!`, `open-agent-feed!`) at request time via
-    ;; eval/lookup-value, so the ns must be compiled into the build. router is
+    ;; `serve-agent-page!`, `open-agent-feed!`) at request time through
+    ;; the compiled resolver, so the ns must be compiled into the build. router is
     ;; its sole requirer.
     [seon.web.datastar]
     [seon.web.debug :as debug]
     ;; Build-inclusion only: the database-seeded `/agent/{id}/call` route
-    ;; resolves this handler symbol late through seon.eval/lookup-value.
+    ;; resolves this handler symbol late through the compiled resolver.
     [seon.web.reactive.call]
     [reitit.ring :as rr]))
 
@@ -168,13 +168,13 @@
 
 (defn- route-handler
   "A reitit ring handler for a route's late-bound handler SYMBOL `sym`.
-   Resolves `sym` via `eval/lookup-value` at REQUEST time (late binding, like
+   Resolves `sym` through the compiled runtime at REQUEST time (late binding, like
    the render engine's `:seon.render/html` symbols), calls it with the Ring
    request `r`, and returns its Response. An unresolved symbol degrades to a
    500 Response."
   [sym]
   (fn [r]
-    (if-let [f (seval/lookup-value sym)]
+    (if-let [f (render.core/resolve-compiled sym)]
       (f r)
       (do (log/error-console! "seon.web.router" "route handler unresolved"
                               {:sym (str sym) :path (:uri r)})

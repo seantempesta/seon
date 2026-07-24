@@ -41,14 +41,13 @@
     [seon.db.restore :as db.restore]
     [seon.derive :as derive]
     [seon.error :as error]
-    [seon.eval :as seval]
     [seon.execution.host :as execution-host]
     [seon.log :as log]
     [seon.platform :as platform]
     [seon.reactive :as reactive]
     [seon.render :as render]
+    [seon.render.core :as render.core]
     [seon.render.value :as render.value]
-    [seon.repl :as repl]
     [seon.runtime.admission :as admission]
     [seon.schema :as schema]
     [seon.ui.html :as html]
@@ -540,7 +539,8 @@
         (fn [body]
           (let [request (reader/read-string body)
                 apply-fn
-                (seval/lookup-value 'seon.client/config-apply-control!)]
+                (render.core/resolve-compiled
+                 'seon.client/config-apply-control!)]
             (when-not
              (schema/valid-candidate-value?
               :seon.launch/config-apply-request request)
@@ -1808,7 +1808,8 @@
 (defn- handle-operator-quiesce!
   "Drain this pod and flush its typed lifecycle result as EDN."
   [_req res]
-  (if-let [quiesce! (seval/lookup-value 'seon.client/quiesce-runtime!)]
+  (if-let [quiesce!
+           (render.core/resolve-compiled 'seon.client/quiesce-runtime!)]
     (-> (js/Promise.resolve (quiesce!))
         (.then
          (fn [result]

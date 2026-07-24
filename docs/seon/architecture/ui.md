@@ -32,7 +32,8 @@ A **block** (`:seon.agent.ctx/block`, registered in [[data-model]]) carries up t
 two **renders**, selected by key presence — there is no stored discriminator:
 
 - **ai render** (`:seon.render/ai`) → **prompt** text: a verbatim string, or a
-  qualified symbol late-resolved each render via `seon.eval/lookup-value`.
+  qualified symbol late-resolved each render through
+  `seon.render.core/resolve-compiled`.
 - **html render** (`:seon.render/html`) → a **surface**: a symbol, a literal hiccup
   vector, else the structural pretty-print.
 
