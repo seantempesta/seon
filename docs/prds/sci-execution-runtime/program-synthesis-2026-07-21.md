@@ -1156,6 +1156,18 @@ MORNING ITEMS (accumulating):
   terminal eval receipts. The orchestrator's default rebuild and final
   re-drive are the dependency-ready refill; do not archive the config issue
   before those datoms exist.
+- ★ DRIVE7 — EVAL WORKS, REACHED THE MEMORY LAYER (2026-07-24 ~5am):
+  11/11 DeepSeek attempts :success with NON-EMPTY replies (reply-text
+  fix proven; claimant2 lane independently replicated it — 163-byte
+  reply), 9/9 EVAL receipts :done :seon.eval/ok? true (config-identity
+  fix unblocked eval — agent code runs through the guarded door on the
+  JVM claimant). LAST-LAYER blocker: my.plan schema projection EMPTY
+  on the claimant ('Accepted my.plan keys: .') → plan!/memory blocked;
+  + a timeout orphaned an :evaling turn (nothing-wedges gap). planschema
+  lane (my.* projection-acquisition completeness + timeout-terminalizes-
+  turn). LADDER FULLY MAPPED: pod contract→crash→routing→claimant
+  config→allocation→eval config→EVAL→my.plan projection. Every layer
+  below memory now GREEN.
 - ★ DRIVE6 — LLM ATTEMPT SUCCEEDS (2026-07-24 ~4am): the JVM claimant
   made a REAL DeepSeek call — attempt :open→HTTP 200→:success at tx
   536873735. Transport works; the pod→JVM chain paid off. Nothing-
