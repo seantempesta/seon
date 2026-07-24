@@ -174,6 +174,22 @@ Bonus U9 feed proof also failed: the in-pod path is active, but
 `render-agent-view!` omits `:seon.agent.ctx/name` on its third surface and the
 feed emits `render error: :malli.core/invalid-output`.
 
+CLAIMANT NPE CLASS FIX SOURCE-COMPLETE (~10:50): unresolved unqualified value
+symbols now remain nil through canonical resolution and become the existing
+`:unresolved-symbol` program-edge uncertainty, so parenthetical prose lists
+produce ordinary fail-closed planner steering rather than an NPE. The portable
+driver now catches a throw/rejection at the claimed phase invocation and routes
+the flat core-bug value through the one terminal-or-displaced + fenced
+phase-error settlement path. Focused proof is green: edge/planner 17/82 and
+serialized claimant writer 11/56; the throw regression observes
+`:published/:error`, closed run, released custody, and a core fault before the
+same drive call returns. `bin/test-writer` itself exposed a stale fixture
+literal (valid artifact v12 rejected because writer test support requires
+v11), recorded in the existing full-writer-gate issue; proof used an otherwise
+identical temporary manifest and did not touch the default cluster. Re-drive-3
+remains the integrated gate after source freeze; earliest program contract and
+final U12 graduation are unchanged.
+
 CHECKPOINT + REDRIVE-2 (~10:10): all five morning lanes LANDED
 (noroots, containment, issuesindex, u9s0a, r45s3-graduated); default
 rebuilt on the coherent tree (page-plan.edn first publish, processes

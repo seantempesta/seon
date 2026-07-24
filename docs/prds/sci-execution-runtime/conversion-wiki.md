@@ -1601,3 +1601,17 @@ the variable-weight values they select.
   custody together. A claimant whose late phase write loses that fence must
   refresh durable run authority and stop when it observes the closed run,
   rather than issuing a second settlement CAS (`f6dd94682`).
+- **An unresolved value symbol is an analyzer uncertainty, not a nullable
+  canonical target.** A parenthesized English aside such as `(not forms)` is a
+  genuine list under the one reply parser and therefore enters program
+  analysis. Resolution keeps an absent target as nil and adds the existing
+  `:unresolved-symbol` uncertainty; `plan-execution` then returns ordinary
+  fail-closed steering data. Do not regex-filter prose or call `namespace` on
+  an absent target.
+- **The claimed-phase call itself is inside the settlement door.** A phase
+  leaf can violate its value contract by throwing before it returns. Catch the
+  throw at the portable `execute-step!` invocation, project it to the flat
+  core-bug value, and feed that value through the same
+  `terminal-or-displaced-result` → `settle-phase-error!` path as every returned
+  phase error. A virtual-thread outer `finally` that only removes the handle
+  cannot release database custody.

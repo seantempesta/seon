@@ -475,6 +475,21 @@
        :seon.agent.run/closed-reason :error
        :seon.agent.driver/error recorded})))
 
+(defn- ^:async execute-step-result
+  "Execute one claimed phase and turn an escaped throw into flat error data."
+  [held step]
+  (try
+    (await
+     ((leaf-fn :seon.agent.driver/execute-step!)
+      (assoc held :seon.agent.driver/step step)))
+    (catch #?(:clj Throwable :cljs :default) throwable
+      {:seon.error/message
+       (str "The claimed " (name step) " phase threw: "
+            (error/->message throwable))
+       :seon.error/kind :core-bug
+       :seon.error/data
+       {:seon.agent.driver/step step}})))
+
 (defn ^:async drive-claim!
   "Advance one held run until close, loss, or a clean tier handoff."
   [claim]
@@ -504,9 +519,7 @@
           (await (release! held))
           (let [step (loop.core/next-step run)
                 result
-                (await
-                 ((leaf-fn :seon.agent.driver/execute-step!)
-                  (assoc held :seon.agent.driver/step step)))]
+                (await (execute-step-result held step))]
             (cond
               (run.core/error-value? result)
               (let [terminal-or-displaced

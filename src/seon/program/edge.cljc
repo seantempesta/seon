@@ -108,12 +108,13 @@
   (when (symbol? value)
     (if (qualified-symbol? value)
       (qualified-target resolution value)
-      (canonical-target
+      (some->
        (or (get refers value)
            (when (contains? current-vars value)
              (symbol (str namespace) (name value)))
            (when (contains? core-vars value)
-             (symbol "clojure.core" (name value))))))))
+             (symbol "clojure.core" (name value))))
+       canonical-target))))
 
 (defn- binding-symbols [binding-form]
   (into #{}
@@ -409,6 +410,12 @@
 
 (defn- walk-expression [state resolution locals form]
   (cond
+    (symbol? form)
+    (cond
+      (contains? locals form) state
+      (resolved-target resolution form) state
+      :else (add-uncertainty state :unresolved-symbol))
+
     (not (seq? form)) state
     (= 'quote (first form)) state
 

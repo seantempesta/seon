@@ -45,6 +45,15 @@ fixed that separate runtime defect and added a focused policy regression. The
 fixtures now need the same shared complete-policy treatment as the archived
 value-sampling-policy repair, while production stays fail-closed.
 
+On 2026-07-24, `bin/test-writer` rejected the current published artifact before
+running a focused claimant regression. The artifact is valid manifest version
+12, while `test/seon/db/writer_test_support.clj` still hard-requires version
+11 and reports “no valid program rows.” The regression was proven against an
+otherwise byte-identical temporary manifest with only that stale fixture
+version changed, and the default cluster was not touched. The shared fixture
+must consume the maintained artifact-version authority rather than pinning an
+obsolete literal.
+
 ## Acceptance
 
 - The first expected-basis writer integration regression passes.

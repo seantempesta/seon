@@ -218,3 +218,11 @@
               (::edge/generation changed-bundle)))
     (is (not= (edge/program-graph-digest [first-bundle])
               (edge/program-graph-digest [changed-bundle])))))
+
+(deftest unresolved-value-symbols-become-edge-uncertainty
+  (let [bundle
+        (analyzed-bundle
+         '(defn subject []
+            (keyword forms)))]
+    (is (= #{"clojure.core/keyword"} (::edge/calls bundle)))
+    (is (contains? (::edge/uncertainties bundle) :unresolved-symbol))))

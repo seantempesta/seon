@@ -96,6 +96,28 @@ deadline and never returned the existing steering value. That directly
 falsifies Acceptance. Full evidence is appended to
 `tmp/orchestrator/lifecycle-redrive-gate.log`.
 
+## 2026-07-24 claimant NPE class correction
+
+The analyzer now keeps an absent unqualified resolution as nil and classifies
+an unresolved value symbol as the existing `:unresolved-symbol` edge
+uncertainty. Thus the real parenthetical prose shape `(not forms)` remains a
+parsed list—there is no prose regex or second classifier—but
+`plan-execution` returns the ordinary unplannable result that the claimant
+maps to flat steering data.
+
+The portable driver now also catches any throw or rejected async result at the
+claimed `execute-step!` call itself, converts it to a flat core-bug value, and
+passes that value through the existing terminal-or-displaced and fenced
+phase-error settlement owner. The serialized-writer regression makes an eval
+phase throw from `:reply-ready` and observes, before `drive-claim!` returns,
+the turn at `:published/:error`, the run closed `:error`, claimant/current-run
+custody absent, and one core fault datom.
+
+Focused JVM proof is green: portable edge/planner coverage is 17 tests and 82
+assertions; the claimant writer namespace is 11 tests and 56 assertions. The
+default cluster was not touched. The source-frozen live re-drive remains the
+acceptance gate for the two registered lifecycle forms.
+
 ## Acceptance
 
 - The same two visible registered forms derive one exact JVM execution plan.

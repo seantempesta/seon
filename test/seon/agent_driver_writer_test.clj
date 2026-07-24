@@ -431,7 +431,7 @@
            (set @installed)))))
 
 (defn- phase-error-case!
-  [attempt-open?]
+  [attempt-open? throw-mid-reply?]
   (let [allocations
         (cond->
          [{::db.id/key ::agent-id
@@ -461,12 +461,21 @@
         run-id (::run-id ids)
         turn-id (::turn-id ids)
         attempt-id (::attempt-id ids)
-        phase (if attempt-open? :attempt-open :rendered)
+        phase (cond
+                throw-mid-reply? :reply-ready
+                attempt-open? :attempt-open
+                :else :rendered)
         message
-        (str "claim phase failed "
+        (str "claim phase "
+             (if throw-mid-reply? "threw mid-reply" "failed")
+             " "
              (if attempt-open? "after receipt" "before receipt")
              " "
              turn-id)
+        settled-message
+        (if throw-mid-reply?
+          (str "The claimed eval phase threw: " message)
+          message)
         now (java.util.Date.)
         rows
         (cond->
@@ -514,12 +523,16 @@
           :seon.agent.run/current-turn turn}}
         platform-leaf
         {:seon.agent.driver/capabilities
-         #{:seon.agent.driver.capability/llm}
+         #{(if throw-mid-reply?
+             :seon.agent.driver.capability/eval
+             :seon.agent.driver.capability/llm)}
          :seon.agent.driver/now (constantly now)
          :seon.agent.driver/execute-step!
          (fn [_]
-           {:seon.error/message message
-            :seon.error/kind :configuration})}
+           (if throw-mid-reply?
+             (throw (ex-info message {:seon.error/kind :core-bug}))
+             {:seon.error/message message
+              :seon.error/kind :configuration}))}
         result
         (driver/call-with-leaf
          platform-leaf (database-leaf)
@@ -546,11 +559,11 @@
     (is (= {:seon.agent/id agent-id} agent))
     (is (= {:seon.agent.turn/status :error
             :seon.agent.turn/phase :published
-            :seon.agent.turn/error message}
+            :seon.agent.turn/error settled-message}
            turn))
     (is (every? :seon.db/ok? @*error-persist-reports*)
         (pr-str @*error-persist-reports*))
-    (is (= #{[:core message]} (set (fault-rows message)))
+    (is (= #{[:core settled-message]} (set (fault-rows settled-message)))
         (pr-str (all-fault-rows)))
     (when attempt-open?
       (is (= {:seon.ai.attempt/outcome :crashed}
@@ -560,9 +573,12 @@
 
 (deftest phase-errors-persist-faults-and-release-custody
   (testing "before an attempt receipt is admitted"
-    (phase-error-case! false))
+    (phase-error-case! false false))
   (testing "after an attempt receipt is durable"
-    (phase-error-case! true)))
+    (phase-error-case! true false)))
+
+(deftest thrown-reply-phase-settles-terminal-in-the-same-drive-step
+  (phase-error-case! false true))
 
 (deftest timeout-terminalizes-the-evaling-turn-without-a-second-stale-cas
   (let [allocations

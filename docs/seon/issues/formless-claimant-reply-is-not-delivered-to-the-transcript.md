@@ -97,6 +97,19 @@ blocked by
 planner exception and nothing-wedges failure. Evidence is appended to
 `tmp/orchestrator/lifecycle-redrive-gate.log`.
 
+## 2026-07-24 blocker correction
+
+The intervening planner exception is corrected at its class boundary:
+unresolved value symbols now become `:unresolved-symbol` steering data, and a
+claimed phase throw now enters the one immediate fenced settlement path. The
+focused portable planner gate passes 17 tests / 82 assertions, and the
+claimant writer gate passes 11 tests / 56 assertions, including terminal
+turn/run/custody/fault datoms in the same drive call.
+
+This does not close the delivery issue. Its source correction still requires
+the original source-frozen live re-drive to prove the final formless reply is
+delivered once through the ordinary message/transcript path.
+
 ## Acceptance
 
 - A successful plain synthesis with no dispatchable forms bypasses exact-plan

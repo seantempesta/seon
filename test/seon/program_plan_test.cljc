@@ -145,6 +145,33 @@
     (is (empty? (:seon.execution/unresolved result)))
     (is (not (contains? release-result :seon.execution/selected-tier)))))
 
+(deftest parenthetical-prose-with-an-unresolved-symbol-steers-as-data
+  (let [forms
+        ['(not forms)
+         '(seon.db/query
+           '[:find ?name :where [?entity :demo/name ?name]])]
+        result
+        (plan/plan-execution
+         (assoc (request forms [])
+                :seon.execution/root-resolution invocation-resolution))
+        disposition
+        (driver/execution-plan-disposition
+         {:seon.execution/plan result
+          :seon.execution/planning-projection
+          (:seon.execution/planning-projection (request forms []))
+          :seon.execution/tier-inventories tier-inventories
+          :seon.execution/invoking-tier :jvm
+          :seon.execution/roots forms
+          :seon.execution/db-value database})]
+    (is (= :unplannable (:seon.execution/placement result)))
+    (is (= [:unresolved-symbol]
+           (mapv :seon.execution/reason
+                 (:seon.execution/unresolved result))))
+    (is (= :steering (:seon.agent.driver/disposition disposition)))
+    (is (= :agent
+           (get-in disposition
+                   [:seon.agent.driver/error :seon.error/kind])))))
+
 (deftest empty-roots-plan-to-no-dispatch-with-no-tier-selection
   (let [planning-request (request [] [])
         result (plan/plan-execution planning-request)
