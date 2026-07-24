@@ -49,6 +49,25 @@ The no-dispatch publication boundary shared by
 `seon.agent.ctx.transcript` must define one delivery path for successful
 formless replies. Do not add a second transcript or side channel.
 
+## Correction in progress
+
+The 2026-07-24 no-roots class fix removes the driver's
+`no-dispatch-reply?` pre-classifier. `plan-execution` remains the one program
+classifier: its existing `:no-roots` result now maps to the
+`:no-dispatch` disposition. The host retains the exact reply blob content and
+uses `seon.agent.message/message-transaction-for` plus
+`seon.db.id/allocate!` to transact the ordinary agent-to-user message in the
+same fenced transaction that advances `:reply-ready` to `:evaled`.
+Publication then performs its existing `:evaled` to `:published`/`:done`
+transition. Unresolved executable roots still produce steering.
+
+The portable planner and configuration selections pass 29 focused tests with
+176 assertions. The focused `bin/test-writer` re-drive is pending because its
+required current compiled program artifact is absent; this lane may not start
+a cluster to produce one. The next source-frozen default rebuild must run the
+writer regression and then repeat the live lifecycle drive. That live
+re-drive remains required even after the writer regression passes.
+
 ## Acceptance
 
 - A successful plain synthesis with no dispatchable forms bypasses exact-plan

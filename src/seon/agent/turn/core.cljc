@@ -29,6 +29,12 @@
       :seon.agent.turn/phase from-phase to-phase]]
     facts)))
 
+(defn deliver-no-dispatch-reply-tx-data
+  "Deliver one formless reply and advance it to the evaled cursor."
+  [run-fence turn-id message-transaction-data]
+  (advance-phase-tx-data
+   run-fence turn-id :reply-ready :evaled message-transaction-data))
+
 (defn open-attempt-row
   "Build the durable pre-dispatch attempt row."
   [{:seon.ai.attempt/keys

@@ -45,6 +45,21 @@ The derived `plan-execution` acquisition/enforcement boundary in
 the canonical program graph and artifact inventories; do not add a symbol
 allowlist or bypass for lifecycle/message forms.
 
+## 2026-07-24 status
+
+The no-roots class fix deliberately does not weaken this exact-plan boundary.
+A reply with no executable roots is classified by `plan-execution` as
+`:no-roots` and receives the explicit `:no-dispatch` disposition; the former
+driver-local pre-classifier is deleted. A reply containing an unresolved
+executable root still returns the existing steering error before phase or
+receipt writes.
+
+This closes the adjacent formless-reply classification defect, not this
+issue's registered-form defect. The two visible lifecycle forms in Acceptance
+still need one exact JVM execution plan and two successful receipts. Focused
+portable planner coverage is green; the current-artifact writer gate and the
+source-frozen live re-drive remain pending.
+
 ## Acceptance
 
 - The same two visible registered forms derive one exact JVM execution plan.

@@ -2,6 +2,7 @@
   (:require
    #?(:clj [clojure.test :refer [deftest is testing]]
       :cljs [cljs.test :refer [deftest is testing]])
+   [seon.agent.driver :as driver]
    [seon.capability :as capability]
    [seon.program.edge :as edge]
    [seon.program.plan :as plan]
@@ -144,14 +145,26 @@
     (is (empty? (:seon.execution/unresolved result)))
     (is (not (contains? release-result :seon.execution/selected-tier)))))
 
-(deftest empty-roots-fail-closed-with-no-selection
-  (let [result (plan/plan-execution (request [] []))]
+(deftest empty-roots-plan-to-no-dispatch-with-no-tier-selection
+  (let [planning-request (request [] [])
+        result (plan/plan-execution planning-request)
+        disposition
+        (driver/execution-plan-disposition
+         {:seon.execution/plan result
+          :seon.execution/planning-projection
+          (:seon.execution/planning-projection planning-request)
+          :seon.execution/tier-inventories tier-inventories
+          :seon.execution/invoking-tier :jvm
+          :seon.execution/roots []
+          :seon.execution/db-value database})]
     (is (= :unplannable (:seon.execution/placement result)))
     (is (empty? (:seon.execution/eligible-tiers result)))
     (is (not (contains? result :seon.execution/selected-tier)))
     (is (= [:no-roots]
            (mapv :seon.execution/reason
-                 (:seon.execution/unresolved result))))))
+                 (:seon.execution/unresolved result))))
+    (is (= {:seon.agent.driver/disposition :no-dispatch}
+           disposition))))
 
 (deftest installed-lifecycle-completion-form-selects-the-local-jvm-tier
   (let [target "seon.agent.lifecycle/complete"

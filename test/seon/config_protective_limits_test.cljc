@@ -27,7 +27,8 @@
    :seon.config.web/maximum-html-characters 1000000
    :seon.config.web/maximum-html-nesting-depth 3000
    :seon.config.claim-driver/invocation-deadline-ms 120000
-   :seon.config.claim-driver/invocation-result-maximum-bytes 1048576})
+   :seon.config.claim-driver/invocation-result-maximum-bytes 1048576
+   :seon.config.claim-driver/llm-attempt-timeout-ms 120000})
 
 (deftest protective-defaults-resolve-as-singleton-facts
   (let [singleton (resolve/resolve-config-singleton {} {} fixed-hardware)]
@@ -38,16 +39,36 @@
     (is (= (select-keys expected-defaults resolve/shell-attributes)
            (resolve/shell-configuration singleton)))
     (is (= (select-keys expected-defaults resolve/web-capability-attributes)
-           (resolve/web-capability-configuration singleton)))))
+           (resolve/web-capability-configuration singleton)))
+    (is (= 120000
+           (:seon.config.claim-driver/llm-attempt-timeout-ms
+            (resolve/claim-driver-configuration singleton))))))
 
-(deftest attempt-timeout-process-fallback-is-portable
-  (is (= 120000 (resolve/llm-attempt-timeout-ms {})))
-  (is (= 42000
-         (resolve/llm-attempt-timeout-ms
-          {"SEON_LLM_ATTEMPT_TIMEOUT_MS" "42000"})))
-  (is (= 120000
-         (resolve/llm-attempt-timeout-ms
-          {"SEON_LLM_ATTEMPT_TIMEOUT_MS" "not-positive"}))))
+(deftest attempt-timeout-resolves-once-as-a-singleton-fact
+  (let [attribute :seon.config.claim-driver/llm-attempt-timeout-ms
+        explicit
+        {:seon.config/claim-driver
+         {attribute 51000}}]
+    (is (= 120000
+           (get (resolve/resolve-config-singleton {} {} fixed-hardware)
+                attribute)))
+    (is (= 42000
+           (get
+            (resolve/resolve-config-singleton
+             {} {"SEON_LLM_ATTEMPT_TIMEOUT_MS" "42000"} fixed-hardware)
+            attribute)))
+    (is (= 51000
+           (get
+            (resolve/resolve-config-singleton
+             explicit {} fixed-hardware)
+            attribute)))
+    (is (= 51000
+           (get
+            (resolve/resolve-config-singleton
+             explicit
+             {"SEON_LLM_ATTEMPT_TIMEOUT_MS" "not-positive"}
+             fixed-hardware)
+            attribute)))))
 
 (deftest explicit-sections-override-without-hidden-call-site-fallbacks
   (let [manifest
@@ -69,7 +90,8 @@
           :seon.config.web/maximum-html-nesting-depth 88}
          :seon.config/claim-driver
          {:seon.config.claim-driver/invocation-deadline-ms 99
-          :seon.config.claim-driver/invocation-result-maximum-bytes 111}}
+          :seon.config.claim-driver/invocation-result-maximum-bytes 111
+          :seon.config.claim-driver/llm-attempt-timeout-ms 222}}
         singleton
         (resolve/resolve-config-singleton manifest {} fixed-hardware)]
     (is (m/validate :seon.config/manifest manifest))
@@ -78,7 +100,9 @@
     (is (= 55 (:seon.config.web/maximum-response-bytes singleton)))
     (is (= 111
            (:seon.config.claim-driver/invocation-result-maximum-bytes
-            singleton)))))
+            singleton)))
+    (is (= 222
+           (:seon.config.claim-driver/llm-attempt-timeout-ms singleton)))))
 
 (deftest every-new-leaf-documents-its-units-and-governing-key
   (doseq [[attribute schema]
@@ -88,7 +112,8 @@
                  (select-keys
                   resolve/claim-driver-dial-schemas
                   [:seon.config.claim-driver/invocation-deadline-ms
-                   :seon.config.claim-driver/invocation-result-maximum-bytes]))]
+                   :seon.config.claim-driver/invocation-result-maximum-bytes
+                   :seon.config.claim-driver/llm-attempt-timeout-ms]))]
     (let [description (get-in schema [1 :description])]
       (is (string? description) (str attribute))
       (is (re-find #"Default|default" description) (str attribute))

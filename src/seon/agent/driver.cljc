@@ -342,6 +342,13 @@
          :seon.execution/eligible-tiers eligible-tiers
          :seon.execution/inspected-tiers inspected-tiers}]
     (cond
+      (and (= :unplannable placement)
+           (= #{:no-roots}
+              (into #{}
+                    (map :seon.execution/reason)
+                    (:seon.execution/unresolved plan))))
+      {:seon.agent.driver/disposition :no-dispatch}
+
       (= :unplannable placement)
       {:seon.agent.driver/disposition :steering
        :seon.agent.driver/error

@@ -146,20 +146,28 @@
 
 (deftest claimant-inherits-attempt-timeout-when-agent-override-is-absent
   (let [agent-row (atom {})
+        requests (atom [])
+        config-row
+        {:seon.config.claim-driver/llm-attempt-timeout-ms 32100}
         resolve-context
         (fn []
           (with-redefs
             [db/pull
-             (fn [{ref ::db/ref}]
+             (fn [{ref ::db/ref :as request}]
+               (swap! requests conj request)
                (if (= config.resolve/cluster-config-lookup-ref ref)
-                 {}
-                 @agent-row))
-             config.resolve/llm-attempt-timeout-ms (constantly 32100)]
+                 config-row
+                 @agent-row))]
             (#'driver.host/resolve-llm-context! {:t 7} "agent")))]
     (is (= 32100
            (get-in (resolve-context)
                    [:seon.ai/config-resolution
                     :seon.ai/agent-attempt-timeout-ms])))
+    (is (some
+         #(and (= config.resolve/cluster-config-lookup-ref (::db/ref %))
+               (some #{:seon.config.claim-driver/llm-attempt-timeout-ms}
+                     (::db/pull-pattern %)))
+         @requests))
     (reset! agent-row {:seon.ai/agent-attempt-timeout-ms 65400})
     (is (= 65400
            (get-in (resolve-context)
@@ -168,6 +176,7 @@
 
 (deftest reply-program-receives-the-successful-attempts-frozen-mode
   (let [received (atom nil)
+        result (atom nil)
         turn {:seon.agent.turn/reply-blob {:my.blob/hash "reply-hash"}
               :seon.agent.turn/llm-attempts
               [{:seon.ai.attempt/ordinal 0
@@ -183,14 +192,18 @@
          (reset! received [raw-reply reply-evaluation starting-ns])
          {:seon.repl/eval-entries [] :seon.repl/errors []})}
       (fn []
-        (#'driver.host/reply-program nil turn "agent")))
-    (is (= ["(+ 1 2)" :batch 'my.agent] @received))))
+        (reset! result
+                (#'driver.host/reply-program nil turn "agent"))))
+    (is (= ["(+ 1 2)" :batch 'my.agent] @received))
+    (is (= "(+ 1 2)"
+           (:seon.agent.driver/reply-content @result)))))
 
 (deftest invocation-limits-come-from-the-config-singleton-entity
   (let [request (atom nil)
         configuration
         {:seon.config.claim-driver/invocation-deadline-ms 120000
-         :seon.config.claim-driver/invocation-result-maximum-bytes 1048576}]
+         :seon.config.claim-driver/invocation-result-maximum-bytes 1048576
+         :seon.config.claim-driver/llm-attempt-timeout-ms 120000}]
     (with-redefs [db/pull
                   (fn [value]
                     (reset! request value)
@@ -249,48 +262,115 @@
     (is (empty? @transactions)
         "planning steering precedes phase and receipt transactions")))
 
-(deftest reply-with-no-dispatchable-work-advances-directly-to-publication
-  (let [transactions (atom [])
-        forbidden (fn [& _] (throw (ex-info "dispatch was not expected" {})))
+(deftest no-roots-disposition-delivers-the-formless-reply-before-done
+  (let [allocations
+        [{::db.id/key ::agent-id
+          ::db.id/identity-attr :seon.agent/id}
+         {::db.id/key ::run-id
+          ::db.id/identity-attr :seon.agent.run/id}
+         {::db.id/key ::turn-id
+          ::db.id/identity-attr :seon.agent.turn/id}]
+        candidates
+        (db.id/candidate-manifest
+         {:seon.agent/id :seon.db.id.generator/human-readable
+          :seon.agent.run/id :seon.db.id.generator/compact
+          :seon.agent.turn/id :seon.db.id.generator/compact}
+         allocations)
+        ids (into {} (map (juxt ::db.id/key ::db.id/value)) candidates)
+        agent-id (::agent-id ids)
+        run-id (::run-id ids)
+        turn-id (::turn-id ids)
+        now (java.util.Date.)
+        content "FORMLESS_FINAL_REPLY"
+        seeded
+        (transact-generated!
+         [{:db/id "agent"
+           :seon.agent/id agent-id
+           :seon.agent/run "run"}
+          {:db/id "run"
+           :seon.agent.run/id run-id
+           :seon.agent.run/agent "agent"
+           :seon.agent.run/status :open
+           :seon.agent.run/claimant driver/claimant
+           :seon.agent.run/claim-epoch 2
+           :seon.agent.run/last-beat-at now}
+          {:db/id "turn"
+           :seon.agent.turn/id turn-id
+           :seon.agent.turn/run "run"
+           :seon.agent.turn/status :running
+           :seon.agent.turn/phase :reply-ready}]
+         candidates)
+        database (context/resolve-head! *writer-session*)
         claim
-        {:seon.db/db {:t 7}
+        {:seon.db/db database
          :seon.agent.run/claim-epoch 2
          :seon.agent.driver/run
-         {:seon.agent/id "agent"
-          :seon.agent.run/id "run"
+         {:seon.agent/id agent-id
+          :seon.agent.run/id run-id
           :seon.agent.run/current-turn
-          {:seon.agent.turn/id "turn"}}}]
-    (with-redefs-fn
-      {#'driver.host/reply-program
-       (fn [& _]
-         {:seon.repl/eval-entries []
-          :seon.repl/errors []})
-       #'driver.host/invocation-configuration! forbidden
-       #'driver.host/parsed-reply-plan forbidden
-       #'driver.host/run-eval-batch! forbidden
-       #'db/transact!
-       (fn [request]
-         (swap! transactions conj request)
-         {:db-after {:t 8}})}
-      (fn []
-        (is (= {:seon.db/db {:t 8}
-                :seon.agent.driver/no-dispatch? true
-                :seon.agent.driver/program
-                {:seon.repl/eval-entries []
-                 :seon.repl/errors []}}
-               (#'driver.host/eval-step! {} nil claim)))))
-    (is (= [[[:db.fn/cas [:seon.agent/id "agent"]
-              :seon.agent/run
-              [:seon.agent.run/id "run"]
-              [:seon.agent.run/id "run"]]
-             [:db.fn/cas [:seon.agent.run/id "run"]
-              :seon.agent.run/claim-epoch 2 2]
-             [:db.fn/cas [:seon.agent.turn/id "turn"]
-              :seon.agent.turn/phase :reply-ready :evaled]]]
-           (mapv ::db/tx-data @transactions)))
-    (is (= [{::db/db {:t 7}
-             ::db/tx-data (-> @transactions first ::db/tx-data)}]
-           @transactions))))
+          {:seon.agent.turn/id turn-id}}}
+        planned? (atom false)
+        forbidden (fn [& _] (throw (ex-info "eval dispatch was not expected" {})))
+        result
+        (binding [db/*leaf* (database-leaf)]
+          (with-redefs-fn
+            {#'driver.host/reply-program
+             (fn [& _]
+               {:seon.repl/eval-entries
+                [{:seon.repl/kind :narration
+                  :seon.repl/narration content}]
+                :seon.repl/errors []
+                :seon.agent.driver/reply-content content})
+             #'driver.host/parsed-reply-plan
+             (fn [& _]
+               (reset! planned? true)
+               {:seon.execution/plan
+                {:seon.execution/placement :unplannable
+                 :seon.execution/unresolved
+                 [{:seon.execution/reason :no-roots}]}
+                :seon.agent.driver/disposition
+                {:seon.agent.driver/disposition :no-dispatch}})
+             #'driver.host/invocation-configuration! forbidden
+             #'driver.host/run-eval-batch! forbidden}
+            (fn []
+              (#'driver.host/eval-step! {} nil claim))))
+        published
+        (binding [db/*leaf* (database-leaf)]
+          (db/transact!
+           {::db/db (:seon.db/db result)
+            ::db/tx-data
+            (turn.core/advance-phase-tx-data
+             (run.core/run-fence agent-id run-id 2)
+             turn-id :evaled :published
+             [{:seon.agent.turn/id turn-id
+               :seon.agent.turn/status :done}])}))
+        turn
+        (pull!
+         [:seon.agent.turn/status
+          :seon.agent.turn/phase
+          {:seon.agent.turn/evals [:seon.eval/id]}]
+         [:seon.agent.turn/id turn-id])
+        messages
+        (binding [db/*leaf* (database-leaf)]
+          (db/query
+           {::db/db (:db-after published)
+            ::db/query
+            '[:find ?content ?agent-id ?user-id
+              :in $ ?content
+              :where
+              [?message :seon.agent.message/content ?content]
+              [?message :seon.agent.message/from ?agent]
+              [?agent :seon.agent/id ?agent-id]
+              [?message :seon.agent.message/to ?user]
+              [?user :seon.user/id ?user-id]]
+            ::db/args [content]}))]
+    (is (true? (::protocol/success? seeded)) (pr-str seeded))
+    (is (true? @planned?) "the disposition comes from the planner path")
+    (is (= :no-dispatch (:seon.agent.driver/disposition result)))
+    (is (= {:seon.agent.turn/status :done
+            :seon.agent.turn/phase :published}
+           turn))
+    (is (= #{[content agent-id "user"]} messages))))
 
 (deftest installed-lazy-capability-namespaces-enter-root-resolution
   (let [tier-inventory

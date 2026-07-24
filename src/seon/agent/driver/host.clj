@@ -1,10 +1,13 @@
 (ns seon.agent.driver.host
   "JVM claimant leaf: database interest, virtual-thread custody, and eval."
-  (:require [my.blob :as blob]
+  (:require [clojure.string :as str]
+            [my.blob :as blob]
             [my.blob.core :as blob.core]
             [my.blob.host :as blob.host]
             [seon.ai.core :as ai.core]
             [seon.agent.driver :as driver]
+            [seon.agent.message :as message]
+            [seon.agent.message.leaf :as message.leaf]
             [seon.agent.run.core :as run.core]
             [seon.agent.turn.core :as turn.core]
             [seon.agent.turn.llm :as turn.llm]
@@ -12,6 +15,7 @@
             [seon.config.resolve :as config.resolve]
             [seon.db :as db]
             [seon.db.host :as db.host]
+            [seon.db.id :as db.id]
             [seon.eval.receipt :as eval.receipt]
             [seon.host.context :as context]
             [seon.host.eval :as host.eval]
@@ -75,23 +79,33 @@
         config-row
         (db/decode-edn-values
          (db/pull {::db/db database
-                   ::db/pull-pattern (ai.core/config-pull-pattern)
+                   ::db/pull-pattern
+                   (conj
+                    (ai.core/config-pull-pattern)
+                    :seon.config.claim-driver/llm-attempt-timeout-ms)
                    ::db/ref config.resolve/cluster-config-lookup-ref}))
         attempt-timeout-ms
-        (config.resolve/llm-attempt-timeout-ms (System/getenv))]
-    (merge
-     {:seon.ai/config-resolution
-      (ai.core/resolved-config-from-rows
-       ai.core/shipped-defaults config-row agent-row attempt-timeout-ms)
-      :seon.config.llm-retry/maximum-wait-ms
-      (:seon.config.llm-retry/maximum-wait-ms config-row)
-      :seon.config.llm-retry/maximum-total-wait-ms
-      (:seon.config.llm-retry/maximum-total-wait-ms config-row)
-      :seon.config.llm-retry/default-retries
-      (:seon.config.llm-retry/default-retries config-row)
-      :seon.config.model-stream/partial-publish-settle-ms
-      (:seon.config.model-stream/partial-publish-settle-ms config-row)}
-     (ai.core/reply-policy-from-rows config-row agent-row))))
+        (:seon.config.claim-driver/llm-attempt-timeout-ms config-row)]
+    (if-not (pos-int? attempt-timeout-ms)
+      {:seon.error/message
+       "The JVM claimant LLM attempt timeout is unavailable; explicitly apply the governing config."
+       :seon.error/kind :core-bug
+       :seon.error/data
+       {:seon.config/key
+        :seon.config.claim-driver/llm-attempt-timeout-ms}}
+      (merge
+       {:seon.ai/config-resolution
+        (ai.core/resolved-config-from-rows
+         ai.core/shipped-defaults config-row agent-row attempt-timeout-ms)
+        :seon.config.llm-retry/maximum-wait-ms
+        (:seon.config.llm-retry/maximum-wait-ms config-row)
+        :seon.config.llm-retry/maximum-total-wait-ms
+        (:seon.config.llm-retry/maximum-total-wait-ms config-row)
+        :seon.config.llm-retry/default-retries
+        (:seon.config.llm-retry/default-retries config-row)
+        :seon.config.model-stream/partial-publish-settle-ms
+        (:seon.config.model-stream/partial-publish-settle-ms config-row)}
+       (ai.core/reply-policy-from-rows config-row agent-row)))))
 
 (defn- bounded-llm-transport!
   [host request]
@@ -213,10 +227,13 @@
         reply (read-blob storage-view hash)]
     (if-not (:my.blob/ok? reply)
       reply
-      (turn.core/reply-program
-       (:my.blob/content reply)
-       (successful-reply-evaluation turn)
-       (host.eval/agent-home-ns agent-id)))))
+      (assoc
+       (turn.core/reply-program
+        (:my.blob/content reply)
+        (successful-reply-evaluation turn)
+        (host.eval/agent-home-ns agent-id))
+       :seon.agent.driver/reply-content
+       (:my.blob/content reply)))))
 
 (defn- invocation
   [agent-id database run-id claim-epoch turn-id program configuration
@@ -335,11 +352,41 @@
                :seon.agent.driver/eval-batch batch
                :seon.agent.driver/program program}))))))
 
-(defn- no-dispatch-reply?
-  [program]
-  (and (empty? (:seon.repl/errors program))
-       (not-any? #(contains? #{:form :read} (:seon.repl/kind %))
-                 (:seon.repl/eval-entries program))))
+(defn- deliver-no-dispatch-reply!
+  [database agent-id run-id claim-epoch turn-id content]
+  (if (str/blank? content)
+    {:seon.error/message "The claimant produced a blank final reply."
+     :seon.error/kind :agent}
+    (binding [message/*leaf*
+              {::message.leaf/now #(java.util.Date.)}]
+      (let [message-transaction
+            (message/message-transaction-for
+             database
+             {:seon.agent.message/from [:seon.agent/id agent-id]
+              :seon.agent.message/to [message/user-ref]
+              :seon.agent.message/content content})]
+        (if (:seon.error/message message-transaction)
+          message-transaction
+          (let [build-message
+                (:seon.agent.message/transaction-builder message-transaction)
+                fence (run.core/run-fence agent-id run-id claim-epoch)
+                allocation
+                (db.id/allocate!
+                 {::db/db database
+                  ::db.id/allocations
+                  (:seon.agent.message/allocations message-transaction)
+                  ::db.id/transaction-builder
+                  (fn [ids]
+                    (update
+                     (build-message ids)
+                     ::db/tx-data
+                     (fn [message-transaction-data]
+                       (turn.core/deliver-no-dispatch-reply-tx-data
+                        fence turn-id message-transaction-data))))})]
+            (if (:seon.error/message allocation)
+              allocation
+              {:seon.db/db (:db-after allocation)
+               :seon.agent.driver/disposition :no-dispatch})))))))
 
 (defn- planning-root-resolution
   [tier-inventory retained-ctx agent-ns]
@@ -408,44 +455,36 @@
       {:seon.error/message (:my.blob/error program)
        :seon.error/kind :core-bug}
 
-      (no-dispatch-reply? program)
-      (let [phase-report
-            (db/transact!
-             {::db/db database
-              ::db/tx-data
-              (turn.core/advance-phase-tx-data
-               fence turn-id :reply-ready :evaled [])})]
-        (if (:seon.error/message phase-report)
-          phase-report
-          {:seon.db/db (:db-after phase-report)
-           :seon.agent.driver/no-dispatch? true
-           :seon.agent.driver/program program}))
-
       :else
-      (let [invocation-configuration (invocation-configuration! database)]
-        (if (:seon.error/message invocation-configuration)
-          invocation-configuration
-          (let [planned (parsed-reply-plan host database agent-id program)]
-            (if (:seon.error/message planned)
-              planned
-              (let [disposition (:seon.agent.driver/disposition planned)
-                    execution-plan (:seon.execution/plan planned)]
-                (case (:seon.agent.driver/disposition disposition)
-                  :steering (:seon.agent.driver/error disposition)
-                  :core-fault (:seon.agent.driver/error disposition)
-                  :release
-                  (let [report
-                        (driver/release!
-                         {:seon.agent.driver/run run
-                          :seon.agent.run/claim-epoch claim-epoch
-                          :seon.db/db database})]
-                    (if (:seon.error/message report)
-                      report
-                      {:seon.db/db (:db-after report)
-                       :seon.agent.driver/released? true
-                       :seon.execution/selected-tier
-                       (:seon.execution/selected-tier disposition)}))
-                  :execute
+      (let [planned (parsed-reply-plan host database agent-id program)]
+        (if (:seon.error/message planned)
+          planned
+          (let [disposition (:seon.agent.driver/disposition planned)
+                execution-plan (:seon.execution/plan planned)]
+            (case (:seon.agent.driver/disposition disposition)
+              :no-dispatch
+              (deliver-no-dispatch-reply!
+               database agent-id run-id claim-epoch turn-id
+               (:seon.agent.driver/reply-content program))
+              :steering (:seon.agent.driver/error disposition)
+              :core-fault (:seon.agent.driver/error disposition)
+              :release
+              (let [report
+                    (driver/release!
+                     {:seon.agent.driver/run run
+                      :seon.agent.run/claim-epoch claim-epoch
+                      :seon.db/db database})]
+                (if (:seon.error/message report)
+                  report
+                  {:seon.db/db (:db-after report)
+                   :seon.agent.driver/released? true
+                   :seon.execution/selected-tier
+                   (:seon.execution/selected-tier disposition)}))
+              :execute
+              (let [invocation-configuration
+                    (invocation-configuration! database)]
+                (if (:seon.error/message invocation-configuration)
+                  invocation-configuration
                   (let [phase-report
                         (db/transact!
                          {::db/db database
@@ -456,7 +495,8 @@
                       phase-report
                       (run-eval-batch!
                        host run claim-epoch (:db-after phase-report) program
-                       invocation-configuration execution-plan))))))))))))
+                       invocation-configuration
+                       execution-plan))))))))))))
 
 (defn- settle-eval-step!
   [host storage-view

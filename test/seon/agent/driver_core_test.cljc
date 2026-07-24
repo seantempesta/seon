@@ -233,8 +233,10 @@
                 {:seon.execution/placement :unplannable
                  :seon.execution/eligible-tiers #{}
                  :seon.execution/unresolved
-                 [{:seon.execution/reason :no-roots
-                   :seon.execution/steering "Supply a parsed invocation root."}]})
+                 [{:seon.execution/reason :unresolved-symbol
+                   :seon.execution/target "unknown/call"
+                   :seon.execution/steering
+                   "Define or install the unresolved function."}]})
          inventories)]
     (is (= :release (:seon.agent.driver/disposition release)))
     (is (= :bun (:seon.execution/selected-tier release)))

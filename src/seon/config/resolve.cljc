@@ -277,7 +277,11 @@
    :seon.config.claim-driver/invocation-result-maximum-bytes
    [:int {:min 1
           :description
-          "Maximum Transit bytes in one claimant invocation result. Default 1048576 preserves the 2026-07-23 JVM claimant ceiling; firing returns a flat agent error naming :seon.config.claim-driver/invocation-result-maximum-bytes."}]})
+          "Maximum Transit bytes in one claimant invocation result. Default 1048576 preserves the 2026-07-23 JVM claimant ceiling; firing returns a flat agent error naming :seon.config.claim-driver/invocation-result-maximum-bytes."}]
+   :seon.config.claim-driver/llm-attempt-timeout-ms
+   [:int {:min 1
+          :description
+          "Maximum wall-clock milliseconds for one claimant LLM attempt. Default 120000 preserves the 2026-07-23 outer attempt fence; firing returns a flat timeout naming :seon.config.claim-driver/llm-attempt-timeout-ms."}]})
 
 (doseq [[attribute shape] claim-driver-dial-schemas]
   (schema/register! attribute shape))
@@ -1075,6 +1079,9 @@
    [:seon.config.claim-driver/invocation-result-maximum-bytes
     {:optional true}
     :seon.config.claim-driver/invocation-result-maximum-bytes]
+   [:seon.config.claim-driver/llm-attempt-timeout-ms
+    {:optional true}
+    :seon.config.claim-driver/llm-attempt-timeout-ms]
    [:seon.config.operator/pod-boot-stall-timeout-ms
     {:optional true}
     :seon.config.operator/pod-boot-stall-timeout-ms]
@@ -1581,16 +1588,25 @@
     (if (and (int? parsed) (pos? parsed)) parsed fallback)))
 
 (defn llm-attempt-timeout-ms
-  "Resolve the process fallback below an optional per-agent attempt timeout.
+  "Resolve the environment fallback below an optional per-agent timeout.
 
-   Both claimant tiers pass this value to `seon.ai.core/resolved-config-from-rows`,
-   whose agent row remains authoritative when it declares the optional
-   `:seon.ai/agent-attempt-timeout-ms` override."
+   Manifest application persists this resolved value on the config singleton;
+   claimants read that fact and never inspect the process environment."
   {:malli/schema
    [:=> [:cat [:map-of :string :string]] :int]}
   [environment]
   (positive-environment-int
    environment "SEON_LLM_ATTEMPT_TIMEOUT_MS" 120000))
+
+(defn- resolved-llm-attempt-timeout-ms
+  [manifest environment]
+  (positive-environment-int
+   environment
+   "SEON_LLM_ATTEMPT_TIMEOUT_MS"
+   (get-in manifest
+           [:seon.config/claim-driver
+            :seon.config.claim-driver/llm-attempt-timeout-ms]
+           120000)))
 
 (defn- declared-attempt-timeouts
   [manifest]
@@ -1603,10 +1619,10 @@
           (get manifest :seon.config/root-context {})])))
 
 (defn- validate-liveness-relations!
-  [manifest environment run]
+  [manifest environment run attempt-timeout-ms]
   (let [attempt-horizon
         (reduce max
-                (llm-attempt-timeout-ms environment)
+                attempt-timeout-ms
                 (declared-attempt-timeouts manifest))
         run-deadline (:seon.config.run/deadline-ms run)
         turn-horizon
@@ -1856,7 +1872,10 @@
         shell (get manifest :seon.config/shell {})
         database (get manifest :seon.config/database {})
         contexts (resolve-context-entities manifest)
-        _ (validate-liveness-relations! manifest environment run)
+        attempt-timeout-ms
+        (resolved-llm-attempt-timeout-ms manifest environment)
+        _ (validate-liveness-relations!
+           manifest environment run attempt-timeout-ms)
         nsp (resolve-namespaces manifest)
         host-respawn-backoff-ms
         (get execution
@@ -1961,6 +1980,8 @@
              (get claim-driver
                   :seon.config.claim-driver/invocation-result-maximum-bytes
                   1048576)
+             :seon.config.claim-driver/llm-attempt-timeout-ms
+             attempt-timeout-ms
              :seon.config.operator/pod-boot-stall-timeout-ms
              (get operator
                   :seon.config.operator/pod-boot-stall-timeout-ms
