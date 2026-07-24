@@ -833,7 +833,7 @@
                       {:seon.dev.cluster/requested cluster-name
                        :seon.dev.cluster/configured
                        (:seon.dev.config/cluster-name configuration)})))
-    (let [{:keys [stopped manifest]}
+    (let [{:keys [stop-results manifest]}
           (state/with-lock
            configuration :stack 1800000
            #(let [_ (assert-current-database-layout! configuration)
@@ -844,24 +844,37 @@
                   (stop-processes!
                    configuration
                    :seon.dev.process.operation/reset
-                   (set (process/target-process-ids configuration)))
+                   (disj (set (process/target-process-ids configuration))
+                         process/watcher-id))
                   _ (when (fs/exists? database) (fs/delete-tree database))
                   _ (config/delete-applied-manifest! configuration)
                   _ (cluster/reset-package-skeleton!
                      (:seon.dev.config/launch-descriptor configuration))
                   selected (select-config configuration nil)
-                  manifest
+                  current
                   (if (= false
                          (:seon.dev.config/source-checkout? selected))
                     (selected-manifest selected)
-                    (process/with-startup-ownership
-                     selected
-                     (fn [start-owned!]
-                       (or (artifact/current-manifest selected)
-                           (publish-source-artifact!
-                            selected start-owned!)))))]
-              {:stopped stopped :manifest manifest}))]
-      (print-stop-evidence! "  " stopped)
+                    (artifact/current-manifest selected))
+                  watcher-stop
+                  (when (and (nil? current)
+                             (live-managed-process?
+                              selected process/watcher-id))
+                    (stop-processes!
+                     selected :seon.dev.process.operation/reset
+                     #{process/watcher-id}))
+                  manifest
+                  (or current
+                      (process/with-startup-ownership
+                       selected
+                       (fn [start-owned!]
+                         (publish-source-artifact!
+                          selected start-owned!))))]
+              {:stop-results (cond-> [stopped]
+                               watcher-stop (conj watcher-stop))
+               :manifest manifest}))]
+      (doseq [result stop-results]
+        (print-stop-evidence! "  " result))
       (println (str "● cluster " cluster-name " reset"))
       (println (str "  release: "
                     (:seon.dev.artifact/application-digest manifest)))

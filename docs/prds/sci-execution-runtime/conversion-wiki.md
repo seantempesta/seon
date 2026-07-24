@@ -1900,10 +1900,12 @@ the variable-weight values they select.
 ## R45 operator publication and admission scars (2026-07-24)
 
 - **Reset prepares a release; it does not admit the application.** The reset
-  owner drains every managed generation, deletes the database and applied
-  manifest, and publishes or verifies the current source artifact. Explicit
-  apply then owns initialization and its completion receipt; only a later
-  `up` may admit writer, host, claimant, pod, and web-render processes.
+  owner drains every application generation, deletes the database and applied
+  manifest, and verifies the current source artifact. It preserves the
+  byte-verified watcher generation, or drains and republishes through that one
+  owner when verification fails. Explicit apply then owns initialization and
+  its completion receipt; only a later `up` may admit writer, host, claimant,
+  pod, and web-render processes.
 - **Watcher liveness is not release identity.** A stopped watcher does not
   invalidate byte-verified published outputs. Re-entering Shadow's fresh
   compiler process for unchanged source can assign different compiler-local

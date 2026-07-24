@@ -1161,7 +1161,6 @@
                       "    pod: forced\n"
                       "    host: forced\n"
                       "    writer: forced\n"
-                      "    watcher: forced\n"
                       "● cluster default reset\n"
                       "  release: "
                       (:seon.dev.artifact/application-digest manifest) "\n"
@@ -1171,7 +1170,7 @@
       (is (= [{:seon.dev.process/configuration configuration
                :seon.dev.process/operation :seon.dev.process.operation/reset
                :seon.dev.process/targets
-               (set process/all-process-ids)}]
+               (disj (set process/all-process-ids) process/watcher-id)}]
              @requests))
       (is (= [(:seon.dev.config/launch-descriptor configuration)]
              @reset-packages))
