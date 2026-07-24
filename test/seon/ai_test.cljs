@@ -16,6 +16,7 @@
     [seon.ai.provider :as provider]
     [seon.db :as db]
     [seon.db.protocol :as protocol]
+    [seon.instrument :as instrument]
     [seon.schema :as schema]))
 
 ;; ============================================================
@@ -36,6 +37,25 @@
               (drop 2 (schema/schema-definition ::ai/agent-config)))]
     (is (= (set (ai/agent-config-pull-pattern)) entity-attributes)
         "every pulled agent configuration attribute is installed by the entity schema")))
+
+(deftest config-pull-pattern-contract-accepts-component-pulls
+  (let [sym 'seon.ai/config-pull-pattern
+        target {::instrument/sym sym
+                ::instrument/schema-form
+                (-> #'ai/config-pull-pattern meta :malli/schema)}]
+    (try
+      (let [result (instrument/instrument-targets! [target])
+            pull-pattern (ai/config-pull-pattern)]
+        (is (true? (::instrument/ok? result)))
+        (is (= #{{:seon.config/provider-descriptors '[*]}
+                 {:seon.config/model-variants '[*]}}
+               (set (filter map? pull-pattern))))
+        (is (every? #(or (qualified-keyword? %) (map? %))
+                    pull-pattern)))
+      (finally
+        (instrument/instrument-delta!
+         {::instrument/changed-syms #{sym}
+          ::instrument/targets []})))))
 
 (deftest agent-override-schemas-are-native-and-reject-inherit
   (let [expected

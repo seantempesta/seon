@@ -568,9 +568,19 @@
   [:seon.config.model-transport/response-identity-cap
    :seon.config.model-transport/endpoint-cap])
 
+(schema/register!
+ ::config-component-pull
+ [:map-of {:min 1 :max 1}
+  [:enum :seon.config/provider-descriptors
+   :seon.config/model-variants]
+  [:= '[*]]])
+(schema/register!
+ ::config-pull-pattern
+ [:vector [:or :qualified-keyword ::config-component-pull]])
+
 (defn config-pull-pattern
   "Pull pattern for the ordinary database values that resolve LLM config."
-  {:malli/schema [:=> [:cat] [:vector :keyword]]}
+  {:malli/schema [:=> [:cat] ::config-pull-pattern]}
   []
   (core/config-pull-pattern))
 
