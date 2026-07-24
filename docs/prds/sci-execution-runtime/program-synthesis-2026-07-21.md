@@ -1086,6 +1086,15 @@ MORNING ITEMS (accumulating):
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- BREAK #6 FIXED (1b30bb578, accepted): the CLJS hang = a
+  single-arity stub of multi-arity publish-committed! throwing on
+  the unavailable rail while the test awaited only success — done
+  never fired; stub now preserves both arities, test settles on all
+  outcomes, NO timeout raise. UNMASKED: the full gate now completes
+  (153 ns, 1,590 tests, 7,853 assertions, 139s) revealing 64F+2E
+  the hang hid — CLJSREDS triage lane dispatched (cluster →
+  attribute class → fix ruled clusters → full rerun with honest
+  counts; r43fix2 files protected).
 - BREAKS #7 FIXED + STATUSFIX ACCEPTED (ff30d1162: analyzer
   confined to its leaf, pure classification extracted to
   seon.dev.program-inventory, test moved to operator discovery, NO
