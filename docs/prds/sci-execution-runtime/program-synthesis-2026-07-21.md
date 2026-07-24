@@ -1086,6 +1086,10 @@ MORNING ITEMS (accumulating):
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- ENSUREPATH FIXED+ARCHIVED (d0a73db8e +2, accepted; 37/224 green):
+  bare file-backed ensures return not-found — never create stores/
+  directories; known names reject mismatched paths; creation
+  authority stays explicit (init/writer startup). Issue count 120.
 - BN-2/3/4 FIXED (fa3cb6c37, accepted): release package preserves
   the checkout build layout with all four members digest-verified
   (application SHA e1b9490…); standalone bin/test-writer resolves
