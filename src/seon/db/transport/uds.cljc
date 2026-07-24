@@ -7,6 +7,7 @@
    without forking `seon.db.protocol`."
   (:require [cognitect.transit :as transit]
             [seon.db.protocol :as protocol]
+            [seon.error :as error]
             [seon.schema :as schema]
             [taoensso.timbre :as log])
   (:import [java.io ByteArrayInputStream ByteArrayOutputStream
@@ -115,6 +116,7 @@
 (schema/register! ::maximum-frame-bytes [:int {:min 1}])
 (schema/register! ::codec-workers [:int {:min 1}])
 (schema/register! ::codec-worker-queue-capacity [:int {:min 1}])
+(schema/register! ::on-core-error [:enum :crash :gate :log])
 (schema/register! ::graceful? :boolean)
 (schema/register! ::forced-connections [:int {:min 0}])
 (schema/register! ::selector-stopped? :boolean)
@@ -128,7 +130,8 @@
   [::protocol/version ::protocol/version]
   [::protocol/configured-maximum-frame-bytes
    ::protocol/configured-maximum-frame-bytes]
-  [::protocol/maximum-frame-bytes ::protocol/maximum-frame-bytes]])
+  [::protocol/maximum-frame-bytes ::protocol/maximum-frame-bytes]
+  [::on-core-error ::on-core-error]])
 (schema/register! ::output-stream 'some?)
 (schema/register! ::connections 'some?)
 (schema/register! ::selector 'some?)
@@ -170,6 +173,7 @@
   [::maximum-session-output-bytes {:optional true}
    ::maximum-session-output-bytes]
   [::maximum-frame-bytes {:optional true} ::maximum-frame-bytes]
+  [::on-core-error {:optional true} ::on-core-error]
   [::maximum-connections {:optional true} ::maximum-connections]
   [::codec-workers {:optional true} ::codec-workers]
   [::codec-worker-queue-capacity {:optional true}
@@ -209,14 +213,40 @@
   (= "java.util.concurrent.RejectedExecutionException"
      (.getName ^Class (class throwable))))
 
+(defn- record-wire-degradation!
+  [degraded-paths on-core-error]
+  (error/with-configuration
+   {:seon.config/on-core-error on-core-error}
+   #(error/record!
+     {::error/raw
+      (ex-info
+       "Database wire projection degraded unsupported values to text."
+       {:seon.error/kind :core-bug
+        ::protocol/degraded-paths degraded-paths})
+      ::error/fault :core})))
+
+(defn- project-message
+  [message on-core-error]
+  (let [{::protocol/keys [projected-value degraded? degraded-paths]}
+        (protocol/wire-envelope-projection message)]
+    (when degraded?
+      (record-wire-degradation! degraded-paths on-core-error))
+    projected-value))
+
 (defn encode
   "Encode one protocol map as Transit JSON bytes."
-  {:malli/schema [:=> [:catn [::message ::message]] :any]}
-  ^bytes [message]
-  (let [out (ByteArrayOutputStream. 1024)
-        writer (transit/writer out :json)]
-    (transit/write writer message)
-    (.toByteArray out)))
+  {:malli/schema [:function
+                  [:=> [:catn [::message ::message]] :any]
+                  [:=> [:catn [::message ::message]
+                               [::on-core-error ::on-core-error]]
+                   :any]]}
+  (^bytes [message]
+   (encode message :gate))
+  (^bytes [message on-core-error]
+   (let [out (ByteArrayOutputStream. 1024)
+         writer (transit/writer out :json)]
+     (transit/write writer (project-message message on-core-error))
+     (.toByteArray out))))
 
 (defn decode
   "Decode one Transit JSON payload into a protocol map."
@@ -255,9 +285,11 @@
 (defn- message-frame
   "Encode one complete length-prefixed frame into a fresh buffer."
   (^ByteBuffer [message]
-   (message-frame message protocol/maximum-frame-bytes))
+   (message-frame message protocol/maximum-frame-bytes :gate))
   (^ByteBuffer [message maximum-frame-bytes]
-   (let [^bytes payload (encode message)
+   (message-frame message maximum-frame-bytes :gate))
+  (^ByteBuffer [message maximum-frame-bytes on-core-error]
+   (let [^bytes payload (encode message on-core-error)
          length (alength payload)]
      (when (> length maximum-frame-bytes)
        (throw (ex-info "Database protocol frame is too large."
@@ -312,7 +344,7 @@
             (::protocol/request-id response))
          (= protocol/current-version (::protocol/version response))
          (protocol/valid-response? response)
-         (int? configured)
+         (integer? configured)
          (<= protocol/session-open-maximum-frame-bytes
              configured
              protocol/maximum-frame-bytes)
@@ -800,7 +832,8 @@
                   (try
                     {::frame
                      (message-frame message
-                                    @(::maximum-frame-bytes-state session))}
+                                    @(::maximum-frame-bytes-state session)
+                                    (::on-core-error session))}
                     (catch Throwable throwable
                       {::encode-error throwable}))]
               (.set ^AtomicReference (::encoding? slot) false)
@@ -906,7 +939,8 @@
                 encoded
                 (try
                   {::frame (message-frame (::message pending)
-                                          maximum-frame-bytes)}
+                                          maximum-frame-bytes
+                                          (::on-core-error session))}
                   (catch Throwable throwable
                     (if (::frame-bytes (ex-data throwable))
                       {::frame
@@ -916,7 +950,8 @@
                           (or (::protocol/request-id (::message pending))
                               protocol/session-control-request-id)
                           ::protocol/maximum-frame-bytes maximum-frame-bytes})
-                        maximum-frame-bytes)}
+                        maximum-frame-bytes
+                        (::on-core-error session))}
                       {::encode-error throwable})))]
             (if-let [^ByteBuffer frame (::frame encoded)]
               (let [reservation
@@ -1025,7 +1060,8 @@
 (defn- queue-session-control!
   [session response outcome]
   (let [frame (message-frame response
-                             protocol/session-open-maximum-frame-bytes)]
+                             protocol/session-open-maximum-frame-bytes
+                             (::on-core-error session))]
     (reset! (::phase session) ::opening-response)
     (.addLast ^ArrayDeque (::outputs session)
               {::frame frame ::opening-outcome outcome})
@@ -1062,7 +1098,7 @@
        {::protocol/request-id protocol/session-open-request-id}})
      ::close]
 
-    (not (and (int? (::protocol/maximum-frame-bytes request))
+    (not (and (integer? (::protocol/maximum-frame-bytes request))
               (<= protocol/session-open-maximum-frame-bytes
                   (::protocol/maximum-frame-bytes request)
                   protocol/maximum-frame-bytes)))
@@ -1284,7 +1320,8 @@
          (protocol/connection-capacity-failure
           {::protocol/maximum-connections
            (::maximum-connections server-capacity)})
-         protocol/session-open-maximum-frame-bytes)
+         protocol/session-open-maximum-frame-bytes
+         (::on-core-error server-capacity))
         attachment
         {::rejection? true
          ::channel channel
@@ -1366,6 +1403,7 @@
                ::maximum-frame-bytes-state
                (atom (::maximum-frame-bytes server-capacity))
                ::maximum-frame-bytes (::maximum-frame-bytes server-capacity)
+               ::on-core-error (::on-core-error server-capacity)
                ::cleanup-workers (::cleanup-workers server-capacity)
                ::shutting-down? shutting-down?
                ::open-connection! open-connection!
@@ -1454,7 +1492,7 @@
             shutdown-timeout-ms maximum-input-bytes maximum-response-slots
             maximum-session-response-slots maximum-output-bytes
             maximum-session-output-bytes maximum-connections
-            maximum-frame-bytes]
+            maximum-frame-bytes on-core-error]
     codec-worker-count ::codec-workers
     worker-queue-capacity ::codec-worker-queue-capacity
     :or {shutdown-timeout-ms default-shutdown-timeout-ms
@@ -1466,6 +1504,7 @@
          maximum-session-output-bytes default-maximum-session-output-bytes
          maximum-connections default-maximum-connections
          maximum-frame-bytes protocol/maximum-frame-bytes
+         on-core-error :gate
          worker-queue-capacity default-codec-worker-queue-capacity}}]
   (try (.delete (java.io.File. ^String socket-path)) (catch Throwable _))
   (let [^UnixDomainSocketAddress address
@@ -1491,6 +1530,7 @@
          ::maximum-output-bytes maximum-output-bytes
          ::maximum-session-output-bytes maximum-session-output-bytes
          ::maximum-frame-bytes maximum-frame-bytes
+         ::on-core-error on-core-error
          ::maximum-connections maximum-connections
          ::rejecting-session (atom nil)
          ::cleanup-workers cleanup-pool}]

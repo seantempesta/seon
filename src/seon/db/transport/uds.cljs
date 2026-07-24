@@ -31,6 +31,7 @@
 
 (schema/register! ::socket-path [:string {:min 1}])
 (schema/register! ::message :map)
+(schema/register! ::encoded-message :string)
 (schema/register! ::timeout-ms [:int {:min 1}])
 (schema/register! ::backstop-config-key :keyword)
 (schema/register! ::on-event! 'fn?)
@@ -117,7 +118,7 @@
             (::protocol/request-id response))
          (= protocol/current-version (::protocol/version response))
          (protocol/valid-response? response)
-         (int? configured)
+         (integer? configured)
          (<= protocol/session-open-maximum-frame-bytes
              configured
              protocol/maximum-frame-bytes)
@@ -209,16 +210,42 @@
       (.set frame payload 4)
       frame))))
 
+(defn- record-wire-degradation!
+  [degraded-paths]
+  (error/record!
+   {::error/raw
+    (ex-info
+     "Database wire projection degraded unsupported values to text."
+     {:seon.error/kind :core-bug
+      ::protocol/degraded-paths degraded-paths})
+    ::error/fault :core}))
+
+(defn encode
+  "Project one protocol map to ordinary data and encode it as Transit JSON."
+  {:malli/schema [:=> [:catn [::message ::message]] ::encoded-message]}
+  [message]
+  (let [{::protocol/keys [projected-value degraded? degraded-paths]}
+        (protocol/wire-envelope-projection message)]
+    (when degraded?
+      (record-wire-degradation! degraded-paths))
+    (t/write transit-writer projected-value)))
+
+(defn decode
+  "Decode one Transit JSON protocol map."
+  {:malli/schema [:=> [:catn [::encoded-message ::encoded-message]] ::message]}
+  [encoded-message]
+  (t/read transit-reader encoded-message))
+
 (defn- encode-frame
   ([message] (encode-frame message maximum-frame-bytes))
   ([message maximum-frame-bytes]
-   (text-frame (t/write transit-writer message) maximum-frame-bytes)))
+   (text-frame (encode message) maximum-frame-bytes)))
 
 (defn- payload-text [^js payload]
   (.decode text-decoder payload))
 
 (defn- decode-payload [^js payload]
-  (t/read transit-reader (payload-text payload)))
+  (decode (payload-text payload)))
 
 (defn- empty-output []
   {::frames []

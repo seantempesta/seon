@@ -3,7 +3,8 @@
   (:require [clojure.test :refer [deftest is]]
             [seon.db.branch :as branch]
             [seon.db.protocol :as protocol]
-            [seon.db.transport.uds :as uds])
+            [seon.db.transport.uds :as uds]
+            [seon.error :as error])
   (:import [com.sun.management UnixOperatingSystemMXBean]
            [java.io File InputStream]
            [java.lang.management ManagementFactory]
@@ -267,8 +268,11 @@
         configured 65536
         response (protocol/session-open-success
                   {::protocol/configured-maximum-frame-bytes configured
-                   ::protocol/maximum-frame-bytes configured})]
-    (is (valid-opening-success? response protocol/maximum-frame-bytes))
+                   ::protocol/maximum-frame-bytes configured})
+        decoded (uds/decode (uds/encode response))]
+    (is (instance? Long (::protocol/configured-maximum-frame-bytes decoded))
+        "Transit decodes a JVM frame ceiling as Long, not Integer")
+    (is (valid-opening-success? decoded protocol/maximum-frame-bytes))
     (is (false?
          (valid-opening-success?
           (assoc response ::protocol/maximum-frame-bytes (inc configured))
@@ -1417,6 +1421,52 @@
                    #(and (empty? @(::uds/connections server))
                          (zero? @(::uds/authority-response-slot-count server))
                          (zero? @(::uds/authority-output-bytes server))))
+      (finally
+        (.close channel)
+        (uds/close-request-server! server)
+        (.delete (File. path))))))
+
+(deftest degraded-value-records-one-core-fault-and-session-survives
+  (let [path (socket-path "transport-codec-degrade")
+        control (promise)
+        recorded (promise)
+        server
+        (uds/start-request-server!
+         {::uds/socket-path path
+          ::uds/on-core-error :log
+          ::uds/open-connection!
+          (fn [connection-control]
+            (deliver control connection-control)
+            (Object.))
+          ::uds/close-connection! (constantly nil)
+          ::uds/handler
+          (fn [_owner _request _frame-bytes _complete!] nil)})
+        channel (open-admitted-channel! path)
+        input (Channels/newInputStream channel)
+        {send! ::uds/send!} (deref control 2000 ::not-opened)]
+    (try
+      (with-redefs-fn
+        {#'seon.error/record!
+         (fn [fault]
+           (deliver recorded fault)
+           {:seon.error/message "recorded"})}
+        (fn []
+          (let [first-send (send! {::event :degraded ::value *})
+                first-frame (uds/read-frame input)
+                second-send (send! {::event :ordinary ::value 42})]
+            (is (= uds/send-accepted (::uds/send-status first-send)))
+            (is (= uds/send-accepted
+                   (deref (::uds/send-completion first-send)
+                          2000 ::not-complete)))
+            (is (= :degraded (::event first-frame)))
+            (is (string? (::value first-frame)))
+            (is (= :core (::error/fault (deref recorded 2000 ::not-recorded))))
+            (is (= uds/send-accepted (::uds/send-status second-send)))
+            (is (= {::event :ordinary ::value 42}
+                   (uds/read-frame input)))
+            (is (= uds/send-accepted
+                   (deref (::uds/send-completion second-send)
+                          2000 ::not-complete))))))
       (finally
         (.close channel)
         (uds/close-request-server! server)

@@ -11,6 +11,9 @@
    transaction request. One logical write therefore has one identity from
    delivery through recovery."
   (:require [clojure.set :as set]
+            [clojure.string :as str]
+            [malli.core :as m]
+            [malli.transform :as mt]
             #?@(:bb [] :default [[hasch.core :as hasch]])
             #?@(:cljs [[cognitect.transit :as transit]
                        [goog.object :as gobj]
@@ -126,6 +129,18 @@
 #?(:clj
    (def ^:private byte-array-class (Class/forName "[B")))
 
+(defn- ordinary-wire-number?
+  [value]
+  (and
+   (number? value)
+   #?(:clj
+      (cond
+        (instance? Double value) (Double/isFinite ^double value)
+        (instance? Float value) (Float/isFinite ^float value)
+        :else true)
+      :cljs
+      (js/Number.isFinite value))))
+
 (defn ordinary-wire-value?
   "True when `value` is eager data supported by every protocol host."
   {:malli/schema [:=> [:cat :any] :boolean]}
@@ -161,7 +176,7 @@
     :else
     (or (nil? value)
         (boolean? value)
-        (number? value)
+        (ordinary-wire-number? value)
         (string? value)
         (keyword? value)
         (symbol? value)
@@ -197,6 +212,139 @@
        [:or :nil :boolean :int :double :string :keyword :symbol
         [:vector {:max 8} [:or :nil :boolean :int :string :keyword]]]}
   'seon.db.protocol/ordinary-wire-value?])
+
+(defn wire-value?
+  "True for the deliberately polymorphic input to the total wire projector."
+  {:malli/schema [:=> [:cat ::wire-value] :boolean]}
+  [_]
+  true)
+
+(schema/register-core-predicate!
+ 'seon.db.protocol/wire-value?
+ wire-value?)
+
+(schema/register!
+ ::wire-value
+ [:fn {:error/message "must be a value"
+       :gen/schema ::ordinary-wire-value}
+  'seon.db.protocol/wire-value?])
+
+(schema/register! ::projected-value ::ordinary-wire-value)
+(schema/register! ::degraded? :boolean)
+(schema/register! ::degraded-paths [:vector :string])
+(schema/register!
+ ::wire-projection
+ [:map {:closed true}
+  [::projected-value ::projected-value]
+  [::degraded? ::degraded?]
+  [::degraded-paths ::degraded-paths]])
+
+(defn- safe-wire-text
+  "Return bounded diagnostic text for an unsupported wire value."
+  [value]
+  (try
+    (binding [*print-level* 8
+              *print-length* 32]
+      (pr-str value))
+    (catch #?(:clj Throwable :cljs :default) _
+      "<unprintable wire value>")))
+
+(defn- wire-path-segment
+  [value]
+  (cond
+    (keyword? value) (str value)
+    (string? value) value
+    (number? value) (str value)
+    :else (safe-wire-text value)))
+
+(declare project-wire-node)
+
+(defn- project-wire-map
+  [value path]
+  (reduce
+   (fn [[projected degraded-paths] [k v]]
+     (let [[projected-key key-paths]
+           (project-wire-node k (conj path "<key>"))
+           value-path (conj path (wire-path-segment projected-key))
+           [projected-value value-paths]
+           (project-wire-node v value-path)]
+       [(assoc projected projected-key projected-value)
+        (into degraded-paths (concat key-paths value-paths))]))
+   [{} []]
+   value))
+
+(defn- project-wire-coll
+  [constructor value path]
+  (let [[values degraded-paths]
+        (reduce
+         (fn [[projected degraded-paths] [index item]]
+           (let [[projected-item item-paths]
+                 (project-wire-node item (conj path (str index)))]
+             [(conj projected projected-item)
+              (into degraded-paths item-paths)]))
+         [[] []]
+         (map-indexed vector value))]
+    [(constructor values) degraded-paths]))
+
+(defn- project-wire-node
+  [value path]
+  (if (ordinary-wire-value? value)
+    [value []]
+    (cond
+      (and (map? value) (not (record? value)))
+      (project-wire-map value path)
+
+      (vector? value)
+      (project-wire-coll vec value path)
+
+      (set? value)
+      (project-wire-coll set value path)
+
+      (list? value)
+      (project-wire-coll #(apply list %) value path)
+
+      :else
+      [(safe-wire-text value) [(str "$/" (str/join "/" path))]])))
+
+(defn wire-projection
+  "Project any boundary value into eager ordinary protocol data.
+
+   Unsupported leaves become bounded text while ordinary structure remains
+   intact. The degradation paths let the codec report the one fallback
+   occurrence without probing Transit or adding call-site guards."
+  {:malli/schema [:=> [:cat ::wire-value] ::wire-projection]}
+  [value]
+  (try
+    (let [[projected-value degraded-paths] (project-wire-node value [])
+          ordinary? (ordinary-wire-value? projected-value)
+          projected-value
+          (if ordinary?
+            projected-value
+            (safe-wire-text value))
+          degraded-paths
+          (if ordinary?
+            degraded-paths
+            ["$/"])]
+      {::projected-value projected-value
+       ::degraded? (boolean (seq degraded-paths))
+       ::degraded-paths (vec degraded-paths)})
+    (catch #?(:clj Throwable :cljs :default) _
+      {::projected-value (safe-wire-text value)
+       ::degraded? true
+       ::degraded-paths ["$/"]})))
+
+(def ^:dynamic *wire-envelope-projection* nil)
+
+(defn project-wire-envelope
+  "Malli wire-transformer hook for a complete protocol envelope."
+  {:malli/schema [:=> [:cat ::wire-value] ::projected-value]}
+  [value]
+  (if (and *wire-envelope-projection*
+           (nil? @*wire-envelope-projection*))
+    (let [projection (wire-projection value)]
+      (reset! *wire-envelope-projection* projection)
+      (::projected-value projection))
+    value))
 
 (defn- one-temporal-bound?
   [value]
@@ -235,10 +383,9 @@
 (schema/register! ::maximum-connections [:int {:min 1}])
 (schema/register! ::peer-version [:int {:min 1}])
 (schema/register! ::configuration-key :qualified-keyword)
-;; Datahike query and pull values are intentionally polymorphic data. The
-;; canonical request/response validators apply `ordinary-wire-value?`
-;; recursively while preserving native result shapes and legitimate bare keys.
-(schema/register! ::result ::ordinary-wire-value)
+;; Datahike query and pull values are intentionally polymorphic. The compiled
+;; envelope encoder owns their ordinary wire projection at the codec boundary.
+(schema/register! ::result ::wire-value)
 (schema/register! ::arguments [:vector ::ordinary-wire-value])
 (schema/register! ::selector ::ordinary-wire-value)
 (schema/register! ::entity-id :any)
@@ -265,7 +412,7 @@
 (schema/register! :datahike.resource/max-work [:int {:min 1}])
 (schema/register! :datahike.resource/max-results [:int {:min 1}])
 (schema/register! :datahike.resource/max-result-weight [:int {:min 1}])
-(schema/register! :datahike.query/result :any)
+(schema/register! :datahike.query/result ::wire-value)
 (schema/register! :datahike.query/cache-evidence :map)
 (schema/register! :datahike.query/resource-evidence :map)
 (schema/register! ::database-name [:string {:min 1}])
@@ -988,7 +1135,7 @@
   [:datahike.index-page/complete? :datahike.index-page/complete?]
   [:datahike.index-page/cursor {:optional true}
    :datahike.index-page/cursor]])
-(schema/register! ::member-response :any)
+(schema/register! ::member-response ::wire-value)
 (schema/register! ::results [:vector ::member-response])
 (schema/register!
  ::execute-many-response
@@ -1154,6 +1301,37 @@
   ::transaction-response
   ::resolve-transaction-branch-head-response
   ::knn-search-response])
+
+(def ^:private wire-transformer
+  (mt/transformer
+   {:name :wire
+    :default-encoder project-wire-envelope}))
+
+(def ^:private request-wire-encoder
+  (delay (m/encoder ::request wire-transformer)))
+
+(def ^:private response-wire-encoder
+  (delay (m/encoder ::response wire-transformer)))
+
+(defn wire-envelope-projection
+  "Apply the schema-selected request/response wire projection once.
+
+   The returned metadata tells the codec whether the schema hook had to use
+   its R41 degraded text representation."
+  {:malli/schema [:=> [:cat ::wire-value] ::wire-projection]}
+  [message]
+  (if (map? message)
+    (let [projection (atom nil)
+          encoder (if (contains? message ::operation)
+                    @request-wire-encoder
+                    @response-wire-encoder)]
+      (binding [*wire-envelope-projection* projection]
+        (let [projected-value (encoder message)]
+          (or @projection
+              {::projected-value projected-value
+               ::degraded? false
+               ::degraded-paths []}))))
+    (wire-projection message)))
 
 (schema/register! ::body :map)
 (schema/register!
@@ -1905,7 +2083,6 @@
   {:malli/schema [:=> [:cat :any] :boolean]}
   [response]
   (and (@response-validator response)
-       (ordinary-wire-value? response)
        (response-semantics-valid? response)))
 
 (defn valid-writer-terminal-result?
@@ -1919,8 +2096,6 @@
   {:malli/schema [:=> [:cat :any] [:maybe :map]]}
   [response]
   (or (@response-explainer response)
-      (when-not (ordinary-wire-value? response)
-        {::error "Protocol responses contain only eager ordinary wire values."})
       (when-not (response-semantics-valid? response)
         {::error "Protocol database values must have one temporal bound."})))
 
