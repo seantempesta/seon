@@ -57,6 +57,12 @@
      (.resolve (Paths/get root (make-array String 0))
                process-dir))))
 
+(defn- selected-artifact-manifest-path
+  []
+  (if-let [manifest (System/getenv "SEON_WRITER_ARTIFACT_MANIFEST")]
+    (.normalize (Paths/get manifest (make-array String 0)))
+    (.resolve ^Path (selected-artifact-process-path) "artifact.edn")))
+
 (defn- sha256-digest?
   [value]
   (and (string? value) (boolean (re-matches #"[0-9a-f]{64}" value))))
@@ -123,7 +129,7 @@
 (defonce ^:private compiled-base
   (delay
     (let [manifest-path
-          (.resolve ^Path (selected-artifact-process-path) "artifact.edn")
+          (selected-artifact-manifest-path)
           _ (when-not (.isFile (.toFile manifest-path))
               (throw
                (ex-info "The selected artifact manifest is absent."

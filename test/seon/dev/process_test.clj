@@ -392,13 +392,15 @@
 (def package-members
   {:seon.release.member/bun "runtime/bun"
    :seon.release.member/writer "runtime/writer.jar"
-   :seon.release.member/pod "runtime/pod.js"
-   :seon.release.member/execution "runtime/execution.js"
+   :seon.release.member/pod "runtime/client/main.js"
+   :seon.release.member/execution "runtime/execution/main.js"
    :seon.release.member/runtime-assets "runtime/web"
    :seon.release.member/program-source "runtime/program-sources.edn"
    :seon.release.member/program-row "runtime/program-rows.edn"
-   :seon.release.member/client-inventory "runtime/client-inventory.edn"
-   :seon.release.member/execution-inventory "runtime/execution-inventory.edn"
+   :seon.release.member/client-inventory
+   "runtime/client/program-inventory.edn"
+   :seon.release.member/execution-inventory
+   "runtime/execution/program-inventory.edn"
    :seon.release.member/babashka "runtime/bb"
    :seon.release.member/operator "runtime/operator.jar"
    :seon.release.member/detach-helper "runtime/detach.py"

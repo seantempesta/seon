@@ -138,15 +138,20 @@
                (program-artifact/prepare-program-rows!
                 state
                 "out/client/program-sources.edn"
-                "out/client/program-rows.edn")]
+                "out/client/program-rows.edn")
+               changed
+               (assoc prepared :sources {})]
            (program-artifact/publish!
-            prepared "out/client/program-sources.edn")
+            changed "out/client/program-sources.edn")
            (is (identical?
-                prepared
+                changed
                 (program-artifact/publish-rows!
-                 prepared
+                 changed
                  "out/client/program-sources.edn"
                  "out/client/program-rows.edn")))))
+      (is (= (program-artifact/artifact-text state)
+             (slurp (str (fs/path project
+                                  "out/client/program-sources.edn")))))
       (is (= {:seon.dev.artifact/program-rows rows}
              (edn/read-string (slurp (str row-output)))))
       (is (= (str "{:seon.dev.artifact/program-rows "

@@ -18,15 +18,16 @@
 
 (defn- fixture! []
   (let [root (fs/create-temp-dir {:prefix "seon-release-test-"})]
-    (fs/create-dirs (fs/path root "web" "nested"))
+    (doseq [directory ["web/nested" "client" "execution"]]
+      (fs/create-dirs (fs/path root directory)))
     (spit (str (fs/path root "bun")) "bun")
     (spit (str (fs/path root "writer.jar")) "writer")
-    (spit (str (fs/path root "pod.js")) "pod")
-    (spit (str (fs/path root "execution.js")) "execution")
     (spit (str (fs/path root "program-sources.edn")) "{}")
     (spit (str (fs/path root "program-rows.edn")) "{}")
-    (spit (str (fs/path root "client-program-inventory.edn")) "{}")
-    (spit (str (fs/path root "execution-program-inventory.edn")) "{}")
+    (spit (str (fs/path root "client/main.js")) "pod")
+    (spit (str (fs/path root "execution/main.js")) "execution")
+    (spit (str (fs/path root "client/program-inventory.edn")) "{}")
+    (spit (str (fs/path root "execution/program-inventory.edn")) "{}")
     (spit (str (fs/path root "bb")) "bb")
     (spit (str (fs/path root "operator.jar")) "operator")
     (spit (str (fs/path root "detach.py")) "detach")
@@ -44,13 +45,13 @@
 (def members
   {:seon.release.member/bun "bun"
    :seon.release.member/writer "writer.jar"
-   :seon.release.member/pod "pod.js"
-   :seon.release.member/execution "execution.js"
+   :seon.release.member/pod "client/main.js"
+   :seon.release.member/execution "execution/main.js"
    :seon.release.member/runtime-assets "web"
    :seon.release.member/program-source "program-sources.edn"
    :seon.release.member/program-row "program-rows.edn"
-   :seon.release.member/client-inventory "client-program-inventory.edn"
-   :seon.release.member/execution-inventory "execution-program-inventory.edn"
+   :seon.release.member/client-inventory "client/program-inventory.edn"
+   :seon.release.member/execution-inventory "execution/program-inventory.edn"
    :seon.release.member/babashka "bb"
    :seon.release.member/operator "operator.jar"
    :seon.release.member/detach-helper "detach.py"
@@ -112,7 +113,7 @@
                           (pr-str manifest))))
         (fs/copy-tree root copied {:replace-existing true})
         (is (= manifest (release/verify-package! (str copied) manifest)))
-        (is (= (str (fs/canonicalize (fs/path copied "pod.js")))
+        (is (= (str (fs/canonicalize (fs/path copied "client/main.js")))
                (release/package-path (str copied) manifest
                                      :seon.release.member/pod)))
         (is (thrown-with-msg? Exception #"manifest is invalid"
@@ -159,10 +160,10 @@
     (try
       (let [manifest
             (release/create-manifest (str root) members runtime-identity)]
-        (spit (str (fs/path root "pod.js")) "changed")
+        (spit (str (fs/path root "client/main.js")) "changed")
         (is (thrown-with-msg? Exception #"digest does not match"
                               (release/verify-package! (str root) manifest)))
-        (fs/delete (fs/path root "pod.js"))
+        (fs/delete (fs/path root "client/main.js"))
         (is (thrown-with-msg? Exception #"member is missing"
                               (release/verify-package! (str root) manifest))))
       (finally (fs/delete-tree root {:force true})))))
@@ -183,15 +184,15 @@
     (try
       (spit (str (fs/path outside "outside.js")) "outside")
       (testing "the declared member"
-        (fs/delete (fs/path root "pod.js"))
-        (fs/create-sym-link (fs/path root "pod.js")
+        (fs/delete (fs/path root "client/main.js"))
+        (fs/create-sym-link (fs/path root "client/main.js")
                             (fs/path outside "outside.js"))
         (is (thrown-with-msg? Exception #"symbolic link"
                               (release/create-manifest
                                (str root) members runtime-identity))))
       (testing "a directory inside a declared member"
-        (fs/delete (fs/path root "pod.js"))
-        (spit (str (fs/path root "pod.js")) "pod")
+        (fs/delete (fs/path root "client/main.js"))
+        (spit (str (fs/path root "client/main.js")) "pod")
         (fs/delete-tree (fs/path root "web" "nested") {:force true})
         (fs/create-sym-link (fs/path root "web" "nested") outside)
         (is (thrown-with-msg? Exception #"symbolic link"

@@ -51,14 +51,15 @@
 (def ^:private package-members
   {:seon.release.member/bun "runtime/bun"
    :seon.release.member/writer "runtime/writer.jar"
-   :seon.release.member/pod "runtime/pod.js"
-   :seon.release.member/execution "runtime/execution.js"
+   :seon.release.member/pod "runtime/client/main.js"
+   :seon.release.member/execution "runtime/execution/main.js"
    :seon.release.member/runtime-assets "runtime-root"
    :seon.release.member/program-source "runtime/program-sources.edn"
    :seon.release.member/program-row "runtime/program-rows.edn"
-   :seon.release.member/client-inventory "runtime/client-program-inventory.edn"
+   :seon.release.member/client-inventory
+   "runtime/client/program-inventory.edn"
    :seon.release.member/execution-inventory
-   "runtime/execution-program-inventory.edn"
+   "runtime/execution/program-inventory.edn"
    :seon.release.member/babashka "runtime/bb"
    :seon.release.member/operator "runtime/operator.jar"
    :seon.release.member/detach-helper "runtime/detach.py"
@@ -815,14 +816,14 @@
     (copy-file! bun (fs/path runtime "bun"))
     (.setExecutable (io/file (str (fs/path runtime "bun"))) true false)
     (copy-file! writer (fs/path runtime "writer.jar"))
-    (copy-file! pod (fs/path runtime "pod.js"))
-    (copy-file! execution (fs/path runtime "execution.js"))
+    (copy-file! pod (fs/path runtime "client/main.js"))
+    (copy-file! execution (fs/path runtime "execution/main.js"))
     (copy-file! program-source (fs/path runtime "program-sources.edn"))
     (copy-file! program-row (fs/path runtime "program-rows.edn"))
     (copy-file! client-inventory
-                (fs/path runtime "client-program-inventory.edn"))
+                (fs/path runtime "client/program-inventory.edn"))
     (copy-file! execution-inventory
-                (fs/path runtime "execution-program-inventory.edn"))
+                (fs/path runtime "execution/program-inventory.edn"))
     (copy-file! babashka (fs/path runtime "bb"))
     (.setExecutable (io/file (str (fs/path runtime "bb"))) true false)
     (copy-file! operator (fs/path runtime "operator.jar"))

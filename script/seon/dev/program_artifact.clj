@@ -13,6 +13,7 @@
 
 (def ^:private program-row-marker "SEON_PROGRAM_ROWS_EDN ")
 (def ^:private prepared-program-rows ::prepared-program-rows)
+(def ^:private prepared-program-sources ::prepared-program-sources)
 (def ^:private shadow-node-devtools-client
   'shadow.cljs.devtools.client.node)
 
@@ -302,7 +303,9 @@
 (defn ^{:shadow.build/stage :flush} publish!
   "Atomically publish deterministic program sources after a client flush."
   [state relative-path]
-  (atomic-spit! (output-file state relative-path) (artifact-text state))
+  (atomic-spit! (output-file state relative-path)
+                (or (get-in state [prepared-program-sources relative-path])
+                    (artifact-text state)))
   state)
 
 (defn ^{:shadow.build/stage :flush} publish-inventory!
@@ -313,14 +316,17 @@
 
 (defn ^{:shadow.build/stage :optimize-prepare} prepare-program-rows!
   "Prepare exact compiled boot rows before release optimization rewrites code."
-  [state _program-source-relative-path relative-path]
+  [state program-source-relative-path relative-path]
   (let [program-source-text (artifact-text state)
         prepared
         (assoc (derive-program-rows
                 state program-source-text (output-file state relative-path))
                :seon.dev.artifact/program-source-digest
                (digest program-source-text))]
-    (assoc-in state [prepared-program-rows relative-path] prepared)))
+    (-> state
+        (assoc-in [prepared-program-rows relative-path] prepared)
+        (assoc-in [prepared-program-sources program-source-relative-path]
+                  program-source-text))))
 
 (defn ^{:shadow.build/stage :flush} publish-rows!
   "Publish the exact compiled boot-program rows from the client artifact."

@@ -21,6 +21,25 @@ bb --config bb.edn --deps-root . -e \
      [:writer])
    nil'
 
+WRITER_ARTIFACT_MANIFEST=$(
+  bb --config bb.edn --deps-root . -e \
+    '(require (quote seon.dev.artifact) (quote seon.dev.config))
+     (let [config (seon.dev.config/load! (System/getProperty "user.dir"))
+           manifest (seon.dev.artifact/current-manifest config)
+           path (:seon.dev.config/artifact-manifest config)]
+       (when-not manifest
+         (throw
+          (ex-info
+           (str "Standalone writer tests require the current compiled program "
+                "artifact. Run `bin/seon up`, wait for watcher readiness, then "
+                "run `bin/seon down` and retry `bin/test-writer`.")
+           {:seon.dev.artifact/path path
+            :seon.dev.artifact/remedy
+            "bin/seon up; bin/seon down; bin/test-writer"})))
+       (print path))'
+)
+export SEON_WRITER_ARTIFACT_MANIFEST="$WRITER_ARTIFACT_MANIFEST"
+
 WRITER_TEST_LIST=$(IFS=,; echo "$*")
 
 RUNNER='(let [log-fn-var (requiring-resolve (quote taoensso.trove/*log-fn*))

@@ -9,14 +9,15 @@
 (def package-members
   {:seon.release.member/bun "runtime/bun"
    :seon.release.member/writer "runtime/writer.jar"
-   :seon.release.member/pod "runtime/pod.js"
-   :seon.release.member/execution "runtime/execution.js"
+   :seon.release.member/pod "runtime/client/main.js"
+   :seon.release.member/execution "runtime/execution/main.js"
    :seon.release.member/runtime-assets "runtime/web"
    :seon.release.member/program-source "runtime/program-sources.edn"
    :seon.release.member/program-row "runtime/program-rows.edn"
-   :seon.release.member/client-inventory "runtime/client-program-inventory.edn"
+   :seon.release.member/client-inventory
+   "runtime/client/program-inventory.edn"
    :seon.release.member/execution-inventory
-   "runtime/execution-program-inventory.edn"
+   "runtime/execution/program-inventory.edn"
    :seon.release.member/babashka "runtime/bb"
    :seon.release.member/operator "runtime/operator.jar"
    :seon.release.member/detach-helper "runtime/detach.py"
@@ -77,12 +78,12 @@
     (doseq [[path content]
             [["runtime/bun" "bun"]
              ["runtime/writer.jar" "writer"]
-             ["runtime/pod.js" "pod"]
-             ["runtime/execution.js" "execution"]
+             ["runtime/client/main.js" "pod"]
+             ["runtime/execution/main.js" "execution"]
              ["runtime/program-sources.edn" "{}"]
              ["runtime/program-rows.edn" "{}"]
-             ["runtime/client-program-inventory.edn" "{}"]
-             ["runtime/execution-program-inventory.edn" "{}"]
+             ["runtime/client/program-inventory.edn" "{}"]
+             ["runtime/execution/program-inventory.edn" "{}"]
              ["runtime/web/style.css" "css"]
              ["runtime/web/resources/public/seon-brand.css" ".brand {}"]
              ["runtime/bb" "bb"]
@@ -96,6 +97,7 @@
              ["SOURCE.edn" "{}"]
              ["sbom.cdx.json" "{}"]
              ["THIRD_PARTY_NOTICES.md" "notices"]]]
+      (fs/create-dirs (fs/parent (fs/path root path)))
       (spit (str (fs/path root path)) content))
     (spit (str (fs/path root "release.edn"))
           (pr-str (release/create-manifest (str root) package-members
@@ -372,10 +374,11 @@
                  (:seon.dev.config/bun-executable configuration)))
           (is (= (str (fs/canonicalize (fs/path root "runtime/writer.jar")))
                  (:seon.dev.config/writer-output configuration)))
-          (is (= (str (fs/canonicalize (fs/path root "runtime/pod.js")))
+          (is (= (str (fs/canonicalize
+                       (fs/path root "runtime/client/main.js")))
                  (:seon.dev.config/client-output configuration)))
           (is (= (str (fs/canonicalize
-                       (fs/path root "runtime/execution.js")))
+                       (fs/path root "runtime/execution/main.js")))
                  (:seon.dev.config/execution-output configuration)
                  (::launch/execution-output runtime)))
           (is (= (str (fs/canonicalize (fs/path root "runtime/web")))
@@ -410,7 +413,7 @@
           launch-called? (atom false)]
       (try
         (when invalid?
-          (spit (str (fs/path root "runtime/pod.js")) "changed"))
+          (spit (str (fs/path root "runtime/client/main.js")) "changed"))
         (with-redefs [launch/default-descriptor
                       (fn [& _]
                         (reset! launch-called? true)

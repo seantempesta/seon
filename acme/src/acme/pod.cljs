@@ -20,20 +20,18 @@
             [acme.context :as context]
             [clojure.string :as str]
             [seon.client :as client])
-  (:require-macros [seon.indexing :refer [public-fn-vars]]))
+  (:require-macros [seon.client.indexing :refer [public-fn-vars]]))
 
 (reset! client/!extra-core-vars
         (filterv #(str/starts-with? (str (:ns (meta %))) "acme.")
                  (public-fn-vars)))
 
-;; Lane-U: after the pod boots its agents (conn open + roster started),
-;; install acme's context blocks + canvas wiring into every live agent's own
-;; ctx scope via the seon override primitive `seon.agent.ctx/install!`. A
-;; one-shot timer because the preload runs BEFORE agents start.
-(js/setTimeout #(context/install-all!) 12000)
-
 (defn -main
   "Start the packaged ACME pod after this namespace registers its extensions."
   {:malli/schema [:=> [:cat [:* :any]] :any]}
   [& args]
+  ;; The preload registers compiled vars at namespace load. Delayed application
+  ;; belongs to the actual pod entry so build-time index derivation stays
+  ;; side-effect free and exits immediately.
+  (js/setTimeout #(context/install-all!) 12000)
   (apply client/-main args))
