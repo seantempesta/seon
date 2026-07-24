@@ -2137,15 +2137,16 @@
 
 (defn- registry-request
   ([database-name backend-kind database-path connection-id
-    connection-initializer]
+    connection-initializer create-database?]
    (registry-request database-name backend-kind database-path connection-id
-                     connection-initializer nil))
+                     connection-initializer create-database? nil))
   ([database-name backend-kind database-path connection-id
-    connection-initializer transport-connection]
+    connection-initializer create-database? transport-connection]
    (cond->
     {::registry/database-name (keyword database-name)
      ::registry/backend backend-kind
      ::registry/initial-tx protocol-native-schema
+     ::registry/create-database? create-database?
      ::registry/initialize-connection! connection-initializer}
      connection-id (assoc ::registry/connection-id connection-id)
      database-path (assoc ::registry/path database-path)
@@ -2169,6 +2170,10 @@
   ([runtime transport-connection request allow-incomplete?]
    (let [database-name (::protocol/database-name request)
         initialization (:seon.db/initialization-page request)
+        create-database?
+        (or allow-incomplete?
+            (some? initialization)
+            (not= :file (::protocol/backend request)))
         initialized-db (volatile! nil)
         entry
         (try
@@ -2179,21 +2184,33 @@
             (::protocol/database-path request)
             (::branch/connection-id request)
             (connection-initializer runtime initialization initialized-db)
+            create-database?
             transport-connection))
           (catch clojure.lang.ExceptionInfo exception
             (let [data (ex-data exception)
                   requested-branch (second (::branch/connection-id request))]
-              (if (and (not= :db requested-branch)
-                       (= :seon.db.registry.error/connection-id-conflict
-                          (:seon.error/kind data))
-                       (set? (::registry/available-branches data))
-                       (not (contains? (::registry/available-branches data)
-                                       requested-branch)))
+              (cond
+                (= :seon.db.registry.error/database-absent
+                   (:seon.error/kind data))
+                (throw
+                 (ex-info (.getMessage exception)
+                          (assoc data ::failure-kind
+                                 protocol/not-found-error)
+                          exception))
+
+                (and (not= :db requested-branch)
+                     (= :seon.db.registry.error/connection-id-conflict
+                        (:seon.error/kind data))
+                     (set? (::registry/available-branches data))
+                     (not (contains? (::registry/available-branches data)
+                                     requested-branch)))
                 (throw
                  (ex-info (.getMessage exception)
                           (assoc data ::failure-kind
                                  protocol/branch-missing-error)
                           exception))
+
+                :else
                 (throw exception)))))
         connection-id (::registry/connection-id entry)
         _ (when (and initialization

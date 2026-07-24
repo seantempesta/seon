@@ -70,6 +70,7 @@
  [:map {:closed true}
   [::transport-connections ::transport-connections]])
 (schema/register! ::ensured? :boolean)
+(schema/register! ::create-database? :boolean)
 (schema/register! ::acquired? :boolean)
 (schema/register! ::release-completion 'some?)
 (schema/register! ::drain! 'fn?)
@@ -138,6 +139,7 @@
                    [::path {:optional true} ::path]
                    [::connection-id {:optional true} ::connection-id]
                    [::initial-tx {:optional true} ::initial-tx]
+                   [::create-database? {:optional true} ::create-database?]
                    [::transport-connection {:optional true}
                     ::transport-connection]
                    [::initialize-connection! 'fn?]])
@@ -545,7 +547,8 @@
 
 (defn- open-entry!
   "Open and validate one exact Datahike connection-id."
-  [registry database-name backend-kind path connection-id initial-tx]
+  [registry database-name backend-kind path connection-id initial-tx
+   create-database?]
   (let [request (backend-request
                  {::database-name database-name
                   ::backend backend-kind
@@ -555,11 +558,21 @@
         cfg (backend/datahike-config request)
         branch (second connection-id)]
     (if (= :db branch)
-      (do
-        (when path
-          (backend/ensure-parent-dir! {::backend/path path}))
-        (when-not (d/database-exists? cfg)
-          (d/create-database cfg)))
+      (when-not (d/database-exists? cfg)
+        (if create-database?
+          (do
+            (when path
+              (backend/ensure-parent-dir! {::backend/path path}))
+            (d/create-database cfg))
+          (throw
+           (ex-info
+            "The requested Datahike database does not exist."
+            {:seon.error/kind
+             :seon.db.registry.error/database-absent
+             ::database-name database-name
+             ::connection-id connection-id
+             ::backend backend-kind
+             ::path path}))))
       (let [source (branch-source registry connection-id)]
         (when-not source
           (fail-connection-id!
@@ -622,16 +635,20 @@
    same entry.
 
    `backend` defaults to `:file`. `path` is optional; the backend adapter
-   derives a default from `database-name` when absent.
+   derives a default from `database-name` when absent. `create-database?`
+   defaults true for internal lifecycle callers; false makes a missing
+   Datahike database an error before any parent directory or store is created.
 
    `::initialize-connection!` is the writer's fixed boot-composed initializer.
    It runs exactly once for a newly opened connection, before publication. A
    failure releases the connection and is rethrown; no broken entry survives."
   {:malli/schema [:=> [:cat ::ensure-database!-request] ::ensure-database!-response]}
   [{::keys [database-name backend path connection-id initial-tx
+            create-database?
             transport-connection
             initialize-connection!]
-    :or {backend :file}}]
+    :or {backend :file
+         create-database? true}}]
   (let [request (backend-request
                  {::database-name database-name
                   ::backend backend
@@ -670,7 +687,8 @@
             (validate-route-bijection!
              registry database-name connection-id* backend backend-path)
             (let [entry (open-entry! registry database-name backend backend-path
-                                     connection-id* initial-tx)
+                                     connection-id* initial-tx
+                                     create-database?)
                   conn (::conn entry)
                   branch (second connection-id*)
                   open-intent (if (= :db branch)

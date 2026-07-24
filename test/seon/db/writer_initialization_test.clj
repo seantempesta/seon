@@ -166,6 +166,78 @@
     (transit/write (transit/writer output :json) value)
     (.size output)))
 
+(defn- delete-tree!
+  [root]
+  (when (.exists ^File root)
+    (run! (fn [^File file] (.delete file))
+          (reverse (file-seq root)))))
+
+(deftest bare-file-ensure-refuses-an-absent-store
+  (let [database-name (str "writer-existing-" (random-uuid))
+        absent-name (str "writer-absent-" (random-uuid))
+        root (File. "tmp" (str "writer-ensure-path-" (random-uuid)))
+        database-path (.getPath (File. root "existing/db"))
+        absent-path (.getPath (File. root "absent/db"))
+        socket-file (File. root "writer.sock")
+        server
+        (writer-test/start!
+         {::writer/dependencies (dependencies)
+          ::writer/database-name database-name
+          ::writer/backend :file
+          ::writer/database-path database-path
+          ::writer/request-socket-path (.getPath socket-file)})
+        runtime (::writer/runtime server)]
+    (try
+      (let [response
+            (writer/handle-request
+             runtime
+             (protocol/ensure-database-request
+              {::protocol/request-id "ensure/absent"
+               ::protocol/database-name absent-name
+               ::protocol/backend :file
+               ::protocol/database-path absent-path}))]
+        (is (false? (::protocol/success? response)) (pr-str response))
+        (is (= protocol/not-found-error (::protocol/error-kind response))
+            (pr-str response))
+        (is (not (.exists (File. absent-path)))
+            "an open-existing request cannot create a store"))
+      (finally
+        (writer/stop! server)
+        (delete-tree! root)))))
+
+(deftest bare-file-ensure-refuses-a-known-name-at-another-path
+  (let [database-name (str "writer-known-" (random-uuid))
+        root (File. "tmp" (str "writer-known-path-" (random-uuid)))
+        database-path (.getPath (File. root "existing/db"))
+        wrong-path (.getPath (File. root "wrong/db"))
+        socket-file (File. root "writer.sock")
+        server
+        (writer-test/start!
+         {::writer/dependencies (dependencies)
+          ::writer/database-name database-name
+          ::writer/backend :file
+          ::writer/database-path database-path
+          ::writer/request-socket-path (.getPath socket-file)})
+        runtime (::writer/runtime server)]
+    (try
+      (let [response
+            (writer/handle-request
+             runtime
+             (protocol/ensure-database-request
+              {::protocol/request-id "ensure/wrong-path"
+               ::protocol/database-name database-name
+               ::protocol/backend :file
+               ::protocol/database-path wrong-path}))]
+        (is (false? (::protocol/success? response)) (pr-str response))
+        (is (= :seon.db.registry.error/connection-id-conflict
+               (:seon.error/kind response))
+            (pr-str response))
+        (is (not (.exists (File. wrong-path)))
+            "a known logical name cannot create or move to another store"))
+      (finally
+        (writer/stop! server)
+        (delete-tree! root)))))
+
 (deftest ten-times-population-stays-well-below-frame-ceiling
   (let [schema-rows
         (filterv #(contains? % :seon.schema/key)
