@@ -498,7 +498,6 @@
   (async done
     (let [original-skills skills/seed-skills-tx-data
           original-reconcile state/reconcile!
-          original-host-coordinates agent/reconcile-host-coordinates!
           original-migrate ctx.admin/migrate-plan-surface-default!
           applied-request (atom nil)
           manifest (config/read-config-file "config/acme.edn")
@@ -508,7 +507,6 @@
           (fn []
             (set! skills/seed-skills-tx-data original-skills)
             (set! state/reconcile! original-reconcile)
-            (set! agent/reconcile-host-coordinates! original-host-coordinates)
             (set! ctx.admin/migrate-plan-surface-default! original-migrate)
             (done))]
       (set! skills/seed-skills-tx-data (fn [_directory] []))
@@ -520,12 +518,6 @@
                 :seon.runtime.state/changed? false
                 :seon.runtime.state/operations 0
                 :seon.runtime.state/attempts 1})))
-      (set! agent/reconcile-host-coordinates!
-            (fn [_configuration]
-              (js/Promise.resolve
-               {::agent/host-coordinate-ok? true
-                ::agent/host-coordinate-changed? false
-                ::agent/host-coordinate-operations 0})))
       (set! ctx.admin/migrate-plan-surface-default!
             (fn []
               (js/Promise.resolve
@@ -596,7 +588,6 @@
     (let [original-skills skills/seed-skills-tx-data
           original-reconcile state/reconcile!
           original-migrate ctx.admin/migrate-plan-surface-default!
-          original-host-coordinates agent/reconcile-host-coordinates!
           effects (atom [])
           reconcile-result (atom nil)
           migration-result (atom nil)
@@ -606,7 +597,6 @@
             (set! skills/seed-skills-tx-data original-skills)
             (set! state/reconcile! original-reconcile)
             (set! ctx.admin/migrate-plan-surface-default! original-migrate)
-            (set! agent/reconcile-host-coordinates! original-host-coordinates)
             (done))
           apply! (fn []
                    (#'client/reconcile-config! {} configuration))]
@@ -623,13 +613,6 @@
               (swap! effects conj :migrate)
               (swap! migration-calls inc)
               (js/Promise.resolve @migration-result)))
-      (set! agent/reconcile-host-coordinates!
-            (fn [_configuration]
-              (swap! effects conj :host-coordinates)
-              (js/Promise.resolve
-               {::agent/host-coordinate-ok? true
-                ::agent/host-coordinate-changed? false
-                ::agent/host-coordinate-operations 0})))
       (reset! reconcile-result
               {:seon.runtime.state/ok? false
                :seon.runtime.state/error "reconcile failed"
@@ -655,7 +638,7 @@
              (is (= {:seon.error/message "migration failed"
                      :seon.error/kind :core-bug}
                     failed-migration))
-             (is (= [:reconcile :host-coordinates :migrate] @effects))
+             (is (= [:reconcile :migrate] @effects))
              (reset! effects [])
              (reset! migration-result
                      {::ctx/ok? true
@@ -669,8 +652,8 @@
                      :seon.runtime.state/operations 5
                      :seon.runtime.state/attempts 1}
                     combined))
-             (is (= [:reconcile :host-coordinates :migrate] @effects)
-                 "host-coordinate and plan reconciliation follow config")))
+             (is (= [:reconcile :migrate] @effects)
+                 "plan reconciliation follows config")))
           (.catch (fn [error] (is false (str error))))
           (.finally cleanup!)))))
 
@@ -681,7 +664,6 @@
           original-db db/db
           original-execute db/execute-many
           original-transact db/transact!
-          original-host-coordinates agent/reconcile-host-coordinates!
           original-migrate ctx.admin/migrate-plan-surface-default!
           singleton {:seon.config/id config/cluster-config-id}
           database (atom {:db-name "default"
@@ -695,7 +677,6 @@
           transactions (atom [])
           acquisitions (atom [])
           migration-calls (atom 0)
-          host-calls (atom 0)
           installed {:seon.config/id
                      {:db/unique :db.unique/identity}}
           acquisition
@@ -722,7 +703,6 @@
             (set! db/db original-db)
             (set! db/execute-many original-execute)
             (set! db/transact! original-transact)
-            (set! agent/reconcile-host-coordinates! original-host-coordinates)
             (set! ctx.admin/migrate-plan-surface-default! original-migrate)
             (done))
           apply! (fn [] (#'client/reconcile-config! {} singleton))]
@@ -758,13 +738,6 @@
                   :tx-data tx-data
                   :tempids {}
                   :tx-meta {}}))))
-      (set! agent/reconcile-host-coordinates!
-            (fn [_configuration]
-              (swap! host-calls inc)
-              (js/Promise.resolve
-               {::agent/host-coordinate-ok? true
-                ::agent/host-coordinate-changed? false
-                ::agent/host-coordinate-operations 0})))
       (set! ctx.admin/migrate-plan-surface-default!
             (fn []
               (if (= 1 (swap! migration-calls inc))
@@ -795,7 +768,6 @@
                           @acquisitions))
                  "the second real reconcile acquisition sees the first commit")
              (is (every? #(= 4 (:seon.db/member-count %)) @acquisitions))
-             (is (= 2 @host-calls))
              (is (= 2 @migration-calls))))
           (.catch
            (fn [error]

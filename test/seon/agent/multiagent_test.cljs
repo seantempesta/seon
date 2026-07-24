@@ -12,7 +12,6 @@
    [seon.db.id :as db.id]
    [seon.db.protocol :as protocol]
    [seon.derive :as derive]
-   [seon.launch :as launch]
    [seon.runtime.admission :as admission]))
 
 (def database
@@ -48,37 +47,6 @@
          (doseq [[restore value] restorations]
            (restore value))
          (done)))))
-
-(deftest host-tier-policy-projects-one-coordinate-for-birth-and-reconcile
-  (let [original launch/process-launch-descriptor
-        socket-path "/tmp/seon-test-host.sock"
-        enabled (assoc configuration :seon.config.execution/host-tier? true)]
-    (set! launch/process-launch-descriptor
-          (assoc original ::launch/host-owner
-                 {::launch/eval-socket-path socket-path}))
-    (try
-      (let [off-row (last (#'agent/initial-agent-tx
-                           configuration "off-agent" nil nil nil {}))
-            on-row (last (#'agent/initial-agent-tx
-                          enabled "on-agent" nil nil nil {}))]
-        (is (not (contains? off-row
-                            :seon.execution.host/eval-socket-path)))
-        (is (= socket-path
-               (:seon.execution.host/eval-socket-path on-row)))
-        (is (= [{:seon.agent/id "existing"
-                 :seon.execution.host/eval-socket-path socket-path}]
-               (#'agent/reconcile-host-coordinate-row
-                enabled {:seon.agent/id "existing"})))
-        (is (= [[:db/retract
-                 [:seon.agent/id "existing"]
-                 :seon.execution.host/eval-socket-path
-                 socket-path]]
-               (#'agent/reconcile-host-coordinate-row
-                configuration
-                {:seon.agent/id "existing"
-                 :seon.execution.host/eval-socket-path socket-path}))))
-      (finally
-        (set! launch/process-launch-descriptor original)))))
 
 (deftest namespace-tempids-do-not-alias-existing-transaction-data
   (is (= -1 (#'agent/next-transaction-tempid [])))

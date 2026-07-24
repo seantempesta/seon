@@ -13,31 +13,20 @@
 (defn- rendered-system-text [host-tier?]
   (ctx/render-system-text host-tier? ctx/system-text-shared))
 
-(deftest system-teaching-selects-one-platform-contract
-  (let [child (rendered-system-text false)
-        host (rendered-system-text true)]
-    (testing "child tier keeps the asynchronous JavaScript contract"
-      (is (str/includes? child "platform contract: child"))
-      (is (str/includes? child "js/"))
-      (is (str/includes? child "ASYNC FORMS"))
-      (is (not (str/includes? child "java.util.Date"))))
-    (testing "host tier teaches synchronous JVM forms"
+(deftest system-teaching-selects-the-jvm-platform-contract
+  (let [host (rendered-system-text true)]
+    (testing "agent code runs behind the JVM host door"
       (is (str/includes? host "platform contract: host"))
       (is (str/includes? host "java.util.Date"))
       (is (str/includes? host "synchronous"))
       (is (not (str/includes? host "NO JVM"))))
-    (testing "both tiers carry the generated-code contract"
-      (doseq [text [child host]]
-        (is (str/includes? text "GENERATE CODE"))
-        (is (str/includes? text "LAST VERSION WINS"))))))
+    (is (str/includes? host "GENERATE CODE"))
+    (is (str/includes? host "LAST VERSION WINS"))))
 
 (deftest configured-shared-body-uses-the-same-platform-renderer
   (let [shared "; configured shared teaching"
-        child (ctx/render-system-text false shared)
         host (ctx/render-system-text true shared)]
-    (is (str/includes? child shared))
     (is (str/includes? host shared))
-    (is (str/includes? child "platform contract: child"))
     (is (str/includes? host "platform contract: host"))))
 
 (deftest development-teaching-is-platform-neutral
@@ -49,10 +38,9 @@
     (is (str/includes? plan.internal/development-teaching
                        "LAST VERSION WINS"))))
 
-(deftest prompt-render-derives-tier-from-the-acquired-fact
+(deftest prompt-render-uses-the-jvm-contract-without-a-tier-query
   (async done
     (let [original-execute-many db/execute-many
-          tier-result (atom nil)
           requests (atom [])
           database {:db-name "default" :t 42 :as-of nil :since nil
                     :history false
@@ -75,26 +63,14 @@
                  {::protocol/success? true
                   ::protocol/result
                   {:seon.config/system-text "; configured shared teaching"}}
-                 {::protocol/success? true ::protocol/result nil}
-                 {::protocol/success? true ::protocol/result @tier-result}]})))
+                 {::protocol/success? true ::protocol/result nil}]})))
       (-> (render!)
           (.then
-           (fn [child-render]
-             (is (str/includes? (:seon.ai/system-prompt child-render)
-                                "platform contract: child"))
-             (reset! tier-result "/cluster/host.sock")
-             (render!)))
-          (.then
            (fn [host-render]
-             (let [system-prompt (:seon.ai/system-prompt host-render)
-                   tier-member (get-in (first @requests) [::db/members 3])]
+             (let [system-prompt (:seon.ai/system-prompt host-render)]
                (is (str/includes? system-prompt "; configured shared teaching"))
                (is (str/includes? system-prompt "platform contract: host"))
-               (is (= ["teaching-agent"] (::protocol/arguments tier-member)))
-               (is (some #{'[?agent
-                              :seon.execution.host/eval-socket-path
-                              ?socket-path]}
-                         (tree-seq coll? seq
-                                   (::protocol/query-form tier-member)))))))
+               (is (= 3
+                      (count (::db/members (first @requests))))))))
           (.catch (fn [error] (is false (str error))))
           (.finally restore!)))))
