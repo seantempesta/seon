@@ -1104,6 +1104,10 @@ MORNING ITEMS (accumulating):
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- QUERYCACHE FIXED+ARCHIVED (caf52685 fork + 108d6dfc1, 210/1,347
+  green): cache keys retain normalized identities only; 117 open.
+  MORNING ITEM added: push fork commit caf52685 to
+  seantempesta/datahike. TREE CLEAN — SETTLE RERUN LAUNCHED.
 - OWNER TO SLEEP (2026-07-23 ~23:20; final directive: proactive
   audits + solutions, spend Sol freely, maximize the night). THREE
   read-only audits live: containment-surface (break-8 class — the
