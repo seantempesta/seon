@@ -627,7 +627,11 @@
 
 (deftest owner-close-stops-transaction-recovery-during-reconnect
   (async done
-    (-> (with-recording-authority
+    (let [reconnect-started-resolve (atom nil)
+          reconnect-started
+          (js/Promise. (fn [resolve]
+                         (reset! reconnect-started-resolve resolve)))]
+      (-> (with-recording-authority
           {}
           (fn [{::keys [requests connection-options connect-count connected?]}]
             (-> (open!)
@@ -636,6 +640,7 @@
                    (set! uds/connect!
                          (fn [_options]
                            (swap! connect-count inc)
+                           (@reconnect-started-resolve true)
                            (js/Promise.
                             (fn [_resolve reject]
                               (js/setTimeout
@@ -661,19 +666,20 @@
                                   :seon.db.transport.uds.failure/closed})))
                              (js/Promise.resolve (response-for message {})))))
                    (let [result (db/transact! [{:db/ident :example/id}])]
-                     (js/setTimeout db/close-session! 5)
-                     result)))
+                     (-> reconnect-started
+                         (.then (fn [_] (db/close-session!)))
+                         (.then (fn [_] result))))))
                 (.then
                  (fn [result]
                    (is (string? (:seon.error/message result)))
                    (is (= 2 @connect-count)
                        "owner close prevents another reconnect attempt"))))))
         (.then (fn [_] (done)))
-        (.catch
-         (fn [error]
-           (is false (str "owner-close recovery failed: " error
-                          "\n" (.-stack error)))
-           (done))))))
+          (.catch
+           (fn [error]
+             (is false (str "owner-close recovery failed: " error
+                            "\n" (.-stack error)))
+             (done)))))))
 
 (deftest latest-database-value-is-a-monotonic-session-cache
   (async done

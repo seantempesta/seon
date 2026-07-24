@@ -1254,6 +1254,13 @@ the variable-weight values they select.
   an allowlist that conceals the real ownership. Rename the mechanism in
   place, update every consumer, and delete the misleading legacy namespace
   (`seon.agent.web.core`).
+- **Reconnect tests synchronize on the attempted connection, not a timer.**
+  Scheduling owner close after an arbitrary few milliseconds can race ahead
+  of the retry backoff and assert that a reconnect occurred before the code
+  was allowed to attempt one. Resolve a test latch from the replacement
+  `connect!`, close the session only after that latch fires, and keep the
+  connection Promise pending long enough to prove owner close stops recovery
+  during the attempt (`test/seon/db_remote_contract_test.cljs`).
 
 ## Computed cold-boot schema population scar (2026-07-23)
 
