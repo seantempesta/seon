@@ -1180,3 +1180,18 @@ projection. Include both in its fingerprint and in fingerprint-guarded reuse;
 patching them onto a reused projection afterward makes cold and reused
 classification observably different. A corpus source row decides before
 artifact membership, and absent evidence fails closed as agent-authored.
+
+## Page variable-weight read expansion, not only identity enumeration
+
+An index cursor can bound and deterministically order identity datoms while
+the query that expands one identity page into source and contract rows remains
+unbounded. Variable-length source made a 32-identity expansion exceed the
+database result-weight breaker even though enumeration itself was paged.
+
+Keep the breaker unchanged and page the expansion at its minimum exact unit:
+one canonical identity row per query. Acquire one immutable database value
+before enumeration and pass that same value through every stable cursor and
+expansion request, so concurrent commits cannot tear the result. Corpus growth
+then increases the number of bounded reads rather than any read's payload.
+This is the read-side sibling of paged initialization: page both the keys and
+the variable-weight values they select.

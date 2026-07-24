@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 tags: [issue, database, runtime, flow]
 severity: blocker
 ---
@@ -43,3 +43,26 @@ path.
 - A fresh current-corpus boot completes committed-program acquisition without
   weakening the global database read ceiling or adding an unbounded read.
 - The isolated operator reaches pod readiness and is shut down cleanly.
+
+## Resolution
+
+Resolved by `7a1c5de68`. Committed-program acquisition still enumerates
+identities in deterministic AEVT cursor pages, but expands each identity into
+its variable-weight canonical row with one bounded database query. Every
+request uses the same immutable database value and retains the 60,000
+result-weight breaker, so corpus growth creates more bounded requests rather
+than a larger payload.
+
+The recurring CLJS regression acquires 40 synthetic functions whose aggregate
+source weight exceeds 80,000, and proves that each expansion request contains
+one identity, retains the breaker, and receives the identical database value.
+`seon.runtime.admission-test` passed 25 tests and 141 assertions; the writer
+initialization fixture passed 12 tests and 77 assertions.
+
+The fresh isolated `acqpage` reset reached pod and web-render readiness in 294
+seconds. The pod acquired 927 schema identities and 2,948 function identities,
+then reported `auto-boot ready`; the operator reset exited zero and
+`bin/seon down` cleanly stopped every supervised process. Evidence is retained
+in `tmp/orchestrator/acqpage-gate.log`,
+`logs/acqpage/pod/f3d0ad3c-17c1-49f6-b37c-a68891943e06.log`, and
+`tmp/orchestrator/acqpage-down.log`.
