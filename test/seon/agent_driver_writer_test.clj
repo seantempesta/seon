@@ -301,6 +301,18 @@
            :seon.agent.turn/phase :reply-ready}]
          candidates)
         database (context/resolve-head! *writer-session*)
+        tier-inventory
+        {:seon.execution.inventory/tier :jvm
+         :seon.execution.inventory/bindings #{}
+         :seon.execution.inventory/remote-bindings #{}
+         :seon.execution.inventory/pure-bindings #{}
+         :seon.execution.inventory/digest "no-roots-jvm"}
+        host
+        {:seon.execution/artifact-inventories
+         {:seon.execution.inventory/availability :available
+          :seon.execution.inventory/exports-by-tier {:jvm #{}}
+          :seon.execution.inventory/digest "no-roots-artifacts"}
+         :seon.host/base {::context/tier-inventory tier-inventory}}
         claim
         {:seon.db/db database
          :seon.agent.run/claim-epoch 2
@@ -309,7 +321,6 @@
           :seon.agent.run/id run-id
           :seon.agent.run/current-turn
           {:seon.agent.turn/id turn-id}}}
-        planned? (atom false)
         forbidden (fn [& _] (throw (ex-info "eval dispatch was not expected" {})))
         result
         (binding [db/*leaf* (database-leaf)]
@@ -321,19 +332,22 @@
                   :seon.repl/narration content}]
                 :seon.repl/errors []
                 :seon.agent.driver/reply-content content})
-             #'driver.host/parsed-reply-plan
+             #'driver.host/ensure-context! (constantly ::retained)
+             #'host.eval/agent-home-ns (constantly 'my.agent)
+             #'host.eval/namespace-resolution
              (fn [& _]
-               (reset! planned? true)
-               {:seon.execution/plan
-                {:seon.execution/placement :unplannable
-                 :seon.execution/unresolved
-                 [{:seon.execution/reason :no-roots}]}
-                :seon.agent.driver/disposition
-                {:seon.agent.driver/disposition :no-dispatch}})
+               {::edge/namespace 'my.agent
+                ::edge/aliases {}
+                ::edge/refers {}
+                ::edge/current-vars #{}
+                ::edge/core-vars #{}
+                ::edge/known-namespaces #{'my.agent}
+                ::edge/macro-symbols #{}
+                ::edge/effects {}})
              #'driver.host/invocation-configuration! forbidden
              #'driver.host/run-eval-batch! forbidden}
             (fn []
-              (#'driver.host/eval-step! {} nil claim))))
+              (#'driver.host/eval-step! host nil claim))))
         published
         (binding [db/*leaf* (database-leaf)]
           (db/transact!
@@ -365,7 +379,6 @@
               [?user :seon.user/id ?user-id]]
             ::db/args [content]}))]
     (is (true? (::protocol/success? seeded)) (pr-str seeded))
-    (is (true? @planned?) "the disposition comes from the planner path")
     (is (= :no-dispatch (:seon.agent.driver/disposition result)))
     (is (= {:seon.agent.turn/status :done
             :seon.agent.turn/phase :published}
