@@ -1140,6 +1140,21 @@ MORNING ITEMS (accumulating):
   (settleclose 1a47c1062 + 5cc3b32e1: break-8 fixture class swept
   suite-wide, program-source digest selection fixed). A REAL
   MILESTONE — but NOT graduation: the goal's bar is PROVABLY ALIVE.
+- ★ LIVE PROOF VERDICT: NOT-YET-ALIVE, ROOT-CAUSED (2026-07-24).
+  Web: the JVM /data tier MORPHS correctly on transact (SSE datastar
+  ALIVE, marker at basis 536871707) — but 5 web bugs filed: agent/
+  root feeds show 'execution child did not become ready' (B1/U9
+  child-render path), no gzip, JVM static assets 404, no coalescing
+  (21 tx→22 frames), pod drained mid-run. Drive: the agent could NOT
+  complete a turn — TWO-LINK CHAIN: (1) render-prompt's :malli/schema
+  still requires RETIRED :seon.config/repl-mode (turn.cljs:351, a
+  BN-5 reply-policy straggler) → every turn faults on output
+  validation; (2) that fault DESYNCS the wire frame ('on.e' read as
+  a length) → pod :crash — the C1 codec class made concrete. FIXES:
+  replmode lane (contract, unblocks turns) + framedesync lane
+  (atomic frame write / catch-before-write, or STOP for owner's C1
+  decision). After both: rebuild+restart+RE-DRIVE. Graduation still
+  NOT claimed — the goal's bar is an agent completing real work.
 - ★ LIVE PROOFS RUNNING (2026-07-24, cluster verified ready, root
   / = HTTP 200): livedrive (DeepSeek multi-turn agent with cross-turn
   db memory — the provably-alive test) + webverify (runbook:
