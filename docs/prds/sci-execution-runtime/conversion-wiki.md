@@ -284,6 +284,17 @@ the anchor stays the state ledger.
 
 ## Process/operator
 
+- **Retiring a Shadow build requires deleting its whole operator projection,
+  not only `shadow-cljs.edn`.** Remove the child build id, output, inventory,
+  runtime-closure digest, release members, launch fields, and watcher readiness
+  expectation together. The surviving `:seon.dev.artifact/execution-digest`
+  remains intentionally: it is the exact `client-output` entry-file digest
+  consumed by the S4 start gate and host-session admission, distinct from the
+  complete client-closure digest and application digest. Its name is now
+  historically confusing but was retained for an explicit owner-taste rename
+  decision (`script/seon/dev/{config,artifact,process,release}.clj`,
+  `src/seon/launch.cljc`).
+
 - **Lifecycle membership is a graph projection, never a hand list.** The
   fourth stale member list found on 2026-07-23 omitted web-render from
   shutdown while still reporting success. Derive membership, dependencies,

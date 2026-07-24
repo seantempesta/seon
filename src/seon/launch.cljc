@@ -23,8 +23,6 @@
 (schema/register! ::artifact-flavor
                   :qualified-keyword)
 (schema/register! ::client-build-id [:string {:min 1}])
-(schema/register! ::execution-build-id [:string {:min 1}])
-(schema/register! ::execution-output ::path)
 (schema/register! ::execution-digest [:re "^[0-9a-f]{64}$"])
 (schema/register! ::application-digest [:re "^[0-9a-f]{64}$"])
 (schema/register! ::cluster-dir ::path)
@@ -80,8 +78,6 @@
   [::runtime-cluster ::runtime-cluster]
   [::artifact-flavor ::artifact-flavor]
   [::client-build-id ::client-build-id]
-  [::execution-build-id {:optional true} ::execution-build-id]
-  [::execution-output {:optional true} ::execution-output]
   [::execution-digest {:optional true} ::execution-digest]
   [::application-digest {:optional true} ::application-digest]
   [:seon.client/launch-capability :seon.client/launch-capability]])
@@ -174,8 +170,6 @@
   [::cluster-dir ::cluster-dir]
   [::artifact-flavor ::artifact-flavor]
   [::client-build-id ::client-build-id]
-  [::execution-build-id {:optional true} ::execution-build-id]
-  [::execution-output {:optional true} ::execution-output]
   [::request-socket-path ::request-socket-path]
   [::eval-socket-path {:optional true} ::eval-socket-path]
   [::writer-repl-port-file ::writer-repl-port-file]
@@ -304,8 +298,8 @@
 (defn default-descriptor
   "Derive one ordinary autonomous-cluster launch descriptor."
   {:malli/schema [:=> [:cat ::default-descriptor-request] ::descriptor]}
-  [{::keys [cluster-dir artifact-flavor client-build-id execution-build-id
-            execution-output request-socket-path eval-socket-path
+  [{::keys [cluster-dir artifact-flavor client-build-id
+            request-socket-path eval-socket-path
             writer-repl-port-file writer-process-dir process-dir log-dir
             http-port http-port-file]}]
   (let [cluster-dir (normalize-path cluster-dir)
@@ -315,13 +309,10 @@
                 {::cluster-dir cluster-dir})
     (validate-descriptor
       {::runtime
-      (cond->
-       {::runtime-cluster cluster
-        ::artifact-flavor artifact-flavor
-        ::client-build-id client-build-id
-        :seon.client/launch-capability {:seon.client/autonomous? true}}
-        execution-build-id (assoc ::execution-build-id execution-build-id)
-        execution-output (assoc ::execution-output execution-output))
+      {::runtime-cluster cluster
+       ::artifact-flavor artifact-flavor
+       ::client-build-id client-build-id
+       :seon.client/launch-capability {:seon.client/autonomous? true}}
       ::database
       {::protocol/database-name cluster
        ::protocol/backend :file
@@ -377,8 +368,6 @@
  ::with-execution-artifact-request
  [:map {:closed true}
   [::descriptor ::descriptor]
-  [::execution-build-id ::execution-build-id]
-  [::execution-output ::execution-output]
   [::execution-digest ::execution-digest]
   [::application-digest ::application-digest]])
 
@@ -387,19 +376,12 @@
   {:malli/schema
    [:=> [:cat ::with-execution-artifact-request] ::descriptor]}
   [{descriptor ::descriptor
-    execution-build-id ::execution-build-id
-    execution-output ::execution-output
     execution-digest ::execution-digest
     application-digest ::application-digest}]
   (let [runtime (::runtime descriptor)]
-    (invariant! (= execution-build-id (::execution-build-id runtime))
-                "The execution build does not match the launch flavor."
-                {::execution-build-id execution-build-id
-                 ::runtime runtime})
     (validate-descriptor
      (assoc descriptor ::runtime
             (assoc runtime
-                   ::execution-output (normalize-path execution-output)
                    ::execution-digest execution-digest
                    ::application-digest application-digest)))))
 
@@ -450,15 +432,10 @@
                  ::source-paths source-bases})
     (validate-descriptor
      {::runtime
-      (cond->
-       {::runtime-cluster runtime-cluster
-        ::artifact-flavor (::artifact-flavor source-runtime)
-        ::client-build-id (::client-build-id source-runtime)
-        :seon.client/launch-capability {:seon.client/autonomous? false}}
-        (::execution-build-id source-runtime)
-        (assoc ::execution-build-id (::execution-build-id source-runtime))
-        (::execution-output source-runtime)
-        (assoc ::execution-output (::execution-output source-runtime)))
+      {::runtime-cluster runtime-cluster
+       ::artifact-flavor (::artifact-flavor source-runtime)
+       ::client-build-id (::client-build-id source-runtime)
+       :seon.client/launch-capability {:seon.client/autonomous? false}}
       ::database
       {::protocol/database-name target-database-name
        ::branch/connection-id target-connection-id
@@ -523,15 +500,10 @@
                  ::source-paths source-private})
     (validate-descriptor
      {::runtime
-      (cond->
-       {::runtime-cluster runtime-cluster
-        ::artifact-flavor (::artifact-flavor source-runtime)
-        ::client-build-id (::client-build-id source-runtime)
-        :seon.client/launch-capability {:seon.client/autonomous? true}}
-        (::execution-build-id source-runtime)
-        (assoc ::execution-build-id (::execution-build-id source-runtime))
-        (::execution-output source-runtime)
-        (assoc ::execution-output (::execution-output source-runtime)))
+      {::runtime-cluster runtime-cluster
+       ::artifact-flavor (::artifact-flavor source-runtime)
+       ::client-build-id (::client-build-id source-runtime)
+       :seon.client/launch-capability {:seon.client/autonomous? true}}
       ::database
       {::protocol/database-name target-database-name
        ::protocol/backend (::protocol/backend source-database)
@@ -581,8 +553,6 @@
            ::artifact-flavor artifact-flavor
            ::client-build-id
            (or (platform/env-val "SEON_CLIENT_BUILD_ID") "client")
-           ::execution-build-id
-           (or (platform/env-val "SEON_EXECUTION_BUILD_ID") "execution")
            ::request-socket-path
            (or (platform/env-val "SEON_DB_SOCK")
                (platform/env-val "SEON_REQ_SOCK")

@@ -34,10 +34,8 @@
     :qualified-keyword]
    [:seon.dev.config/test-build? :boolean]
    [:seon.dev.config/client-build-id :string]
-   [:seon.dev.config/execution-build-id :string]
    [:seon.dev.config/shadow-cache-root :string]
    [:seon.dev.config/client-output :string]
-   [:seon.dev.config/execution-output :string]
    [:seon.dev.config/writer-output :string]
    [:seon.dev.config/bun-executable {:optional true} :string]
    [:seon.dev.config/runtime-assets {:optional true} :string]
@@ -119,14 +117,10 @@
               {:seon.dev.config/launch-descriptor descriptor})))
   (let [configured
         [(:seon.dev.config/artifact-flavor configuration)
-         (:seon.dev.config/client-build-id configuration)
-         (:seon.dev.config/execution-build-id configuration)
-         (:seon.dev.config/execution-output configuration)]
+         (:seon.dev.config/client-build-id configuration)]
         selected
         [(get-in descriptor [::launch/runtime ::launch/artifact-flavor])
-         (get-in descriptor [::launch/runtime ::launch/client-build-id])
-         (get-in descriptor [::launch/runtime ::launch/execution-build-id])
-         (get-in descriptor [::launch/runtime ::launch/execution-output])]]
+         (get-in descriptor [::launch/runtime ::launch/client-build-id])]]
     (when-not (= configured selected)
       (throw
        (ex-info "The launch descriptor selects another artifact."
@@ -316,20 +310,16 @@
    [:seon.dev.config/artifact-flavor :qualified-keyword]
    [:seon.dev.config/test-build? :boolean]
    [:seon.dev.config/client-build-id :string]
-   [:seon.dev.config/execution-build-id :string]
    [:seon.dev.config/shadow-cache-root :string]
    [:seon.dev.config/client-output :string]
-   [:seon.dev.config/execution-output :string]
    [:seon.dev.config/artifact-manifest-name :string]])
 
 (def ^:private default-artifact
   {:seon.dev.config/artifact-flavor :seon.dev.artifact.flavor/default
    :seon.dev.config/test-build? true
    :seon.dev.config/client-build-id "client"
-   :seon.dev.config/execution-build-id "execution"
    :seon.dev.config/shadow-cache-root ".shadow-cljs"
    :seon.dev.config/client-output "out/client/main.js"
-   :seon.dev.config/execution-output "out/execution/main.js"
    :seon.dev.config/artifact-manifest-name "artifact.edn"})
 
 (defn- root-path [root path]
@@ -365,8 +355,6 @@
                        :seon.dev.config/explanation
                        (m/explain artifact-configuration-schema target)})))
         expected-output (root-path root (:seon.dev.config/client-output target))
-        expected-execution-output
-        (root-path root (:seon.dev.config/execution-output target))
         configured-output (some->> (get environment "SEON_CLIENT_OUT")
                                    (root-path root))]
     (when (and configured-output (not= expected-output configured-output))
@@ -378,9 +366,7 @@
                   :seon.dev.config/configured-client-output configured-output})))
     (-> target
         (update :seon.dev.config/shadow-cache-root #(root-path root %))
-        (assoc :seon.dev.config/client-output expected-output
-               :seon.dev.config/execution-output
-               expected-execution-output))))
+        (assoc :seon.dev.config/client-output expected-output))))
 
 (defn shadow-environment
   "Select the artifact flavor's Shadow server cache before JVM startup."
@@ -489,12 +475,9 @@
        :seon.dev.artifact.flavor/default
        :seon.dev.config/test-build? false
        :seon.dev.config/client-build-id "client"
-       :seon.dev.config/execution-build-id "execution"
        :seon.dev.config/shadow-cache-root root
        :seon.dev.config/client-output
        (member-path :seon.dev.release/pod-member)
-       :seon.dev.config/execution-output
-       (member-path :seon.dev.release/execution-member)
        :seon.dev.config/writer-output
        (member-path :seon.dev.release/writer-member)
        :seon.dev.config/bun-executable
@@ -534,10 +517,8 @@
                                 [:seon.dev.config/artifact-flavor
                                  :seon.dev.config/test-build?
                                  :seon.dev.config/client-build-id
-                                 :seon.dev.config/execution-build-id
                                  :seon.dev.config/shadow-cache-root
-                                 :seon.dev.config/client-output
-                                 :seon.dev.config/execution-output]))
+                                 :seon.dev.config/client-output]))
         environment (if source-checkout?
                       (shadow-environment environment artifact)
                       environment)
@@ -595,10 +576,6 @@
           (:seon.dev.config/artifact-flavor artifact)
           ::launch/client-build-id
           (:seon.dev.config/client-build-id artifact)
-          ::launch/execution-build-id
-          (:seon.dev.config/execution-build-id artifact)
-          ::launch/execution-output
-          (:seon.dev.config/execution-output artifact)
           ::launch/request-socket-path req-sock
           ::launch/writer-repl-port-file writer-port-file
           ::launch/writer-process-dir writer-proc-dir

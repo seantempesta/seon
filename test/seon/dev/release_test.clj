@@ -18,7 +18,7 @@
 
 (defn- fixture! []
   (let [root (fs/create-temp-dir {:prefix "seon-release-test-"})]
-    (doseq [directory ["web/nested" "client" "execution"]]
+    (doseq [directory ["web/nested" "client"]]
       (fs/create-dirs (fs/path root directory)))
     (spit (str (fs/path root "bun")) "bun")
     (spit (str (fs/path root "writer.jar")) "writer")
@@ -27,9 +27,7 @@
     (spit (str (fs/path root "base-projection.edn")) "{}")
     (spit (str (fs/path root "page-plan.edn")) "{}")
     (spit (str (fs/path root "client/main.js")) "pod")
-    (spit (str (fs/path root "execution/main.js")) "execution")
     (spit (str (fs/path root "client/program-inventory.edn")) "{}")
-    (spit (str (fs/path root "execution/program-inventory.edn")) "{}")
     (spit (str (fs/path root "bb")) "bb")
     (spit (str (fs/path root "operator.jar")) "operator")
     (spit (str (fs/path root "detach.py")) "detach")
@@ -48,14 +46,12 @@
   {:seon.release.member/bun "bun"
    :seon.release.member/writer "writer.jar"
    :seon.release.member/pod "client/main.js"
-   :seon.release.member/execution "execution/main.js"
    :seon.release.member/runtime-assets "web"
    :seon.release.member/program-source "program-sources.edn"
    :seon.release.member/program-row "program-rows.edn"
    :seon.release.member/base-projection "base-projection.edn"
    :seon.release.member/page-plan "page-plan.edn"
    :seon.release.member/client-inventory "client/program-inventory.edn"
-   :seon.release.member/execution-inventory "execution/program-inventory.edn"
    :seon.release.member/babashka "bb"
    :seon.release.member/operator "operator.jar"
    :seon.release.member/detach-helper "detach.py"
@@ -80,11 +76,9 @@
    :seon.dev.release/babashka-asset-sha-256
    "5bc992f39692b707403fc322e860fc82017da7de4a84a32267abb4d50a0c5f9d"
    :seon.dev.release/database-protocol-version 13
-   :seon.dev.release/execution-protocol-version 3
    :seon.dev.release/bun-member :seon.release.member/bun
    :seon.dev.release/writer-member :seon.release.member/writer
    :seon.dev.release/pod-member :seon.release.member/pod
-   :seon.dev.release/execution-member :seon.release.member/execution
    :seon.dev.release/runtime-assets-member :seon.release.member/runtime-assets
    :seon.dev.release/program-source-member :seon.release.member/program-source
    :seon.dev.release/program-row-member :seon.release.member/program-row
@@ -93,8 +87,6 @@
    :seon.dev.release/page-plan-member :seon.release.member/page-plan
    :seon.dev.release/client-inventory-member
    :seon.release.member/client-inventory
-   :seon.dev.release/execution-inventory-member
-   :seon.release.member/execution-inventory
    :seon.dev.release/babashka-member :seon.release.member/babashka
    :seon.dev.release/operator-member :seon.release.member/operator
    :seon.dev.release/detach-helper-member :seon.release.member/detach-helper
@@ -239,13 +231,11 @@
         (fs/create-dirs (fs/path inputs directory)))
       (doseq [[path content]
               [["bun" "bun"] ["writer.jar" "writer"] ["pod.js" "pod"]
-               ["execution.js" "execution"]
                ["program-sources.edn" "{}"]
                ["program-rows.edn" "{}"]
                ["base-projection.edn" "{}"]
                ["page-plan.edn" "{}"]
                ["client-program-inventory.edn" "{}"]
-               ["execution-program-inventory.edn" "{}"]
                ["bb" "bb"] ["operator.jar" "operator"]
                ["detach.py" "detach"]
                ["seon" "launcher"] ["config/system.edn" "{}"]
@@ -271,7 +261,6 @@
               ::release/bun-version "1.4.0"
               ::release/writer (str (fs/path inputs "writer.jar"))
               ::release/pod (str (fs/path inputs "pod.js"))
-              ::release/execution (str (fs/path inputs "execution.js"))
               ::release/bootstrap (str (fs/path inputs "bootstrap"))
               ::release/public-assets (str (fs/path inputs "public"))
               ::release/program-source
@@ -284,8 +273,6 @@
               (str (fs/path inputs "page-plan.edn"))
               ::release/client-inventory
               (str (fs/path inputs "client-program-inventory.edn"))
-              ::release/execution-inventory
-              (str (fs/path inputs "execution-program-inventory.edn"))
               ::release/babashka (str (fs/path inputs "bb"))
               ::release/babashka-asset
               {:seon.dev.release/asset

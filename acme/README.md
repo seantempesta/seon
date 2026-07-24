@@ -20,7 +20,6 @@ the place we iterate on the "consume Seon without forking it" story.
   load-time registration it delegates to `seon.client/-main`. Development uses
   it as a preload, while production uses it as the real Shadow entrypoint, so
   downstream code cannot be removed as unreachable.
-- **Execution entry** — `SEON_EXTRA_EXECUTION_MAIN=acme.execution/-main`
   keeps the same downstream functions reachable in each optimized isolated
   execution child without pulling the pod and web startup graph into it.
 - **Live canvas via SCI (BUG A)** — `acme.widget/dash` is a correctly

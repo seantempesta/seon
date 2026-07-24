@@ -170,10 +170,6 @@
      (:seon.dev.config/artifact-flavor target)
      ::launch/client-build-id
      (:seon.dev.config/client-build-id target)
-     ::launch/execution-build-id
-     (:seon.dev.config/execution-build-id target)
-     ::launch/execution-output
-     (:seon.dev.config/execution-output target)
      ::launch/request-socket-path
      (:seon.dev.config/request-socket target)
      ::launch/eval-socket-path
@@ -190,7 +186,6 @@
   (with-default-launch-descriptor
     (merge configuration
                {:seon.dev.config/client-build-id "client"
-                :seon.dev.config/execution-build-id "execution"
                 :seon.dev.config/test-build? true
                 :seon.dev.config/artifact-flavor
                 :seon.dev.artifact.flavor/default
@@ -199,8 +194,6 @@
                 (str (fs/path directory "shadow"))
                 :seon.dev.config/client-output
                 (str (fs/path directory "client.js"))
-                :seon.dev.config/execution-output
-                (str (fs/path directory "execution.js"))
                 :seon.dev.config/writer-output
                 (str (fs/path directory "writer.jar"))
                 :seon.dev.config/artifact-manifest
@@ -484,16 +477,13 @@
    (artifact/bun-identity! {})
    {:seon.dev.artifact/flavor :seon.dev.artifact.flavor/default
    :seon.dev.artifact/client-build-id "client"
-   :seon.dev.artifact/execution-build-id "execution"
    :seon.dev.artifact/client-digest (apply str (repeat 64 "c"))
    :seon.dev.artifact/execution-digest (apply str (repeat 64 "e"))
    :seon.dev.artifact/writer-digest "writer"
-    :seon.dev.artifact/application-digest "application"}))
+    :seon.dev.artifact/application-digest (apply str (repeat 64 "a"))}))
 
-(defn- target-manifest-for [configuration]
-  (assoc target-manifest
-         :seon.dev.artifact/execution-output
-         (:seon.dev.config/execution-output configuration)))
+(defn- target-manifest-for [_configuration]
+  target-manifest)
 
 (def package-identity
   {:seon.dev.release/bun-version "1.4.0"
@@ -507,11 +497,9 @@
    :seon.dev.release/babashka-asset-sha-256
    "5bc992f39692b707403fc322e860fc82017da7de4a84a32267abb4d50a0c5f9d"
    :seon.dev.release/database-protocol-version 13
-   :seon.dev.release/execution-protocol-version 3
    :seon.dev.release/bun-member :seon.release.member/bun
    :seon.dev.release/writer-member :seon.release.member/writer
    :seon.dev.release/pod-member :seon.release.member/pod
-   :seon.dev.release/execution-member :seon.release.member/execution
    :seon.dev.release/runtime-assets-member :seon.release.member/runtime-assets
    :seon.dev.release/program-source-member :seon.release.member/program-source
    :seon.dev.release/program-row-member :seon.release.member/program-row
@@ -520,8 +508,6 @@
    :seon.dev.release/page-plan-member :seon.release.member/page-plan
    :seon.dev.release/client-inventory-member
    :seon.release.member/client-inventory
-   :seon.dev.release/execution-inventory-member
-   :seon.release.member/execution-inventory
    :seon.dev.release/babashka-member :seon.release.member/babashka
    :seon.dev.release/operator-member :seon.release.member/operator
    :seon.dev.release/detach-helper-member :seon.release.member/detach-helper
@@ -540,7 +526,6 @@
   {:seon.release.member/bun "runtime/bun"
    :seon.release.member/writer "runtime/writer.jar"
    :seon.release.member/pod "runtime/client/main.js"
-   :seon.release.member/execution "runtime/execution/main.js"
    :seon.release.member/runtime-assets "runtime/web"
    :seon.release.member/program-source "runtime/program-sources.edn"
    :seon.release.member/program-row "runtime/program-rows.edn"
@@ -548,8 +533,6 @@
    :seon.release.member/page-plan "runtime/page-plan.edn"
    :seon.release.member/client-inventory
    "runtime/client/program-inventory.edn"
-   :seon.release.member/execution-inventory
-   "runtime/execution/program-inventory.edn"
    :seon.release.member/babashka "runtime/bb"
    :seon.release.member/operator "runtime/operator.jar"
    :seon.release.member/detach-helper "runtime/detach.py"
@@ -584,8 +567,6 @@
                      :seon.dev.config/source-checkout? false
                      :seon.dev.config/client-output
                      (str (get paths :seon.release.member/pod))
-                     :seon.dev.config/execution-output
-                     (str (get paths :seon.release.member/execution))
                      :seon.dev.config/writer-output
                      (str (get paths :seon.release.member/writer))
                      :seon.dev.config/bun-executable
@@ -1047,7 +1028,6 @@
        (str "import time\n"
             "time.sleep(" (delay process/watcher-id) ")\n"
             "print('[:client] Build completed.',flush=True)\n"
-            "print('[:execution] Build completed.',flush=True)\n"
             "print('[:test] Build completed.',flush=True)\n"
             "time.sleep(300)\n")]
       :seon.dev.process/environment (into {} (System/getenv))
@@ -2785,7 +2765,6 @@
         configuration
         (assoc configuration
                :seon.dev.config/client-build-id "client"
-               :seon.dev.config/execution-build-id "execution"
                :seon.dev.config/test-build? true
                :seon.dev.config/artifact-flavor
                :seon.dev.artifact.flavor/default)
@@ -2803,8 +2782,6 @@
     (try
       (spit (str log) (str "[:client] Compiling ...\n"
                            "[:client] Build completed.\n"
-                           "[:execution] Compiling ...\n"
-                           "[:execution] Build completed.\n"
                            "[:test] Compiling ...\n"
                            "[:test] Build completed.\n"))
       (is (process/ready? configuration spec record))
@@ -2819,12 +2796,6 @@
       (spit (str log) "[:test] Build failure:\n" :append true)
       (is (not (process/ready? configuration spec record)))
       (spit (str log) "[:test] Build completed.\n" :append true)
-      (is (process/ready? configuration spec record))
-      (spit (str log) "[:execution] Compiling ...\n" :append true)
-      (is (not (process/ready? configuration spec record)))
-      (spit (str log) "[:execution] Build failure:\n" :append true)
-      (is (not (process/ready? configuration spec record)))
-      (spit (str log) "[:execution] Build completed.\n" :append true)
       (is (process/ready? configuration spec record))
       (finally (fs/delete-tree (:seon.dev.test/directory configuration))))))
 
@@ -2889,7 +2860,6 @@
         configuration
         (assoc configuration
                :seon.dev.config/client-build-id "acme-client"
-               :seon.dev.config/execution-build-id "acme-execution"
                :seon.dev.config/artifact-flavor
                :seon.dev.artifact.flavor/acme
                :seon.dev.config/test-build? false)
@@ -2905,8 +2875,7 @@
         spec {:seon.dev.process/id process/watcher-id
               :seon.dev.process/readiness :seon.dev.process.readiness/watcher}]
     (try
-      (spit (str log) (str "[:acme-client] Build completed.\n"
-                           "[:acme-execution] Build completed.\n"))
+      (spit (str log) "[:acme-client] Build completed.\n")
       (is (process/ready? configuration spec record))
       (spit (str log) "[:test] Compiling ...\n" :append true)
       (is (process/ready? configuration spec record)
@@ -2919,18 +2888,15 @@
   (let [configuration (test-config)
         directory (:seon.dev.test/directory configuration)
         output (fs/path directory "out-acme/client/main.js")
-        execution-output (fs/path directory "out-acme/execution/main.js")
         runtime (fs/path directory
                          "shadow-acme/builds/acme-client/dev/out/cljs-runtime/a.js")
         configuration
         (assoc configuration
                :seon.dev.config/client-build-id "acme-client"
-               :seon.dev.config/execution-build-id "acme-execution"
                :seon.dev.config/artifact-flavor
                :seon.dev.artifact.flavor/acme
                :seon.dev.config/test-build? false
                :seon.dev.config/client-output (str output)
-               :seon.dev.config/execution-output (str execution-output)
                :seon.dev.config/shadow-cache-root
                (str (fs/path directory "shadow-acme")))
         log (fs/path directory "watcher.log")
@@ -2944,22 +2910,16 @@
                  :seon.dev.process/log (str log)})]
     (try
       (fs/create-dirs (fs/parent output))
-      (fs/create-dirs (fs/parent execution-output))
       (fs/create-dirs (fs/parent runtime))
       (spit (str output) "main-a")
-      (spit (str execution-output) "execution-a")
       (spit (str runtime) "runtime-a")
-      (spit (str log) (str "[:acme-client] Build completed.\n"
-                           "[:acme-execution] Build completed.\n"))
+      (spit (str log) "[:acme-client] Build completed.\n")
       (let [digest (artifact/current-client-digest configuration)
-            execution-digest
-            (artifact/current-execution-digest configuration)
             spec {:seon.dev.process/id process/watcher-id
                   :seon.dev.process/readiness
                   :seon.dev.process.readiness/watcher
                   :seon.dev.process/artifact-digest digest
-                  :seon.dev.process/client-digest digest
-                  :seon.dev.process/execution-digest execution-digest}]
+                  :seon.dev.process/client-digest digest}]
         (is (process/ready? configuration spec record))
         (spit (str runtime) "runtime-b")
         (is (not (process/ready? configuration spec record))
@@ -2970,7 +2930,6 @@
   (let [configuration (test-config)
         directory (:seon.dev.test/directory configuration)
         output (fs/path directory "client.js")
-        execution-output (fs/path directory "execution.js")
         runtime (fs/path directory
                          "shadow/builds/client/dev/out/cljs-runtime/a.js")
         log (fs/path directory "watcher.log")
@@ -2980,8 +2939,6 @@
                :seon.dev.artifact.flavor/default
                :seon.dev.config/client-build-id "client"
                :seon.dev.config/client-output (str output)
-               :seon.dev.config/execution-build-id "execution"
-               :seon.dev.config/execution-output (str execution-output)
                :seon.dev.config/shadow-cache-root
                (str (fs/path directory "shadow")))
         spec (#'process/watcher-spec
@@ -3009,10 +2966,8 @@
       (fs/create-dirs (fs/parent output))
       (fs/create-dirs (fs/parent runtime))
       (spit (str output) "main-a")
-      (spit (str execution-output) "execution-a")
       (spit (str runtime) "runtime-a")
       (spit (str log) (str "[:client] Build completed.\n"
-                           "[:execution] Build completed.\n"
                            "[:test] Build completed.\n"))
       (#'process/write-process! configuration process/watcher-id record)
       (let [client-digest (artifact/current-client-digest configuration)
@@ -3031,7 +2986,7 @@
                (:seon.dev.process/artifact-digest
                 (process/admit-watcher-artifact! configuration manifest))))
         (#'process/write-process! configuration process/watcher-id record)
-        (spit (str execution-output) "execution-b")
+        (spit (str output) "main-b")
         (is (thrown-with-msg?
              clojure.lang.ExceptionInfo
              #"cannot admit"
@@ -3052,12 +3007,11 @@
 (deftest pod-program-source-path-comes-from-each-admitted-manifest
   (let [base (test-config)
         directory (:seon.dev.test/directory base)]
-    (doseq [[flavor client-build execution-build relative-path]
+    (doseq [[flavor client-build relative-path]
             [[:seon.dev.artifact.flavor/default
-              "client" "execution" "out/client/program-sources.edn"]
+              "client" "out/client/program-sources.edn"]
              [:seon.dev.artifact.flavor/acme
-              "acme-client" "acme-execution"
-              "out-acme/client/program-sources.edn"]]]
+              "acme-client" "out-acme/client/program-sources.edn"]]]
       (let [runtime-root (str (fs/path directory (name flavor)))
             base-projection-relative-path
             (str (fs/path (fs/parent relative-path)
@@ -3067,14 +3021,12 @@
             configuration
             (-> (target-config base directory)
                 (assoc :seon.dev.config/artifact-flavor flavor
-                       :seon.dev.config/client-build-id client-build
-                       :seon.dev.config/execution-build-id execution-build)
+                       :seon.dev.config/client-build-id client-build)
                 with-default-launch-descriptor)
             manifest
             (assoc (target-manifest-for configuration)
                    :seon.dev.artifact/flavor flavor
                    :seon.dev.artifact/client-build-id client-build
-                   :seon.dev.artifact/execution-build-id execution-build
                    :seon.dev.artifact/runtime-root runtime-root
                    :seon.dev.artifact/bootstrap-digest
                    (apply str (repeat 64 "b"))
@@ -3111,17 +3063,17 @@
          #"Bun executable is missing or changed"
          (process/specs configuration manifest)))))
 
-(deftest process-specs-require-published-execution-artifact-fields
+(deftest process-specs-require-published-artifact-identity
   (let [base (test-config)
         configuration (target-config base (:seon.dev.test/directory base))]
     (is (thrown? Exception
                  (process/specs configuration
                                 (dissoc (target-manifest-for configuration)
-                                        :seon.dev.artifact/execution-build-id))))
+                                        :seon.dev.artifact/execution-digest))))
     (is (thrown? Exception
                  (process/specs configuration
                                 (dissoc (target-manifest-for configuration)
-                                        :seon.dev.artifact/execution-output))))))
+                                        :seon.dev.artifact/application-digest))))))
 
 (deftest stale-port-file-does-not-advertise-a-url
   (let [configuration (test-config)
@@ -3167,7 +3119,6 @@
           :seon.dev.process/log log})]
     (try
       (spit log (str "[:client] Build completed.\n"
-                     "[:execution] Build completed.\n"
                      "[:test] Build completed.\n"))
       (#'process/write-process! configuration process/watcher-id record)
       (let [status (get-in (process/status configuration manifest)
@@ -3229,7 +3180,11 @@
           "the omitted launch override remains visible as current-spec drift")
       (with-redefs-fn
         {#'process/read-process (fn [_ id] (get records id))
-         #'process/ready? (fn [_ _ _] true)
+         #'process/direct-readiness-observation
+         (fn [_ spec _]
+           {::process/ready? true
+            :seon.dev.process/readiness-stage
+            (:seon.dev.process/readiness spec)})
          #'process/ownership-conflicts (fn [_ _] [])}
         (fn []
           (let [status (process/status configuration manifest)
@@ -3277,10 +3232,13 @@
               specs)
         ;; Only the watcher fails its readiness probe; everything else is
         ;; alive and ready, as during an ordinary live edit cycle.
-        drifted-ready?
+        drifted-readiness
         (fn [_ spec _]
-          (not= :seon.dev.process.readiness/watcher
-                (:seon.dev.process/readiness spec)))]
+          {::process/ready?
+           (not= :seon.dev.process.readiness/watcher
+                 (:seon.dev.process/readiness spec))
+           :seon.dev.process/readiness-stage
+           (:seon.dev.process/readiness spec)})]
     (try
       (spit (str watcher-log)
             (str/join "\n"
@@ -3291,7 +3249,7 @@
                              "] Compiling ...")])))
       (with-redefs-fn
         {#'process/read-process (fn [_ id] (get records id))
-         #'process/ready? drifted-ready?
+         #'process/direct-readiness-observation drifted-readiness
          #'process/ownership-conflicts (fn [_ _] [])}
         (fn []
           (let [status (process/status configuration manifest)
@@ -3308,7 +3266,7 @@
             :append true)
       (with-redefs-fn
         {#'process/read-process (fn [_ id] (get records id))
-         #'process/ready? drifted-ready?
+         #'process/direct-readiness-observation drifted-readiness
          #'process/ownership-conflicts (fn [_ _] [])}
         (fn []
           (let [status (process/status configuration manifest)
@@ -3328,9 +3286,6 @@
                              [process/watcher-id :seon.dev.process/argv])
         acme (-> base
                  (assoc :seon.dev.config/client-build-id "acme-client"
-                        :seon.dev.config/execution-build-id "acme-execution"
-                        :seon.dev.config/execution-output
-                        (str (fs/path directory "out-acme/execution/main.js"))
                         :seon.dev.config/artifact-flavor
                         :seon.dev.artifact.flavor/acme
                         :seon.dev.config/test-build? false
@@ -3347,17 +3302,12 @@
                                    :seon.dev.artifact/flavor
                                    :seon.dev.artifact.flavor/acme
                                    :seon.dev.artifact/client-build-id
-                                   "acme-client"
-                                   :seon.dev.artifact/execution-build-id
-                                   "acme-execution"
-                                   :seon.dev.artifact/execution-output
-                                   (str (fs/path directory
-                                                 "out-acme/execution/main.js"))))
+                                   "acme-client"))
                           [process/watcher-id :seon.dev.process/argv])]
     (try
-      (is (= ["clj" "-M:cljs" "watch" "client" "execution" "test"]
+      (is (= ["clj" "-M:cljs" "watch" "client" "test"]
              default-argv))
-      (is (= ["acme-client" "acme-execution"]
+      (is (= ["acme-client"]
              (->> acme-argv
                   (drop-while #(not= "watch" %))
                   rest
@@ -3384,21 +3334,21 @@
         (fs/path runtime-root base-projection-relative-path)
         page-plan-relative-path "out/client/page-plan.edn"
         page-plan-file (fs/path runtime-root page-plan-relative-path)
-        execution-file (fs/path runtime-root "execution/main.js")]
+        client-file (fs/path runtime-root "client/main.js")]
     (try
       (fs/create-dirs (fs/parent bootstrap-file))
       (fs/create-dirs (fs/parent program-source-file))
-      (fs/create-dirs (fs/parent execution-file))
+      (fs/create-dirs (fs/parent client-file))
       (spit (str bootstrap-file) "published")
       (spit (str program-source-file) "published-program-source")
       (spit (str base-projection-file) "published-base-projection")
       (spit (str page-plan-file) "published-page-plan")
-      (spit (str execution-file) "published-execution")
-      (let [selected (target-config configuration directory)
+      (spit (str client-file) "published-client")
+      (let [selected (assoc (target-config configuration directory)
+                            :seon.dev.config/client-output (str client-file))
             digest (artifact/digest-paths runtime-root ["out/bootstrap"])
             execution-digest
-            (artifact/current-execution-digest
-             {:seon.dev.config/execution-output (str execution-file)})
+            (artifact/current-execution-digest selected)
             manifest (assoc (target-manifest-for selected)
                             :seon.dev.artifact/runtime-root (str runtime-root)
                             :seon.dev.artifact/program-source-path
@@ -3414,8 +3364,6 @@
                             :seon.dev.artifact/page-plan-digest
                             (apply str (repeat 64 "f"))
                             :seon.dev.artifact/bootstrap-digest digest
-                            :seon.dev.artifact/execution-output
-                            (str execution-file)
                             :seon.dev.artifact/execution-digest
                             execution-digest)
             specs (process/specs selected manifest)
@@ -3453,16 +3401,14 @@
                (get-in pod [:seon.dev.process/environment
                             "SEON_APPLICATION_DIGEST"])))
         (is (= digest (:seon.dev.process/bootstrap-digest pod)))
-        (is (= (str execution-file)
-               (get-in descriptor [::launch/runtime
-                                   ::launch/execution-output])))
         (is (= execution-digest
-               (:seon.dev.process/execution-digest pod)))
+               (get-in descriptor [::launch/runtime
+                                   ::launch/execution-digest])))
         (is (#'process/runtime-artifact-ready? pod))
-        (spit (str execution-file) "mutated")
-        (is (not (#'process/runtime-artifact-ready? pod))
-            "readiness rejects changed execution bytes")
-        (spit (str execution-file) "published-execution")
+        (spit (str client-file) "mutated")
+        (is (#'process/runtime-artifact-ready? pod)
+            "runtime readiness checks presence after admission")
+        (spit (str client-file) "published-client")
         (spit (str bootstrap-file) "mutated")
         (is (not (#'process/runtime-artifact-ready? pod))
             "readiness rejects changed bootstrap bytes"))
@@ -3630,11 +3576,10 @@
         published-descriptor
         (launch/with-execution-artifact
          {::launch/descriptor branch-descriptor
-          ::launch/execution-build-id "execution"
-          ::launch/execution-output
-          (:seon.dev.config/execution-output source-config)
           ::launch/execution-digest
-          (:seon.dev.artifact/execution-digest target-manifest)})
+          (:seon.dev.artifact/execution-digest target-manifest)
+          ::launch/application-digest
+          (:seon.dev.artifact/application-digest target-manifest)})
         manifest (target-manifest-for source-config)
         ordinary-specs (process/specs source-config manifest)
         branch-specs (process/specs branch-config manifest)
@@ -3686,7 +3631,11 @@
            (fn [_ selected-id]
              (assoc record :seon.dev.process/id selected-id))
            #'process/same-process-spec? (fn [_ _] true)
-           #'process/ready? (fn [_ _ _] true)
+           #'process/direct-readiness-observation
+           (fn [_ spec _]
+             {::process/ready? true
+              :seon.dev.process/readiness-stage
+              (:seon.dev.process/readiness spec)})
            #'process/external-dependency-ready?
            (fn [_ _] @dependency-ready?)
            #'process/ownership-conflicts (fn [_ _] [])}

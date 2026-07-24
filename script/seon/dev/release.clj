@@ -14,14 +14,12 @@
            [java.util Properties]
            [java.util.jar JarEntry JarFile JarOutputStream]))
 
-(def current-version 4)
+(def current-version 5)
 
 (def sdk-version 1)
 
 (def ^:private patched-bun-revision
   "d8ecf098572e2b8265b23e40c04efb4067e516cc")
-
-(def ^:private execution-protocol-version 3)
 
 (def ^:private babashka-version "1.12.218")
 
@@ -52,7 +50,6 @@
   {:seon.release.member/bun "runtime/bun"
    :seon.release.member/writer "runtime/writer.jar"
    :seon.release.member/pod "runtime/client/main.js"
-   :seon.release.member/execution "runtime/execution/main.js"
    :seon.release.member/runtime-assets "runtime-root"
    :seon.release.member/program-source "runtime/program-sources.edn"
    :seon.release.member/program-row "runtime/program-rows.edn"
@@ -60,8 +57,6 @@
    :seon.release.member/page-plan "runtime/page-plan.edn"
    :seon.release.member/client-inventory
    "runtime/client/program-inventory.edn"
-   :seon.release.member/execution-inventory
-   "runtime/execution/program-inventory.edn"
    :seon.release.member/babashka "runtime/bb"
    :seon.release.member/operator "runtime/operator.jar"
    :seon.release.member/detach-helper "runtime/detach.py"
@@ -98,18 +93,15 @@
    [:seon.dev.release/babashka-asset :string]
    [:seon.dev.release/babashka-asset-sha-256 sha-256-schema]
    [:seon.dev.release/database-protocol-version :int]
-   [:seon.dev.release/execution-protocol-version :int]
    [:seon.dev.release/bun-member :qualified-keyword]
    [:seon.dev.release/writer-member :qualified-keyword]
    [:seon.dev.release/pod-member :qualified-keyword]
-   [:seon.dev.release/execution-member :qualified-keyword]
    [:seon.dev.release/runtime-assets-member :qualified-keyword]
    [:seon.dev.release/program-source-member :qualified-keyword]
    [:seon.dev.release/program-row-member :qualified-keyword]
    [:seon.dev.release/base-projection-member :qualified-keyword]
    [:seon.dev.release/page-plan-member :qualified-keyword]
    [:seon.dev.release/client-inventory-member :qualified-keyword]
-   [:seon.dev.release/execution-inventory-member :qualified-keyword]
    [:seon.dev.release/babashka-member :qualified-keyword]
    [:seon.dev.release/operator-member :qualified-keyword]
    [:seon.dev.release/detach-helper-member :qualified-keyword]
@@ -133,14 +125,12 @@
   [:seon.dev.release/bun-member
    :seon.dev.release/writer-member
    :seon.dev.release/pod-member
-   :seon.dev.release/execution-member
    :seon.dev.release/runtime-assets-member
    :seon.dev.release/program-source-member
    :seon.dev.release/program-row-member
    :seon.dev.release/base-projection-member
    :seon.dev.release/page-plan-member
    :seon.dev.release/client-inventory-member
-   :seon.dev.release/execution-inventory-member
    :seon.dev.release/babashka-member
    :seon.dev.release/operator-member
    :seon.dev.release/detach-helper-member
@@ -615,11 +605,9 @@
    :seon.dev.release/babashka-asset-sha-256
    (:seon.dev.release/sha-256 babashka-asset)
    :seon.dev.release/database-protocol-version database-protocol/current-version
-   :seon.dev.release/execution-protocol-version execution-protocol-version
    :seon.dev.release/bun-member :seon.release.member/bun
    :seon.dev.release/writer-member :seon.release.member/writer
    :seon.dev.release/pod-member :seon.release.member/pod
-   :seon.dev.release/execution-member :seon.release.member/execution
    :seon.dev.release/runtime-assets-member
    :seon.release.member/runtime-assets
    :seon.dev.release/program-source-member
@@ -632,8 +620,6 @@
    :seon.release.member/page-plan
    :seon.dev.release/client-inventory-member
    :seon.release.member/client-inventory
-   :seon.dev.release/execution-inventory-member
-   :seon.release.member/execution-inventory
    :seon.dev.release/babashka-member :seon.release.member/babashka
    :seon.dev.release/operator-member :seon.release.member/operator
    :seon.dev.release/detach-helper-member
@@ -783,7 +769,6 @@
            [::bun-version :string]
            [::writer :string]
            [::pod :string]
-           [::execution :string]
            [::bootstrap :string]
            [::public-assets :string]
            [::program-source :string]
@@ -791,7 +776,6 @@
            [::base-projection :string]
            [::page-plan :string]
            [::client-inventory :string]
-           [::execution-inventory :string]
            [::babashka :string]
            [::babashka-asset :map]
            [::operator :string]
@@ -810,9 +794,9 @@
            [::bun-lock :string]
            [::license :string]]]
     release-manifest-schema]}
-  [{::keys [package-root bun bun-version writer pod execution bootstrap
+  [{::keys [package-root bun bun-version writer pod bootstrap
             public-assets program-source program-row base-projection page-plan
-            client-inventory execution-inventory
+            client-inventory
             babashka babashka-asset operator
             detach-helper
             launcher config brand-css babashka-license bun-license
@@ -829,15 +813,12 @@
     (.setExecutable (io/file (str (fs/path runtime "bun"))) true false)
     (copy-file! writer (fs/path runtime "writer.jar"))
     (copy-file! pod (fs/path runtime "client/main.js"))
-    (copy-file! execution (fs/path runtime "execution/main.js"))
     (copy-file! program-source (fs/path runtime "program-sources.edn"))
     (copy-file! program-row (fs/path runtime "program-rows.edn"))
     (copy-file! base-projection (fs/path runtime "base-projection.edn"))
     (copy-file! page-plan (fs/path runtime "page-plan.edn"))
     (copy-file! client-inventory
                 (fs/path runtime "client/program-inventory.edn"))
-    (copy-file! execution-inventory
-                (fs/path runtime "execution/program-inventory.edn"))
     (copy-file! babashka (fs/path runtime "bb"))
     (.setExecutable (io/file (str (fs/path runtime "bb"))) true false)
     (copy-file! operator (fs/path runtime "operator.jar"))
@@ -1039,8 +1020,6 @@
          (str (fs/path build-root "shadow-cache"))
          :seon.dev.artifact/release-client-output
          (str (fs/path build-root "pod.js"))
-         :seon.dev.artifact/release-execution-output
-         (str (fs/path build-root "execution.js"))
          :seon.dev.artifact/release-program-source-output
          (str (fs/path build-root "program-sources.edn"))
          :seon.dev.artifact/release-program-row-output
@@ -1050,9 +1029,7 @@
          :seon.dev.artifact/release-page-plan-output
          (str (fs/path build-root "page-plan.edn"))
          :seon.dev.artifact/release-client-inventory-output
-         (str (fs/path build-root "client-program-inventory.edn"))
-         :seon.dev.artifact/release-execution-inventory-output
-         (str (fs/path build-root "execution-program-inventory.edn"))}
+         (str (fs/path build-root "client-program-inventory.edn"))}
         config {:seon.dev.config/root (str root)
                 :seon.dev.config/environment environment}
         selected-config (fs/path (or (get environment "SEON_CONFIG")
@@ -1118,8 +1095,6 @@
         ::writer (str (fs/path root
                                "target/seon-database-server-standalone.jar"))
         ::pod (:seon.dev.artifact/release-client-output release-programs)
-        ::execution (:seon.dev.artifact/release-execution-output
-                     release-programs)
         ::bootstrap (str (fs/path root "out/bootstrap"))
         ::public-assets (str (fs/path root "resources/public"))
         ::program-source
@@ -1132,9 +1107,6 @@
         (:seon.dev.artifact/release-page-plan-output release-programs)
         ::client-inventory
         (:seon.dev.artifact/release-client-inventory-output release-programs)
-        ::execution-inventory
-        (:seon.dev.artifact/release-execution-inventory-output
-         release-programs)
         ::babashka executable
         ::babashka-asset identity
         ::operator (str operator)

@@ -142,8 +142,6 @@
          {::launch/descriptor
           (ordinary "data/clusters/default"
                     :seon.dev.artifact.flavor/default "client")
-          ::launch/execution-build-id "execution"
-          ::launch/execution-output "out/execution/main.js"
           ::launch/execution-digest digest-a
           ::launch/application-digest digest-b})
         runtime (::launch/runtime descriptor)]

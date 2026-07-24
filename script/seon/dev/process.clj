@@ -44,11 +44,6 @@
    [:seon.dev.process/readiness qualified-keyword?]
    [:seon.dev.process/client-digest {:optional true}
     [:re #"[0-9a-f]{64}"]]
-   [:seon.dev.process/execution-digest {:optional true}
-    [:re #"[0-9a-f]{64}"]]
-   [:seon.dev.process/execution-runtime-digest {:optional true}
-    [:re #"[0-9a-f]{64}"]]
-   [:seon.dev.process/execution-output {:optional true} :string]
    [:seon.dev.process/artifact-digest :string]])
 
 (def process-spec-schema
@@ -73,10 +68,6 @@
    [:seon.dev.process/release-manifest-digest {:optional true}
     [:re #"[0-9a-f]{64}"]]
    [:seon.dev.process/client-digest {:optional true}
-    [:re #"[0-9a-f]{64}"]]
-   [:seon.dev.process/execution-digest {:optional true}
-    [:re #"[0-9a-f]{64}"]]
-   [:seon.dev.process/execution-runtime-digest {:optional true}
     [:re #"[0-9a-f]{64}"]]
    [:seon.dev.process/artifact-digest :string]])
 
@@ -274,8 +265,6 @@
        (:seon.dev.config/artifact-flavor config)
        :seon.dev.artifact/client-build-id
        (:seon.dev.config/client-build-id config)
-       :seon.dev.artifact/execution-build-id
-       (:seon.dev.config/execution-build-id config)
        :seon.dev.artifact/bun-executable
        (:seon.dev.config/bun-executable config)
        :seon.dev.artifact/bun-executable-digest
@@ -292,8 +281,6 @@
        (:seon.dev.config/client-output config)
        :seon.dev.artifact/writer-output
        (:seon.dev.config/writer-output config)
-       :seon.dev.artifact/execution-output
-       (:seon.dev.config/execution-output config)
        :seon.dev.artifact/execution-digest
        (artifact/current-execution-digest config)
        :seon.dev.artifact/runtime-root
@@ -377,10 +364,8 @@
 
 (defn- watcher-build-ids [config]
   (let [client-build-id
-        (keyword (:seon.dev.config/client-build-id config))
-        execution-build-id
-        (keyword (:seon.dev.config/execution-build-id config))]
-    (cond-> [client-build-id execution-build-id]
+        (keyword (:seon.dev.config/client-build-id config))]
+    (cond-> [client-build-id]
       (:seon.dev.config/test-build? config) (conj :test))))
 
 (defn- extra-cljs-watch-args [config]
@@ -416,13 +401,7 @@
    :seon.dev.process/artifact-digest artifact-digest}
     (:seon.dev.artifact/client-digest manifest)
     (assoc :seon.dev.process/client-digest
-           (:seon.dev.artifact/client-digest manifest))
-    (:seon.dev.artifact/execution-digest manifest)
-    (assoc :seon.dev.process/execution-digest
-           (:seon.dev.artifact/execution-digest manifest))
-    (:seon.dev.artifact/execution-runtime-digest manifest)
-    (assoc :seon.dev.process/execution-runtime-digest
-           (:seon.dev.artifact/execution-runtime-digest manifest))))
+           (:seon.dev.artifact/client-digest manifest))))
 
 (defn specs
   "Derive the selected runtime process graph from one verified manifest."
@@ -435,14 +414,10 @@
         source-runtime (::launch/runtime source-descriptor)
         configured-artifact
         [(:seon.dev.config/artifact-flavor config)
-         (:seon.dev.config/client-build-id config)
-         (:seon.dev.config/execution-build-id config)
-         (:seon.dev.config/execution-output config)]
+         (:seon.dev.config/client-build-id config)]
         selected-source-artifact
         [(::launch/artifact-flavor source-runtime)
-         (::launch/client-build-id source-runtime)
-         (::launch/execution-build-id source-runtime)
-         (::launch/execution-output source-runtime)]
+         (::launch/client-build-id source-runtime)]
         _ (when-not (= configured-artifact selected-source-artifact)
             (throw
              (ex-info "The launch descriptor selects another artifact."
@@ -452,10 +427,6 @@
         descriptor
         (launch/with-execution-artifact
          {::launch/descriptor source-descriptor
-          ::launch/execution-build-id
-          (:seon.dev.artifact/execution-build-id manifest)
-          ::launch/execution-output
-          (:seon.dev.artifact/execution-output manifest)
           ::launch/execution-digest
           (:seon.dev.artifact/execution-digest manifest)
           ::launch/application-digest
@@ -597,19 +568,11 @@
            (:seon.dev.artifact/application-digest manifest)}
           runtime-root
           (assoc :seon.dev.process/bootstrap-digest
-                 (:seon.dev.artifact/bootstrap-digest manifest)
-                 :seon.dev.process/execution-digest
-                 (:seon.dev.artifact/execution-digest manifest)
-                 :seon.dev.process/execution-output
-                 (:seon.dev.artifact/execution-output manifest))
+                 (:seon.dev.artifact/bootstrap-digest manifest))
 
           (:seon.dev.artifact/release-manifest-digest manifest)
           (assoc :seon.dev.process/release-manifest-digest
                  (:seon.dev.artifact/release-manifest-digest manifest))
-
-          (:seon.dev.artifact/execution-runtime-digest manifest)
-          (assoc :seon.dev.process/execution-runtime-digest
-                 (:seon.dev.artifact/execution-runtime-digest manifest))
 
           (not owns-writer-processes?)
           (assoc :seon.dev.process/external-dependencies
@@ -626,14 +589,8 @@
                        :seon.dev.process.readiness/watcher
                        :seon.dev.process/client-digest
                        (:seon.dev.artifact/client-digest manifest)
-                       :seon.dev.process/execution-digest
-                       (:seon.dev.artifact/execution-digest manifest)
                        :seon.dev.process/artifact-digest
-                       (:seon.dev.artifact/application-digest manifest)}
-                       (:seon.dev.artifact/execution-runtime-digest manifest)
-                       (assoc :seon.dev.process/execution-runtime-digest
-                              (:seon.dev.artifact/execution-runtime-digest
-                               manifest))))
+                       (:seon.dev.artifact/application-digest manifest)}))
                     true
                     (conj {:seon.dev.process/id writer-id
                            :seon.dev.process/owner-process-dir
@@ -1033,16 +990,6 @@
      (try
        (= expected (artifact/current-client-digest config))
        (catch Throwable _ false))
-     true)
-   (if-let [expected (:seon.dev.process/execution-digest spec)]
-     (try
-       (= expected (artifact/current-execution-digest config))
-       (catch Throwable _ false))
-     true)
-   (if-let [expected (:seon.dev.process/execution-runtime-digest spec)]
-     (try
-       (= expected (artifact/current-execution-runtime-digest config))
-       (catch Throwable _ false))
      true)))
 
 (defn- runtime-artifact-ready? [spec]
@@ -1052,23 +999,22 @@
           program-source (get-in spec [:seon.dev.process/environment
                                        "SEON_PROGRAM_SOURCE_PATH"])
           base-projection (get-in spec [:seon.dev.process/environment
-                                        "SEON_BASE_PROJECTION_PATH"])
+                                       "SEON_BASE_PROJECTION_PATH"])
           page-plan (get-in spec [:seon.dev.process/environment
                                   "SEON_PAGE_PLAN_PATH"])
-          execution-output (:seon.dev.process/execution-output spec)
-          expected-execution (:seon.dev.process/execution-digest spec)]
+          client-output (second (:seon.dev.process/argv spec))]
       (if (:seon.dev.process/release-manifest-digest spec)
         ;; Package admission verified these immutable members once. Readiness
         ;; checks presence and never repeats package hashing on every probe.
         (and runtime-root (fs/directory? runtime-root)
-             execution-output (fs/regular-file? execution-output)
+             client-output (fs/regular-file? client-output)
              program-source (fs/regular-file? program-source)
              base-projection (fs/regular-file? base-projection)
              page-plan (fs/regular-file? page-plan))
         (and runtime-root
              (fs/directory? (fs/path runtime-root "out/bootstrap"))
-             execution-output
-             (fs/regular-file? execution-output)
+             client-output
+             (fs/regular-file? client-output)
              program-source
              (fs/regular-file? program-source)
              base-projection
@@ -1076,12 +1022,8 @@
              page-plan
              (fs/regular-file? page-plan)
              (try
-               (and
-                (= expected
-                   (artifact/digest-paths runtime-root ["out/bootstrap"]))
-                (= expected-execution
-                   (artifact/current-execution-digest
-                    {:seon.dev.config/execution-output execution-output})))
+               (= expected
+                  (artifact/digest-paths runtime-root ["out/bootstrap"]))
                (catch Throwable _ false)))))
     true))
 
@@ -2812,24 +2754,16 @@
   (let [record (read-process config watcher-id)
         client-digest (:seon.dev.artifact/client-digest manifest)
         execution-digest (:seon.dev.artifact/execution-digest manifest)
-        execution-runtime-digest
-        (:seon.dev.artifact/execution-runtime-digest manifest)
         application-digest (:seon.dev.artifact/application-digest manifest)
         actual-client (artifact/current-client-digest config)
-        actual-execution (artifact/current-execution-digest config)
-        actual-execution-runtime
-        (when execution-runtime-digest
-          (artifact/current-execution-runtime-digest config))]
+        actual-execution (artifact/current-execution-digest config)]
     (when-not (and record
                    (= :seon.dev.process.status/alive (process-status record))
                    (= unpublished-client-digest
                       (:seon.dev.process/artifact-digest record))
                    (watcher-ready? config record)
                    (= client-digest actual-client)
-                   (= execution-digest actual-execution)
-                   (or (nil? execution-runtime-digest)
-                       (= execution-runtime-digest
-                          actual-execution-runtime)))
+                   (= execution-digest actual-execution))
       (throw
        (ex-info "The managed watcher cannot admit the published flavor artifact."
                 {:seon.dev.process/id watcher-id
@@ -2837,10 +2771,6 @@
                  :seon.dev.process/actual-client-digest actual-client
                  :seon.dev.process/expected-execution-digest execution-digest
                  :seon.dev.process/actual-execution-digest actual-execution
-                 :seon.dev.process/expected-execution-runtime-digest
-                 execution-runtime-digest
-                 :seon.dev.process/actual-execution-runtime-digest
-                 actual-execution-runtime
                  :seon.dev.process/recorded-artifact-digest
                  (:seon.dev.process/artifact-digest record)})))
     (write-process!

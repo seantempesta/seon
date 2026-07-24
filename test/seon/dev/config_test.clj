@@ -10,14 +10,13 @@
   {:seon.release.member/bun "runtime/bun"
    :seon.release.member/writer "runtime/writer.jar"
    :seon.release.member/pod "runtime/client/main.js"
-   :seon.release.member/execution "runtime/execution/main.js"
    :seon.release.member/runtime-assets "runtime/web"
    :seon.release.member/program-source "runtime/program-sources.edn"
    :seon.release.member/program-row "runtime/program-rows.edn"
+   :seon.release.member/base-projection "runtime/base-projection.edn"
+   :seon.release.member/page-plan "runtime/page-plan.edn"
    :seon.release.member/client-inventory
    "runtime/client/program-inventory.edn"
-   :seon.release.member/execution-inventory
-   "runtime/execution/program-inventory.edn"
    :seon.release.member/babashka "runtime/bb"
    :seon.release.member/operator "runtime/operator.jar"
    :seon.release.member/detach-helper "runtime/detach.py"
@@ -44,18 +43,17 @@
    :seon.dev.release/babashka-asset-sha-256
    "5bc992f39692b707403fc322e860fc82017da7de4a84a32267abb4d50a0c5f9d"
    :seon.dev.release/database-protocol-version 13
-   :seon.dev.release/execution-protocol-version 3
    :seon.dev.release/bun-member :seon.release.member/bun
    :seon.dev.release/writer-member :seon.release.member/writer
    :seon.dev.release/pod-member :seon.release.member/pod
-   :seon.dev.release/execution-member :seon.release.member/execution
    :seon.dev.release/runtime-assets-member :seon.release.member/runtime-assets
    :seon.dev.release/program-source-member :seon.release.member/program-source
    :seon.dev.release/program-row-member :seon.release.member/program-row
+   :seon.dev.release/base-projection-member
+   :seon.release.member/base-projection
+   :seon.dev.release/page-plan-member :seon.release.member/page-plan
    :seon.dev.release/client-inventory-member
    :seon.release.member/client-inventory
-   :seon.dev.release/execution-inventory-member
-   :seon.release.member/execution-inventory
    :seon.dev.release/babashka-member :seon.release.member/babashka
    :seon.dev.release/operator-member :seon.release.member/operator
    :seon.dev.release/detach-helper-member :seon.release.member/detach-helper
@@ -79,11 +77,11 @@
             [["runtime/bun" "bun"]
              ["runtime/writer.jar" "writer"]
              ["runtime/client/main.js" "pod"]
-             ["runtime/execution/main.js" "execution"]
              ["runtime/program-sources.edn" "{}"]
              ["runtime/program-rows.edn" "{}"]
+             ["runtime/base-projection.edn" "{}"]
+             ["runtime/page-plan.edn" "{}"]
              ["runtime/client/program-inventory.edn" "{}"]
-             ["runtime/execution/program-inventory.edn" "{}"]
              ["runtime/web/style.css" "css"]
              ["runtime/web/resources/public/seon-brand.css" ".brand {}"]
              ["runtime/bb" "bb"]
@@ -291,43 +289,32 @@
     (is (= :seon.dev.artifact.flavor/default
            (:seon.dev.config/artifact-flavor default)))
     (is (= "client" (:seon.dev.config/client-build-id default)))
-    (is (= "execution" (:seon.dev.config/execution-build-id default)))
     (is (= (str (fs/path root ".shadow-cljs"))
            (:seon.dev.config/shadow-cache-root default)))
     (is (= (str (fs/path root "out/client/main.js"))
            (:seon.dev.config/client-output default)))
-    (is (= (str (fs/path root "out/execution/main.js"))
-           (:seon.dev.config/execution-output default)))
     (is (= "artifact.edn"
            (:seon.dev.config/artifact-manifest-name default)))
     (is (true? (:seon.dev.config/test-build? default)))
     (is (= :acme.artifact/runtime
            (:seon.dev.config/artifact-flavor acme)))
     (is (= "acme-client" (:seon.dev.config/client-build-id acme)))
-    (is (= "acme-execution"
-           (:seon.dev.config/execution-build-id acme)))
     (is (= (str (fs/path root "tmp/shadow/acme"))
            (:seon.dev.config/shadow-cache-root acme)))
     (is (= (str (fs/path root "out-acme/client/main.js"))
            (:seon.dev.config/client-output acme)))
-    (is (= (str (fs/path root "out-acme/execution/main.js"))
-           (:seon.dev.config/execution-output acme)))
     (is (= "artifact-acme.edn"
            (:seon.dev.config/artifact-manifest-name acme)))
     (is (false? (:seon.dev.config/test-build? acme)))
     (is (not= (select-keys default
                            [:seon.dev.config/client-build-id
-                            :seon.dev.config/execution-build-id
                             :seon.dev.config/shadow-cache-root
                             :seon.dev.config/client-output
-                            :seon.dev.config/execution-output
                             :seon.dev.config/artifact-manifest-name])
               (select-keys acme
                            [:seon.dev.config/client-build-id
-                            :seon.dev.config/execution-build-id
                             :seon.dev.config/shadow-cache-root
                             :seon.dev.config/client-output
-                            :seon.dev.config/execution-output
                             :seon.dev.config/artifact-manifest-name])))))
 
 (deftest artifact-descriptor-rejects-hybrid-or-invalid-data
@@ -374,10 +361,7 @@
                     config/shadow-environment
                     (fn [& _]
                       (throw (ex-info "Shadow environment was consulted" {})))]
-        (let [configuration (config/load! (str root))
-              runtime (get-in configuration
-                              [:seon.dev.config/launch-descriptor
-                               ::launch/runtime])]
+        (let [configuration (config/load! (str root))]
           (is (false? (:seon.dev.config/source-checkout? configuration)))
           (is (= (or (get (System/getenv) "SEON_RENDER_STRICT") "0")
                  (get-in configuration
@@ -390,10 +374,6 @@
           (is (= (str (fs/canonicalize
                        (fs/path root "runtime/client/main.js")))
                  (:seon.dev.config/client-output configuration)))
-          (is (= (str (fs/canonicalize
-                       (fs/path root "runtime/execution/main.js")))
-                 (:seon.dev.config/execution-output configuration)
-                 (::launch/execution-output runtime)))
           (is (= (str (fs/canonicalize (fs/path root "runtime/web")))
                  (:seon.dev.config/runtime-assets configuration)))
           (is (= (str (fs/canonicalize
