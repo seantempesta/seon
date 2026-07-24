@@ -17,29 +17,36 @@ Returned reports are claims to review: read enough source to judge them,
 falsify risky conclusions independently, and keep overlapping shared files at
 the top level.
 
-## Standing goal — full-throttle parallel orchestration (owner-ruled 2026-07-24)
+## Standing goal — delete the old system at full throttle (owner-ruled 2026-07-24 PM)
 
-The orchestrator is ALWAYS pursuing multiple goals in parallel, limited
-only by real conflicts — same-file ownership, a frozen-tree checkpoint,
-an exhausted budget — never by caution or tidiness. An idle slot while
-dependency-ready work sits in the queue is a bug in the orchestrator.
+THE GREAT DELETION IS THE SPINE. The pod's self-host/child execution
+machinery — the cljs.js self-host engine, eval.cljs, the execution
+child and its bands, every pod-only duplicate of a mechanism the JVM
+now owns — gets DELETED, slice by slice, starting immediately, without
+waiting for green suites. Old tests that pin a deleted path are deleted
+in the same commit; the tests that replace them assert the SURVIVING
+mechanism, written from the lessons learned, never green-washed. Do not
+port old code into new homes: design the replacement fresh from the
+architecture target, and prefer NO replacement when the JVM path
+already owns the behavior. A deletion slice is blocked ONLY by a real
+implementation dependency — something live still calls the path and the
+surviving owner genuinely cannot serve it yet. Name that dependency,
+fix it at the surviving owner, resume deleting. Let it crash: breakage
+exposed by deletion is discovery, not failure — fix forward, never
+restore the deleted path.
 
-Supervision has a clock: at least every 15 minutes of wall time, spot-
-check every running lane's transcript and verify it is doing REAL work
-(committing, editing, testing — not polling, not waiting on a peer, not
-re-grounding endlessly). A lane running long is fine; a lane running
-quiet is not. On drift: stop + resume with the correction the same
-minute. Long lanes must commit coherent gains as they go, so progress
-is visible in git, not only in a final summary.
-
-Shared-tree churn is normal weather, not an emergency. Lanes roll with
-concurrent commits, rebuilds, watcher reloads, cluster restarts, and
-database resets — a restart under a lane is a FREE resilience drill and
-an opportunity to prove crash-tolerance, not a reason to abandon the
-unit. Abandon work only when it genuinely cannot proceed under churn,
-and record exactly why in the owning issue/PRD. Research lanes and
-implementation lanes on different parts of the system always run
-concurrently; never serialize what real ownership does not force.
+The morning goal's mechanics stay in force: multiple lanes ALWAYS,
+limited only by real conflicts (same-file ownership, a frozen-tree
+checkpoint, an exhausted budget) — an idle slot with dependency-ready
+work queued is an orchestrator bug. Supervision every ≤15 minutes of
+wall time: verify each lane's transcript shows REAL work (long is fine,
+quiet is not); stop + resume with the correction the same minute; lanes
+commit coherent gains as they go so progress lives in git. Shared-tree
+churn, rebuilds, restarts, and database resets are normal weather and
+FREE resilience drills — abandon a unit only when it genuinely cannot
+proceed, recording why. Research and implementation always run
+concurrently. Timeouts are last resorts; interfaces express their
+dependencies and publish their own readiness.
 
 ## Sustained program cadence
 
