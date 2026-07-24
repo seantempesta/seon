@@ -313,7 +313,6 @@
           original-transact db/transact!
           original-routes config/resolve-routes
           original-skills skills/seed-skills-tx-data
-          original-host-coordinates agent/reconcile-host-coordinates!
           original-migrate agent.ctx.admin/migrate-plan-surface-default!
           success (fn [m] (protocol/success m))
           entity-rows
@@ -379,7 +378,6 @@
             (set! db/transact! original-transact)
             (set! config/resolve-routes original-routes)
             (set! skills/seed-skills-tx-data original-skills)
-            (set! agent/reconcile-host-coordinates! original-host-coordinates)
             (set! agent.ctx.admin/migrate-plan-surface-default! original-migrate))]
       (set! db/db
             (fn
@@ -408,12 +406,6 @@
                 :tempids {}})))
       (set! config/resolve-routes (fn [_ _] []))
       (set! skills/seed-skills-tx-data (fn [_] []))
-      (set! agent/reconcile-host-coordinates!
-            (fn [_]
-              (js/Promise.resolve
-               {::agent/host-coordinate-ok? true
-                ::agent/host-coordinate-changed? false
-                ::agent/host-coordinate-operations 0})))
       (set! agent.ctx.admin/migrate-plan-surface-default!
             (fn []
               (js/Promise.resolve
