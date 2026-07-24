@@ -536,6 +536,19 @@ operator 93/394 for the digest slice, prior operator 130/733, launch 12/78
 green. NEXT: normalize once at validation → green apply → five-ready boot with
 timings → S6 cutover → re-drive-3.
 
+BOOT ONION LEDGER (~18:40): pageplandigest ACCEPTED — 07af12c73
+(reset clears applied identity; one digest fn) + a4b8b9d48/e35e2344e
+(encode-once at transact! before validation; nested logical
+validation; home-requires schema restored); both issues archived;
+apply now reaches context materialization and refuses
+:seon.render/ai nil for :root-role (stored-nil violation; refusal
+correct; issue filed) → rootslotnil lane dispatched (suspect todays
+resolve.cljc commits). Apply wall 22-35s (pre-cutover). Layers fixed
+live today by the boot drive: watch/release derivation · Long/int?
+probe · AOT canonical wiring · socket ownership · exec build ·
+applied-identity staleness · EDN encode order — each a committed
+class fix.
+
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 
 ## older restart protocol below until morning)
