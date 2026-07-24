@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, database, flow]
 ---
@@ -73,3 +73,36 @@ dependency checkpoint, and measured one-source hit/allocation comparison.
 - Failure, cancellation, clear, reconnect, and release leave zero retained
   multi-source database values or flights.
 - Single-database query hit latency and allocation do not regress materially.
+
+## Resolution
+
+Datahike commits `0070d507` and `caf52685` strengthen the one existing query
+result cache and single-flight identity. Parsed source bindings now determine
+an ordered composite of every committed database identity, while generic
+arguments contain no database values. Publication is fenced by every member
+generation, and closing any member evicts the completed bucket and detaches
+its flight.
+
+The finishing commit also caches the parsed query's source-binding derivation
+and input count, keeps the legacy one-source argument shape, and touches an
+exact LRU hit without replacing or reweighing unchanged cache content. The
+cache's private get/put boundary accepts normalized identities only; it no
+longer probes an ordinary identity vector with the native-database protocol.
+
+Proof retained in `tmp/orchestrator/querycache-gate.log`:
+
+- Four independent databases produce `#{["A" "B" "C" "D"]}`, with one miss,
+  one exact hit, one composite key, no native database anywhere in retained
+  cache entries, and zero snapshots after closing the second member's
+  generation.
+- The post-format focused checkpoint passes 210 tests / 1,347 assertions
+  across persistent-set, hitchhiker-tree, and specification configurations.
+- The complete current Clojure, specification, and Kabel matrices pass
+  1,779 / 9,332, 874 / 4,609, and 16 / 81 respectively. The final historical
+  compatibility fixture is independently tracked because latest released
+  Datahike writes Konserve `0.9.363`, newer than this maintained fork's
+  `0.9.359-seon.1`.
+- A 7 × 200,000-hit committed one-source benchmark retains the historical
+  `(rest args)` key shape. The patched samples allocate about 4,504 bytes/hit
+  versus about 4,760 bytes/hit at the pre-multi-source parent, with both in the
+  same low-microsecond latency band on this JVM.
