@@ -61,6 +61,13 @@ declarations; anchor updated per landing; kill-and-resume freely on
 derivable rulings; stops that need genuine owner taste park in
 MORNING ITEMS with a recommendation.
 
+ISSUE-TRIAGE LANE (dispatched): every open issue classified
+stale-verify-archive / fold-into-unit / fix-tonight / needs-owner,
+with verification evidence required for every archive; index.md
+reconciled; fix-tonight list feeds overnight slots; needs-owner
+feeds MORNING ITEMS. The issue COUNT is a first-class morning-report
+metric.
+
 MORNING ITEMS (accumulating):
 - (seed) Bun self-host comparison number post-checkpoint if wanted —
   cheap re-run, decision-moot (path dies at U9).
