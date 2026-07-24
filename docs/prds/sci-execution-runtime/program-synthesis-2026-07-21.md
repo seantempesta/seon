@@ -1120,6 +1120,14 @@ MORNING ITEMS (accumulating):
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- SETTLE RERUN: CLJS GREEN (1,592/7,866/0/0); fresh boot 308s
+  (perf row stands — R45 preprocessing is the fix). Writer + operator
+  each at ONE fixture-class error: (A) host-cancel-writer-test =
+  break-8 sibling (host symbol into SCI); (B) process-test artifact
+  absence in an ownership assertion. SETTLECLOSE lane dispatched to
+  kill BOTH + sweep the break-8 fixture class suite-wide (the
+  containment audit predicted more). These are the last two between
+  here and a fully green three-suite checkpoint.
 - QUERYCACHE FIXED+ARCHIVED (caf52685 fork + 108d6dfc1, 210/1,347
   green): cache keys retain normalized identities only; 117 open.
   MORNING ITEM added: push fork commit caf52685 to
