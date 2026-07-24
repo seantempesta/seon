@@ -31,6 +31,7 @@
            [java.nio.channels Channels ServerSocketChannel SocketChannel]))
 
 (def ^:private artifact-digest (apply str (repeat 64 "a")))
+(def ^:private application-digest (apply str (repeat 64 "e")))
 
 (schema/register! :seon.agent/run :seon.db/ref)
 
@@ -225,8 +226,8 @@
   ([agent-id]
    {:seon.execution/protocol-version 3
     :seon.execution/agent-id agent-id
-    :seon.execution/artifact-digest artifact-digest
-    :seon.execution/shadow-build-id "host-conformance-build"
+    :seon.launch/execution-digest artifact-digest
+    :seon.launch/application-digest application-digest
     :seon.execution/database-selection
     {:seon.db/socket-path "unused-by-the-host"
      :seon.db/database-name "host-conformance"
@@ -403,9 +404,8 @@
       (is (= :seon.execution.message/ready (:seon.execution/message ready)))
       (is (= 3 (:seon.execution/protocol-version ready)))
       (is (= "handshake-agent" (:seon.execution/agent-id ready)))
-      (is (= "host-conformance-build" (:seon.execution/shadow-build-id ready)))
-      (is (= artifact-digest (:seon.execution/artifact-digest ready)))
-      (is (string? (:seon.execution/bun-version ready)))
+      (is (= artifact-digest (:seon.launch/execution-digest ready)))
+      (is (= application-digest (:seon.launch/application-digest ready)))
       (is (= database (:seon.db/db ready)))
       (finally (close! session)))))
 

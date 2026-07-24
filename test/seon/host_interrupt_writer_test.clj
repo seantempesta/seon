@@ -12,6 +12,7 @@
            [java.nio.channels Channels SocketChannel]))
 
 (def ^:private artifact-digest (apply str (repeat 64 "c")))
+(def ^:private application-digest (apply str (repeat 64 "e")))
 (def ^:private deadline-duration-ms 100)
 
 (def ^:private ^:dynamic *host-socket* nil)
@@ -31,8 +32,8 @@
      output
      {:seon.execution/protocol-version 3
       :seon.execution/agent-id agent-id
-      :seon.execution/artifact-digest artifact-digest
-      :seon.execution/shadow-build-id "host-interrupt-writer-test"
+      :seon.launch/execution-digest artifact-digest
+      :seon.launch/application-digest application-digest
       :seon.execution/database-selection
       {:seon.db/socket-path "unused-by-the-host"
        :seon.db/database-name database-name}})

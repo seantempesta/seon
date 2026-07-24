@@ -400,6 +400,7 @@
     [?config :seon.config.render/value-max-items ?items]])
 
 (def ^:private parity-digest (apply str (repeat 64 "b")))
+(def ^:private application-digest (apply str (repeat 64 "e")))
 
 (defn- host-session! [host-socket agent-id database-name]
   (let [^SocketChannel channel (uds/connect! host-socket)
@@ -409,8 +410,8 @@
      output
      {:seon.execution/protocol-version 3
       :seon.execution/agent-id agent-id
-      :seon.execution/artifact-digest parity-digest
-      :seon.execution/shadow-build-id "writer-test"
+      :seon.launch/execution-digest parity-digest
+      :seon.launch/application-digest application-digest
       :seon.execution/database-selection
       {:seon.db/socket-path "unused-by-the-host"
        :seon.db/database-name database-name}})
