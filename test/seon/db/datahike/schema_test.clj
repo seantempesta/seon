@@ -423,7 +423,7 @@
             :db/valueType :db.type/string
             :db/cardinality :db.cardinality/one}
            (dhs/malli-form->datahike-attribute
-            {:seon.content-hash/digest [:string {:min 64 :max 64}]
+            {:seon.content-hash/digest [:re "^[0-9a-f]{64}$"]
              :example/digest :seon.content-hash/digest
              :example/sha-256 :example/digest}
             :example/sha-256

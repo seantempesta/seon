@@ -34,6 +34,7 @@
    Includes both keyword types (:string) and predicate types (string?)."
   {:string   :db.type/string
    'string?  :db.type/string
+   :re       :db.type/string
    :int      :db.type/long
    'int?     :db.type/long
    :long     :db.type/long
@@ -138,7 +139,8 @@
         combined-seon-props (merge (seon-db-props->db-props (m/properties child-schema))
                                    (seon-db-props->db-props entry-props))]
     (case schema-type
-      (:string :int :long :double :float :boolean :keyword :qualified-keyword
+      (:string :re :int :long :double :float :boolean :keyword
+               :qualified-keyword
                :symbol :qualified-symbol :uuid :inst
                string? int? double? float? boolean? keyword? symbol? uuid? inst?)
       (merge {:db/valueType (malli-type->datahike-type schema-type)

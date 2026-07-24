@@ -58,7 +58,11 @@
                     #(internal/form->datahike-value-type
                        [:enum "open" "done"]))]
       (is (str/includes? message
-                         "(schema/register! :my.domain/status [:enum :open :done])")))))
+                         "(schema/register! :my.domain/status [:enum :open :done])"))))
+  (testing "a regular-expression schema stores its validated string value"
+    (is (= :db.type/string
+           (internal/form->datahike-value-type
+            [:re "^[0-9a-f]{64}$"])))))
 
 (deftest error-evidence-uses-the-authoritative-transaction-path
   (async done
@@ -294,7 +298,7 @@
 
 (def ^:private initialization
   "One production-shaped initialization seeded through the canonical
-   schema authority, exactly like `seon.client/database-initialization`."
+   schema authority, exactly like the build-time page-plan producer."
   (let [schema-rows (mapv #(dissoc % :seon.schema/created-at)
                           (schema/canonical-schema-rows (js/Date.)))]
     {:seon.execution/artifact-digest

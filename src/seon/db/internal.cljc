@@ -57,6 +57,7 @@
 
 (def malli-type->datahike-type
   {:string :db.type/string
+   :re :db.type/string
    :int :db.type/long
    :double :db.type/double
    :float :db.type/float
