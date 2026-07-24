@@ -1293,6 +1293,16 @@ the variable-weight values they select.
   including compact identity, config digest, deadline, and reply evaluation,
   so fail-closed production validation proves ordering and drift rather than
   rejecting an impossible test row first.
+- **A policy split is incomplete until producer-result contracts move too.**
+  `seon.agent.ctx.driver/render-prompt!` correctly returned the two explicit
+  reply-policy axes while `seon.agent.turn/render-prompt` still required the
+  retired `:seon.config/repl-mode` projection. Malli output instrumentation
+  therefore rejected every valid prompt before a turn opened. When replacing
+  one field with orthogonal facts, sweep function output schemas and test
+  fixtures in addition to database readers; prove the producer through the
+  instrumented consumer for every legal axis combination. Reuse the registered
+  axis schemas rather than copying their boolean and enum definitions
+  (`a88e11505`, `tmp/orchestrator/replmode-gate.log`).
 
 ## Web-limit reader scar (2026-07-23)
 

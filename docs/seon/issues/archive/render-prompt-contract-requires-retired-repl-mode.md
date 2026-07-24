@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, schema, runtime]
 ---
@@ -53,6 +53,30 @@ The source mismatch is direct:
 The run remained open with the dead pod claimant, no current turn, and no
 receipts at writer basis transaction 536871709.
 
+The dependency boundary is Malli 0.20.0, pinned in `deps.edn`; its maintained
+source is `reference-code/malli` at `80138076960e7820523b4cb932c5b5d1936d4e7f`.
+`malli.core/-ref-schema` resolves registered keyword references through the
+active registry, and `seon.schema/valid-candidate-value?` validates against
+Seon's candidate registry. The existing R36 schema owners are
+`src/seon/config/resolve.cljc` for `:seon.ai/wire-stream?` and
+`:seon.ai/reply-evaluation`; `src/seon/ai/core.cljc` produces their resolved
+map through `reply-policy-from-rows`.
+
+Commit `a88e11505` replaces the retired required output field with references
+to those two registered axis schemas. The regression invokes the real
+`seon.agent.ctx.driver/render-prompt!` producer through the instrumented
+`seon.agent.turn/render-prompt` consumer for all four legal combinations,
+asserts each result satisfies `:seon.agent.turn/prompt-result`, and proves the
+legacy projection is absent. The focused `seon.agent.turn-test` gate passed 17
+tests and 51 assertions with zero failures or errors; the transcript is
+`tmp/orchestrator/replmode-gate.log`.
+
+A source scan confirms `src/seon/agent/turn.cljs` has no remaining
+`:seon.config/repl-mode` contract field. Its remaining occurrences are
+historical explanatory comments. Per the live-proof source-freeze boundary,
+this lane did not start a cluster; the orchestrator owns the rebuild, restart,
+and fresh agent re-drive.
+
 ## Owner
 
 `seon.agent.turn` owns the public prompt-result contract. It must describe the
@@ -68,3 +92,8 @@ wire-stream policy.
   advances through `:published`.
 - A contract regression compares the actual driver result against
   `::prompt-result`, so producer and consumer cannot drift independently.
+
+The source contract and recurring regression are resolved by `a88e11505`. The
+fresh live re-drive remains the orchestrator's integration proof after its
+coordinated rebuild and restart; it is not a remaining source change in this
+issue.

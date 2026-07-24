@@ -1140,6 +1140,16 @@ MORNING ITEMS (accumulating):
   (settleclose 1a47c1062 + 5cc3b32e1: break-8 fixture class swept
   suite-wide, program-source digest selection fixed). A REAL
   MILESTONE — but NOT graduation: the goal's bar is PROVABLY ALIVE.
+- ★ RENDER-PROMPT REPLY-POLICY BLOCKER SOURCE-FIXED (`a88e11505`,
+  2026-07-24): the public output contract now requires the registered
+  `:seon.ai/wire-stream?` and `:seon.ai/reply-evaluation` projections
+  returned by the compiled renderer, not retired
+  `:seon.config/repl-mode`. The focused real producer-through-consumer
+  regression covers all four legal R36 combinations: 17 tests / 51
+  assertions / 0 failures / 0 errors
+  (`tmp/orchestrator/replmode-gate.log`). The orchestrator owns the
+  required frozen-tree rebuild, restart, and fresh live agent re-drive;
+  this source lane ran no cluster.
 - ★ LIVE PROOF VERDICT: NOT-YET-ALIVE, ROOT-CAUSED (2026-07-24).
   Web: the JVM /data tier MORPHS correctly on transact (SSE datastar
   ALIVE, marker at basis 536871707) — but 5 web bugs filed: agent/
