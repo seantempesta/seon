@@ -7,6 +7,11 @@ tags: [issue, component, cljs, flow]
 
 # Keep a running target's bootstrap artifact immutable
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — R45 S-ladder.** Content-addressed roots are landed; R45 owns
+the remaining simultaneous default/ACME resolved-path proof and release reuse.
+
 ## Problem
 
 Default and ACME publish different manifests but both builds replace the same

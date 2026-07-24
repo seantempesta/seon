@@ -7,6 +7,12 @@ tags: [issue, component, architecture]
 
 # Operator trial processes leak across days
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — test-simplification batch.** Today's exact-generation reaper
+does not prove interrupted trial-fixture cleanup; the real-process fixtures
+and their finally/reaping contract close with the test consolidation batch.
+
 ## Observed (2026-07-20)
 
 Six `detach.py`-launched trial processes from a

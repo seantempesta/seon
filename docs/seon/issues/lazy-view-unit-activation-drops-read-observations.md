@@ -7,6 +7,11 @@ tags: [issue, web, database, flow, architecture]
 
 # Capture dependencies when a lazy view unit activates
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — web slice 2.** Activation-time dependency capture plus
+stable-DOM full/incremental convergence are web-render transition acceptance.
+
 ## Problem
 
 Activating a lazy debug unit renders its producer for the immediate Datastar

@@ -7,6 +7,12 @@ tags: [issue, agent, component, database, research]
 
 # Give Inspect live callers an ownership-fenced cluster lease
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — R45 S-ladder.** The remaining per-sample ownership lease
+must compose with R45's release/cluster identities and apply/start operator
+operations.
+
 ## Problem
 
 Inspect's unsafe retired cluster operations are removed. Lease-dependent entry

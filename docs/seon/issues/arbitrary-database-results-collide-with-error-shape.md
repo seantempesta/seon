@@ -7,6 +7,12 @@ severity: blocker
 
 # Arbitrary database results collide with the error shape
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — C1 codec.** The closed outer result/error union and
+schema-selected total wire projection must land at the one C1 boundary; this
+issue closes with that unit, not with another result discriminator.
+
 ## Triage — 2026-07-23
 
 REAL+INDEPENDENT (M), owned by the public `seon.db` result boundary.

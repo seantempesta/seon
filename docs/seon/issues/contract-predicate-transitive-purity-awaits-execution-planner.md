@@ -7,6 +7,12 @@ tags: [issue, schema, runtime]
 
 # Contract predicate transitive purity awaits execution planner
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — P3 read-side admission.** `plan-execution` now walks
+predicate bundles, but acquired projections still default the pure-predicate
+population empty. P3 owns deriving and admitting that graph-proven set.
+
 ## Problem
 
 R33 admits an agent-authored `[:fn]` predicate only when its complete indexed

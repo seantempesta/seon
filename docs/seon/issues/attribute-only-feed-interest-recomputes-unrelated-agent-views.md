@@ -7,6 +7,11 @@ tags: [issue, architecture, web, database]
 
 # Select entity-scoped feed interests in the writer
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — web slice 2.** Entity-scoped interest selection and its
+browser/feed cost proof are part of the JVM web-render transition.
+
 ## Problem
 
 Read evidence for an agent feed is reduced to changed attributes. When two

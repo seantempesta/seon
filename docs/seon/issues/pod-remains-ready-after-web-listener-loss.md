@@ -7,6 +7,12 @@ tags: [issue, pod, health, web]
 
 # Pod remains ready after losing its web listener
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — web slice 2.** Controlled listener loss, readiness
+withdrawal, and browser recovery are health acceptance for the surviving JVM
+web process.
+
 ## Problem
 
 The operator can report the pod as alive and ready while its configured web

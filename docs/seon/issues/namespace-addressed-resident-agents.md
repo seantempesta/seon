@@ -7,6 +7,12 @@ tags: [issue, agent, database]
 
 # Address resident agents by namespace
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — U9 deletion.** Namespace identity may survive, but
+warm-child residency, dormancy, and generated-DAG dispatch are cutover
+topology that U9 removes or reframes.
+
 ## Intended model
 
 An agent's public identity and routing address is one Clojure namespace symbol.

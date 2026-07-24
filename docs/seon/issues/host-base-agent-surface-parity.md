@@ -1,10 +1,17 @@
 ---
 type: issue
 status: open
+severity: blocker
 tags: [issue, agent, architecture]
 ---
 
 # The host base does not resolve the agent-facing surface (q34, W5-0 gate)
+
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — U9 deletion.** U9's census-to-zero cutover gate owns full
+symbol resolution and source-to-installed capability-effect parity before the
+fallback children disappear.
 
 ## Observed (2026-07-22, live default cluster, host-tier dial ON)
 

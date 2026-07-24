@@ -7,6 +7,11 @@ tags: [issue, agent, architecture, pod]
 
 # Reduce retained memory in each execution child
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — U9 deletion.** The retained compiler heap belongs only to
+the per-agent children that U9 deletes.
+
 ## Problem
 
 Each idle per-agent Bun execution child retains hundreds of megabytes. This

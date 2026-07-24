@@ -7,6 +7,11 @@ tags: [issue, architecture, database, agent]
 
 # Remove local Datahike ownership from execution children
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — U9 deletion.** The defect is entirely reachability and
+database ownership inside the outgoing execution artifact.
+
 ## Problem
 
 Every per-agent Bun child must perform database work through the remote

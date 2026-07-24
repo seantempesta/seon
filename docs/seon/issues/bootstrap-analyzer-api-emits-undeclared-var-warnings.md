@@ -7,6 +7,11 @@ tags: [issue, agent, cljs]
 
 # Remove undeclared-var warnings from the self-host bootstrap build
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — U9 deletion.** The warning is emitted only by the self-host
+bootstrap/analyzer artifact that U9 removes.
+
 ## Triage — 2026-07-23
 
 DISSOLVES into the cutover unit “per-agent child + `eval.cljs` self-host

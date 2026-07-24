@@ -7,6 +7,12 @@ tags: [issue, component, cljs, flow]
 
 # Make the downstream runtime package self-contained
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — U9 deletion.** The remaining package contract still names
+the execution child and self-host bootstrap; U9 removes those members and
+redefines the downstream runtime descriptor.
+
 ## Problem
 
 ACME now proves that a third party can build and run a customized source-free

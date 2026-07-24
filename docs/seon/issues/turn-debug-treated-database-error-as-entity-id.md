@@ -7,6 +7,12 @@ severity: friction
 
 # Turn debug treated a database error as an entity id
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — C1 codec.** The source branch and no-pull regression are
+landed; the remaining structured capacity-error live proof belongs to C1
+result/error discrimination.
+
 ## Evidence
 
 During a sustained real-agent run on 2026-07-17, the database session reached

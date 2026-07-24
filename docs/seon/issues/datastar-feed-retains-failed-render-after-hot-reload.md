@@ -7,6 +7,11 @@ tags: [issue, web, flow]
 
 # Invalidate a cached failed Datastar render after its owner reloads
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — web slice 2.** Failed-render invalidation and replacement on
+the next relevant committed transaction belong to the surviving JVM web feed.
+
 ## Triage — 2026-07-23
 
 REAL+INDEPENDENT (M), owned by `seon.web.datastar`'s subscription/cache

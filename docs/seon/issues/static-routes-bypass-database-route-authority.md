@@ -7,6 +7,11 @@ tags: [issue, architecture, web, database]
 
 # Move product routes out of the static router supplement
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — web slice 2.** The database-derived JVM router must remove
+the second literal product-route catalog during the web transition.
+
 ## Design
 
 Implementation-ready design (owner ruling 2026-07-20 — route datoms are the

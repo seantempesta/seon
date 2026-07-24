@@ -7,6 +7,12 @@ tags: [issue, cljs, research]
 
 # LoRA audit runner depends on a retired Shadow target and pinned checkout
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — test-simplification batch.** The retired Shadow target,
+absolute checkout pin, and scratch runner belong to the one maintained
+test/evaluation-path cleanup.
+
 ## Problem
 
 The LoRA data-audit runbook is bound to an isolated `:lora-audit` Shadow build,

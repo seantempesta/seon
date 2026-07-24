@@ -7,6 +7,12 @@ tags: [issue, agent, flow, architecture]
 
 # Arbitrary eval allocation lacks hard process memory containment
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — U9 deletion.** U9 removes the per-agent arbitrary-eval child
+topology; its cutover and U12 recovery proof own the replacement containment
+contract.
+
 ## Problem
 
 Datahike query/pull execution and retained eval values now have synchronous

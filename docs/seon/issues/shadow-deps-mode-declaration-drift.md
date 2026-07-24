@@ -7,6 +7,11 @@ tags: [issue, cljs, component]
 
 # Shadow deps-mode declarations imply inactive build paths
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — R45 S-ladder.** Release pre-processing and build-artifact
+ownership must remove the duplicate dependency/build declaration authority.
+
 ## Problem
 
 The supported CLJS lifecycle enters Shadow through `clj -M:cljs` and derives

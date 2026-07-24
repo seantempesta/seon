@@ -1,6 +1,6 @@
 ---
 type: issue
-status: active
+status: resolved
 severity: blocker
 tags: [issue, schema, runtime, database]
 ---
@@ -48,3 +48,14 @@ program exceeds the protocol's hard 4 MiB initialization frame. That distinct
 blocker is recorded in
 [[unbounded-runtime-acquisitions-exceed-frame]]. This issue remains open until
 the fresh readiness gate can run through that owner.
+
+## Resolution — 2026-07-23
+
+Resolved by `adc25b852`, `b6ecb55df`, and `ad8eeb582`, with the formerly
+blocked fresh-readiness acceptance completed after paged initialization and
+acquisition in `25edc8cff` / `a55419c02`. The desired core population is
+compiled with explicit boot provenance at `src/seon/client.cljs:1624-1644`;
+the committed-row boundary remains separately fail-closed at
+`src/seon/runtime/admission.cljs:209-228`. The recurring identity regression
+at `test/seon/client_initialization_test.cljs:224-260` proves the committed
+projection equals and reuses the prevalidated core projection.

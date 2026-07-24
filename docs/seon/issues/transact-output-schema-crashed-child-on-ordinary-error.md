@@ -7,6 +7,11 @@ severity: friction
 
 # Transact output schema crashed child on ordinary error
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — C1 codec.** The output union exists; the missing
+instrumented refusal-to-success same-runtime proof is C1 boundary totality.
+
 ## Evidence
 
 A live agent called `complete`, which transacts the run's terminal facts. The

@@ -1,10 +1,8 @@
 ---
 type: issue
 status: resolved
-tags:
-  - runtime
-  - persistence
-  - ipc
+severity: blocker
+tags: [issue, runtime, persistence, ipc]
 ---
 
 # Eval terminal envelope bypassed wire admission

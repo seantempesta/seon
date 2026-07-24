@@ -7,6 +7,11 @@ severity: friction
 
 # Execution process proof seeds incomplete schema population
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — U9 deletion.** This fixture and its nested-render proof
+target the outgoing real Bun-child topology.
+
 ## Evidence
 
 `bin/test-writer seon.execution-process-test` reaches the real Bun child, but

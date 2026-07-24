@@ -7,6 +7,11 @@ tags: [issue, web, database, agent, flow, architecture]
 
 # Implement browser-session navigation provenance
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — web slice 2.** The browser-tab session model, message/turn
+provenance, and two-tab proof belong to the JVM web UI transition.
+
 ## Problem
 
 The active web UI has no database-backed browser-tab session. Human messages do

@@ -7,6 +7,11 @@ tags: [issue, agent, pod, web]
 
 # Sequence calls within each agent execution child
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — U9 deletion.** The collision exists in the per-agent child
+that U9 deletes.
+
 ## Problem
 
 An agent's turn, context renderers, and Datastar canvas renderers all use that

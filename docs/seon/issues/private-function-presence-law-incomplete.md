@@ -1,6 +1,7 @@
 ---
 type: issue
-status: active
+status: open
+severity: blocker
 tags: [issue, runtime, rendering]
 ---
 

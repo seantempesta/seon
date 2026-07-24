@@ -7,6 +7,11 @@ tags: [issue, agent, architecture]
 
 # Execution-child native heap mislabeled as GPU dominates footprint
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — U9 deletion.** The measured mimalloc/IOAccelerator cost is
+specific to per-agent child startup, which U9 removes.
+
 ## Problem
 
 A headless execution child's physical footprint is ~178 MB, of which

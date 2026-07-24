@@ -7,6 +7,12 @@ tags: [issue, agent, database, flow]
 
 # Make multi-form eval order a durable database fact
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — U9 deletion.** Position must become claimed run-step/attempt
+data; implementing it in outgoing `eval-batch!` would preserve the wrong
+owner.
+
 ## Problem
 
 One model reply may contain several executable forms, but the database cannot

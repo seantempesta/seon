@@ -7,6 +7,12 @@ tags: [issue, architecture, pod, agent]
 
 # Supply the execution artifact to the production container launch
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — U9 deletion.** The issue's current acceptance publishes and
+launches the execution-child artifact that U9 deletes; container acceptance
+must be restated against the claim-native runtime in that unit.
+
 ## Triage — 2026-07-23
 
 DISSOLVES into the cutover unit “per-agent child + `eval.cljs` self-host

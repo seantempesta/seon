@@ -80,3 +80,13 @@ Finally, the stable mutable holder is retained-context-owned and reset by the
 door for every invocation; no dynamic binding sits in the hot path. U1's
 second-session regression proves that a function defined before the second
 session consumes the second invocation's freshly reset budget.
+
+## Closure evidence — 2026-07-23
+
+Resolved by `8000f5327` and the config-owner handoff in `3d8c9a9a6`.
+`src/seon/host/guard.cljc:47-72` owns the retained-context holder and resets it
+at every invocation; `src/seon/host/guard.cljc:210-220` is the one guarded
+entry. The direct portable hostile-loop proof is
+`test/seon/host/guard_test.cljc:51-67`, the second-session reuse regression is
+`test/seon/host/guard_context_test.clj:17-75`, and the closed config projection
+is exercised by `test/seon/host/guard_config_test.cljs:7-43`.

@@ -7,6 +7,12 @@ tags: [issue, agent]
 
 # Restore focused agent edge-case coverage
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — test-simplification batch.** The missing lifecycle,
+run-state, and derivation cases must be placed under their existing focused
+owners while fixture and duplicate-test paths converge.
+
 ## Problem
 
 The authority migration correctly deleted the embedded-Datahike

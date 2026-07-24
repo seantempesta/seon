@@ -7,6 +7,12 @@ tags: [issue, database, web, architecture]
 
 # Derive read dependencies from Datahike's parsed semantics
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — P3 read-side admission.** The maintained parser projection
+is exposed; P3 must make cache, listener, schema-change, and generated
+false-negative coverage consume the same fail-closed interpretation.
+
 ## Triage — 2026-07-23
 
 REAL+INDEPENDENT (L), owned by Datahike's parsed read-dependency projection.

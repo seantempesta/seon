@@ -1,10 +1,16 @@
 ---
 type: issue
-status: active
+status: open
+severity: blocker
 tags: [issue, runtime, database]
 ---
 
 # Writer run-readiness! busy-spins when a ready source has no runtime
+
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — busy-spin fix.** The ruled repair parks on missing runtime
+ownership and wakes on owner publication while correcting stop ordering.
 
 ## Evidence (verified from source)
 

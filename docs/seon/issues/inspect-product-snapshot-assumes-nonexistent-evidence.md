@@ -7,6 +7,12 @@ severity: friction
 
 # Inspect product snapshot assumes nonexistent evidence
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — U9 deletion.** The current scorer joins outgoing
+execution-child failure/replacement evidence; U9 must rewrite it around
+claimant and leaf-host recovery.
+
 ## Evidence
 
 The offline `product_scenarios` scorer is discriminating over its fixtures, but

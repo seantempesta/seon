@@ -7,6 +7,11 @@ severity: blocker
 
 # Toolkit current-ns wedges the agent since the cljc packaging window
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — U9 deletion.** Source and live repair exist; the remaining
+namespace-state mechanism is the self-host path U9 deletes.
+
 ## Evidence
 
 Live default cluster, 2026-07-21. Agent real-hats-wave moved its REPL

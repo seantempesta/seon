@@ -1,6 +1,6 @@
 ---
 type: issue
-status: closed
+status: resolved
 tags: [issue, build, cljs, flow]
 severity: blocker
 ---

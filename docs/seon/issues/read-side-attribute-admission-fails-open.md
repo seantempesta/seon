@@ -1,10 +1,17 @@
 ---
 type: issue
-status: active
+status: open
+severity: blocker
 tags: [issue, runtime, database, schema]
 ---
 
 # Read-side attribute admission fails open (silent empty results, :all fallback)
+
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — P3 read-side admission.** P3 owns applying the existing
+query/pull dependency extractor as a fail-closed gate against the committed
+projection.
 
 ## Evidence (verified from source)
 

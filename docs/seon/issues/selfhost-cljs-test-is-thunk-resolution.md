@@ -7,6 +7,11 @@ severity: friction
 
 # Self-host `cljs.test/is` throws inside a dynamically-evaled `:test` thunk
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — U9 deletion.** The defect is confined to the outgoing
+`cljs.js/eval-str` path.
+
 ## Problem
 
 When a B9 usage-example fn — a `(defn f {:test (fn [] (cljs.test/is …))} …)` —

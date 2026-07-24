@@ -7,6 +7,12 @@ severity: friction
 
 # Persisted program error prevents agent repair
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — U9 deletion.** The remaining source/form diagnostic is tied
+to outgoing self-host program preparation; U9 must preserve its falsifier at
+the SCI loader door.
+
 ## Evidence
 
 An agent evaluated a schema namespace followed by an action namespace whose

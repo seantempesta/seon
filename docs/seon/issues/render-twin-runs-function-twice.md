@@ -7,6 +7,11 @@ tags: [issue, web, agent]
 
 # AI and HTML render twins may run one derivation twice
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — web slice 2.** The shared render-unit engine must derive
+both twins once per frozen database value as part of the web transition.
+
 ## Problem
 
 The AI context render and HTML surface render can independently invoke the same

@@ -7,6 +7,11 @@ tags: [issue, agent, database, architecture]
 
 # Cross-agent planners can reopen worker-completed steps
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — U9 deletion.** Claimant-owned capability stamping is the
+unforgeable actor boundary required before this transition can graduate.
+
 ## Problem
 
 A planner that knows a worker's step id can reopen that completed step even

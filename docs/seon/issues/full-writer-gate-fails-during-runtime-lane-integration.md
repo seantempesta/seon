@@ -7,6 +7,13 @@ severity: blocker
 
 # Full writer gate fails during runtime lane integration
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — test-simplification batch.** Fixture contracts and the
+one-seeding path have repaired major causes, but the current checkpoint has not
+yet produced one coherent full-writer green. The remaining fixture migration
+and proof close with that batch.
+
 ## Evidence
 
 The U5 checkpoint on 2026-07-23 ran 387 tests / 2,981 assertions and reported

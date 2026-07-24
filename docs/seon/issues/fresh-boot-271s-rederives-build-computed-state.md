@@ -1,10 +1,17 @@
 ---
 type: issue
-status: active
+status: open
+severity: friction
 tags: [issue, runtime]
 ---
 
 # Fresh boot takes 271s, re-deriving state the build already computed
+
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — R45 S-ladder.** `df2cb508a` delivered 14× projection
+construction and reuse, but the latest fresh readiness remained about 314
+seconds. Build-emitted startup data plus the apply/start split remain R45 work.
 
 ## Measured breakdown (predfix live proof, 2026-07-23)
 

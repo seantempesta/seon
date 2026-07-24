@@ -7,6 +7,12 @@ severity: friction
 
 # Execution child program load omitted instrumentation
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — U9 deletion.** The observed generation was repaired, and
+preserving the remaining self-host loader would strengthen the wrong owner;
+U9 retains the parity falsifier at the guarded host door.
+
 ## Problem
 
 The execution child activated the committed schema/function-contract

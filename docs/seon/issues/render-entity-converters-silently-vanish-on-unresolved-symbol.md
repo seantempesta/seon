@@ -7,6 +7,11 @@ tags: [issue, agent, web]
 
 # Render entity converters silently vanish on unresolved symbols
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — web slice 2.** One unresolved-symbol family across AI/HTML
+render slots and routes belongs to the JVM web-render transition.
+
 ## Problem
 
 `src/seon/render.cljs:352` and `:621` resolve registered render symbols via

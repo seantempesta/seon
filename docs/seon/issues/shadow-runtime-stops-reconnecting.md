@@ -7,6 +7,12 @@ tags: [issue, cljs, mcp, component]
 
 # Shadow runtime stops reconnecting
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — poll/timeout conversion.** Watcher outage and reconnect
+proof belongs with the census-driven conversion from guessed windows to
+event-driven progress and stall detection.
+
 ## Problem
 
 A live Bun pod can remain HTTP-ready while disappearing from Shadow's

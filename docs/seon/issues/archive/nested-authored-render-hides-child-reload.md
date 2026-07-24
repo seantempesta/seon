@@ -129,3 +129,10 @@ single-call door, a hostile authored symbol retains its `:budget` steering
 value in the slot, and the restart-stable default-context byte oracle remains
 identical. The option-A window is closed; the pod render containment path is
 door-complete.
+
+The closing implementation is `cd7d3ebf8` on top of `8bd19774e`.
+`src/seon/agent/turn.cljs:393-411` now sends authored render calls through the
+single host invocation, while `src/seon/agent/turn.cljs:413-447` keeps trusted
+compiled calls direct and routes authored symbols through
+`:seon.render/invoke-authored!`. The seam itself is
+`src/seon/render.cljc:43,67-68`.

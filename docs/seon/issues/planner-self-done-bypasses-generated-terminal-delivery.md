@@ -7,6 +7,11 @@ tags: [issue, agent, flow]
 
 # Planner self-done bypasses generated terminal delivery
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — U9 deletion.** The refusal is landed, but fresh generated
+terminal delivery remains scheduler behavior replaced by claimed run steps.
+
 ## Problem
 
 The planning agent's `:plan` block presents the generated root as its

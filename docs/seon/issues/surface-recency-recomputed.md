@@ -7,6 +7,11 @@ tags: [issue, web, database]
 
 # Surface recency may be recomputed globally
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — web slice 2.** Recency invalidation belongs to the shared
+render-unit dependency engine, not a new cache.
+
 ## Problem
 
 Choosing the most recently deliberate surface may repeatedly scan or derive

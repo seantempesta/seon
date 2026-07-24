@@ -7,6 +7,12 @@ tags: [issue, schema, agent, flow]
 
 # Make program indexing independent of the active schema projection
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — R45 S-ladder.** Build-emitted program rows must validate
+against the complete immutable pre-processing projection, not ambient Malli
+state.
+
 ## Problem
 
 `seon.client/var->fn-row` validates every compiled function's

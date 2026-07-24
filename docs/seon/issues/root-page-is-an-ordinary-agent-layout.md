@@ -7,6 +7,11 @@ tags: [issue, web, agent, flow, architecture]
 
 # Give root a dedicated system layout
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — web slice 2.** The dedicated system layout, canonical
+`/agent/root`, shared view units, and browser/SSE proof are one JVM web slice.
+
 ## Problem
 
 The root system workspace is implemented as the ordinary root-agent page. It

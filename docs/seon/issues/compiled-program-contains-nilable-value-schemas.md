@@ -7,6 +7,12 @@ tags: [issue, database, schema]
 
 # Compiled program contains nilable value schemas
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — test-simplification batch.** The semantic fixes are landed;
+the remaining complete-population proof must use the one paged fixture
+initialization and closes with that migration batch.
+
 ## Triage — 2026-07-23
 
 REAL+INDEPENDENT (S), owned by schema registration/compiled-program admission.

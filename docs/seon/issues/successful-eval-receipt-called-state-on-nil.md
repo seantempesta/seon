@@ -7,6 +7,11 @@ tags: [issue, agent, cljs]
 
 # Skip the receipt reread branch after a successful eval write
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — U9 deletion.** The failing child-side
+`eval.cljs/record-eval!` path is removed by U9.
+
 ## Problem
 
 `record-eval!` reads an existing receipt only when terminalizing an eval fails.

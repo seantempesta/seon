@@ -7,6 +7,12 @@ severity: blocker
 
 # Projected map keys are not drill paths
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — C1 codec.** Sampler metadata is present; the remaining
+strict path-codec and no-drill consumer proof belongs to C1 boundary totality,
+not another path representation.
+
 ## Problem
 
 `seon.render.value` says retained map keys remain valid path components, but

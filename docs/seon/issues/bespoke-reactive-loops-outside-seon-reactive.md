@@ -7,6 +7,12 @@ tags: [issue, database, architecture, web]
 
 # Bespoke reactive loops duplicate seon.reactive outside its owner
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — web slice 2.** The router, advertisement, shutdown, and
+request-settlement loops must converge on `seon.reactive` while the surviving
+web UI moves; they close with that slice.
+
 ## Triage — 2026-07-23
 
 REAL+INDEPENDENT (L), owned by `seon.reactive`. Current

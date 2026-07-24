@@ -7,6 +7,11 @@ severity: blocker
 
 # Value drill has no total work bounds
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — web slice 2.** The config half is landed; route/renderer
+effective limits and zero-work proof belong to the JVM value-browser cut.
+
 ## Problem
 
 The planned value route needs bounded paths and paging, but configuration has

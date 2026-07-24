@@ -7,6 +7,12 @@ tags: [issue, web, database, flow, architecture]
 
 # Thread one database value through debug and data feeds
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — U9 deletion.** The remaining loss is at the outgoing
+execution-child prompt boundary; U9 must preserve the claimant-side read
+evidence while deleting that child path.
+
 ## Triage — 2026-07-23
 
 DISSOLVES into the P4 loop-migration slice followed by “per-agent child +

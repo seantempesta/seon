@@ -1,7 +1,7 @@
 ---
 type: issue
 status: resolved
-severity: defect
+severity: blocker
 tags: [issue, agent, ui, architecture]
 ---
 
@@ -52,3 +52,7 @@ Focused JVM evidence is retained at
 `tmp/orchestrator/u4-gate-my-canvas-jvm.log`: the writer/host basis evaluated
 `(require 'my.canvas)` successfully. The twelve-namespace R1 JVM load gate also
 remained green at `tmp/orchestrator/u4-gate-r1-jvm.log`.
+
+Current source retains the resolved owner at
+`src/seon/render/canvas/field_signal.cljc:9-18`; both platform branches encode
+the same unpadded base64url value under the `seon_` prefix.

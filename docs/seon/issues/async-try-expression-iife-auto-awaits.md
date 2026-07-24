@@ -7,6 +7,11 @@ tags: [issue, agent, architecture]
 
 # try in expression position inside a compiled ^:async fn auto-awaits
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — U9 deletion.** The behavior belongs exclusively to the
+outgoing self-host `eval.cljs` compiler path, which U9 deletes.
+
 ## Triage — 2026-07-23
 
 DISSOLVES into the cutover unit “per-agent child + `eval.cljs` self-host

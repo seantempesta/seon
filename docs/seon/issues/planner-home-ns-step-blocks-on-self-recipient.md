@@ -7,6 +7,12 @@ tags: [issue, agent, flow]
 
 # Planner home-ns step blocks the root on a self-recipient refusal
 
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — U9 deletion.** Generated namespace-DAG dispatch is outgoing
+scheduler behavior; U9 retains the self-recipient falsifier in its cutover
+acceptance.
+
 ## Problem
 
 When the planning agent's reply declares its OWN home namespace

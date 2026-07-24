@@ -1,10 +1,8 @@
 ---
 type: issue
 status: resolved
-tags:
-  - runtime
-  - configuration
-  - reliability
+severity: blocker
+tags: [issue, runtime, configuration, reliability]
 ---
 
 # Protective runtime literals bypassed config
