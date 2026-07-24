@@ -511,6 +511,18 @@ checkpoint, then re-drive-3. Final graduation remains the reset default
 cluster with claimant interaction outcome visible through the live
 page/feed.
 
+EXECBUILDRETIRE LANDED (~17:45, 41d911add + a6ba6e1d8, accepted):
+child build retired everywhere; watcher green (client+test only);
+WRITER AND HOST REACHED READINESS (the readiness saga is resolved
+live); pod's S4 stale-release refusal fired correctly → sanctioned
+default reset → fresh apply exposed ONE remaining blocker:
+page-plan config-manifest digest drift (sidecar adc1e407 vs selected
+607f6793; issue filed) — pageplandigest lane dispatched (one digest
+owner, same bytes; verification stays strict). execution-digest
+rename = owner-taste item (deliberately retained). Focused gates:
+operator 130/733, launch 12/78 green. NEXT: green apply → five-ready
+boot with timings → S6 cutover → re-drive-3.
+
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 
 ## older restart protocol below until morning)
