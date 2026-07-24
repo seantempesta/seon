@@ -136,6 +136,21 @@
                  (launch/decode-descriptor
                   (pr-str (assoc descriptor :seon.test/unknown true)))))))
 
+(deftest published-launch-retains-both-artifact-digests
+  (let [descriptor
+        (launch/with-execution-artifact
+         {::launch/descriptor
+          (ordinary "data/clusters/default"
+                    :seon.dev.artifact.flavor/default "client")
+          ::launch/execution-build-id "execution"
+          ::launch/execution-output "out/execution/main.js"
+          ::launch/execution-digest digest-a
+          ::launch/application-digest digest-b})
+        runtime (::launch/runtime descriptor)]
+    (is (= digest-a (::launch/execution-digest runtime)))
+    (is (= digest-b (::launch/application-digest runtime)))
+    (is (schema/valid-candidate-value? ::launch/descriptor descriptor))))
+
 (deftest branch-descriptor-inherits-source-owners-and-isolates-target-data
   (let [source-connection-id
         [#uuid "9dcfa740-5f7f-4ff5-ac08-a9c8b605a8aa" :db]

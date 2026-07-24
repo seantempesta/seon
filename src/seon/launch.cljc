@@ -26,6 +26,7 @@
 (schema/register! ::execution-build-id [:string {:min 1}])
 (schema/register! ::execution-output ::path)
 (schema/register! ::execution-digest [:re "^[0-9a-f]{64}$"])
+(schema/register! ::application-digest [:re "^[0-9a-f]{64}$"])
 (schema/register! ::cluster-dir ::path)
 (schema/register! ::packages-dir ::path)
 (schema/register! ::process-dir ::path)
@@ -82,6 +83,7 @@
   [::execution-build-id {:optional true} ::execution-build-id]
   [::execution-output {:optional true} ::execution-output]
   [::execution-digest {:optional true} ::execution-digest]
+  [::application-digest {:optional true} ::application-digest]
   [:seon.client/launch-capability :seon.client/launch-capability]])
 (schema/register!
  ::database
@@ -377,7 +379,8 @@
   [::descriptor ::descriptor]
   [::execution-build-id ::execution-build-id]
   [::execution-output ::execution-output]
-  [::execution-digest ::execution-digest]])
+  [::execution-digest ::execution-digest]
+  [::application-digest ::application-digest]])
 
 (defn with-execution-artifact
   "Bind one launch to its immutable flavor-owned execution artifact."
@@ -386,7 +389,8 @@
   [{descriptor ::descriptor
     execution-build-id ::execution-build-id
     execution-output ::execution-output
-    execution-digest ::execution-digest}]
+    execution-digest ::execution-digest
+    application-digest ::application-digest}]
   (let [runtime (::runtime descriptor)]
     (invariant! (= execution-build-id (::execution-build-id runtime))
                 "The execution build does not match the launch flavor."
@@ -396,7 +400,8 @@
      (assoc descriptor ::runtime
             (assoc runtime
                    ::execution-output (normalize-path execution-output)
-                   ::execution-digest execution-digest)))))
+                   ::execution-digest execution-digest
+                   ::application-digest application-digest)))))
 
 (defn branch-descriptor
   "Derive one non-autonomous branch descriptor from its source launch."

@@ -1772,12 +1772,57 @@ the variable-weight values they select.
   bounded evaluation. Requiring both on the JVM proves the core has no hidden
   platform residue.
 
+## U9 host-session admission scar (2026-07-24)
+
+- **A host session is admitted by artifact digests, never a child build
+  name.** Its first frame carries the launch's execution and application
+  digests. The JVM compares those values with its operator-admitted execution
+  digest and the database's applied release digest, then echoes the pair in
+  `ready`; mismatch refuses with the exact values and the cluster-apply remedy.
+  `shadow-build-id`, `bun-version`, and the child `artifact-digest` handshake
+  have no surviving authority.
+
+## U9 authored host-client scar (2026-07-24)
+
+- **The Bun leaf host has a session client, not an eval engine.** It acquires
+  one authored function's current source at the caller's immutable database
+  value, hashes that source, sends one source-digest invocation, and accepts
+  only the correlated result/error frame. Calls serialize per agent because
+  the retained SCI context has one evaluation owner; no compile state, program
+  installer, result registry, or child lifecycle survives in the client.
+
+## U9 authored-render rewire scar (2026-07-24)
+
+- **Prompt and agent-view orchestration stay local; only authored symbols cross
+  the host lane.** Trusted compiled render functions still run in the pod at
+  the supplied database value. An authored leaf alone enters
+  `seon.host.session.leaf/invoke-authored!`, and both render owners preserve
+  their existing ordinary success/error value shape before the surrounding
+  prompt or Datastar projection continues.
+
 ## U9 S1 completion scar (2026-07-24)
 
 - **A retired transport has no compatibility namespace.** Once the portable
   host-session core owns the wire values, deleting both mixed execution
   namespaces exposes every remaining caller as a concrete migration task;
   preserving an alias would keep the retired child topology alive in source.
+
+## U9 launch-identity scar (2026-07-24)
+
+- **A process launch carries the whole artifact identity, not one child
+  digest.** The operator binds the manifest's client execution digest and
+  application digest into `seon.launch/runtime`; later session admission reads
+  that closed value and never reconstructs release identity from ambient paths
+  or build names.
+
+## U9 S2 self-host deletion scar (2026-07-24)
+
+- **Portable corpus analysis survives; the pod compiler does not.** Namespace
+  source parsing remains a dual-tier `seon.ns.source` property, and receipt
+  data remains owned by the JVM host path. The pod's `seon.eval`,
+  `seon.repl`, analyzer-state snapshot, and their engine tests are deleted
+  whole. The only retained `cljs.js` compiler is the isolated diffusion worker
+  leaf, never a pod execution fallback.
 
 ## R52 interaction handoff scar (2026-07-24)
 
