@@ -5,10 +5,10 @@
    lives in [[seon.agent.turn]]. This namespace owns the agent entity and the
    capability surface that operates on it.
 
-   The agent operates as a real REPL: bootstrap-CLJS evaluates its forms,
-   results land in a per-agent home namespace (`my.agent.<id>`) as live
-   values keyed by eval-id (via [[seon.eval]]), and durable records land as
-   `:seon.eval` entities. The agent calls the real `seon.db/*` APIs directly.
+   The agent operates as a real REPL: the guarded JVM host evaluates forms in
+   a retained per-agent home namespace (`my.agent.<id>`), and durable receipts
+   land as `:seon.eval` entities. The agent calls the real `seon.db/*` APIs
+   directly.
 
    This namespace owns:
      - the `:seon.agent/*` schemas (id/purpose/run/terminated-at/parent/
@@ -76,7 +76,6 @@
     [seon.db.protocol :as protocol]
     [seon.derive :as derive]
     [seon.error :as error]
-    [seon.launch :as launch]
     [seon.runtime.admission :as admission]
     [seon.schema :as schema]))
 
@@ -250,8 +249,6 @@
    [:seon.config/repl-mode         {:optional true} :seon.config/repl-mode]
    [:seon.agent.lifecycle/wake?      {:optional true} :seon.agent.lifecycle/wake?]
    [:seon.eval/home-requires       {:optional true} :seon.eval/home-requires]
-   [:seon.execution.host/eval-socket-path
-    {:optional true} :seon.execution.host/eval-socket-path]
    [:seon.render/ai   {:optional true} :seon.render/ai]
    [:seon.render/html {:optional true} :seon.render/html]])
 
@@ -359,103 +356,6 @@
 (def ^:private agent-creation-max-results
   4096)
 
-(schema/register! ::host-coordinate-ok? :boolean)
-(schema/register! ::host-coordinate-changed? :boolean)
-(schema/register! ::host-coordinate-operations [:int {:min 0}])
-(schema/register! ::host-coordinate-error :string)
-(schema/register!
- ::host-coordinate-reconciliation
- [:or
-  [:map {:closed true}
-   [::host-coordinate-ok? [:= true]]
-   [::host-coordinate-changed? ::host-coordinate-changed?]
-   [::host-coordinate-operations ::host-coordinate-operations]]
-  [:map {:closed true}
-   [::host-coordinate-ok? [:= false]]
-   [::host-coordinate-error ::host-coordinate-error]]])
-
-(defn- configured-host-eval-socket-path
-  "The supervised host socket selected by execution policy, else absent."
-  [configuration]
-  (when (true? (:seon.config.execution/host-tier? configuration))
-    (get-in launch/process-launch-descriptor
-            [::launch/host-owner ::launch/eval-socket-path])))
-
-(defn- reconcile-host-coordinate-row
-  "Project execution policy onto one agent's host socket coordinate."
-  [configuration agent]
-  (let [desired (configured-host-eval-socket-path configuration)
-        current (:seon.execution.host/eval-socket-path agent)
-        ref [:seon.agent/id (:seon.agent/id agent)]]
-    (cond
-      (= desired current) []
-      desired [{:seon.agent/id (:seon.agent/id agent)
-                :seon.execution.host/eval-socket-path desired}]
-      current [[:db/retract ref
-                :seon.execution.host/eval-socket-path current]]
-      :else [])))
-
-(defn ^:async reconcile-host-coordinates!
-  "Reconcile supervised-host coordinates for every existing agent."
-  {:malli/schema
-   [:=> [:catn [:seon.config/configuration :seon.config/singleton]]
-    ::host-coordinate-reconciliation]}
-  [configuration]
-  (let [database (await (db/db))]
-    (if (error-value? database)
-      {::host-coordinate-ok? false
-       ::host-coordinate-error (:seon.error/message database)}
-      (let [ids
-            (await
-             (db/query
-              {::db/db database
-               ::db/query
-               '[:find [?id ...]
-                 :where
-                 [?agent :seon.agent/id ?id]
-                 [?agent :seon.agent/namespace]]
-               ::db/max-results agent-creation-max-results
-               ::db/max-result-weight 1048576}))]
-        (if (error-value? ids)
-          {::host-coordinate-ok? false
-           ::host-coordinate-error (:seon.error/message ids)}
-          (let [agents
-                (if (seq ids)
-                  (await
-                   (db/pull-many
-                    {::db/db database
-                     ::db/pull-pattern
-                     [:seon.agent/id
-                      :seon.execution.host/eval-socket-path]
-                     ::db/refs (mapv (fn [id] [:seon.agent/id id]) ids)
-                     ::db/max-results agent-creation-max-results
-                     ::db/max-result-weight 1048576}))
-                  [])]
-            (if (error-value? agents)
-              {::host-coordinate-ok? false
-               ::host-coordinate-error (:seon.error/message agents)}
-              (let [tx-data
-                    (into []
-                          (mapcat #(reconcile-host-coordinate-row
-                                    configuration %))
-                          agents)]
-                (if (seq tx-data)
-                  (let [result
-                        (await
-                         (db/transact!
-                          {::db/db database
-                           ::db/expected-db database
-                           ::db/tx-data tx-data}))]
-                    (if-let [message (:seon.error/message result)]
-                      {::host-coordinate-ok? false
-                       ::host-coordinate-error message}
-                      {::host-coordinate-ok? true
-                       ::host-coordinate-changed? true
-                       ::host-coordinate-operations (count tx-data)}))
-                  {::host-coordinate-ok? true
-                   ::host-coordinate-changed? false
-                   ::host-coordinate-operations 0})))))))))
-
 (defn- model-variant-overrides
   [configuration variant]
   (let [variants (config/model-variants configuration)]
@@ -517,12 +417,7 @@
                      (if (contains? existing k) m (assoc m k v)))
                    {}
                    context)
-        host-eval-socket-path
-        (configured-host-eval-socket-path configuration)
         agent-row     (cond-> (assoc missing-context :seon.agent/id id)
-                        host-eval-socket-path
-                        (assoc :seon.execution.host/eval-socket-path
-                               host-eval-socket-path)
                         (not (contains? existing :seon.agent/namespace))
                         (assoc :seon.agent/namespace namespace-ref)
                         (and (not (contains? existing :seon.agent/purpose))

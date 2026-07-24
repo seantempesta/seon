@@ -474,15 +474,7 @@
                     (if (db-result-error? authorized)
                       (throw (js/Error. "authorization unavailable"))
                       (value-error-response 404 (value-absent-error)))
-                    (let [result
-                          (await (execution-host/sample-value!
-                                   agent-id selector-value drill-request))]
-                      (value-result-response
-                        configuration
-                        {:seon.agent/id agent-id}
-                        value-route-base
-                        {:seon.render/eval-id selector-value}
-                        result))))
+                    (value-error-response 503 (value-core-error))))
                 (if (not= "root" agent-id)
                   (value-error-response 404 (value-absent-error))
                   (let [entity (await (db/entity database selector-value))]

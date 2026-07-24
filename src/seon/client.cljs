@@ -1840,16 +1840,9 @@
                      (state/reconcile! reconcile-request))]
                 (if-not (:seon.runtime.state/ok? reconciled)
                   reconciled
-                  (let [host-coordinates
-                        (await (agent/reconcile-host-coordinates! singleton))
-                        migrated
+                  (let [migrated
                         (await (agent.ctx.admin/migrate-plan-surface-default!))]
                     (cond
-                      (not (::agent/host-coordinate-ok? host-coordinates))
-                      {:seon.error/message
-                       (::agent/host-coordinate-error host-coordinates)
-                       :seon.error/kind :core-bug}
-
                       (not (::agent.ctx/ok? migrated))
                       {:seon.error/message (::agent.ctx/error migrated)
                        :seon.error/kind :core-bug}
@@ -1858,13 +1851,9 @@
                       (-> reconciled
                           (update :seon.runtime.state/changed?
                                   #(or %
-                                       (::agent/host-coordinate-changed?
-                                        host-coordinates)
                                        (::agent.ctx/changed? migrated)))
                           (update :seon.runtime.state/operations +
-                                  (+ (::agent/host-coordinate-operations
-                                      host-coordinates)
-                                     (::agent.ctx/operations migrated)))))))))))))))
+                                  (::agent.ctx/operations migrated))))))))))))))
 
 (defn ^:async apply-config!
   "Apply one operator-resolved config payload without rereading its manifest."

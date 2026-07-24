@@ -24,7 +24,6 @@
    [seon.db :as db]
    [seon.db.protocol :as protocol]
    [seon.derive :as derive]
-   [seon.execution :as execution]
    [seon.error :as error]
    [seon.render :as render]
    [seon.render.canvas :as canvas]
@@ -70,7 +69,7 @@
 
 (defn- selected-error-message
   [result]
-  (or (get-in result [::execution/error :seon.error/message])
+  (or (get-in result [:seon.execution/error :seon.error/message])
       "selected function failed"))
 
 (defn- block-error-text
@@ -108,10 +107,10 @@
 (defn html-value
   "Normalize one selected HTML invocation result for an agent surface."
   [id block result]
-  (if (::execution/ok? result)
+  (if (:seon.execution/ok? result)
     (let [value (render/unwrap-response
                  :seon.render/html
-                 (::execution/value result))]
+                 (:seon.execution/value result))]
       (cond
         (or (vector? value) (nil? value))
         (interactive-hiccup id block value)
@@ -123,7 +122,7 @@
     (if (= "canvas" (:seon.render.surface/selection block))
       (:seon.render/hiccup
        (canvas/error-response
-        (assoc (::execution/error result)
+        (assoc (:seon.execution/error result)
                :seon.render.canvas/content (:seon.render/html block))))
       (canvas/error-card
        {:seon.error/message
@@ -131,9 +130,9 @@
 
 (defn- block-call
   [id entity configuration database block run-id]
-  {::execution/function-symbol (:seon.render/ai block)
-   ::execution/invoke-selected? true
-   ::execution/arguments
+  {:seon.execution/function-symbol (:seon.render/ai block)
+   :seon.execution/invoke-selected? true
+   :seon.execution/arguments
    [(cond-> {:seon.agent/id id
              :seon.agent/entity entity
              :seon.config/configuration configuration
@@ -160,13 +159,13 @@
          (reduce
            (fn [resolved [{:keys [index block]} result]]
              (assoc-in resolved [index :seon.render/ai]
-                       (if (::execution/ok? result)
-                         (ai-value (::execution/value result))
+                       (if (:seon.execution/ok? result)
+                         (ai-value (:seon.execution/value result))
                          (block-error-text block result))))
            blocks
            (map vector targets results))
          :seon.execution.runtime/values
-         (mapv #(when (::execution/ok? %) (::execution/value %)) results)}))))
+         (mapv #(when (:seon.execution/ok? %) (:seon.execution/value %)) results)}))))
 
 (defn- namespace-value [values]
   (some #(when (and (map? %)
@@ -202,8 +201,8 @@
                    (await (invoke-selected!
                            [(block-call id entity configuration database block
                                         run-id)])))]
-      (if (::execution/ok? result)
-        (ai-value (::execution/value result))
+      (if (:seon.execution/ok? result)
+        (ai-value (:seon.execution/value result))
         (block-error-text block result)))))
 
 (def ^:private prompt-pull-pattern
@@ -239,20 +238,7 @@
     {::protocol/operation protocol/pull-operation
      ::protocol/selector (ai/config-pull-pattern)
      ::protocol/entity-id [:seon.ai/id "config"]}
-    ai/configuration-read-profile)
-   ;; Presence query, not pull: the optional tier attribute may not be
-   ;; installed yet in a database whose agents all remain on the child tier.
-   {::protocol/operation protocol/query-operation
-    ::protocol/query-form
-    '[:find ?socket-path .
-      :in $ ?agent-id
-      :where
-      [?agent :seon.agent/id ?agent-id]
-      [?agent :seon.execution.host/eval-socket-path ?socket-path]]
-    ::protocol/arguments [nil]
-    :datahike.resource/max-work 10000
-    :datahike.resource/max-results 8
-    :datahike.resource/max-result-weight 1024}])
+    ai/configuration-read-profile)])
 
 (defn acquired-member
   "Return one successful database acquisition member's value."
@@ -293,9 +279,8 @@
     run-id :seon.agent.run/id
     profile :seon.agent.ctx/profile
     database ::db/db} invoke-selected!]
-  (let [members (-> prompt-acquisition-members
-                    (assoc-in [0 ::protocol/entity-id] [:seon.agent/id id])
-                    (assoc-in [3 ::protocol/arguments] [id]))
+  (let [members (assoc-in prompt-acquisition-members
+                          [0 ::protocol/entity-id] [:seon.agent/id id])
         acquired (if database
                    (await (db/execute-many {::db/db database
                                             ::db/members members
@@ -303,11 +288,9 @@
                    {:seon.error/message
                     "Prompt rendering requires :seon.db/db."
                     :seon.error/kind :core-bug})
-        [agent-member cluster-config-member ai-config-member tier-member]
+        [agent-member cluster-config-member ai-config-member]
         (::db/results acquired)
-        required-members (cond-> [agent-member cluster-config-member
-                                  ai-config-member]
-                           (some? tier-member) (conj tier-member))
+        required-members [agent-member cluster-config-member ai-config-member]
         member-failure?
         (not (every? #(true? (::protocol/success? %)) required-members))]
     (if member-failure?
@@ -322,16 +305,7 @@
             shared-system-text
             (or (:seon.config/system-text cluster-config-row)
                 ctx/system-text-shared)
-            host-tier? (and (some? tier-member)
-                            (string? (acquired-member tier-member)))
-            ;; Three-member acquisition is retained only for older direct test
-            ;; stubs. Real prompt acquisition always carries the tier member
-            ;; and therefore always uses the one tier-aware renderer.
-            system-prompt (if (some? tier-member)
-                            (ctx/render-system-text host-tier?
-                                                    shared-system-text)
-                            (or (:seon.config/system-text cluster-config-row)
-                                ctx/system-text))
+            system-prompt (ctx/render-system-text true shared-system-text)
             config-resolution (ai/resolved-config-from-rows config-row entity)
             whole-prompt (when-not (seq profile)
                            (some->> (:seon.render/ai entity)
@@ -444,9 +418,9 @@
     (db/decode-edn-value :seon.render/html value)))
 
 (defn- html-call [id entity configuration database block renderer]
-  {::execution/function-symbol renderer
-   ::execution/invoke-selected? true
-   ::execution/arguments
+  {:seon.execution/function-symbol renderer
+   :seon.execution/invoke-selected? true
+   :seon.execution/arguments
    [(cond-> {:seon.agent/id id
              :seon.agent/entity entity
              :seon.config/configuration configuration
