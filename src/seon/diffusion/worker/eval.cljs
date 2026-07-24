@@ -28,10 +28,9 @@
    cache loader) + `cljs.analyzer` (warning capture) +
    `seon.eval.bootstrap-cache` (the shared LEAF cache loader — deliberately
    free of seon.db/seon.schema/pod state). NO `seon.eval`, NO datahike —
-   those are pod-coupled (`src/seon/render/sci.cljs:69-70`,
-   `src/seon/eval.cljs:36-58`); this is a separate leaf bundle so the
-   self-host weight never bloats the lean parse bundle, and it must not drag
-   the pod cage onto the worker image.
+   this is a separate leaf bundle so the self-host weight never bloats the
+   lean parse bundle, and it must not drag pod runtime state onto the worker
+   image.
 
    ## Non-termination is BOUNDED
 

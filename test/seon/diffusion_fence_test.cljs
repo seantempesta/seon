@@ -10,10 +10,7 @@
 (def ^:private fenced-require-pattern
   #"\[\s*(seon\.diffusion(?:\.[A-Za-z0-9_.-]+)+)(?=[\s\]\}:])")
 
-(def ^:private allowlist
-  [{::file "src/seon/eval.cljs"
-    ::date "2026-07-21"
-    ::reason "dies at W5 (deletion inventory); remove this row with that band"}])
+(def ^:private allowlist [])
 
 (defn- fenced-requires
   [source]
