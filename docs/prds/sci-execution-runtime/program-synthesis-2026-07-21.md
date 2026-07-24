@@ -68,7 +68,16 @@ reconciled; fix-tonight list feeds overnight slots; needs-owner
 feeds MORNING ITEMS. The issue COUNT is a first-class morning-report
 metric.
 
+CODEX OUTAGE (2026-07-23 ~23:00): Sol usage limit exhausted —
+resets Jul 28 or on credit purchase (chatgpt.com/codex/settings/
+usage). Remaining night work switches to FABLE subagents (owner
+authorized, expensive) + orchestrator-run gates. Already-running
+codex processes may complete; no new codex turns possible.
+
 MORNING ITEMS (accumulating):
+- CODEX CREDITS: Sol is the cheap implementation fleet and is dry
+  until Jul 28 — decide whether to purchase credits (the night
+  continued on Fable lanes).
 - (seed) Bun self-host comparison number post-checkpoint if wanted —
   cheap re-run, decision-moot (path dies at U9).
 
