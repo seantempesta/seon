@@ -5,7 +5,8 @@
    [my.blob :as blob]
    [seon.agent.turn.llm :as llm]
    [seon.ai.core :as ai]
-   [seon.db :as db])
+   [seon.db :as db]
+   [seon.db.id :as db.id])
   #?(:clj
      (:import [java.util.concurrent CountDownLatch TimeUnit])))
 
@@ -73,6 +74,50 @@
                    #?(:clj (java.util.Date. 1250) :cljs (js/Date. 1250))}
                   now 1000)]
     (is (= 250 (llm/remaining-ms now deadline)))))
+
+#?(:clj
+   (deftest durable-attempt-persists-the-adapter-text
+     (let [reply "(seon.agent.message/user \"ALIVE\")"
+           captured (atom nil)]
+       (with-redefs
+        [db/pull
+         (fn [_]
+           {:seon.agent.turn/phase :rendered
+            :seon.agent.turn/llm-attempts []})
+         db.id/allocate!
+         (fn [_]
+           {::db.id/ids
+            {:seon.agent.turn.llm/claim-attempt "attempt"}
+            :db-after ::opened})
+         blob/put!
+         (fn [request]
+           (reset! captured request)
+           {:my.blob/ok? true :my.blob/hash "reply-hash"})
+         db/transact!
+         (fn [_] {:db-after ::settled})]
+         (let [result
+               (llm/durable-attempt!
+                {:seon.agent.driver/run
+                 {:seon.agent/id "agent"
+                  :seon.agent.run/id "run"
+                  :seon.agent.run/deadline (java.util.Date. 2000)
+                  :seon.agent.run/current-turn
+                  {:seon.agent.turn/id "turn"}}
+                 :seon.agent.run/claim-epoch 1
+                 :seon.db/db ::database
+                 :seon.ai/config-resolution resolution
+                 :seon.ai/ctx "prompt"
+                 :seon.ai/reply-evaluation :batch
+                 :seon.config.model-stream/partial-publish-settle-ms 1
+                 :seon.agent.turn/transport!
+                 (fn [_]
+                   {:seon.ai/text reply
+                    :seon.ai/status 200})
+                 :seon.agent.turn/now!
+                 #(java.util.Date. 1000)})]
+           (is (= {:my.blob/content reply :my.blob/media :reply}
+                  @captured))
+           (is (= ::settled (:seon.db/db result))))))))
 
 #?(:clj
    (deftest phase-entry-refuses-to-reconstruct-a-missing-prompt

@@ -418,7 +418,8 @@
                 reply-result
                 (when (= :success (:seon.ai.attempt/outcome terminal))
                   (await
-                   (blob/put! {:my.blob/content (or (:text response) "")
+                   (blob/put! {:my.blob/content
+                               (or (:seon.ai/text response) "")
                                :my.blob/media :reply})))
                 reply-blob (blob-ref reply-result)
                 publication-failed?

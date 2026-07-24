@@ -251,7 +251,7 @@
          {::db/db database
           ::db/pull-pattern
           (into [:seon.config/id] config.resolve/claim-driver-attributes)
-          ::db/ref [:seon.config/id :seon.config/singleton]})
+          ::db/ref [:seon.config/id "cluster"]})
         configuration
         (config.resolve/claim-driver-configuration singleton)
         missing

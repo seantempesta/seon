@@ -182,6 +182,22 @@
         (#'driver.host/reply-program nil turn "agent")))
     (is (= ["(+ 1 2)" :batch 'my.agent] @received))))
 
+(deftest invocation-limits-come-from-the-config-singleton-entity
+  (let [request (atom nil)
+        configuration
+        {:seon.config.claim-driver/invocation-deadline-ms 120000
+         :seon.config.claim-driver/invocation-result-maximum-bytes 1048576}]
+    (with-redefs [db/pull
+                  (fn [value]
+                    (reset! request value)
+                    configuration)]
+      (is (= configuration
+             (#'driver.host/invocation-configuration! ::database))))
+    (is (= [:seon.config/id "cluster"] (::db/ref @request)))
+    (is (= (into [:seon.config/id]
+                 config.resolve/claim-driver-attributes)
+           (::db/pull-pattern @request)))))
+
 (deftest unplannable-reply-does-not-open-the-eval-phase
   (let [transactions (atom [])
         steering
