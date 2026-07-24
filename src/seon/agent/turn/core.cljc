@@ -156,10 +156,10 @@
      :seon.agent.run/claimant]
     [:db/retract [:seon.agent/id agent-id] :seon.agent/run]]))
 
-(defn phase-error-close-tx-data
-  "Fault a phase, terminalize its open attempts, and release the run atomically."
+(defn terminal-close-tx-data
+  "Terminalize a turn and its claimed run in one fenced transaction."
   [run-fence agent-id run-id turn-id phase open-attempt-ids
-   closed-at error-message]
+   closed-at turn-status run-reason error-message]
   (into
    (vec run-fence)
    (concat
@@ -173,15 +173,23 @@
      open-attempt-ids)
     [{:seon.agent.turn/id turn-id
       :seon.agent.turn/phase :published
-      :seon.agent.turn/status :error
+      :seon.agent.turn/status turn-status
       :seon.agent.turn/error error-message}
      {:seon.agent.run/id run-id
       :seon.agent.run/status :closed
-      :seon.agent.run/closed-reason :error
+      :seon.agent.run/closed-reason run-reason
       :seon.agent.run/closed-at closed-at}
      [:db/retract [:seon.agent.run/id run-id]
       :seon.agent.run/claimant]
      [:db/retract [:seon.agent/id agent-id] :seon.agent/run]])))
+
+(defn phase-error-close-tx-data
+  "Fault a phase, terminalize its open attempts, and release the run atomically."
+  [run-fence agent-id run-id turn-id phase open-attempt-ids
+   closed-at error-message]
+  (terminal-close-tx-data
+   run-fence agent-id run-id turn-id phase open-attempt-ids
+   closed-at :error :error error-message))
 
 (defn next-attempt-ordinal
   "Derive the next ordinal exclusively from durable attempt rows."

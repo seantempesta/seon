@@ -130,6 +130,32 @@
                 :seon.agent/run]}
               tx))))
 
+(deftest external-close-terminalizes-the-active-turn-in-the-same-transaction
+  (let [fence (run.core/run-fence agent-id run-id 3)
+        tx
+        (turn.core/terminal-close-tx-data
+         fence agent-id run-id "turn-u2" :evaling []
+         now :interrupted :superseded
+         "The run closed :superseded before the active turn published.")]
+    (is (= fence (subvec tx 0 2)))
+    (is (some #{[:db.fn/cas [:seon.agent.turn/id "turn-u2"]
+                :seon.agent.turn/phase :evaling :evaling]}
+              tx))
+    (is (some #(and (map? %)
+                    (= :published (:seon.agent.turn/phase %))
+                    (= :interrupted (:seon.agent.turn/status %)))
+              tx))
+    (is (some #(and (map? %)
+                    (= :closed (:seon.agent.run/status %))
+                    (= :superseded (:seon.agent.run/closed-reason %)))
+              tx))
+    (is (some #{[:db/retract [:seon.agent.run/id run-id]
+                :seon.agent.run/claimant]}
+              tx))
+    (is (some #{[:db/retract [:seon.agent/id agent-id]
+                :seon.agent/run]}
+              tx))))
+
 (deftest phase-eligibility-is-policy-data
   (is (loop.core/eligible?
        #{:seon.agent.driver.capability/render}

@@ -111,6 +111,12 @@
 (def ^:private claim-policy-selector
   [:seon.config.watchdog/stale-ms])
 
+(def ^:private run-authority-selector
+  [:seon.agent.run/status
+   :seon.agent.run/claimant
+   :seon.agent.run/claim-epoch
+   :seon.agent.run/closed-reason])
+
 (defn- turn-reply-evaluation [turn]
   (->> (:seon.agent.turn/llm-attempts turn)
        (filter #(= :success (:seon.ai.attempt/outcome %)))
@@ -386,6 +392,41 @@
         maximum-characters 4096]
     (subs message 0 (min maximum-characters (count message)))))
 
+(defn- ^:async terminal-or-displaced-result
+  "Return terminal/lost-custody data when a failed phase no longer owns work."
+  [held]
+  (let [held-run (:seon.agent.driver/run held)
+        agent-id (:seon.agent/id held-run)
+        run-id (:seon.agent.run/id held-run)
+        held-epoch (:seon.agent.run/claim-epoch held)
+        held-claimant (or (:seon.agent.driver/claimant held)
+                          (:seon.agent.run/claimant held-run))
+        database (await (db/db))]
+    (if (run.core/error-value? database)
+      database
+      (let [run
+            (await
+             (db/pull
+              {::db/db database
+               ::db/pull-pattern run-authority-selector
+               ::db/ref [:seon.agent.run/id run-id]}))]
+        (cond
+          (run.core/error-value? run) run
+
+          (= :closed (:seon.agent.run/status run))
+          {:seon.db/db database
+           :seon.agent.driver/closed? true
+           :seon.agent.run/closed-reason
+           (:seon.agent.run/closed-reason run)}
+
+          (or (nil? run)
+              (not= held-epoch (:seon.agent.run/claim-epoch run))
+              (not= held-claimant (:seon.agent.run/claimant run)))
+          {:seon.db/db database
+           :seon.agent.driver/released? true}
+
+          :else nil)))))
+
 (defn- ^:async settle-phase-error!
   "Persist one direct phase error and atomically fault/release the held run."
   [held phase-error now]
@@ -461,7 +502,11 @@
                   (assoc held :seon.agent.driver/step step)))]
             (cond
               (run.core/error-value? result)
-              (await (settle-phase-error! held result now))
+              (let [terminal-or-displaced
+                    (await (terminal-or-displaced-result held))]
+                (if terminal-or-displaced
+                  terminal-or-displaced
+                  (await (settle-phase-error! held result now))))
               (:seon.agent.driver/closed? result) result
               (:seon.agent.driver/released? result) result
               (:seon.db/db result)

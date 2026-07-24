@@ -9,6 +9,7 @@
     [seon.agent.ctx :as ctx]
     [seon.agent.message :as msg]
     [seon.agent.run.core :as run.core]
+    [seon.agent.turn.core :as turn.core]
     [seon.ai :as ai]
     [seon.ai.tokens :as tokens]
     [seon.config :as config]
@@ -615,12 +616,40 @@
      {:seon.agent/parent [:seon.agent/id]}
      {:seon.agent/run [:seon.agent.run/id]}]}
    {:seon.agent.turn/_run
-    [:seon.agent.turn/id :seon.agent.turn/scheduled?]}])
+    [:db/id :seon.agent.turn/id :seon.agent.turn/status
+     :seon.agent.turn/phase :seon.agent.turn/scheduled?
+     {:seon.agent.turn/llm-attempts
+      [:seon.ai.attempt/id :seon.ai.attempt/outcome]}]}])
 
 (defn- work-turn-count [run]
   (->> (:seon.agent.turn/_run run)
        (remove :seon.agent.turn/scheduled?)
        count))
+
+(defn- active-turn [run]
+  (->> (:seon.agent.turn/_run run)
+       (filter #(= :running (:seon.agent.turn/status %)))
+       (sort-by :db/id)
+       last))
+
+(defn- active-turn-close-data
+  [agent-id run-id claim-epoch turn reason closed-at]
+  (turn.core/terminal-close-tx-data
+   (run.core/run-fence agent-id run-id claim-epoch)
+   agent-id
+   run-id
+   (:seon.agent.turn/id turn)
+   (:seon.agent.turn/phase turn)
+   (into []
+         (comp
+          (filter #(= :open (:seon.ai.attempt/outcome %)))
+          (map :seon.ai.attempt/id))
+         (:seon.agent.turn/llm-attempts turn))
+   closed-at
+   (if (= :error reason) :error :interrupted)
+   reason
+   (str "The run closed :" (name reason)
+        " before the active turn published.")))
 
 (defn- log-notice-error! [child-id recipient result]
   (when (error-value? result)
@@ -735,11 +764,18 @@
             ;; mark this run closed but leave the live pointer untouched.
             owns?     (= run-id
                          (:seon.agent.run/id (:seon.agent/run agent)))
+            turn      (when owns? (active-turn r))
+            closed-at (js/Date.)
             report    (await (db/transact!
                               {::db/db database
                                ::db/tx-data
-                               (close-tx-data owns? agent-id run-id claim-epoch reason
-                                              (js/Date.))}))]
+                               (if turn
+                                 (active-turn-close-data
+                                  agent-id run-id claim-epoch turn reason
+                                  closed-at)
+                                 (close-tx-data
+                                  owns? agent-id run-id claim-epoch reason
+                                  closed-at))}))]
         ;; Piece 2b — route the parent/root OUTCOME notice through this one
         ;; choke point (only after the close committed; only for an outcome
         ;; reason; never for :completed, which `complete` messages itself).

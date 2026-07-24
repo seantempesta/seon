@@ -379,6 +379,69 @@
            (is (identical? database-after (:seon.db/db @sent)))
            (is (nil? (:seon.agent.message/origin @sent)))))))))
 
+(deftest close-terminalizes-an-active-turn-with-the-run-and-custody
+  (async done
+    (let [original-db db/db
+          original-pull db/pull
+          original-transact db/transact!
+          transaction (atom nil)
+          run-row
+          {:seon.agent.run/id "run-a"
+           :seon.agent.run/status :open
+           :seon.agent.run/claim-epoch 7
+           :seon.agent.run/agent
+           {:seon.agent/id "agent-a"
+            :seon.agent/run {:seon.agent.run/id "run-a"}}
+           :seon.agent.turn/_run
+           [{:db/id 101
+             :seon.agent.turn/id "turn-a"
+             :seon.agent.turn/status :running
+             :seon.agent.turn/phase :evaling
+             :seon.agent.turn/llm-attempts
+             [{:seon.ai.attempt/id "attempt-a"
+               :seon.ai.attempt/outcome :success}]}]}]
+      (set! db/db (fn ([] (js/Promise.resolve database))
+                    ([_] (js/Promise.resolve database))))
+      (set! db/pull
+            (fn
+              ([_] (js/Promise.resolve run-row))
+              ([_ _] (js/Promise.resolve nil))
+              ([_ _ _] (js/Promise.resolve nil))))
+      (set! db/transact!
+            (fn [& requests]
+              (reset! transaction (first requests))
+              (js/Promise.resolve native-report)))
+      (finish!
+       done
+       [[#(set! db/db %) original-db]
+        [#(set! db/pull %) original-pull]
+        [#(set! db/transact! %) original-transact]]
+       (fn ^:async test-close []
+         (await
+          (run/close-run!
+           {:seon.agent.run/id "run-a"
+            :seon.agent.run/claim-epoch 7
+            :seon.agent.run/closed-reason :superseded}))
+         (let [tx (::db/tx-data @transaction)]
+           (is (= [:db.fn/cas [:seon.agent.turn/id "turn-a"]
+                   :seon.agent.turn/phase :evaling :evaling]
+                  (nth tx 2)))
+           (is (some #(and (map? %)
+                           (= :published (:seon.agent.turn/phase %))
+                           (= :interrupted (:seon.agent.turn/status %)))
+                     tx))
+           (is (some #(and (map? %)
+                           (= :closed (:seon.agent.run/status %))
+                           (= :superseded
+                              (:seon.agent.run/closed-reason %)))
+                     tx))
+           (is (= [:db/retract [:seon.agent.run/id "run-a"]
+                   :seon.agent.run/claimant]
+                  (nth tx (- (count tx) 2))))
+           (is (= [:db/retract [:seon.agent/id "agent-a"]
+                   :seon.agent/run]
+                  (last tx)))))))))
+
 (deftest unowned-close-never-touches-the-current-pointer
   (async done
     (let [original-db db/db

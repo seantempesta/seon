@@ -2,6 +2,7 @@
   "JVM claim-driver reply-policy regressions."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [seon.agent.driver :as driver]
+            [seon.agent.run.core :as run.core]
             [seon.db :as db]
             [seon.db.host :as db.host]
             [seon.db.id :as db.id]
@@ -12,6 +13,7 @@
             [seon.agent.turn.core :as turn.core]
             [seon.config.resolve :as config.resolve]
             [seon.error :as error]
+            [seon.db.leaf :as db.leaf]
             [seon.host.context :as context]
             [seon.host.eval :as host.eval])
   (:import [java.io File]))
@@ -378,3 +380,176 @@
     (phase-error-case! false))
   (testing "after an attempt receipt is durable"
     (phase-error-case! true)))
+
+(deftest timeout-terminalizes-the-evaling-turn-without-a-second-stale-cas
+  (let [allocations
+        [{::db.id/key ::agent-id
+          ::db.id/identity-attr :seon.agent/id}
+         {::db.id/key ::run-id
+          ::db.id/identity-attr :seon.agent.run/id}
+         {::db.id/key ::turn-id
+          ::db.id/identity-attr :seon.agent.turn/id}
+         {::db.id/key ::eval-id
+          ::db.id/identity-attr :seon.eval/id}]
+        candidates
+        (db.id/candidate-manifest
+         {:seon.agent/id :seon.db.id.generator/human-readable
+          :seon.agent.run/id :seon.db.id.generator/compact
+          :seon.agent.turn/id :seon.db.id.generator/compact
+          :seon.eval/id :seon.db.id.generator/compact}
+         allocations)
+        ids (into {} (map (juxt ::db.id/key ::db.id/value)) candidates)
+        agent-id (::agent-id ids)
+        run-id (::run-id ids)
+        turn-id (::turn-id ids)
+        eval-id (::eval-id ids)
+        now (java.util.Date.)
+        close-message
+        "The run closed :superseded before the active turn published."
+        seeded
+        (transact-generated!
+         [{:db/id "agent"
+           :seon.agent/id agent-id
+           :seon.agent/run "run"}
+          {:db/id "run"
+           :seon.agent.run/id run-id
+           :seon.agent.run/agent "agent"
+           :seon.agent.run/status :open
+           :seon.agent.run/claimant driver/claimant
+           :seon.agent.run/claim-epoch 2
+           :seon.agent.run/last-beat-at now}
+          {:db/id "turn"
+           :seon.agent.turn/id turn-id
+           :seon.agent.turn/run "run"
+           :seon.agent.turn/status :running
+           :seon.agent.turn/phase :evaling}
+          {:db/id "eval"
+           :seon.eval/id eval-id
+           :seon.eval/source "(seon.schema/register! :my.memory/value :int)"
+           :seon.eval/at now
+           :seon.eval/status :done
+           :seon.eval/ok? true}
+          [:db/add "turn" :seon.agent.turn/evals "eval"]]
+         candidates)
+        database (context/resolve-head! *writer-session*)
+        held
+        {:seon.db/db database
+         :seon.agent.run/claim-epoch 2
+         :seon.agent.driver/run
+         {:seon.agent/id agent-id
+          :seon.agent.run/id run-id
+          :seon.agent.run/status :open
+          :seon.agent.run/claimant driver/claimant
+          :seon.agent.run/claim-epoch 2
+          :seon.agent.run/current-turn
+          {:seon.agent.turn/id turn-id
+           :seon.agent.turn/status :running
+           :seon.agent.turn/phase :evaling}}}
+        transaction-calls (atom 0)
+        base-leaf (database-leaf)
+        counting-leaf
+        (update
+         base-leaf db.leaf/transaction-call!
+         (fn [transaction-call!]
+           (fn [request recoverable?]
+             (swap! transaction-calls inc)
+             (transaction-call! request recoverable?))))
+        fault-count-before (count (all-fault-rows))
+        platform-leaf
+        {:seon.agent.driver/capabilities
+         #{:seon.agent.driver.capability/eval}
+         :seon.agent.driver/now (constantly now)
+         :seon.agent.driver/execute-step!
+         (fn [_]
+           (let [run-fence (turn.core/terminal-close-tx-data
+                            (run.core/run-fence agent-id run-id 2)
+                            agent-id run-id turn-id :evaling []
+                            now :interrupted :superseded close-message)
+                 closed (db/transact!
+                         {::db/db database
+                          ::db/tx-data run-fence})]
+             (if (:seon.error/message closed)
+               closed
+               (db/transact!
+                 {::db/db database
+                 ::db/tx-data
+                 (turn.core/advance-phase-tx-data
+                  (run.core/run-fence agent-id run-id 2)
+                  turn-id :evaling :evaled [])}))))}
+        result
+        (driver/call-with-leaf
+         platform-leaf counting-leaf
+         #(driver/drive-claim! held))
+        database-after (:seon.db/db result)
+        run
+        (binding [db/*leaf* base-leaf]
+          (db/pull
+           {::db/db database-after
+            ::db/pull-pattern
+            [:seon.agent.run/status :seon.agent.run/closed-reason
+             :seon.agent.run/claimant]
+            ::db/ref [:seon.agent.run/id run-id]}))
+        agent
+        (binding [db/*leaf* base-leaf]
+          (db/pull
+           {::db/db database-after
+            ::db/pull-pattern [:seon.agent/id :seon.agent/run]
+            ::db/ref [:seon.agent/id agent-id]}))
+        turn
+        (binding [db/*leaf* base-leaf]
+          (db/pull
+           {::db/db database-after
+            ::db/pull-pattern
+            [:seon.agent.turn/status :seon.agent.turn/phase
+             :seon.agent.turn/error
+             {:seon.agent.turn/evals
+              [:seon.eval/status :seon.eval/ok?]}]
+            ::db/ref [:seon.agent.turn/id turn-id]}))
+        orphaned
+        (binding [db/*leaf* base-leaf]
+          (db/query
+           {::db/db database-after
+            ::db/query
+            '[:find ?turn
+              :in $ ?run-id
+              :where
+              [?run :seon.agent.run/id ?run-id]
+              [?run :seon.agent.run/status :closed]
+              [?turn :seon.agent.turn/run ?run]
+              [?turn :seon.agent.turn/status :running]]
+            ::db/args [run-id]}))
+        closing-transactions
+        (binding [db/*leaf* base-leaf]
+          (db/query
+           {::db/db (db/history database-after)
+            ::db/query
+            '[:find ?run-tx ?turn-tx
+              :in $ ?run-id ?turn-id
+              :where
+              [?run :seon.agent.run/id ?run-id]
+              [?turn :seon.agent.turn/id ?turn-id]
+              [?run :seon.agent.run/status :closed ?run-tx true]
+              [?turn :seon.agent.turn/status :interrupted ?turn-tx true]]
+            ::db/args [run-id turn-id]}))]
+    (is (true? (::protocol/success? seeded)) (pr-str seeded))
+    (is (true? (:seon.agent.driver/closed? result)) (pr-str result))
+    (is (= :superseded (:seon.agent.run/closed-reason result)))
+    (is (= 2 @transaction-calls)
+        "timeout close plus the displaced phase write; no second settlement CAS")
+    (is (= fault-count-before (count (all-fault-rows)))
+        "the expected displaced write records no core fault")
+    (is (= {:seon.agent.run/status :closed
+            :seon.agent.run/closed-reason :superseded}
+           run))
+    (is (= {:seon.agent/id agent-id} agent))
+    (is (= {:seon.agent.turn/status :interrupted
+            :seon.agent.turn/phase :published
+            :seon.agent.turn/error close-message
+            :seon.agent.turn/evals
+            [{:seon.eval/status :done :seon.eval/ok? true}]}
+           turn))
+    (is (empty? orphaned))
+    (is (seq closing-transactions))
+    (is (every? (fn [[run-tx turn-tx]] (= run-tx turn-tx))
+                closing-transactions)
+        "run and turn terminal facts share the same committed transaction")))
