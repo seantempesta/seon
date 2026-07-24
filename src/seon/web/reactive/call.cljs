@@ -51,7 +51,6 @@
     [clojure.string :as str]
     [seon.db :as db]
     [seon.execution :as execution]
-    [seon.execution.host :as execution.host]
     [seon.log :as log]
     [seon.runtime.admission :as admission]
     [seon.web.reactive.transform :as transform]))
@@ -114,47 +113,21 @@
       :seon.error/kind kind})))
 
 (defn ^:async invoke!
-  "Invoke a granted authored function in its supervised Bun child.
-
-   Uses the request's immutable database value, prepares the function's authored
-   source identity at exactly that value, and sends the ordinary argument
-   vector through `seon.execution.host/invoke!`. The child applies the function
-   inside its agent and database transaction context, awaits async work, and
-   returns one bounded ordinary result. Child or preparation failures become
-   `{::ok? false ::error <structured-error>}` values; arguments are never source text."
+  "Refuse retired synchronous interaction execution as a flat error value."
   {:malli/schema [:=> [:catn [::db :seon.db/db] [::agent-id :string]
                        [::fn-sym :symbol]
                        [::args [:sequential :any]]]
                   :any]}
   [database agent-id fn-sym args]
-  (if-not (admission/available?)
-    (let [refusal (admission/unavailable)]
-      {::ok? false
-       ::unavailable? true
-       ::error (error-value (get refusal :seon/error) :core)})
-    (try
-      (let [plan (execution/invocation-plan agent-id fn-sym (vec args))
-            prepared
-            (await
-             (execution/prepare-invocations!
-              {:seon.db/db database
-               ::execution/invocation-plans [plan]}))]
-        (if (:seon.error/message prepared)
-          {::ok? false ::error prepared}
-          (if-let [invocation (first prepared)]
-            (let [result (await (execution.host/invoke! invocation))]
-              (if (= execution/result-message (::execution/message result))
-                {::ok? true ::value (::execution/result result)}
-                {::ok? false
-                 ::error
-                 (error-value
-                  (or (::execution/error result)
-                      "The execution child returned no result."))}))
-            {::ok? false
-             ::error (error-value
-                      "Invocation preparation returned no invocation.")})))
-      (catch :default e
-        {::ok? false ::error (error-value (err->msg e))}))))
+  {::ok? false
+   ::unavailable? true
+   ::error {:seon.error/message
+             "Interaction execution is being rehomed under R52."
+             :seon.error/kind :seon.runtime/unavailable
+             :seon.error/data {:seon.web.reactive.call/agent-id agent-id
+                               :seon.web.reactive.call/function-symbol fn-sym
+                               :seon.web.reactive.call/arguments args
+                               :seon.web.reactive.call/database database}}})
 
 ;; ============================================================
 ;; HTTP handler — POST /agent/{id}/call. The Ring request carries the native

@@ -1778,3 +1778,17 @@ the variable-weight values they select.
   host-session core owns the wire values, deleting both mixed execution
   namespaces exposes every remaining caller as a concrete migration task;
   preserving an alias would keep the retired child topology alive in source.
+
+## R52 interaction handoff scar (2026-07-24)
+
+- **A browser interaction is not a synchronous execution channel.** Until the
+  database interaction owner lands, validated requests refuse loudly as ordinary
+  error values; they neither await a retired child nor silently drop work.
+
+## R45 S6 writer AOT scar (2026-07-24)
+
+- **An AOT cache is an opt-in artifact, never a source-tree scan.** Preserve
+  source beside compiled classes for `requiring-resolve`, compile only the
+  measured writer artifact inventory, and reject the build when a fresh load
+  trace disagrees. The canonical operator artifact remains source-launched
+  until the orchestrator reviews a measured cutover.

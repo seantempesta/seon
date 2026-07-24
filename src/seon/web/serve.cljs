@@ -41,7 +41,6 @@
     [seon.db.restore :as db.restore]
     [seon.derive :as derive]
     [seon.error :as error]
-    [seon.execution.host :as execution-host]
     [seon.log :as log]
     [seon.platform :as platform]
     [seon.reactive :as reactive]
@@ -974,7 +973,7 @@
    (js/JSON.stringify
     (clj->js
      (product-evidence-json-value
-      {:seon.execution.host/processes (execution-host/processes)})))))
+      {:seon.host.session/processes []})))))
 
 (defn- turn-evidence-row
   "Stable external projection of captured turn prompts and raw replies."

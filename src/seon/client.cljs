@@ -73,7 +73,6 @@
     [seon.db.process :as db.process]
     [seon.derive :as derive]
     [seon.error :as error]
-    [seon.execution.host :as execution.host]
     [seon.log :as log]
     ;; Render protocol — A-2. Required here so the build includes it.
     ;; Symbol lookup for compiled render slots lives in
@@ -2296,9 +2295,6 @@
         autonomous? (true? (::autonomous? capability))
         descriptor (launch/validate-descriptor
                      launch/process-launch-descriptor)
-        _ (execution.host/configure!
-           {::execution.host/launch-descriptor descriptor
-            ::execution.host/javascript-runtime js/process.execPath})
         attached? (db/attached?)
         restore-startup
         (validate-restore-launch! descriptor capability)
@@ -2851,7 +2847,6 @@
         _ (swap! !state update ::quiesce-progress
                  merge-quiesce-progress
                  {::lifecycle/unhosted-ids host-ids})
-        _ (await (execution.host/stop!))
         _ (await (detach-runtime-advertisement!))]
     (let [progress (::quiesce-progress @!state)]
       (let [detached (admission/detach!)]
