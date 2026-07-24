@@ -11,10 +11,10 @@
    [seon.db :as db]
    [seon.error :as error]
    #?(:cljs [seon.log :as log])
-   [seon.schema :as schema])
+  [seon.schema :as schema])
   #?(:clj
      (:import [java.util.concurrent Executors ScheduledExecutorService
-               ScheduledFuture TimeUnit])))
+               ScheduledFuture ThreadFactory TimeUnit])))
 
 (schema/register! ::key :any)
 (schema/register! ::consumer-key :any)
@@ -84,7 +84,11 @@
 
 #?(:clj
    (defonce ^:private ^ScheduledExecutorService timer-executor
-     (Executors/newSingleThreadScheduledExecutor)))
+     (Executors/newSingleThreadScheduledExecutor
+      (reify ThreadFactory
+        (newThread [_ runnable]
+          (doto (Thread. ^Runnable runnable "seon-reactive-settle")
+            (.setDaemon true)))))))
 
 (defn- monotonic-ms []
   #?(:cljs (.now js/performance)
