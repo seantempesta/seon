@@ -34,6 +34,8 @@ manifest by the SAME mechanism.
 
 ## Resolution
 
+Resolved by `8953b45e3`.
+
 `status` passed the unresolved result of `seon.dev.config/load!` directly to
 the process status derivation. `up` and `cluster reset` first called
 `seon.dev.config/select-manifest`, which selects the retained applied manifest
