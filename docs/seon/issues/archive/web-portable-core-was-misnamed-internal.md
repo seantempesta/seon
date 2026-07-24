@@ -1,9 +1,8 @@
 ---
 type: issue
 status: resolved
-tags:
-  - issue
-  - runtime
+severity: cleanup
+tags: [issue, runtime]
 ---
 
 # Web portable core was misnamed internal

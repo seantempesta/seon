@@ -1,9 +1,8 @@
 ---
 type: issue
 status: resolved
-tags:
-  - issue
-  - testing
+severity: friction
+tags: [issue, testing]
 ---
 
 # Owner-close reconnect test raced retry backoff
