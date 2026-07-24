@@ -219,6 +219,24 @@ source-frozen root + non-root feed re-drive; the obsolete child-readiness
 failure was already absent. This does not displace the program spine or U12
 graduation gate.
 
+TIMEOUT CENSUS ACCEPTED (~11:00, research/timeout-census-2026-07-24.md):
+81 constants — 10 legit backstops / 17 poll-where-event-exists /
+21 clock-masking-missing-signal / 33 tuned guesses. R50 fix queue
+(ranked lanes 1-10 in the report; WHENs):
+- W-R50-1 claimant vthread-completion settlement (dispatch! finally
+  discards the death event; npefix closed the in-phase catch, the
+  handle-join residual remains) — WHEN: after re-drive-3 proves npefix
+  live; fold with W-R50-2 lease/process-death signalling.
+- W-R50-3 run/API/quiescence settlement via db interest (900s/10ms
+  family) — WHEN: after S4 lands (client.cljs owner frees).
+- W-R50-4 db transport/receipt completion delivery — independent lane.
+- W-R50-5 event-driven operator (onExit/WatchService; R42 stays loud
+  ceiling) — independent lane. 6-10 (config-authority cleanup, retry
+  unification, legacy-clock retirement, backstop-loudness proofs,
+  dev-tool polling) queue behind.
+Anchor rule: a backstop firing must record a fault datom — silent
+backstop firings found in watchdog steal + R42 are part of W-R50-2/5.
+
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 
 ## older restart protocol below until morning)
