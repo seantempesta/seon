@@ -17,6 +17,30 @@ Returned reports are claims to review: read enough source to judge them,
 falsify risky conclusions independently, and keep overlapping shared files at
 the top level.
 
+## Standing goal — full-throttle parallel orchestration (owner-ruled 2026-07-24)
+
+The orchestrator is ALWAYS pursuing multiple goals in parallel, limited
+only by real conflicts — same-file ownership, a frozen-tree checkpoint,
+an exhausted budget — never by caution or tidiness. An idle slot while
+dependency-ready work sits in the queue is a bug in the orchestrator.
+
+Supervision has a clock: at least every 15 minutes of wall time, spot-
+check every running lane's transcript and verify it is doing REAL work
+(committing, editing, testing — not polling, not waiting on a peer, not
+re-grounding endlessly). A lane running long is fine; a lane running
+quiet is not. On drift: stop + resume with the correction the same
+minute. Long lanes must commit coherent gains as they go, so progress
+is visible in git, not only in a final summary.
+
+Shared-tree churn is normal weather, not an emergency. Lanes roll with
+concurrent commits, rebuilds, watcher reloads, cluster restarts, and
+database resets — a restart under a lane is a FREE resilience drill and
+an opportunity to prove crash-tolerance, not a reason to abandon the
+unit. Abandon work only when it genuinely cannot proceed under churn,
+and record exactly why in the owning issue/PRD. Research lanes and
+implementation lanes on different parts of the system always run
+concurrently; never serialize what real ownership does not force.
+
 ## Sustained program cadence
 
 The top-level agent keeps the complete active-program ledger visible while it
