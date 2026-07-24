@@ -348,7 +348,8 @@
    [:seon.render/text :string]
    [:seon.ai/system-prompt :string]
    [:seon.ai/config-resolution :seon.ai/config-resolution]
-   [:seon.config/repl-mode :seon.config/repl-mode]
+   [:seon.ai/wire-stream? :seon.ai/wire-stream?]
+   [:seon.ai/reply-evaluation :seon.ai/reply-evaluation]
    [:seon.eval/ns :seon.ns/name]
    [:seon.agent.ctx/rendered-blocks {:optional true} [:vector :map]]])
 (schema/register! ::prompt-result [:or ::rendered-prompt ::prompt-error])

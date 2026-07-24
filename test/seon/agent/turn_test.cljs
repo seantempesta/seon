@@ -6,6 +6,7 @@
    [seon.agent.turn.core :as turn.core]
    [seon.db :as db]
    [seon.db.id :as db.id]
+   [seon.db.protocol :as protocol]
    [seon.error :as error]
    [seon.execution :as execution]
    [seon.execution.host :as execution.host]
@@ -28,7 +29,8 @@
   {:seon.render/text "remote prompt"
    :seon.ai/system-prompt "frozen system"
    :seon.ai/config-resolution resolution
-   :seon.config/repl-mode :batch
+   :seon.ai/wire-stream? false
+   :seon.ai/reply-evaluation :batch
    :seon.eval/ns 'my.agent.agent-1})
 
 (def ^:private reply-program turn.core/reply-program)
@@ -183,6 +185,61 @@
             (fn []
               (set! ctx.driver/render-prompt! original)
               (done)))))))
+
+(deftest render-prompt-validates-every-current-reply-policy
+  (async done
+    (let [original db/execute-many
+          policy (atom nil)
+          policies [{:seon.ai/wire-stream? false
+                     :seon.ai/reply-evaluation :batch}
+                    {:seon.ai/wire-stream? false
+                     :seon.ai/reply-evaluation :first-form}
+                    {:seon.ai/wire-stream? true
+                     :seon.ai/reply-evaluation :batch}
+                    {:seon.ai/wire-stream? true
+                     :seon.ai/reply-evaluation :first-form}]]
+      (set! db/execute-many
+            (fn [_]
+              (js/Promise.resolve
+               {::db/results
+                [{::protocol/success? true
+                  ::protocol/result
+                  (merge {:seon.agent/id "agent-1"
+                          :seon.render/ai (pr-str "remote prompt")}
+                         @policy)}
+                 {::protocol/success? true
+                  ::protocol/result
+                  {:seon.config/system-text "frozen system"}}
+                 {::protocol/success? true
+                  ::protocol/result
+                  {:seon.ai/model "frozen-model"}}]})))
+      (-> (reduce
+           (fn [prior reply-policy]
+             (.then
+              prior
+              (fn [_]
+                (reset! policy reply-policy)
+                (-> (turn/render-prompt "agent-1" database)
+                    (.then
+                     (fn [rendered]
+                       (is (schema/valid-candidate-value?
+                            ::turn/prompt-result rendered))
+                       (is (= reply-policy
+                              (select-keys
+                               rendered
+                               [:seon.ai/wire-stream?
+                                :seon.ai/reply-evaluation])))
+                       (is (not (contains? rendered
+                                           :seon.config/repl-mode)))))))))
+           (js/Promise.resolve)
+           policies)
+          (.catch
+           (fn [exception]
+             (is false (str "current reply policy rejected: " exception))))
+          (.finally
+           (fn []
+             (set! db/execute-many original)
+             (done)))))))
 
 (deftest prompt-profile-is-forwarded-to-the-same-compiled-owner
   (async done
