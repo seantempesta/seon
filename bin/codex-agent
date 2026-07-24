@@ -11,8 +11,14 @@
 #                                   transcript to stdout AND persists
 #                                   tmp/orchestrator/<name>-stdout.log;
 #                                   summary -> <name>-summary.txt.
-#   bin/codex-agent resume <name> <sid> [followup]
-#                                   continue a lane's session by id.
+#   bin/codex-agent resume <name> [followup]
+#                                   continue a lane with full prior
+#                                   context (session id auto-read from
+#                                   the lane's log; or pass it via
+#                                   LANE_SID). Followup as argument or
+#                                   stdin.
+#   bin/codex-agent stop <name>            kill a lane's codex process
+#                                   (its session survives; resume later).
 #   bin/codex-agent watch <name>           follow a lane's live transcript.
 #   bin/codex-agent summary <name>         print a lane's -o summary.
 #   bin/codex-agent status                 running lanes + landed summaries.
@@ -62,10 +68,31 @@ case "$command" in
       tee "$dir/$name-stdout.log"
     ;;
   resume)
-    [ $# -ge 2 ] || usage
-    name=$1; sid=$2; shift 2
-    codex exec resume "$sid" $(sandbox_flags) "$@" < /dev/null 2>&1 |
+    [ $# -ge 1 ] || usage
+    name=$1; shift
+    # codex prints "session id: <uuid>" in every run header; the last
+    # one in the lane's log is the session to continue.
+    sid=${LANE_SID:-$(grep -o 'session id: [0-9a-f-]*' \
+      "$dir/$name-stdout.log" 2>/dev/null | tail -1 | cut -d' ' -f3)}
+    [ -n "$sid" ] || {
+      echo "bin/codex-agent: no session id in $dir/$name-stdout.log;" \
+           "pass LANE_SID=<uuid>" >&2
+      exit 65
+    }
+    if [ $# -ge 1 ]; then followup=$1; else followup=$(cat); fi
+    [ -n "$followup" ] || { echo "bin/codex-agent: empty followup" >&2; exit 64; }
+    # resume rejects -o; the final message still lands in the summary
+    # file via tee of stdout — read the tail of the log instead.
+    codex exec resume "$sid" $(sandbox_flags) "$followup" < /dev/null 2>&1 |
       tee -a "$dir/$name-stdout.log"
+    ;;
+  stop)
+    [ $# -ge 1 ] || usage
+    pids=$(pgrep -f "codex exec.*$1-summary.txt" || true)
+    [ -n "$pids" ] || { echo "bin/codex-agent: no running lane '$1'" >&2; exit 1; }
+    kill $pids
+    echo "stopped lane '$1' (pids: $pids); session preserved — resume with:"
+    echo "  bin/codex-agent resume $1 \"<new information / correction>\""
     ;;
   watch)
     [ $# -ge 1 ] || usage
