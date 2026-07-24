@@ -11,7 +11,7 @@
             [seon.host.preflight :as preflight]
             [seon.host.record :as record]
             [seon.host.sample :as sample]
-            [seon.host.session :as session]
+            [seon.host.session.leaf :as session]
             [seon.program.edge :as edge]
             [seon.repl.parse.repair :as repair]
             [seon.schema :as schema])

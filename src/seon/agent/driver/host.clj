@@ -21,7 +21,7 @@
             [seon.host.eval :as host.eval]
             [seon.host.instrument :as instrument]
             [seon.host.invoke :as invoke]
-            [seon.host.session :as session]
+            [seon.host.session.leaf :as session]
             [seon.program.edge :as edge]
             [seon.program.plan :as plan]
             [seon.repl.parse :as repl.parse])

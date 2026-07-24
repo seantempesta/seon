@@ -1763,3 +1763,11 @@ the variable-weight values they select.
   targets, and its measurement harness therefore removes executable reachability
   without preserving the child runtime just to satisfy a symbol-valued
   protocol field.
+
+## U9 protocol promotion scar (2026-07-24)
+
+- **A guarded-host wire contract is portable data; session resources are not.**
+  `seon.host.session` owns the schemas and message values shared by both
+  endpoints, while `seon.host.session.leaf` owns JVM channels, locks, and
+  bounded evaluation. Requiring both on the JVM proves the core has no hidden
+  platform residue.

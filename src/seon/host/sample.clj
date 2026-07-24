@@ -2,7 +2,7 @@
   "Serve retained value sampling for one JVM host session."
   (:require [seon.db.protocol :as db.protocol]
             [seon.host.context :as context]
-            [seon.host.session :as session]
+            [seon.host.session.leaf :as session]
             [seon.render.value :as render.value]
             [seon.schema :as schema]))
 

@@ -8,7 +8,7 @@
             [seon.host.guard :as guard]
             [seon.host.instrument :as instrument]
             [seon.host.sample :as sample]
-            [seon.host.session :as session]
+            [seon.host.session.leaf :as session]
             [seon.schema :as schema])
   (:import [java.nio.channels SocketChannel]
            [java.util.concurrent ExecutorService ScheduledExecutorService TimeUnit]))

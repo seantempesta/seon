@@ -15,7 +15,7 @@
             [seon.host.instrument :as instrument]
             [seon.host.invoke :as invoke]
             [seon.host.sample :as sample]
-            [seon.host.session :as session]
+            [seon.host.session.leaf :as session]
             [seon.schema :as schema]
             [taoensso.timbre :as log])
   (:import [java.net StandardProtocolFamily UnixDomainSocketAddress]
