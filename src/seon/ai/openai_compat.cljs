@@ -10,10 +10,10 @@
        (https://api.deepseek.com/v1 root) and the `DEEPSEEK_API_KEY`
        env default. The DeepSeek wire format IS the OpenAI format.
      - `:openai-compat` — any OpenAI-compatible gateway (vLLM/SGLang,
-       enterprise bearer-keyed proxies, …). The endpoint is the config
-       row's `:seon.ai/base-url` (SEON_AI_BASE_URL). No shipped default
-       — `:openai-compat` selected with no base-url is a legible error
-       envelope at call time, never a throw.
+       enterprise bearer-keyed proxies, …). Its descriptor ships the
+       DeepSeek-compatible `/v1` root; an explicit `:seon.ai/base-url`
+       overrides that default. A resolved request with no base URL is a
+       legible error envelope at call time, never a throw.
 
    baseURL reconciliation: `SEON_AI_BASE_URL` was historically the FULL
    chat-completions URL; the SDK wants the `/v1` ROOT and appends

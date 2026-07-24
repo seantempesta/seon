@@ -54,21 +54,23 @@
     (is (= 0.2 (:temperature body)))
     (is (= 99 (:max_tokens body)))
     (is (= {:type "enabled"} (:thinking body)))
-    (is (= "high" (:reasoning_effort body)))
+    (is (not (contains? body :reasoning_effort))
+        "DeepSeek's descriptor promises its thinking toggle, not effort")
     (is (= "deepseek-v4-pro" (:model override)))
     (is (= 0.9 (:temperature override)))
     (is (= 7 (:max_tokens override)))))
 
-(deftest compatible-gateways-use-only-standard-reasoning-effort
+(deftest descriptor-thinking-policies-select-only-promised-wire-keys
   (let [effort (params {:seon.ai/ctx "hi"}
-                       (resolution {:seon.ai/provider :openai-compat
+                       (resolution {:seon.ai/provider :zai
                                     :seon.ai/base-url "https://gw.example/v1"
                                     :seon.ai/thinking "minimal"}))
         enabled (params {:seon.ai/ctx "hi"}
                         (resolution {:seon.ai/provider :openai-compat
                                      :seon.ai/base-url "https://gw.example/v1"
                                      :seon.ai/thinking "true"}))]
-    (is (= "minimal" (:reasoning_effort effort)))
+    (is (= "minimal" (:reasoning_effort effort))
+        "Z.AI's descriptor explicitly selects reasoning_effort")
     (is (not (contains? effort :thinking)))
     (is (not (contains? enabled :reasoning_effort)))
     (is (not (contains? enabled :thinking)))))
@@ -303,7 +305,7 @@
 (deftest one-resolution-survives-later-config-values
   (async done
     (let [captured (atom nil)
-          frozen (resolution {:seon.ai/provider :openai-compat
+          frozen (resolution {:seon.ai/provider :zai
                               :seon.ai/model "model-a"
                               :seon.ai/base-url "https://a.example/v1"
                               :seon.ai/timeout-ms 120000
@@ -389,10 +391,13 @@
       (is (true? (:seon.ai/timeout? result)))
       (is (not (contains? result :seon.ai/transport?))))))
 
-(deftest missing-compatible-gateway-config-is-an-error-value
+(deftest explicitly-missing-compatible-gateway-base-url-is-an-error-value
   (async done
     (let [calls (atom 0)
-          resolved (resolution {:seon.ai/provider :openai-compat})]
+          resolved
+          (update (resolution {:seon.ai/provider :openai-compat})
+                  :seon.ai/resolved-config
+                  dissoc :seon.ai/base-url)]
       (-> (with-env {"SEON_AI_API_KEY" "key"}
             (fn []
               (with-fetch (fn [_ _] (swap! calls inc))
