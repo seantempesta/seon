@@ -1380,6 +1380,17 @@ the variable-weight values they select.
   (`src/seon/db/transport/uds.cljc`,
   `test/seon/db/transport_uds_test.clj`).
 
+## HTTP terminal-catch fault scar (2026-07-24)
+
+- **Returning HTTP 500 does not record a caught core fault.** A terminal
+  Promise catch at an HTTP composition door must call `seon.error/record!`
+  with `:seon.error/fault :core` before it logs and constructs the bounded
+  response. Console output is operational evidence, not the durable fault
+  datom. Regress the boundary with the real injected persistence hook and
+  assert the transaction projection, not merely that a mocked recorder was
+  invoked (`src/seon/web/serve.cljs`,
+  `test/seon/web/serve_test.cljs`).
+
 ## Computed-bootstrap fixture scar (2026-07-23)
 
 - **Host transaction data is never SCI source.** `pr-str` preserves symbol

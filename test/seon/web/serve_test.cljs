@@ -20,6 +20,7 @@
     [seon.db.branch :as branch]
     [seon.db.restore :as restore]
     [seon.derive :as derive]
+    [seon.error :as error]
     [seon.eval :as seval]
     [seon.execution :as execution]
     [seon.execution.host :as execution-host]
@@ -535,6 +536,48 @@
              (set! db/query original-query)
              (set! lifecycle/resume! original-resume)
              (set! agent/message! original-message)
+             (done)))))))
+
+(deftest agent-run-core-fault-persists-before-http-500
+  (async done
+    (let [handler (deref #'serve/handle-agent-run!)
+          batches (atom [])
+          original-db db/db
+          request (js/Request.
+                   "http://127.0.0.1/agents/run"
+                   #js {:method "POST"
+                        :headers #js {"Content-Type" "application/json"}
+                        :body "{\"input\":\"work\"}"})]
+      (set! db/db
+            (fn
+              ([] (js/Promise.reject (js/Error. "injected core fault")))
+              ([_] (js/Promise.reject (js/Error. "injected core fault")))))
+      (error/set-db-hooks!
+       {:seon.error/transact!
+        (fn [tx-data]
+          (swap! batches conj tx-data)
+          (js/Promise.resolve {:seon.db/ok? true}))
+        :seon.error/branch-head (constantly nil)})
+      (-> (error/expecting-core-fault! #(handler request nil))
+          (.then
+           (fn [response]
+             (let [faults (filter #(= :core (:seon.error/fault %))
+                                  (mapcat identity @batches))]
+               (is (= 1 (count faults))
+                   "the terminal catch persists exactly one core-fault datom")
+               (is (= "injected core fault"
+                      (:seon.error/message (first faults))))
+               (is (= 500 (.-status response)))
+               (.json response))))
+          (.then
+           (fn [body]
+             (is (= "Error: injected core fault" (aget body "error")))))
+          (.catch (fn [exception]
+                    (is false (str "agents/run catch rejected: " exception))))
+          (.finally
+           (fn []
+             (set! db/db original-db)
+             (error/set-db-hooks! {})
              (done)))))))
 
 (deftest agent-creation-form-preserves-lifecycle-data

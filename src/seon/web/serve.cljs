@@ -40,6 +40,7 @@
     [seon.db.branch :as branch]
     [seon.db.restore :as db.restore]
     [seon.derive :as derive]
+    [seon.error :as error]
     [seon.eval :as seval]
     [seon.execution.host :as execution-host]
     [seon.log :as log]
@@ -1651,6 +1652,8 @@
                    (write-status! res 200 "application/json; charset=utf-8"
                                   (js/JSON.stringify (clj->js result)))))))
       (.catch (fn [err]
+                (error/record! {:seon.error/raw err
+                                :seon.error/fault :core})
                 (log/error-console! "seon.web.serve" "/agents/run threw" err)
                 (write-status! res 500 "application/json; charset=utf-8"
                                (js/JSON.stringify #js {:error (str err)}))))))
