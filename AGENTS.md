@@ -523,7 +523,12 @@ code-block comment above a form, and `;;;` is runtime-structure demarcation.
   callbacks, `listen!`), with the clock kept only as a loud last-resort
   backstop whose firing is itself a bug report, never the primary
   failure path. When you meet a tuned constant, first ask what
-  observable event it is standing in for.
+  observable event it is standing in for. Corollary (explicit goal,
+  same ruling): wherever an interface can be changed to EXPRESS its
+  dependencies and publish its own readiness — a start that returns a
+  completion, a resource that announces attached, a consumer that
+  declares what it awaits — change the interface; do not bolt
+  detection onto an interface that hides the event.
 - Nothing throws into the agent loop. Every failure is a `:seon/error` value;
   catch sites record the fault as database data. Agent mistakes never crash the
   pod. Core faults follow the one `:seon.config/on-core-error` dial.
