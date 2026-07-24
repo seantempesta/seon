@@ -1120,6 +1120,21 @@ MORNING ITEMS (accumulating):
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- SETTLECLOSE GREEN (2026-07-23 night): the final two fixture-class
+  failures are closed without weakening either production boundary.
+  Writer fixtures now keep canonical host schema rows out of SCI
+  source, use the compiled initialization-page population, declare
+  fixture-only schema supplements explicitly, and allocate generated
+  identities through the maintained candidate transaction contract.
+  The suite-wide residue sweep covered authored invocation, cancel,
+  graduate, hostile battery, instrument, and interrupt fixtures.
+  Operator package graph derivation now hashes the manifest-selected
+  program-source member while preserving the ownership assertion.
+  Integrated proof: focused cancel 4/31/0/0; full writer
+  641/4,339/0/0; full operator 318/1,837/0/0; the already-settled
+  full CLJS gate remains 1,592/7,866/0/0. The earliest unsettled
+  contract returns to the ordered [[unified-plan-2026-07-23]] spine;
+  this checkpoint has no occupied fix lane or local refill.
 - SETTLE RERUN: CLJS GREEN (1,592/7,866/0/0); fresh boot 308s
   (perf row stands — R45 preprocessing is the fix). Writer + operator
   each at ONE fixture-class error: (A) host-cancel-writer-test =
@@ -1138,8 +1153,8 @@ MORNING ITEMS (accumulating):
   complete agent-SCI binding inventory), U9 plan re-verification at
   post-wave HEAD, web-verification runbook prep. NIGHT ORDER after
   querycache lands: settle rerun (3 suites) → live-proof ledger +
-  baseline perf → drives + browser verification (runbook) → U9 S0a
-  + schedfix + P3 + fix-tonight batch waves → morning report
+  baseline perf → drives + browser verification (runbook) → U9 S0a,
+  schedfix, P3, and fix-tonight batch waves → morning report
   (checkpoint verdict, issue count, juicy finds, MORNING ITEMS incl.
   the 31 needs-owner rows from triage).
 - FULL CLJS GREEN (e5d5fa780, Fable lane, accepted): 1,592 tests /

@@ -2,13 +2,17 @@
   "Cancellation races through the real one-worker JVM agent host."
   (:require [clojure.test :refer [deftest is use-fixtures]]
             [sci.core :as sci]
+            [seon.db.host :as db.host]
+            [seon.db.id :as db.id]
+            [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds]
             [seon.db.writer-test-support :as writer-test]
             [seon.db.writer :as writer]
             [seon.host :as host]
             [seon.host.context :as context]
             [seon.host.invoke :as host.invoke]
-            [seon.host-registry-writer-test :as registry-test])
+            [seon.host-registry-writer-test :as registry-test]
+            [seon.schema :as schema])
   (:import [java.io File]
            [java.nio.channels Channels SocketChannel]))
 
@@ -50,13 +54,51 @@
       ::context/arglists '([label])
       ::context/doc "Signal that the writer test reached this call."}}}))
 
-(defn- seed-agent-turn! [agent-id turn-id]
-  (let [result
-        (context/transact-writer!
-         *writer-session*
-         [{:seon.agent/id agent-id}
-          {:seon.agent.turn/id turn-id}])]
-    (is (true? (:seon.db/ok? result)) (pr-str result))))
+(defn- allocate-agent-turn!
+  ([]
+   (let [candidates
+         (db.id/candidate-manifest
+          {:seon.agent/id :seon.db.id.generator/human-readable
+           :seon.agent.turn/id :seon.db.id.generator/compact}
+          [{:seon.db.id/key :fixture/agent
+            :seon.db.id/identity-attr :seon.agent/id}
+           {:seon.db.id/key :fixture/turn
+            :seon.db.id/identity-attr :seon.agent.turn/id}])
+         agent-id (:seon.db.id/value (first candidates))
+         turn-id (:seon.db.id/value (second candidates))
+         database (db.host/resolve-db! *writer-session* nil false)
+         result
+         (db.host/call!
+          *writer-session*
+          (protocol/transaction-request
+           {::protocol/request-id (str (random-uuid))
+            :seon.db/db database
+            ::protocol/transaction-data
+            [{:seon.agent/id agent-id}
+             {:seon.agent.turn/id turn-id}]
+            ::protocol/generated-candidates candidates}))]
+     (is (true? (::protocol/success? result)) (pr-str result))
+     [agent-id turn-id]))
+  ([agent-id]
+   (let [candidates
+         (db.id/candidate-manifest
+          {:seon.agent.turn/id :seon.db.id.generator/compact}
+          [{:seon.db.id/key :fixture/turn
+            :seon.db.id/identity-attr :seon.agent.turn/id}])
+         turn-id (:seon.db.id/value (first candidates))
+         database (db.host/resolve-db! *writer-session* nil false)
+         result
+         (db.host/call!
+          *writer-session*
+          (protocol/transaction-request
+           {::protocol/request-id (str (random-uuid))
+            :seon.db/db database
+            ::protocol/transaction-data
+            [{:seon.agent/id agent-id}
+             {:seon.agent.turn/id turn-id}]
+            ::protocol/generated-candidates candidates}))]
+     (is (true? (::protocol/success? result)) (pr-str result))
+     turn-id)))
 
 (defn- open-session! [agent-id]
   (let [^SocketChannel channel (uds/connect! *host-socket*)
@@ -168,38 +210,39 @@
            {::context/writer-socket-path request-path
             ::context/database-name database-name
             ::context/backend :memory})
-          seed-ctx (context/fork-context (context/build-base! writer-session))]
+          _ (schema/register! :seon.host-cancel-writer-test/sentinel :string)]
       (try
         (let [seeded
-              (sci/eval-string*
-               seed-ctx
-               (str "(require 'seon.db)"
-                    "(seon.db/transact! {:seon.db/tx-data "
-                    (pr-str
-                     (into (registry-value 'corpus-schema-rows)
-                           [(registry-value 'value-sampling-policy)
-                            {:seon.schema/key
-                             :seon.host-cancel-writer-test/sentinel
-                             :seon.schema/form ":string"}
-                            {:seon.agent/id "cancel-schema-probe"}
-                            {:seon.db.process/id :seon.db.process/repl}]))
-                    "})"))]
-          (is (map? (:db-after seeded)) (pr-str seeded)))
+              (writer-test/seed-canonical-schema!
+               writer-session
+               database-name
+               [(registry-value 'value-sampling-policy)
+                {:seon.user/id "user"}
+                {:seon.db.process/id :seon.db.process/repl}])]
+          (is (true? (::protocol/success? seeded)) (pr-str seeded)))
+        (let [declared
+              (context/transact-writer!
+               writer-session
+               [{:seon.schema/key
+                 :seon.host-cancel-writer-test/sentinel
+                 :seon.schema/form ":string"}])]
+          (is (:seon.db/ok? declared) (pr-str declared)))
         ;; Install optional provenance and sentinel attrs before the host's
         ;; recorder/query paths use them. Schema rows alone are intentionally
         ;; not physical Datahike attribute installation.
-        (let [installed
+        (let [seed-ctx
+              (context/fork-context (context/build-base! writer-session))
+              installed
               (sci/eval-string*
                seed-ctx
-               (str "(seon.db/transact! {:seon.db/tx-data "
-                    (pr-str
-                     [{:seon.db/user
-                       [:seon.agent/id "cancel-schema-probe"]
-                       :seon.db/process
-                       [:seon.db.process/id :seon.db.process/repl]
-                       :seon.host-cancel-writer-test/sentinel
-                       "schema-install-probe"}])
-                    "})"))]
+               (str "(require 'seon.db)"
+                    "(seon.db/transact!"
+                    " {:seon.db/tx-data"
+                    "  [{:seon.db/user [:seon.user/id \"user\"]"
+                    "    :seon.db/process"
+                    "    [:seon.db.process/id :seon.db.process/repl]"
+                    "    :seon.host-cancel-writer-test/sentinel"
+                    "    \"schema-install-probe\"}]})"))]
           (is (map? (:db-after installed)) (pr-str installed)))
         (let [started
               (host/start!
@@ -224,10 +267,8 @@
           (.delete (File. ^String host-socket)))))))
 
 (deftest queued-cancel-produces-no-receipts-or-database-writes
-  (let [busy-agent "cancel-queue-busy"
-        busy-turn "turn-cancel-queue-busy"
-        queued-agent "cancel-queue-target"
-        queued-turn "turn-cancel-queue-target"
+  (let [[busy-agent busy-turn] (allocate-agent-turn!)
+        [queued-agent queued-turn] (allocate-agent-turn!)
         queued-invocation "invocation-cancel-queued"
         sentinel "queued-ghost"
         sentinel-source
@@ -239,8 +280,6 @@
         busy-session (open-session! busy-agent)
         queued-session (open-session! queued-agent)]
     (swap! controls assoc label {::entered entered ::release release})
-    (seed-agent-turn! busy-agent busy-turn)
-    (seed-agent-turn! queued-agent queued-turn)
     (try
       (is (= :seon.execution.message/ready
              (:seon.execution/message (::ready busy-session))))
@@ -270,15 +309,12 @@
         (close-session! queued-session)))))
 
 (deftest running-cancel-preserves-the-context-and-next-eval
-  (let [agent-id "cancel-running"
-        turn-id "turn-cancel-running"
-        revisit-turn "turn-cancel-running-revisit"
+  (let [[agent-id turn-id] (allocate-agent-turn!)
         invocation-id "invocation-cancel-running"
         entered (promise)
         label "running-signal"
         session (open-session! agent-id)]
     (swap! controls assoc label {::entered entered})
-    (seed-agent-turn! agent-id turn-id)
     (try
       (send-invoke!
        session agent-id invocation-id turn-id
@@ -293,8 +329,8 @@
       (finally
         (swap! controls dissoc label)
         (close-session! session)))
-    (seed-agent-turn! agent-id revisit-turn)
-    (let [reconnected (open-session! agent-id)]
+    (let [revisit-turn (allocate-agent-turn! agent-id)
+          reconnected (open-session! agent-id)]
       (try
         (send-invoke! reconnected agent-id "invocation-after-running-cancel"
                       revisit-turn ["before-running-cancel"])
@@ -305,15 +341,13 @@
           (close-session! reconnected))))))
 
 (deftest cancel-as-the-pool-enters-the-body-skips-the-settled-generation
-  (let [agent-id "cancel-start-race"
-        turn-id "turn-cancel-start-race"
+  (let [[agent-id turn-id] (allocate-agent-turn!)
         invocation-id "invocation-cancel-start-race"
         sentinel "start-race-ghost"
         entered (promise)
         release (promise)
         original (var-get (host-private 'run-invocation!))
         session (open-session! agent-id)]
-    (seed-agent-turn! agent-id turn-id)
     (try
       (with-redefs-fn
         {(host-private 'run-invocation!)
@@ -344,10 +378,8 @@
         (close-session! session)))))
 
 (deftest uncanceled-batches-still-record-and-return
-  (let [agent-id "cancel-normal"
-        turn-id "turn-cancel-normal"
+  (let [[agent-id turn-id] (allocate-agent-turn!)
         session (open-session! agent-id)]
-    (seed-agent-turn! agent-id turn-id)
     (try
       (send-invoke! session agent-id "invocation-normal" turn-id
                     ["(def normal-value 40)" "(+ normal-value 2)"])

@@ -4,6 +4,8 @@
             [sci.core :as sci]
             [sci.ctx-store]
             [seon.content-hash :as content-hash]
+            [seon.db.host :as db.host]
+            [seon.db.id :as db.id]
             [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds]
             [seon.db.writer-test-support :as writer-test]
@@ -25,14 +27,21 @@
 (def ^:private socket-path
   (var-get #'registry-test/socket-path))
 
-(def ^:private agent-id "authored-agent")
-(def ^:private home-ns 'my.agent.authored-agent)
+(def ^:private agent-candidates
+  (db.id/candidate-manifest
+   {:seon.agent/id :seon.db.id.generator/human-readable}
+   [{:seon.db.id/key :fixture/agent
+     :seon.db.id/identity-attr :seon.agent/id}]))
+(def ^:private agent-id
+  (:seon.db.id/value (first agent-candidates)))
+(def ^:private home-ns
+  (symbol (str "my.agent." agent-id)))
 
 (def ^:private helper-a "(defn helper [] :helper-a)")
 (def ^:private caller-a
   (str "(defn caller\n"
        "  {:malli/schema [:=> [:cat :int] [:tuple :keyword :int :keyword]]}\n"
-       "  [x] [:a x ((resolve 'my.agent.authored-agent/helper))])"))
+       "  [x] [:a x ((resolve '" home-ns "/helper))])"))
 (def ^:private private-a "(defn- private-answer [] :private-a)")
 (def ^:private square-source
   (str "(defn square\n"
@@ -43,7 +52,7 @@
 (def ^:private caller-b
   (str "(defn caller\n"
        "  {:malli/schema [:=> [:cat :int] [:tuple :keyword :int :keyword]]}\n"
-       "  [x] [:b x ((resolve 'my.agent.authored-agent/helper))])"))
+       "  [x] [:b x ((resolve '" home-ns "/helper))])"))
 
 (defn- function-row
   ([sym source spec] (function-row sym source spec false))
@@ -95,16 +104,23 @@
          session database-name
          [value-sampling-policy
           {:seon.user/id "user"}
-          {:seon.agent/id agent-id}
           {:seon.db.process/id :seon.db.process/repl}])
         _ (is (true? (::protocol/success? seed)) (pr-str seed))
-        base (context/build-base! session)
-        ctx (context/fork-context base)
-        _ (sci/eval-string* ctx "(require 'seon.db)")]
+        database (db.host/resolve-db! session nil false)
+        allocated
+        (db.host/call!
+         session
+         (protocol/transaction-request
+          {::protocol/request-id (str (random-uuid))
+           :seon.db/db database
+           ::protocol/transaction-data [{:seon.agent/id agent-id}]
+           ::protocol/generated-candidates agent-candidates}))
+        _ (is (true? (::protocol/success? allocated)) (pr-str allocated))]
     (let [installed
           (sci/eval-string*
-           ctx
-           (str "(seon.db/transact! {:seon.db/tx-data "
+           (context/fork-context (context/build-base! session))
+           (str "(require 'seon.db)"
+                "(seon.db/transact! {:seon.db/tx-data "
                 (pr-str [{:seon.db/user [:seon.agent/id agent-id]
                           :seon.db/process
                           [:seon.db.process/id :seon.db.process/repl]}
@@ -246,7 +262,7 @@
                     live-b (sci.ctx-store/with-ctx retained
                              (sci/eval-string*
                               retained
-                              "(my.agent.authored-agent/caller 3)"))]
+                              (str "(" home-ns "/caller 3)")))]
                 (is (= [:b 3 :helper-b] live-b))
                 (is (= [:a 3 :helper-a]
                        (:seon.execution/result
@@ -258,7 +274,7 @@
                        (sci.ctx-store/with-ctx retained
                          (sci/eval-string*
                           retained
-                          "(my.agent.authored-agent/caller 3)")))
+                          (str "(" home-ns "/caller 3)"))))
                     "pinned replay leaves the retained/shared B roots intact")))
             (finally
               (try (.close ^SocketChannel (::registry-test/channel live))

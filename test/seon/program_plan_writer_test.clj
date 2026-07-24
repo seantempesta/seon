@@ -39,6 +39,12 @@
         seed! (private-value 'seed-schema-rows!)
         register! (private-value 'register-runtime-schemas!)
         schema-rows (private-value 'corpus-schema-rows)
+        edge-schema-rows
+        (into []
+              (filter
+               #(= "seon.program.edge"
+                   (namespace (:seon.schema/key %))))
+              schema-rows)
         bundle
         {::edge/function-symbol "fixture.writer/root"
          ::edge/generation "root-generation"
@@ -55,11 +61,11 @@
     (try
       (register! schema-rows)
       (let [genesis
-            (seed!
-             session
-             (into schema-rows
-                   [{:seon.user/id "user"}
-                    {:seon.db.process/id :seon.db.process/repl}]))]
+            (writer-test/seed-canonical-schema!
+             session database-name
+             [{:seon.user/id "user"}
+              {:seon.db.process/id :seon.db.process/repl}]
+             edge-schema-rows)]
         (is (true? (::protocol/success? genesis)) (pr-str genesis)))
       (let [installed
             (seed!

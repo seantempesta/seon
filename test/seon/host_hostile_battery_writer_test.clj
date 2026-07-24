@@ -5,6 +5,7 @@
             [sci.core :as sci]
             [seon.ai.tokens :as tokens]
             [seon.db.host :as db.host]
+            [seon.db.id :as db.id]
             [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds]
             [seon.db.writer-test-support :as writer-test]
@@ -146,18 +147,31 @@
         (pr-str error))
     error))
 
-(defn- seed-agent! [agent-id]
-  (let [result (context/transact-writer!
-                *writer-session*
-                [{:seon.agent/id agent-id}])]
-    (is (true? (:seon.db/ok? result)) (pr-str result))))
-
-(defn- seed-turn! [agent-id turn-id]
-  (let [result (context/transact-writer!
-                *writer-session*
-                [{:seon.agent/id agent-id}
-                 {:seon.agent.turn/id turn-id}])]
-    (is (true? (:seon.db/ok? result)) (pr-str result))))
+(defn- allocate-identities! [turn?]
+  (let [policies
+        (cond-> {:seon.agent/id :seon.db.id.generator/human-readable}
+          turn? (assoc :seon.agent.turn/id :seon.db.id.generator/compact))
+        allocations
+        (cond-> [{:seon.db.id/key :fixture/agent
+                  :seon.db.id/identity-attr :seon.agent/id}]
+          turn? (conj {:seon.db.id/key :fixture/turn
+                       :seon.db.id/identity-attr :seon.agent.turn/id}))
+        candidates (db.id/candidate-manifest policies allocations)
+        agent-id (:seon.db.id/value (first candidates))
+        turn-id (some-> (second candidates) :seon.db.id/value)
+        database (db.host/resolve-db! *writer-session* nil false)
+        result
+        (db.host/call!
+         *writer-session*
+         (protocol/transaction-request
+          {::protocol/request-id (str (random-uuid))
+           :seon.db/db database
+           ::protocol/transaction-data
+           (cond-> [{:seon.agent/id agent-id}]
+             turn? (conj {:seon.agent.turn/id turn-id}))
+           ::protocol/generated-candidates candidates}))]
+    (is (true? (::protocol/success? result)) (pr-str result))
+    (if turn? [agent-id turn-id] agent-id)))
 
 (defn- turn-eval-count [turn-id]
   (count
@@ -249,42 +263,39 @@
                 (context/writer-session
                  {::context/writer-socket-path request-path
                   ::context/database-name database-name
-                  ::context/backend :memory})
-                seed-ctx
-                (context/fork-context (context/build-base! writer-session))]
+                  ::context/backend :memory})]
             (try
               (let [seeded
-                    (sci/eval-string*
-                     seed-ctx
-                     (str "(require 'seon.db)"
-                          "(seon.db/transact! {:seon.db/tx-data "
-                          (pr-str
-                           (into
-                            (registry-value 'corpus-schema-rows)
-                            [(registry-value 'value-sampling-policy)
-                             {:seon.schema/key
-                              :seon.host-hostile-battery-writer-test/sentinel
-                              :seon.schema/form ":string"}
-                             {:seon.agent/id "hostile-schema-probe"}
-                             {:seon.db.process/id :seon.db.process/repl}]))
-                          "})"))]
-                (is (map? (:db-after seeded)) (pr-str seeded)))
+                    (writer-test/seed-canonical-schema!
+                     writer-session
+                     database-name
+                     [(registry-value 'value-sampling-policy)
+                      {:seon.user/id "user"}
+                      {:seon.db.process/id :seon.db.process/repl}])]
+                (is (true? (::protocol/success? seeded)) (pr-str seeded)))
+              (let [declared
+                    (context/transact-writer!
+                     writer-session
+                     [{:seon.schema/key
+                       :seon.host-hostile-battery-writer-test/sentinel
+                       :seon.schema/form ":string"}])]
+                (is (:seon.db/ok? declared) (pr-str declared)))
               (let [installed
                     (sci/eval-string*
-                     seed-ctx
-                     (str "(seon.db/transact! {:seon.db/tx-data "
-                          (pr-str
-                           [{:seon.db/user
-                             [:seon.agent/id "hostile-schema-probe"]
-                             :seon.db/process
-                             [:seon.db.process/id :seon.db.process/repl]
-                             :seon.host-hostile-battery-writer-test/sentinel
-                             "schema-install-probe"}
-                            {:seon.fn/sym "hostile/install-probe"
-                             :seon.fn/spec "[:=> [:cat :int] :int]"
-                             :seon.fn/schema-error "none"
-                             :seon.fn/read-attrs [:hostile/probe]}])
-                          "})"))]
+                     (context/fork-context
+                      (context/build-base! writer-session))
+                     (str "(require 'seon.db)"
+                          "(seon.db/transact!"
+                          " {:seon.db/tx-data"
+                          "  [{:seon.db/user [:seon.user/id \"user\"]"
+                          "    :seon.db/process"
+                          "    [:seon.db.process/id :seon.db.process/repl]"
+                          "    :seon.host-hostile-battery-writer-test/sentinel"
+                          "    \"schema-install-probe\"}"
+                          "   {:seon.fn/sym \"hostile/install-probe\""
+                          "    :seon.fn/spec \"[:=> [:cat :int] :int]\""
+                          "    :seon.fn/schema-error \"none\""
+                          "    :seon.fn/read-attrs [:hostile/probe]}]})"))]
                 (is (map? (:db-after installed)) (pr-str installed)))
               (let [started
                     (host/start!
@@ -383,14 +394,12 @@
         (close-session! survivor)))))
 
 (deftest print-flood-is-loud-persisted-and-absent-from-host-stdout
-  (let [attacker-id "battery-print-attacker"
+  (let [[attacker-id turn-id] (allocate-identities! true)
         survivor-id "battery-print-survivor"
-        turn-id "battery-print-turn"
         attacker (open-session! attacker-id)
         survivor (open-session! survivor-id)
         host-bytes (ByteArrayOutputStream.)
         original-out System/out]
-    (seed-turn! attacker-id turn-id)
     (try
       (System/setOut (PrintStream. host-bytes true "UTF-8"))
       (let [response
@@ -420,10 +429,8 @@
         (close-session! survivor)))))
 
 (deftest concurrent-sessions-keep-output-attributed-to-own-eval-row
-  (let [left-id "battery-output-left"
-        right-id "battery-output-right"
-        left-turn "battery-output-left-turn"
-        right-turn "battery-output-right-turn"
+  (let [[left-id left-turn] (allocate-identities! true)
+        [right-id right-turn] (allocate-identities! true)
         left-label :output-left
         right-label :output-right
         left-entered (promise)
@@ -432,8 +439,6 @@
         right-release (promise)
         left (open-session! left-id)
         right (open-session! right-id)]
-    (seed-turn! left-id left-turn)
-    (seed-turn! right-id right-turn)
     (swap! controls assoc
            left-label {::entered left-entered ::release left-release}
            right-label {::entered right-entered ::release right-release})
@@ -519,8 +524,7 @@
   (let [busy-sessions
         (mapv #(open-session! (str "battery-cancel-busy-" %))
               (range eval-threads))
-        target-id "battery-cancel-target"
-        target-turn "battery-cancel-target-turn"
+        [target-id target-turn] (allocate-identities! true)
         invocation-id "battery-cancel-queued"
         target (open-session! target-id)
         sentinel "battery-cancel-ghost"
@@ -533,7 +537,6 @@
                          {::entered entered ::release release})
                   {:label label :entered entered :release release}))
               (range eval-threads))]
-    (seed-turn! target-id target-turn)
     (try
       (doseq [[index session] (map-indexed vector busy-sessions)]
         (send-invoke!
@@ -576,14 +579,12 @@
         (close-session! target)))))
 
 (deftest deadline-at-return-records-interrupt-and-leaves-next-form-clean
-  (let [attacker-id "battery-late-interrupt"
+  (let [[attacker-id turn-id] (allocate-identities! true)
         survivor-id "battery-late-survivor"
-        turn-id "battery-late-interrupt-turn"
         attacker (open-session! attacker-id)
         survivor (open-session! survivor-id)
         original (var-get #'host.eval/finish-evaluation!)
         fired? (atom false)]
-    (seed-turn! attacker-id turn-id)
     (try
       (let [response
             (with-redefs-fn
@@ -707,14 +708,13 @@
 
 (deftest eval-error-storm-does-not-prevent-another-agents-real-work
   (let [attacker-id "battery-error-storm"
-        survivor-id "battery-error-survivor"
+        survivor-id (allocate-identities! false)
         attacker (open-session! attacker-id)
         survivor (open-session! survivor-id)
         sentinel "battery-error-storm-survivor"
         attacks [["missing-battery-symbol" :resolution]
                  ["((fn [x] x))" :arity]
                  ["(/ 1 0)" :runtime]]]
-    (seed-agent! survivor-id)
     (try
       (let [storm
             (future

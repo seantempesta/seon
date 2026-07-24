@@ -3,6 +3,9 @@
   (:require [clojure.test :refer [deftest is]]
             [sci.core :as sci]
             [seon.content-hash :as content-hash]
+            [seon.db.host :as db.host]
+            [seon.db.id :as db.id]
+            [seon.db.protocol :as protocol]
             [seon.db.writer-test-support :as writer-test]
             [seon.db.writer :as writer]
             [seon.host :as host]
@@ -12,8 +15,6 @@
   (:import [java.io File]
            [java.nio.channels SocketChannel]))
 
-(def ^:private corpus-schema-rows
-  (var-get #'registry-test/corpus-schema-rows))
 (def ^:private value-sampling-policy
   (var-get #'registry-test/value-sampling-policy))
 (def ^:private value-sampling-policy-query
@@ -26,6 +27,21 @@
   (var-get #'registry-test/invoke-batch!))
 (def ^:private socket-path
   (var-get #'registry-test/socket-path))
+
+(def ^:private agent-candidates
+  (db.id/candidate-manifest
+   {:seon.agent/id :seon.db.id.generator/human-readable
+    :seon.agent.turn/id :seon.db.id.generator/compact}
+   [{:seon.db.id/key :fixture/agent
+     :seon.db.id/identity-attr :seon.agent/id}
+    {:seon.db.id/key :fixture/turn
+     :seon.db.id/identity-attr :seon.agent.turn/id}]))
+(def ^:private agent-id
+  (:seon.db.id/value (first agent-candidates)))
+(def ^:private turn-id
+  (:seon.db.id/value (second agent-candidates)))
+(def ^:private home-ns
+  (symbol (str "my.agent." agent-id)))
 
 (def ^:private source-v1
   (str "(defn sum-squares\n"
@@ -62,14 +78,14 @@
 
 (defn- invoke-source! [live agent-id invocation-id head source]
   (invoke-batch!
-   live agent-id invocation-id head
+   live agent-id turn-id invocation-id head
    [{:seon.repl/kind :form :seon.repl/source source}]))
 
 (defn- caller-value [ctx]
   (sci/eval-string*
    ctx
-   "(require '[my.agent.graduate-agent :as graduated])
-    (graduated/sum-squares 5)"))
+   (str "(require '[" home-ns " :as graduated])"
+        " (graduated/sum-squares 5)")))
 
 (defn- sample-call-nanos [ctx n]
   (let [form (str "(dotimes [_ " n "] (graduated/sum-squares 100))")]
@@ -112,8 +128,7 @@
   (let [database-name (str "host-u3-" (random-uuid))
         request-path (socket-path "u3-writer")
         host-socket (socket-path "u3-host")
-        agent-id "graduate-agent"
-        fn-sym "my.agent.graduate-agent/sum-squares"
+        fn-sym (str home-ns "/sum-squares")
         server (writer-test/start! {::writer/dependencies (dependencies)
                                ::writer/database-name database-name
                                ::writer/backend :memory
@@ -122,31 +137,36 @@
                  {::context/writer-socket-path request-path
                   ::context/database-name database-name
                   ::context/backend :memory})
-        seed-base (context/build-base! session)
-        seed-ctx (context/fork-context seed-base)
         started (atom nil)]
     (try
       (let [seeded
-            (sci/eval-string*
-             seed-ctx
-             (str "(require 'seon.db)"
-                  "(seon.db/transact! {:seon.db/tx-data "
-                  (pr-str (into corpus-schema-rows
-                                [value-sampling-policy
-                                 {:seon.agent/id agent-id}
-                                 {:seon.db.process/id
-                                  :seon.db.process/repl}
-                                 {:seon.agent.turn/id "turn-parity"}]))
-                  "})"))]
-        (is (map? (:db-after seeded)) (pr-str seeded)))
+            (writer-test/seed-canonical-schema!
+             session database-name
+             [value-sampling-policy
+              {:seon.user/id "user"}
+              {:seon.db.process/id :seon.db.process/repl}])]
+        (is (true? (::protocol/success? seeded)) (pr-str seeded)))
+      (let [database (db.host/resolve-db! session nil false)
+            allocated
+            (db.host/call!
+             session
+             (protocol/transaction-request
+              {::protocol/request-id (str (random-uuid))
+               :seon.db/db database
+               ::protocol/transaction-data
+               [{:seon.agent/id agent-id}
+                {:seon.agent.turn/id turn-id}]
+               ::protocol/generated-candidates agent-candidates}))]
+        (is (true? (::protocol/success? allocated)) (pr-str allocated)))
       (is (= [32 4096 1024 3 80 8 12]
              (context/query-writer! session value-sampling-policy-query
                                     ["cluster"])))
       ;; Install provenance and exact-set optional attrs before U4 recording.
       (let [probe
             (sci/eval-string*
-             seed-ctx
-             (str "(seon.db/transact! {:seon.db/tx-data "
+             (context/fork-context (context/build-base! session))
+             (str "(require 'seon.db)"
+                  "(seon.db/transact! {:seon.db/tx-data "
                   (pr-str
                    [{:seon.db/user [:seon.agent/id agent-id]
                      :seon.db/process
@@ -257,7 +277,7 @@
           (is (= 1 (::graduate/graduated report)) (pr-str report))
           (let [response
                 (invoke-batch!
-                 live agent-id "u3-after-restart"
+                 live agent-id turn-id "u3-after-restart"
                  (context/resolve-head! session)
                  [{:seon.repl/kind :form
                    :seon.repl/source "(sum-squares 5)"}])]

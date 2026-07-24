@@ -32,6 +32,9 @@
    :seon.config.web/maximum-response-bytes 2000000
    :seon.config.web/default-preview-tokens 2000
    :seon.config.web/maximum-redirects 5
+   :seon.config.web/default-link-count 25
+   :seon.config.web/maximum-html-characters 1000000
+   :seon.config.web/maximum-html-nesting-depth 3000
    :seon.config.web/default-search-results 10
    :seon.config.web/maximum-search-results 20})
 

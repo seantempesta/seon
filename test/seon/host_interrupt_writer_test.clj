@@ -1,7 +1,7 @@
 (ns seon.host-interrupt-writer-test
   "Interrupt-aware SCI core behavior through the real JVM agent host."
   (:require [clojure.test :refer [deftest is use-fixtures]]
-            [sci.core :as sci]
+            [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds]
             [seon.db.writer-test-support :as writer-test]
             [seon.db.writer :as writer]
@@ -128,19 +128,13 @@
           (context/writer-session
            {::context/writer-socket-path request-path
             ::context/database-name database-name
-            ::context/backend :memory})
-          base (context/build-base! writer-session)
-          seed-ctx (context/fork-context base)]
+            ::context/backend :memory})]
       (try
         (let [seeded
-              (sci/eval-string*
-               seed-ctx
-               (str "(require 'seon.db)"
-                    "(seon.db/transact! {:seon.db/tx-data "
-                    (pr-str (into (registry-value 'corpus-schema-rows)
-                                  [(registry-value 'value-sampling-policy)]))
-                    "})"))]
-          (is (map? (:db-after seeded)) (pr-str seeded)))
+              (writer-test/seed-canonical-schema!
+               writer-session database-name
+               [(registry-value 'value-sampling-policy)])]
+          (is (true? (::protocol/success? seeded)) (pr-str seeded)))
         (let [started
               (host/start!
                {::host/socket-path host-socket

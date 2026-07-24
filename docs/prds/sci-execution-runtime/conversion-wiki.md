@@ -1359,6 +1359,19 @@ the variable-weight values they select.
 
 ## Computed-bootstrap fixture scar (2026-07-23)
 
+- **Host transaction data is never SCI source.** `pr-str` preserves symbol
+  values such as `:seon.ns/name 'seon.host.context` without adding a quote at
+  their eventual code position. Splicing canonical schema or compiled program
+  rows into `(seon.db/transact! ...)` source therefore asks SCI to analyze host
+  data as agent code and fails at the first unbound namespace symbol. Seed a
+  fresh writer fixture with
+  `seon.db.writer-test-support/seed-canonical-schema!`, pass fixture-specific
+  initial rows as its ordinary `initial-data`, and assert the protocol success
+  value. Reserve evaluated transaction forms for data the agent actually
+  authored. When this failure appears, sweep every writer fixture for
+  `corpus-schema-rows` or canonical transaction data inside `eval-string*`,
+  `invoke-batch!`, and source-building `str` forms; repairing only the first
+  failing namespace leaves the same class latent behind suite order.
 - **A hand-built initialization fixture dies twice under computed-bootstrap
   enforcement: missing bootstrap forms, then a dangling registry.** After
   paging landed, `protocol/initialization-pages` rejects any

@@ -197,11 +197,18 @@
     (try
       (schema/register! :seon.host-registry-writer-test/note
                         [:string {:min 1}])
-      (let [seeded
+      (let [note-schema-rows
+            (into []
+                  (filter
+                   #(= :seon.host-registry-writer-test/note
+                       (:seon.schema/key %)))
+                  (writer-test/canonical-schema-rows))
+            seeded
             (writer-test/seed-canonical-schema!
              session database-name
              [{:seon.user/id "user"}
-              {:seon.db.process/id :seon.db.process/repl}])]
+              {:seon.db.process/id :seon.db.process/repl}]
+             note-schema-rows)]
         (is (true? (::protocol/success? seeded)) (pr-str seeded)))
       (let [installed
             (seed-schema-rows!
@@ -526,15 +533,15 @@
             ;; The :seon.fn row: the def is a corpus citizen.
             (let [fn-row (first
                           (query!
-                           '[:find ?source ?arglists ?doc ?ns-sym
+                           [:find '?source '?arglists '?doc '?ns-sym
                              :where
-                             [?fn :seon.fn/sym
-                              (str "my.agent." agent-id "/parity-double")]
-                             [?fn :seon.fn/source ?source]
-                             [?fn :seon.fn/arglists ?arglists]
-                             [?fn :seon.fn/doc ?doc]
-                             [?fn :seon.fn/ns ?ns]
-                             [?ns :seon.ns/name ?ns-sym]]))]
+                            ['?fn :seon.fn/sym
+                             (str "my.agent." agent-id "/parity-double")]
+                            ['?fn :seon.fn/source '?source]
+                            ['?fn :seon.fn/arglists '?arglists]
+                            ['?fn :seon.fn/doc '?doc]
+                            ['?fn :seon.fn/ns '?ns]
+                            ['?ns :seon.ns/name '?ns-sym]]))]
               (is (= (str "(defn parity-double \"Double x.\" "
                           "{:malli/schema [:=> [:catn [:x :int]] :int]} "
                           "[x] (* 2 x))")
@@ -683,13 +690,13 @@
                  (str "(seon.db/query"
                       " (quote [:find ?v ."
                       "         :where [?e"
-                      "                 :seon.execution.host/eval-socket-path"
+                      "                 :seon.host-registry-writer-test.uninstalled/value"
                       "                 ?v]]))")))
           "query over the uninstalled attribute is NO FACT, never an error")
       (let [pulled (sci/eval-string*
                     ctx
                     (str "(seon.db/pull"
-                         " [:seon.execution.host/eval-socket-path]"
+                         " [:seon.host-registry-writer-test.uninstalled/value]"
                          " [:seon.schema/key :seon.schema/form])"))]
         (is (string? (:seon.error/message pulled))
             "a pull selector naming the uninstalled attribute is rejected"))

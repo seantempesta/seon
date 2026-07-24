@@ -1442,14 +1442,6 @@
                    {:seon.ns/name (symbol (namespace schema-key))}))))))
    (registered-schemas)))
 
-(def ^:private database-attribute-properties
-  #{:seon.db/identity
-    :seon.db/unique
-    :seon.db/index
-    :seon.db/component
-    :seon.db/no-history?
-    :db.secondary/only})
-
 (defn canonical-database-attributes
   "Compute the complete production database-attribute population.
 
@@ -1457,30 +1449,7 @@
    forms join that population only when they carry a persistence facet."
   {:malli/schema [:=> [:cat] [:vector :qualified-keyword]]}
   []
-  (let [forms (registered-schemas)]
-    (->> forms
-         (reduce-kv
-          (fn [attributes schema-key definition]
-            (let [properties (form/attr-form-properties definition)
-                  entity-attributes
-                  (when (and (form/map-shape? definition)
-                             (true? (:seon.db/entity
-                                     (form/schema-properties definition))))
-                    (into #{}
-                          (keep (fn [entry]
-                                  (let [attribute
-                                        (when (vector? entry) (first entry))]
-                                    (when (qualified-keyword? attribute)
-                                      attribute))))
-                          (form/map-entries definition)))]
-              (cond-> (into attributes entity-attributes)
-                (and (qualified-keyword? schema-key)
-                     (some #(contains? properties %)
-                           database-attribute-properties))
-                (conj schema-key))))
-          #{})
-         (sort-by str)
-         vec)))
+  (form/database-attributes (registered-schemas)))
 
 (defn registered?
   "Check if a schema keyword is registered."

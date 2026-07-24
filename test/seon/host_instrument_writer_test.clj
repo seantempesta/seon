@@ -3,6 +3,9 @@
   (:require [clojure.test :refer [deftest is]]
             [malli.core :as m]
             [sci.core :as sci]
+            [seon.db.host :as db.host]
+            [seon.db.id :as db.id]
+            [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds]
             [seon.db.writer-test-support :as writer-test]
             [seon.error.instrument :as error.instrument]
@@ -16,8 +19,6 @@
   (:import [java.io File]
            [java.nio.channels SocketChannel]))
 
-(def ^:private corpus-schema-rows
-  (var-get #'registry-test/corpus-schema-rows))
 (def ^:private value-sampling-policy
   (var-get #'registry-test/value-sampling-policy))
 (def ^:private dependencies
@@ -256,7 +257,16 @@
   (let [database-name (str "host-instrument-" (random-uuid))
         request-path (socket-path "instrument-writer")
         host-socket (socket-path "instrument-host")
-        agent-id "instrument-agent"
+        agent-candidates
+        (db.id/candidate-manifest
+         {:seon.agent/id :seon.db.id.generator/human-readable
+          :seon.agent.turn/id :seon.db.id.generator/compact}
+         [{:seon.db.id/key :fixture/agent
+           :seon.db.id/identity-attr :seon.agent/id}
+          {:seon.db.id/key :fixture/turn
+           :seon.db.id/identity-attr :seon.agent.turn/id}])
+        agent-id (:seon.db.id/value (first agent-candidates))
+        turn-id (:seon.db.id/value (second agent-candidates))
         server (writer-test/start! {::writer/dependencies (dependencies)
                                ::writer/database-name database-name
                                ::writer/backend :memory
@@ -264,28 +274,34 @@
         session (context/writer-session
                  {::context/writer-socket-path request-path
                   ::context/database-name database-name
-                  ::context/backend :memory})
-        base (context/build-base! session)
-        seed-ctx (context/fork-context base)]
+                  ::context/backend :memory})]
     (try
       (let [seeded
-            (sci/eval-string*
-             seed-ctx
-             (str "(require 'seon.db)"
-                  "(seon.db/transact! {:seon.db/tx-data "
-                  (pr-str (into corpus-schema-rows
-                                [value-sampling-policy
-                                 {:seon.agent/id agent-id}
-                                 {:seon.db.process/id :seon.db.process/repl}
-                                 {:seon.agent.turn/id "turn-parity"}]))
-                  "})"))]
-        (is (map? (:db-after seeded)) (pr-str seeded)))
+            (writer-test/seed-canonical-schema!
+             session database-name
+             [value-sampling-policy
+              {:seon.user/id "user"}
+              {:seon.db.process/id :seon.db.process/repl}])]
+        (is (true? (::protocol/success? seeded)) (pr-str seeded)))
+      (let [database (db.host/resolve-db! session nil false)
+            allocated
+            (db.host/call!
+             session
+             (protocol/transaction-request
+              {::protocol/request-id (str (random-uuid))
+               :seon.db/db database
+               ::protocol/transaction-data
+               [{:seon.agent/id agent-id}
+                {:seon.agent.turn/id turn-id}]
+               ::protocol/generated-candidates agent-candidates}))]
+        (is (true? (::protocol/success? allocated)) (pr-str allocated)))
       ;; Install optional corpus attributes that exact-set terminal recording
       ;; may retract, matching a real cluster's genesis population.
       (let [probe
             (sci/eval-string*
-             seed-ctx
-             (str "(seon.db/transact! {:seon.db/tx-data "
+             (context/fork-context (context/build-base! session))
+             (str "(require 'seon.db)"
+                  "(seon.db/transact! {:seon.db/tx-data "
                   (pr-str [{:seon.db/user [:seon.agent/id agent-id]
                             :seon.db/process
                             [:seon.db.process/id :seon.db.process/repl]}
@@ -317,7 +333,7 @@
               "cold startup instruments the real stamped host wrapper")
           (let [response
                 (invoke-batch!
-                 live agent-id "instrument-built-in-parity"
+                 live agent-id turn-id "instrument-built-in-parity"
                  (context/resolve-head! session)
                  [{:seon.repl/kind :form
                    :seon.repl/source
@@ -371,7 +387,7 @@
                      "  ([] 0) ([x] x))")
                 first-response
                 (invoke-batch!
-                 live agent-id "instrument-first" head
+                 live agent-id turn-id "instrument-first" head
                  [{:seon.repl/kind :form :seon.repl/source definition}
                   {:seon.repl/kind :form
                    :seon.repl/source "(private-multi \"bad\")"}])
@@ -385,7 +401,7 @@
                            [:seon.error/data :seon.error.sci/class])))
             (let [next-response
                   (invoke-batch!
-                   live agent-id "instrument-next"
+                   live agent-id turn-id "instrument-next"
                    (context/resolve-head! session)
                    [{:seon.repl/kind :form
                      :seon.repl/source "(private-multi \"still-bad\")"}])
@@ -410,7 +426,7 @@
               (try
                 (let [response
                       (invoke-batch!
-                       restored-live agent-id "instrument-restored"
+                       restored-live agent-id turn-id "instrument-restored"
                        (context/resolve-head! session)
                        [{:seon.repl/kind :form
                          :seon.repl/source

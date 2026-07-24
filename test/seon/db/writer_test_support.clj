@@ -7,7 +7,8 @@
             [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds]
             [seon.db.writer :as writer]
-            [seon.schema :as schema])
+            [seon.schema :as schema]
+            [seon.schema.form :as schema.form])
   (:import [java.nio.file Path Paths]
            [java.security MessageDigest]))
 
@@ -31,6 +32,14 @@
   {:malli/schema [:=> [:cat] [:vector :map]]}
   []
   (schema/canonical-schema-rows (java.util.Date.)))
+
+(defn- schema-forms
+  [rows]
+  (into {}
+        (keep (fn [{:seon.schema/keys [key form]}]
+                (when (and key form)
+                  [key (edn/read-string form)])))
+        rows))
 
 (defn- bytes->hex
   [byte-values]
@@ -153,7 +162,8 @@
            (:seon.dev.artifact/program-row-digest manifest)
            :seon.dev.artifact/program-row)
           artifact (edn/read-string (slurp (str program-row)))
-          rows (:seon.dev.artifact/program-rows artifact)]
+          rows (:seon.dev.artifact/program-rows artifact)
+          forms (schema-forms rows)]
       (when-not (and (vector? rows) (every? map? rows))
         (throw
          (ex-info "The verified program-row artifact is malformed."
@@ -163,39 +173,56 @@
       {:seon.execution/artifact-digest
        (:seon.dev.artifact/application-digest manifest)
        :seon.db/program rows
+       :seon.db/attributes (schema.form/database-attributes forms)
        :seon.dev.artifact/program-source-path (str program-source)
        :seon.dev.artifact/program-row-path (str program-row)})))
 
 (defn seed-canonical-schema!
-  "Apply the verified compiled base through production initialization pages."
-  [session database-name initial-data]
-  (let [base @compiled-base
-        pages
-        (protocol/initialization-pages
-         {:seon.execution/artifact-digest
-          (:seon.execution/artifact-digest base)
-          :seon.db.initialization/page-rows 64
-          :seon.db/attributes (schema/canonical-database-attributes)
-          :seon.db/program (:seon.db/program base)
-          :seon.db/initial-data (vec initial-data)})]
-    (reduce
-     (fn [_ page]
-       (let [result
-             (db.host/call!
-              session
-              (protocol/ensure-database-request
-               {::protocol/request-id
-                (str "fixture-initialization/"
-                     (:seon.db.initialization/fingerprint page) "/"
-                     (:seon.db.initialization/page-index page))
-                ::protocol/database-name database-name
-                ::protocol/backend :memory
-                :seon.db/initialization-page page}))]
-         (if (::protocol/success? result)
-           result
-           (reduced result))))
-     nil
-     pages)))
+  "Apply the verified compiled base through production initialization pages.
+
+   `supplemental-schema-rows` declares only schema owned by the calling
+   fixture. Keeping those rows explicit prevents the process-global test
+   registry from changing an otherwise immutable compiled population."
+  ([session database-name initial-data]
+   (seed-canonical-schema! session database-name initial-data []))
+  ([session database-name initial-data supplemental-schema-rows]
+   (let [base @compiled-base
+         supplemental-schema-rows (vec supplemental-schema-rows)
+         supplemental-attributes
+         (schema.form/database-attributes
+          (schema-forms supplemental-schema-rows))
+         pages
+         (protocol/initialization-pages
+          {:seon.execution/artifact-digest
+           (:seon.execution/artifact-digest base)
+           :seon.db.initialization/page-rows 64
+           :seon.db/attributes
+           (->> (concat (:seon.db/attributes base)
+                        supplemental-attributes)
+                distinct
+                (sort-by str)
+                vec)
+           :seon.db/program
+           (into (:seon.db/program base) supplemental-schema-rows)
+           :seon.db/initial-data (vec initial-data)})]
+     (reduce
+      (fn [_ page]
+        (let [result
+              (db.host/call!
+               session
+               (protocol/ensure-database-request
+                {::protocol/request-id
+                 (str "fixture-initialization/"
+                      (:seon.db.initialization/fingerprint page) "/"
+                      (:seon.db.initialization/page-index page))
+                 ::protocol/database-name database-name
+                 ::protocol/backend :memory
+                 :seon.db/initialization-page page}))]
+          (if (::protocol/success? result)
+            result
+            (reduced result))))
+      nil
+      pages))))
 
 (def read-defaults
   "Generous finite read limits for writer tests not exercising read policy."
