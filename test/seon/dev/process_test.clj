@@ -314,6 +314,150 @@
       (finally
         (fs/delete-tree directory {:force true})))))
 
+(deftest writer-readiness-preserves-every-refusal-at-the-probe-boundary
+  (let [configuration (test-config)
+        directory (:seon.dev.test/directory configuration)
+        port-file (str (fs/path directory "writer.port"))
+        socket (str (fs/path directory "writer.sock"))
+        configuration
+        (assoc configuration
+               :seon.dev.config/writer-repl-port-file port-file
+               :seon.dev.config/request-socket socket)
+        observe #(deref (future
+                          (#'process/writer-readiness-observation
+                           configuration))
+                        1000
+                        ::timed-out)]
+    (try
+      (let [missing-port (observe)]
+        (is (false? (:seon.dev.process/ready? missing-port)))
+        (is (= :seon.dev.process/writer-repl-port-file
+               (:seon.dev.process/readiness-stage missing-port)))
+        (is (= port-file (:seon.dev.process/readiness-path missing-port))))
+      (spit port-file "12345")
+      (let [missing-socket (observe)]
+        (is (false? (:seon.dev.process/ready? missing-socket)))
+        (is (= :seon.dev.process/writer-request-socket
+               (:seon.dev.process/readiness-stage missing-socket)))
+        (is (= socket (:seon.dev.process/readiness-path missing-socket))))
+      (spit socket "")
+      (with-redefs [uds/open-session!
+                    (fn [_]
+                      (throw (java.net.ConnectException.
+                              "Connection refused by readiness test")))]
+        (let [connect-refusal (observe)]
+          (is (false? (:seon.dev.process/ready? connect-refusal)))
+          (is (= :seon.dev.process/writer-session-open
+                 (:seon.dev.process/readiness-stage connect-refusal)))
+          (is (= "java.net.ConnectException"
+                 (:seon.dev.process/readiness-refusal-class
+                  connect-refusal)))
+          (is (str/includes?
+               (:seon.dev.process/readiness-refusal connect-refusal)
+               "Connection refused"))))
+      (let [rejection
+            {::db.protocol/success? false
+             ::db.protocol/error-kind db.protocol/protocol-error
+             ::db.protocol/error "The readiness session was rejected."
+             ::db.protocol/request-id db.protocol/session-open-request-id}]
+        (with-redefs [uds/open-session!
+                      (fn [_]
+                        (throw
+                         (ex-info "The readiness session was rejected."
+                                  rejection)))]
+          (let [session-refusal (observe)]
+            (is (= :seon.dev.process/writer-session-open
+                   (:seon.dev.process/readiness-stage session-refusal)))
+            (is (= rejection
+                   (:seon.dev.process/readiness-refusal-data
+                    session-refusal))))))
+      (with-redefs [uds/open-session! (fn [_] {::uds/channel (Object.)})
+                    uds/close-session!
+                    (fn [_]
+                      (throw (java.io.IOException.
+                              "Readiness session close failed")))]
+        (let [close-refusal (observe)]
+          (is (= :seon.dev.process/writer-session-close
+                 (:seon.dev.process/readiness-stage close-refusal)))
+          (is (= "java.io.IOException"
+                 (:seon.dev.process/readiness-refusal-class
+                  close-refusal)))))
+      (with-redefs [uds/open-session! (fn [_] {::uds/channel (Object.)})
+                    uds/close-session! (constantly nil)]
+        (is (= {:seon.dev.process/ready? true
+                :seon.dev.process/readiness-stage
+                :seon.dev.process/writer-session-open}
+               (observe))))
+      (with-redefs [uds/open-session!
+                    (fn [_]
+                      (throw
+                       (ex-info
+                        "The database request server is at connection capacity."
+                        {::db.protocol/error-kind
+                         db.protocol/connection-capacity-error})))]
+        (is (= {:seon.dev.process/ready? true
+                :seon.dev.process/readiness-stage
+                :seon.dev.process/writer-connection-capacity}
+               (observe))))
+      (finally
+        (fs/delete-tree directory {:force true})))))
+
+(deftest writer-readiness-timeout-prints-and-carries-the-exact-refusal
+  (let [configuration (test-config)
+        directory (:seon.dev.test/directory configuration)
+        port-file (str (fs/path directory "writer.port"))
+        socket (str (fs/path directory "writer.sock"))
+        log (str (fs/path directory "writer.log"))
+        configuration
+        (assoc configuration
+               :seon.dev.config/writer-repl-port-file port-file
+               :seon.dev.config/request-socket socket)
+        pid (.pid (java.lang.ProcessHandle/current))
+        record
+        (live-probe-record
+         configuration
+         {:seon.dev.process/id process/writer-id
+          :seon.dev.process/pid pid
+          :seon.dev.process/start-instant
+          (state/process-start-instant pid)
+          :seon.dev.process/log log})
+        spec {:seon.dev.process/id process/writer-id
+              :seon.dev.process/readiness
+              :seon.dev.process.readiness/writer
+              :seon.dev.process/ready-timeout-ms 1}
+        rejection
+        {::db.protocol/success? false
+         ::db.protocol/error-kind db.protocol/protocol-error
+         ::db.protocol/error "The session-open response shape is invalid."}
+        diagnostic (java.io.StringWriter.)]
+    (try
+      (spit port-file "12345")
+      (spit socket "")
+      (let [failure
+            (with-redefs [uds/open-session!
+                          (fn [_]
+                            (throw
+                             (ex-info
+                              "The session-open response shape is invalid."
+                              rejection)))]
+              (binding [*err* diagnostic]
+                (try
+                  (#'process/wait-ready! configuration spec record)
+                  nil
+                  (catch clojure.lang.ExceptionInfo exception
+                    exception))))]
+        (is (instance? clojure.lang.ExceptionInfo failure))
+        (is (str/includes? (str diagnostic)
+                           "writer readiness probe refused"))
+        (is (str/includes? (str diagnostic)
+                           "session-open response shape is invalid"))
+        (is (= rejection
+               (get-in (ex-data failure)
+                       [:seon.dev.process/readiness-observation
+                        :seon.dev.process/readiness-refusal-data]))))
+      (finally
+        (fs/delete-tree directory {:force true})))))
+
 (deftest host-readiness-cleanup-never-unlinks-a-live-listener
   (let [configuration (test-config)
         socket-path (str (fs/path "tmp"

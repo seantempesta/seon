@@ -36,7 +36,8 @@
         envelope
          (merge
           (zipmap config.resolve/operational-keys (repeat 1))
-          {:seon.config.database.executor/selected-processors selected-processors
+          {:seon.config/on-core-error :gate
+           :seon.config.database.executor/selected-processors selected-processors
            :seon.config.database.writer/jvm-heap-mb 2
            :seon.config.database.read/max-result-weight 60000
            :seon.config.database.transport/maximum-frame-bytes 65536
@@ -136,7 +137,8 @@
          ::uds/maximum-session-output-bytes 65537
          ::uds/shutdown-timeout-ms 206
          ::uds/codec-workers 207
-         ::uds/codec-worker-queue-capacity 208}
+         ::uds/codec-worker-queue-capacity 208
+         ::uds/on-core-error :gate}
         expected-read-defaults
         {:datahike.resource/max-work 301
          :datahike.resource/max-results 302
@@ -156,6 +158,61 @@
       (is (= expected-request-server-options
              (::writer/request-server-options @captured)))
       (is (= expected-read-defaults (::writer/read-defaults @captured)))
+      (finally
+        (delete-tree! directory)))))
+
+(deftest writer-start-error-cannot-advertise-a-ready-server
+  (let [directory
+        (.toFile
+         (java.nio.file.Files/createTempDirectory
+          "seon-writer-start-refusal"
+          (make-array java.nio.file.attribute.FileAttribute 0)))
+        request-socket (io/file directory "request.sock")
+        envelope-file (launch-envelope-file! directory 2)
+        writer-error
+        {:seon/error
+         {:seon.error/message "The writer start request is invalid."
+          :seon.error/kind :user-input
+          :seon.error/data
+          {::writer/validation-errors
+           [{::writer/validation-input-path
+             [::writer/request-server-options ::uds/on-core-error]
+             ::writer/validation-type :malli.core/invalid-type}]}}}
+        events (atom [])
+        log-config
+        (assoc log/default-config
+               :appenders
+               {:capture
+                {:enabled? true
+                 :async? false
+                 :fn #(swap! events conj
+                             {:seon.test/level (:level %)
+                              :seon.test/arguments (:vargs %)})}})
+        failure
+        (with-redefs-fn
+          {#'server/configure-logging! (constantly nil)
+           #'server/writer-runtime (constantly {})
+           #'writer/start! (constantly writer-error)}
+          #(log/with-config
+             log-config
+             (try
+               (server/start! ["--backend" "memory"
+                               "--db-name" "start-refusal-test"
+                               "--req-sock" (.getPath request-socket)
+                               "--launch-envelope" (.getPath envelope-file)])
+               nil
+               (catch clojure.lang.ExceptionInfo exception
+                 exception))))]
+    (try
+      (is (instance? clojure.lang.ExceptionInfo failure))
+      (is (= "The writer start request is invalid." (ex-message failure)))
+      (is (= writer-error (::server/writer-start-response (ex-data failure))))
+      (is (not (.exists request-socket)))
+      (is (not-any?
+           (fn [{:seon.test/keys [arguments]}]
+             (some #{"ready"} arguments))
+           @events)
+          "a writer error value cannot reach the readiness advertisement")
       (finally
         (delete-tree! directory)))))
 

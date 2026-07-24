@@ -885,18 +885,72 @@
            (not (fs/exists?
                  (:seon.dev.process.containment/result-path containment))))))
 
-(defn- writer-ready? [config]
-  (let [socket (:seon.dev.config/request-socket config)]
-    (and (fs/regular-file? (:seon.dev.config/writer-repl-port-file config))
-         (fs/exists? socket)
-         (try
-           (let [session (uds/open-session! socket)]
-             (uds/close-session! session))
-           true
-           (catch clojure.lang.ExceptionInfo exception
-             (= db.protocol/connection-capacity-error
-                (::db.protocol/error-kind (ex-data exception))))
-           (catch Throwable _ false)))))
+(defn- readiness-refusal
+  [stage message data]
+  (merge
+   {::ready? false
+    ::readiness-stage stage
+    ::readiness-refusal message}
+   data))
+
+(defn- throwable-readiness-refusal
+  [stage throwable data]
+  (readiness-refusal
+   stage
+   (or (ex-message throwable) (.toString ^Throwable throwable))
+   (cond->
+    (assoc data
+           ::readiness-refusal-class
+           (.getName (class throwable)))
+     (ex-data throwable)
+     (assoc ::readiness-refusal-data (ex-data throwable)))))
+
+(defn- writer-readiness-observation
+  [config]
+  (let [port-file (:seon.dev.config/writer-repl-port-file config)
+        socket (:seon.dev.config/request-socket config)]
+    (try
+      (cond
+        (not (fs/regular-file? port-file))
+        (readiness-refusal
+         ::writer-repl-port-file
+         "The writer REPL port file is absent."
+         {::readiness-path port-file})
+
+        (not (fs/exists? socket))
+        (readiness-refusal
+         ::writer-request-socket
+         "The writer request socket is absent."
+         {::readiness-path socket})
+
+        :else
+        (try
+          (let [session (uds/open-session! socket)]
+            (try
+              (uds/close-session! session)
+              {::ready? true
+               ::readiness-stage ::writer-session-open}
+              (catch Throwable throwable
+                (throwable-readiness-refusal
+                 ::writer-session-close throwable
+                 {::readiness-path socket}))))
+          (catch clojure.lang.ExceptionInfo exception
+            (if (= db.protocol/connection-capacity-error
+                   (::db.protocol/error-kind (ex-data exception)))
+              {::ready? true
+               ::readiness-stage ::writer-connection-capacity}
+              (throwable-readiness-refusal
+               ::writer-session-open exception
+               {::readiness-path socket})))
+          (catch Throwable throwable
+            (throwable-readiness-refusal
+             ::writer-session-open throwable
+             {::readiness-path socket}))))
+      (catch Throwable throwable
+        (throwable-readiness-refusal
+         ::writer-probe throwable
+         {::readiness-path socket
+          ::writer-repl-port-file port-file})))))
 
 (defn- tcp-ready? [port]
   (and (pos-int? port)
@@ -1043,29 +1097,62 @@
        true
        (catch Throwable _ false)))))
 
+(defn- direct-readiness-observation
+  [config spec record]
+  (let [status (process-status record)]
+    (cond
+      (not= :seon.dev.process.status/alive status)
+      (readiness-refusal
+       ::process-lifetime
+       "The recorded process lifetime is not alive."
+       {::readiness-process-status status})
+
+      (not (containment-live? record))
+      (readiness-refusal
+       ::process-containment
+       "The process containment lifetime is not live."
+       {})
+
+      (= :seon.dev.process.readiness/writer
+         (:seon.dev.process/readiness spec))
+      (writer-readiness-observation config)
+
+      :else
+      {::ready?
+       (boolean
+        (case (:seon.dev.process/readiness spec)
+          :seon.dev.process.readiness/process true
+          :seon.dev.process.readiness/watcher
+          (and (watcher-ready? config record)
+               (current-watcher-outputs-ready? config spec))
+          :seon.dev.process.readiness/host
+          (unix-socket-ready? (host-eval-socket config))
+          :seon.dev.process.readiness/web-render
+          (pod-ready? config spec record)
+          :seon.dev.process.readiness/pod (pod-ready? config spec record)
+          false))
+       ::readiness-stage (:seon.dev.process/readiness spec)})))
+
 (defn ready?
   "Probe readiness for the current process lifetime."
   [config spec record]
-  (and (= :seon.dev.process.status/alive (process-status record))
-       (containment-live? record)
-       (case (:seon.dev.process/readiness spec)
-         :seon.dev.process.readiness/process true
-         :seon.dev.process.readiness/watcher
-         (and (watcher-ready? config record)
-              (current-watcher-outputs-ready? config spec))
-         :seon.dev.process.readiness/writer (writer-ready? config)
-         :seon.dev.process.readiness/host
-         (unix-socket-ready? (host-eval-socket config))
-         :seon.dev.process.readiness/web-render
-         (pod-ready? config spec record)
-         :seon.dev.process.readiness/pod (pod-ready? config spec record)
-         false)))
+  (true? (::ready? (direct-readiness-observation config spec record))))
+
+(defn- report-readiness-refusal!
+  [spec observation]
+  (binding [*out* *err*]
+    (println
+     (str "  ✗ " (name (:seon.dev.process/id spec))
+          " readiness probe refused: "
+          (pr-str (dissoc observation ::ready?)))))
+  nil)
 
 (defn- readiness-failure [config record]
   (let [log (:seon.dev.process/log record)
         text (tail-text log)
         build-failures
-        (mapv #(str "[:" (name %) "] Build failure:")
+        (into []
+              (keep #(when % (str "[:" (name %) "] Build failure:")))
               (watcher-build-ids config))]
     (or (some->> (str/split-lines text)
                  (filter #(or (some (fn [needle]
@@ -1093,26 +1180,33 @@
         total-deadline (some-> (:seon.dev.process/ready-timeout-ms spec)
                                (+ now))]
     (loop [last-progress (log-progress-observation record)
-           last-progress-at now]
+           last-progress-at now
+           last-readiness-refusal nil]
       (let [now (System/currentTimeMillis)
             progress (log-progress-observation record)
             advanced? (not= progress last-progress)
             last-progress-at (if advanced? now last-progress-at)
             deadline (if stall-ms
                        (+ last-progress-at stall-ms)
-                       total-deadline)]
+                       total-deadline)
+            readiness (direct-readiness-observation config spec record)
+            refusal (when-not (::ready? readiness)
+                      (dissoc readiness ::ready?))]
+        (when (and refusal (not= refusal last-readiness-refusal))
+          (report-readiness-refusal! spec readiness))
         (cond
-          (ready? config spec record) record
+          (::ready? readiness) record
           (readiness-failure config record)
           (throw (ex-info "A Seon process failed before readiness."
                           {:seon.dev.process/id (:seon.dev.process/id spec)
                            :seon.dev.process/failure
                            (readiness-failure config record)
+                           ::readiness-observation readiness
                            :seon.dev.process/log
                            (:seon.dev.process/log record)}))
           (< now deadline)
           (do (Thread/sleep 200)
-              (recur progress last-progress-at))
+              (recur progress last-progress-at refusal))
           :else
           (let [config-key
                 (:seon.dev.process/ready-stall-timeout-config-key spec)]
@@ -1127,7 +1221,8 @@
                {:seon.dev.process/id (:seon.dev.process/id spec)
                 :seon.dev.process/log (:seon.dev.process/log record)
                 :seon.dev.process/last-progress last-progress
-                :seon.dev.process/last-progress-at last-progress-at}
+                :seon.dev.process/last-progress-at last-progress-at
+                ::readiness-observation readiness}
                 stall-ms
                 (assoc :seon.dev.process/ready-stall-timeout-ms stall-ms)
                 config-key
@@ -1459,7 +1554,7 @@
                 (current-watcher-outputs-ready?
                  probe-config dependency))
            :seon.dev.process.readiness/writer
-           (writer-ready? probe-config)
+           (true? (::ready? (writer-readiness-observation probe-config)))
            false))))
 
 (defn- external-dependency-status
@@ -3024,8 +3119,12 @@
                            (if foreign?
                              :seon.dev.process.status/foreign
                              containment-state)
+                           readiness
+                           (when record
+                             (direct-readiness-observation
+                              config spec record))
                            process-ready?
-                           (boolean (and record (ready? config spec record)))
+                           (true? (::ready? readiness))
                            drift?
                            (and (= :seon.dev.process.status/alive
                                    process-state)
@@ -3034,6 +3133,8 @@
                        [id (cond->
                              {:seon.dev.process/status process-state
                               :seon.dev.process/ready? process-ready?}
+                             (and readiness (not process-ready?))
+                             (assoc ::readiness-observation readiness)
                              drift?
                              (assoc :seon.dev.process/rebuild-pending? true)
                              record

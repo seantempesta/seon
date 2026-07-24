@@ -507,6 +507,11 @@
            ::writer/request-socket-path request-socket-path}
            database-path
            (assoc ::writer/database-path database-path)))
+        _ (when-let [writer-error (:seon/error writer-server)]
+            (throw
+             (ex-info
+              (:seon.error/message writer-error)
+              (assoc writer-error ::writer-start-response writer-server))))
         resolved-repl-port-file (when repl-port
                                   (resolve-repl-port-file options))
         repl-server

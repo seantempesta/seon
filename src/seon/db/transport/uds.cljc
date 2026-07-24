@@ -375,7 +375,18 @@
              (::protocol/maximum-frame-bytes response)}
             (throw (ex-info (or (::protocol/error response)
                                 "Database session opening failed.")
-                            (or response {::eof true}))))))
+                            (merge
+                             (or response {::eof true})
+                             {::opening-request
+                              {::protocol/request-id
+                               protocol/session-open-request-id
+                               ::protocol/version protocol/current-version
+                               ::protocol/maximum-frame-bytes
+                               (::protocol/maximum-frame-bytes opening)}
+                              ::opening-response response
+                              ::opening-response-explanation
+                              (when response
+                                (protocol/explain-response response))}))))))
       (catch Throwable throwable
         (try (.close channel) (catch Throwable _))
         (throw throwable)))))
