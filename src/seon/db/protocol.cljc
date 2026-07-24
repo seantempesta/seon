@@ -388,13 +388,13 @@
 (schema/register! ::result ::wire-value)
 (schema/register! ::arguments [:vector ::ordinary-wire-value])
 (schema/register! ::selector ::ordinary-wire-value)
-(schema/register! ::entity-id :any)
+(schema/register! ::entity-id ::wire-value)
 (schema/register! ::query-form
-                  [:or [:vector :any] :map [:string {:min 1}]])
+                  [:or [:vector ::wire-value] :map [:string {:min 1}]])
 (schema/register! :seon.db/db
                   [:map {:closed true}
                    [:db-name [:string {:min 1}]]
-                   [:store-id [:vector {:min 2 :max 3} :any]]
+                   [:store-id [:vector {:min 2 :max 3} ::wire-value]]
                    [:t [:int {:min 0}]]
                    [:as-of [:or :nil [:int {:min 0}] :inst]]
                    [:since [:or :nil [:int {:min 0}] :inst]]
@@ -419,10 +419,10 @@
 (schema/register! ::database-path [:string {:min 1}])
 (schema/register! ::backend [:enum :memory :file])
 (schema/register! :seon.db/program
-                  [:vector [:map-of :qualified-keyword :any]])
+                  [:vector [:map-of :qualified-keyword ::wire-value]])
 (schema/register! :seon.db/attributes [:vector :qualified-keyword])
 (schema/register! :seon.db/initial-data
-                  [:vector [:map-of :qualified-keyword :any]])
+                  [:vector [:map-of :qualified-keyword ::wire-value]])
 (schema/register! :seon.execution/artifact-digest
                   :seon.content-hash/digest)
 (schema/register! :seon.db.initialization/page-rows [:int {:min 1}])
@@ -537,7 +537,7 @@
 (schema/register! ::running? :boolean)
 (schema/register! ::request-hash :uuid)
 (schema/register! ::version [:int {:min 1}])
-(schema/register! ::transaction-data [:vector :any])
+(schema/register! ::transaction-data [:vector ::wire-value])
 (schema/register! ::transaction-meta :map)
 (schema/register!
  ::generated-candidate
@@ -559,10 +559,10 @@
 (schema/register! ::query [:string {:min 1}])
 (schema/register! ::limit [:int {:min 1}])
 (schema/register! ::index [:enum :eavt :aevt :avet])
-(schema/register! ::prefix [:vector {:max 4} :any])
+(schema/register! ::prefix [:vector {:max 4} ::wire-value])
 (schema/register! ::direction [:enum :forward :reverse])
 (schema/register! ::index-page-limit [:int {:min 1 :max 200}])
-(schema/register! ::datom [:tuple :int :keyword :any :int :boolean])
+(schema/register! ::datom [:tuple :int :keyword ::wire-value :int :boolean])
 (schema/register! ::datoms [:vector ::datom])
 (schema/register! ::cursor ::datom)
 (schema/register! :datahike.index-page/datoms ::datoms)
@@ -606,12 +606,12 @@
  [:map {:closed true}
   [:seon.db/a :keyword]
   [:seon.db/e {:optional true} :int]
-  [:seon.db/v {:optional true} :any]
+  [:seon.db/v {:optional true} ::wire-value]
   [:seon.db/added? {:optional true} :boolean]])
 (schema/register! ::datom-patterns
                   [:vector {:min 1 :max 64} ::datom-pattern])
 (schema/register! ::listening? :boolean)
-(schema/register! ::entity-ids [:vector :any])
+(schema/register! ::entity-ids [:vector ::wire-value])
 (schema/register! ::knn-entity-ids [:vector :int])
 (schema/register! ::hits [:vector :map])
 (schema/register! :db-before :seon.db/db)
