@@ -457,7 +457,9 @@
           ::launch/execution-output
           (:seon.dev.artifact/execution-output manifest)
           ::launch/execution-digest
-          (:seon.dev.artifact/execution-digest manifest)})
+          (:seon.dev.artifact/execution-digest manifest)
+          ::launch/application-digest
+          (:seon.dev.artifact/application-digest manifest)})
         descriptor-runtime (::launch/runtime descriptor)
         descriptor-writer (::launch/writer-owner descriptor)
         descriptor-process (::launch/process descriptor)
@@ -669,6 +671,8 @@
                      (config/claim-driver-pool-wait-timeout-ms config)
                      :seon.startgate/release-digest
                      (:seon.dev.artifact/application-digest manifest)
+                     :seon.startgate/execution-digest
+                     (:seon.dev.artifact/execution-digest manifest)
                      :seon.startgate/config-manifest-digest
                      (get-in descriptor
                              [::launch/resolved-manifest ::launch/sha-256])
