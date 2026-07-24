@@ -34,11 +34,11 @@
                    [:seon.db/socket-path [:string {:min 1}]]
                    [:seon.db/database-name [:string {:min 1}]]])
 (schema/register! ::startup
-                  [:map
+                  [:map {:closed true}
                    [:seon.execution/protocol-version ::protocol-version]
                    [:seon.execution/agent-id ::agent-id]
-                   [:seon.execution/artifact-digest ::digest]
-                   [:seon.execution/shadow-build-id [:string {:min 1}]]
+                   [:seon.launch/execution-digest ::digest]
+                   [:seon.launch/application-digest ::digest]
                    [:seon.execution/database-selection ::database-selection]])
 (schema/register! ::invoke
                   [:map
@@ -54,3 +54,34 @@
                                                               :max maximum-result-bytes}]]
                    [:seon.execution/run-fence {:optional true}
                     [:map-of :qualified-keyword :any]]])
+(schema/register!
+ ::ready
+ [:map {:closed true}
+  [:seon.execution/message [:= ready-message]]
+  [:seon.execution/protocol-version ::protocol-version]
+  [:seon.execution/agent-id ::agent-id]
+  [:seon.launch/execution-digest ::digest]
+  [:seon.launch/application-digest ::digest]
+  [:seon.db/db :seon.db/db]])
+(schema/register!
+ ::result
+ [:map {:closed true}
+  [:seon.execution/message [:= result-message]]
+  [:seon.execution/protocol-version ::protocol-version]
+  [:seon.execution/invocation-id ::invocation-id]
+  [:seon.db/db :seon.db/db]
+  [:seon.execution/result :any]
+  [:seon.execution/result-bytes
+   [:int {:min 1 :max maximum-result-bytes}]]])
+(schema/register!
+ ::error
+ [:map {:closed true}
+  [:seon.execution/message [:= error-message]]
+  [:seon.execution/protocol-version ::protocol-version]
+  [:seon.execution/invocation-id ::invocation-id]
+  [:seon.db/db {:optional true} :seon.db/db]
+  [:seon.execution/error
+   [:map {:closed true}
+    [:seon.error/message [:string {:min 1}]]
+    [:seon.error/kind :keyword]
+    [:seon.error/data {:optional true} :map]]]])

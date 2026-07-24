@@ -42,6 +42,7 @@
   [:seon.execution/artifact-inventories
    {:optional true} ::capability/available-artifact-inventory]
   [:seon.startgate/release-digest [:re "^[0-9a-f]{64}$"]]
+  [:seon.startgate/execution-digest [:re "^[0-9a-f]{64}$"]]
   [:seon.startgate/config-manifest-digest [:re "^[0-9a-f]{64}$"]]
   [:seon.startgate/base-projection-path [:string {:min 1}]]
   [:seon.startgate/base-projection-digest [:re "^[0-9a-f]{64}$"]]
@@ -92,15 +93,36 @@
 (defn- accept-startup!
   "Validate the session's first frame and answer ready, or refuse."
   [session host startup]
-  (let [selection (:seon.execution/database-selection startup)]
+  (let [selection (:seon.execution/database-selection startup)
+        client-execution (:seon.launch/execution-digest startup)
+        client-application (:seon.launch/application-digest startup)
+        host-execution (:seon.startgate/execution-digest host)
+        applied-application
+        (get-in host [:seon.startgate/applied-identity
+                      :seon.db.initialization/release-digest])
+        cluster (::context/database-name host)
+        identity-matches?
+        (and (= client-execution host-execution)
+             (= client-application applied-application))]
     (cond
       (not (schema/valid-candidate-value? ::session/startup startup))
-      (session/startup-error session "The execution child startup identity is invalid.")
+      (session/startup-error session "The host-session startup identity is invalid.")
 
-      (not= (::context/database-name host)
+      (not= cluster
             (:seon.db/database-name selection))
       (session/startup-error session
                      "The startup names another cluster database.")
+
+      (not identity-matches?)
+      (session/startup-error
+       session
+       (str "The host-session artifact identity does not match this applied "
+            "cluster: client execution " client-execution
+            " / application " client-application
+            "; host execution " host-execution
+            " / applied application " applied-application
+            ". Run `bin/seon cluster apply " cluster
+            "` and restart the pod."))
 
       :else
       (let [head (context/resolve-head! (::writer host))]
@@ -142,15 +164,8 @@
              {:seon.execution/message session/ready-message
               :seon.execution/protocol-version session/protocol-version
               :seon.execution/agent-id agent-id
-              ;; The child schema names this field bun-version; the host
-              ;; reports its JVM runtime there (rename rides the .cljc
-              ;; promotion seam).
-              :seon.execution/bun-version
-              (str "jvm-" (System/getProperty "java.version"))
-              :seon.execution/shadow-build-id
-              (:seon.execution/shadow-build-id startup)
-              :seon.execution/artifact-digest
-              (:seon.execution/artifact-digest startup)
+              :seon.launch/execution-digest client-execution
+              :seon.launch/application-digest client-application
               :seon.db/db head})
             (assoc session ::session/ctx ctx)))))))
 
@@ -291,9 +306,10 @@
          (:seon.startgate/release-digest request)
          :seon.db.initialization/config-manifest-digest
          (:seon.startgate/config-manifest-digest request)}
-        _ (context/verify-applied-identity!
-           writer database (::context/database-name writer)
-           expected-identity)
+        applied-identity
+        (context/verify-applied-identity!
+         writer database (::context/database-name writer)
+         expected-identity)
         base (context/build-base!
               writer (:seon.host.context/base-load-plan base-artifact))
         jvm-artifact-inventory
@@ -357,6 +373,9 @@
                      :seon.execution/artifact-inventories
                      artifact-inventories
                      :seon.agent.driver/llm-transport! ai.http/complete
+                     :seon.startgate/execution-digest
+                     (:seon.startgate/execution-digest request)
+                     :seon.startgate/applied-identity applied-identity
                      ::socket-path socket-path})
         acceptor
         (Thread.
