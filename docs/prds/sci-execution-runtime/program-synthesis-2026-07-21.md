@@ -14,6 +14,57 @@ earlier — consult it only for archaeology, never for current truth.
 units U1-U10, sequencing, decisions, graduation gate. Read it
 COMPLETELY before dispatching anything.
 
+## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
+
+## older restart protocol below until morning)
+
+Owner rulings for the night: UNLIMITED DeepSeek for bug-finding
+drives; browser-testing agents verify the UI (rendering, db-change
+responsiveness, SSE datastar updates); continue source cleanup +
+test/codebase improvement; deliver the system RUNNING AS WELL AS
+POSSIBLE by morning. Reserved for the owner awake (do NOT do
+overnight): C1 codec totality + db-call deadline conversions; R45
+S3/S4 apply/start operator verbs; graduation drills (C9 pause);
+P6 implementation.
+
+PRIORITY 0 (owns the night until green): finish the checkpoint break
+chain — currently #6 cljshang (CLJS full-suite hang) + #8 r43fix2
+(seon.host.context symbol into SCI env) in flight; seamsweep audit
+returns a batch-prediction of remaining breaks → fix in one parallel
+wave; then rerun the three suites → live-proof ledger (guard live,
+U4 restart byte-identity, U5 web gzip transcripts, U6 LLM
+batch+stream, U8a leaf invocations) with baseline perf capture →
+demo agent drive.
+
+PRIORITY 1 (after green, file-disjoint lanes in order as slots
+free): U9 great deletion (slice S0a agent-view move FIRST) ·
+schedfix (R46 semantics + discarded-error/false-:done receipt fix) ·
+P3 read-side admission + computed populations · runtime-cost
+measurement on the frozen artifact · test-simplification mechanical
+batch (fixture migrations + 38 prose pins) · busy-spin
+park-until-publication fix · census stragglers as filler.
+
+CONTINUOUS ALL NIGHT (post-checkpoint): (a) LIVE AGENT DRIVES —
+DeepSeek unlimited by owner ruling, multi-step plans + db-backed
+memory, every anomaly becomes an issue + fix lane, drives repeat
+after each wave slice; (b) BROWSER/UI VERIFICATION lanes — root
+view + /agent/{id} + /data rendering, a real transact must morph
+the page (SSE datastar over gzip verified server-side per the
+browser-automation skill; browser bridge may 503 on long SSE),
+responsiveness after db changes, console errors; (c) cleanup lanes
+from the accepted audits (fragile-tests F-rows, census, wiki-driven
+smells) whenever a slot is otherwise idle.
+
+MORNING ITEMS list lives at the bottom of this section — anything
+needing owner taste parks there, never blocks. No victory
+declarations; anchor updated per landing; kill-and-resume freely on
+derivable rulings; stops that need genuine owner taste park in
+MORNING ITEMS with a recommendation.
+
+MORNING ITEMS (accumulating):
+- (seed) Bun self-host comparison number post-checkpoint if wanted —
+  cheap re-run, decision-moot (path dies at U9).
+
 ## Restart protocol (rewritten at the 2026-07-23 PM wind-down)
 
 1. Read this file COMPLETELY — the dated bullets above the rulings
