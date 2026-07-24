@@ -72,6 +72,21 @@ OWNER RULINGS (2026-07-24 ~08:40, recorded same-turn):
 - Owner wants active participation in big design decisions —
   batch design forks to him with recommendations; don't auto-rule.
 
+R48 + R49 CONTAINMENT INTEGRATED (09:05): `3bb7c2d39` deletes the
+tests-pass host-eval compilation path and every Malli `::m/sci-options`
+context-construction site. `graduate!` now returns the flat R48/P4 refusal
+without compiling or transacting; matching legacy `:graduated` rows derive
+`:nursery` and rebuild through SCI. Schema projections prebind every admitted
+predicate callable before Malli compilation, and unresolved predicates fail
+closed. The door retains a fired policy trip even when Malli returns `false`
+or throws a replacement instrumentation error. Focused proof: JVM guard,
+schema projection, and standalone-schema 14/164; shared registry/graduation
+6/30; portable CLJS guard 5/18 and schema 21/148, all green. The
+`bin/test-writer` wrapper could not select its stale/absent compiled artifact
+without a prohibited cluster bring-up, so the same writer namespaces ran
+directly through the repository's `:writer:host:writer-test` aliases. Both
+containment issues are archived; native graduation reopens only at P4/R33.
+
 FIX-QUALITY AUDIT ACCEPTED (research/overnight-fix-quality-audit-
 2026-07-24.md): 7 CLASS / 6 INSTANCE / 2 docs; no weakened tests.
 Weakness queue (owner package + WHEN):

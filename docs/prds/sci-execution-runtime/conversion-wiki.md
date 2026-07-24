@@ -1255,6 +1255,26 @@ the anchor stays the state ledger.
 
 ## Source provenance and contract provenance are different facts
 
+## Guarded schema and graduation scars (2026-07-24)
+
+- **Malli options are not a guarded-context handoff.** Malli 0.20.0 consumes
+  `::m/sci-options` by initializing its own SCI context, evaluating aliases,
+  forking, and evaluating each symbolic predicate. Resolve an admitted
+  predicate symbol to its already-materialized corpus callable before Malli
+  compilation instead. An unresolved callable fails closed; Malli never owns a
+  second evaluator.
+- **A dependency can swallow an uncatchable-inside-SCI interrupt.** Malli's
+  safe predicate wrapper catches the SCI marker and returns `false`, and
+  instrumentation may then throw a different schema error. The guarded holder
+  must retain the fired policy kind independently of the throwable and report
+  it exactly once after a normal return or a replacement throw.
+- **Passing tests cannot prove native code door-equivalent.** Differential
+  tests remain useful sanity evidence, but only the P4/R33 transitive call
+  graph can admit native compilation. Until that proof exists, graduation
+  refuses loudly and every legacy `:graduated` row derives an effective
+  nursery tier. Deleting the host-eval path is the containment boundary; a
+  silent downgrade would falsely report promotion.
+
 A function contract row and its source row may have different asserting
 transactions. Datahike does not create a new datom when an identical
 `:seon.fn/spec` value is reasserted, so an agent can replace
