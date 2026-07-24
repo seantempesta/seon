@@ -333,6 +333,33 @@
           (.catch #(is false (str %)))
           (.finally cleanup!)))))
 
+(deftest startup-identity-mismatch-refuses-with-exact-cluster-apply-remedy
+  (let [old-release
+        "1111111111111111111111111111111111111111111111111111111111111111"
+        new-release
+        "2222222222222222222222222222222222222222222222222222222222222222"
+        old-config
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        new-config
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        error
+        (#'client/applied-identity-refusal
+         {::launch/runtime
+          {::launch/runtime-cluster "s4startgate"}}
+         {:seon.db.initialization/fingerprint "population"
+          :seon.db.initialization/release-digest old-release
+          :seon.db.initialization/config-manifest-digest old-config}
+         {:seon.db.initialization/fingerprint "population"
+          :seon.db.initialization/release-digest new-release
+          :seon.db.initialization/config-manifest-digest new-config})]
+    (is (=
+         (str "this cluster was applied at release 22222222/config "
+              "bbbbbbbb; this artifact is 11111111/config aaaaaaaa; "
+              "run `bin/seon cluster apply s4startgate`.")
+         (ex-message error)))
+    (is (= "bin/seon cluster apply s4startgate"
+           (:seon.startgate/remedy (ex-data error))))))
+
 (deftest startup-recovery-accepts-domain-data-and-throws-direct-errors
   (let [recovery-result! (deref #'client/recovery-result!)
         domain-result {::recovery/repaired? false
@@ -349,77 +376,21 @@
     (is (identical? domain-result (recovery-result! domain-result)))
     (is (= direct-error (ex-data thrown)))))
 
-(deftest config-free-startup-initializes-from-retained-config
-  (async done
-    (let [open-startup! (deref #'client/open-startup-session!)
-          original-open client/open-database-session!
-          original-db db/db
-          original-entity db/entity
-          original-resolve config/resolve-config-singleton
-          retained (assoc configuration
-                          :seon.config/always #{'custom.core})
-          stored retained
-          cleanup!
-          (fn []
-            (set! client/open-database-session! original-open)
-            (set! db/db original-db)
-            (set! db/entity original-entity)
-            (set! config/resolve-config-singleton original-resolve)
-            (done))
-          requests (atom [])]
-      (set! client/open-database-session!
-            (fn [request]
-              (swap! requests conj request)
-              (js/Promise.resolve {::db/db {:db-name "default"}})))
-      (set! db/db
-            (fn
-              ([] (js/Promise.resolve {:db-name "default"}))
-              ([_request] (js/Promise.resolve {:db-name "default"}))))
-      (set! db/entity
-            (fn
-              ([_entity-id] (js/Promise.resolve stored))
-              ([_database _entity-id] (js/Promise.resolve stored))))
-      (set! config/resolve-config-singleton
-            (fn [_]
-              (throw
-               (js/Error. "config-free reopen must not resolve defaults"))))
-      (try
-        (-> (open-startup! true nil)
-            (.then
-             (fn [_]
-               (is (= [{::client/initialize? false}
-                       {::client/initialize? true
-                        ::client/configuration retained}]
-                      @requests)
-                   "attach first, then initialize from the retained decoded policy")))
-            (.catch
-             (fn [error]
-               (is false (str "config-free startup rejected: " error
-                              "\n" (.-stack error)))))
-            (.finally cleanup!))
-        (catch :default error
-          (is false (str "config-free startup threw synchronously: " error))
-          (cleanup!))))))
-
-(deftest selected-startup-shares-one-resolved-configuration
+(deftest selected-apply-shares-one-resolved-configuration
   (async done
     (let [select-configuration
           (deref #'client/selected-startup-configuration)
-          open-startup! (deref #'client/open-startup-session!)
           original-resolve config/resolve-config-singleton
-          original-open client/open-database-session!
           original-skills skills/seed-skills-tx-data
           original-reconcile state/reconcile!
           original-migrate ctx.admin/migrate-plan-surface-default!
           resolved (assoc configuration :seon.config.render/eval-cap 42)
           resolve-count (atom 0)
-          opened-configuration (atom nil)
           applied-configuration (atom nil)
           applied-request (atom nil)
           cleanup!
           (fn []
             (set! config/resolve-config-singleton original-resolve)
-            (set! client/open-database-session! original-open)
             (set! skills/seed-skills-tx-data original-skills)
             (set! state/reconcile! original-reconcile)
             (set! ctx.admin/migrate-plan-surface-default! original-migrate)
@@ -434,10 +405,6 @@
               ([_ _]
                (swap! resolve-count inc)
                resolved)))
-      (set! client/open-database-session!
-            (fn [request]
-              (reset! opened-configuration (::client/configuration request))
-              (js/Promise.resolve {::db/db {:db-name "default"}})))
       (set! skills/seed-skills-tx-data
             (fn
               ([] [])
@@ -458,25 +425,22 @@
                {::ctx/ok? true ::ctx/changed? false ::ctx/operations 0})))
       (try
         (let [selected (select-configuration manifest)]
-          (-> (open-startup! true selected)
-              (.then
-               (fn [_]
-                 (#'client/reconcile-config! manifest selected)))
+          (-> (js/Promise.resolve
+               ((deref #'client/reconcile-config!) manifest selected))
               (.then
                (fn [_]
                  (is (= 1 @resolve-count))
-                 (is (identical? selected @opened-configuration))
                  (is (identical? selected @applied-configuration))
                  (is (= #{:seon.db.process/boot
                           :seon.db.process/config}
                         (:seon.db/managed-scope @applied-request)))))
               (.catch
                (fn [error]
-                 (is false (str "selected startup rejected: " error
+                 (is false (str "selected apply rejected: " error
                                 "\n" (.-stack error)))))
               (.finally cleanup!)))
         (catch :default error
-          (is false (str "selected startup threw synchronously: " error))
+          (is false (str "selected apply threw synchronously: " error))
           (cleanup!))))))
 
 (deftest declared-ai-selection-joins-the-one-config-reconcile

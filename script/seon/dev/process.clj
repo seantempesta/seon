@@ -261,7 +261,13 @@
            (:seon.dev.config/writer-output config))
     (let [identity (:seon.dev.release/identity manifest)
           member-sha #(get (release-member manifest %)
-                           :seon.dev.release/sha-256)]
+                           :seon.dev.release/sha-256)
+          sidecar-directory
+          (fs/parent (:seon.dev.config/program-source config))
+          base-projection-path
+          (str (fs/path sidecar-directory "base-projection.edn"))
+          page-plan-path
+          (str (fs/path sidecar-directory "page-plan.edn"))]
       ;; Config admission already verified every member against this manifest.
       ;; Keep process derivation data-only: it neither rebuilds nor rehashes.
       {:seon.dev.artifact/flavor
@@ -298,11 +304,14 @@
        (:seon.dev.config/program-source config)
        :seon.dev.artifact/program-source-digest
        (artifact/current-program-source-digest config)
+       :seon.dev.artifact/base-projection-path
+       base-projection-path
+       :seon.dev.artifact/base-projection-digest
+       (artifact/file-digest base-projection-path)
        :seon.dev.artifact/page-plan-path
-       (str (fs/path (fs/parent (:seon.dev.config/program-source config))
-                     "page-plan.edn"))
+       page-plan-path
        :seon.dev.artifact/page-plan-digest
-       (member-sha :seon.dev.release/page-plan-member)
+       (artifact/file-digest page-plan-path)
        :seon.dev.artifact/application-digest
        (:seon.dev.release/application-sha-256 manifest)
        :seon.dev.artifact/release-manifest-digest
@@ -471,6 +480,15 @@
             program-source-relative-path))
         page-plan-relative-path
         (:seon.dev.artifact/page-plan-path manifest)
+        base-projection-relative-path
+        (:seon.dev.artifact/base-projection-path manifest)
+        base-projection-digest
+        (:seon.dev.artifact/base-projection-digest manifest)
+        base-projection-path
+        (when (and runtime-root base-projection-relative-path)
+          (if source-checkout?
+            (str (fs/path runtime-root base-projection-relative-path))
+            base-projection-relative-path))
         page-plan-digest
         (:seon.dev.artifact/page-plan-digest manifest)
         page-plan-path
@@ -481,6 +499,8 @@
         _ (when-not (apply = (map some? [runtime-root
                                          program-source-relative-path
                                          program-source-digest
+                                         base-projection-relative-path
+                                         base-projection-digest
                                          page-plan-relative-path
                                          page-plan-digest]))
             (throw
@@ -490,6 +510,10 @@
                        program-source-relative-path
                        :seon.dev.artifact/program-source-digest
                        program-source-digest
+                       :seon.dev.artifact/base-projection-path
+                       base-projection-relative-path
+                       :seon.dev.artifact/base-projection-digest
+                       base-projection-digest
                        :seon.dev.artifact/page-plan-path
                        page-plan-relative-path
                        :seon.dev.artifact/page-plan-digest
@@ -500,6 +524,10 @@
                            "SEON_LAUNCH_DESCRIPTOR" (pr-str descriptor)
                            "SEON_APPLICATION_DIGEST"
                            (:seon.dev.artifact/application-digest manifest)
+                           "SEON_ARTIFACT_INVENTORY"
+                           (pr-str
+                            (:seon.dev.artifact/cljs-artifact-inventory
+                             manifest))
                            "SEON_REQ_SOCK"
                            (::launch/request-socket-path descriptor-writer)
                            "SEON_WRITER_REPL_PORT_FILE"
@@ -519,6 +547,14 @@
                                  program-source-path
                                  "SEON_PROGRAM_SOURCE_DIGEST"
                                  program-source-digest)
+                          base-projection-path
+                          (assoc "SEON_BASE_PROJECTION_PATH"
+                                 base-projection-path
+                                 "SEON_BASE_PROJECTION_DIGEST"
+                                 base-projection-digest
+                                 "SEON_PREPROCESSED_RELEASE_IDENTITY"
+                                 (:seon.dev.artifact/application-digest
+                                  manifest))
                           page-plan-path
                           (assoc "SEON_PAGE_PLAN_PATH"
                                  page-plan-path
@@ -604,6 +640,17 @@
                            :seon.dev.process.readiness/writer
                            :seon.dev.process/artifact-digest
                            (:seon.dev.artifact/writer-digest manifest)}))))
+        jvm-environment
+        (cond->
+         (assoc environment
+                "SEON_APPLICATION_DIGEST"
+                (:seon.dev.artifact/application-digest manifest))
+          base-projection-path
+          (assoc
+           "SEON_PREPROCESSED_RELEASE_IDENTITY"
+           (:seon.dev.artifact/application-digest manifest)
+           "SEON_BASE_PROJECTION_PATH" base-projection-path
+           "SEON_BASE_PROJECTION_DIGEST" base-projection-digest))
         host-spec
         (when source-checkout?
           (cond->
@@ -620,11 +667,20 @@
                      (:seon.dev.config/cluster-name config)
                      :seon.host/database-pool-wait-timeout-ms
                      (config/claim-driver-pool-wait-timeout-ms config)
+                     :seon.startgate/release-digest
+                     (:seon.dev.artifact/application-digest manifest)
+                     :seon.startgate/config-manifest-digest
+                     (get-in descriptor
+                             [::launch/resolved-manifest ::launch/sha-256])
+                     :seon.startgate/base-projection-path
+                     base-projection-path
+                     :seon.startgate/base-projection-digest
+                     base-projection-digest
                      :seon.execution/artifact-inventories
                      (:seon.dev.artifact/cljs-artifact-inventory manifest)
                      :my.blob/storage-view
                      (::launch/blob-storage-view descriptor)})]
-           :seon.dev.process/environment environment
+           :seon.dev.process/environment jvm-environment
            :seon.dev.process/dependencies
            (get process-graph host-id)
            :seon.dev.process/readiness :seon.dev.process.readiness/host
@@ -652,10 +708,18 @@
                (:seon.dev.config/request-socket config)
                :seon.web.server/database-name
                (:seon.dev.config/cluster-name config)
+               :seon.startgate/release-digest
+               (:seon.dev.artifact/application-digest manifest)
+               :seon.startgate/config-manifest-digest
+               (get-in descriptor
+                       [::launch/resolved-manifest ::launch/sha-256])
+               :seon.startgate/base-projection-path base-projection-path
+               :seon.startgate/base-projection-digest
+               base-projection-digest
                :seon.web.server/port-file
                (web-render-port-file config)
                :seon.web.server/port 0})]
-            :seon.dev.process/environment environment
+            :seon.dev.process/environment jvm-environment
             :seon.dev.process/dependencies
             (get process-graph web-render-id)
             :seon.dev.process/http-port-file
@@ -929,6 +993,8 @@
                                      "SEON_RUNTIME_ROOT"])
           program-source (get-in spec [:seon.dev.process/environment
                                        "SEON_PROGRAM_SOURCE_PATH"])
+          base-projection (get-in spec [:seon.dev.process/environment
+                                        "SEON_BASE_PROJECTION_PATH"])
           page-plan (get-in spec [:seon.dev.process/environment
                                   "SEON_PAGE_PLAN_PATH"])
           execution-output (:seon.dev.process/execution-output spec)
@@ -939,6 +1005,7 @@
         (and runtime-root (fs/directory? runtime-root)
              execution-output (fs/regular-file? execution-output)
              program-source (fs/regular-file? program-source)
+             base-projection (fs/regular-file? base-projection)
              page-plan (fs/regular-file? page-plan))
         (and runtime-root
              (fs/directory? (fs/path runtime-root "out/bootstrap"))
@@ -946,6 +1013,8 @@
              (fs/regular-file? execution-output)
              program-source
              (fs/regular-file? program-source)
+             base-projection
+             (fs/regular-file? base-projection)
              page-plan
              (fs/regular-file? page-plan)
              (try
@@ -1888,6 +1957,7 @@
 (def ^:private operations
   #{:seon.dev.process.operation/down
     :seon.dev.process.operation/ensure-host
+    :seon.dev.process.operation/ensure-writer
     :seon.dev.process.operation/recover
     :seon.dev.process.operation/restart
     :seon.dev.process.operation/rebuild-readers
@@ -2788,6 +2858,17 @@
    [:seon.dev.process.containment/workload-pid pos-int?]
    [:seon.dev.process/swept-containment-sockets [:vector :string]]])
 
+(def ensure-writer-result-schema
+  [:map {:closed true}
+   [:seon.dev.process/id [:= writer-id]]
+   [:seon.runtime.state/changed? :boolean]
+   [:seon.dev.process/status [:= :seon.dev.process.status/alive]]
+   [:seon.dev.process/ready? [:= true]]
+   [:seon.dev.process/pid pos-int?]
+   [:seon.dev.process.containment/generation :uuid]
+   [:seon.dev.process.containment/owner-pid pos-int?]
+   [:seon.dev.process.containment/workload-pid pos-int?]])
+
 (defn- managed-dependency-ready?
   [configuration spec]
   (when-let [record
@@ -2862,6 +2943,45 @@
        :seon.dev.process.containment/workload-pid
        (:seon.dev.process.containment/workload-pid containment)
        :seon.dev.process/swept-containment-sockets swept})))
+
+(defn ensure-writer!
+  "Reconcile exactly the operator-owned writer without starting consumers."
+  {:malli/schema
+   [:=> [:catn [:configuration map?] [:manifest map?]]
+    ensure-writer-result-schema]}
+  [configuration manifest]
+  (let [spec (get (specs configuration manifest) writer-id)
+        _ (when-not spec
+            (throw
+             (ex-info
+              "The selected launch descriptor has no operator-owned writer."
+              {:seon.dev.process/id writer-id})))
+        exact? (converged? configuration spec)
+        record-before (read-process configuration writer-id)
+        _ (when (and (not exact?) record-before)
+            (clean-or-force!
+             {:seon.dev.process/configuration configuration
+              :seon.dev.process/operation
+              :seon.dev.process.operation/ensure-writer
+              :seon.dev.process/targets #{writer-id}}))
+        record
+        (if exact?
+          record-before
+          (with-startup-ownership
+           configuration
+           #(ensure! configuration spec %)))
+        containment (:seon.dev.process/containment record)]
+    {:seon.dev.process/id writer-id
+     :seon.runtime.state/changed? (not exact?)
+     :seon.dev.process/status :seon.dev.process.status/alive
+     :seon.dev.process/ready? true
+     :seon.dev.process/pid (:seon.dev.process/pid record)
+     :seon.dev.process.containment/generation
+     (:seon.dev.process.containment/generation containment)
+     :seon.dev.process.containment/owner-pid
+     (:seon.dev.process.containment/owner-pid containment)
+     :seon.dev.process.containment/workload-pid
+     (:seon.dev.process.containment/workload-pid containment)}))
 
 (defn reported-process-status
   "Derive one managed generation's containment-aware operator status."

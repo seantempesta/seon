@@ -107,6 +107,8 @@
 (defn- bound-forms [forms predicate-functions]
   (update-vals forms #(bind-predicates % predicate-functions)))
 
+(declare canonical-data-string)
+
 (defn- portable-string-hash [s]
   #?(:clj (.hashCode ^String s)
      :cljs
@@ -116,15 +118,23 @@
          (recur (inc i)
                 (bit-or 0 (+ (* 31 result) (.charCodeAt s i))))))))
 
+(defn canonical-data-fingerprint
+  "Portable content fingerprint for ordinary data."
+  [value]
+  (portable-string-hash (canonical-data-string value)))
+
 (defn- framed [tag payload]
   (str tag (count payload) ":" payload))
-
-(declare canonical-data-string)
 
 (defn- canonical-coll-string [tag values]
   (framed tag (apply str (map canonical-data-string values))))
 
-(defn- canonical-data-string [value]
+(defn canonical-data-string
+  "Canonical byte-comparison string for ordinary projection data.
+
+   This is the portable content oracle used by projection fingerprints and by
+   the preprocessed-base composition proof. Runtime objects are rejected."
+  [value]
   (cond
     (nil? value) "n"
     (true? value) "b1"
@@ -221,6 +231,25 @@
 
 (def ^:dynamic ^:private *candidate-forms-overlay* nil)
 (def ^:dynamic ^:private *registration-admission-source* :core)
+
+(def ^:dynamic *verified-release-identity*
+  "Exact release digest admitted by the process launcher, or nil.
+
+   Module loading happens before process main. The operator supplies this only
+   when the release manifest contains the preprocessed projection artifact;
+   every process still verifies the same digest against cluster facts before
+   admitting executable work."
+  (let [application
+        #?(:clj (System/getenv "SEON_APPLICATION_DIGEST")
+           :cljs (some-> js/process .-env
+                         (aget "SEON_APPLICATION_DIGEST")))
+        preprocessed
+        #?(:clj (System/getenv "SEON_PREPROCESSED_RELEASE_IDENTITY")
+           :cljs (some-> js/process .-env
+                         (aget "SEON_PREPROCESSED_RELEASE_IDENTITY")))]
+    (when (and (re-matches #"[0-9a-f]{64}" (or application ""))
+               (= application preprocessed))
+      application)))
 
 (def asserting-transaction-provenance-pattern
   "Pull pattern for the transaction that asserted a canonical schema/contract
@@ -776,20 +805,22 @@
            :seon.schema/key k
            :seon.schema/definition v
            :seon.error/kind :user-input}))))
-  ;; Forward references remain declaration-order independent. Complete forms
-  ;; are gated now; an unresolved canonical reference is gated when the full
-  ;; candidate projection is constructed.
-  (try
-    (assert-complete-contract!
-      {:seon.schema/identity k
-       :seon.schema/definition v
-       :seon.schema/forms (assoc (candidate-forms) k v)
-       :seon.schema/admission
-       {:seon.schema.admission/source *registration-admission-source*}
-       :seon.schema/predicate-functions (core-predicate-functions)})
-    (catch #?(:clj Exception :cljs :default) e
-      (when-not (= :malli.core/invalid-schema (:type (ex-data e)))
-        (throw e))))
+  ;; A manifest-admitted preprocessed release already proved the complete
+  ;; population. Its module-load registrations collect the exact authored
+  ;; forms without repeating the quadratic prefix proof. Unverified REPL/dev
+  ;; loads and agent registration retain the full gate.
+  (when-not *verified-release-identity*
+    (try
+      (assert-complete-contract!
+        {:seon.schema/identity k
+         :seon.schema/definition v
+         :seon.schema/forms (assoc (candidate-forms) k v)
+         :seon.schema/admission
+         {:seon.schema.admission/source *registration-admission-source*}
+         :seon.schema/predicate-functions (core-predicate-functions)})
+      (catch #?(:clj Exception :cljs :default) e
+        (when-not (= :malli.core/invalid-schema (:type (ex-data e)))
+          (throw e)))))
   (update-candidate-forms! assoc k v)
   k)
 
@@ -803,6 +834,8 @@
                   [:maybe :string]]}
   [k]
   (some-> (get (candidate-forms) k) pr-str))
+
+(declare compose-projection-data materialize-projection)
 
 (defn build-projection
   "Build and validate one immutable runtime projection.
@@ -837,8 +870,13 @@
           function-source-admissions {}
           artifact-exports #{}
           pure-predicate-symbols #{}
-          predicate-functions {}}}]
-   (let [predicate-functions
+          predicate-functions {}}
+     :as options}]
+   (if (contains? forms :seon.schema.projection/forms)
+     (materialize-projection
+      (compose-projection-data forms function-contracts)
+      options)
+     (let [predicate-functions
          (merge (core-predicate-functions) predicate-functions)
          predicate-symbols
          (into (into #{} (mapcat predicate-symbols-in) (vals forms))
@@ -1019,7 +1057,8 @@
                      [attr (vec (sort-by shape-rank schema-keys))]))
               raw-shape-index)
         catalog  (->> shape-rows
-                      vals
+                      (sort-by (comp str key))
+                      (map second)
                       (keep
                         (fn [{:seon.schema/keys [key required-attrs]
                               :seon.entity/keys [id-attr]
@@ -1059,8 +1098,211 @@
      :seon.schema.projection/required-by-key required-by-key
      :seon.schema.projection/shape-index shape-index
      :seon.schema.projection/shape-rows shape-rows
-     :seon.schema.projection/catalog catalog
-     :seon.schema.projection/fingerprint fingerprint})))
+      :seon.schema.projection/catalog catalog
+      :seon.schema.projection/fingerprint fingerprint}))))
+
+(def ^:private projection-runtime-keys
+  #{:seon.schema.projection/registry
+    :seon.schema.projection/compile-options
+    :seon.schema.projection/predicate-functions})
+
+(defn projection-pure-data
+  "Return the EDN-only portion of one immutable projection."
+  {:malli/schema [:=> [:catn [::projection :map]] :map]}
+  [projection]
+  (apply dissoc projection projection-runtime-keys))
+
+(defn- projection-fingerprint-from-data
+  [projection]
+  (projection-fingerprint
+   (:seon.schema.projection/forms projection)
+   (:seon.schema.projection/function-contracts projection)
+   (:seon.schema.projection/schema-admissions projection)
+   (:seon.schema.projection/function-admissions projection)
+   (:seon.schema.projection/function-source-admissions projection)
+   (:seon.schema.projection/artifact-exports projection)
+   (:seon.schema.projection/pure-predicate-symbols projection)))
+
+(defn- reverse-dependencies
+  [dependencies]
+  (reduce-kv
+   (fn [reverse-edges dependent dependency-keys]
+     (reduce (fn [edges dependency]
+               (update edges dependency (fnil conj #{}) dependent))
+             reverse-edges
+             dependency-keys))
+   {}
+   dependencies))
+
+(defn- shape-projections
+  [shape-rows]
+  (let [required-by-key
+        (into (sorted-map)
+              (map (fn [[k row]]
+                     [k (:seon.schema/required-attrs row)]))
+              shape-rows)
+        raw-shape-index
+        (reduce-kv
+         (fn [index schema-key required-attrs]
+           (reduce (fn [result attr]
+                     (update result attr (fnil conj []) schema-key))
+                   index
+                   required-attrs))
+         (sorted-map)
+         required-by-key)
+        shape-rank
+        (fn [schema-key]
+          [(- (count (get required-by-key schema-key))) (str schema-key)])
+        shape-index
+        (into (sorted-map)
+              (map (fn [[attr schema-keys]]
+                     [attr (vec (sort-by shape-rank schema-keys))]))
+              raw-shape-index)
+        catalog
+        (->> shape-rows
+             (sort-by (comp str key))
+             (map second)
+             (keep
+              (fn [{:seon.schema/keys [key required-attrs]
+                    :seon.entity/keys [id-attr]
+                    :seon.render/keys [ai html]
+                    :as row}]
+                (when (and (:seon.schema/entity? row) id-attr)
+                  (cond->
+                   {:seon.schema.catalog/key key
+                    :seon.schema.catalog/id-attr id-attr
+                    :seon.schema.catalog/required-attrs required-attrs}
+                    ai (assoc :seon.schema.catalog/render-ai ai)
+                    html (assoc :seon.schema.catalog/render-html html)))))
+             vec)]
+    {:seon.schema.projection/required-by-key required-by-key
+     :seon.schema.projection/shape-index shape-index
+     :seon.schema.projection/catalog catalog}))
+
+(defn compose-projection-data
+  "Compose preproved base pure data with one divergence pure-data delta.
+
+   Row identities are map keys, so divergence naturally wins for a redefined
+   base identity. The cross-population fingerprint and reverse/shape indexes
+   are recomputed over the composed ordinary data; no schema is compiled here."
+  {:malli/schema [:=> [:catn [::projection :map]
+                             [:seon.schema/divergence-delta :map]]
+                  :map]}
+  [base divergence]
+  (let [merge-map-key
+        (fn [projection key]
+          (assoc projection key
+                 (merge (get projection key {})
+                        (get divergence key {}))))
+        keyed
+        [:seon.schema.projection/forms
+         :seon.schema.projection/schema-admissions
+         :seon.schema.projection/function-admissions
+         :seon.schema.projection/function-source-admissions
+         :seon.schema.projection/schema-dependencies
+         :seon.schema.projection/function-contracts
+         :seon.schema.projection/function-dependencies
+         :seon.schema.projection/shape-rows]
+        composed
+        (reduce merge-map-key (projection-pure-data base) keyed)
+        composed
+        (cond-> composed
+          (contains? divergence :seon.schema.projection/artifact-exports)
+          (assoc :seon.schema.projection/artifact-exports
+                 (:seon.schema.projection/artifact-exports divergence))
+
+          (contains? divergence
+                     :seon.schema.projection/pure-predicate-symbols)
+          (assoc :seon.schema.projection/pure-predicate-symbols
+                 (:seon.schema.projection/pure-predicate-symbols divergence)))
+        composed
+        (merge composed
+               {:seon.schema.projection/reverse-schema-dependencies
+                (reverse-dependencies
+                 (:seon.schema.projection/schema-dependencies composed))}
+               (shape-projections
+                (:seon.schema.projection/shape-rows composed)))]
+    (assoc composed
+           :seon.schema.projection/fingerprint
+           (projection-fingerprint-from-data composed))))
+
+(defn projection-delta
+  "Return the row-keyed pure-data difference from `base` to `composed`.
+
+   This is the ordinary value stored by the divergence cache. Runtime objects
+   and population-wide indexes are never included."
+  {:malli/schema [:=> [:catn [::projection :map] [::projection :map]] :map]}
+  [base composed]
+  (let [base (projection-pure-data base)
+        composed (projection-pure-data composed)
+        keyed
+        [:seon.schema.projection/forms
+         :seon.schema.projection/schema-admissions
+         :seon.schema.projection/function-admissions
+         :seon.schema.projection/function-source-admissions
+         :seon.schema.projection/schema-dependencies
+         :seon.schema.projection/function-contracts
+         :seon.schema.projection/function-dependencies
+         :seon.schema.projection/shape-rows]]
+    (reduce
+     (fn [delta key]
+       (let [base-values (get base key {})
+             changed
+             (into (sorted-map)
+                   (filter (fn [[identity value]]
+                             (not= value (get base-values identity))))
+                   (get composed key {}))]
+         (cond-> delta (seq changed) (assoc key changed))))
+     {:seon.schema.projection/artifact-exports
+      (:seon.schema.projection/artifact-exports composed)
+      :seon.schema.projection/pure-predicate-symbols
+      (:seon.schema.projection/pure-predicate-symbols composed)}
+     keyed)))
+
+(defn materialize-projection
+  "Rematerialize registry/options over preproved pure projection data."
+  {:malli/schema
+   [:function
+    [:=> [:catn [::projection :map]] :map]
+    [:=> [:catn [::projection :map]
+                 [:seon.schema/projection-options :map]]
+     :map]]}
+  ([pure-data]
+   (materialize-projection pure-data {}))
+  ([pure-data {:seon.schema/keys [predicate-functions]}]
+   (let [predicate-functions
+         (merge (core-predicate-functions) predicate-functions)
+         forms (:seon.schema.projection/forms pure-data)
+         contracts (:seon.schema.projection/function-contracts pure-data)
+         predicate-symbols
+         (into (into #{} (mapcat predicate-symbols-in) (vals forms))
+               (mapcat predicate-symbols-in)
+               (vals contracts))
+         predicate-functions
+         (reduce (fn [bindings predicate]
+                   (if (contains? bindings predicate)
+                     bindings
+                     (if-let [f (runtime-predicate predicate)]
+                       (assoc bindings predicate f)
+                       bindings)))
+                 predicate-functions
+                 predicate-symbols)
+         compiled-forms (bound-forms forms predicate-functions)
+         registry (mr/composite-registry
+                   (m/default-schemas)
+                   (mr/fast-registry compiled-forms))
+         options {:registry registry}]
+     ;; Materialization still compiles the runtime objects, but all population
+     ;; validation and pure-data derivation was completed before publication.
+     (doseq [[_ form] compiled-forms]
+       (m/schema form options))
+     (doseq [[_ contract] (bound-forms contracts predicate-functions)]
+       (m/function-schema contract options))
+     (assoc pure-data
+            :seon.schema.projection/registry registry
+            :seon.schema.projection/compile-options options
+            :seon.schema.projection/predicate-functions
+            predicate-functions))))
 
 (defn projection-from-rows
   "Build one complete projection from committed schema and contract rows.

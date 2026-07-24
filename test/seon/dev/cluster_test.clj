@@ -9,6 +9,7 @@
             [seon.dev.cluster :as cluster]
             [seon.dev.config :as config]
             [seon.dev.process :as process]
+            [seon.dev.release :as release]
             [seon.dev.state :as state]
             [seon.launch :as launch]))
 
@@ -16,6 +17,41 @@
   (let [configuration (config/load! (System/getProperty "user.dir"))]
     (cluster/request {::cluster/configuration configuration
                       ::cluster/name "experiment"})))
+
+(deftest current-manifest-uses-the-owning-reader-for-source-and-release
+  (let [manifest {:seon.dev.artifact/application-digest "application"}
+        calls (atom [])]
+    (with-redefs [artifact/current-manifest
+                  (fn [configuration]
+                    (swap! calls conj [:artifact configuration])
+                    manifest)
+                  artifact/read-manifest
+                  (fn [configuration]
+                    (swap! calls conj [:artifact-read configuration])
+                    manifest)
+                  release/read-manifest!
+                  (fn [path]
+                    (swap! calls conj [:release path])
+                    manifest)]
+      (is (= manifest
+             (#'cluster/current-manifest!
+              {:seon.dev.config/source-checkout? true})))
+      (is (= manifest
+             (#'cluster/current-manifest!
+              {:seon.dev.config/source-checkout? false
+               :seon.dev.config/artifact-manifest "/release.edn"})))
+      (is (= manifest
+             (#'cluster/manifest!
+              {:seon.dev.config/source-checkout? true})))
+      (is (= manifest
+             (#'cluster/manifest!
+              {:seon.dev.config/source-checkout? false
+               :seon.dev.config/artifact-manifest "/release.edn"})))
+      (is (= [[:artifact {:seon.dev.config/source-checkout? true}]
+              [:release "/release.edn"]
+              [:artifact-read {:seon.dev.config/source-checkout? true}]
+              [:release "/release.edn"]]
+             @calls)))))
 
 (deftest public-name-derives-one-private-autonomous-cluster
   (let [{::cluster/keys [configuration target-configuration name]}
@@ -43,6 +79,29 @@
       (is (thrown? Exception
                    (cluster/request {::cluster/configuration configuration
                                      ::cluster/name invalid}))))))
+
+(deftest package-clusters-live-in-operator-state-not-the-immutable-release
+  (let [source (::cluster/configuration (target-request))
+        configuration
+        (assoc source
+               :seon.dev.config/root "/immutable/release"
+               :seon.dev.config/source-checkout? false
+               :seon.dev.config/cluster-dir
+               "/operator-state/data/clusters/control")
+        target
+        (with-redefs [config/select-manifest
+                      (fn [selected _config-path] selected)]
+          (::cluster/target-configuration
+           (cluster/request {::cluster/configuration configuration
+                             ::cluster/name "experiment"})))
+        descriptor (:seon.dev.config/launch-descriptor target)]
+    (is (= "/operator-state/data/clusters/experiment/db"
+           (get-in descriptor
+                   [::launch/database :seon.db.protocol/database-path])))
+    (is (= "/operator-state/tmp/seon-clusters/experiment"
+           (get-in descriptor [::launch/process ::launch/process-dir])))
+    (is (= "/operator-state/logs/clusters/experiment"
+           (get-in descriptor [::launch/process ::launch/log-dir])))))
 
 (deftest package-skeleton-is-generated-and-reset-from-the-cluster-coordinate
   (let [root (fs/create-temp-dir {:prefix "seon-cluster-packages-"})

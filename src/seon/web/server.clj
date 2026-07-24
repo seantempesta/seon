@@ -5,6 +5,7 @@
             [clojure.string :as str]
             [org.httpkit.server :as http-kit]
             [seon.config.resolve :as config.resolve]
+            [seon.content-hash :as content-hash]
             [seon.db :as db]
             [seon.db.host :as db.host]
             [seon.db.protocol :as protocol]
@@ -45,6 +46,10 @@
   "Project and validate web-render dials from the config singleton."
   [singleton]
   (let [facts (config.resolve/web-render-configuration singleton)
+        reactive-policy
+        (merge config.resolve/default-reactive-policy
+               (select-keys singleton
+                            (keys config.resolve/default-reactive-policy)))
         selected
         (into {}
               (map (fn [[runtime-key attribute]]
@@ -57,10 +62,30 @@
        "The database configuration is missing required web-render dials."
        :seon.error/kind :configuration
        :seon.error/data {::missing-keys missing}}
-      selected)))
+      (assoc selected ::reactive-policy reactive-policy))))
+
+(defn- short-digest [digest]
+  (if (and (string? digest) (<= 8 (count digest)))
+    (subs digest 0 8)
+    (pr-str digest)))
+
+(defn- base-initialization-fingerprint!
+  [path expected-digest]
+  (let [text (slurp path)
+        actual-digest (content-hash/sha-256 text)
+        artifact (edn/read-string text)]
+    (when-not (= expected-digest actual-digest)
+      (throw
+       (ex-info "The admitted base-projection artifact digest changed."
+                {:seon.dev.artifact/base-projection-path path
+                 :seon.dev.artifact/expected-digest expected-digest
+                 :seon.dev.artifact/actual-digest actual-digest})))
+    (:seon.db.initialization/fingerprint artifact)))
 
 (defn- bootstrap-configuration!
-  [writer-socket-path database-name]
+  [{::keys [writer-socket-path database-name]
+    :seon.startgate/keys [release-digest config-manifest-digest
+                          base-projection-path base-projection-digest]}]
   (let [session (uds/open-session! writer-socket-path)]
     (try
       (let [acquired
@@ -81,9 +106,58 @@
                   :seon.db/db (:seon.db/db acquired)
                   ::protocol/selector '[*]
                   ::protocol/entity-id
-                  config.resolve/cluster-config-lookup-ref})}))]
+                  config.resolve/cluster-config-lookup-ref})}))
+            identity
+            (when (::protocol/success? acquired)
+              (uds/call!
+               {::uds/session session
+                ::uds/message
+                (protocol/pull-request
+                 {::protocol/request-id (str (random-uuid))
+                  :seon.db/db (:seon.db/db acquired)
+                  ::protocol/selector '[*]
+                  ::protocol/entity-id
+                  [:seon.db.initialization/id "database"]})}))
+            actual
+            (when (and identity (::protocol/success? identity))
+              (select-keys
+               (db/decode-edn-values (::protocol/result identity))
+               [:seon.db.initialization/fingerprint
+                :seon.db.initialization/status
+                :seon.db.initialization/release-digest
+                :seon.db.initialization/config-manifest-digest]))
+            expected
+            {:seon.db.initialization/fingerprint
+             (base-initialization-fingerprint!
+              base-projection-path base-projection-digest)
+             :seon.db.initialization/release-digest release-digest
+             :seon.db.initialization/config-manifest-digest
+             config-manifest-digest}]
+        (when-not
+         (and (= :seon.db.initialization.status/complete
+                 (:seon.db.initialization/status actual))
+              (= expected (select-keys actual (keys expected))))
+          (throw
+           (ex-info
+            (str "this cluster was applied at release "
+                 (short-digest
+                  (:seon.db.initialization/release-digest actual))
+                 "/config "
+                 (short-digest
+                  (:seon.db.initialization/config-manifest-digest actual))
+                 "; this artifact is "
+                 (short-digest release-digest)
+                 "/config "
+                 (short-digest config-manifest-digest)
+                 "; run `bin/seon cluster apply " database-name "`.")
+            {:seon.startgate/cluster database-name
+             :seon.startgate/applied-identity actual
+             :seon.startgate/launch-identity expected
+             :seon.startgate/remedy
+             (str "bin/seon cluster apply " database-name)})))
         (if (and pulled (::protocol/success? pulled))
-          (configuration (db/decode-edn-values (::protocol/result pulled)))
+          (configuration
+           (db/decode-edn-values (::protocol/result pulled)))
           {:seon.error/message
            "The web-render process could not acquire database configuration."
            :seon.error/kind :configuration
@@ -99,9 +173,21 @@
              "Cache-Control" "no-store, no-cache, must-revalidate"}
    :body body})
 
+(defn- runtime-root []
+  (some-> (System/getenv "SEON_RUNTIME_ROOT") str/trim not-empty))
+
+(defn- resource-source
+  "Resolve one shipped resource from the immutable runtime before classpath."
+  [path]
+  (or
+   (when-let [root (runtime-root)]
+     (let [file (io/file root "resources" path)]
+       (when (.isFile file) file)))
+   (io/resource path)))
+
 (defn- resource-response
   [path content-type]
-  (if-let [resource (io/resource path)]
+  (if-let [resource (resource-source path)]
     (response 200 content-type (io/input-stream resource))
     (response 404 "text/plain; charset=utf-8" "not found")))
 
@@ -170,10 +256,10 @@
 (defn start!
   "Start the additive JVM database browser and return its owned resources."
   [{::keys [writer-socket-path database-name port-file port configuration]
-    :as _request}]
+    :as request}]
   (let [configuration
         (or configuration
-            (bootstrap-configuration! writer-socket-path database-name))]
+            (bootstrap-configuration! request))]
     (when (:seon.error/message configuration)
       (throw (ex-info (:seon.error/message configuration)
                       (:seon.error/data configuration))))
@@ -207,6 +293,7 @@
                    ::feed/mailbox-depth (::mailbox-depth configuration)
                    ::feed/maximum-connections
                    (::maximum-connections configuration)
+                   ::feed/reactive-policy (::reactive-policy configuration)
                    ::feed/compression :identity}}))
               _ (swap! started assoc ::leaf leaf ::feed-service feed-service)
               request-executor

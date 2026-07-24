@@ -36,7 +36,8 @@
    `seon.schema/register!` admits for real through the one bridge, and
    the registry diff around each form tees the canonical `:seon.schema`
    row."
-  (:require [clojure.java.io :as io]
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.tools.reader :as tools.reader]
             [my.blob :as blob]
@@ -167,6 +168,7 @@
 (schema/register! ::excluded [:int {:min 0}])
 (schema/register! ::source-path :string)
 (schema/register! ::namespace :symbol)
+(schema/register! ::base-load-plan :map)
 (schema/register! ::status [:enum :loaded :failed :excluded])
 (schema/register! ::reason [:string {:min 1}])
 (schema/register!
@@ -252,6 +254,115 @@
   "Resolve the host writer's current immutable database value."
   [writer]
   (db.host/resolve-db! writer nil false))
+
+(declare bound-database-functions)
+
+(defn load-base-projection!
+  "Load and verify one manifest-bound EDN-only projection artifact."
+  [path expected-digest]
+  (let [text (slurp path)
+        actual-digest (content-hash/sha-256 text)
+        artifact (edn/read-string text)
+        projection (:seon.dev.artifact/base-projection artifact)
+        recomposed (schema/compose-projection-data projection {})]
+    (when-not (= expected-digest actual-digest)
+      (throw
+       (ex-info "The admitted base-projection artifact digest changed."
+                {:seon.dev.artifact/base-projection-path path
+                 :seon.dev.artifact/expected-digest expected-digest
+                 :seon.dev.artifact/actual-digest actual-digest})))
+    (when-not
+     (= (:seon.schema.projection/fingerprint projection)
+        (:seon.schema.projection/fingerprint recomposed))
+      (throw
+       (ex-info "The base-projection population fingerprint changed."
+                {:seon.dev.artifact/base-projection-path path
+                 :seon.dev.artifact/stored-fingerprint
+                 (:seon.schema.projection/fingerprint projection)
+                 :seon.dev.artifact/recomputed-fingerprint
+                 (:seon.schema.projection/fingerprint recomposed)})))
+    artifact))
+
+(defn verify-applied-identity!
+  "Verify the cluster's three applied-identity facts at one database value."
+  [writer database cluster expected]
+  (let [entity-fn (get (bound-database-functions writer) 'entity)
+        actual
+        (select-keys
+         (entity-fn database [:seon.db.initialization/id "database"])
+         [:seon.db.initialization/fingerprint
+          :seon.db.initialization/status
+          :seon.db.initialization/release-digest
+          :seon.db.initialization/config-manifest-digest])
+        matched?
+        (and (= :seon.db.initialization.status/complete
+                (:seon.db.initialization/status actual))
+             (= expected (select-keys actual (keys expected))))
+        short-digest
+        (fn [digest]
+          (if (and (string? digest) (<= 8 (count digest)))
+            (subs digest 0 8)
+            (pr-str digest)))]
+    (when-not matched?
+      (throw
+       (ex-info
+        (str "this cluster was applied at release "
+             (short-digest
+              (:seon.db.initialization/release-digest actual))
+             "/config "
+             (short-digest
+              (:seon.db.initialization/config-manifest-digest actual))
+             "; this artifact is "
+             (short-digest
+              (:seon.db.initialization/release-digest expected))
+             "/config "
+             (short-digest
+              (:seon.db.initialization/config-manifest-digest expected))
+             "; run `bin/seon cluster apply " cluster "`.")
+        {:seon.startgate/cluster cluster
+         :seon.startgate/applied-identity actual
+         :seon.startgate/launch-identity expected
+         :seon.startgate/remedy (str "bin/seon cluster apply " cluster)})))
+    actual))
+
+(defn acquire-preprocessed-projection!
+  "Read, verify, compose, and rematerialize the cluster projection cache."
+  [writer database base artifact-exports]
+  (let [entity-fn (get (bound-database-functions writer) 'entity)
+        cache
+        (entity-fn
+         database
+         [:seon.runtime.admission.cache/id "committed-projection"])
+        delta-string (:seon.runtime.admission.cache/delta cache)
+        delta (when (string? delta-string)
+                (edn/read-string delta-string))
+        composed (when (map? delta)
+                   (schema/compose-projection-data base delta))
+        current?
+        (and
+         (= (:seon.schema.projection/fingerprint base)
+            (:seon.runtime.admission.cache/base-fingerprint cache))
+         (= (:t database)
+            (:seon.runtime.admission.cache/basis-t cache))
+         (= (schema/canonical-data-fingerprint delta)
+            (:seon.runtime.admission.cache/divergence-fingerprint cache))
+         (= (:seon.schema.projection/fingerprint composed)
+            (:seon.runtime.admission.cache/composed-fingerprint cache)))]
+    (when-not current?
+      (throw
+       (ex-info
+        "The divergence projection cache is not current at the database basis."
+        {:seon.runtime.admission.cache/base-fingerprint
+         (:seon.runtime.admission.cache/base-fingerprint cache)
+         :seon.runtime.admission.cache/basis-t
+         (:seon.runtime.admission.cache/basis-t cache)
+         :seon.db/basis-t (:t database)})))
+    {::database database
+     ::projection
+     (schema/materialize-projection
+      (schema/compose-projection-data
+       composed
+       {:seon.schema.projection/artifact-exports artifact-exports}))}))
 
 (defn- database-context
   [writer]
@@ -929,14 +1040,14 @@
   (into []
         (comp (filter definition-form?)
               (map (fn [form]
-                     (let [source (or (:source (meta form)) (pr-str form))]
+                     (let [source (or (:source (meta form)) (pr-str form))
+                           host-form (host-form source ns-sym aliases)]
                        {::block-name (str (second form))
                         ::source source
                         ;; The recorded source retains reader conditionals.
                         ;; Re-read it for `:clj`, preserving the namespace's
                         ;; alias table so `::db/db` cannot drift into `user`.
-                        ::host-source (some-> (host-form source ns-sym aliases)
-                                              pr-str)}))))
+                        ::host-source (some-> host-form pr-str)}))))
         (record/read-forms {::record/source source
                             ::record/ns-sym ns-sym
                             ::record/aliases aliases})))
@@ -1006,6 +1117,16 @@
                            (apply dissoc remaining ready))
                      (into ordered ready)))))))))
 
+(defn base-load-plan
+  "Return the artifact-derived ordered toolkit forms rematerialized by SCI."
+  {:malli/schema [:=> [:cat] ::base-load-plan]}
+  []
+  (let [units (mapv source-unit (toolkit-source-files))
+        {::keys [ordered cycle]} (dependency-order units)]
+    {::units units
+     ::ordered ordered
+     ::cycle cycle}))
+
 (defn- require-spec
   [{:seon.ns.require/keys [target alias refers refer-all? as-alias?]}]
   (cond-> [target]
@@ -1060,15 +1181,27 @@
     reason (assoc ::reason reason)
     unresolved-symbol (assoc ::unresolved-symbol unresolved-symbol)))
 
+(defn- eval-block!
+  [ctx namespace {::keys [host-form host-source]}]
+  (if host-form
+    (let [sci-namespace
+          (sci/eval-string* ctx (str "(or (find-ns '" namespace
+                                     ") (create-ns '" namespace "))"))]
+      (sci/with-bindings {sci/ns sci-namespace}
+        (sci/eval-form ctx host-form)))
+    (sci/eval-string*
+     ctx (str "(in-ns '" namespace ")\n" host-source))))
+
 (defn load-portable-slice!
   "Eval every pure `my.*` defn block from its real source into `ctx`.
 
    Returns the honest ledger: block counts plus each failure's first error
    line. Failures are references to impure private helpers the pure slice
    does not carry, recorded — never silently skipped."
-  [ctx registry]
-  (let [units (mapv source-unit (toolkit-source-files))
-        {::keys [ordered cycle]} (dependency-order units)
+  ([ctx registry]
+   (load-portable-slice! ctx registry (base-load-plan)))
+  ([ctx registry {::keys [units ordered cycle]}]
+  (let [
         candidate-libs (set (map ::namespace units))
         available-libs (into candidate-libs (keys @registry))
         loaded-rows
@@ -1096,8 +1229,7 @@
                            (map #(block-row unit % :failed ns-error nil) portable)
                            (map (fn [{::keys [host-source] :as block}]
                                   (try
-                                    (sci/eval-string*
-                                     ctx (str "(in-ns '" namespace ")\n" host-source))
+                                    (eval-block! ctx namespace block)
                                     (block-row unit block :loaded nil nil)
                                     (catch Throwable throwable
                                       (block-row
@@ -1156,7 +1288,7 @@
      ::failed (count failures)
      ::excluded (count (filter #(= :excluded (::status %)) rows))
      ::blocks rows
-     ::failures failures}))
+     ::failures failures})))
 
 (def ^:private host-toolkit-bindings
   {'my.plan
@@ -1177,14 +1309,12 @@
    `await` is identity at this tier. Definitions load from the same alias-aware
    source units as the portable base. A small fixed-point pass honors forward
    declarations without inventing a second implementation."
-  [ctx registry delegates]
+  [ctx registry delegates {::keys [ordered]}]
   (doseq [namespace host-toolkit-implementation-namespaces]
     (sci/eval-string* ctx
                       (str "(in-ns '" namespace ")\n"
                            "(def await identity)")))
-  (let [units (mapv source-unit (toolkit-source-files))
-        ordered (::ordered (dependency-order units))
-        candidates
+  (let [candidates
         (into []
               (comp
                (filter #(contains? host-toolkit-implementation-namespaces
@@ -1206,10 +1336,7 @@
                         (keep
                          (fn [[unit block :as candidate]]
                            (try
-                             (sci/eval-string*
-                              ctx
-                              (str "(in-ns '" (::namespace unit) ")\n"
-                                   (::host-source block)))
+                             (eval-block! ctx (::namespace unit) block)
                              nil
                              (catch Throwable _ candidate))))
                         pending)]
@@ -1256,8 +1383,13 @@
    lazily in the base and every fork. The portable `my.*` pure slice
    loads from its real sources (its requires exercise that lazy path).
    The returned report is the honest real-vs-failed load ledger."
-  {:malli/schema [:=> [:cat ::writer] ::base]}
-  [writer]
+  {:malli/schema
+   [:function
+    [:=> [:cat ::writer] ::base]
+    [:=> [:cat ::writer ::base-load-plan] ::base]]}
+  ([writer]
+   (build-base! writer (base-load-plan)))
+  ([writer load-plan]
   (let [wrapper-registry (registry)
         toolkit-delegates (atom {})
         tier-inventory
@@ -1274,14 +1406,14 @@
               (fn []
                 (when-let [holder (::guard/holder (sci.ctx-store/get-ctx))]
                   ((::guard/check! holder))))})
-        report (load-portable-slice! ctx wrapper-registry)
+        report (load-portable-slice! ctx wrapper-registry load-plan)
         _ (load-host-toolkit-bindings! ctx wrapper-registry
-                                       toolkit-delegates)
+                                       toolkit-delegates load-plan)
         _ (stamp-shared-base-vars! ctx)]
     {::ctx ctx
      ::report report
      ::registry wrapper-registry
-     ::tier-inventory tier-inventory}))
+     ::tier-inventory tier-inventory})))
 
 (defn fork-context
   "Fork one private agent context from the shared base."

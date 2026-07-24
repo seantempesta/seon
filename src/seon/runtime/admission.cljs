@@ -6,6 +6,7 @@
    committed generation. Closing admission hides process-local wrapper and
    projection surgery from agent, schedule, and web execution boundaries."
   (:require
+    [cljs.reader :as reader]
     [seon.db :as db]
     [seon.error :as error]
     [seon.instrument :as instrument]
@@ -25,13 +26,21 @@
 (schema/register! ::record-failures? :boolean)
 (schema/register! ::instrument? :boolean)
 (schema/register! ::reusable-projection :map)
+(schema/register! ::base-projection :map)
+(schema/register! ::artifact-exports [:set :symbol])
 (schema/register! ::prepare-request
                   [:map {:closed true}
                    [::record-failures? {:optional true} ::record-failures?]
                    [::instrument? {:optional true} ::instrument?]
                    [::reusable-projection
                     {:optional true}
-                    ::reusable-projection]])
+                    ::reusable-projection]
+                   [::base-projection
+                    {:optional true}
+                    ::base-projection]
+                   [::artifact-exports
+                    {:optional true}
+                    ::artifact-exports]])
 (schema/register! ::state
   [:map
    [::status ::status]
@@ -41,6 +50,12 @@
 
 (defonce ^:private !state
   (atom {::status :starting}))
+
+(defonce ^:private !base-projection
+  ;; Installed only by a start request that already passed release/database
+  ;; identity verification. Later hot publications reuse the same immutable
+  ;; release base and read only the database-homed divergence overlay.
+  (atom nil))
 
 (defn state
   "Immutable process admission state.
@@ -199,6 +214,28 @@
 (def ^:private acquisition-page-size 32)
 (def ^:private acquisition-page-max-result-weight 60000)
 
+(schema/register!
+ :seon.runtime.admission.cache/id
+ [:string {:seon.db/identity true}])
+(schema/register!
+ :seon.runtime.admission.cache/base-fingerprint
+ [:int {:seon.db/no-history? true}])
+(schema/register!
+ :seon.runtime.admission.cache/divergence-fingerprint
+ [:int {:seon.db/no-history? true}])
+(schema/register!
+ :seon.runtime.admission.cache/composed-fingerprint
+ [:int {:seon.db/no-history? true}])
+(schema/register!
+ :seon.runtime.admission.cache/basis-t
+ [:int {:seon.db/no-history? true}])
+(schema/register!
+ :seon.runtime.admission.cache/delta
+ [:string {:seon.db/no-history? true}])
+
+(def divergence-cache-ref
+  [:seon.runtime.admission.cache/id "committed-projection"])
+
 (def ^:private committed-row-query
   '[:find ?identity ?form (pull ?tx ?provenance-pattern)
     :in $ [?e ...] ?identity-attr ?form-attr ?provenance-pattern
@@ -318,28 +355,80 @@
      ::function-contract-rows contracts
      ::function-source-rows sources}))
 
+(defn divergence-cache-row
+  "Return the one no-history cache row for a composed projection delta."
+  {:malli/schema [:=> [:cat :map :map :int] :map]}
+  [base delta basis-t]
+  (let [base-fingerprint
+        (:seon.schema.projection/fingerprint base)
+        composed (schema/compose-projection-data base delta)]
+    {:seon.runtime.admission.cache/id "committed-projection"
+     :seon.runtime.admission.cache/base-fingerprint base-fingerprint
+     :seon.runtime.admission.cache/divergence-fingerprint
+     (schema/canonical-data-fingerprint delta)
+     :seon.runtime.admission.cache/composed-fingerprint
+     (:seon.schema.projection/fingerprint composed)
+     :seon.runtime.admission.cache/basis-t basis-t
+     :seon.runtime.admission.cache/delta (pr-str delta)}))
+
+(defn- verified-cache-composition
+  [base cache database]
+  (let [delta-string (:seon.runtime.admission.cache/delta cache)
+        delta (when (string? delta-string)
+                (reader/read-string delta-string))
+        composed (when (map? delta)
+                   (schema/compose-projection-data base delta))]
+    (when (and
+           (= (:seon.schema.projection/fingerprint base)
+              (:seon.runtime.admission.cache/base-fingerprint cache))
+           (= (:t database)
+              (:seon.runtime.admission.cache/basis-t cache))
+           (= (schema/canonical-data-fingerprint delta)
+              (:seon.runtime.admission.cache/divergence-fingerprint cache))
+           (= (:seon.schema.projection/fingerprint composed)
+              (:seon.runtime.admission.cache/composed-fingerprint cache)))
+      composed)))
+
+(defn- ^:async acquire-preprocessed-projection!
+  "Verify all three cache keys and rematerialize one admitted projection."
+  [base artifact-exports]
+  (let [database (await (db/db))
+        _ (when (failed-read? database)
+            (acquisition-error! :database database))
+        cache (await (db/entity database divergence-cache-ref))
+        _ (when (failed-read? cache)
+            (acquisition-error! :divergence-cache cache))
+        composed (verified-cache-composition base cache database)
+        _ (when-not composed
+            (throw
+             (ex-info
+              (str "The committed projection divergence cache does not match "
+                   "the verified release and database basis. START refuses "
+                   "population derivation; refresh the cache while applying "
+                   "the committed change.")
+              {:seon.runtime.admission/base-fingerprint
+               (:seon.schema.projection/fingerprint base)
+               :seon.runtime.admission/database-basis (:t database)
+               :seon.runtime.admission/cache cache})))
+        process-projection
+        (schema/compose-projection-data
+         composed
+         {:seon.schema.projection/artifact-exports artifact-exports})]
+    {::db/db database
+     ::projection (schema/materialize-projection process-projection)}))
+
 (defn- ^:async reconcile-committed!
-  [old-projection instrument? reusable-projection]
-  (let [_ (log/info-console!
-           "seon.runtime.admission"
-           "committed projection acquisition started")
-        acquired (await (acquire-committed-projection!))
-        _ (log/info-console!
-           "seon.runtime.admission"
-           "committed projection construction started"
-           {:seon.runtime.admission/schema-row-count
-            (count (::schema-rows acquired))
-            :seon.runtime.admission/function-contract-row-count
-            (count (::function-contract-rows acquired))})
-        projection
-        (committed-projection
-         (assoc acquired
-                ::artifact-exports
-                (or (:seon.schema.projection/artifact-exports
-                     reusable-projection)
-                    (:seon.schema.projection/artifact-exports old-projection)
-                    #{}))
-         reusable-projection)
+  [old-projection instrument? reusable-projection base-projection
+   artifact-exports]
+  (let [acquired
+        (await
+         (acquire-preprocessed-projection!
+          base-projection
+          (or artifact-exports
+              (:seon.schema.projection/artifact-exports reusable-projection)
+              (:seon.schema.projection/artifact-exports old-projection)
+              #{})))
+        projection (::projection acquired)
         _ (log/info-console!
            "seon.runtime.admission"
            "committed projection instrumentation started")
@@ -406,10 +495,18 @@
      [::generation {:optional true} ::generation]
      [::instrumentation {:optional true} :map]
      [:seon/error {:optional true} :map]]]}
-  [{::keys [record-failures? reusable-projection]
+  [{::keys [record-failures? reusable-projection base-projection
+             artifact-exports]
     :or {record-failures? true}
     :as request}]
-  (let [current @!state
+  (let [_ (when base-projection (reset! !base-projection base-projection))
+        base-projection (or base-projection @!base-projection)
+        _ (when-not base-projection
+            (throw
+             (ex-info
+              "No verified release base projection is installed."
+              {:seon.runtime.admission/stage :base-projection})))
+        current @!state
         instrument? (if (contains? request ::instrument?)
                       (::instrument? request)
                       (get current ::instrument? true))
@@ -424,7 +521,8 @@
           (let [{::keys [generation instrumentation]}
                 (await
                  (reconcile-committed!
-                  old-projection instrument? reusable-projection))]
+                  old-projection instrument? reusable-projection
+                  base-projection artifact-exports))]
             (if-not (retain-prepared-generation! generation)
               ;; Another settlement (a concurrent prepare or a newer
               ;; publication) closed this window first. Losing retention is
@@ -449,7 +547,8 @@
               (let [{::keys [generation instrumentation]}
                     (await
                      (reconcile-committed!
-                      old-projection instrument? reusable-projection))]
+                      old-projection instrument? reusable-projection
+                      base-projection artifact-exports))]
                 (if-not (retain-prepared-generation! generation)
                   (assoc (unavailable)
                          ::prepared? false

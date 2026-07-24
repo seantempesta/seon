@@ -14,7 +14,7 @@
            [java.time Instant]
            [java.util.jar JarFile]))
 
-(def current-version 12)
+(def current-version 13)
 
 (def bun-identity-schema
   [:map {:closed true}
@@ -51,6 +51,8 @@
    [:seon.dev.artifact/program-source-digest [:re #"[0-9a-f]{64}"]]
    [:seon.dev.artifact/program-row-path :string]
    [:seon.dev.artifact/program-row-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/base-projection-path :string]
+   [:seon.dev.artifact/base-projection-digest [:re #"[0-9a-f]{64}"]]
    [:seon.dev.artifact/page-plan-path :string]
    [:seon.dev.artifact/page-plan-digest [:re #"[0-9a-f]{64}"]]
    [:seon.dev.artifact/client-inventory-path :string]
@@ -110,7 +112,9 @@
           (.update digest buffer 0 n-read)
           (recur))))))
 
-(defn- file-digest [path]
+(defn file-digest
+  "Return the SHA-256 digest of one file's exact bytes."
+  [path]
   (let [digest (MessageDigest/getInstance "SHA-256")]
     (with-open [stream (io/input-stream (str path))]
       (update-stream! digest stream))
@@ -416,6 +420,21 @@
                       {:seon.dev.artifact/path path})))
     (file-digest path)))
 
+(defn base-projection-path
+  "Return the flavor-owned preprocessed projection beside the client output."
+  [config]
+  (str (fs/path (fs/parent (:seon.dev.config/client-output config))
+                "base-projection.edn")))
+
+(defn current-base-projection-digest
+  "Hash the exact flavor-owned preprocessed projection bytes."
+  [config]
+  (let [path (base-projection-path config)]
+    (when-not (fs/regular-file? path)
+      (throw (ex-info "The base-projection artifact is absent."
+                      {:seon.dev.artifact/path path})))
+    (file-digest path)))
+
 (defn page-plan-path
   "Return the flavor-owned page-plan file beside the client output."
   [config]
@@ -475,6 +494,7 @@
     (digest-paths root [(:seon.dev.config/client-output config)
                         (program-source-path config)
                         (program-row-path config)
+                        (base-projection-path config)
                         (page-plan-path config)
                         (program-inventory-path
                          (:seon.dev.config/client-output config))
@@ -536,6 +556,8 @@
    [:seon.dev.artifact/program-source-digest [:re #"[0-9a-f]{64}"]]
    [:seon.dev.artifact/program-row-path :string]
    [:seon.dev.artifact/program-row-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/base-projection-path :string]
+   [:seon.dev.artifact/base-projection-digest [:re #"[0-9a-f]{64}"]]
    [:seon.dev.artifact/page-plan-path :string]
    [:seon.dev.artifact/page-plan-digest [:re #"[0-9a-f]{64}"]]
    [:seon.dev.artifact/client-inventory-path :string]
@@ -551,13 +573,15 @@
    [:seon.dev.artifact/application-digest [:re #"[0-9a-f]{64}"]]])
 
 (defn- derive-application-digest
-  [config bun maintained-dependencies writer-digest client-digest
-   program-source-path program-source-digest
-   program-row-path program-row-digest
-   page-plan-path page-plan-digest
-   client-inventory-path client-inventory-digest
-   execution-digest execution-inventory-path execution-inventory-digest
-   execution-runtime-digest bootstrap-digest css-digest]
+  [{:keys [config bun maintained-dependencies writer-digest client-digest
+           program-source-path program-source-digest
+           program-row-path program-row-digest
+           base-projection-path base-projection-digest
+           page-plan-path page-plan-digest
+           client-inventory-path client-inventory-digest
+           execution-digest execution-inventory-path
+           execution-inventory-digest execution-runtime-digest
+           bootstrap-digest css-digest]}]
   (digest-values ["flavor" (:seon.dev.config/artifact-flavor config)
                   "bun-executable" (:seon.dev.artifact/bun-executable bun)
                   "bun-executable-digest"
@@ -574,6 +598,8 @@
                   "program-source" program-source-digest
                   "program-row-path" program-row-path
                   "program-row" program-row-digest
+                  "base-projection-path" base-projection-path
+                  "base-projection" base-projection-digest
                   "page-plan-path" page-plan-path
                   "page-plan" page-plan-digest
                   "client-inventory-path" client-inventory-path
@@ -604,6 +630,11 @@
         program-row-path
         (str (fs/relativize (fs/path root) (fs/path (program-row-path config))))
         program-row-digest (current-program-row-digest config)
+        base-projection-path
+        (str (fs/relativize
+              (fs/path root)
+              (fs/path (base-projection-path config))))
+        base-projection-digest (current-base-projection-digest config)
         page-plan-path
         (str (fs/relativize (fs/path root) (fs/path (page-plan-path config))))
         page-plan-digest (current-page-plan-digest config)
@@ -628,13 +659,27 @@
         css-digest (digest-paths root ["resources/public/css/output.css"])
         application-digest
         (derive-application-digest
-         config bun maintained-dependencies writer-digest client-digest
-         program-source-path program-source-digest
-         program-row-path program-row-digest
-         page-plan-path page-plan-digest
-         client-inventory-path client-inventory-digest
-         execution-digest execution-inventory-path execution-inventory-digest
-         execution-runtime-digest bootstrap-digest css-digest)]
+         {:config config
+          :bun bun
+          :maintained-dependencies maintained-dependencies
+          :writer-digest writer-digest
+          :client-digest client-digest
+          :program-source-path program-source-path
+          :program-source-digest program-source-digest
+          :program-row-path program-row-path
+          :program-row-digest program-row-digest
+          :base-projection-path base-projection-path
+          :base-projection-digest base-projection-digest
+          :page-plan-path page-plan-path
+          :page-plan-digest page-plan-digest
+          :client-inventory-path client-inventory-path
+          :client-inventory-digest client-inventory-digest
+          :execution-digest execution-digest
+          :execution-inventory-path execution-inventory-path
+          :execution-inventory-digest execution-inventory-digest
+          :execution-runtime-digest execution-runtime-digest
+          :bootstrap-digest bootstrap-digest
+          :css-digest css-digest})]
     (merge bun
      {:seon.dev.artifact/writer-digest writer-digest
      :seon.dev.artifact/client-digest client-digest
@@ -642,6 +687,8 @@
      :seon.dev.artifact/program-source-digest program-source-digest
      :seon.dev.artifact/program-row-path program-row-path
      :seon.dev.artifact/program-row-digest program-row-digest
+     :seon.dev.artifact/base-projection-path base-projection-path
+     :seon.dev.artifact/base-projection-digest base-projection-digest
      :seon.dev.artifact/page-plan-path page-plan-path
      :seon.dev.artifact/page-plan-digest page-plan-digest
      :seon.dev.artifact/client-inventory-path client-inventory-path
@@ -729,6 +776,7 @@
    [:seon.dev.artifact/release-execution-output :string]
    [:seon.dev.artifact/release-program-source-output :string]
    [:seon.dev.artifact/release-program-row-output :string]
+   [:seon.dev.artifact/release-base-projection-output :string]
    [:seon.dev.artifact/release-page-plan-output :string]
    [:seon.dev.artifact/release-client-inventory-output :string]
    [:seon.dev.artifact/release-execution-inventory-output :string]])
@@ -742,7 +790,8 @@
              ["-Sdeps" (pr-str {:deps {'seon.extra/src
                                         {:local/root source}}})])
            ["-M:cljs" "release" build-id "--force-spawn"
-            "--config-merge" (pr-str config-merge)]))))
+            "--config-merge"
+            (binding [*print-meta* true] (pr-str config-merge))]))))
 
 (defn- release-relative-path! [root field path]
   (let [relative (str (fs/relativize root
@@ -788,6 +837,8 @@
         (:seon.dev.artifact/release-program-source-output release)
         program-row-output
         (:seon.dev.artifact/release-program-row-output release)
+        base-projection-output
+        (:seon.dev.artifact/release-base-projection-output release)
         page-plan-output
         (:seon.dev.artifact/release-page-plan-output release)
         client-inventory-output
@@ -801,6 +852,8 @@
                     execution-output]
                    [:seon.dev.artifact/release-program-row-output
                     program-row-output]
+                   [:seon.dev.artifact/release-base-projection-output
+                    base-projection-output]
                    [:seon.dev.artifact/release-page-plan-output
                     page-plan-output]
                    [:seon.dev.artifact/release-client-inventory-output
@@ -816,6 +869,10 @@
         (release-relative-path!
          root :seon.dev.artifact/release-program-row-output
          program-row-output)
+        base-projection-relative
+        (release-relative-path!
+         root :seon.dev.artifact/release-base-projection-output
+         base-projection-output)
         page-plan-relative
         (release-relative-path!
          root :seon.dev.artifact/release-page-plan-output
@@ -832,7 +889,7 @@
         (update config :seon.dev.config/environment
                 assoc "SHADOW_CLJS" (pr-str {:cache-root cache-root}))]
     (doseq [path [client-output execution-output program-source-output
-                  program-row-output page-plan-output
+                  program-row-output base-projection-output page-plan-output
                   client-inventory-output execution-inventory-output]]
       (fs/create-dirs (fs/parent path)))
     (run-step!
@@ -844,15 +901,20 @@
        {:output-to client-output
         :compiler-options {:parallel-build false}
         :build-hooks
-        [['seon.dev.program-artifact/prepare-program-rows!
-          program-source-relative program-row-relative page-plan-relative]
-         ['seon.dev.program-artifact/publish! program-source-relative]
-         ['seon.dev.program-artifact/publish-rows!
-          program-source-relative program-row-relative]
-         ['seon.dev.program-artifact/publish-page-plan!
-          program-row-relative page-plan-relative]
-         ['seon.dev.program-artifact/publish-inventory!
-          client-inventory-relative]]
+        (with-meta
+          [['seon.dev.program-artifact/prepare-program-rows!
+            program-source-relative program-row-relative
+            base-projection-relative page-plan-relative]
+           ['seon.dev.program-artifact/publish! program-source-relative]
+           ['seon.dev.program-artifact/publish-rows!
+            program-source-relative program-row-relative]
+           ['seon.dev.program-artifact/publish-base-projection!
+            program-row-relative base-projection-relative]
+           ['seon.dev.program-artifact/publish-page-plan!
+            program-row-relative page-plan-relative]
+           ['seon.dev.program-artifact/publish-inventory!
+            client-inventory-relative]]
+          {:replace true})
         :devtools {:enabled false :preloads [] :build-notify nil}}
         (not (str/blank?
               (get-in release-config
@@ -1067,6 +1129,10 @@
   (fs/path runtime-root
            (runtime-relative-path config (program-row-path config))))
 
+(defn- runtime-base-projection [config runtime-root]
+  (fs/path runtime-root
+           (runtime-relative-path config (base-projection-path config))))
+
 (defn- runtime-page-plan [config runtime-root]
   (fs/path runtime-root
            (runtime-relative-path config (page-plan-path config))))
@@ -1088,7 +1154,7 @@
 (defn- verify-runtime-root!
   [config runtime-root bootstrap-digest execution-digest
    execution-runtime-digest program-source-digest program-row-digest
-   page-plan-digest
+   base-projection-digest page-plan-digest
    client-inventory-digest execution-inventory-digest]
   (let [actual-bootstrap (digest-paths runtime-root ["out/bootstrap"])
         execution-output (runtime-execution-output config runtime-root)
@@ -1107,6 +1173,10 @@
         actual-program-row
         (when (fs/regular-file? program-row)
           (file-digest program-row))
+        base-projection (runtime-base-projection config runtime-root)
+        actual-base-projection
+        (when (fs/regular-file? base-projection)
+          (file-digest base-projection))
         page-plan (runtime-page-plan config runtime-root)
         actual-page-plan
         (when (fs/regular-file? page-plan)
@@ -1144,6 +1214,13 @@
                       {:seon.dev.artifact/runtime-root (str runtime-root)
                        :seon.dev.artifact/expected program-row-digest
                        :seon.dev.artifact/actual actual-program-row})))
+    (when-not (= base-projection-digest actual-base-projection)
+      (throw
+       (ex-info
+        "An immutable runtime root has an unexpected base projection."
+        {:seon.dev.artifact/runtime-root (str runtime-root)
+         :seon.dev.artifact/expected base-projection-digest
+         :seon.dev.artifact/actual actual-base-projection})))
     (when-not (= page-plan-digest actual-page-plan)
       (throw (ex-info "An immutable runtime root has an unexpected page plan."
                       {:seon.dev.artifact/runtime-root (str runtime-root)
@@ -1166,7 +1243,8 @@
 
 (defn- publish-runtime-root!
   [config bootstrap-digest execution-digest execution-runtime-digest
-   program-source-digest program-row-digest page-plan-digest
+   program-source-digest program-row-digest base-projection-digest
+   page-plan-digest
    client-inventory-digest
    execution-inventory-digest]
   (let [root (fs/path (:seon.dev.config/root config))
@@ -1174,6 +1252,7 @@
         identity (digest-values [bootstrap-digest execution-digest
                                  execution-runtime-digest
                                  program-source-digest program-row-digest
+                                 base-projection-digest
                                  page-plan-digest
                                  client-inventory-digest
                                  execution-inventory-digest])
@@ -1182,6 +1261,7 @@
       (verify-runtime-root! config runtime-root bootstrap-digest
                             execution-digest execution-runtime-digest
                             program-source-digest program-row-digest
+                            base-projection-digest
                             page-plan-digest
                             client-inventory-digest execution-inventory-digest)
       (let [temporary (fs/path parent (str "." identity "."
@@ -1207,6 +1287,10 @@
           (fs/copy (program-row-path config)
                    (runtime-program-row config temporary))
           (fs/create-dirs
+           (fs/parent (runtime-base-projection config temporary)))
+          (fs/copy (base-projection-path config)
+                   (runtime-base-projection config temporary))
+          (fs/create-dirs
            (fs/parent (runtime-page-plan config temporary)))
           (fs/copy (page-plan-path config)
                    (runtime-page-plan config temporary))
@@ -1230,6 +1314,7 @@
           (verify-runtime-root! config temporary bootstrap-digest
                                 execution-digest execution-runtime-digest
                                 program-source-digest program-row-digest
+                                base-projection-digest
                                 page-plan-digest
                                 client-inventory-digest
                                 execution-inventory-digest)
@@ -1248,6 +1333,7 @@
                   (:seon.dev.config/client-output config)
                   (program-source-path config)
                   (program-row-path config)
+                  (base-projection-path config)
                   (page-plan-path config)
                   (program-inventory-path
                    (:seon.dev.config/client-output config))
@@ -1269,6 +1355,9 @@
           program-row-relative-path
           (str (runtime-relative-path config (program-row-path config)))
           program-row-digest (current-program-row-digest config)
+          base-projection-relative-path
+          (str (runtime-relative-path config (base-projection-path config)))
+          base-projection-digest (current-base-projection-digest config)
           page-plan-relative-path
           (str (runtime-relative-path config (page-plan-path config)))
           page-plan-digest (current-page-plan-digest config)
@@ -1295,6 +1384,7 @@
           (publish-runtime-root! config bootstrap-digest execution-digest
                                  execution-runtime-digest
                                  program-source-digest program-row-digest
+                                 base-projection-digest
                                  page-plan-digest
                                  client-inventory-digest
                                  execution-inventory-digest)
@@ -1302,14 +1392,27 @@
           (str (runtime-execution-output config runtime-root))
           application-digest
           (derive-application-digest
-           config bun maintained-dependencies writer-digest client-digest
-           program-source-relative-path program-source-digest
-           program-row-relative-path program-row-digest
-           page-plan-relative-path page-plan-digest
-           client-inventory-path client-inventory-digest
-           execution-digest execution-inventory-path
-           execution-inventory-digest execution-runtime-digest
-           bootstrap-digest css-digest)]
+           {:config config
+            :bun bun
+            :maintained-dependencies maintained-dependencies
+            :writer-digest writer-digest
+            :client-digest client-digest
+            :program-source-path program-source-relative-path
+            :program-source-digest program-source-digest
+            :program-row-path program-row-relative-path
+            :program-row-digest program-row-digest
+            :base-projection-path base-projection-relative-path
+            :base-projection-digest base-projection-digest
+            :page-plan-path page-plan-relative-path
+            :page-plan-digest page-plan-digest
+            :client-inventory-path client-inventory-path
+            :client-inventory-digest client-inventory-digest
+            :execution-digest execution-digest
+            :execution-inventory-path execution-inventory-path
+            :execution-inventory-digest execution-inventory-digest
+            :execution-runtime-digest execution-runtime-digest
+            :bootstrap-digest bootstrap-digest
+            :css-digest css-digest})]
       (validate-manifest!
         (merge bun
         {:seon.dev.artifact/version current-version
@@ -1336,6 +1439,9 @@
          :seon.dev.artifact/program-source-digest program-source-digest
          :seon.dev.artifact/program-row-path program-row-relative-path
          :seon.dev.artifact/program-row-digest program-row-digest
+         :seon.dev.artifact/base-projection-path
+         base-projection-relative-path
+         :seon.dev.artifact/base-projection-digest base-projection-digest
          :seon.dev.artifact/page-plan-path page-plan-relative-path
          :seon.dev.artifact/page-plan-digest page-plan-digest
          :seon.dev.artifact/client-inventory-path client-inventory-path

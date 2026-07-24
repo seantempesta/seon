@@ -1588,6 +1588,45 @@
      :seon.db/initialization-pages
      (db.protocol/initialization-pages initialization)}))
 
+(defn build-base-projection
+  "Build the preprocessed all-core projection proof from exact program rows.
+
+   The returned value is ordinary EDN only. Runtime registries, validators, and
+   predicate function objects rematerialize in each admitted process."
+  {:malli/schema [:=> [:cat :seon.db/program] :map]}
+  [program]
+  (let [core-transaction
+        {:seon.db/user {:seon.agent/id "root"}
+         :seon.db/process
+         {:seon.db.process/id :seon.db.process/boot}}
+        schema-rows
+        (into []
+              (keep (fn [{:seon.schema/keys [key form]}]
+                      (when (and key form)
+                        [key form core-transaction])))
+              program)
+        contract-rows
+        (into []
+              (keep (fn [{:seon.fn/keys [sym spec]}]
+                      (when (and sym spec)
+                        [sym spec core-transaction])))
+              program)
+        source-rows
+        (into []
+              (keep (fn [{:seon.fn/keys [sym source]}]
+                      (when (and sym source)
+                        [sym source core-transaction])))
+              program)]
+    (schema/projection-pure-data
+     (schema/projection-from-rows
+      {:seon.schema/schema-rows schema-rows
+       :seon.schema/function-contract-rows contract-rows
+       :seon.schema/function-source-rows source-rows
+       ;; Artifact exports are a process-tier overlay. The release base proves
+       ;; the shared corpus independently of which claimant tier rematerializes
+       ;; it.
+       :seon.schema/artifact-exports #{}}))))
+
 (defn- sha-256
   [text]
   (-> (js/require "crypto")
@@ -1651,6 +1690,45 @@
                    (:seon.db.initialization/config-manifest-digest page-plan)
                    :seon.error/kind :core-bug})))
       (proof-page-plan-prefix page-plan))))
+
+(defn- load-base-projection
+  "Load and independently verify the preprocessed pure-data projection."
+  []
+  (let [path (seon.platform/env-val "SEON_BASE_PROJECTION_PATH")
+        expected (seon.platform/env-val "SEON_BASE_PROJECTION_DIGEST")]
+    (when-not (and (string? path)
+                   (re-matches #"[0-9a-f]{64}" (or expected "")))
+      (throw
+       (ex-info "The launch has no admitted base-projection artifact."
+                {:seon.dev.artifact/base-projection-path path
+                 :seon.dev.artifact/base-projection-digest expected
+                 :seon.error/kind :core-bug})))
+    (let [text (.readFileSync (js/require "fs") path "utf8")
+          actual (sha-256 text)
+          artifact (reader/read-string text)
+          projection (:seon.dev.artifact/base-projection artifact)
+          recomposed (schema/compose-projection-data projection {})]
+      (when-not (= expected actual)
+        (throw
+         (ex-info "The admitted base-projection artifact digest changed."
+                  {:seon.dev.artifact/base-projection-path path
+                   :seon.dev.artifact/expected-digest expected
+                   :seon.dev.artifact/actual-digest actual
+                   :seon.error/kind :core-bug})))
+      (when-not
+       (= (:seon.schema.projection/fingerprint projection)
+          (:seon.schema.projection/fingerprint recomposed))
+        (throw
+         (ex-info "The base-projection population fingerprint changed."
+                  {:seon.dev.artifact/base-projection-path path
+                   :seon.dev.artifact/stored-fingerprint
+                   (:seon.schema.projection/fingerprint projection)
+                   :seon.dev.artifact/recomputed-fingerprint
+                   (:seon.schema.projection/fingerprint recomposed)
+                   :seon.error/kind :core-bug})))
+      {:seon.dev.artifact/base-projection projection
+       :seon.db.initialization/fingerprint
+       (:seon.db.initialization/fingerprint artifact)})))
 
 (schema/register! ::llm-fn        'fn?)
 (defn ^:async ^:private rehost-agent-runtimes!
@@ -1918,21 +1996,6 @@
                    {:seon.client/missing-restore-schema missing-schema
                     :seon.error/kind :core-bug}))))))
 
-(defn- ^:async open-startup-session!
-  "Open startup from selected desired config or retained database config."
-  [startup? selected-configuration]
-  (if (some? selected-configuration)
-    (open-database-session!
-     {::initialize? true
-      ::configuration selected-configuration})
-    (let [opened (await (open-database-session! {::initialize? false}))]
-      (if startup?
-        (let [retained-configuration (await (acquire-configuration!))]
-          (open-database-session!
-           {::initialize? true
-            ::configuration retained-configuration}))
-        opened))))
-
 (defn- selected-startup-configuration
   "Resolve one explicitly selected startup manifest exactly once."
   ([selected-manifest]
@@ -2013,9 +2076,77 @@
           (:seon.db.initialization/status actual))
        (= expected (select-keys actual (keys expected)))))
 
-(defn- ^:async stamp-applied-identity!
-  [expected]
+(defn- short-digest [digest]
+  (if (and (string? digest) (<= 8 (count digest)))
+    (subs digest 0 8)
+    (pr-str digest)))
+
+(defn- launch-artifact-exports []
+  (let [inventory
+        (some-> (seon.platform/env-val "SEON_ARTIFACT_INVENTORY")
+                reader/read-string)]
+    (into #{}
+          (comp (mapcat val) (map symbol))
+          (:seon.execution.inventory/exports-by-tier inventory))))
+
+(defn- launch-applied-identity
+  [descriptor base-artifact]
+  {:seon.db.initialization/fingerprint
+   (:seon.db.initialization/fingerprint base-artifact)
+   :seon.db.initialization/release-digest
+   (seon.platform/env-val "SEON_APPLICATION_DIGEST")
+   :seon.db.initialization/config-manifest-digest
+   (get-in descriptor [::launch/resolved-manifest ::launch/sha-256])})
+
+(defn- applied-identity-refusal
+  [descriptor expected actual]
+  (let [cluster (get-in descriptor
+                        [::launch/runtime ::launch/runtime-cluster])
+        message
+        (str "this cluster was applied at release "
+             (short-digest
+              (:seon.db.initialization/release-digest actual))
+             "/config "
+             (short-digest
+              (:seon.db.initialization/config-manifest-digest actual))
+             "; this artifact is "
+             (short-digest
+              (:seon.db.initialization/release-digest expected))
+             "/config "
+             (short-digest
+              (:seon.db.initialization/config-manifest-digest expected))
+             "; run `bin/seon cluster apply " cluster "`.")]
+    (ex-info message
+             {:seon.startgate/cluster cluster
+              :seon.startgate/applied-identity actual
+              :seon.startgate/launch-identity expected
+              :seon.startgate/remedy
+              (str "bin/seon cluster apply " cluster)
+              :seon.error/kind :configuration})))
+
+(defn- ^:async verify-applied-identity!
+  "Refuse startup unless cluster facts name this exact launch identity."
+  [descriptor expected]
   (let [actual (await (acquire-applied-identity!))]
+    (when (:seon.error/message actual)
+      (throw (ex-info "Applied identity acquisition failed." actual)))
+    (when-not (applied-identity? expected actual)
+      (throw (applied-identity-refusal descriptor expected actual)))
+    actual))
+
+(defn- ^:async stamp-applied-identity!
+  ([expected]
+   (stamp-applied-identity! expected nil))
+  ([expected base-projection]
+  (let [actual (await (acquire-applied-identity!))
+        database (await (db/db))
+        existing-cache
+        (when base-projection
+          (await (db/entity database admission/divergence-cache-ref)))
+        current-cache
+        (when base-projection
+          (admission/divergence-cache-row
+           base-projection {} (:t database)))]
     (when (:seon.error/message actual)
       (throw (ex-info "Applied identity acquisition failed." actual)))
     (when-not (and (= :seon.db.initialization.status/complete
@@ -2027,9 +2158,16 @@
                 {:seon.cluster.apply/expected expected
                  :seon.cluster.apply/actual actual
                  :seon.error/kind :core-bug})))
-    (if (applied-identity? expected actual)
+    (if (and
+         (applied-identity? expected actual)
+         (or (nil? base-projection)
+             (= current-cache
+                (select-keys existing-cache (keys current-cache)))))
       {:seon.cluster.apply/changed? false}
-      (let [database (await (db/db))
+      (let [cache
+            (when base-projection
+              (admission/divergence-cache-row
+               base-projection {} (inc (:t database))))
             report
             (await
              (db/with-tx-context
@@ -2041,13 +2179,15 @@
                  {::db/db database
                   ::db/expected-db database
                   ::db/tx-data
-                  [(assoc expected
-                          :seon.db.initialization/id "database")]}))))]
+                  (cond->
+                   [(assoc expected
+                           :seon.db.initialization/id "database")]
+                    cache (conj cache))}))))]
         (when (:seon.error/message report)
           (throw (ex-info "Applied identity transaction failed." report)))
         {:seon.cluster.apply/changed? true
          :seon.cluster.apply/transaction
-         (select-keys (:db-after report) [:t :datahike/commit-id])}))))
+         (select-keys (:db-after report) [:t :datahike/commit-id])})))))
 
 (defn ^:async ^:private cluster-apply!
   "Apply the admitted release and resolved manifest to this cluster."
@@ -2063,7 +2203,18 @@
     (let [manifest (config/load-resolved-manifest resolved-reference)
           configuration (selected-startup-configuration manifest envelope)
           page-plan (load-page-plan descriptor)
-          expected (page-plan-identity page-plan)]
+          expected (page-plan-identity page-plan)
+          base-artifact (load-base-projection)
+          base-projection (:seon.dev.artifact/base-projection base-artifact)
+          _ (when-not
+             (= (:seon.db.initialization/fingerprint expected)
+                (:seon.db.initialization/fingerprint base-artifact))
+              (throw
+               (ex-info
+                "The base projection and page plan name different populations."
+                {:seon.cluster.apply/page-plan-identity expected
+                 :seon.cluster.apply/base-initialization-fingerprint
+                 (:seon.db.initialization/fingerprint base-artifact)})))]
       (try
         (await
          (open-database-session!
@@ -2074,11 +2225,16 @@
           (when (:seon.error/message actual)
             (throw (ex-info "Applied identity acquisition failed." actual)))
           (if (applied-identity? expected actual)
-            {:seon.cluster.apply/ok? true
-             :seon.cluster.apply/changed? false
-             :seon.cluster.apply/identity expected
-             :seon.cluster.apply/database
-             (select-keys before [:db-name :t :datahike/commit-id])}
+            (let [stamped
+                  (await
+                   (stamp-applied-identity! expected base-projection))
+                  after (await (db/db))]
+              {:seon.cluster.apply/ok? true
+               :seon.cluster.apply/changed?
+               (:seon.cluster.apply/changed? stamped)
+               :seon.cluster.apply/identity expected
+               :seon.cluster.apply/database
+               (select-keys after [:db-name :t :datahike/commit-id])})
             (let [reconciled
                   (await (reconcile-config! manifest configuration))]
               (when (or (string? (:seon.error/message reconciled))
@@ -2100,7 +2256,9 @@
                         (throw
                          (ex-info "Cluster apply initial agent birth failed."
                                   initial-agent)))
-                    stamped (await (stamp-applied-identity! expected))
+                    stamped
+                    (await
+                     (stamp-applied-identity! expected base-projection))
                     after (await (db/db))]
                 {:seon.cluster.apply/ok? true
                  :seon.cluster.apply/changed?
@@ -2144,20 +2302,7 @@
         attached? (db/attached?)
         restore-startup
         (validate-restore-launch! descriptor capability)
-        startup? (and (not attached?) autonomous? (nil? restore-startup))
-        resolved-manifest-reference (::launch/resolved-manifest descriptor)
         envelope (::launch/operational-envelope descriptor)
-        selected-manifest
-        (when startup?
-          (if resolved-manifest-reference
-            (config/load-resolved-manifest resolved-manifest-reference)
-            (config/load-manifest)))
-        reconcile-manifest?
-        (if resolved-manifest-reference
-          (::launch/reconcile-manifest? resolved-manifest-reference)
-          (some? selected-manifest))
-        selected-configuration
-        (selected-startup-configuration selected-manifest envelope)
         restore-completion-claim
         (when restore-startup
           (db.restore/completion-from-launch
@@ -2193,37 +2338,18 @@
       (let [_ (log/info-console!
                "seon.client/start-runtime!"
                "boot phase: opening database session")
-            session-open
-            (await (open-startup-session! startup? selected-configuration))
-            boot-projection (-> session-open meta ::boot-projection)
+            base-artifact (load-base-projection)
+            base-projection (:seon.dev.artifact/base-projection base-artifact)
+            _ (await (open-database-session! {::initialize? false}))
+            expected-identity
+            (launch-applied-identity descriptor base-artifact)
+            _ (await (verify-applied-identity! descriptor expected-identity))
             _ (await
                (validate-restore-database!
                 descriptor restore-startup restore-completion-claim))]
         (log/info-console!
          "seon.client/start-runtime!"
          "boot phase: database session acquired")
-        (when reconcile-manifest?
-          (log/info-console!
-           "seon.client/start-runtime!"
-           "boot phase: config reconciliation started")
-          (let [reconciled
-                (await (reconcile-config! selected-manifest
-                                          selected-configuration))]
-            (when (or (string? (:seon.error/message reconciled))
-                      (false? (:seon.runtime.state/ok? reconciled)))
-              (throw
-               (ex-info "Startup config reconciliation failed."
-                        {:seon.error/kind :core-bug
-                         :seon.runtime.state/error
-                         (or (:seon.runtime.state/error reconciled)
-                             (:seon.error/message reconciled))})))
-            (log/info-console!
-             "seon.client/start-runtime!"
-             "boot phase: config reconciliation completed"
-             {:seon.runtime.state/changed?
-              (:seon.runtime.state/changed? reconciled)
-              :seon.runtime.state/operations
-              (:seon.runtime.state/operations reconciled)})))
         ;; Claim leases and persisted phase cursors own ordinary restart.
         ;; The conservative recovery operation remains an explicit repair
         ;; surface; cold boot must not close work held by another claimant.
@@ -2237,39 +2363,8 @@
               _ (when envelope
                   (await (prove-launch-configuration! envelope configuration)))
               _ (db/install-configuration-context! configuration)
-              _ (when (and autonomous? (nil? restore-startup))
-                  (log/info-console!
-                   "seon.client/start-runtime!"
-                   "boot phase: initial agent ensure started"))
-              initial-result
-              (when (and autonomous? (nil? restore-startup))
-                (await
-                 (db/with-tx-context
-                  {:seon.db/user [:seon.agent/id "root"]
-                   :seon.db/process
-                   (db.process/lookup-ref :seon.db.process/boot)}
-                  (fn [] (agent/ensure-initial-agent! {})))))
-              _ (when (and autonomous?
-                           (nil? restore-startup)
-                           (initial-agent-failure? initial-result))
-                  (throw (ex-info "start-runtime!: initial agent birth failed"
-                                  initial-result)))
-              _ (when (and autonomous? (nil? restore-startup))
-                  (log/info-console!
-                   "seon.client/start-runtime!"
-                   "boot phase: initial agent ensure completed"
-                   {:seon.agent/root-created?
-                    (::agent/root-created? initial-result)
-                    :seon.agent/initial-created?
-                    (::agent/initial-created? initial-result)}))
-              initial-id (when (and autonomous?
-                                    (nil? restore-startup)
-                                    (::agent/initial-created? initial-result))
-                           (:seon.agent/id initial-result))
-              created-ids (cond-> []
-                            (::agent/root-created? initial-result)
-                            (conj "root")
-                            initial-id (conj initial-id))
+              initial-id nil
+              created-ids []
               _ (log/info-console!
                  "seon.client/start-runtime!"
                  "boot phase: resumable agent acquisition started")
@@ -2292,7 +2387,10 @@
                 (when restore-startup
                   (await
                    (admission/prepare-committed!
-                    {::admission/record-failures? false})))
+                    {::admission/record-failures? false
+                     ::admission/base-projection base-projection
+                     ::admission/artifact-exports
+                     (launch-artifact-exports)})))
                 _ (when (and restore-startup
                              (not (::admission/prepared? preparation)))
                     (throw
@@ -2324,10 +2422,9 @@
                 (when-not restore-startup
                   (await
                    (admission/publish-committed!
-                    (cond-> {}
-                      boot-projection
-                      (assoc ::admission/reusable-projection
-                             boot-projection)))))
+                    {::admission/base-projection base-projection
+                     ::admission/artifact-exports
+                     (launch-artifact-exports)})))
                 _ (when (and (nil? restore-startup)
                              (not (::admission/published? publication)))
                     (throw

@@ -58,15 +58,21 @@
   {:target           :node-script
    :output-to        "out/client/main.js"
    :main             seon.client/-main
+   ;; All four boot artifacts are one optimize-stage identity and publish
+   ;; together at flush; the watcher may refresh only the BUILD derivation.
    :build-hooks      [[seon.dev.program-artifact/prepare-program-rows!
                        "out/client/program-sources.edn"
                        "out/client/program-rows.edn"
+                       "out/client/base-projection.edn"
                        "out/client/page-plan.edn"]
                       [seon.dev.program-artifact/publish!
                        "out/client/program-sources.edn"]
                       [seon.dev.program-artifact/publish-rows!
                        "out/client/program-sources.edn"
                        "out/client/program-rows.edn"]
+                      [seon.dev.program-artifact/publish-base-projection!
+                       "out/client/program-rows.edn"
+                       "out/client/base-projection.edn"]
                       [seon.dev.program-artifact/publish-page-plan!
                        "out/client/program-rows.edn"
                        "out/client/page-plan.edn"]
@@ -110,12 +116,16 @@
    :build-hooks      [[seon.dev.program-artifact/prepare-program-rows!
                        "out-acme/client/program-sources.edn"
                        "out-acme/client/program-rows.edn"
+                       "out-acme/client/base-projection.edn"
                        "out-acme/client/page-plan.edn"]
                       [seon.dev.program-artifact/publish!
                        "out-acme/client/program-sources.edn"]
                       [seon.dev.program-artifact/publish-rows!
                        "out-acme/client/program-sources.edn"
                        "out-acme/client/program-rows.edn"]
+                      [seon.dev.program-artifact/publish-base-projection!
+                       "out-acme/client/program-rows.edn"
+                       "out-acme/client/base-projection.edn"]
                       [seon.dev.program-artifact/publish-page-plan!
                        "out-acme/client/program-rows.edn"
                        "out-acme/client/page-plan.edn"]
@@ -153,12 +163,16 @@
    :build-hooks      [[seon.dev.program-artifact/prepare-program-rows!
                        "out-bench/client/program-sources.edn"
                        "out-bench/client/program-rows.edn"
+                       "out-bench/client/base-projection.edn"
                        "out-bench/client/page-plan.edn"]
                       [seon.dev.program-artifact/publish!
                        "out-bench/client/program-sources.edn"]
                       [seon.dev.program-artifact/publish-rows!
                        "out-bench/client/program-sources.edn"
                        "out-bench/client/program-rows.edn"]
+                      [seon.dev.program-artifact/publish-base-projection!
+                       "out-bench/client/program-rows.edn"
+                       "out-bench/client/base-projection.edn"]
                       [seon.dev.program-artifact/publish-page-plan!
                        "out-bench/client/program-rows.edn"
                        "out-bench/client/page-plan.edn"]

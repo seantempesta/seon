@@ -63,12 +63,29 @@
         application-digest
         (fn [identity]
           (#'artifact/derive-application-digest
-           config identity [] digest digest "out/program-sources.edn" digest
-           "out/program-rows.edn" digest
-           "out/page-plan.edn" digest
-           "out/client/program-inventory.edn" digest
-           digest "out/execution/program-inventory.edn" digest
-           digest digest digest))
+           {:config config
+            :bun identity
+            :dependencies []
+            :source-input-digest digest
+            :writer-digest digest
+            :program-source-relative-path "out/program-sources.edn"
+            :program-source-digest digest
+            :program-row-relative-path "out/program-rows.edn"
+            :program-row-digest digest
+            :base-projection-relative-path "out/base-projection.edn"
+            :base-projection-digest digest
+            :page-plan-relative-path "out/page-plan.edn"
+            :page-plan-digest digest
+            :client-inventory-relative-path
+            "out/client/program-inventory.edn"
+            :client-inventory-digest digest
+            :client-digest digest
+            :execution-inventory-relative-path
+            "out/execution/program-inventory.edn"
+            :execution-inventory-digest digest
+            :execution-runtime-digest digest
+            :bootstrap-digest digest
+            :css-digest digest}))
         initial (application-digest bun)]
     (doseq [[field changed]
             [[:seon.dev.artifact/bun-executable "/other-bun"]
@@ -127,6 +144,9 @@
          :seon.dev.artifact/program-source-digest digest-a
          :seon.dev.artifact/program-row-path "out/client/program-rows.edn"
          :seon.dev.artifact/program-row-digest digest-a
+         :seon.dev.artifact/base-projection-path
+         "out/client/base-projection.edn"
+         :seon.dev.artifact/base-projection-digest digest-a
          :seon.dev.artifact/page-plan-path "out/client/page-plan.edn"
          :seon.dev.artifact/page-plan-digest digest-a
          :seon.dev.artifact/client-inventory-path
@@ -177,6 +197,8 @@
         output (fs/path directory "out-acme/client/main.js")
         program-source (fs/path directory "out-acme/client/program-sources.edn")
         program-row (fs/path directory "out-acme/client/program-rows.edn")
+        base-projection
+        (fs/path directory "out-acme/client/base-projection.edn")
         page-plan (fs/path directory "out-acme/client/page-plan.edn")
         inventory (fs/path directory "out-acme/client/program-inventory.edn")
         runtime (fs/path directory
@@ -192,6 +214,7 @@
       (spit (str output) "main-a")
       (spit (str program-source) "program-a")
       (spit (str program-row) "rows-a")
+      (spit (str base-projection) "projection-a")
       (spit (str page-plan) "page-plan-a")
       (spit (str inventory) "inventory-a")
       (spit (str runtime) "runtime-a")
@@ -203,6 +226,9 @@
         (spit (str program-row) "rows-b")
         (is (not= digest (artifact/current-client-digest config)))
         (spit (str program-row) "rows-a")
+        (spit (str base-projection) "projection-b")
+        (is (not= digest (artifact/current-client-digest config)))
+        (spit (str base-projection) "projection-a")
         (spit (str page-plan) "page-plan-b")
         (is (not= digest (artifact/current-client-digest config)))
         (spit (str page-plan) "page-plan-a")
@@ -262,6 +288,7 @@
                          :client (apply str (repeat 64 "b"))
                          :program-source (apply str (repeat 64 "7"))
                          :program-row (apply str (repeat 64 "8"))
+                         :base-projection (apply str (repeat 64 "5"))
                          :page-plan (apply str (repeat 64 "6"))
                          :execution (apply str (repeat 64 "c"))
                          :client-inventory (apply str (repeat 64 "1"))
@@ -286,6 +313,8 @@
             (fn [_] (:program-source @component))
             #'artifact/current-program-row-digest
             (fn [_] (:program-row @component))
+            #'artifact/current-base-projection-digest
+            (fn [_] (:base-projection @component))
             #'artifact/current-page-plan-digest
             (fn [_] (:page-plan @component))
             #'artifact/current-inventory-digest
@@ -314,7 +343,7 @@
     (let [initial (observe)]
       (is (= (select-keys @component
                           [:writer :client :program-source :program-row
-                           :page-plan
+                           :base-projection :page-plan
                            :client-inventory
                            :execution :execution-inventory :execution-runtime
                            :bootstrap :css])
@@ -324,6 +353,8 @@
               (:seon.dev.artifact/program-source-digest initial)
               :program-row
               (:seon.dev.artifact/program-row-digest initial)
+              :base-projection
+              (:seon.dev.artifact/base-projection-digest initial)
               :page-plan
               (:seon.dev.artifact/page-plan-digest initial)
               :client-inventory
@@ -340,6 +371,8 @@
                [:client :seon.dev.artifact/client-digest]
                [:program-source :seon.dev.artifact/program-source-digest]
                [:program-row :seon.dev.artifact/program-row-digest]
+               [:base-projection
+                :seon.dev.artifact/base-projection-digest]
                [:page-plan :seon.dev.artifact/page-plan-digest]
                [:client-inventory
                 :seon.dev.artifact/client-inventory-digest]
@@ -413,6 +446,8 @@
          (str (fs/path directory "runtime/program-sources.edn"))
          :seon.dev.artifact/release-program-row-output
          (str (fs/path directory "runtime/program-rows.edn"))
+         :seon.dev.artifact/release-base-projection-output
+         (str (fs/path directory "runtime/base-projection.edn"))
          :seon.dev.artifact/release-page-plan-output
          (str (fs/path directory "runtime/page-plan.edn"))
          :seon.dev.artifact/release-client-inventory-output
@@ -449,12 +484,16 @@
         (is (= [['seon.dev.program-artifact/prepare-program-rows!
                  "runtime/program-sources.edn"
                  "runtime/program-rows.edn"
+                 "runtime/base-projection.edn"
                  "runtime/page-plan.edn"]
                 ['seon.dev.program-artifact/publish!
                  "runtime/program-sources.edn"]
                 ['seon.dev.program-artifact/publish-rows!
                  "runtime/program-sources.edn"
                  "runtime/program-rows.edn"]
+                ['seon.dev.program-artifact/publish-base-projection!
+                 "runtime/program-rows.edn"
+                 "runtime/base-projection.edn"]
                 ['seon.dev.program-artifact/publish-page-plan!
                  "runtime/program-rows.edn"
                  "runtime/page-plan.edn"]
@@ -485,6 +524,8 @@
          (str (fs/path directory "runtime/program-sources.edn"))
          :seon.dev.artifact/release-program-row-output
          (str (fs/path directory "runtime/program-rows.edn"))
+         :seon.dev.artifact/release-base-projection-output
+         (str (fs/path directory "runtime/base-projection.edn"))
          :seon.dev.artifact/release-page-plan-output
          (str (fs/path directory "runtime/page-plan.edn"))
          :seon.dev.artifact/release-client-inventory-output
@@ -518,6 +559,8 @@
          (str (fs/path directory "runtime/program-sources.edn"))
          :seon.dev.artifact/release-program-row-output
          (str (fs/path directory "runtime/program-rows.edn"))
+         :seon.dev.artifact/release-base-projection-output
+         (str (fs/path directory "runtime/base-projection.edn"))
          :seon.dev.artifact/release-page-plan-output
          (str (fs/path directory "runtime/page-plan.edn"))
          :seon.dev.artifact/release-client-inventory-output
@@ -763,6 +806,8 @@
         client (fs/path directory "out/client/main.js")
         program-source (fs/path directory "out/client/program-sources.edn")
         program-row (fs/path directory "out/client/program-rows.edn")
+        base-projection
+        (fs/path directory "out/client/base-projection.edn")
         page-plan (fs/path directory "out/client/page-plan.edn")
         client-inventory (fs/path directory "out/client/program-inventory.edn")
         execution (fs/path directory "out/execution/main.js")
@@ -788,6 +833,7 @@
       (spit (str client) "default-client")
       (spit (str program-source) "default-program-source")
       (spit (str program-row) "default-program-row")
+      (spit (str base-projection) "default-base-projection")
       (spit (str page-plan) "default-page-plan")
       (spit (str client-inventory) "default-client-inventory")
       (spit (str execution) "default-execution")
@@ -803,6 +849,8 @@
             (artifact/current-program-source-digest config)
             default-program-row-digest
             (artifact/current-program-row-digest config)
+            default-base-projection-digest
+            (artifact/current-base-projection-digest config)
             default-page-plan-digest
             (artifact/current-page-plan-digest config)
             default-client-inventory-digest
@@ -814,6 +862,7 @@
                            default-runtime-digest
                            default-program-source-digest
                            default-program-row-digest
+                           default-base-projection-digest
                            default-page-plan-digest
                            default-client-inventory-digest
                            default-execution-inventory-digest)]
@@ -833,6 +882,9 @@
         (is (= "default-program-row"
                (slurp (str (fs/path default-root
                                     "out/client/program-rows.edn")))))
+        (is (= "default-base-projection"
+               (slurp (str (fs/path default-root
+                                    "out/client/base-projection.edn")))))
         (is (= "default-page-plan"
                (slurp (str (fs/path default-root
                                     "out/client/page-plan.edn")))))
@@ -852,6 +904,7 @@
                          default-runtime-digest
                          default-program-source-digest
                          default-program-row-digest
+                         default-base-projection-digest
                          default-page-plan-digest
                          default-client-inventory-digest
                          default-execution-inventory-digest)]
@@ -869,6 +922,7 @@
                   config acme-digest default-execution-digest
                   default-runtime-digest default-program-source-digest
                   default-program-row-digest
+                  default-base-projection-digest
                   default-page-plan-digest
                   default-client-inventory-digest
                   default-execution-inventory-digest))
@@ -881,6 +935,7 @@
                               default-runtime-digest
                               default-program-source-digest
                               default-program-row-digest
+                              default-base-projection-digest
                               default-page-plan-digest
                               default-client-inventory-digest
                               default-execution-inventory-digest)]
@@ -898,6 +953,7 @@
                               default-runtime-digest
                               changed-program-source-digest
                               default-program-row-digest
+                              default-base-projection-digest
                               default-page-plan-digest
                               default-client-inventory-digest
                               default-execution-inventory-digest)]
@@ -1030,6 +1086,8 @@
         client (fs/path directory "out/client/main.js")
         program-source (fs/path directory "out/client/program-sources.edn")
         program-row (fs/path directory "out/client/program-rows.edn")
+        base-projection
+        (fs/path directory "out/client/base-projection.edn")
         page-plan (fs/path directory "out/client/page-plan.edn")
         client-inventory (fs/path directory "out/client/program-inventory.edn")
         execution (fs/path directory "out/execution/main.js")
@@ -1059,6 +1117,7 @@
       (doseq [[path value] [[client "client"] [execution "execution"]
                             [program-source "program-source"]
                             [program-row "program-row"]
+                            [base-projection "base-projection"]
                             [page-plan "page-plan"]
                             [client-inventory
                              "{:seon.dev.program-inventory/public-exports [\"example/client\"] :seon.dev.program-inventory/internal-terminals []}"]
@@ -1073,11 +1132,13 @@
                     artifact/publish-runtime-root!
                     (fn [_ bootstrap-digest execution-digest runtime-digest
                          program-source-digest program-row-digest
+                         base-projection-digest
                          page-plan-digest
                          client-inventory-digest execution-inventory-digest]
                       (str "/runtime/" bootstrap-digest "-" execution-digest
                            "-" runtime-digest "-" program-source-digest
-                           "-" program-row-digest "-" page-plan-digest
+                           "-" program-row-digest "-"
+                           base-projection-digest "-" page-plan-digest
                            "-" client-inventory-digest
                            "-" execution-inventory-digest))]
         (let [bun (artifact/bun-identity! {})
@@ -1119,6 +1180,9 @@
          :seon.dev.artifact/program-source-digest digest
          :seon.dev.artifact/program-row-path "out/client/program-rows.edn"
          :seon.dev.artifact/program-row-digest digest
+         :seon.dev.artifact/base-projection-path
+         "out/client/base-projection.edn"
+         :seon.dev.artifact/base-projection-digest digest
          :seon.dev.artifact/page-plan-path "out/client/page-plan.edn"
          :seon.dev.artifact/page-plan-digest digest
          :seon.dev.artifact/client-inventory-path

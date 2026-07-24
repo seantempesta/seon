@@ -24,6 +24,7 @@
     (spit (str (fs/path root "writer.jar")) "writer")
     (spit (str (fs/path root "program-sources.edn")) "{}")
     (spit (str (fs/path root "program-rows.edn")) "{}")
+    (spit (str (fs/path root "base-projection.edn")) "{}")
     (spit (str (fs/path root "page-plan.edn")) "{}")
     (spit (str (fs/path root "client/main.js")) "pod")
     (spit (str (fs/path root "execution/main.js")) "execution")
@@ -51,6 +52,7 @@
    :seon.release.member/runtime-assets "web"
    :seon.release.member/program-source "program-sources.edn"
    :seon.release.member/program-row "program-rows.edn"
+   :seon.release.member/base-projection "base-projection.edn"
    :seon.release.member/page-plan "page-plan.edn"
    :seon.release.member/client-inventory "client/program-inventory.edn"
    :seon.release.member/execution-inventory "execution/program-inventory.edn"
@@ -86,6 +88,8 @@
    :seon.dev.release/runtime-assets-member :seon.release.member/runtime-assets
    :seon.dev.release/program-source-member :seon.release.member/program-source
    :seon.dev.release/program-row-member :seon.release.member/program-row
+   :seon.dev.release/base-projection-member
+   :seon.release.member/base-projection
    :seon.dev.release/page-plan-member :seon.release.member/page-plan
    :seon.dev.release/client-inventory-member
    :seon.release.member/client-inventory
@@ -238,6 +242,7 @@
                ["execution.js" "execution"]
                ["program-sources.edn" "{}"]
                ["program-rows.edn" "{}"]
+               ["base-projection.edn" "{}"]
                ["page-plan.edn" "{}"]
                ["client-program-inventory.edn" "{}"]
                ["execution-program-inventory.edn" "{}"]
@@ -273,6 +278,8 @@
               (str (fs/path inputs "program-sources.edn"))
               ::release/program-row
               (str (fs/path inputs "program-rows.edn"))
+              ::release/base-projection
+              (str (fs/path inputs "base-projection.edn"))
               ::release/page-plan
               (str (fs/path inputs "page-plan.edn"))
               ::release/client-inventory

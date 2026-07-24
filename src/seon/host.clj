@@ -41,6 +41,10 @@
    {:optional true} ::database-pool-wait-timeout-ms]
   [:seon.execution/artifact-inventories
    {:optional true} ::capability/available-artifact-inventory]
+  [:seon.startgate/release-digest [:re "^[0-9a-f]{64}$"]]
+  [:seon.startgate/config-manifest-digest [:re "^[0-9a-f]{64}$"]]
+  [:seon.startgate/base-projection-path [:string {:min 1}]]
+  [:seon.startgate/base-projection-digest [:re "^[0-9a-f]{64}$"]]
   [::eval-threads {:optional true} ::eval-threads]])
 (schema/register! ::server 'some?)
 (schema/register! ::contexts 'some?)
@@ -273,7 +277,24 @@
               (let [database (context/resolve-head! writer)]
                 (when-not (:seon/error database)
                   (db.branch/head-from-database-value database))))})
-        base (context/build-base! writer)
+        base-artifact
+        (context/load-base-projection!
+         (:seon.startgate/base-projection-path request)
+         (:seon.startgate/base-projection-digest request))
+        base-projection (:seon.dev.artifact/base-projection base-artifact)
+        database (context/resolve-head! writer)
+        expected-identity
+        {:seon.db.initialization/fingerprint
+         (:seon.db.initialization/fingerprint base-artifact)
+         :seon.db.initialization/release-digest
+         (:seon.startgate/release-digest request)
+         :seon.db.initialization/config-manifest-digest
+         (:seon.startgate/config-manifest-digest request)}
+        _ (context/verify-applied-identity!
+           writer database (::context/database-name writer)
+           expected-identity)
+        base (context/build-base!
+              writer (:seon.host.context/base-load-plan base-artifact))
         jvm-artifact-inventory
         (capability/installed-artifact-inventory
          (::context/tier-inventory base))
@@ -290,7 +311,8 @@
               (:seon.execution.inventory/exports-by-tier
                artifact-inventories))
         acquired-projection
-        (context/acquire-committed-projection! writer artifact-exports)
+        (context/acquire-preprocessed-projection!
+         writer database base-projection artifact-exports)
         _ (when (:seon/error acquired-projection)
             (context/close-session! writer)
             (error/set-db-hooks! {})

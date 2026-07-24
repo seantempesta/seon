@@ -1,6 +1,7 @@
 (ns seon.host-toolkit-writer-test
   "Dependency-ordered JVM-host toolkit loading and its honest ledger."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.edn :as edn]
+            [clojure.test :refer [deftest is testing]]
             [seon.host.context :as context]))
 
 (defn- unconnected-writer []
@@ -29,10 +30,18 @@
     (is (= ['my.probe.right 'my.probe.left] (::context/cycle result)))))
 
 (deftest toolkit-report-ledgers-every-discovered-definition
-  (let [report (::context/report (context/build-base! (unconnected-writer)))
+  (let [load-plan (edn/read-string (pr-str (context/base-load-plan)))
+        report
+        (::context/report
+         (context/build-base! (unconnected-writer) load-plan))
         rows (::context/blocks report)
         failures (::context/failures report)
         status-counts (frequencies (map ::context/status rows))]
+    (is (= (count (::context/units load-plan))
+           (count (::context/ordered load-plan))))
+    (is (empty? (::context/cycle load-plan)))
+    (is (every? ::context/host-source
+                (mapcat ::context/blocks (::context/units load-plan))))
     (is (= (count rows)
            (+ (::context/loaded report)
               (::context/failed report)

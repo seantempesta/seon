@@ -9,6 +9,7 @@
             [seon.dev.artifact :as artifact]
             [seon.dev.config :as config]
             [seon.dev.process :as process]
+            [seon.dev.release :as release]
             [seon.dev.state :as state]
             [seon.launch :as launch]
             [seon.packages :as packages]
@@ -51,19 +52,21 @@
   {:malli/schema [:=> [:cat ::target-request] ::request]}
   [{::keys [configuration name] :as target}]
   (validate! ::target-request target "The cluster request is invalid.")
-  (let [root (:seon.dev.config/root configuration)
+  (let [cluster-base
+        (fs/parent (:seon.dev.config/cluster-dir configuration))
+        state-root (fs/parent (fs/parent cluster-base))
         source (:seon.dev.config/launch-descriptor configuration)
-        cluster-dir (str (fs/path root "data" "clusters" name))
-        process-dir (str (fs/path root "tmp" "seon-clusters" name))
+        cluster-dir (str (fs/path cluster-base name))
+        process-dir (str (fs/path state-root "tmp" "seon-clusters" name))
         descriptor
         (launch/shared-writer-cluster-descriptor
          {::launch/source-descriptor source
           ::launch/runtime-cluster name
           ::launch/target-database-name name
-          ::protocol/database-path (str (fs/path cluster-dir "db"))
-          ::launch/packages-dir (str (fs/path cluster-dir "packages"))
-          ::launch/process-dir process-dir
-          ::launch/log-dir (str (fs/path root "logs" "clusters" name))
+         ::protocol/database-path (str (fs/path cluster-dir "db"))
+         ::launch/packages-dir (str (fs/path cluster-dir "packages"))
+         ::launch/process-dir process-dir
+          ::launch/log-dir (str (fs/path state-root "logs" "clusters" name))
           ::launch/http-port 0
           ::launch/http-port-file (str (fs/path process-dir "http.port"))
           ::launch/writable-blob-dir (str (fs/path cluster-dir "blobs"))})]
@@ -76,7 +79,12 @@
 
 (defn- manifest!
   [configuration]
-  (or (artifact/read-manifest configuration)
+  (or (if (:seon.dev.config/source-checkout? configuration)
+        (artifact/read-manifest configuration)
+        (try
+          (release/read-manifest!
+           (:seon.dev.config/artifact-manifest configuration))
+          (catch Throwable _ nil)))
       (throw
        (ex-info "The shared writer artifact manifest is absent."
                 {:seon.dev.cluster/artifact-manifest
@@ -84,7 +92,12 @@
 
 (defn- current-manifest!
   [configuration]
-  (or (artifact/current-manifest configuration)
+  (or (if (:seon.dev.config/source-checkout? configuration)
+        (artifact/current-manifest configuration)
+        (try
+          (release/read-manifest!
+           (:seon.dev.config/artifact-manifest configuration))
+          (catch Throwable _ nil)))
       (throw
        (ex-info "The shared runtime artifact is absent or changed."
                 {:seon.dev.cluster/artifact-manifest

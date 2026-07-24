@@ -1,5 +1,6 @@
 (ns seon.runtime.admission-test
   (:require
+    [cljs.reader :as reader]
     [cljs.test :refer [async deftest is use-fixtures]]
     [seon.agent :as agent]
     [seon.agent.lifecycle :as lifecycle]
@@ -18,12 +19,17 @@
 
 (defn- reset-admission! []
   (reset! @#'admission/!state
-          {::admission/status :starting}))
+          {::admission/status :starting})
+  (reset! @#'admission/!base-projection nil))
 
 (defn- restore-test-admission! []
   (reset! @#'admission/!state
           {::admission/status :available
            ::admission/generation 0}))
+
+(defn- installed-generation []
+  (:seon.schema.projection/fingerprint
+   (deref @#'admission/!base-projection)))
 
 (defonce ^:private !schema-state-before (atom nil))
 
@@ -39,6 +45,51 @@
             (schema/restore-state! @!schema-state-before)
             (schema/relink-registry!)
             (restore-test-admission!))})
+
+(deftest divergence-cache-row-composes-byte-equal-to-cold
+  (let [base
+        (schema/build-projection
+         {:startgate.cache/id [:string {:seon.db/identity true}]})
+        cold
+        (schema/build-projection
+         {:startgate.cache/id [:string {:seon.db/identity true}]
+          :startgate.cache/value :int}
+         {'startgate.cache/read
+          [:=> [:cat :startgate.cache/id] :startgate.cache/value]})
+        delta (schema/projection-delta base cold)
+        cache (admission/divergence-cache-row base delta 91)
+        composed (schema/compose-projection-data
+                  (schema/projection-pure-data base)
+                  (reader/read-string
+                   (:seon.runtime.admission.cache/delta cache)))]
+    (is (= 91 (:seon.runtime.admission.cache/basis-t cache)))
+    (is (= (:seon.schema.projection/fingerprint base)
+           (:seon.runtime.admission.cache/base-fingerprint cache)))
+    (is (= (schema/canonical-data-string
+            (schema/projection-pure-data cold))
+           (schema/canonical-data-string composed)))
+    (is (= (:seon.schema.projection/fingerprint cold)
+           (:seon.runtime.admission.cache/composed-fingerprint cache)))))
+
+(deftest divergence-cache-is-one-identity-with-no-history-values
+  (let [attributes
+        [:seon.runtime.admission.cache/id
+         :seon.runtime.admission.cache/base-fingerprint
+         :seon.runtime.admission.cache/divergence-fingerprint
+         :seon.runtime.admission.cache/composed-fingerprint
+         :seon.runtime.admission.cache/basis-t
+         :seon.runtime.admission.cache/delta]
+        facets
+        (into {}
+              (map (juxt :db/ident identity))
+              (db/malli->datahike-schema attributes))]
+    (is (= :db.unique/identity
+           (get-in facets
+                   [:seon.runtime.admission.cache/id :db/unique])))
+    (is (every?
+         true?
+         (map #(get-in facets [% :db/noHistory])
+              (rest attributes))))))
 
 (deftest publication-state-has-one-owner-and-one-fault
   (let [!recorded (atom [])]
@@ -127,6 +178,7 @@
             reconcile-projection! record!]}
    body]
   (let [original-db db/db
+        original-entity db/entity
         original-index-page db/index-page
         original-pull-many db/pull-many
         original-committed-projection admission/committed-projection
@@ -138,6 +190,21 @@
           (fn
             ([] (js/Promise.resolve acquisition-database))
             ([_] (js/Promise.resolve acquisition-database))))
+    (let [build-projection
+          (or committed-projection
+              (constantly (schema/build-projection {})))
+          base-projection (build-projection {})]
+      (reset! @#'admission/!base-projection base-projection)
+      (set! db/entity
+            (fn
+              ([_database _ref]
+               (js/Promise.resolve
+                (admission/divergence-cache-row
+                 base-projection {} (:t acquisition-database))))
+              ([_request]
+               (js/Promise.resolve
+                (admission/divergence-cache-row
+                 base-projection {} (:t acquisition-database)))))))
     (set! db/index-page
           (fn
             ([_]
@@ -155,9 +222,7 @@
             ([_ _ _] (js/Promise.resolve []))))
     (let [build-projection
           (or committed-projection
-              (constantly
-               {:seon.schema.projection/fingerprint 42
-                :seon.schema.projection/function-contracts {}}))]
+              (constantly (schema/build-projection {})))]
       (set! admission/committed-projection
             (fn
               ([acquired]
@@ -172,6 +237,7 @@
         (.finally
           (fn []
             (set! db/db original-db)
+            (set! db/entity original-entity)
             (set! db/index-page original-index-page)
             (set! db/pull-many original-pull-many)
             (set! admission/committed-projection original-committed-projection)
@@ -571,10 +637,13 @@
               (fn [result]
                 (is (true? (::admission/published? result)))
                 (is (false? (::admission/recovered? result)))
-                (is (= 42 (::admission/generation result)))
-                (is (= 42 (::admission/generation (admission/state))))
+                (is (= (installed-generation)
+                       (::admission/generation result)))
+                (is (= (installed-generation)
+                       (::admission/generation (admission/state))))
                 (is (admission/available?))
-                (is (= 42 (:seon.schema.projection/fingerprint @!activated)))
+                (is (= (installed-generation)
+                       (:seon.schema.projection/fingerprint @!activated)))
                 (done)))
             (.catch (fn [error]
                       (is false (str "publication threw — " error))
@@ -643,7 +712,8 @@
                 (let [publication (admission/admit-prepared! preparation)]
                   (is (true? (::admission/published? publication)))
                   (is (= [:projection-activated :completion-verified] @!effects))
-                  (is (= 42 (::admission/generation (admission/state))))
+                  (is (= (installed-generation)
+                         (::admission/generation (admission/state))))
                   (is (admission/available?)))
                 (done)))
             (.catch (fn [error]
@@ -652,10 +722,8 @@
 
 (deftest publication-reconciles-from-the-projection-captured-before-replay
   (async done
-    (let [projection-a {:seon.schema.projection/fingerprint 1
-                      :seon.schema.projection/function-contracts {}}
-        projection-b {:seon.schema.projection/fingerprint 2
-                      :seon.schema.projection/function-contracts {}}
+    (let [projection-a (schema/build-projection {})
+        projection-b (schema/build-projection {:probe.publication/id :string})
         !active (atom projection-a)
         !reconciliations (atom [])]
       (-> (with-publication-seams
@@ -675,12 +743,15 @@
             (.then
               (fn [result]
                 (is (true? (::admission/published? result)))
-                (is (= [{::instrument/old-projection projection-a
-                         ::instrument/new-projection projection-b}]
-                       @!reconciliations)
+                (is (= (schema/projection-pure-data projection-b)
+                       (schema/projection-pure-data
+                        (::instrument/new-projection
+                         (first @!reconciliations))))
                     "publication removes A wrappers after replay activates B")
-                (is (identical? projection-b @!active))
-                (is (= 2 (::admission/generation (admission/state))))
+                (is (= (schema/projection-pure-data projection-b)
+                       (schema/projection-pure-data @!active)))
+                (is (= (:seon.schema.projection/fingerprint projection-b)
+                       (::admission/generation (admission/state))))
                 (done)))
             (.catch (fn [error]
                       (is false (str "publication threw — " error))

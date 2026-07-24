@@ -436,6 +436,57 @@
       (finally
         (schema/restore-state! before)))))
 
+(deftest preprocessed-base-plus-divergence-is-byte-equal-to-cold
+  (let [base
+        (schema/build-projection
+         {:startgate/id [:string {:seon.db/identity true}]
+          :startgate/base
+          [:map [:startgate/id :startgate/id]]}
+         {'startgate/base-fn
+          [:=> [:cat :startgate/base] :startgate/id]})
+        cold
+        (schema/build-projection
+         {:startgate/id [:string {:seon.db/identity true}]
+          :startgate/base
+          [:map [:startgate/id :startgate/id]]
+          :startgate/title :string
+          :startgate/divergent
+          [:map {:seon.db/entity true}
+           [:startgate/id :startgate/id]
+           [:startgate/title :startgate/title]]}
+         {'startgate/base-fn
+          [:=> [:cat :startgate/base] :startgate/id]
+          'startgate/divergent-fn
+          [:=> [:cat :startgate/divergent] :startgate/title]})
+        base-data (schema/projection-pure-data base)
+        delta (schema/projection-delta base cold)
+        composed (schema/build-projection base-data delta {})
+        pure schema/projection-pure-data]
+    (is (= (schema/canonical-data-string (pure cold))
+           (schema/canonical-data-string (pure composed))))
+    (is (= (:seon.schema.projection/fingerprint cold)
+           (:seon.schema.projection/fingerprint composed)))
+    (is (some? (:seon.schema.projection/registry composed)))
+    (is (some? (:seon.schema.projection/compile-options composed)))))
+
+(deftest verified-release-registration-is-collect-only
+  (let [before (schema/snapshot-state)
+        validations (atom [])]
+    (try
+      (with-redefs [schema/assert-complete-contract!
+                    (fn [request] (swap! validations conj request) [])]
+        (binding [schema/*verified-release-identity* nil]
+          (schema/register! :startgate.collect/unverified :string))
+        (binding [schema/*verified-release-identity*
+                  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
+          (schema/register! :startgate.collect/verified :string)))
+      (is (= [:startgate.collect/unverified]
+             (mapv :seon.schema/identity @validations)))
+      (is (= :string
+             (get (schema/snapshot) :startgate.collect/verified)))
+      (finally
+        (schema/restore-state! before)))))
+
 (deftest single-segment-keyword-namespace-is-refused-with-guidance
   (testing "the S-21 defect shape — :workout/date"
     (let [e (try (schema/register! :workout/date :string)

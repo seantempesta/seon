@@ -329,17 +329,23 @@
     (print-ready! target open?)))
 
 (defn- ensure! [configuration arguments]
-  (when-not (= ["host"] (vec arguments))
-    (throw (ex-info "`ensure` requires exactly `host`."
+  (let [member (first arguments)]
+    (when-not (and (= 1 (count arguments))
+                   (#{"host" "writer"} member))
+    (throw (ex-info "`ensure` requires exactly `host` or `writer`."
                     {:seon.dev.cli/arguments (vec arguments)})))
-  (let [result
+  (let [operation (keyword "seon.dev.process.operation"
+                           (str "ensure-" member))
+        result
         (state/with-lock
          configuration :stack 300000
          #(let [configuration (select-config configuration nil)]
-            (require-no-retained-restore! configuration :ensure-host)
-            (process/ensure-host! configuration
-                                  (selected-manifest configuration))))]
-    (println "● host ready")
+            (require-no-retained-restore! configuration operation)
+            ((if (= "host" member)
+               process/ensure-host!
+               process/ensure-writer!)
+             configuration (selected-manifest configuration))))]
+    (println (str "● " member " ready"))
     (println (str "  changed: " (:seon.runtime.state/changed? result)))
     (println (str "  owner-pid: "
                   (:seon.dev.process.containment/owner-pid result)))
@@ -347,7 +353,7 @@
                   (:seon.dev.process.containment/workload-pid result)))
     (println (str "  generation: "
                   (:seon.dev.process.containment/generation result)))
-    result))
+    result)))
 
 (defn- ready-config-target!
   [configuration]
@@ -783,7 +789,8 @@
                      (not (str/starts-with? (nth arguments 2) "-"))))
     (throw (ex-info "`release` requires a runtime directory and optional `--sdk` directory."
                     {:seon.dev.cli/arguments (vec arguments)})))
-  (let [root (:seon.dev.config/root configuration)
+  (let [configuration (select-config configuration nil)
+        root (:seon.dev.config/root configuration)
         requested (fs/path (first arguments))
         package-root (if (fs/relative? requested)
                        (fs/path root requested)
@@ -1239,7 +1246,7 @@
          "  up [--open] [--config PATH] build and reconcile the complete system\n"
          "  down                     drain the complete system\n"
          "  restart [--open] [--config PATH] drain, rebuild, and reconcile\n"
-         "  ensure host               reconcile only the supervised sci host\n"
+         "  ensure host|writer        reconcile one supervised process\n"
          "  config apply PATH        explicitly reconcile database config\n"
          "  status [--edn]           report live health\n"
          "  branch open|restart|close|status NAME [--edn]\n"

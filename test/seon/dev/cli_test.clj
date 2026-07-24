@@ -160,9 +160,9 @@
          (is (= :stack (nth (first @calls) 2)))
          (is (= selected (second (nth @calls 2))))
          (is (= selected (second (nth @calls 4))))
-         (is (thrown-with-msg? Exception #"exactly `host`"
+         (is (thrown-with-msg? Exception #"`host` or `writer`"
                                (#'cli/ensure! configuration [])))
-         (is (thrown-with-msg? Exception #"exactly `host`"
+         (is (thrown-with-msg? Exception #"`host` or `writer`"
                                (#'cli/ensure! configuration
                                 ["host" "pod"])))))))
 
@@ -195,7 +195,9 @@
         calls (atom [])]
     (try
       (with-redefs-fn
-        {#'release/build-package!
+        {#'cli/select-config
+         (fn [value _config-path] value)
+         #'release/build-package!
          (fn [request]
            (swap! calls conj request)
            (fs/create-dirs (::release/package-root request))
