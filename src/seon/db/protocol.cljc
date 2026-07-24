@@ -1309,7 +1309,9 @@
    its R41 degraded text representation."
   {:malli/schema [:=> [:cat ::wire-value] ::wire-projection]}
   [message]
-  (if (map? message)
+  (if (and (map? message)
+           (or (contains? message ::operation)
+               (schema/valid-candidate-value? ::response message)))
     (let [projection (atom nil)
           encoder (if (contains? message ::operation)
                     @request-wire-encoder
