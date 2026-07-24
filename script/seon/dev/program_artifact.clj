@@ -4,7 +4,7 @@
             [clojure.java.io :as io]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
-            [seon.dev.config :as config]
+            [seon.dev.config-manifest :as config-manifest]
             [seon.dev.program-inventory :as program-inventory])
   (:import [java.io File]
            [java.nio.charset StandardCharsets]
@@ -308,7 +308,7 @@
                  expected-sha-256
                  :seon.db.initialization/page-rows page-rows})))
     (let [actual-sha-256
-          (config/config-manifest-digest (slurp selected))]
+          (config-manifest/digest (slurp selected))]
       (when-not (= expected-sha-256 actual-sha-256)
         (throw
          (ex-info "The admitted resolved manifest digest changed."

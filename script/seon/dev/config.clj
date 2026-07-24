@@ -6,11 +6,10 @@
             [clojure.string :as str]
             [malli.core :as m]
             [seon.config.resolve :as config.resolve]
+            [seon.dev.config-manifest :as config-manifest]
             [seon.dev.release :as release]
             [seon.launch :as launch])
-  (:import [java.nio.charset StandardCharsets]
-           [java.nio.file Files StandardCopyOption]
-           [java.security MessageDigest]
+  (:import [java.nio.file Files StandardCopyOption]
            [java.time ZoneId]))
 
 (def configuration-schema
@@ -142,14 +141,6 @@
           (fs/directory? database-path)
           (some fs/regular-file? (fs/list-dir database-path))))))
 
-(defn config-manifest-digest
-  "Return the SHA-256 identity of canonical resolved-manifest bytes."
-  {:malli/schema [:=> [:cat :string] [:re #"[0-9a-f]{64}"]]}
-  [text]
-  (let [digest (MessageDigest/getInstance "SHA-256")]
-    (.update digest (.getBytes text StandardCharsets/UTF_8))
-    (apply str (map #(format "%02x" (bit-and 0xff %)) (.digest digest)))))
-
 (defn- atomic-write-edn! [path value]
   (let [target (fs/path path)
         parent (fs/parent target)
@@ -241,7 +232,7 @@
         envelope-path
         (str (fs/path process-dir (str "launch-envelope-" generation ".edn")))
         manifest-text (pr-str manifest)
-        manifest-sha-256 (config-manifest-digest manifest-text)
+        manifest-sha-256 (config-manifest/digest manifest-text)
         initialization-page-rows
         (:seon.config.database.initialization/page-rows singleton)
         _ (atomic-write-edn! manifest-path manifest)

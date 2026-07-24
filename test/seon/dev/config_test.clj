@@ -3,6 +3,7 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.dev.config :as config]
+            [seon.dev.config-manifest :as config-manifest]
             [seon.dev.release :as release]
             [seon.launch :as launch]))
 
@@ -269,7 +270,7 @@
             (is (= resolved-manifest-path
                    (get first-environment
                         "SEON_RESOLVED_MANIFEST_PATH")))
-            (is (= (config/config-manifest-digest
+            (is (= (config-manifest/digest
                     (slurp resolved-manifest-path))
                    (get first-environment
                         "SEON_RESOLVED_MANIFEST_SHA_256")))
