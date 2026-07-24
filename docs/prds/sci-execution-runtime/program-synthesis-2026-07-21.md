@@ -1086,6 +1086,13 @@ MORNING ITEMS (accumulating):
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- BN LEDGER (running): #8 benchmark ✓ (ef0680725) · #9 claimant
+  arity + prose pins ✓ (0b3976ad0) · #11 transcript direct-call ✓
+  (same commit; PRODUCTION IMPACT DEFINITIVELY NO — fixture-only) ·
+  BN-5/10 lane dispatched (driver files freed by #9) · BN-1/9,
+  BN-2/3/4, BN-7 in flight · BN-6 queued behind BN-1's serve.cljs.
+  Full-suite rerun deferred until the wave settles (one honest
+  rerun, not eight partial ones).
 - SEAM SWEEP ACCEPTED + BATCH WAVE DISPATCHED (research/
   integration-seam-sweep-2026-07-23.md: 11 breaks-now + 2 suspicious
   + 2 breaks-on-growth beyond the chain's 7; four consumer groups
