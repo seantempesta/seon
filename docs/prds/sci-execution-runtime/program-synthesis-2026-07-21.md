@@ -32,41 +32,44 @@ handoff) ∥ Fable audit agent → research/overnight-fix-quality-audit-
 web-UI fixes (after u9s0a returns; serve.cljs owner), containment
 HIGH items. §8 preprocessing decisions confirmed at recommendations.
 
-R45 S3 SOURCE INTEGRATED (08:48; live proof pending the coordinated
-source-freeze): `1fc076d44` admits exact precomputed initialization
-pages and the applied-identity attrs; `dfb3a6edc` adds the explicit
+R45 S3 GRADUATED (09:58): `1fc076d44` admits exact precomputed
+initialization pages and applied-identity attrs; `dfb3a6edc` adds the explicit
 `cluster apply` operator; `dd919ebf6` publishes/digest-binds/packages
-`page-plan.edn`; `9a885319f` deletes runtime page derivation and runs
-seed → config reconcile → initial-agent birth → final identity stamp
-through the one client entry. Focused proofs: protocol/writer 34/191,
-artifact/process 124/663, cluster 8/63, CLI 45/123, all green.
-Earliest unsettled contract = actual flush must execute
-`build-page-plan` after the watcher reloads the new hook graph.
-Integrated proof that closes it = one coherent rebuild plus focused
-CLJS gate, then fresh apply / identical-basis reapply / prefix-cut
-resume and 64-vs-256 page timing on `r45s3`. Dependency-ready
-parallel portfolio remains u9s0a + containment + noroots; the next
-spine refill is S4 startgate only after these S3 live numbers land.
+`page-plan.edn`; `9a885319f` deletes apply-time page derivation and runs seed →
+config reconcile → initial-agent birth → final identity stamp through the one
+client entry. Follow-on hook repairs bind the exact operator-selected manifest
+and carry one prepared derivation through flush (`631a5a7c9` through
+`407533985`); `69140720a` adds the CLJS page-plan and zero-transaction
+regressions. Focused gates are green: protocol/writer 34/191,
+artifact/process 124/663, cluster 8/63, CLI 45/123, writer init 15/84, and
+owning CLJS surfaces 61/257.
+
+Live `r45s3` proof: fresh 64-row apply = **46.00s / 98 pages**; identical
+re-apply = **25.91s**, with the same basis transaction `536871015` and commit
+ID, hence zero writes; a five-page proof cut failed closed and the full rerun
+resumed to completion in **45.27s**. Fresh 256-row apply =
+**36.44s / 28 pages**, a measured **9.56s** improvement that does not reach
+the ≤10s program gate. The canonical 64-row operator was restored and
+`r45s3` closed. Earliest unsettled contract is now **R45 S4 startgate**:
+verify applied identity at startup, remove population/config/agent work from
+`start-runtime!`, and prove the base-admission/divergence fast path.
 Final graduation remains U12's 100-agent kill/restart demonstration.
 
-U9 S0a SOURCE INTEGRATED (09:09; live proof blocked on the R45
-publisher): `e74cae74a` moves `render-agent-view!` into
+U9 S0a SOURCE INTEGRATED (09:09; R45 publisher block cleared at 09:58):
+`e74cae74a` moves `render-agent-view!` into
 `seon.agent.ctx.driver`, calls it directly from the Datastar feed at
 the feed's exact immutable database value, resolves trusted renderers
 in the pod, and sends only authored renderer leaves through
 `prepare-invocations!` plus the guarded host door. The dying
 `seon.execution.runtime/render-agent-view!` compiled-function entry is
 gone. Focused proofs are green: driver 5/30, Datastar 18/84, and UI
-projection 1/4. The required real-agent feed gate has NOT run:
-`u9s0a` remains down because the coordinated canonical rebuild still
-fails its first client flush in the page-plan hook
-(`tmp/orchestrator/r45s3-gate.log`; watcher generations
-`cb379bd6-cf41-438c-b79c-36ba8c719a76` and
-`2785c268-f8a8-4810-957d-62a0ae756278`). Do not start U9 S1 or the
-web-UI refill until an admitted artifact opens `u9s0a` and a real
-`/agent/{id}` feed morphs without `execution child did not become
-ready`; then close the cluster and append that proof to
-`tmp/orchestrator/u9s0a-gate.log`.
+projection 1/4. The required real-agent feed gate has NOT run, but a valid
+v12 artifact and restored canonical operator now remove its infrastructure
+block. The dependency-ready refill is to open `u9s0a`, prove that a real
+`/agent/{id}` feed morphs without `execution child did not become ready`, then
+close the cluster and append the proof to
+`tmp/orchestrator/u9s0a-gate.log`. Do not start U9 S1 or the web-UI refill
+before that gate.
 
 Orchestrator review note (08:25): 170d97862 verified computed-rule
 (capability manifest → namespaces, no hand list). 60d09ef38 flagged

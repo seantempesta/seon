@@ -381,20 +381,21 @@ The same three-identity split answers multi-cluster directly:
    artifact digest alone; row 8 on artifact × config-manifest digest.
    Nothing in the release directory derives from any cluster's basis or
    store (VERIFIED §1.1). Cluster N's cost is exactly apply + attach.
-2. **Apply cost estimate for a new cluster** (ESTIMATED from measured
-   spans): page-plan read + digest verify <1s; paged seed writes — 16s
-   MEASURED at 97 pages/64 rows today; pages come STRAIGHT from
-   `page-plan.edn` with zero recomputation (the plan already contains the
-   ordered page payloads; the writer's existing fingerprint/receipt
-   machinery consumes them unchanged). The ~160ms/page cost is wire+tx
-   work; the existing `page-rows` config fact can coarsen it now that
-   frames are bounded by construction — 256-row pages ≈ 4s ESTIMATED,
-   falsifiable in one probe. Config reconcile + initial agent: today
-   inside the unlogged 35s gap; D4's instrumentation names the split
-   before we promise a number — budget ≤5s as the design target, with the
-   dominant suspect (per-row wire round-trips in `state/reconcile!`)
-   fixable by the same paging shapes. **Target: apply ≤ 25s today's
-   mechanisms, ≈10s after page coarsening + gap fix.**
+2. **Apply cost for a new cluster is MEASURED by S3.** On 2026-07-24,
+   `/usr/bin/time -p bin/seon cluster apply r45s3` took **46.00s** with
+   98 pages at 64 rows and **36.44s** with 28 pages at 256 rows. Both were
+   fresh absent-database applies through the same built code/corpus and the
+   same writer, config-reconcile, initial-agent, and final-identity mechanisms;
+   each config fact correctly produced a distinct artifact/config identity.
+   Coarsening therefore saved **9.56s** end to end; the earlier ≈4s total
+   estimate was falsified. Pages came STRAIGHT from `page-plan.edn` with zero
+   apply-time recomputation. An exact-identity re-apply took **25.91s** but
+   retained the identical basis transaction and commit ID, proving zero writes;
+   this isolates one-shot client/base-load overhead that paging cannot remove.
+   Config reconcile + initial agent remain inside the unpartitioned remainder;
+   S4/S6 instrumentation must name that split before further promises.
+   **The ≤10s target remains open after S3: page coarsening is material but
+   insufficient, and S4 owns removal of startup/base population work.**
 3. **Storage sharing:** the release directory is immutable and
    content-named — publish once under `out/` (or `releases/<digest>/`,
    owner taste) and let every cluster reference it by path+digest exactly
@@ -616,10 +617,10 @@ S1 is the already-dispatched bootfast lane, restated for completeness.
   structure ([[boot-time-design-2026-07-23]]); sci Var mutability and fork
   semantics detail ([[sci-internals-opportunities-2026-07-21]]).
 - ESTIMATED (falsifiers named): every §4 phase number except
-  instrumentation 0.37s and store-open; the §5 apply timings except the
-  16s paging measurement; the 81s window's 46/35 split; the sci base-load
-  cost (S6's first job). The 35s gap's internal split is UNKNOWN until D4
-  reports.
+  instrumentation 0.37s and store-open; the 81s window's 46/35 split; the sci
+  base-load cost (S6's first job). Section 5's full apply wall times and
+  64-vs-256 page-count comparison are now MEASURED, while the internal
+  one-shot-client/config/agent split remains UNKNOWN until D4/S6 reports.
 - INFERRED (design, not source): the collect-only `register!` gate's exact
   plumbing; the row-5 same-tx delta shape (the schema for the cache entity
   is S5's to design under review); the divergence-layer content

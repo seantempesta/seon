@@ -1247,11 +1247,13 @@ the anchor stays the state ledger.
   remains unavailable because completion is absent; an ordinary full re-run
   uses the same page request IDs and resumes through the writer's durable
   receipts.
-- **Build-time and operator manifest resolution must hash the same ordinary
-  value.** The flush hook resolves explicit `SEON_CONFIG` or
-  `config/system.edn`, supplies the same default host timezone as
-  `select-manifest`, and hashes `(pr-str manifest)`. Any difference is rejected
-  before a page reaches the writer.
+- **The flush hook consumes the operator-selected resolved manifest; it never
+  resolves configuration independently.** The operator exports the exact
+  resolved-manifest path, SHA-256, and effective page-row fact to its managed
+  watcher. The hook digest-checks those bytes and derives rows plus the page
+  plan once from that admitted value. Re-resolving `SEON_CONFIG` inside the JVM
+  hook produced a different digest for retained configuration and is a second
+  configuration mechanism.
 
 ## Source provenance and contract provenance are different facts
 
