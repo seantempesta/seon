@@ -338,3 +338,6 @@
 [submodule "reference-code/litellm-clj"]
 	path = reference-code/litellm-clj
 	url = https://github.com/unravel-team/litellm-clj
+[submodule "reference-code/integrant"]
+	path = reference-code/integrant
+	url = https://github.com/weavejester/integrant
