@@ -147,7 +147,7 @@
           (with-redefs
             [db/pull
              (fn [{ref ::db/ref}]
-               (if (= [:seon.config/id "cluster"] ref)
+               (if (= config.resolve/cluster-config-lookup-ref ref)
                  {}
                  @agent-row))
              config.resolve/llm-attempt-timeout-ms (constantly 32100)]
@@ -193,7 +193,7 @@
                     configuration)]
       (is (= configuration
              (#'driver.host/invocation-configuration! ::database))))
-    (is (= [:seon.config/id "cluster"] (::db/ref @request)))
+    (is (= config.resolve/cluster-config-lookup-ref (::db/ref @request)))
     (is (= (into [:seon.config/id]
                  config.resolve/claim-driver-attributes)
            (::db/pull-pattern @request)))))

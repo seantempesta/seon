@@ -187,7 +187,7 @@
          (db/pull
           {::db/db database
            ::db/pull-pattern claim-policy-selector
-           ::db/ref [:seon.config/id config.resolve/cluster-config-id]}))
+           ::db/ref config.resolve/cluster-config-lookup-ref}))
         pending-input
         (await
          (db/query

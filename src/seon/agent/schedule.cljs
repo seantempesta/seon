@@ -357,7 +357,7 @@
             (query-member database crashed-runs-query [])
             (query-member database scheduled-starts-query [])
             (pull-member database breaker-config-selector
-                         [:seon.config/id config/cluster-config-id])]
+                         config/cluster-config-lookup-ref)]
            ::db/max-result-weight 1048576}))
         members (::db/results acquired)]
     (cond

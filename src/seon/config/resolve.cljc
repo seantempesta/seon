@@ -911,6 +911,10 @@
 
 (schema/register! :seon.config/id [:and {:seon.db/identity true} :string])
 
+(def cluster-config-lookup-ref
+  "The Datahike lookup ref for the one cluster config entity."
+  [:seon.config/id cluster-config-id])
+
 ;;; The scalar/enum per-knob attrs are registered ONCE with their manifest
 ;;; section specs above (the LEAF-attr block before `:seon.config/render`) —
 ;;; the singleton entity schema below references those registrations. Only

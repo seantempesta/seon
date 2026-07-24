@@ -59,6 +59,7 @@
 ;;; namespace delegates instead of maintaining a second schema graph.
 
 (def cluster-config-id resolve/cluster-config-id)
+(def cluster-config-lookup-ref resolve/cluster-config-lookup-ref)
 
 (schema/register! ::agent-id :string)
 (schema/register! ::routes [:vector :map])

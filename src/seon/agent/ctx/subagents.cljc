@@ -259,7 +259,7 @@
                    ::db/members
                    [(query-member direct-children-query [id] 4096 262144)
                     (pull-member breaker-selector
-                                 [:seon.config/id configuration/cluster-config-id])
+                                 configuration/cluster-config-lookup-ref)
                     (query-member database-instant-query [] 1 1024)]
                    ::db/max-result-weight 524288})))
         [children-member breaker-member instant-member] (::db/results stage-one)

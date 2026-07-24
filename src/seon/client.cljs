@@ -617,7 +617,7 @@
     (let [stored
           (await
            (db/entity database
-                      [:seon.config/id config/cluster-config-id]))]
+                      config/cluster-config-lookup-ref))]
       (when (:seon.error/message stored)
         (throw (ex-info "Config singleton acquisition failed." stored)))
       (when-not stored

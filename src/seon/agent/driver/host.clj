@@ -75,7 +75,7 @@
         (db/decode-edn-values
          (db/pull {::db/db database
                    ::db/pull-pattern (ai.core/config-pull-pattern)
-                   ::db/ref [:seon.config/id "cluster"]}))
+                   ::db/ref config.resolve/cluster-config-lookup-ref}))
         attempt-timeout-ms
         (config.resolve/llm-attempt-timeout-ms (System/getenv))]
     (merge
@@ -251,7 +251,7 @@
          {::db/db database
           ::db/pull-pattern
           (into [:seon.config/id] config.resolve/claim-driver-attributes)
-          ::db/ref [:seon.config/id "cluster"]})
+          ::db/ref config.resolve/cluster-config-lookup-ref})
         configuration
         (config.resolve/claim-driver-configuration singleton)
         missing

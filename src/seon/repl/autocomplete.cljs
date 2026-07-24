@@ -164,7 +164,7 @@
   (let [row (await
               (db/pull database
                        [:seon.config/id :seon.config/context-profiles]
-                       [:seon.config/id config/cluster-config-id]))]
+                       config/cluster-config-lookup-ref))]
     (if (:seon.error/message row)
       row
       (some->> (db/decode-edn-values row)

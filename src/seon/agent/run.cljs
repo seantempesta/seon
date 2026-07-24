@@ -213,7 +213,7 @@
                   [:or [:int {:min 1}] ::direct-error]]}
   [{:seon.db/keys [db] id :seon.agent/id}]
   (let [members (cond-> [(pull-member db config-selector
-                                      [:seon.config/id config/cluster-config-id])]
+                                      config/cluster-config-lookup-ref)]
                   id (conj (pull-member db
                                         [:seon.agent/default-deadline-ms]
                                         [:seon.agent/id id])))
@@ -480,7 +480,7 @@
                              agent-run-policy-selector
                              [:seon.agent/id id])
                 (pull-member database config-selector
-                             [:seon.config/id config/cluster-config-id])]}))
+                             config/cluster-config-lookup-ref)]}))
             members (::db/results acquired)]
         (cond
           (error-value? acquired) acquired
@@ -780,7 +780,7 @@
                 (pull-member database [:seon.agent/default-deadline-ms]
                              [:seon.agent/id id])
                 (pull-member database config-selector
-                             [:seon.config/id config/cluster-config-id])]}))
+                             config/cluster-config-lookup-ref)]}))
             members (::db/results acquired)]
         (cond
           (error-value? acquired) acquired
@@ -1085,7 +1085,7 @@
                ::db/members
                [(query-member database stale-runs-query [])
                 (pull-member database watchdog-config-selector
-                             [:seon.config/id config/cluster-config-id])]}))
+                             config/cluster-config-lookup-ref)]}))
             members (::db/results acquired)]
         (cond
           (error-value? acquired) acquired

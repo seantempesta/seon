@@ -1159,7 +1159,7 @@
                            ::db/ref [:seon.agent/id agent-id]})
                  (db/pull {::db/db historical
                            ::db/pull-pattern historical-cluster-pull-pattern
-                           ::db/ref [:seon.config/id config/cluster-config-id]})]))
+                           ::db/ref config/cluster-config-lookup-ref})]))
           [config-row agent-row cluster-row] (array-seq values)]
       (if-let [error (some #(when (:seon.error/message %) %)
                            [config-row agent-row cluster-row])]
@@ -1452,7 +1452,7 @@
                          ::db/ref [:seon.agent/id aid]})
                (db/pull {::db/db database
                          ::db/pull-pattern final-cluster-pull-pattern
-                         ::db/ref [:seon.config/id config/cluster-config-id]})]))
+                         ::db/ref config/cluster-config-lookup-ref})]))
         [run-rows turn-identities reply-rows config-row agent-row cluster-row]
         (array-seq values)
         acquired-error

@@ -29,7 +29,7 @@
   [database]
   (let [stored
         (await
-         (db/entity database [:seon.config/id config/cluster-config-id]))]
+         (db/entity database config/cluster-config-lookup-ref))]
     (when (or (db-error? stored) (nil? stored))
       (throw (js/Error. "configuration unavailable")))
     (db/decode-edn-values stored)))

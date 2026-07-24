@@ -77,10 +77,11 @@
                {::uds/session session
                 ::uds/message
                 (protocol/pull-request
-                 {::protocol/request-id (str (random-uuid))
+                  {::protocol/request-id (str (random-uuid))
                   :seon.db/db (:seon.db/db acquired)
                   ::protocol/selector '[*]
-                  ::protocol/entity-id [:seon.config/id "cluster"]})}))]
+                  ::protocol/entity-id
+                  config.resolve/cluster-config-lookup-ref})}))]
         (if (and pulled (::protocol/success? pulled))
           (configuration (db/decode-edn-values (::protocol/result pulled)))
           {:seon.error/message

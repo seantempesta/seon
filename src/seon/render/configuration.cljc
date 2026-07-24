@@ -14,6 +14,7 @@
   (get configuration k default))
 
 (def cluster-config-id config.resolve/cluster-config-id)
+(def cluster-config-lookup-ref config.resolve/cluster-config-lookup-ref)
 
 (defn namespaces-policy [configuration]
   {:seon.config/always (or (:seon.config/always configuration) #{})})

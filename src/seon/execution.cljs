@@ -432,7 +432,7 @@
 (defn- config-request [database]
   {::db/db database
    ::db/pull-pattern '[*]
-   ::db/ref [:seon.config/id config/cluster-config-id]
+   ::db/ref config/cluster-config-lookup-ref
    ::db/max-work (:datahike.resource/max-work
                   config/configuration-read-profile)
    ::db/max-results (:datahike.resource/max-results
@@ -972,7 +972,7 @@
             stored (when-not (:seon.error/message database)
                      (await
                       (db/entity database
-                                 [:seon.config/id config/cluster-config-id])))
+                                 config/cluster-config-lookup-ref)))
             configuration
             (when-not (:seon.error/message stored)
               (some-> stored db/decode-edn-values))]

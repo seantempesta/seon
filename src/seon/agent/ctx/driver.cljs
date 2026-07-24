@@ -217,7 +217,7 @@
    (merge
     {::protocol/operation protocol/pull-operation
      ::protocol/selector '[*]
-     ::protocol/entity-id [:seon.config/id config/cluster-config-id]}
+     ::protocol/entity-id config/cluster-config-lookup-ref}
     config/configuration-read-profile)
    (merge
     {::protocol/operation protocol/pull-operation
@@ -398,7 +398,7 @@
    (merge
     {::protocol/operation protocol/pull-operation
      ::protocol/selector '[*]
-     ::protocol/entity-id [:seon.config/id config/cluster-config-id]}
+     ::protocol/entity-id config/cluster-config-lookup-ref}
     config/configuration-read-profile)])
 
 (def agent-view-fixed-dependencies

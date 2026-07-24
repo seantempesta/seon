@@ -354,7 +354,7 @@
    :seon.error/data data})
 
 (def ^:private configuration-ref
-  [:seon.config/id config/cluster-config-id])
+  config/cluster-config-lookup-ref)
 
 (def ^:private agent-creation-max-results
   4096)
