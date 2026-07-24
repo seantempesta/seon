@@ -11,6 +11,11 @@
             [clojure.string :as str]
             [seon.schema :as schema]))
 
+;; Namespace identity is the root of the persisted namespace fact family.
+;; Keep it in this dependency-neutral owner so every load-time schema
+;; reference can require the declaration before candidate projection.
+(schema/register! :seon.ns/name [:symbol {:seon.db/identity true}])
+
 (schema/register! :seon.ns.require/target :symbol)
 (schema/register! :seon.ns.require/alias :symbol)
 (schema/register! :seon.ns.require/refers [:set :symbol])

@@ -34,13 +34,11 @@
 
 (declare decode-block)
 
-;; Program-graph ns rows. :seon.ns/name itself is registered in
-;; seon.agent.ctx.render-fns — the FIRST-loading ns whose load-time
-;; schemas reference it (this ns requires render-fns for schema ownership, so render-fns
-;; loads before line 90 here would run; registering it here broke
-;; every COLD pod boot while hot reloads sailed). The rest of the
-;; :seon.fn/:seon.schema attr family stays in seon.agent until the P6
-;; split finds them a real home.
+;; Program-graph ns rows. Namespace identity lives in the dependency-neutral
+;; seon.ns.source owner required above, before any load-time schema references
+;; it. Namespace source remains here with the context acquisition that first
+;; registers it. The rest of the :seon.fn/:seon.schema attr family stays in
+;; seon.agent until the P6 split finds them a real home.
 (schema/register! :seon.ns/source  :string)
 ;; The ns dependency edges have ONE persisted representation: the reified
 ;; `:seon.ns/require-edges` component rows (registered in seon.eval,

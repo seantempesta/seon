@@ -150,8 +150,8 @@
 ;; indexed codebase at boot; agent-defined entities populate via
 ;; detect-and-tee in eval-batch!.
 ;;
-;; :seon.ns/name + :seon.ns/source live in seon.agent.ctx (its render-namespace
-;; schemas reference them and seon.agent.ctx loads first).
+;; :seon.ns/name lives in the dependency-neutral seon.ns.source owner;
+;; :seon.ns/source lives in seon.agent.ctx with its first acquisition schemas.
 ;; ============================================================
 
 ;; Projections from the analyzer's var-map. Re-derived on every

@@ -7,6 +7,7 @@
   (:require
     [clojure.string :as str]
     [seon.db :as db]
+    [seon.ns.source]
     [seon.schema :as schema]))
 
 #?(:clj (defmacro await [value] value))

@@ -11,6 +11,7 @@
    [seon.ai.tokens :as tokens]
    [seon.render.configuration :as configuration]
    [seon.db.id :as db.id]
+   [seon.ns.source]
    [seon.schema :as schema]))
 
 #?(:clj (defmacro await [value] value))
@@ -44,9 +45,8 @@
        (sort-by (comp str ::sym))
        vec))
 
-;; These load-order schemas remain here because this namespace is the first
-;; execution-child owner that references them.
-(schema/register! :seon.ns/name [:symbol {:seon.db/identity true}])
+;; Agent identity remains here because this namespace is its first load-time
+;; referencer. Namespace identity lives in seon.ns.source, required above.
 (schema/register!
  :seon.agent/id
  [:and {:seon.db/identity true
