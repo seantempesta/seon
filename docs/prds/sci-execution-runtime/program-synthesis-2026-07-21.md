@@ -237,6 +237,16 @@ TIMEOUT CENSUS ACCEPTED (~11:00, research/timeout-census-2026-07-24.md):
 Anchor rule: a backstop firing must record a fault datom — silent
 backstop firings found in watchdog steal + R42 are part of W-R50-2/5.
 
+R50 COROLLARY RULED (~11:15): interfaces EXPRESS dependencies and
+publish readiness — change the interface, never bolt detection onto
+one that hides the event (AGENTS.md §Runtime contracts). Integrant
+vendored at reference-code/integrant (bcad6bc; local git dir from the
+prior integrant era reactivated). Fable research lane running →
+research/integrant-evaluation-2026-07-24.md: current three-layer
+lifecycle (operator / process boot / db coordination) vs integrant
+source, per-wedge-class fit, migration cost vs thinner
+readiness-interface + superv.async path; owner decides on the report.
+
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 
 ## older restart protocol below until morning)
