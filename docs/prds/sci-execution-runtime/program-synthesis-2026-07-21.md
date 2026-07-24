@@ -1086,6 +1086,12 @@ MORNING ITEMS (accumulating):
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- R43 RENDER CLUSTER CLOSED (a675ab8ed, accepted): all four
+  namespaces green (107/608), TEST-ONLY — fixtures model provenance
+  with exact artifact exports, fail-closed unknowns, parity
+  fingerprints re-derived; production classifier unchanged. The
+  16F+1E remainder is dead. Awaiting: BN-5/10/6 closer + two
+  refills → THE SETTLE RERUN.
 - HOSTERR FIXED+ARCHIVED (d1e6612fe + d68d6a25a, 36/198 green):
   flat writer errors recognized, startup error frame before EOF,
   structured Throwable logging — silent loss dead. 119 OPEN.
