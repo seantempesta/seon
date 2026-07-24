@@ -1,5 +1,5 @@
 (ns seon.execution.runtime
-  "Compose execution-child services and compiled prompt entrypoints.
+  "Compose execution-child services and the compiled evaluation entrypoint.
 
    This runtime wires evaluation, rendering, database access, and request
    dispatch inside one child without taking over host process supervision."
@@ -13,9 +13,6 @@
    [my.skills]
    [my.ui]
    [seon.agent]
-   [seon.agent.ctx :as ctx]
-   [seon.agent.ctx.driver :as ctx-driver]
-   [seon.agent.ctx.canvas :as ctx-canvas]
    [seon.agent.home :as home]
    [seon.agent.ctx.menu]
    [seon.agent.ctx.namespaces]
@@ -24,7 +21,6 @@
    [seon.agent.ctx.transcript]
    [seon.agent.ctx.typeahead-steps]
    [seon.agent.ctx.warnings]
-   [seon.agent.message :as message]
    [seon.agent.fs]
    [seon.agent.lifecycle]
    [seon.agent.search]
@@ -34,197 +30,14 @@
    [seon.config :as config]
    [seon.db :as db]
    [seon.db.protocol :as protocol]
-   [seon.derive :as derive]
    [seon.execution :as execution]
    [seon.error :as error]
    [seon.eval :as eval]
    [seon.render :as render]
-   [seon.render.canvas :as canvas]
-   [seon.render.surface :as surface]
    [seon.render.system]
    [seon.schema :as schema]
    [seon.web.reactive.transform :as reactive-transform]))
 
-
-(defn- query-member-value [member]
-  (when (true? (::protocol/success? member))
-    (:datahike.query/result member)))
-
-(defn- html-slot [value]
-  (when (some? value)
-    (db/decode-edn-value :seon.render/html value)))
-
-(defn- html-call [id entity configuration block renderer]
-  {::execution/function-symbol renderer
-   ::execution/invoke-selected? true
-   ::execution/arguments
-   [(cond-> {:seon.agent/id id
-             :seon.agent/entity entity
-             :seon.config/configuration configuration
-             :seon.render/node block}
-      (contains? block :seon.render.chat/last-reply)
-      (assoc :seon.render.chat/last-reply
-             (:seon.render.chat/last-reply block)))]})
-
-(defn- page-state [entity]
-  (let [run (:seon.agent/run entity)
-        open? (= :open (:seon.agent.run/status run))]
-    (derive/state-from-primitives
-     (cond-> {:seon.agent.run/open? open?}
-       (:seon.agent/terminated-at entity)
-       (assoc :seon.agent/terminated-at (:seon.agent/terminated-at entity))
-       (and open? (:seon.agent.run/paused-at run))
-       (assoc :seon.agent.run/paused-at (:seon.agent.run/paused-at run))))))
-
-(defn ^:async render-agent-view!
-  "Acquire one page projection and resolve its surfaces inside the child."
-  [{:seon.agent/keys [id]} invoke-selected!]
-  (let [database (or (::db/db (db/current-tx-context))
-                     (await (db/db)))
-        members (assoc-in ctx-driver/agent-view-members [0 ::protocol/entity-id]
-                          [:seon.agent/id id])]
-    (if (:seon.error/message database)
-      database
-      (let [acquired (await
-                      (db/execute-many
-                       {::db/db database
-                        ::db/members members
-                        ::db/max-result-weight 3670016}))
-            [agent-member agent-count-member config-member]
-            (::db/results acquired)]
-        (cond
-          (:seon.error/message acquired)
-          acquired
-
-          (not= 3 (count (::db/results acquired)))
-          (ctx-driver/prompt-acquisition-error acquired (::db/results acquired))
-
-          (not-every? #(true? (::protocol/success? %))
-                      (::db/results acquired))
-          (ctx-driver/prompt-acquisition-error acquired (::db/results acquired))
-
-          :else
-          (let [entity (or (ctx-driver/acquired-member agent-member) {})
-                configuration
-                (db/decode-edn-values
-                 (or (ctx-driver/acquired-member config-member) {}))
-                canvas-acquisition
-                (await (ctx-canvas/acquire-canvas! id entity database))]
-            (if (:seon.error/message canvas-acquisition)
-              canvas-acquisition
-              (let [canvas-wired
-                    (:seon.render.canvas/wired canvas-acquisition)
-                    canvas-value
-                    (:seon.render.canvas/value canvas-wired)
-                    recent-messages
-                    (when (= canvas/welcome-sym canvas-value)
-                      (await
-                       (message/recent
-                        {::db/db database
-                         :seon.agent/id id
-                         :seon.agent.message/recent-limit 50})))]
-                (if (:seon.error/message recent-messages)
-                  recent-messages
-                  (let [last-reply
-                        (when (vector? recent-messages)
-                          (some->> recent-messages
-                                   (filter
-                                    (fn [message]
-                                      (and
-                                       (= id
-                                          (get-in
-                                           message
-                                           [:seon.agent.message/from
-                                            :seon.agent/id]))
-                                       (some
-                                        :seon.user/id
-                                        (:seon.agent.message/to message)))))
-                                   last
-                                   :seon.agent.message/content))
-                        blocks
-                        (->> (ctx/selected-agent-blocks entity nil)
-                             (keep
-                              (fn [block]
-                                (when-let [renderer
-                                           (html-slot
-                                            (:seon.render/html block))]
-                                  (assoc block
-                                         :seon.render/html renderer))))
-                             vec)
-                        canvas-block
-                        (cond->
-                        {:seon.render.surface/selection "canvas"
-                         :seon.render.surface/label "canvas"
-                         :seon.render/html canvas-value
-                         :seon.fn/read-attrs
-                         (:seon.fn/read-attrs canvas-acquisition)
-                         :seon.agent/entity
-                         (:seon.render/entity canvas-acquisition)}
-                          (some? last-reply)
-                          (assoc :seon.render.chat/last-reply last-reply))
-                        all-blocks (conj blocks canvas-block)
-                        targets
-                        (->> all-blocks
-                             (keep-indexed
-                              (fn [index block]
-                                (when (symbol? (:seon.render/html block))
-                                  {:index index
-                                   :call
-                                   (html-call
-                                    id
-                                    (or (:seon.agent/entity block) entity)
-                                    configuration
-                                    block
-                                    (:seon.render/html block))})))
-                             vec)
-                        results
-                        (if (seq targets)
-                          (await
-                           (error/with-configuration
-                            configuration
-                            #(invoke-selected! (mapv :call targets))))
-                          [])
-                        hiccup-by-index
-                        (into {}
-                              (map
-                               (fn [{:keys [index]} result]
-                                 [index
-                                  (ctx-driver/html-value
-                                   id (nth all-blocks index) result)])
-                               targets
-                               results))
-                        surfaces
-                        (->> all-blocks
-                             (keep-indexed
-                              (fn [index block]
-                                (let [renderer (:seon.render/html block)
-                                      hiccup
-                                      (cond
-                                        (vector? renderer)
-                                        (ctx-driver/interactive-hiccup
-                                         id block renderer)
-
-                                        (symbol? renderer)
-                                        (get hiccup-by-index index)
-
-                                        :else
-                                        nil)]
-                                  (surface/materialized block hiccup))))
-                             vec)]
-                    {:seon.agent/id id
-                     :seon.ui.agent-view/state
-                     (if (seq entity) (page-state entity) :unknown)
-                     ::surface/surfaces surfaces
-                     :seon.web.datastar/dependencies
-         (into ctx-driver/agent-view-fixed-dependencies
-                           (mapcat ::surface/read-attrs)
-                           surfaces)
-                     :seon.ui.header/projection
-                     {:seon.ui.header/brand-name "seon"
-                      :seon.ui.header/agent-count
-                      (or (query-member-value agent-count-member) 0)
-                      :seon.ui.header/running-count
-                      (if (= :running (page-state entity)) 1 0)}}))))))))))
 
 (def ^:private setup-home-requires-origin-query
   '[:find ?requires ?process-id
@@ -315,12 +128,6 @@
    {::execution/compiled-function
     (fn [arguments _invoke-selected! _compile-state! prepare-program!]
       (apply eval-batch! (conj arguments prepare-program!)))
-    ::execution/pin-database? true}
-
-   'seon.execution.runtime/render-agent-view!
-   {::execution/compiled-function
-    (fn [arguments invoke-selected! _compile-state! _prepare-program!]
-      (apply render-agent-view! (conj arguments invoke-selected!)))
     ::execution/pin-database? true}})
 
 (defn -main

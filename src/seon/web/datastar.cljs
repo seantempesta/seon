@@ -25,12 +25,16 @@
   (:require
     ["node:zlib" :as zlib]
     [clojure.string :as str]
+    [seon.agent.ctx.driver :as ctx.driver]
     [seon.db :as db]
     [seon.db.branch :as db.branch]
+    [seon.error :as error]
     [seon.execution :as execution]
     [seon.execution.host :as execution.host]
     [seon.log :as log]
     [seon.reactive :as reactive]
+    [seon.render :as render]
+    [seon.render.core :as render.core]
     [seon.schema :as schema]
     [seon.ui.agent-view :as agent-view]
     [seon.ui.html :as html]
@@ -1071,29 +1075,121 @@
   [_r]
   (root-page-response))
 
-(def agent-view-function 'seon.execution.runtime/render-agent-view!)
-
-(defn- agent-view-result [message]
-  (if (= execution/result-message (::execution/message message))
-    (let [projection (::execution/result message)]
-      (if-let [error-message (:seon.error/message projection)]
-        {::element
-         [:main {:id "app-view" :class "text-error text-xs font-mono"}
-          (str "render error: " error-message)]
-         ::db/read-evidence :all}
-        {::element (agent-view/render-agent-view projection)
-         ::db/read-evidence (or (::db/read-evidence message) :all)}))
+(defn- agent-view-result [projection]
+  (if-let [error-message (:seon.error/message projection)]
     {::element
      [:main {:id "app-view" :class "text-error text-xs font-mono"}
-      (str "render error: "
-           (or (get-in message [::execution/error :seon.error/message])
-               "execution child failed"))]
-     ::db/read-evidence :all}))
+     (str "render error: " error-message)]
+     ::db/read-evidence :all}
+    (cond-> {::element (agent-view/render-agent-view projection)}
+      (contains? projection ::db/read-evidence)
+      (assoc ::db/read-evidence (::db/read-evidence projection)))))
+
+(defn- supports-arity?
+  "Read the original CLJS callable through Malli's instrumentation wrapper."
+  [function-value arity]
+  (let [function-value
+        (or (aget function-value "malli$instrument$original")
+            function-value)
+        max-fixed (aget function-value "cljs$lang$maxFixedArity")
+        fixed (aget function-value
+                    (str "cljs$core$IFn$_invoke$arity$" arity))
+        variadic (aget function-value
+                       "cljs$core$IFn$_invoke$arity$variadic")]
+    (if (number? max-fixed)
+      (or (fn? fixed)
+          (and (fn? variadic) (>= arity max-fixed)))
+      (= arity (.-length function-value)))))
+
+(defn- ^:async invoke-authored-render!
+  [database agent-id
+   {function-symbol ::render/function-symbol
+    arguments ::render/arguments}]
+  (try
+    (let [invocations
+          (await
+           (execution/prepare-invocations!
+            {::db/db database
+             ::execution/invocation-plans
+             [(execution/invocation-plan
+               agent-id function-symbol arguments)]}))
+          result (await (execution.host/invoke! (first invocations)))]
+      (cond
+        (contains? result ::execution/ok?)
+        result
+
+        (= execution/result-message (::execution/message result))
+        (cond-> {::execution/ok? true
+                 ::execution/value (::execution/result result)}
+          (contains? result ::db/read-evidence)
+          (assoc ::db/read-evidence (::db/read-evidence result)))
+
+        :else
+        {::execution/ok? false
+         ::execution/error
+         (or (::execution/error result)
+             {:seon.error/message "The authored agent-view render failed."
+              :seon.error/kind :agent})}))
+    (catch :default exception
+      {::execution/ok? false
+       ::execution/error (error/->map exception)})))
+
+(declare invoke-agent-view-calls!)
+
+(defn- ^:async invoke-agent-view-call!
+  [database agent-id call]
+  (let [function-symbol (::execution/function-symbol call)]
+    (if (error/agent-authored-sym?
+         function-symbol (schema/current-projection))
+      (await
+       (invoke-authored-render!
+        database
+        agent-id
+        {::render/function-symbol function-symbol
+         ::render/arguments (::execution/arguments call)}))
+      (try
+        (if-let [function-value
+                 (or (get render.core/renderer-functions function-symbol)
+                     (render.core/resolve-compiled function-symbol))]
+          (let [base-arguments (::execution/arguments call)
+                arguments
+                (cond-> base-arguments
+                  (and (::execution/invoke-selected? call)
+                       (supports-arity?
+                        function-value (inc (count base-arguments))))
+                  (conj #(invoke-agent-view-calls!
+                          database agent-id %)))
+                value (await (apply function-value arguments))]
+            {::execution/ok? true ::execution/value value})
+          {::execution/ok? false
+           ::execution/error
+           {:seon.error/message
+            "The selected compiled agent-view function is not loaded."
+            :seon.error/kind :core-bug
+            :seon.error/data
+            {::execution/function-symbol function-symbol}}})
+        (catch :default exception
+          (error/record! {::error/raw exception ::error/fault :core})
+          {::execution/ok? false
+           ::execution/error (error/->map exception)})))))
+
+(defn- ^:async invoke-agent-view-calls!
+  [database agent-id calls]
+  (let [results
+        (await
+         (js/Promise.all
+          (clj->js
+           (mapv #(invoke-agent-view-call!
+                   database agent-id %)
+                 calls))))]
+    (vec (array-seq results))))
 
 (defn- ^:async render-agent-view! [id database]
   (agent-view-result
-   (await (execution.host/invoke-compiled!
-           database id agent-view-function [{:seon.agent/id id}]))))
+   (await
+    (ctx.driver/render-agent-view!
+     {:seon.agent/id id ::db/db database}
+     #(invoke-agent-view-calls! database id %)))))
 
 (defn- live-agent-feed-definition [id view-id]
   (cond->
@@ -1112,9 +1208,10 @@
    db->routes resolves its symbol.
 
    A historical request supplies all four `store-id`, `branch`, `commit-id`,
-   and `basis-t` query fields. That Proximum branch head is passed to the
-   compiled child and used as the frozen subscription key. Partial or malformed
-   branch heads return a structured 422; only an absent branch head opens live."
+   and `basis-t` query fields. That Proximum branch head selects the immutable
+   database value for the trusted in-pod render and remains the frozen
+   subscription key. Partial or malformed branch heads return a structured
+   422; only an absent branch head opens live."
   [r]
   (let [^js request (:seon.http/request r)
         id      (get-in r [:path-params :id])

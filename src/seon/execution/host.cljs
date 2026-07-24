@@ -977,8 +977,9 @@
 (defn- invoke-now!
   "Route the head invocation from its selected execution-plan tier.
 
-   Result-symbol ownership remains a runtime fact. Artifact-digest prompt/view
-   rendering stays on the Bun child until its claimant phase moves."
+   Result-symbol ownership remains a runtime fact. The remaining generic
+   artifact-digest path stays on the Bun child until its wider deletion; the
+   live prompt and agent-view callers render directly in the pod."
   [invocation]
   (if (and (eval-batch-invocation? invocation)
            (not (contains? #{:jvm :bun}

@@ -1053,7 +1053,7 @@
           core-projection
           {:seon.schema.projection/function-source-admissions {}
            :seon.schema.projection/artifact-exports
-           #{'seon.execution.runtime/render-agent-view!}}
+           #{'seon.execution.runtime/eval-batch!}}
           core-error (ex-info "composition failed"
                               {:seon.error/kind :core-bug})]
       (set! db/db
@@ -1083,7 +1083,7 @@
       (try
         (is (= :core
                (error/fault-for
-                'seon.execution.runtime/render-agent-view!
+                'seon.execution.runtime/eval-batch!
                 core-projection)))
         (-> (js/Promise.resolve
              (record-top-level! 'my.orders/view
@@ -1092,8 +1092,8 @@
              (fn [_]
                (is (empty? @reads))
                (js/Promise.resolve
-                (record-top-level!
-                 'seon.execution.runtime/render-agent-view! core-error))))
+               (record-top-level!
+                 'seon.execution.runtime/eval-batch! core-error))))
             (.then
              (fn [_]
                (is (= [:db [:seon.config/id config/cluster-config-id]]

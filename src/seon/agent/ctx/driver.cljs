@@ -1,8 +1,9 @@
 (ns seon.agent.ctx.driver
-  "Compose execution-child services and compiled prompt entrypoints.
+  "Derive prompt and agent-view renders inside the pod.
 
-   This runtime wires evaluation, rendering, database access, and request
-   dispatch inside one child without taking over host process supervision."
+   Trusted composition stays in-process over one immutable database value.
+   Callers inject the selected-function door so agent-authored renderers remain
+   guarded without moving the trusted prompt or page projection."
   (:require
    [my.blob]
    [my.canvas]
@@ -14,17 +15,21 @@
    [my.ui]
    [seon.agent.ctx :as ctx]
    [seon.agent.ctx.canvas :as ctx-canvas]
+   [seon.agent.message :as message]
    [seon.agent.home :as home]
    [seon.agent.ctx.render-fns :as render-fns]
    [seon.ai :as ai]
    [seon.config :as config]
    [seon.db :as db]
    [seon.db.protocol :as protocol]
+   [seon.derive :as derive]
    [seon.execution :as execution]
    [seon.error :as error]
    [seon.render :as render]
    [seon.render.canvas :as canvas]
+   [seon.render.surface :as surface]
    [seon.schema :as schema]
+   [seon.ui.agent-view]
    [seon.web.reactive.transform :as reactive-transform]))
 
 (schema/register! ::render-prompt-request
@@ -50,7 +55,17 @@
    [:seon.agent.run/id-of-run {:optional true} :string]])
 
 (schema/register! ::render-agent-view-request
-  [:map {:closed true} [:seon.agent/id :string]])
+  [:map {:closed true}
+   [:seon.agent/id :string]
+   [:seon.db/db :seon.db/db]])
+
+(schema/register! ::invoke-selected! 'fn?)
+
+(schema/register! ::render-agent-view-error
+  [:map
+   [:seon.error/message :string]
+   [:seon.error/kind {:optional true} :keyword]
+   [:seon.error/data {:optional true} :map]])
 
 (defn- selected-error-message
   [result]
@@ -417,3 +432,196 @@
     :seon.render.surface/touch
     :seon.render.surface/focus-touch
     :seon.fn/read-attrs})
+
+(defn- query-member-value [member]
+  (when (true? (::protocol/success? member))
+    (:datahike.query/result member)))
+
+(defn- html-slot [value]
+  (when (some? value)
+    (db/decode-edn-value :seon.render/html value)))
+
+(defn- html-call [id entity configuration database block renderer]
+  {::execution/function-symbol renderer
+   ::execution/invoke-selected? true
+   ::execution/arguments
+   [(cond-> {:seon.agent/id id
+             :seon.agent/entity entity
+             :seon.config/configuration configuration
+             ::db/db database
+             :seon.render/node block}
+      (contains? block :seon.render.chat/last-reply)
+      (assoc :seon.render.chat/last-reply
+             (:seon.render.chat/last-reply block)))]})
+
+(defn- page-state [entity]
+  (let [run (:seon.agent/run entity)
+        open? (= :open (:seon.agent.run/status run))]
+    (derive/state-from-primitives
+     (cond-> {:seon.agent.run/open? open?}
+       (:seon.agent/terminated-at entity)
+       (assoc :seon.agent/terminated-at (:seon.agent/terminated-at entity))
+       (and open? (:seon.agent.run/paused-at run))
+       (assoc :seon.agent.run/paused-at (:seon.agent.run/paused-at run))))))
+
+(defn ^:async render-agent-view!
+  "Acquire one page projection and resolve its surfaces inside the pod."
+  {:malli/schema
+   [:=> [:cat ::render-agent-view-request ::invoke-selected!]
+    [:or :seon.ui.agent-view/projection ::render-agent-view-error]]}
+  [{:seon.agent/keys [id] database ::db/db} invoke-selected!]
+  (let [members (assoc-in agent-view-members [0 ::protocol/entity-id]
+                          [:seon.agent/id id])
+        acquired (if database
+                   (await
+                    (db/execute-many
+                     {::db/db database
+                      ::db/members members
+                      ::db/max-result-weight 3670016}))
+                   {:seon.error/message
+                    "Agent-view rendering requires :seon.db/db."
+                    :seon.error/kind :core-bug})
+        [agent-member agent-count-member config-member]
+        (::db/results acquired)]
+    (cond
+      (:seon.error/message acquired)
+      acquired
+
+      (not= 3 (count (::db/results acquired)))
+      (prompt-acquisition-error acquired (::db/results acquired))
+
+      (not-every? #(true? (::protocol/success? %))
+                  (::db/results acquired))
+      (prompt-acquisition-error acquired (::db/results acquired))
+
+      :else
+      (let [entity (or (acquired-member agent-member) {})
+            configuration
+            (db/decode-edn-values
+             (or (acquired-member config-member) {}))
+            canvas-acquisition
+            (await (ctx-canvas/acquire-canvas! id entity database))]
+        (if (:seon.error/message canvas-acquisition)
+          canvas-acquisition
+          (let [canvas-wired
+                (:seon.render.canvas/wired canvas-acquisition)
+                canvas-value
+                (:seon.render.canvas/value canvas-wired)
+                recent-messages
+                (when (= canvas/welcome-sym canvas-value)
+                  (await
+                   (message/recent
+                    {::db/db database
+                     :seon.agent/id id
+                     :seon.agent.message/recent-limit 50})))]
+            (if (:seon.error/message recent-messages)
+              recent-messages
+              (let [last-reply
+                    (when (vector? recent-messages)
+                      (some->> recent-messages
+                               (filter
+                                (fn [recent-message]
+                                  (and
+                                   (= id
+                                      (get-in
+                                       recent-message
+                                       [:seon.agent.message/from
+                                        :seon.agent/id]))
+                                   (some
+                                    :seon.user/id
+                                    (:seon.agent.message/to recent-message)))))
+                               last
+                               :seon.agent.message/content))
+                    blocks
+                    (->> (ctx/selected-agent-blocks entity nil)
+                         (keep
+                          (fn [block]
+                            (when-let [renderer
+                                       (html-slot
+                                        (:seon.render/html block))]
+                              (assoc block :seon.render/html renderer))))
+                         vec)
+                    canvas-block
+                    (cond->
+                     {:seon.render.surface/selection "canvas"
+                      :seon.render.surface/label "canvas"
+                      :seon.render/html canvas-value
+                      :seon.fn/read-attrs
+                      (:seon.fn/read-attrs canvas-acquisition)
+                      :seon.agent/entity
+                      (:seon.render/entity canvas-acquisition)}
+                      (some? last-reply)
+                      (assoc :seon.render.chat/last-reply last-reply))
+                    all-blocks (conj blocks canvas-block)
+                    targets
+                    (->> all-blocks
+                         (keep-indexed
+                          (fn [index block]
+                            (when (symbol? (:seon.render/html block))
+                              {:index index
+                               :call
+                               (html-call
+                                id
+                                (or (:seon.agent/entity block) entity)
+                                configuration
+                                database
+                                block
+                                (:seon.render/html block))})))
+                         vec)
+                    results
+                    (if (seq targets)
+                      (await
+                       (error/with-configuration
+                        configuration
+                        #(invoke-selected! (mapv :call targets))))
+                      [])
+                    remote-read-evidence
+                    (let [evidence (keep ::db/read-evidence results)]
+                      (cond
+                        (some #{:all} evidence) :all
+                        (seq evidence)
+                        (vec (distinct (mapcat identity evidence)))
+                        :else nil))
+                    hiccup-by-index
+                    (into {}
+                          (map
+                           (fn [{:keys [index]} result]
+                             [index
+                              (html-value
+                               id (nth all-blocks index) result)])
+                           targets
+                           results))
+                    surfaces
+                    (->> all-blocks
+                         (keep-indexed
+                          (fn [index block]
+                            (let [renderer (:seon.render/html block)
+                                  hiccup
+                                  (cond
+                                    (vector? renderer)
+                                    (interactive-hiccup id block renderer)
+
+                                    (symbol? renderer)
+                                    (get hiccup-by-index index)
+
+                                    :else
+                                    nil)]
+                              (surface/materialized block hiccup))))
+                         vec)
+                    state (if (seq entity) (page-state entity) :unknown)]
+                (cond->
+                 {:seon.agent/id id
+                  :seon.ui.agent-view/state state
+                  ::surface/surfaces surfaces
+                  :seon.web.datastar/dependencies
+                  (into agent-view-fixed-dependencies
+                        (mapcat ::surface/read-attrs)
+                        surfaces)
+                  :seon.ui.header/projection
+                  {:seon.ui.header/brand-name "seon"
+                   :seon.ui.header/agent-count
+                   (or (query-member-value agent-count-member) 0)
+                   :seon.ui.header/running-count
+                   (if (= :running state) 1 0)}}
+                  remote-read-evidence
+                  (assoc ::db/read-evidence remote-read-evidence))))))))))

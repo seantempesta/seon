@@ -115,6 +115,15 @@ the anchor stays the state ledger.
   move (`src/seon/agent/turn.cljs:335-405`,
   `src/seon/execution/host.cljs:1285-1307`,
   `src/seon/execution/runtime.cljs:683-693`).
+- **An in-pod render move must preserve both the immutable database value and
+  authored-read evidence.** The trusted agent-view projection now receives the
+  feed's exact `:seon.db/db` and invokes core renderers locally, while authored
+  renderer leaves still pass through `prepare-invocations!` and
+  `execution.host/invoke!`. Forward the host result's
+  `:seon.db/read-evidence` into the projection; otherwise the reactive feed can
+  suppress a dependency that was read behind the guarded door
+  (`src/seon/agent/ctx/driver.cljs`,
+  `src/seon/web/datastar.cljs`).
 - **A scalar success with a ruled error-value failure needs an explicit union.**
   `home-dir` could not remain `[] -> :string` after errors-as-values: register
   the exact string-or-flat-error response and regress the absent environment

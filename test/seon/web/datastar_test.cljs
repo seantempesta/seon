@@ -1,8 +1,11 @@
 (ns seon.web.datastar-test
   (:require [cljs.test :refer [async deftest is]]
             [clojure.string :as str]
+            [seon.agent.ctx.driver :as ctx.driver]
             [seon.db :as db]
+            [seon.error :as error]
             [seon.execution :as execution]
+            [seon.execution.host :as execution.host]
             [seon.reactive :as reactive]
             [seon.ui.agent-view :as agent-view]
             [seon.ui.html :as html]
@@ -140,25 +143,105 @@
     (is (= :identity (select "gzip" "gzip;q=0, br")))
     (is (thrown? js/Error (select "invented" "gzip")))))
 
-(deftest child-database-errors-remain-the-visible-render-error
-  (let [result (@#'datastar/agent-view-result
-                {::execution/message execution/result-message
-                 ::execution/result
-                 {:seon.error/message
-                  "datahike query-results budget exceeded"}})]
+(deftest database-errors-remain-the-visible-agent-view-render-error
+  (let [result
+        (@#'datastar/agent-view-result
+         {:seon.error/message "datahike query-results budget exceeded"})]
     (is (= :main (first (::datastar/element result))))
     (is (= :all (::db/read-evidence result)))
     (is (= "render error: datahike query-results budget exceeded"
            (last (::datastar/element result))))))
 
-(deftest child-message-read-evidence-is-authoritative
+(deftest remote-authored-read-evidence-remains-authoritative
   (with-redefs [agent-view/render-agent-view
                 (fn [_] [:main {:id "app-view"} "projection"])]
     (let [result (@#'datastar/agent-view-result
-                  {::execution/message execution/result-message
-                   ::execution/result {:unrelated/declaration :wrong}
+                  {:unrelated/declaration :wrong
                    ::db/read-evidence read-evidence})]
       (is (= read-evidence (::db/read-evidence result))))))
+
+(deftest direct-agent-view-render-pins-the-feed-database-without-child-dispatch
+  (async done
+    (let [original-render ctx.driver/render-agent-view!
+          original-compiled execution.host/invoke-compiled!
+          observed (atom nil)
+          child-dispatches (atom 0)]
+      (set! ctx.driver/render-agent-view!
+            (fn [request _invoke-selected!]
+              (reset! observed request)
+              (js/Promise.resolve
+               {:seon.agent/id "agent-1"
+                :seon.ui.agent-view/state :idle
+                :seon.render.surface/surfaces []
+                :seon.ui.header/projection
+                {:seon.ui.header/brand-name "seon"
+                 :seon.ui.header/agent-count 1
+                 :seon.ui.header/running-count 0}})))
+      (set! execution.host/invoke-compiled!
+            (fn [& _]
+              (swap! child-dispatches inc)
+              (js/Promise.reject
+               (js/Error. "agent view must not dispatch to a child"))))
+      (-> (js/Promise.resolve
+           (@#'datastar/render-agent-view! "agent-1" database))
+          (.then
+           (fn [result]
+             (is (= {:seon.agent/id "agent-1" ::db/db database}
+                    @observed))
+             (is (zero? @child-dispatches))
+             (is (= "app-view"
+                    (get-in result [::datastar/element 1 :id])))))
+          (.catch (fn [exception] (is false (str exception))))
+          (.finally
+           (fn []
+             (set! ctx.driver/render-agent-view! original-render)
+             (set! execution.host/invoke-compiled! original-compiled)
+             (done)))))))
+
+(deftest authored-agent-view-render-uses-the-guarded-host-door
+  (async done
+    (let [original-classify error/agent-authored-sym?
+          original-prepare execution/prepare-invocations!
+          original-invoke execution.host/invoke!
+          observed (atom nil)
+          invocation {::execution/invocation-id "agent-view-render"}]
+      (set! error/agent-authored-sym? (fn [& _] true))
+      (set! execution/prepare-invocations!
+            (fn [request]
+              (reset! observed request)
+              (js/Promise.resolve [invocation])))
+      (set! execution.host/invoke!
+            (fn [selected]
+              (is (= invocation selected))
+              (js/Promise.resolve
+               {::execution/message execution/result-message
+                ::execution/result
+                {:seon.render/hiccup [:div "authored"]}
+                ::db/read-evidence read-evidence})))
+      (-> (js/Promise.resolve
+           (@#'datastar/invoke-agent-view-call!
+            database
+            "agent-1"
+            {::execution/function-symbol 'my.orders/view
+             ::execution/arguments [{:seon.agent/id "agent-1"}]}))
+          (.then
+           (fn [result]
+             (is (true? (::execution/ok? result)))
+             (is (= {:seon.render/hiccup [:div "authored"]}
+                    (::execution/value result)))
+             (is (= read-evidence (::db/read-evidence result)))
+             (is (identical? database (::db/db @observed)))
+             (is (= 'my.orders/view
+                    (get-in @observed
+                            [::execution/invocation-plans 0
+                             ::execution/function-symbol])))))
+          (.catch (fn [exception] (is false (str exception))))
+          (.finally
+           (fn []
+             (set! error/agent-authored-sym? original-classify)
+             (set! execution/prepare-invocations! original-prepare)
+             (set! execution.host/invoke! original-invoke)
+             (done)))))))
 
 (deftest structural-settle-selects-the-database-configured-delay
   (let [select @#'datastar/structural-settle-ms
