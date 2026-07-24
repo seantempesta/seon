@@ -177,8 +177,21 @@
          environment)
    "PATH" (selected-path-executable (get environment "PATH") argv)))
 
+(defn- stable-launch-descriptor-text
+  [text]
+  (try
+    (pr-str
+     (update (edn/read-string text)
+             ::launch/operational-envelope
+             dissoc
+             :seon.launch.envelope/generation))
+    (catch Throwable _ text)))
+
 (defn- environment-digest [environment argv]
-  (sha256-text (managed-environment environment argv)))
+  (sha256-text
+   (cond-> (managed-environment environment argv)
+     (string? (get environment "SEON_LAUNCH_DESCRIPTOR"))
+     (update "SEON_LAUNCH_DESCRIPTOR" stable-launch-descriptor-text))))
 
 (defn- owns-writer-processes?
   [descriptor]

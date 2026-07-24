@@ -1418,6 +1418,27 @@
       (is (false? (#'process/same-process-spec? spec record)))
       (finally (fs/delete-tree root {:force true})))))
 
+(deftest environment-identity-ignores-only-launch-envelope-generation
+  (let [descriptor
+        (fn [generation on-core-error]
+          (pr-str
+           {::launch/operational-envelope
+            {:seon.launch.envelope/generation generation
+             :seon.config/on-core-error on-core-error}}))
+        environment
+        (fn [generation on-core-error]
+          {"PATH" (System/getenv "PATH")
+           "SEON_LAUNCH_DESCRIPTOR"
+           (descriptor generation on-core-error)})]
+    (is (= (#'process/environment-digest
+            (environment 1 :crash) ["java"])
+           (#'process/environment-digest
+            (environment 2 :crash) ["java"])))
+    (is (not= (#'process/environment-digest
+               (environment 1 :crash) ["java"])
+              (#'process/environment-digest
+               (environment 2 :continue) ["java"])))))
+
 (deftest ensure-refuses-to-replace-a-nonconverged-managed-process
   (let [record {:seon.dev.process/id process/pod-id
                 :seon.dev.process/pid 41}

@@ -1919,6 +1919,7 @@ the variable-weight values they select.
   existing owner.
 - **Launch-envelope generation is lifecycle identity, not configuration
   identity.** Process convergence compares the envelope's data after removing
-  only `:seon.launch.envelope/generation` and normalizes its argv path. A
-  material envelope change still requires coordinated replacement; selecting
-  the same manifest for a second `up` reuses the ready generation.
+  only `:seon.launch.envelope/generation`, normalizes its argv path, and applies
+  the same projection to the launch descriptor in managed environment
+  identity. A material envelope change still requires coordinated replacement;
+  selecting the same manifest for a second `up` reuses the ready generation.
