@@ -55,6 +55,29 @@ verify applied identity at startup, remove population/config/agent work from
 `start-runtime!`, and prove the base-admission/divergence fast path.
 Final graduation remains U12's 100-agent kill/restart demonstration.
 
+R45 S4 STARTGATE SOURCE + BUN PROOF COMPLETE (13:10): release
+`ee5015ecdf715ad553f498973d4ed2de2d2179b3d2f2ba3912199beeb5074ff5`
+starts the applied `s4startgate` Bun leaf by verified identity + release base +
+database divergence overlay only. The divergent database contains one
+agent-provenance schema and one durable function; compose and the monolithic
+cold oracle have identical canonical bytes and fingerprint `1769298305`.
+The restart log contains zero committed-acquisition, indexing,
+config-reconcile, initial-agent, or monolithic-projection lines. Containment
+owner start → ready measured **2.03s** empty and **2.46s** divergent; complete
+`cluster open` operator wall measured **9.21s**. Frozen older release
+`a44d9b02…` refused the newer applied `ee5015ec…` database, named both full
+identities, and prescribed exactly `bin/seon cluster apply s4startgate`.
+
+S4 is **not graduated under its complete budget acceptance**: the shared
+writer JVM measured **13.88s** from containment-owner start to ready
+(`booting` → ready itself was 0.07s), and the claimant/web-render JVM processes
+remain unmeasured in the current release topology. Earliest unsettled contract
+is therefore the S4/S6 target-topology budget proof, while S5 same-transaction
+divergence maintenance is dependency-ready because the start gate and compose
+contract are settled. The next refill is S5 maintenance; S6 must investigate
+writer class load and measure claimant/web-render without relabeling the writer
+failure. Final graduation remains U12's 100-agent kill/restart demonstration.
+
 U9 S0a SOURCE INTEGRATED (09:09; R45 publisher block cleared at 09:58):
 `e74cae74a` moves `render-agent-view!` into
 `seon.agent.ctx.driver`, calls it directly from the Datastar feed at
@@ -257,6 +280,16 @@ fault loudly = the W-R50-1..5 queue. Integrant submodule stays as
 reference only; `rg integrant src/` must stay empty (standing
 acceptance). Fleet at ruling: s4startgate ∥ webui ∥ dbreceipts ∥
 15-min supervision clock.
+
+W-R50-4 LANDED+ACCEPTED (~13:20): dbreceipts — UDS per-request
+completion + disconnect rejection + nearest-deadline loud backstop
+(63b5ad37d), host receipt joining + event-driven interest reconnect
+(5af6813be); polling constants deleted, verified; 250ms survivor =
+reconnect rate-limit (census-sanctioned). Slot refilled: c1codec
+(codec totality + generative round-trip property, last owner-reserved
+item). Fleet: s4startgate ∥ webui ∥ c1codec ∥ supervision clock.
+Naming watch: :seon.r45s4/* seen in s4 transcript is NOT in the tree
+(verified rg-zero); unit-scoped names = stop-and-rename at review.
 
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 
