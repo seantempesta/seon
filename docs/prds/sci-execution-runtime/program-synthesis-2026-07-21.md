@@ -315,6 +315,21 @@ so far: b28cadfee EDN fingerprint · ddf2c5aa6 watch base-load-plan ·
 wire-type. Fleet: s4 (default bring-up) ∥ webui ∥ c1codec (resumed,
 remaining codec work) ∥ clock.
 
+AFTERNOON LEDGER (~14:40): LANDED+ACCEPTED: webui bef651af7
+(coalescing intact; test rewritten to await delivered-morph basis t —
+async-timing class) · configlift 1b5dd623d/a172b8f62 (W-R50-6 facts
+lifted; lane-7 bootstrap seam issue filed — first reconcile cannot
+read its own fact). IN FLIGHT: s5maintain (R45-S5 write-through) ∥
+writerready (fresh-eyes: operator readiness probe fails SILENTLY —
+prime suspect; make probe loud first, then fix; owns default
+bring-up; also the shutdown doubleValue NPE) ∥ clock. NOTE: c1codec
+resume self-killed (kill -TERM on its own session while process-
+cleaning); its uds.cljc close-diagnostic hunk left uncommitted —
+writerready adjudicates it. Blocked on green default: s4 final
+measure, re-drive-3, webui live proof, c1codec focused writer test.
+Dirty leftovers watch: db/id/schema.cljc + restore/schema.cljc
+tracked-modified, owner unclear — adjudicate before next freeze.
+
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 
 ## older restart protocol below until morning)
