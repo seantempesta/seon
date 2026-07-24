@@ -299,6 +299,8 @@
                           (schema/canonical-schema-rows (js/Date.)))]
     {:seon.execution/artifact-digest
      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+     :seon.db.initialization/config-manifest-digest
+     "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
      :seon.db.initialization/page-rows 64
      :seon.db/attributes (schema/canonical-database-attributes)
      :seon.db/program

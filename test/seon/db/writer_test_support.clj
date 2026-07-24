@@ -195,6 +195,8 @@
          (protocol/initialization-pages
           {:seon.execution/artifact-digest
            (:seon.execution/artifact-digest base)
+           :seon.db.initialization/config-manifest-digest
+           "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
            :seon.db.initialization/page-rows 64
            :seon.db/attributes
            (->> (concat (:seon.db/attributes base)

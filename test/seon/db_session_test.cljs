@@ -28,6 +28,8 @@
 (def ^:private initialization-0
   {:seon.execution/artifact-digest
    "0000000000000000000000000000000000000000000000000000000000000000"
+   :seon.db.initialization/config-manifest-digest
+   "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
    :seon.db.initialization/page-rows 64
    :seon.db/attributes []
    :seon.db/program []

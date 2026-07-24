@@ -742,7 +742,7 @@
 ;; Cluster database authority session.
 ;; ---------------------------------------------------------------------------
 
-(declare database-initialization)
+(declare load-page-plan)
 
 (schema/register! ::initialize? :boolean)
 (schema/register! ::configuration :seon.config/singleton)
@@ -789,11 +789,9 @@
             (throw
              (ex-info "Database initialization requires explicit config data."
                       {:seon.error/kind :core-bug})))
-          (database-initialization descriptor configuration))
-        boot-projection (some-> initialization meta ::boot-projection)
-        wire-initialization (some-> initialization (with-meta nil))
+          (load-page-plan descriptor))
         opened (await (db/open-session!
-                       (session-selection descriptor wire-initialization)))]
+                       (session-selection descriptor initialization)))]
     (log/info-console! "seon.client/open-database-session!"
                        (str "database "
                             (::db.protocol/database-name database)
@@ -801,19 +799,19 @@
                             (::db.protocol/database-path database)
                             " (writer: "
                             (::launch/request-socket-path writer-owner) ")"))
-    (cond-> opened
-      boot-projection
-      (vary-meta assoc ::boot-projection boot-projection))))
+    opened))
 
 ;; ---------------------------------------------------------------------------
 ;; Required initial database entities.
 ;; ---------------------------------------------------------------------------
 
 (defn- initial-data
-  "Return config, user, and the empty system-wide instruction singleton.
+  "Return the user and empty system-wide instruction singleton.
 
    The database authority admits these identities with the compiled program
-   before publishing the first usable database value.
+   before publishing the first usable database value. The config singleton is
+   intentionally absent: [[reconcile-config!]] is its one write surface, and
+   cluster apply invokes that surface after page application.
 
    The EMPTY system-wide instruction
    singleton (`my.kb.shared/seed-tx-data`); agents and the user APPEND
@@ -828,9 +826,9 @@
    clobbers runtime appends.
 
   Reopening the database never clobbers runtime appends."
-  [configuration]
+  []
   (db/encode-edn-slot-values
-   (into [configuration {:seon.user/id "user"}]
+   (into [{:seon.user/id "user"}]
          (my.kb.shared/seed-tx-data))))
 
 ;; ---------------------------------------------------------------------------
@@ -949,38 +947,6 @@
    still compiled, and its name-set membership is now a build fact, not
    a literal)."
   (into #{} (first-party-ns-strs)))
-
-(defn- load-compiled-artifact-exports
-  "Load the exact P1b export inventories admitted beside both Bun outputs."
-  []
-  (let [path (js/require "path")
-        client-output (aget (.-argv js/process) 1)
-        execution-output
-        (get-in launch/process-launch-descriptor
-                [::launch/runtime ::launch/execution-output])]
-    (when-not (every? string? [client-output execution-output])
-      (throw
-       (ex-info "The launch does not identify both compiled Bun outputs."
-                {:seon.error/kind :core-bug})))
-    (let [inventory-paths
-          (mapv #(.join path (.dirname path %) "program-inventory.edn")
-                [client-output execution-output])]
-      (into #{}
-            (mapcat
-             (fn [inventory-path]
-               (let [inventory
-                     (reader/read-string
-                      (.readFileSync (js/require "fs")
-                                     inventory-path "utf8"))]
-                 (map symbol
-                      (concat
-                       (:seon.dev.program-inventory/public-exports inventory)
-                       (:seon.dev.program-inventory/internal-terminals
-                        inventory)))))
-            inventory-paths)))))
-
-(defonce ^:private compiled-artifact-exports
-  (delay (load-compiled-artifact-exports)))
 
 (defn- load-program-sources
   "Load and verify the admitted build's resource-name to source-string map."
@@ -1591,70 +1557,100 @@
             [position (pr-str (get row attribute))]))
         (map-indexed vector compiled-program-identity-attrs)))
 
-(defn- database-initialization
-  "Build the complete deterministic database initialization value."
-  [descriptor configuration]
-  (let [artifact-digest
-        (get-in descriptor [::launch/runtime ::launch/execution-digest])
-        program
-        (->> (concat (index-core! configuration) (index-schemas))
-             (map #(apply dissoc % compiled-program-wall-clock-attrs))
-             (sort-by compiled-program-sort-key)
-             vec)
-        schema-forms
-        (into {}
-              (keep (fn [row]
-                      (when-let [key (:seon.schema/key row)]
-                        [key (reader/read-string
-                              (:seon.schema/form row))])))
-              program)
-        function-contracts
-        (into {}
-              (keep (fn [row]
-                      (when-let [form (:seon.fn/spec row)]
-                        [(symbol (:seon.fn/sym row))
-                         (reader/read-string form)])))
-              program)
-        function-source-syms
-        (into #{}
-              (keep (fn [row]
-                      (when (string? (:seon.fn/source row))
-                        (symbol (:seon.fn/sym row)))))
-              program)
-        boot-admission
-        (schema/admission-from-asserting-transaction
-         {:seon.db/user {:seon.agent/id "root"}
-          :seon.db/process
-          {:seon.db.process/id :seon.db.process/boot}})
-        projection
-        (schema/build-projection
-         schema-forms
-         function-contracts
-         {:seon.schema/schema-admissions
-          (zipmap (keys schema-forms) (repeat boot-admission))
-         :seon.schema/function-admissions
-          (zipmap (keys function-contracts) (repeat boot-admission))
-          :seon.schema/function-source-admissions
-          (zipmap function-source-syms (repeat boot-admission))
-          :seon.schema/artifact-exports
-          (if (string?
-               (get-in descriptor
-                       [::launch/runtime ::launch/execution-output]))
-            @compiled-artifact-exports
-            #{})})]
-    (when-not artifact-digest
+(schema/register!
+ ::page-plan-build-request
+ [:map {:closed true}
+  [:seon.execution/artifact-digest [:re "^[0-9a-f]{64}$"]]
+  [:seon.db.initialization/config-manifest-digest
+   :seon.content-hash/digest]
+  [:seon.db.initialization/page-rows
+   :seon.db.initialization/page-rows]
+  [:seon.db/program :seon.db/program]])
+
+(defn build-page-plan
+  "Build the exact ordered initialization pages published with one release."
+  {:malli/schema
+   [:=> [:cat ::page-plan-build-request] :seon.db/precomputed-initialization]}
+  [{:seon.execution/keys [artifact-digest]
+    :seon.db.initialization/keys [config-manifest-digest page-rows]
+    program :seon.db/program}]
+  (let [initialization
+        {:seon.execution/artifact-digest artifact-digest
+         :seon.db.initialization/config-manifest-digest
+         config-manifest-digest
+         :seon.db.initialization/page-rows page-rows
+         :seon.db/attributes agent-bootstrap-attrs
+         :seon.db/program program
+         :seon.db/initial-data (vec (initial-data))}]
+    {:seon.execution/artifact-digest artifact-digest
+     :seon.db.initialization/config-manifest-digest
+     config-manifest-digest
+     :seon.db/initialization-pages
+     (db.protocol/initialization-pages initialization)}))
+
+(defn- sha-256
+  [text]
+  (-> (js/require "crypto")
+      (.createHash "sha256")
+      (.update text "utf8")
+      (.digest "hex")))
+
+(defn- proof-page-plan-prefix
+  [page-plan]
+  (let [configured
+        (seon.platform/env-val "SEON_CLUSTER_APPLY_PROOF_PAGE_LIMIT")
+        limit (when (and configured
+                         (= "cluster-apply" (aget (.-argv js/process) 2)))
+                (js/parseInt configured 10))
+        pages (:seon.db/initialization-pages page-plan)]
+    (if (and (int? limit) (pos? limit) (< limit (count pages)))
+      (assoc page-plan :seon.db/initialization-pages
+             (subvec pages 0 limit))
+      page-plan)))
+
+(defn- load-page-plan
+  "Load and verify the one precomputed page plan bound by the launch."
+  [descriptor]
+  (let [path (seon.platform/env-val "SEON_PAGE_PLAN_PATH")
+        expected (seon.platform/env-val "SEON_PAGE_PLAN_DIGEST")
+        config-digest
+        (get-in descriptor [::launch/resolved-manifest ::launch/sha-256])]
+    (when-not (and (string? path)
+                   (re-matches #"[0-9a-f]{64}" (or expected "")))
       (throw
-       (ex-info "The launch has no compiled execution artifact digest."
-                {:seon.error/kind :core-bug
-                 ::launch/runtime (::launch/runtime descriptor)})))
-    (with-meta
-      {:seon.execution/artifact-digest artifact-digest
-       :seon.db.initialization/page-rows
-       (:seon.config.database.initialization/page-rows configuration)
-       :seon.db/attributes agent-bootstrap-attrs
-       :seon.db/program program
-       :seon.db/initial-data (vec (initial-data configuration))}
-      {::boot-projection projection})))
+       (ex-info "The launch has no admitted page-plan artifact."
+                {:seon.dev.artifact/page-plan-path path
+                 :seon.dev.artifact/page-plan-digest expected
+                 :seon.error/kind :core-bug})))
+    (let [text (.readFileSync (js/require "fs") path "utf8")
+          actual (sha-256 text)
+          value (reader/read-string text)
+          page-plan (:seon.dev.artifact/page-plan value)]
+      (when-not (= expected actual)
+        (throw
+         (ex-info "The admitted page-plan artifact digest changed."
+                  {:seon.dev.artifact/page-plan-path path
+                   :seon.dev.artifact/expected-digest expected
+                   :seon.dev.artifact/actual-digest actual
+                   :seon.error/kind :core-bug})))
+      (when-not (schema/valid-candidate-value?
+                 :seon.db/precomputed-initialization page-plan)
+        (throw
+         (ex-info "The admitted page-plan artifact value is invalid."
+                  {:seon.dev.artifact/page-plan-path path
+                   :seon.schema/explanation
+                   (schema/explain-candidate-value
+                    :seon.db/precomputed-initialization page-plan)
+                   :seon.error/kind :core-bug})))
+      (when-not (= config-digest
+                   (:seon.db.initialization/config-manifest-digest page-plan))
+        (throw
+         (ex-info "The page plan does not match the selected config manifest."
+                  {:seon.launch/selected-config-manifest-digest config-digest
+                   :seon.db.initialization/config-manifest-digest
+                   (:seon.db.initialization/config-manifest-digest page-plan)
+                   :seon.error/kind :core-bug})))
+      (proof-page-plan-prefix page-plan))))
 
 (schema/register! ::llm-fn        'fn?)
 (defn ^:async ^:private rehost-agent-runtimes!
@@ -1972,6 +1968,157 @@
   [result]
   (or (string? (:seon.error/message result))
       (false? (:seon.db/ok? result))))
+
+(def ^:private database-initialization-ref
+  [:seon.db.initialization/id "database"])
+
+(defn- page-plan-identity
+  [page-plan]
+  (let [release-digest
+        (seon.platform/env-val "SEON_APPLICATION_DIGEST")
+        pages (:seon.db/initialization-pages page-plan)
+        fingerprint (:seon.db.initialization/fingerprint (first pages))]
+    (when-not (and (re-matches #"[0-9a-f]{64}" (or release-digest ""))
+                   (string? fingerprint))
+      (throw
+       (ex-info "Cluster apply has no complete release/page identity."
+                {:seon.db.initialization/release-digest release-digest
+                 :seon.db.initialization/fingerprint fingerprint
+                 :seon.error/kind :core-bug})))
+    {:seon.db.initialization/fingerprint fingerprint
+     :seon.db.initialization/release-digest release-digest
+     :seon.db.initialization/config-manifest-digest
+     (:seon.db.initialization/config-manifest-digest page-plan)}))
+
+(defn- ^:async acquire-applied-identity!
+  []
+  (let [database (await (db/db))
+        entity (when-not (:seon.error/message database)
+                 (await (db/entity database database-initialization-ref)))]
+    (cond
+      (:seon.error/message database) database
+      (:seon.error/message entity) entity
+      :else
+      (select-keys
+       entity
+       [:seon.db.initialization/fingerprint
+        :seon.db.initialization/page-count
+        :seon.db.initialization/status
+        :seon.db.initialization/release-digest
+        :seon.db.initialization/config-manifest-digest]))))
+
+(defn- applied-identity?
+  [expected actual]
+  (and (= :seon.db.initialization.status/complete
+          (:seon.db.initialization/status actual))
+       (= expected (select-keys actual (keys expected)))))
+
+(defn- ^:async stamp-applied-identity!
+  [expected]
+  (let [actual (await (acquire-applied-identity!))]
+    (when (:seon.error/message actual)
+      (throw (ex-info "Applied identity acquisition failed." actual)))
+    (when-not (and (= :seon.db.initialization.status/complete
+                      (:seon.db.initialization/status actual))
+                   (= (:seon.db.initialization/fingerprint expected)
+                      (:seon.db.initialization/fingerprint actual)))
+      (throw
+       (ex-info "Initialization pages are not complete for this apply."
+                {:seon.cluster.apply/expected expected
+                 :seon.cluster.apply/actual actual
+                 :seon.error/kind :core-bug})))
+    (if (applied-identity? expected actual)
+      {:seon.cluster.apply/changed? false}
+      (let [database (await (db/db))
+            report
+            (await
+             (db/with-tx-context
+              {:seon.db/user [:seon.agent/id "root"]
+               :seon.db/process
+               (db.process/lookup-ref :seon.db.process/boot)}
+              (fn []
+                (db/transact!
+                 {::db/db database
+                  ::db/expected-db database
+                  ::db/tx-data
+                  [(assoc expected
+                          :seon.db.initialization/id "database")]}))))]
+        (when (:seon.error/message report)
+          (throw (ex-info "Applied identity transaction failed." report)))
+        {:seon.cluster.apply/changed? true
+         :seon.cluster.apply/transaction
+         (select-keys (:db-after report) [:t :datahike/commit-id])}))))
+
+(defn ^:async ^:private cluster-apply!
+  "Apply the admitted release and resolved manifest to this cluster."
+  []
+  (let [descriptor (launch/validate-descriptor
+                    launch/process-launch-descriptor)
+        resolved-reference (::launch/resolved-manifest descriptor)
+        envelope (::launch/operational-envelope descriptor)]
+    (when-not (and resolved-reference envelope)
+      (throw
+       (ex-info "Cluster apply requires an operator-resolved manifest."
+                {:seon.error/kind :core-bug})))
+    (let [manifest (config/load-resolved-manifest resolved-reference)
+          configuration (selected-startup-configuration manifest envelope)
+          page-plan (load-page-plan descriptor)
+          expected (page-plan-identity page-plan)]
+      (try
+        (await
+         (open-database-session!
+          {::initialize? true
+           ::configuration configuration}))
+        (let [before (await (db/db))
+              actual (await (acquire-applied-identity!))]
+          (when (:seon.error/message actual)
+            (throw (ex-info "Applied identity acquisition failed." actual)))
+          (if (applied-identity? expected actual)
+            {:seon.cluster.apply/ok? true
+             :seon.cluster.apply/changed? false
+             :seon.cluster.apply/identity expected
+             :seon.cluster.apply/database
+             (select-keys before [:db-name :t :datahike/commit-id])}
+            (let [reconciled
+                  (await (reconcile-config! manifest configuration))]
+              (when (or (string? (:seon.error/message reconciled))
+                        (false? (:seon.runtime.state/ok? reconciled)))
+                (throw
+                 (ex-info "Cluster apply config reconciliation failed."
+                          reconciled)))
+              (let [installed (await (acquire-configuration!))
+                    _ (await (prove-launch-configuration! envelope installed))
+                    _ (db/install-configuration-context! installed)
+                    initial-agent
+                    (await
+                     (db/with-tx-context
+                      {:seon.db/user [:seon.agent/id "root"]
+                       :seon.db/process
+                       (db.process/lookup-ref :seon.db.process/boot)}
+                      (fn [] (agent/ensure-initial-agent! {}))))
+                    _ (when (initial-agent-failure? initial-agent)
+                        (throw
+                         (ex-info "Cluster apply initial agent birth failed."
+                                  initial-agent)))
+                    stamped (await (stamp-applied-identity! expected))
+                    after (await (db/db))]
+                {:seon.cluster.apply/ok? true
+                 :seon.cluster.apply/changed?
+                 (or (:seon.runtime.state/changed? reconciled)
+                     (::agent/root-created? initial-agent)
+                     (::agent/initial-created? initial-agent)
+                     (:seon.cluster.apply/changed? stamped))
+                 :seon.cluster.apply/config-changed?
+                 (:seon.runtime.state/changed? reconciled)
+                 :seon.cluster.apply/root-created?
+                 (boolean (::agent/root-created? initial-agent))
+                 :seon.cluster.apply/initial-agent-created?
+                 (boolean (::agent/initial-created? initial-agent))
+                 :seon.cluster.apply/identity expected
+                 :seon.cluster.apply/database
+                 (select-keys after [:db-name :t :datahike/commit-id])}))))
+        (finally
+          (db/close-session!))))))
 
 (defn- ^:async start-runtime-impl!
   "Cold-start the cluster process or refresh attached read-surface readiness.
@@ -2844,9 +2991,19 @@
            (error/record! {:seon.error/raw   err
                            :seon.error/fault (instrument/wrapper-fault err :core)})))))
 
+(defn- write-cluster-apply-result!
+  [result]
+  (let [path (seon.platform/env-val "SEON_CLUSTER_APPLY_RESULT")]
+    (when-not (string? path)
+      (throw
+       (ex-info "Cluster apply has no operator result path."
+                {:seon.error/kind :core-bug})))
+    (.writeFileSync (js/require "fs") path (str (pr-str result) "\n") "utf8")
+    result))
+
 (defn -main
   {:malli/schema [:=> [:cat [:* :any]] :any]}
-  [& _args]
+  [& args]
   ;; FIRST: gate datahike-cljs/konserve trace+debug (per-index-node
   ;; `:datahike/index-access` traces flooded pod.log to 813 MB on one
   ;; cold-store web UI render, 2026-06-09). Must run before start-runtime!
@@ -2861,45 +3018,60 @@
   (claim-blob-storage-view!
    (::launch/blob-storage-view launch/process-launch-descriptor))
   (install-process-safety-net!)
-  (log/info-console! "seon.client" "-main boot" {:boot-at (:boot-at @!state)})
-  ;; Malli instrumentation is installed from the validated PROGRAM projection
-  ;; inside `start-runtime!`, after the core is indexed. The DB is the complete,
-  ;; ordering-independent source of every fn + spec; later transitions publish
-  ;; only their exact dependency delta.
-  ;; Auto-start the cluster host unless SEON_NO_AUTO_BOOT.
-  ;; Cheap default for dev iteration — browser hits the loopback port,
-  ;; no REPL needed. Disable for a compiler-only/dev-eval process.
-  (when-not (config/no-auto-boot?)
-    (let [llm-fn (ai.dispatch/llm-fn)]
-      (-> (start-runtime!
-           {::llm-fn llm-fn
-            ::launch-capability
-            (get-in launch/process-launch-descriptor
-                    [::launch/runtime :seon.client/launch-capability])})
-          (.then (fn [{:seon.agent/keys [id ns]
-                       :seon.client/keys [resumed-ids created-ids]
-                       :seon.web/keys [port port-file]}]
-                   (log/info-console! "seon.client" "auto-boot ready"
-                                       {:agent id :ns (str ns)
-                                        :resumed resumed-ids
-                                       :created created-ids
-                                       :url (str "http://127.0.0.1:" port
-                                                 "/agent/"
-                                                 (js/encodeURIComponent id))
-                                       :port-file port-file})))
-          (.catch (fn [err]
-                    ;; FAIL LOUD (2.2e): the pod is useless without its
-                    ;; agent + cluster conn, and a half-up pod that looks
-                    ;; healthy is worse than a dead one. Most common
-                    ;; cause: the database server is unavailable (the error says
-                    ;; exactly that). No local database fallback, by design.
-                    (log/error-console! "seon.client"
-                                        "auto-boot FAILED — exiting (no local fallback)"
-                                        err)
-                    (.exit js/process 1))))))
-  (log/info-console!
-   "seon.client" "runtime entry started"
-   {:seon.launch/client-build-id
-    (get-in launch/process-launch-descriptor
-            [::launch/runtime ::launch/client-build-id])})
-  (start-heartbeat!))
+  (if (= "cluster-apply" (first args))
+    (-> (cluster-apply!)
+        (.then
+         (fn [result]
+           (write-cluster-apply-result! result)
+           (log/info-console! "seon.client" "cluster apply completed" result)
+           (.exit js/process 0)))
+        (.catch
+         (fn [error]
+           (let [result
+                 {:seon.cluster.apply/ok? false
+                  :seon.error/message (or (.-message error) (str error))
+                  :seon.error/data (or (ex-data error) {})}]
+             (try
+               (write-cluster-apply-result! result)
+               (catch :default write-error
+                 (log/error-console! "seon.client"
+                                     "cluster apply result write failed"
+                                     write-error)))
+             (log/error-console! "seon.client" "cluster apply failed" error)
+             (.exit js/process 1)))))
+    (do
+      (log/info-console! "seon.client" "-main boot" {:boot-at (:boot-at @!state)})
+      ;; Malli instrumentation is installed from the validated PROGRAM
+      ;; projection inside `start-runtime!`, after the core is indexed.
+      (when-not (config/no-auto-boot?)
+        (let [llm-fn (ai.dispatch/llm-fn)]
+          (-> (start-runtime!
+               {::llm-fn llm-fn
+                ::launch-capability
+                (get-in launch/process-launch-descriptor
+                        [::launch/runtime :seon.client/launch-capability])})
+              (.then
+               (fn [{:seon.agent/keys [id ns]
+                     :seon.client/keys [resumed-ids created-ids]
+                     :seon.web/keys [port port-file]}]
+                 (log/info-console!
+                  "seon.client" "auto-boot ready"
+                  {:agent id :ns (str ns)
+                   :resumed resumed-ids
+                   :created created-ids
+                   :url (str "http://127.0.0.1:" port
+                             "/agent/" (js/encodeURIComponent id))
+                   :port-file port-file})))
+              (.catch
+               (fn [err]
+                 (log/error-console!
+                  "seon.client"
+                  "auto-boot FAILED — exiting (no local fallback)"
+                  err)
+                 (.exit js/process 1))))))
+      (log/info-console!
+       "seon.client" "runtime entry started"
+       {:seon.launch/client-build-id
+        (get-in launch/process-launch-descriptor
+                [::launch/runtime ::launch/client-build-id])})
+      (start-heartbeat!))))

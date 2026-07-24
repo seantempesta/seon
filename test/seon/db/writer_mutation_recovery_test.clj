@@ -119,6 +119,8 @@
 (def ^:private paged-initialization
   {:seon.execution/artifact-digest
    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+   :seon.db.initialization/config-manifest-digest
+   "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
    :seon.db.initialization/page-rows 2
    :seon.db/attributes [:writer.initialization/id]
    :seon.db/program

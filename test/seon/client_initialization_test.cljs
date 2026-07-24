@@ -179,123 +179,68 @@
         (set! shadow-env/autoload original-autoload)
         (set! shadow-node/closure-import original-import)))))
 
-(defn- with-program-builders
-  [core schemas body]
-  (let [original-core client/index-core!
-        original-schemas client/index-schemas]
-    (set! client/index-core! (fn [_configuration] core))
-    (set! client/index-schemas (fn [] schemas))
-    (try
-      (body)
-      (finally
-        (set! client/index-core! original-core)
-        (set! client/index-schemas original-schemas)))))
+(def ^:private config-digest
+  "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789")
 
-(deftest initialization-is-one-deterministic-complete-value
-  (let [namespace-row
-        {:seon.ns/name 'example.core
-         :seon.ns/source "(ns example.core)"}
-        function-row
-        {:seon.fn/sym "example.core/identity"
-         :seon.fn/ns [:seon.ns/name 'example.core]
-         :seon.fn/source "(defn identity [value] value)"
-         :seon.fn/spec "[:=> [:cat :example/id] :example/id]"
-         :seon.fn/created-at (js/Date. 1)}
-        schema-row
-        {:seon.schema/key :example/id
-         :seon.schema/form ":int"
-         :seon.schema/created-at (js/Date. 2)}
-        build (deref #'client/database-initialization)
-        forward
-        (with-program-builders
-          [function-row namespace-row]
-          [schema-row]
-          #(build (descriptor) configuration))
-        reverse
-        (with-program-builders
-          [namespace-row function-row]
-          [schema-row]
-          #(build (descriptor) configuration))]
-    (is (= forward reverse))
+(defn- build-page-plan
+  [program page-rows]
+  (client/build-page-plan
+   {:seon.execution/artifact-digest digest
+    :seon.db.initialization/config-manifest-digest config-digest
+    :seon.db.initialization/page-rows page-rows
+    :seon.db/program program}))
+
+(deftest page-plan-is-one-deterministic-complete-value
+  (let [program
+        [{:seon.schema/key :example/id :seon.schema/form ":int"}
+         {:seon.ns/name 'example.core :seon.ns/source "(ns example.core)"}
+         {:seon.fn/sym "example.core/identity"
+          :seon.fn/ns [:seon.ns/name 'example.core]
+          :seon.fn/source "(defn identity [value] value)"
+          :seon.fn/spec "[:=> [:cat :example/id] :example/id]"}]
+        forward (build-page-plan program 64)
+        replay (build-page-plan program 64)
+        pages (:seon.db/initialization-pages forward)
+        attributes (into #{} (mapcat :seon.db/attributes) pages)
+        initial-data (into [] (mapcat :seon.db/initial-data) pages)]
+    (is (= forward replay))
     (is (= digest (:seon.execution/artifact-digest forward)))
-    (is (= 64 (:seon.db.initialization/page-rows forward)))
-    (is (= client/agent-bootstrap-attrs (:seon.db/attributes forward)))
-    (is (every? (set (:seon.db/attributes forward))
-                [:my.plan/namespace :my.plan/claim])
-        "fresh clusters install generated-plan query attrs before first use")
-    (is (every? (set (:seon.db/attributes forward))
-                [:seon.ns/doc :seon.ns/summary])
-        "namespace metadata schema is cold-published independent of program rows")
-    (is (every? (set (:seon.db/attributes forward))
-                legacy-cold-boot-attributes)
-        "computed boot attributes preserve the deleted list's persisted contract")
-    (is (some #{:my.kb/source-line-end} (:seon.db/attributes forward))
-        "the declaration also publishes persisted attrs omitted by the old list")
-    (is (= [:seon.ns/name :seon.fn/sym :seon.schema/key]
-           (mapv (fn [row]
-                   (cond
-                     (:seon.ns/name row) :seon.ns/name
-                     (:seon.fn/sym row) :seon.fn/sym
-                     (:seon.schema/key row) :seon.schema/key))
-                 (:seon.db/program forward))))
-    (is (not-any? #(or (contains? % :seon.fn/created-at)
-                       (contains? % :seon.schema/created-at))
-                  (:seon.db/program forward)))
+    (is (= config-digest
+           (:seon.db.initialization/config-manifest-digest forward)))
+    (is (every? #(= 64 (:seon.db.initialization/page-rows %)) pages))
+    (is (every? attributes [:my.plan/namespace :my.plan/claim]))
+    (is (every? attributes [:seon.ns/doc :seon.ns/summary]))
+    (is (every? attributes legacy-cold-boot-attributes))
+    (is (some #{:my.kb/source-line-end} attributes))
     (is (= (db/encode-edn-slot-values
-            [configuration
-             {:seon.user/id "user"}
-             {:my.kb.shared/id "shared"}])
-           (:seon.db/initial-data forward)))))
+            [{:seon.user/id "user"} {:my.kb.shared/id "shared"}])
+           initial-data))
+    (is (not-any? #(contains? % :seon.config/id) initial-data)
+        "config writes belong only to reconcile-config!")))
 
-(deftest fresh-boot-reuses-identical-prevalidated-projection
-  (let [function-row
-        {:seon.fn/sym "example.core/identity"
-         :seon.fn/ns [:seon.ns/name 'example.core]
-         :seon.fn/source "(defn identity [value] value)"
-         :seon.fn/spec "[:=> [:cat :example/id] :example/id]"}
-        initialization
-        (with-program-builders
-          [{:seon.ns/name 'example.core
-            :seon.ns/source "(ns example.core)"}
-           function-row]
-          [{:seon.schema/key :example/id
-            :seon.schema/form ":int"}]
-          #((deref #'client/database-initialization)
-            (descriptor) configuration))
-        boot-projection (-> initialization meta ::client/boot-projection)
-        core-transaction
-        {:seon.db/user {:seon.agent/id "root"}
-         :seon.db/process
-         {:seon.db.process/id :seon.db.process/boot}}
-        acquired-projection
-        (schema/projection-from-rows
-         {:seon.schema/schema-rows
-          [[:example/id ":int" core-transaction]]
-          :seon.schema/function-contract-rows
-          [["example.core/identity"
-            (:seon.fn/spec function-row)
-            core-transaction]]
-          :seon.schema/function-source-rows
-          [["example.core/identity"
-            (:seon.fn/source function-row)
-            core-transaction]]
-          :seon.schema/artifact-exports
-          (:seon.schema.projection/artifact-exports boot-projection)}
-         boot-projection)]
-    (is (identical? boot-projection acquired-projection)
-        "fresh boot retains the exact projection after committed-row identity")))
+(deftest page-plan-fingerprint-binds-config-manifest-digest
+  (let [program [{:seon.schema/key :example/id :seon.schema/form ":int"}]
+        first-plan (build-page-plan program 64)
+        second-plan
+        (client/build-page-plan
+         {:seon.execution/artifact-digest digest
+          :seon.db.initialization/config-manifest-digest
+          "123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0"
+          :seon.db.initialization/page-rows 64
+          :seon.db/program program})]
+    (is (not=
+         (:seon.db.initialization/fingerprint
+          (first (:seon.db/initialization-pages first-plan)))
+         (:seon.db.initialization/fingerprint
+          (first (:seon.db/initialization-pages second-plan)))))))
 
-(deftest ten-times-current-corpus-keeps-every-initialization-frame-bounded
-  (let [build (deref #'client/database-initialization)
-        current (build (descriptor) configuration)
-        current-rows (count (:seon.db/program current))
-        synthetic
-        (-> current
-            (update :seon.db/program
-                    #(into [] cat (repeat 10 %)))
-            (update :seon.db/initial-data
-                    #(into [] cat (repeat 10 %))))
-        pages (protocol/initialization-pages synthetic)
+(deftest ten-times-synthetic-corpus-keeps-every-page-plan-frame-bounded
+  (let [base-program
+        [{:seon.schema/key :example/id :seon.schema/form ":int"}
+         {:seon.ns/name 'example.core :seon.ns/source "(ns example.core)"}]
+        synthetic-program (into [] cat (repeat 500 base-program))
+        page-plan (build-page-plan synthetic-program 64)
+        pages (:seon.db/initialization-pages page-plan)
         writer (transit/writer :json)
         encoder (js/TextEncoder.)
         frame-sizes
@@ -315,15 +260,11 @@
                 :seon.db/initialization-page page})))))
          pages)
         maximum-frame-bytes (apply max frame-sizes)
-        evidence {:current-program-rows current-rows
-                  :synthetic-program-rows
-                  (count (:seon.db/program synthetic))
+        evidence {:synthetic-program-rows (count synthetic-program)
                   :page-count (count pages)
                   :maximum-frame-bytes maximum-frame-bytes
                   :protocol-frame-ceiling protocol/maximum-frame-bytes}]
     (js/console.log "INITPAGE_10X_MEASUREMENT" (pr-str evidence))
-    (is (= (* 10 current-rows)
-           (count (:seon.db/program synthetic))))
     (is (> (count pages) 10)
         (pr-str evidence))
     (is (< maximum-frame-bytes (* 1024 1024))
@@ -331,20 +272,46 @@
     (is (every? #(< % protocol/maximum-frame-bytes) frame-sizes)
         (pr-str evidence))))
 
-(deftest initialization-validates-core-program-before-provenance-exists
-  (let [opaque-core-schema
-        {:seon.schema/key :example.core/third-party-value
-         :seon.schema/form ":any"}
-        build (deref #'client/database-initialization)
-        initialization
-        (with-program-builders
-          []
-          [opaque-core-schema]
-          #(build (descriptor) configuration))]
-    (is (= opaque-core-schema
-           (first (:seon.db/program initialization)))
-        (str "the desired core program is validated without fabricating "
-             "a committed transaction"))))
+(deftest identical-applied-identity-submits-no-transaction
+  (async done
+    (let [fingerprint "page-plan-fingerprint"
+          expected
+          {:seon.db.initialization/fingerprint fingerprint
+           :seon.db.initialization/release-digest digest
+           :seon.db.initialization/config-manifest-digest config-digest}
+          original-db db/db
+          original-entity db/entity
+          original-transact db/transact!
+          transactions (atom 0)
+          cleanup!
+          (fn []
+            (set! db/db original-db)
+            (set! db/entity original-entity)
+            (set! db/transact! original-transact)
+            (done))]
+      (set! db/db
+            (fn [] (js/Promise.resolve
+                    {:db-name "r45s3" :t 42
+                     :datahike/commit-id (random-uuid)})))
+      (set! db/entity
+            (fn [_database _ref]
+              (js/Promise.resolve
+               (assoc expected
+                      :seon.db.initialization/id "database"
+                      :seon.db.initialization/page-count 9
+                      :seon.db.initialization/status
+                      :seon.db.initialization.status/complete))))
+      (set! db/transact!
+            (fn [_request]
+              (swap! transactions inc)
+              (js/Promise.resolve {})))
+      (-> (#'client/stamp-applied-identity! expected)
+          (.then
+           (fn [result]
+             (is (false? (:seon.cluster.apply/changed? result)))
+             (is (zero? @transactions))))
+          (.catch #(is false (str %)))
+          (.finally cleanup!)))))
 
 (deftest startup-recovery-accepts-domain-data-and-throws-direct-errors
   (let [recovery-result! (deref #'client/recovery-result!)
@@ -851,48 +818,6 @@
              (is false (str "stateful config retry rejected: " error
                             "\n" (.-stack error)))))
           (.finally cleanup!)))))
-
-(deftest invalid-complete-program-fails-before-session-open
-  (async done
-    (let [original-descriptor launch/process-launch-descriptor
-          original-open db/open-session!
-          original-core client/index-core!
-          original-schemas client/index-schemas
-          opened? (atom false)]
-      (set! launch/process-launch-descriptor (descriptor))
-      (set! client/index-core!
-            (fn [_configuration]
-              [{:seon.ns/name 'example.core
-                :seon.ns/source "(ns example.core)"}
-               {:seon.fn/sym "example.core/broken"
-                :seon.fn/ns [:seon.ns/name 'example.core]
-                :seon.fn/source "(defn broken [value] value)"
-                :seon.fn/spec
-                "[:=> [:cat :example/missing] :example/missing]"}]))
-      (set! client/index-schemas
-            (fn []
-              [{:seon.schema/key :example/id :seon.schema/form ":int"}]))
-      (set! db/open-session!
-            (fn [_]
-              (reset! opened? true)
-              (js/Promise.resolve {})))
-      (-> (client/open-database-session!
-           {:seon.client/initialize? true
-            :seon.client/configuration configuration})
-          (.then
-           (fn [_]
-             (is false "invalid complete projection was admitted")))
-          (.catch
-           (fn [_]
-             (testing "the full schema and function projection is validated first"
-               (is (false? @opened?)))))
-          (.finally
-           (fn []
-             (set! launch/process-launch-descriptor original-descriptor)
-             (set! client/index-core! original-core)
-             (set! client/index-schemas original-schemas)
-             (set! db/open-session! original-open)
-             (done)))))))
 
 (defn- shadow-ready-state
   []
