@@ -1,6 +1,8 @@
 (ns seon.web.feed
   "JVM Datastar SSE connections with latest-complete-state delivery."
-  (:require [seon.db.host :as db.host]
+  (:require [seon.config.resolve :as config.resolve]
+            [seon.db :as db]
+            [seon.reactive :as reactive]
             [starfederation.datastar.clojure.adapter.common :as adapter]
             [starfederation.datastar.clojure.adapter.http-kit :as http-kit]
             [starfederation.datastar.clojure.api :as datastar]
@@ -50,31 +52,23 @@
   nil)
 
 (defn start!
-  "Start one database interest and shared heartbeat scheduler."
-  [{::keys [writer render configuration]}]
-  (let [connections (atom {})
+  "Start one shared reactive feed and heartbeat scheduler."
+  [{::keys [render configuration]}]
+  (let [leaf db/*leaf*
+        connections (atom {})
         heartbeat-executor
         (Executors/newSingleThreadScheduledExecutor)
-        service {::writer writer
+        service {::service-id (random-uuid)
+                 ::leaf leaf
                  ::render render
                  ::configuration configuration
                  ::connections connections
                  ::connection-permits
                  (Semaphore. (int (::maximum-connections configuration)))
-                 ::heartbeat-executor heartbeat-executor}
-        refresh!
-        (fn [transaction-report]
-          (let [database (:db-after transaction-report)
-                groups (group-by ::render-key (vals @connections))]
-            (doseq [[_ equivalent] groups]
-              (when-let [connection (first equivalent)]
-                (let [element (render database (::render-input connection))]
-                  (run! #(enqueue-latest! (::mailbox %) element)
-                        equivalent))))))]
-    (db.host/listen!
-     writer
-     {:seon.db/key ::data-feed
-      :seon.db/handler refresh!})
+                 ::heartbeat-executor heartbeat-executor}]
+    (reactive/configure!
+     (merge config.resolve/default-reactive-policy
+            (::reactive-policy configuration)))
     (.scheduleAtFixedRate
      ^ScheduledExecutorService heartbeat-executor
      ^Runnable #(heartbeat! service)
@@ -84,17 +78,18 @@
     service))
 
 (defn stop!
-  "Stop the database interest, scheduler, and every open connection."
-  [{::keys [writer connections heartbeat-executor]}]
-  (db.host/unlisten! writer ::data-feed)
+  "Stop reactive registrations, scheduler, and every open connection."
+  [{::keys [leaf connections heartbeat-executor]}]
   (.shutdownNow ^ScheduledExecutorService heartbeat-executor)
   (run! stop-connection! (vals @connections))
   (reset! connections {})
+  (binding [db/*leaf* leaf]
+    (reactive/close!))
   nil)
 
 (defn open!
   "Return one SDK-owned SSE response for a database view."
-  [{::keys [connections connection-permits configuration render writer]
+  [{::keys [service-id leaf connections connection-permits configuration render]
     :as service}
    request render-key render-input]
   (let [connection-id (random-uuid)
@@ -131,12 +126,31 @@
                          (drain-connection! connection)
                          (finally
                            (swap! connections dissoc connection-id)
-                           (release!)))))
+                           ;; SSE close interrupts the drain thread. Clear that
+                           ;; local signal before the same virtual thread writes
+                           ;; the observable database-interest release.
+                           (Thread/interrupted)
+                           (try
+                             (binding [db/*leaf* leaf]
+                               (reactive/unobserve!
+                                {::reactive/key
+                                 [::data-feed service-id render-key]
+                                 ::reactive/consumer-key connection-id}))
+                             (finally
+                               (release!)))))))
                     connection (assoc connection ::thread thread)
-                    database (db.host/resolve-db! writer)
-                    element (render database render-input)]
-                (swap! connections assoc connection-id connection)
-                (enqueue-latest! mailbox element)))
+                    reactive-key [::data-feed service-id render-key]]
+                (swap! connections assoc connection-id
+                       (assoc connection ::reactive-key reactive-key))
+                (binding [db/*leaf* leaf]
+                  (reactive/observe!
+                   {::reactive/key reactive-key
+                    ::reactive/consumer-key connection-id
+                    ::reactive/compute
+                    (fn [database]
+                      {::db/value (render database render-input)
+                       ::db/read-evidence :all})
+                    ::reactive/notify #(enqueue-latest! mailbox %)}))))
             adapter/on-close
             (fn [_sse & _]
               (if-let [connection (get @connections connection-id)]

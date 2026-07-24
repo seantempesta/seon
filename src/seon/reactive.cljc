@@ -6,11 +6,15 @@
    this namespace only schedules demanded recomputation and delivers changed
    Clojure values."
   (:require
-   [seon.config :as config]
+   #?(:cljs [seon.config :as config]
+      :clj [seon.config.resolve :as config.resolve])
    [seon.db :as db]
    [seon.error :as error]
-   [seon.log :as log]
-   [seon.schema :as schema]))
+   #?(:cljs [seon.log :as log])
+   [seon.schema :as schema])
+  #?(:clj
+     (:import [java.util.concurrent Executors ScheduledExecutorService
+               ScheduledFuture TimeUnit])))
 
 (schema/register! ::key :any)
 (schema/register! ::consumer-key :any)
@@ -41,7 +45,8 @@
 
 (defonce ^{:private true
            :doc "Reactive timing acquired from database configuration."}
-  !policy (atom config/default-reactive-policy))
+  !policy (atom #?(:cljs config/default-reactive-policy
+                   :clj config.resolve/default-reactive-policy)))
 
 (defn- registration-gauges [runtime]
   (let [registrations (vals (::registrations runtime))]
@@ -77,9 +82,26 @@
   (reset! !policy policy)
   nil)
 
-(defn- monotonic-ms [] (.now js/performance))
-(defn- set-timer! [callback delay-ms] (js/setTimeout callback delay-ms))
-(defn- clear-timer! [timer] (js/clearTimeout timer))
+#?(:clj
+   (defonce ^:private ^ScheduledExecutorService timer-executor
+     (Executors/newSingleThreadScheduledExecutor)))
+
+(defn- monotonic-ms []
+  #?(:cljs (.now js/performance)
+     :clj (/ (double (System/nanoTime)) 1000000.0)))
+
+(defn- set-timer!
+  [callback delay-ms]
+  #?(:cljs (js/setTimeout callback delay-ms)
+     :clj (.schedule timer-executor
+                     ^Runnable (bound-fn [] (callback))
+                     (long (Math/ceil (double delay-ms)))
+                     TimeUnit/MILLISECONDS)))
+
+(defn- clear-timer!
+  [timer]
+  #?(:cljs (js/clearTimeout timer)
+     :clj (.cancel ^ScheduledFuture timer false)))
 
 (defn- newer-database [left right]
   (cond
@@ -133,13 +155,19 @@
 (defn- notify-one! [notify value]
   (try
     (let [result (notify value)]
-      (when (and result (= "function" (goog/typeOf (.-catch result))))
-        (.catch result
-                #(log/error-console! "seon.reactive"
-                                     "reactive consumer rejected" %))))
-    (catch :default exception
-      (log/error-console! "seon.reactive"
-                          "reactive consumer threw" exception))))
+      #?(:cljs
+         (when (and result (= "function" (goog/typeOf (.-catch result))))
+           (.catch result
+                   #(log/error-console! "seon.reactive"
+                                        "reactive consumer rejected" %)))))
+    (catch #?(:cljs :default :clj Throwable) exception
+      #?(:cljs
+         (log/error-console! "seon.reactive"
+                             "reactive consumer threw" exception)
+         :clj
+         (binding [*out* *err*]
+           (println "seon.reactive: reactive consumer threw"
+                    (.getMessage ^Throwable exception)))))))
 
 (defn- notify-consumers! [registration value]
   (let [consumers (vals (::consumers registration))]
@@ -154,7 +182,7 @@
     (if-let [select-delay (::settle-ms registration)]
       (try
         (max 0 (or (select-delay event @!policy) configured))
-        (catch :default _ configured))
+        (catch #?(:cljs :default :clj Throwable) _ configured))
       configured)))
 
 (defn- due-at [registration now]
@@ -291,38 +319,50 @@
       (notify-consumers! current failure)
       (resolve-ready! current failure))))
 
+(defn- accept-installed-interest!
+  [key registration-id install-id basis-db signature initial? ack-db]
+  (if (:seon.error/message ack-db)
+    (fail-registration! key registration-id ack-db)
+    (do
+      (swap! !runtime
+             (fn [runtime]
+               (let [current (get-in runtime [::registrations key])]
+                 (if (and (= registration-id
+                             (::registration-id current))
+                          (= install-id
+                             (::interest-install-id current)))
+                   (assoc-in runtime [::registrations key]
+                             (assoc current
+                                    ::installed-signature signature
+                                    ::interest-db ack-db))
+                   runtime))))
+      (record-basis! ::last-installed-interest-t ack-db)
+      (if initial?
+        (do
+          (enqueue! key registration-id ack-db nil)
+          (start-evaluation! key registration-id nil))
+        (when (> (:t ack-db) (:t basis-db))
+          (enqueue! key registration-id ack-db nil))))))
+
 (defn- interest-installed!
   [key registration-id install-id basis-db signature initial?]
   (let [registration (get-in @!runtime [::registrations key])]
     (when (and (= registration-id (::registration-id registration))
                (= install-id (::interest-install-id registration)))
-      (.catch
-       (.then
-        (db/db)
-        (fn [ack-db]
-          (if (:seon.error/message ack-db)
-            (fail-registration! key registration-id ack-db)
-            (do
-              (swap! !runtime
-                     (fn [runtime]
-                       (let [current (get-in runtime [::registrations key])]
-                         (if (and (= registration-id
-                                     (::registration-id current))
-                                  (= install-id
-                                     (::interest-install-id current)))
-                           (assoc-in runtime [::registrations key]
-                                     (assoc current
-                                            ::installed-signature signature
-                                            ::interest-db ack-db))
-                           runtime))))
-              (record-basis! ::last-installed-interest-t ack-db)
-              (if initial?
-                (do
-                  (enqueue! key registration-id ack-db nil)
-                  (start-evaluation! key registration-id nil))
-                (when (> (:t ack-db) (:t basis-db))
-                  (enqueue! key registration-id ack-db nil)))))))
-       #(fail-registration! key registration-id (error-value %))))))
+      #?(:cljs
+         (.catch
+          (.then
+           (db/db)
+           #(accept-installed-interest!
+             key registration-id install-id basis-db signature initial? %))
+          #(fail-registration! key registration-id (error-value %)))
+         :clj
+         (try
+           (accept-installed-interest!
+            key registration-id install-id basis-db signature initial? (db/db))
+           (catch Throwable exception
+             (fail-registration! key registration-id
+                                 (error-value exception))))))))
 
 (defn- install-interest!
   [key registration-id basis-db read-evidence initial?]
@@ -331,7 +371,10 @@
         request
         (cond-> {::db/key (interest-key key)
                  ::db/db basis-db
-                 ::db/handler #(transaction! key registration-id install-id %)}
+                 ::db/handler
+                 #?(:cljs #(transaction! key registration-id install-id %)
+                    :clj (bound-fn [event]
+                           (transaction! key registration-id install-id event)))}
           (= :all read-evidence)
           (assoc ::db/dependency-plan :all)
 
@@ -345,30 +388,59 @@
                            (assoc registration ::interest-install-id install-id))
                  runtime))))
     (if (and (vector? read-evidence) (empty? read-evidence))
-      (-> (db/unlisten! {::db/key (interest-key key)})
-          (.then (fn [_]
-                   (swap! !runtime
-                          (fn [runtime]
-                            (let [registration
-                                  (get-in runtime [::registrations key])]
-                              (if (and (= registration-id
-                                          (::registration-id registration))
-                                       (= install-id
-                                          (::interest-install-id registration)))
-                                (assoc-in runtime [::registrations key]
-                                          (assoc registration
-                                                 ::installed-signature #{}))
-                                runtime))))))
-          (.catch #(fail-registration! key registration-id (error-value %))))
-      (-> (db/listen! request)
-          (.then
-           (fn [result]
+      #?(:cljs
+         (-> (db/unlisten! {::db/key (interest-key key)})
+             (.then (fn [_]
+                      (swap! !runtime
+                             (fn [runtime]
+                               (let [registration
+                                     (get-in runtime [::registrations key])]
+                                 (if (and (= registration-id
+                                             (::registration-id registration))
+                                          (= install-id
+                                             (::interest-install-id
+                                              registration)))
+                                   (assoc-in runtime [::registrations key]
+                                             (assoc registration
+                                                    ::installed-signature #{}))
+                                   runtime))))))
+             (.catch #(fail-registration! key registration-id
+                                         (error-value %))))
+         :clj
+         (do
+           (db/unlisten! {::db/key (interest-key key)})
+           (swap! !runtime
+                  (fn [runtime]
+                    (let [registration
+                          (get-in runtime [::registrations key])]
+                      (if (and (= registration-id
+                                  (::registration-id registration))
+                               (= install-id
+                                  (::interest-install-id registration)))
+                        (assoc-in runtime [::registrations key]
+                                  (assoc registration
+                                         ::installed-signature #{}))
+                        runtime))))))
+      #?(:cljs
+         (-> (db/listen! request)
+             (.then
+              (fn [result]
+                (if (= (interest-key key) result)
+                  (interest-installed! key registration-id install-id basis-db
+                                       signature initial?)
+                  (fail-registration! key registration-id result))))
+             (.catch #(fail-registration! key registration-id
+                                         (error-value %))))
+         :clj
+         (try
+           (let [result (db/listen! request)]
              (if (= (interest-key key) result)
                (interest-installed! key registration-id install-id basis-db
                                     signature initial?)
-               (fail-registration! key registration-id result))))
-          (.catch #(fail-registration! key registration-id
-                                      (error-value %)))))))
+               (fail-registration! key registration-id result)))
+           (catch Throwable exception
+             (fail-registration! key registration-id
+                                 (error-value exception))))))))
 
 (defn- finish-evaluation!
   [key registration-id evaluation-id basis-db raw-result]
@@ -458,17 +530,28 @@
       (record-high-water!)
       (when-let [timer (::timer prior)] (clear-timer! timer))
       (let [database (::db active)]
-        (-> (js/Promise.resolve nil)
-            (.then (fn [_] ((::compute registration) database)))
-            (.then #(finish-evaluation! key registration-id evaluation-id
-                                       database %))
-            (.catch #(finish-evaluation!
-                      key registration-id evaluation-id database
-                      {::db/value (error-value %)
-                       ::db/read-evidence :all
-                       ::failed? true})))))))
+        #?(:cljs
+           (-> (js/Promise.resolve nil)
+               (.then (fn [_] ((::compute registration) database)))
+               (.then #(finish-evaluation! key registration-id evaluation-id
+                                          database %))
+               (.catch #(finish-evaluation!
+                         key registration-id evaluation-id database
+                         {::db/value (error-value %)
+                          ::db/read-evidence :all
+                          ::failed? true})))
+           :clj
+           (try
+             (finish-evaluation! key registration-id evaluation-id database
+                                 ((::compute registration) database))
+             (catch Throwable exception
+               (finish-evaluation!
+                key registration-id evaluation-id database
+                {::db/value (error-value exception)
+                 ::db/read-evidence :all
+                 ::failed? true}))))))))
 
-(defn ^:async observe!
+(defn ^{:async #?(:cljs true :clj false)} observe!
   "Attach one consumer to a registered reactive computation.
 
    The first consumer installs an all-attributes interest before evaluating.
@@ -476,12 +559,18 @@
   {:malli/schema [:=> [:cat ::observe-request] ::consumer-key]}
   [{::keys [key consumer-key compute notify settle-ms]
     database ::db/db}]
-  (let [database (or database (await (db/db)))]
+  (let [database (or database #?(:cljs (await (db/db)) :clj (db/db)))]
     (if (:seon.error/message database)
       database
       (let [registration-id (random-uuid)
             resolve-ready (atom nil)
-            ready (js/Promise. (fn [resolve _] (reset! resolve-ready resolve)))
+            ready #?(:cljs
+                     (js/Promise.
+                      (fn [resolve _] (reset! resolve-ready resolve)))
+                     :clj
+                     (promise))
+            _ #?(:clj (reset! resolve-ready #(deliver ready %))
+                 :cljs nil)
             [before after]
             (swap-vals!
              !runtime
@@ -509,14 +598,15 @@
               (notify-one! notify (::value registration))
               (record-count! ::notifications-delivered 1))
             (when-not (::delivered? registration)
-              (await (::ready registration)))
+              #?(:cljs (await (::ready registration))
+                 :clj (deref (::ready registration))))
             consumer-key)
           (do
             (install-interest! key registration-id database :all true)
-            (await ready)
+            #?(:cljs (await ready) :clj (deref ready))
             consumer-key))))))
 
-(defn ^:async unobserve!
+(defn ^{:async #?(:cljs true :clj false)} unobserve!
   "Detach one consumer and release all registration state after the last one."
   {:malli/schema [:=> [:cat ::unobserve-request] :boolean]}
   [{::keys [key consumer-key]}]
@@ -539,13 +629,14 @@
       (when-let [timer (::timer prior)] (clear-timer! timer))
       (resolve-ready!
        prior
-       {:seon.error/message
+      {:seon.error/message
         "Reactive registration was released before its first value."
         :seon.error/kind :canceled})
-      (await (db/unlisten! {::db/key (interest-key key)})))
+      #?(:cljs (await (db/unlisten! {::db/key (interest-key key)}))
+         :clj (db/unlisten! {::db/key (interest-key key)})))
     (boolean prior)))
 
-(defn ^:async close!
+(defn ^{:async #?(:cljs true :clj false)} close!
   "Release every reactive computation, timer, value, and database interest."
   {:malli/schema [:=> [:cat] :nil]}
   []
@@ -557,12 +648,17 @@
        {:seon.error/message
         "Reactive runtime closed before the first value was available."
         :seon.error/kind :canceled}))
-    (await
-     (js/Promise.all
-      (clj->js
-       (mapv (fn [key]
+    #?(:cljs
+       (await
+        (js/Promise.all
+         (clj->js
+          (mapv (fn [key]
+                  (db/unlisten! {::db/key (interest-key key)}))
+                (keys (::registrations before))))))
+       :clj
+       (run! (fn [key]
                (db/unlisten! {::db/key (interest-key key)}))
-             (keys (::registrations before))))))
+             (keys (::registrations before))))
     nil))
 
 (defn measurements
