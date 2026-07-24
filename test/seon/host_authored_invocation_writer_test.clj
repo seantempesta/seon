@@ -4,6 +4,7 @@
             [sci.core :as sci]
             [sci.ctx-store]
             [seon.content-hash :as content-hash]
+            [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds]
             [seon.db.writer-test-support :as writer-test]
             [seon.db.writer :as writer]
@@ -15,8 +16,6 @@
   (:import [java.io File]
            [java.nio.channels SocketChannel]))
 
-(def ^:private corpus-schema-rows
-  (var-get #'registry-test/corpus-schema-rows))
 (def ^:private value-sampling-policy
   (var-get #'registry-test/value-sampling-policy))
 (def ^:private dependencies
@@ -90,20 +89,18 @@
       :where [?function :seon.fn/sym ?sym]]
     [(str sym)])))
 
-(defn- seed-database! [session]
-  (let [base (context/build-base! session)
+(defn- seed-database! [session database-name]
+  (let [seed
+        (writer-test/seed-canonical-schema!
+         session database-name
+         [value-sampling-policy
+          {:seon.user/id "user"}
+          {:seon.agent/id agent-id}
+          {:seon.db.process/id :seon.db.process/repl}])
+        _ (is (true? (::protocol/success? seed)) (pr-str seed))
+        base (context/build-base! session)
         ctx (context/fork-context base)
-        seed
-        (sci/eval-string*
-         ctx
-         (str "(require 'seon.db)"
-              "(seon.db/transact! {:seon.db/tx-data "
-              (pr-str (into corpus-schema-rows
-                            [value-sampling-policy
-                             {:seon.agent/id agent-id}
-                             {:seon.db.process/id :seon.db.process/repl}]))
-              "})"))]
-    (is (map? (:db-after seed)) (pr-str seed))
+        _ (sci/eval-string* ctx "(require 'seon.db)")]
     (let [installed
           (sci/eval-string*
            ctx
@@ -147,7 +144,7 @@
                   ::context/backend :memory})
         started (atom nil)]
     (try
-      (let [database-before-functions (seed-database! session)
+      (let [database-before-functions (seed-database! session database-name)
             database-a (context/resolve-head! session)
             caller-sym (symbol (str home-ns "/caller"))
             helper-sym (symbol (str home-ns "/helper"))

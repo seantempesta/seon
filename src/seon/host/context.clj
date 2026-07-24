@@ -1572,8 +1572,11 @@
                         :datahike.resource/max-work 1000000
                         ;; One sentinel proves the claimed complete population
                         ;; did not stop at Datahike's early-stop row limit.
+                        ;; Datahike charges every tuple cell, so admit the
+                        ;; widest projection row while the explicit row-count
+                        ;; check below remains the population bound.
                         :datahike.resource/max-results
-                        (inc committed-projection-row-limit)
+                        (* 4 (inc committed-projection-row-limit))
                         :datahike.resource/max-result-weight (* 3 1024 1024)})
               response
               (writer-call!
