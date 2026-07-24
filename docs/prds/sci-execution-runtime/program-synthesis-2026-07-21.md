@@ -1140,6 +1140,17 @@ MORNING ITEMS (accumulating):
   (settleclose 1a47c1062 + 5cc3b32e1: break-8 fixture class swept
   suite-wide, program-source digest selection fixed). A REAL
   MILESTONE — but NOT graduation: the goal's bar is PROVABLY ALIVE.
+- ★ DRIVE6 — LLM ATTEMPT SUCCEEDS (2026-07-24 ~4am): the JVM claimant
+  made a REAL DeepSeek call — attempt :open→HTTP 200→:success at tx
+  536873735. Transport works; the pod→JVM chain paid off. Nothing-
+  wedges held a 4th time (turn :error, run closed, refs retracted,
+  core fault recorded, cluster UP). Blocker: eval config acquisition
+  uses WRONG identity ([:seon.config/id :seon.config/singleton] vs the
+  real [:seon.config/id 'cluster']). FLAG: the :success attempt
+  persisted an EMPTY reply blob (e3b0…b855) — cfgid lane investigates
+  whether reply extraction drops JVM-claimant content. cfgid lane
+  (config-singleton-identity + reply-extraction). LADDER: …claimant
+  config → allocation → eval config identity. Nearly topped.
 - ★ NOTHING-WEDGES INVARIANT NOW HOLDS (094e7a7e6, 2026-07-24 ~3:30am):
   claimant timeout inheritance shared pod/JVM; phase errors now persist
   a fault, terminalize the open attempt, close the run :error, and
