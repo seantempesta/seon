@@ -57,7 +57,12 @@ Stream stdout through `tee`, never a bare `>` redirect —
 `codex exec [flags] "<spec>" < /dev/null 2>&1 | tee
 tmp/orchestrator/<lane>-stdout.log` — so the user's task panel shows
 the lane's live transcript while the log file still persists (owner
-request 2026-07-24: watchable agents). Give each Bash call a
+request 2026-07-24: watchable agents). This also protects the
+orchestrator's context: background-task stdout never enters the
+conversation on its own — the orchestrator gets a one-line completion
+notification, reads the `-o` summary, and queries the stdout log
+selectively (`tail`/`rg`), never a whole-file read (transcripts reach
+megabytes). Give each Bash call a
 description naming the lane (that string is what the user's panel
 shows). Detached `nohup` remains
 acceptable only when a lane must survive the orchestrator session
