@@ -259,11 +259,24 @@
           (let [first-selection (config/select-manifest configuration nil)
                 first-path (:seon.dev.config/launch-envelope-path first-selection)
                 first-value (slurp first-path)
+                first-environment
+                (:seon.dev.config/environment first-selection)
+                resolved-manifest-path
+                (:seon.dev.config/resolved-manifest-path first-selection)
                 second-selection (config/select-manifest configuration nil)
                 second-path (:seon.dev.config/launch-envelope-path second-selection)]
             (is (not= first-path second-path))
             (is (re-find #"launch-envelope-[0-9]+\.edn$" first-path))
             (is (= first-value (slurp first-path)))
+            (is (= resolved-manifest-path
+                   (get first-environment
+                        "SEON_RESOLVED_MANIFEST_PATH")))
+            (is (= (#'config/sha-256 (slurp resolved-manifest-path))
+                   (get first-environment
+                        "SEON_RESOLVED_MANIFEST_SHA_256")))
+            (is (= "64"
+                   (get first-environment
+                        "SEON_DB_INITIALIZATION_PAGE_ROWS")))
             (is (fs/regular-file? second-path))
             (is (not (fs/exists? (fs/path process-dir "launch-envelope.edn")))))))
       (finally

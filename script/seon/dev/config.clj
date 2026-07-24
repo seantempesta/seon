@@ -244,6 +244,9 @@
         envelope-path
         (str (fs/path process-dir (str "launch-envelope-" generation ".edn")))
         manifest-text (pr-str manifest)
+        manifest-sha-256 (sha-256 manifest-text)
+        initialization-page-rows
+        (:seon.config.database.initialization/page-rows singleton)
         _ (atomic-write-edn! manifest-path manifest)
         _ (atomic-write-edn! envelope-path envelope)
         descriptor
@@ -251,17 +254,23 @@
           (-> base
               (assoc ::launch/resolved-manifest
                      {::launch/path manifest-path
-                      ::launch/sha-256 (sha-256 manifest-text)
+                      ::launch/sha-256 manifest-sha-256
                       ::launch/reconcile-manifest? reconcile?})
               (assoc ::launch/operational-envelope envelope)
               launch/validate-descriptor))]
-    (cond-> (assoc configuration
-                   :seon.dev.config/resolved-manifest manifest
-                   :seon.dev.config/resolved-manifest-path manifest-path
-                   :seon.dev.config/launch-envelope-path envelope-path
-                   :seon.dev.config/operational-envelope envelope
-                   :seon.dev.config/resolved-configuration singleton
-                   :seon.dev.config/reconcile-manifest? reconcile?)
+    (cond-> (-> configuration
+                (assoc
+                 :seon.dev.config/resolved-manifest manifest
+                 :seon.dev.config/resolved-manifest-path manifest-path
+                 :seon.dev.config/launch-envelope-path envelope-path
+                 :seon.dev.config/operational-envelope envelope
+                 :seon.dev.config/resolved-configuration singleton
+                 :seon.dev.config/reconcile-manifest? reconcile?)
+                (update :seon.dev.config/environment assoc
+                        "SEON_RESOLVED_MANIFEST_PATH" manifest-path
+                        "SEON_RESOLVED_MANIFEST_SHA_256" manifest-sha-256
+                        "SEON_DB_INITIALIZATION_PAGE_ROWS"
+                        (str initialization-page-rows)))
       descriptor
       (assoc :seon.dev.config/launch-descriptor descriptor)
 
