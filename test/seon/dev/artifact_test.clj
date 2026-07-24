@@ -762,7 +762,9 @@
       (spit (str client) "default-client")
       (spit (str program-source) "default-program-source")
       (spit (str program-row) "default-program-row")
+      (spit (str client-inventory) "default-client-inventory")
       (spit (str execution) "default-execution")
+      (spit (str execution-inventory) "default-execution-inventory")
       (spit (str execution-runtime) "default-runtime")
       (let [default-digest (artifact/digest-paths
                              directory ["out/bootstrap"])
@@ -774,11 +776,17 @@
             (artifact/current-program-source-digest config)
             default-program-row-digest
             (artifact/current-program-row-digest config)
+            default-client-inventory-digest
+            (#'artifact/current-inventory-digest (str client))
+            default-execution-inventory-digest
+            (#'artifact/current-inventory-digest (str execution))
             default-root (#'artifact/publish-runtime-root!
                            config default-digest default-execution-digest
                            default-runtime-digest
                            default-program-source-digest
-                           default-program-row-digest)]
+                           default-program-row-digest
+                           default-client-inventory-digest
+                           default-execution-inventory-digest)]
         (is (= "default-bootstrap"
                (slurp (str (fs/path default-root
                                     "out/bootstrap/example.txt")))))
@@ -795,6 +803,14 @@
         (is (= "default-program-row"
                (slurp (str (fs/path default-root
                                     "out/client/program-rows.edn")))))
+        (is (= "default-client-inventory"
+               (slurp (str (fs/path
+                            default-root
+                            "out/client/program-inventory.edn")))))
+        (is (= "default-execution-inventory"
+               (slurp (str (fs/path
+                            default-root
+                            "out/execution/program-inventory.edn")))))
 
         (spit (str source) "acme-bootstrap")
         (let [acme-digest (artifact/digest-paths directory ["out/bootstrap"])
@@ -802,7 +818,9 @@
                          config acme-digest default-execution-digest
                          default-runtime-digest
                          default-program-source-digest
-                         default-program-row-digest)]
+                         default-program-row-digest
+                         default-client-inventory-digest
+                         default-execution-inventory-digest)]
           (is (not= default-root acme-root))
           (is (= default-digest
                  (artifact/digest-paths default-root ["out/bootstrap"])))
@@ -816,7 +834,9 @@
                  (#'artifact/publish-runtime-root!
                   config acme-digest default-execution-digest
                   default-runtime-digest default-program-source-digest
-                  default-program-row-digest))
+                  default-program-row-digest
+                  default-client-inventory-digest
+                  default-execution-inventory-digest))
               "identical runtime bytes reuse their verified content address")
           (spit (str execution) "changed-execution")
           (let [changed-execution-digest
@@ -825,7 +845,9 @@
                               config acme-digest changed-execution-digest
                               default-runtime-digest
                               default-program-source-digest
-                              default-program-row-digest)]
+                              default-program-row-digest
+                              default-client-inventory-digest
+                              default-execution-inventory-digest)]
             (is (not= acme-root changed-root))
             (is (= "default-execution"
                    (slurp (str (fs/path acme-root
@@ -839,7 +861,9 @@
                               config acme-digest default-execution-digest
                               default-runtime-digest
                               changed-program-source-digest
-                              default-program-row-digest)]
+                              default-program-row-digest
+                              default-client-inventory-digest
+                              default-execution-inventory-digest)]
             (is (not= acme-root changed-root))
             (is (= "default-program-source"
                    (slurp (str (fs/path acme-root
@@ -1009,10 +1033,12 @@
       (with-redefs [artifact/maintained-dependencies (fn [_] @dependencies)
                     artifact/publish-runtime-root!
                     (fn [_ bootstrap-digest execution-digest runtime-digest
-                         program-source-digest program-row-digest]
+                         program-source-digest program-row-digest
+                         client-inventory-digest execution-inventory-digest]
                       (str "/runtime/" bootstrap-digest "-" execution-digest
                            "-" runtime-digest "-" program-source-digest
-                           "-" program-row-digest))]
+                           "-" program-row-digest "-" client-inventory-digest
+                           "-" execution-inventory-digest))]
         (let [bun (artifact/bun-identity! {})
               initial (#'artifact/output-manifest config bun)]
           (swap! dependencies assoc-in

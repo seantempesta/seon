@@ -1026,9 +1026,24 @@
   (fs/path runtime-root
            (runtime-relative-path config (program-row-path config))))
 
+(defn- runtime-client-inventory [config runtime-root]
+  (fs/path runtime-root
+           (runtime-relative-path
+            config
+            (program-inventory-path
+             (:seon.dev.config/client-output config)))))
+
+(defn- runtime-execution-inventory [config runtime-root]
+  (fs/path runtime-root
+           (runtime-relative-path
+            config
+            (program-inventory-path
+             (:seon.dev.config/execution-output config)))))
+
 (defn- verify-runtime-root!
   [config runtime-root bootstrap-digest execution-digest
-   execution-runtime-digest program-source-digest program-row-digest]
+   execution-runtime-digest program-source-digest program-row-digest
+   client-inventory-digest execution-inventory-digest]
   (let [actual-bootstrap (digest-paths runtime-root ["out/bootstrap"])
         execution-output (runtime-execution-output config runtime-root)
         actual-execution
@@ -1045,7 +1060,15 @@
         program-row (runtime-program-row config runtime-root)
         actual-program-row
         (when (fs/regular-file? program-row)
-          (file-digest program-row))]
+          (file-digest program-row))
+        client-inventory (runtime-client-inventory config runtime-root)
+        actual-client-inventory
+        (when (fs/regular-file? client-inventory)
+          (file-digest client-inventory))
+        execution-inventory (runtime-execution-inventory config runtime-root)
+        actual-execution-inventory
+        (when (fs/regular-file? execution-inventory)
+          (file-digest execution-inventory))]
     (when-not (= bootstrap-digest actual-bootstrap)
       (throw (ex-info "An immutable runtime root has unexpected bootstrap bytes."
                       {:seon.dev.artifact/runtime-root (str runtime-root)
@@ -1071,21 +1094,38 @@
                       {:seon.dev.artifact/runtime-root (str runtime-root)
                        :seon.dev.artifact/expected program-row-digest
                        :seon.dev.artifact/actual actual-program-row})))
+    (when-not (= client-inventory-digest actual-client-inventory)
+      (throw
+       (ex-info "An immutable runtime root has an unexpected client inventory."
+                {:seon.dev.artifact/runtime-root (str runtime-root)
+                 :seon.dev.artifact/expected client-inventory-digest
+                 :seon.dev.artifact/actual actual-client-inventory})))
+    (when-not (= execution-inventory-digest actual-execution-inventory)
+      (throw
+       (ex-info
+        "An immutable runtime root has an unexpected execution inventory."
+        {:seon.dev.artifact/runtime-root (str runtime-root)
+         :seon.dev.artifact/expected execution-inventory-digest
+         :seon.dev.artifact/actual actual-execution-inventory})))
     (str runtime-root)))
 
 (defn- publish-runtime-root!
   [config bootstrap-digest execution-digest execution-runtime-digest
-   program-source-digest program-row-digest]
+   program-source-digest program-row-digest client-inventory-digest
+   execution-inventory-digest]
   (let [root (fs/path (:seon.dev.config/root config))
         parent (fs/path root "tmp/seon-runtime-artifacts")
         identity (digest-values [bootstrap-digest execution-digest
                                  execution-runtime-digest
-                                 program-source-digest program-row-digest])
+                                 program-source-digest program-row-digest
+                                 client-inventory-digest
+                                 execution-inventory-digest])
         runtime-root (fs/path parent identity)]
     (if (fs/directory? runtime-root)
       (verify-runtime-root! config runtime-root bootstrap-digest
                             execution-digest execution-runtime-digest
-                            program-source-digest program-row-digest)
+                            program-source-digest program-row-digest
+                            client-inventory-digest execution-inventory-digest)
       (let [temporary (fs/path parent (str "." identity "."
                                                 (random-uuid) ".tmp"))]
         (try
@@ -1108,6 +1148,16 @@
            (fs/parent (runtime-program-row config temporary)))
           (fs/copy (program-row-path config)
                    (runtime-program-row config temporary))
+          (fs/create-dirs
+           (fs/parent (runtime-client-inventory config temporary)))
+          (fs/copy
+           (program-inventory-path (:seon.dev.config/client-output config))
+           (runtime-client-inventory config temporary))
+          (fs/create-dirs
+           (fs/parent (runtime-execution-inventory config temporary)))
+          (fs/copy
+           (program-inventory-path (:seon.dev.config/execution-output config))
+           (runtime-execution-inventory config temporary))
           ;; The bootstrap and complete execution closure are immutable runtime
           ;; members. Development source and assets remain explicit links until
           ;; downstream packaging publishes its bounded corpus.
@@ -1117,7 +1167,9 @@
             (fs/create-sym-link (fs/path temporary relative) source))
           (verify-runtime-root! config temporary bootstrap-digest
                                 execution-digest execution-runtime-digest
-                                program-source-digest program-row-digest)
+                                program-source-digest program-row-digest
+                                client-inventory-digest
+                                execution-inventory-digest)
           (fs/create-dirs parent)
           (fs/move temporary runtime-root {:atomic-move true})
           (str runtime-root)
@@ -1175,7 +1227,9 @@
           runtime-root
           (publish-runtime-root! config bootstrap-digest execution-digest
                                  execution-runtime-digest
-                                 program-source-digest program-row-digest)
+                                 program-source-digest program-row-digest
+                                 client-inventory-digest
+                                 execution-inventory-digest)
           execution-output
           (str (runtime-execution-output config runtime-root))
           application-digest

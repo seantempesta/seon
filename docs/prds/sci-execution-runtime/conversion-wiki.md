@@ -1135,6 +1135,15 @@ the anchor stays the state ledger.
   regression is a first flush that publishes manifest v11 while no
   `.program-rows-build-*` Bun process remains
   (`script/seon/dev/program_artifact.clj`).
+- **Every boot-read inventory is an immutable runtime member.** The pod reads
+  `program-inventory.edn` beside both its client output and the selected
+  execution output. A manifest path and digest do not make either file part of
+  a content-addressed runtime root. Include both inventory digests in the root
+  identity, copy both files at their manifest-relative paths, and verify their
+  exact bytes before admission. The default watcher makes this coherent by
+  always watching both configured builds; each build publishes its inventory
+  from its own flush hook (`script/seon/dev/artifact.clj`,
+  `script/seon/dev/process.clj`).
 - **R28 breakage can survive on a pod surface until build-time derivation
   executes it.** The shell config-fact conversion changed portable
   `run-request` to require the acquired configuration, but the still-alive pod
