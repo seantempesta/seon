@@ -1135,6 +1135,20 @@ MORNING ITEMS (accumulating):
   full CLJS gate remains 1,592/7,866/0/0. The earliest unsettled
   contract returns to the ordered [[unified-plan-2026-07-23]] spine;
   this checkpoint has no occupied fix lane or local refill.
+- ★ CHECKPOINT SUITES ALL GREEN (verified from raw logs): CLJS
+  1,592/7,866 · writer 641/4,339 · operator 318/1,837 · 0F/0E each
+  (settleclose 1a47c1062 + 5cc3b32e1: break-8 fixture class swept
+  suite-wide, program-source digest selection fixed). A REAL
+  MILESTONE — but NOT graduation: the goal's bar is PROVABLY ALIVE.
+- ★ PRIORITY-ZERO LIVE BLOCKER (found at the suite-green boundary,
+  exactly why the goal separates tests from alive): the claimant
+  HOST DRAINS after a clean restart — 'Committed schema projection
+  acquisition failed' (host.clj:298); paged reads succeed,
+  reconstruction fails. Strong hypothesis = tonight's forward-
+  reference class (register! forward refs → build-projection fails
+  deep without naming the key). hostdrain lane dispatched (reproduce,
+  root-cause, dissolve the class, loud error; acceptance = restart →
+  all 5 processes ready). THE LIVE-PROOF LEDGER WAITS ON THIS.
 - SETTLE RERUN: CLJS GREEN (1,592/7,866/0/0); fresh boot 308s
   (perf row stands — R45 preprocessing is the fix). Writer + operator
   each at ONE fixture-class error: (A) host-cancel-writer-test =
