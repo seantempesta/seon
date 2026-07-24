@@ -436,7 +436,8 @@
      [:seon.schema/key :seon.schema/key]
      [:seon.schema/form :seon.schema/form]
      [:seon.schema/ns {:optional true} :seon.schema/ns]
-     [:seon.schema/created-at {:optional true} :seon.schema/created-at]]
+     [:seon.schema/created-at {:optional true} :seon.schema/created-at]
+     [:seon.db.id/generator {:optional true} :seon.db.id/generator]]
     :seon.ns
     [:map {:seon.db/entity true
            :seon.render/ai 'seon.render.handlers.ns/render-ai

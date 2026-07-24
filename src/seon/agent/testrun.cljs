@@ -30,7 +30,7 @@
 (schema/register! ::agent     :seon.db/ref)             ; SCOPE ref — the agent this run belongs to
 
 (schema/register! ::failure
-  [:map
+  [:map {:seon.db/entity true}
    [::test-name ::test-name]
    [::path      ::path]
    [::line      {:optional true} ::line]
@@ -40,6 +40,15 @@
 ;; only as a DB attr; the response carries `::failures` as a map KEY with an
 ;; inline `[:vector ::failure]` value, so there is no schema clash.
 (schema/register! ::failures [:vector {:seon.db/component true} :seon.db/ref])
+
+(schema/register! ::testrun
+  [:map {:seon.db/entity true}
+   [::framework ::framework]
+   [::passed ::passed]
+   [::failed ::failed]
+   [::errors ::errors]
+   [::agent ::agent]
+   [::failures {:optional true} ::failures]])
 
 ;; A recognized run (attached to the shell envelope + persisted). `::failures`
 ;; here is the inline data vector the agent reads.

@@ -69,7 +69,7 @@
 ;; qualified symbol resolves LATE via seon.eval/lookup-value at every
 ;; render. Optional :seon.render/html twin (symbol or hiccup literal).
 (schema/register! :seon.agent.ctx/block
-  [:map
+  [:map {:seon.db/entity true}
    [:seon.agent.ctx/name     :seon.agent.ctx/name]
    [:seon.agent.ctx/priority :seon.agent.ctx/priority]
    [:seon.agent.ctx/token-cap {:optional true} :seon.agent.ctx/token-cap]

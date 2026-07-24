@@ -28,6 +28,28 @@
 (def ^:private digest
   "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
 
+(def ^:private legacy-cold-boot-attributes
+  "Persisted attributes carried by the deleted hand-maintained boot list whose
+   entity declarations were incomplete when the population became computed."
+  #{:my.kb.shared/at
+    :my.kb.shared/text
+    :my.kb/confidence
+    :my.kb/source-line
+    :my.kb/source-path
+    :my.kb/verified-at
+    :seon.agent.ctx/priority
+    :seon.agent.testrun/agent
+    :seon.agent.testrun/errors
+    :seon.agent.testrun/failed
+    :seon.agent.testrun/framework
+    :seon.agent.testrun/line
+    :seon.agent.testrun/message
+    :seon.agent.testrun/passed
+    :seon.agent.testrun/path
+    :seon.agent.testrun/test-name
+    :seon.db.id/generator
+    :seon.render/full?})
+
 (deftest doctored-launch-envelope-records-the-divergent-keys
   (async done
     (let [recorded (atom nil)
@@ -204,7 +226,11 @@
     (is (every? (set (:seon.db/attributes forward))
                 [:seon.ns/doc :seon.ns/summary])
         "namespace metadata schema is cold-published independent of program rows")
-    (is (some #{:seon.render/full?} (:seon.db/attributes forward)))
+    (is (every? (set (:seon.db/attributes forward))
+                legacy-cold-boot-attributes)
+        "computed boot attributes preserve the deleted list's persisted contract")
+    (is (some #{:my.kb/source-line-end} (:seon.db/attributes forward))
+        "the declaration also publishes persisted attrs omitted by the old list")
     (is (= [:seon.ns/name :seon.fn/sym :seon.schema/key]
            (mapv (fn [row]
                    (cond

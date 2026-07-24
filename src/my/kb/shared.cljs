@@ -27,6 +27,11 @@
    [::id ::id]
    [::instructions {:optional true} ::instructions]])
 
+(schema/register! ::instruction
+  [:map {:seon.db/entity true}
+   [::text ::text]
+   [::at ::at]])
+
 ;; --- Boot seed — the EMPTY zero state. The four shipped behavioral
 ;; --- teachings live in the system prompt (context-v4 §2.2 home 1),
 ;; --- NOT here: this entity starts with no rows and grows only by

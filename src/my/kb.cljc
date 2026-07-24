@@ -31,6 +31,15 @@
 ;; writes it; multi-field domains design their own my.kb.<domain> schema.
 (schema/register! ::claim [:string {:seon.db/identity true}])
 
+(schema/register! ::finding
+  [:map {:seon.db/entity true}
+   [::claim ::claim]
+   [::source-path ::source-path]
+   [::source-line {:optional true} ::source-line]
+   [::source-line-end {:optional true} ::source-line-end]
+   [::verified-at ::verified-at]
+   [::confidence ::confidence]])
+
 ;; [[remember]]'s map-in / map-out. `::source` is an ERGONOMIC input only
 ;; (a "file:line" / "file" / url string that [[remember]] PARSES into the
 ;; shared `::source-path` + `::source-line`) — it is never itself stored.

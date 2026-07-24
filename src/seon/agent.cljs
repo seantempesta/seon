@@ -217,7 +217,8 @@
    [:seon.eval/result-edn  {:optional true} :seon.eval/result-edn]
    [:seon.eval/output      {:optional true} :seon.eval/output]
    [:seon.eval/error       {:optional true} :seon.eval/error]
-   [:seon.eval/error-data  {:optional true} :seon.eval/error-data]])
+   [:seon.eval/error-data  {:optional true} :seon.eval/error-data]
+   [:seon.render/full?     {:optional true} :seon.render/full?]])
 
 ;; :seon.agent — the agent's OWN entity shape. Its page/canvas operation
 ;; selects the surface renderer after acquiring one immutable agent value;
