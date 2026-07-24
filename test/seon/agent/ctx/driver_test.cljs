@@ -2,6 +2,7 @@
   (:require
    [cljs.test :refer [async deftest is]]
    [clojure.string :as str]
+   [malli.core :as m]
    [seon.agent.ctx.driver :as ctx.driver]
    [seon.agent.message :as message]
    [seon.ai :as ai]
@@ -129,6 +130,13 @@
                     (into #{}
                           (map :seon.render.surface/label)
                           (:seon.render.surface/surfaces projection))))
+             (is (m/validate :seon.ui.agent-view/projection projection)
+                 "the complete in-pod page projection satisfies its output schema")
+             (is (= #{:literal :authored :canvas}
+                    (into #{}
+                          (map :seon.agent.ctx/name)
+                          (:seon.render.surface/surfaces projection)))
+                 "every materialized surface preserves its context identity")
              (let [by-label
                    (into {}
                          (map (juxt :seon.render.surface/label identity))

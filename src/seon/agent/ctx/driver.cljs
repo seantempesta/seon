@@ -543,7 +543,8 @@
                          vec)
                     canvas-block
                     (cond->
-                     {:seon.render.surface/selection "canvas"
+                     {:seon.agent.ctx/name :canvas
+                      :seon.render.surface/selection "canvas"
                       :seon.render.surface/label "canvas"
                       :seon.render/html canvas-value
                       :seon.fn/read-attrs
