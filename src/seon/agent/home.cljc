@@ -25,7 +25,8 @@
 (schema/register! ::require-edges [:set ::require-edge])
 (schema/register! ::error [:map [:seon.error/message :string]])
 (schema/register! ::home-requires-result [:or ::require-specs ::error])
-(schema/register! :seon.eval/home-requires :string)
+(schema/register! :seon.eval/home-requires
+  [:or ::require-specs :symbol])
 
 (defn home-ns
   "Return the deterministic home-ns symbol for an agent id.

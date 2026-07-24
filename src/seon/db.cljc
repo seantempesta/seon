@@ -399,7 +399,7 @@
             request (protocol/transaction-request
                      (cond-> {::protocol/request-id op-id ::db database
                               ::protocol/transaction-data
-                              (internal/encode-edn-slot-values tx-data)}
+                              tx-data}
                        (::expected-db arg) (assoc ::expected-db (::expected-db arg))
                        (seq tx-meta) (assoc ::protocol/transaction-meta tx-meta)
                        (contains? arg :seon.db.id/generated-candidates)
@@ -470,6 +470,7 @@
                                      (::tx-data arg))
                               (into (conj (internal/tx-meta-datahike-schema)
                                           {:seon.user/id "user"}))))
+                storage-tx-data (internal/encode-edn-slot-values tx-data)
                 opts (if (declares-provenance-schema? tx-data)
                        (cond-> (or (::opts arg) {})
                          (::tx-meta arg) (assoc :tx-meta (::tx-meta arg)))
@@ -478,15 +479,15 @@
                           (::tx-meta arg) (assoc :tx-meta (::tx-meta arg)))
                         (current-tx-context) (current-agent-id)))
                 tx-meta (:tx-meta opts)
-                attrs (into (internal/extract-tx-attrs tx-data)
+                attrs (into (internal/extract-tx-attrs storage-tx-data)
                             (keys tx-meta))
                 validate? (not= false
                                 ((context-fn ::leaf/schema-validation?)))]
             (when validate?
               (internal/validate-attrs! attrs)
-              (internal/validate-values! tx-data)
+              (internal/validate-values! storage-tx-data)
               (internal/validate-values! [tx-meta]))
-            (let [report (await (submit-transaction! arg tx-data tx-meta))]
+            (let [report (await (submit-transaction! arg storage-tx-data tx-meta))]
               (when (and projection (not (error-value? report)))
                 ((context-fn ::leaf/cache-schema-projection!) projection))
               report))))))

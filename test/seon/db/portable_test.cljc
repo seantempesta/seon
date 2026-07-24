@@ -246,6 +246,11 @@
         (is (= (pr-str {:portable.value/n 2})
                (get-in (::protocol/transaction-data wire) [0 edn-attr])))
         (is (set? (get-in (::protocol/transaction-data wire) [0 set-attr])))
+        (let [request-count (count @requests)
+              malformed (await (transact! [{id-attr "one" edn-attr 42}]))]
+          (is (= :user-input (:seon.error/kind malformed)))
+          (is (= request-count (count @requests))
+              "logical EDN-slot validation refuses malformed data before transport"))
         (let [rejected (await (transact! {::db/tx-data tx
                                           ::db/request-id "transport-leak"}))]
           (is (= :user-input (:seon.error/kind rejected)))

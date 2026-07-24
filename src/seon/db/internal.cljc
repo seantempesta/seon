@@ -4,6 +4,8 @@
    This internal namespace normalizes public requests and ordinary context
    data into protocol data; platform scope and transport live elsewhere."
   (:require
+   #?(:clj [clojure.edn :as reader]
+      :cljs [cljs.reader :as reader])
    [clojure.string :as str]
    [seon.ai.tokens :as tokens]
    [seon.db :as-alias db]
@@ -392,34 +394,40 @@
   [entity]
   (doseq [[attr value] entity
           :when (and (not (system-attr? attr)) (registered? attr))]
-    (when (and (acquired-component-schema? attr)
-               (not (valid-value? attr value)))
-      (throw (ex-info
-               (str "Transaction data fails its registered component schema "
-                    (pr-str (schema-definition attr)) ". "
-                    "Transact identified child entities or entity refs; for "
-                    "example "
-                    (transaction-form
-                      [{attr 'value-matching-registered-schema}]) ".")
-                      {::db/attr attr ::db/actual-value value
-                       ::db/expected-schema (schema-definition attr)
-                       :seon.error/kind :user-input})))
-    (case (ref-attr-arity (schema-definition attr))
-      :one (validate-ref! attr value)
-      :many (doseq [child value] (validate-ref! attr child))
-      (when-not (valid-value? attr value)
+    (let [logical-value
+          (if (and (edn-encoded-attr? attr) (string? value))
+            (try
+              (reader/read-string value)
+              (catch #?(:clj Throwable :cljs :default) _ ::invalid-edn-slot))
+            value)]
+      (when (and (acquired-component-schema? attr)
+                 (not (valid-value? attr logical-value)))
         (throw (ex-info
-                 (str "Transaction data fails its registered schema "
-                      (pr-str (schema-definition attr)) ". "
-                      (if (nil? value)
-                        (str "Omit the absent key; for example "
-                             (transaction-form [(dissoc entity attr)]) ".")
-                        (str "Transact a matching value; for example "
-                             (transaction-form
+                (str "Transaction data fails its registered component schema "
+                     (pr-str (schema-definition attr)) ". "
+                     "Transact identified child entities or entity refs; for "
+                     "example "
+                     (transaction-form
+                      [{attr 'value-matching-registered-schema}]) ".")
+                {::db/attr attr ::db/actual-value logical-value
+                 ::db/expected-schema (schema-definition attr)
+                 :seon.error/kind :user-input})))
+      (case (ref-attr-arity (schema-definition attr))
+        :one (validate-ref! attr logical-value)
+        :many (doseq [child logical-value] (validate-ref! attr child))
+        (when-not (valid-value? attr logical-value)
+          (throw (ex-info
+                  (str "Transaction data fails its registered schema "
+                       (pr-str (schema-definition attr)) ". "
+                       (if (nil? logical-value)
+                         (str "Omit the absent key; for example "
+                              (transaction-form [(dissoc entity attr)]) ".")
+                         (str "Transact a matching value; for example "
+                              (transaction-form
                                [{attr 'value-matching-registered-schema}]) ".")))
-                        {::db/attr attr ::db/actual-value value
-                         ::db/expected-schema (schema-definition attr)
-                         :seon.error/kind :user-input})))))
+                  {::db/attr attr ::db/actual-value logical-value
+                   ::db/expected-schema (schema-definition attr)
+                   :seon.error/kind :user-input}))))))
   nil)
 
 (defn validate-values!
