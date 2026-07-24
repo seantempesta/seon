@@ -63,7 +63,7 @@ See `README.md` for the convention.
 | [Writer run-readiness! busy-spins when a ready source has no runtime](writer-run-readiness-busy-spins-without-runtime.md) | blocker | Core |
 | [seon.agent.ctx file reads bypass the filesystem grant](agent-ctx-file-reads-bypass-fs-grant.md) | blocker | agent |
 
-## Friction (71)
+## Friction (70)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -119,7 +119,6 @@ See `README.md` for the convention.
 | [Remove the Node module-register deprecation from CSS builds](tailwind-node-module-register-deprecation.md) | friction | UI |
 | [Remove undeclared-var warnings from the self-host bootstrap build](bootstrap-analyzer-api-emits-undeclared-var-warnings.md) | friction | agent |
 | [Render entity converters silently vanish on unresolved symbols](render-entity-converters-silently-vanish-on-unresolved-symbol.md) | friction | UI |
-| [Repair invalid existing issue frontmatter](issues-index-cannot-rebuild-with-invalid-existing-frontmatter.md) | friction | general |
 | [Restore focused agent edge-case coverage](removed-embedded-multiagent-coverage-needs-owner.md) | friction | agent |
 | [Root context replaces inherited capability requirements](root-context-replaces-base-capability-requires.md) | friction | agent |
 | [Root warnings block renders 146k tokens before its cap clips it](root-warnings-block-renders-146k-tokens-before-cap.md) | friction | agent |
