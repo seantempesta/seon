@@ -499,29 +499,42 @@ runner retains an accept loop after five minutes.
 The first timed `bin/seon up` crossed watcher, writer, and host readiness,
 then correctly refused the old applied release at **111.30s**. The
 non-destructive apply could not converge because the old database schema
-typed `:seon.eval/home-requires` as a string; the pre-authorized reset
-removed that conflict. Fresh apply then exposed a different independent
-blocker: the published page plan names config digest `adc1e407…` while
-the selected launch manifest names `607f6793…`. That failure is recorded
-in [[page-plan-config-digest-drift-blocks-fresh-default-apply]]; default
-is down. Earliest unsettled contract is now page-plan/config-manifest
-identity convergence, whose integrated proof is fresh apply plus pod and
-web-render readiness. Next dependency-ready refill after it is S6 cutover
-checkpoint, then re-drive-3. Final graduation remains the reset default
-cluster with claimant interaction outcome visible through the live
+typed `:seon.eval/home-requires` as a string; the pre-authorized reset was
+expected to remove that conflict. Fresh apply then exposed page-plan/config
+digest drift: the sidecar named `adc1e407…` while the selected launch manifest
+named `607f6793…`. `07af12c73` closes that mechanism: reset now removes the
+retained applied manifest with the database, operator and Shadow publication
+share one digest owner, and artifact reuse/publication binds the selected
+launch digest to the page plan. Focused proof is 93 tests / 394 assertions,
+green. A fresh 76.29-second reset produced matching selected/page-plan digest
+`adc1e407…`; the following apply passed identity admission and began the
+95-page initialization plan.
+
+That first admitted apply falsified the old-schema assumption and exposed the
+next independent blocker after 35.35 seconds: config reconciliation validates
+logical `:seon.eval/home-requires` vector data against its `:string` storage
+schema before the transaction path encodes EDN slots. Evidence and the exact
+owner boundary are in
+[[transaction-validation-precedes-edn-slot-encoding-blocks-fresh-config-reconcile]].
+Default remains down. Earliest unsettled contract is now one transaction
+normalization representation at validation, whose integrated proof is fresh
+apply plus pod and web-render readiness. Next dependency-ready refill after it
+is S6 cutover checkpoint, then re-drive-3. Final graduation remains the reset
+default cluster with claimant interaction outcome visible through the live
 page/feed.
 
 EXECBUILDRETIRE LANDED (~17:45, 41d911add + a6ba6e1d8, accepted):
 child build retired everywhere; watcher green (client+test only);
 WRITER AND HOST REACHED READINESS (the readiness saga is resolved
-live); pod's S4 stale-release refusal fired correctly → sanctioned
-default reset → fresh apply exposed ONE remaining blocker:
-page-plan config-manifest digest drift (sidecar adc1e407 vs selected
-607f6793; issue filed) — pageplandigest lane dispatched (one digest
-owner, same bytes; verification stays strict). execution-digest
+live); pod's S4 stale-release refusal fired correctly → sanctioned default
+reset → page-plan config-manifest drift fixed by `07af12c73` (one digest owner,
+same bytes, strict verification retained) → fresh apply admitted the plan and
+exposed transaction validation before EDN-slot encoding as the next blocker.
+execution-digest
 rename = owner-taste item (deliberately retained). Focused gates:
-operator 130/733, launch 12/78 green. NEXT: green apply → five-ready
-boot with timings → S6 cutover → re-drive-3.
+operator 93/394 for the digest slice, prior operator 130/733, launch 12/78
+green. NEXT: normalize once at validation → green apply → five-ready boot with
+timings → S6 cutover → re-drive-3.
 
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 

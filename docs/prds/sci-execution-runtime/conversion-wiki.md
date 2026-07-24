@@ -1870,3 +1870,14 @@ the variable-weight values they select.
   measured writer artifact inventory, and reject the build when a fresh load
   trace disagrees. The canonical operator artifact remains source-launched
   until the orchestrator reviews a measured cutover.
+
+## R45 page-plan/config identity scar (2026-07-24)
+
+- **The retained applied manifest is part of the database application
+  identity.** A confirmed cluster reset must delete that exact file with the
+  database before selecting fresh configuration; otherwise the recreated
+  database makes selection prefer stale applied bytes. Hash the canonical
+  resolved-manifest bytes through the one
+  `seon.dev.config/config-manifest-digest` owner at both operator selection and
+  Shadow flush publication, bind the sidecar to that digest, and keep apply's
+  mismatch refusal strict.
