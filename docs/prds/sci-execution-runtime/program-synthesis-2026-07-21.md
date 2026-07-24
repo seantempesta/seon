@@ -1162,6 +1162,13 @@ MORNING ITEMS (accumulating):
   failures/errors (`tmp/orchestrator/framedesync-gate.log`). The
   orchestrator owns the coordinated rebuild, restart, and core-fault
   live re-drive; this source lane ran no cluster.
+- ★ RE-DRIVE RUNNING (2026-07-24): both fixes landed (render-prompt
+  contract a88e11505; UDS frame-ordering 0b8ad3537 — a real
+  scheduling race, NOT C1, so C1 stays owner-reserved). Fresh
+  restart→READY (314s, all 5). Decisive DeepSeek drive testing the
+  provably-alive bar: agent completes multi-step work + cross-turn
+  db memory + core-fault leaves pod READY (framedesync integrated
+  proof). Verdict pending.
 - ★ LIVE PROOF VERDICT: NOT-YET-ALIVE, ROOT-CAUSED (2026-07-24).
   Web: the JVM /data tier MORPHS correctly on transact (SSE datastar
   ALIVE, marker at basis 536871707) — but 5 web bugs filed: agent/
