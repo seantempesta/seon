@@ -736,6 +736,15 @@
     (complete-send! pending status))
   nil)
 
+(defn- queue-event-output!
+  [session pending frame]
+  (let [output {::phase ::output ::pending pending ::frame frame}]
+    (reset! (::event-state session) output)
+    (.addLast ^ArrayDeque (::outputs session) output)
+    (swap! (::queued-output-bytes session) + (.remaining ^ByteBuffer frame))
+    (key-interests! session op-write 0))
+  nil)
+
 (defn- select-encoded-event!
   [connections workers close-connection! shutting-down? session pending frame]
   (when (identical? pending (::pending @(::event-state session)))
@@ -746,12 +755,7 @@
                          session slot (.remaining ^ByteBuffer frame))
             status (::send-status reservation)]
         (if (= send-accepted status)
-          (do
-            (reset! (::event-state session)
-                    {::phase ::output ::pending pending ::frame frame})
-            (swap! (::queued-output-bytes session)
-                   + (.remaining ^ByteBuffer frame))
-            (key-interests! session op-write 0))
+          (queue-event-output! session pending frame)
           (do
             (reset! (::event-state session)
                     {::phase ::blocked ::pending pending ::frame frame})
@@ -769,11 +773,7 @@
                          session slot (.remaining ^ByteBuffer frame))]
         (when (= send-accepted (::send-status reservation))
           (swap! (::paused-event-sessions session) disj session)
-          (reset! (::event-state session)
-                  {::phase ::output ::pending pending ::frame frame})
-          (swap! (::queued-output-bytes session)
-                 + (.remaining ^ByteBuffer frame))
-          (key-interests! session op-write 0))))))
+          (queue-event-output! session pending frame))))))
 
 (defn- wake-paused-events!
   [paused-sessions]
@@ -1219,9 +1219,7 @@
         ^ArrayDeque outputs (::outputs session)]
     (loop []
       (if-let [{::keys [frame response-slot pending opening-outcome] :as output}
-               (or (.peekFirst outputs)
-                   (when (= ::output (::phase @(::event-state session)))
-                     @(::event-state session)))]
+               (.peekFirst outputs)]
         (do
           (.write channel ^ByteBuffer frame)
           (when-not (.hasRemaining ^ByteBuffer frame)

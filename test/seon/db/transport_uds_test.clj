@@ -1546,6 +1546,57 @@
         (uds/close-request-server! server)
         (.delete (File. path))))))
 
+(deftest partial-event-frame-cannot-be-preempted-by-a-response
+  (let [path (socket-path "transport-partial-event")
+        control (promise)
+        event {::event-payload (apply str (repeat (* 3 1024 1024) "e"))}
+        request {::request :after-partial-event}
+        response {::response :after-partial-event}
+        server
+        (uds/start-request-server!
+         {::uds/socket-path path
+          ::uds/open-connection!
+          (fn [connection-control]
+            (deliver control connection-control)
+            (Object.))
+          ::uds/close-connection! (constantly nil)
+          ::uds/handler
+          (fn [_owner _request _frame-bytes complete!]
+            (complete! response))})
+        channel (open-admitted-channel! path)
+        {send! ::uds/send!} (deref control 2000 ::not-opened)]
+    (try
+      (let [send-result (send! event)]
+        (is (= uds/send-accepted (::uds/send-status send-result)))
+        (wait-until!
+         "partially written event frame"
+         #(when-let [session (first (vals @(::uds/connections server)))]
+            (when-let [^ByteBuffer frame
+                       (::uds/frame @(::uds/event-state session))]
+              (and (pos? (.position frame)) (.hasRemaining frame)))))
+        (write-bytes! channel (frame-bytes request) Integer/MAX_VALUE)
+        (wait-until!
+         "response queued behind the partial event frame"
+         #(when-let [session (first (vals @(::uds/connections server)))]
+            (some ::uds/response-slot
+                  (seq ^ArrayDeque (::uds/outputs session)))))
+        (let [input (Channels/newInputStream channel)]
+          (is (= event (uds/read-frame input))
+              "the first frame drains completely before another frame starts")
+          (is (= response (uds/read-frame input))
+              "the following response remains independently framed"))
+        (is (= uds/send-accepted
+               (deref (::uds/send-completion send-result)
+                      2000 ::not-complete)))
+        (wait-until!
+         "event and response output reservations released"
+         #(and (zero? @(::uds/authority-response-slot-count server))
+               (zero? @(::uds/authority-output-bytes server)))))
+      (finally
+        (.close channel)
+        (uds/close-request-server! server)
+        (.delete (File. path))))))
+
 (deftest request-server-closes-one-owner-exactly-once
   (let [path (socket-path "transport-owner-close")
         opened (promise)
