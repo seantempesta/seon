@@ -291,6 +291,19 @@ item). Fleet: s4startgate ∥ webui ∥ c1codec ∥ supervision clock.
 Naming watch: :seon.r45s4/* seen in s4 transcript is NOT in the tree
 (verified rg-zero); unit-scoped names = stop-and-rename at review.
 
+R45-S4 LANDED (~13:20, 13ebc881d+774cecd90) — MEASURED: Bun start
+2.03s empty / 2.46s divergent (was 300+s); cluster open 9.21s (≤10s
+PASS); writer JVM 13.88s FAIL = raw JVM classload (booting→ready
+0.07s) → S6 owns (AOT/CDS candidates); claimant/web-render measures
+= S6. Zero derivation lines on start; compose byte-equal cold;
+mismatch refusal with remedy proven; naming clean (rg r45s4 = 0).
+CAVEAT: default WATCH build breaks in publish-base-projection! —
+fingerprint fix b28cadfee landed, remaining cause = base-load-plan
+NIL on watch build (release-only wiring); s4 session resumed on it.
+Default cluster DOWN until watch flush green → then re-drive-3
+(alive caveat) on the S4 boot path. Fleet: s4-resume ∥ webui ∥
+c1codec(+3 read-only sub-audits) ∥ clock.
+
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 
 ## older restart protocol below until morning)
