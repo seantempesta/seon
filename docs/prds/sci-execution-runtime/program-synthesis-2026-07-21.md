@@ -14,6 +14,30 @@ earlier — consult it only for archaeology, never for current truth.
 units U1-U10, sequencing, decisions, graduation gate. Read it
 COMPLETELY before dispatching anything.
 
+## MORNING 2026-07-24 (owner awake — supersedes the overnight block)
+
+Owner directives (08:20): the overnight "reserved for owner" hold on
+R45 S3/S4 is LIFTED and fast boot is TOP PRIORITY — the 300–455s boots
+wasted the night's wall-clock; attack the biggest slowdowns in order.
+Breaking things is authorized (not production; great-refactor posture);
+old tests do not need to pass — write better tests from lessons, never
+green-wash. Sol remains the implementation fleet; orchestrator audits
+overnight fix quality for missed class-level designs.
+
+Lanes live (08:25): r45s3 (pageplan+apply, session 019f9412-d9e0) ∥
+u9s0a great-deletion S0a (059146, resumed from wind-down) ∥
+lifecycle-caveat re-drive on default (session 019f9410-b7b2, survived
+handoff) ∥ Fable audit agent → research/overnight-fix-quality-audit-
+2026-07-24.md. Spine after S3: S4 startgate → S5 maintain; refills:
+web-UI fixes (after u9s0a returns; serve.cljs owner), containment
+HIGH items. §8 preprocessing decisions confirmed at recommendations.
+
+Orchestrator review note (08:25): 170d97862 verified computed-rule
+(capability manifest → namespaces, no hand list). 60d09ef38 flagged
+PROVISIONAL: `no-dispatch-reply?` bypasses the planner instead of
+plan-execution returning a trivial empty plan — candidate class fix,
+awaiting the fix-quality audit verdict before re-opening.
+
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 
 ## older restart protocol below until morning)
