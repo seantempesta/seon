@@ -3,7 +3,6 @@
   (:require [clojure.test :refer [deftest is testing]]
             [seon.host :as host]
             [seon.host.context :as context]
-            [seon.host.sample :as host.sample]
             [seon.schema :as schema]))
 
 (defn- projection [k form]
@@ -73,31 +72,6 @@
     (context/publish-committed-projection! state (acquired 13 :projection.test/thirteen :int))
     (is (= 13 (get-in @state [::context/database :t])))
     (is (nil? (::context/fault @state)))))
-
-(deftest a-newer-generation-fault-refuses-the-host-drill-read
-  (let [fault {:seon.error/message "projection refresh failed"
-               :seon.error/kind :core-bug}
-        state (atom {::context/fault fault
-                     ::context/committed-basis 11})
-        result (host.sample/drill-value
-                 {::host/projection-state state}
-                 {:projection.test/id 1}
-                 {:seon.render.value/path []
-                  :seon.render.value/offset 0
-                  :seon.render.value/effective-limits
-                  {:seon.config.render/value-max-path-segments 32
-                   :seon.config.render/value-max-path-bytes 4096
-                   :seon.config.render/value-max-realized-items 32
-                   :seon.config.render/value-max-depth 3
-                   :seon.config.render/value-max-string 80
-                   :seon.config.render/value-shape-sample 8
-                   :seon.render.value/page-size 8}})]
-    (is (false? (:seon.render.value/ok? result)))
-    (is (= {:seon.error/message
-            "Schema-aware value browsing is unavailable."
-            :seon.error/kind :core-bug}
-           (:seon/error result)))
-    (is (< (count (pr-str result)) 256))))
 
 (deftest one-database-value-pins-both-authority-queries
   (let [database {:db-name "projection-test" :t 42}

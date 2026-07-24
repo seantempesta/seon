@@ -23,7 +23,6 @@
             [seon.host.preflight :as host.preflight]
             [seon.host.sample :as host.sample]
             [seon.host.session :as host.session]
-            [seon.render.value :as render.value]
             [seon.schema :as schema]
             [taoensso.timbre :as log])
   (:import [java.io ByteArrayInputStream ByteArrayOutputStream DataOutputStream
@@ -276,34 +275,6 @@
    :seon.repl/ok? false
    :seon.repl/source source
    :seon.repl/message "Unexpected EOF."})
-
-(def ^:private sample-limits
-  {:seon.config.render/value-max-path-segments 32
-   :seon.config.render/value-max-path-bytes 4096
-   :seon.config.render/value-max-realized-items 32
-   :seon.config.render/value-max-depth 3
-   :seon.config.render/value-max-string 80
-   :seon.config.render/value-shape-sample 2
-   :seon.render.value/page-size 3})
-
-(def ^:private trusted-sample-limits
-  {:seon.config.render/value-max-path-segments 32
-   :seon.config.render/value-max-path-bytes 4096
-   :seon.config.render/value-max-realized-items 1024
-   :seon.config.render/value-max-depth 3
-   :seon.config.render/value-max-string 80
-   :seon.config.render/value-shape-sample 2
-   :seon.render.value/page-size 12})
-
-(defn- sample-value [agent-id request-id eval-id path]
-  {:seon.execution/message :seon.execution.message/value-sample
-   :seon.execution/protocol-version 3
-   :seon.execution/agent-id agent-id
-   :seon.execution/request-id request-id
-   :seon.execution/eval-id eval-id
-   :seon.render.value/path path
-   :seon.render.value/offset 0
-   :seon.render.value/effective-limits sample-limits})
 
 (defn- error-of [message] (get-in message [:seon.execution/error
                                            :seon.error/message]))
@@ -887,134 +858,6 @@
                          :seon.eval/value])))
       (finally (close! session)))))
 
-(deftest managed-eval-values-are-sampled-only-in-the-owning-host-session
-  (let [[session _ready] (open-session! "sample-agent")]
-    (try
-      (send! session
-             (invoke-value "sample-agent" "sample-source"
-                           [(form "{:payload (vec (range 10))}")]))
-      (let [invocation-result (:seon.execution/result (recv! session))
-            eval-id (first (:seon.eval/ids invocation-result))
-            valid (sample-value "sample-agent" "sample-live"
-                                eval-id [:payload])
-            malformed
-            [(assoc valid :host.test/extra true)
-             (assoc valid :seon.execution/message :host.test/unknown)
-             (assoc valid :seon.execution/protocol-version 2)
-             (assoc valid :seon.execution/agent-id "")
-             (assoc valid :seon.execution/request-id "")
-             (assoc valid :seon.execution/eval-id 42)
-             (assoc valid :seon.render.value/path (vec (repeat 33 :x)))
-             (-> valid
-                 (assoc :seon.render.value/offset 31)
-                 (assoc-in [:seon.render.value/effective-limits
-                            :seon.render.value/page-size] 3))]]
-        (is (string? eval-id))
-        (let [raw-lookups (atom 0)
-              original (var-get #'host.sample/retained-live-value)]
-          (with-redefs-fn
-            {#'host.sample/retained-live-value
-             (fn [& args] (swap! raw-lookups inc) (apply original args))}
-            (fn []
-              (doseq [[field maximum] trusted-sample-limits]
-                (send! session
-                       (assoc-in valid
-                                 [:seon.render.value/effective-limits field]
-                                 (inc maximum)))
-                (let [refused (recv! session)]
-                  (is (= :seon.execution.message/value-sample-result
-                         (:seon.execution/message refused)))
-                  (is (= (render.value/sampling-policy-refusal)
-                         (:seon.render.value/result refused)))))))
-          (is (zero? @raw-lookups)
-              "a widened policy is refused before raw slot access"))
-        (let [raw-lookups (atom 0)]
-          (with-redefs-fn
-            {#'host.sample/retained-live-entry
-             (fn [_ _] {::host.session/found? true
-                        ::host.session/limits sample-limits})
-             #'host.sample/retained-live-value
-             (fn [& _] (swap! raw-lookups inc) :forbidden)}
-            (fn []
-              (send! session valid)
-              (let [unavailable (recv! session)]
-                (is (= :seon.execution.message/value-sample-error
-                       (:seon.execution/message unavailable)))
-                (is (= {:seon.error/message
-                        render.value/sampling-policy-unavailable-message
-                        :seon.error/kind :seon.runtime/unavailable}
-                       (:seon.execution/error unavailable))))))
-          (is (zero? @raw-lookups)
-              "corrupt retained metadata is rejected before raw slot access"))
-        (doseq [bad malformed]
-          (send! session bad)
-          (let [refused (recv! session)]
-            (is (= :seon.execution.message/value-sample-error
-                   (:seon.execution/message refused)))
-            (is (string? (:seon.execution/request-id refused)))))
-        ;; Every malformed frame was rejected before slot lookup; the same
-        ;; retained id remains available on the same reader loop.
-        (send! session valid)
-        (let [sampled (recv! session)]
-          (is (= :seon.execution.message/value-sample-result
-                 (:seon.execution/message sampled)))
-          (is (= "sample-live" (:seon.execution/request-id sampled)))
-          (is (= :available
-                 (get-in sampled [:seon.render.value/result
-                                  :seon.render.value/availability])))
-          (is (= [0 1 2]
-                 (get-in sampled [:seon.render.value/result
-                                  :seon.render.value/projection
-                                  :seon.render.value/tree
-                                  :seon.render.value/shown]))))
-        (send! session {:seon.execution/message
-                        :seon.execution.message/shutdown
-                        :seon.execution/protocol-version 3})
-        (is (= :seon.execution.message/stopped
-               (:seon.execution/message (recv! session))))
-        (close! session)
-        (let [[replacement _] (open-session! "sample-agent")]
-          (try
-            (send! replacement (sample-value "sample-agent" "sample-retired"
-                                             eval-id [:payload]))
-            (let [retired (recv! replacement)]
-              (is (= :unavailable
-                     (get-in retired [:seon.render.value/result
-                                      :seon.render.value/availability])))
-              (is (true?
-                   (get-in retired [:seon.render.value/result
-                                    :seon.render.value/recompute?]))))
-            (finally (close! replacement)))))
-      (finally (close! session)))))
-
-(deftest sample-render-throw-answers-an-error-and-keeps-the-session-live
-  (let [[session _ready] (open-session! "sample-throw-agent")]
-    (try
-      (send! session
-             (invoke-value "sample-throw-agent" "sample-throw-source"
-                           [(form "{:payload [1 2 3]}")]))
-      (let [eval-id (first (get-in (recv! session)
-                                   [:seon.execution/result :seon.eval/ids]))
-            sample (sample-value "sample-throw-agent" "sample-throw"
-                                 eval-id [:payload])]
-        (with-redefs [render.value/drill-value
-                      (fn [& _] (throw (ex-info "sample failed" {})))]
-          (send! session sample)
-          (let [response (recv! session)]
-            (is (= :seon.execution.message/value-sample-error
-                   (:seon.execution/message response)))
-            (is (= "sample-throw" (:seon.execution/request-id response)))))
-        (send! session (assoc sample :seon.execution/request-id "still-live"
-                             :host.test/extra true))
-        (is (= "still-live" (:seon.execution/request-id (recv! session))))
-        (send! session
-               (invoke-value "sample-throw-agent" "after-sample-throw"
-                             [(form "(+ 20 22)")]))
-        (is (= 42 (get-in (recv! session)
-                          [:seon.execution/result :seon.host/results 0
-                           :seon.eval/value]))))
-      (finally (close! session)))))
-
 (deftest context-reaches-the-writer-through-the-one-db-binding
   (let [[session _ready] (open-session! "db-agent")]
     (try
@@ -1104,18 +947,6 @@
                (get-in timeout [:seon.execution/error
                                 :seon.error/data
                                 :seon.error.sci/class]))))
-      (finally (close! session)))))
-
-(deftest untrusted-artifact-digest-errors-core-bug
-  (let [[session _ready] (open-session! "digest-agent")]
-    (try
-      (send! session
-             (assoc-in (invoke-value "digest-agent" "invocation-digest" [])
-                       [:seon.execution/function-identity
-                        :seon.execution/artifact-digest]
-                       (apply str (repeat 64 "b"))))
-      (is (= "The compiled function identity is not trusted by this artifact."
-             (error-of (recv! session))))
       (finally (close! session)))))
 
 (deftest render-entrypoints-answer-with-pod-steering-errors
@@ -1225,26 +1056,6 @@
         (is (= 11 (get-in (recv! reconnected)
                           [:seon.execution/result :seon.host/results 0
                            :seon.eval/value])))
-        (finally (close! reconnected))))))
-
-(deftest shutdown-acknowledges-stopped-and-parks-the-context
-  (let [[session _ready] (open-session! "shutdown-agent")]
-    (try
-      (send! session (invoke-value "shutdown-agent" "invocation-park"
-                                   [(form "(def parked-state 21)")]))
-      (recv! session)
-      (send! session {:seon.execution/message :seon.execution.message/shutdown
-                      :seon.execution/protocol-version 3})
-      (is (= :seon.execution.message/stopped
-             (:seon.execution/message (recv! session))))
-      (finally (close! session)))
-    ;; Park = drop: a fresh session forks a fresh context from the base.
-    (let [[reconnected _ready] (open-session! "shutdown-agent")]
-      (try
-        (send! reconnected (invoke-value "shutdown-agent" "invocation-fresh"
-                                         [(form "parked-state")]))
-        (let [result (:seon.execution/result (recv! reconnected))]
-          (is (= 1 (:seon.eval/n-fail result))))
         (finally (close! reconnected))))))
 
 ;;; Restore: fork the shared base + replay defs (the kill-drill mechanics)

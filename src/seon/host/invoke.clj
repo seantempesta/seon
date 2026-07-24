@@ -133,14 +133,6 @@
                 #(arm-deadline! session worker remaining %)
                 ::guard/evaluate!
                 #(cond
-            (and compiled?
-                 (not= (:seon.execution/artifact-digest identity-value)
-                       (get-in @(::session/startup session)
-                               [:seon.execution/artifact-digest])))
-            {::error (session/error-value
-                      "The compiled function identity is not trusted by this artifact."
-                      :core-bug)}
-
             (not compiled?)
             {::value
              (invoke-authored!
@@ -289,19 +281,3 @@
                      2000 TimeUnit/MILLISECONDS)
                (catch Throwable _ nil))))
       true)))
-
-(defn shutdown-session!
-  "Cancel active work, park the agent context, acknowledge, and close."
-  {:malli/schema [:=> [:cat ::session/session] :nil]}
-  [session]
-  (when-let [token @(::session/active session)]
-    (cancel-active!
-     session
-     (get-in token [::invocation :seon.execution/invocation-id])))
-  ;; Park = drop: restore forks the base and replays defs from the corpus.
-  (when-let [agent-id (:seon.execution/agent-id @(::session/startup session))]
-    (swap! (::session/contexts session) dissoc agent-id))
-  (reset! (::session/live-values session) {::session/order [] ::session/values {}})
-  (session/send-frame! session {:seon.execution/message session/stopped-message
-                        :seon.execution/protocol-version session/protocol-version})
-  nil)

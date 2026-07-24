@@ -14,7 +14,7 @@
             [seon.host.graduate :as graduate]
             [seon.host.instrument :as instrument]
             [seon.host.invoke :as invoke]
-            [seon.host.sample :as sample]
+            [seon.host.session :as protocol]
             [seon.host.session.leaf :as session]
             [seon.schema :as schema]
             [taoensso.timbre :as log])
@@ -105,7 +105,7 @@
         (and (= client-execution host-execution)
              (= client-application applied-application))]
     (cond
-      (not (schema/valid-candidate-value? ::session/startup startup))
+      (not (schema/valid-candidate-value? ::protocol/startup startup))
       (session/startup-error session "The host-session startup identity is invalid.")
 
       (not= cluster
@@ -161,8 +161,8 @@
             (reset! (::session/startup session) startup)
             (session/send-frame!
              session
-             {:seon.execution/message session/ready-message
-              :seon.execution/protocol-version session/protocol-version
+             {:seon.execution/message protocol/ready-message
+              :seon.execution/protocol-version protocol/protocol-version
               :seon.execution/agent-id agent-id
               :seon.launch/execution-digest client-execution
               :seon.launch/application-digest client-application
@@ -204,7 +204,7 @@
               (when (map? message)
                 (case (:seon.execution/message message)
                   :seon.execution.message/invoke
-                  (do (if (schema/valid-candidate-value? ::session/invoke message)
+                  (do (if (schema/valid-candidate-value? ::protocol/invoke message)
                         (invoke/begin-invocation! ready-session message)
                         (session/send-frame! ready-session
                                      (session/invalid-message-frame message)))
@@ -218,36 +218,9 @@
                        (:seon.execution/invocation-id message))
                       nil)
 
-                  :seon.execution.message/value-sample
-                  (do (if (sample/valid-value-sample? message)
-                        (try
-                          (sample/serve-value-sample! host ready-session message)
-                          (catch Throwable throwable
-                            (invoke/record-core-fault! throwable)
-                            (session/send-frame!
-                             ready-session
-                             (session/sample-error-frame
-                              (sample/safe-sample-correlation ready-session message)
-                              "The value sample could not be produced."))))
-                        (let [safe-sample
-                              (sample/safe-sample-correlation ready-session message)]
-                          (session/send-frame!
-                           ready-session
-                           (session/sample-error-frame
-                            safe-sample
-                            "The parent sent an invalid value sample."))))
-                      (recur))
-
-                  :seon.execution.message/shutdown
-                  (invoke/shutdown-session! ready-session)
-
                   (do (session/send-frame!
                        ready-session
-                       (if (contains? message :seon.execution/request-id)
-                         (session/sample-error-frame
-                          (sample/safe-sample-correlation ready-session message)
-                          "The parent sent an invalid value sample.")
-                         (session/invalid-message-frame message)))
+                       (session/invalid-message-frame message))
                       (recur))))))))
       (catch Throwable throwable
         (when-not @startup-timed-out?
@@ -255,7 +228,6 @@
           (log/error (pr-str (session-fault-log-value throwable)))))
       (finally
         (.cancel timeout-task false)
-        (reset! (::session/live-values session) {::session/order [] ::session/values {}})
         (try (.close channel) (catch Throwable _)))))))
 
 (defn- accept-channel! [^ServerSocketChannel server]

@@ -10,7 +10,6 @@
             [seon.host.instrument :as instrument]
             [seon.host.preflight :as preflight]
             [seon.host.record :as record]
-            [seon.host.sample :as sample]
             [seon.host.session.leaf :as session]
             [seon.program.edge :as edge]
             [seon.repl.parse.repair :as repair]
@@ -538,9 +537,6 @@
                       ids (if (and recorded (:seon.db/ok? recorded))
                             (conj ids eval-id)
                             ids)
-                      _ (when (and ok? recorded (:seon.db/ok? recorded))
-                          (sample/retain-live-value! session eval-id live-value
-                                              value-sampling-limits database))
                       envelope (if (and recorded
                                         (not (:seon.db/ok? recorded)))
                                  ;; The outcome could not become durable —

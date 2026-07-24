@@ -23,7 +23,6 @@
                    [::interrupt-lock 'some?]
                    [::interrupt-fired? 'some?]
                    [::worker-phase 'some?]
-                   [::live-values 'some?]
                    [::contexts 'some?]
                    [::writer 'some?]
                    [::projection-state 'some?]
@@ -78,36 +77,16 @@
    :seon.execution/result value
    :seon.execution/result-bytes result-bytes})
 
-(defn sample-error-frame
-  "Build one correlated value-sample error frame."
-  {:malli/schema [:function
-                  [:=> [:cat :map :string] :map]
-                  [:=> [:cat :map :string :keyword] :map]]}
-  ([sample message] (sample-error-frame sample message :core-bug))
-  ([sample message kind]
-  {:seon.execution/message protocol/value-sample-error-message
-   :seon.execution/protocol-version protocol/protocol-version
-   :seon.execution/agent-id (:seon.execution/agent-id sample)
-   :seon.execution/request-id (:seon.execution/request-id sample)
-   :seon.execution/error (error-value message kind)}))
 (defn- fallback-error-frame [message]
   (let [execution-error (:seon.execution/error message)
         invocation-id (or (:seon.execution/invocation-id message) "invalid")]
-    (if (contains? message :seon.execution/request-id)
-      (sample-error-frame
-       {:seon.execution/agent-id
-        (or (:seon.execution/agent-id message) "invalid")
-        :seon.execution/request-id
-        (or (:seon.execution/request-id message) "invalid")}
-       (or (:seon.error/message execution-error)
-           "The execution response could not cross its frame boundary."))
-      (error-frame
-       invocation-id
-       (error-value
-        (or (:seon.error/message execution-error)
-            "The execution response could not cross its frame boundary.")
-        (or (:seon.error/kind execution-error) :core-bug))
-       (:seon.db/db message)))))
+    (error-frame
+     invocation-id
+     (error-value
+      (or (:seon.error/message execution-error)
+          "The execution response could not cross its frame boundary.")
+      (or (:seon.error/kind execution-error) :core-bug))
+     (:seon.db/db message))))
 
 (defn- encodable-frame? [message]
   (let [^bytes payload (uds/encode message)]
@@ -206,7 +185,6 @@
    ::interrupt-lock (Object.)
    ::interrupt-fired? (atom false)
    ::worker-phase (atom :idle)
-   ::live-values (atom {::order [] ::values {}})
    ::contexts (:seon.host/contexts host)
    ::writer (:seon.host/writer host)
    ::projection-state (:seon.host/projection-state host)
