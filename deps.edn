@@ -15,7 +15,7 @@
   ;; Proximum's slf4j-simple is selected explicitly as the writer's sole SLF4J
   ;; provider.
   :writer
-  {:replace-paths ["src"]
+  {:replace-paths ["target/seon-jvm-aot-classes" "src"]
    :replace-deps
    {org.clojure/clojure {:mvn/version "1.12.0"}
     metosin/malli {:mvn/version "0.20.0"}
