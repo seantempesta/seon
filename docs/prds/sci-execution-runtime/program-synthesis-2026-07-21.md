@@ -1104,6 +1104,16 @@ MORNING ITEMS (accumulating):
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- OWNER TO SLEEP (2026-07-23 ~23:20; final directive: proactive
+  audits + solutions, spend Sol freely, maximize the night). THREE
+  read-only audits live: containment-surface (break-8 class — the
+  complete agent-SCI binding inventory), U9 plan re-verification at
+  post-wave HEAD, web-verification runbook prep. NIGHT ORDER after
+  querycache lands: settle rerun (3 suites) → live-proof ledger +
+  baseline perf → drives + browser verification (runbook) → U9 S0a
+  + schedfix + P3 + fix-tonight batch waves → morning report
+  (checkpoint verdict, issue count, juicy finds, MORNING ITEMS incl.
+  the 31 needs-owner rows from triage).
 - FULL CLJS GREEN (e5d5fa780, Fable lane, accepted): 1,592 tests /
   7,866 assertions / 0F / 0E — the checkpoint's first fully green
   CLJS suite. The last fixture now seeds through canonical-schema-
