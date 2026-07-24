@@ -1140,15 +1140,18 @@ MORNING ITEMS (accumulating):
   (settleclose 1a47c1062 + 5cc3b32e1: break-8 fixture class swept
   suite-wide, program-source digest selection fixed). A REAL
   MILESTONE — but NOT graduation: the goal's bar is PROVABLY ALIVE.
-- ★ PRIORITY-ZERO LIVE BLOCKER (found at the suite-green boundary,
-  exactly why the goal separates tests from alive): the claimant
-  HOST DRAINS after a clean restart — 'Committed schema projection
-  acquisition failed' (host.clj:298); paged reads succeed,
-  reconstruction fails. Strong hypothesis = tonight's forward-
-  reference class (register! forward refs → build-projection fails
-  deep without naming the key). hostdrain lane dispatched (reproduce,
-  root-cause, dissolve the class, loud error; acceptance = restart →
-  all 5 processes ready). THE LIVE-PROOF LEDGER WAITS ON THIS.
+- ★ PRIORITY-ZERO LIVE BLOCKER CLOSED (`c2c5faeff`, 2026-07-24):
+  direct replay proved the successful schema/contract rows reconstruct,
+  falsifying the forward-reference hypothesis. The omitted third
+  `execute-many` member was the whole function-source population and
+  exceeded aggregate result weight. Host admission now freezes one
+  database value, pages identities, and reads one variable-size form
+  row per bounded query; genuine missing references name owner key,
+  missing key, and namespace. Focused JVM 23/187 and CLJS 21/148 are
+  green. Fresh isolated `hostdrain` reset/start → restart → status
+  proved all five processes alive/ready, host not drained, followed by
+  clean shutdown (`tmp/orchestrator/hostdrain-gate.log`). The issue is
+  archived; the live-proof ledger is unblocked.
 - SETTLE RERUN: CLJS GREEN (1,592/7,866/0/0); fresh boot 308s
   (perf row stands — R45 preprocessing is the fix). Writer + operator
   each at ONE fixture-class error: (A) host-cancel-writer-test =

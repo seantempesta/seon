@@ -100,6 +100,13 @@ interpreter, not merely hosts it:
 
 ## Evidence base
 
+The 2026-07-24 reset-boundary checkpoint fixed claimant-host committed
+acquisition in `c2c5faeff`: one frozen database value, AEVT identity pages,
+and one bounded query per variable-size form row. Fresh isolated start →
+restart proved watcher, writer, host, pod, and web-render all alive/ready; the
+host did not drain. See
+[[../../seon/issues/archive/claimant-host-drains-after-clean-restart]].
+
 [[../source-cleanup/research/sci-execution-child-feasibility-2026-07-20]]
 (measured probe: retention, perf ratios, four semantic gaps, JVM context
 sharing, port inventory, bb impossibility) built on

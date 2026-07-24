@@ -1389,3 +1389,15 @@ the variable-weight values they select.
   assertions compare the ensure requests' `:seon.db/initialization-page`
   sequence against `protocol/initialization-pages` of the same fixture value
   (`test/seon/db_remote_contract_test.cljs`).
+- **An opaque committed-projection acquisition failure is not evidence of a
+  forward reference.** The claimant host formerly sent schema, contract, and
+  whole-source queries as one `execute-many` request, then logged only the
+  first two member results. On restart, the omitted source member exceeded the
+  aggregate result-weight bound; replaying the complete successful
+  schema/contract rows through `projection-from-rows` was the shortest
+  falsifier. The host now freezes one database value, pages identities through
+  AEVT, and reads each variable-size form row separately through `seon.db`,
+  matching pod admission without a corpus-size response. A real missing Malli
+  reference now reports the registering key plus the missing key and namespace
+  on both tiers (`c2c5faeff`,
+  [[../../../seon/issues/archive/claimant-host-drains-after-clean-restart]]).
