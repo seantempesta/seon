@@ -1011,10 +1011,10 @@
    `SEON_LLM_ATTEMPT_TIMEOUT_MS`, default 120000 (2 min). The inner bound
    [[seon.agent.turn/call-llm!]] races each attempt against — independent
    of the adapter's own `:seon.ai/timeout-ms` (which may be unset/huge), so
-   a single attempt can never park the turn."
+  a single attempt can never park the turn."
   {:malli/schema [:=> [:cat] :int]}
   []
-  (env-int "SEON_LLM_ATTEMPT_TIMEOUT_MS" 120000))
+  (resolve/llm-attempt-timeout-ms (process-environment)))
 
 (defn turn-timeout-ms
   "Per-step wall-clock bound in ms for the agent loop's awaits.

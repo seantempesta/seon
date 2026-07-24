@@ -102,6 +102,34 @@
             [{:seon.ai.attempt/ordinal 0}
              {:seon.ai.attempt/ordinal 2}])))))
 
+(deftest phase-error-close-terminalizes-receipts-and-releases-custody
+  (let [fence (run.core/run-fence agent-id run-id 3)
+        tx
+        (turn.core/phase-error-close-tx-data
+         fence agent-id run-id "turn-u2" :attempt-open ["attempt-u2"]
+         now "provider configuration failed")]
+    (is (= fence (subvec tx 0 2)))
+    (is (some #{[:db.fn/cas [:seon.agent.turn/id "turn-u2"]
+                :seon.agent.turn/phase :attempt-open :attempt-open]}
+              tx))
+    (is (some #{[:db.fn/cas [:seon.ai.attempt/id "attempt-u2"]
+                :seon.ai.attempt/outcome :open :crashed]}
+              tx))
+    (is (some #(and (map? %)
+                    (= :published (:seon.agent.turn/phase %))
+                    (= :error (:seon.agent.turn/status %)))
+              tx))
+    (is (some #(and (map? %)
+                    (= :closed (:seon.agent.run/status %))
+                    (= :error (:seon.agent.run/closed-reason %)))
+              tx))
+    (is (some #{[:db/retract [:seon.agent.run/id run-id]
+                :seon.agent.run/claimant]}
+              tx))
+    (is (some #{[:db/retract [:seon.agent/id agent-id]
+                :seon.agent/run]}
+              tx))))
+
 (deftest phase-eligibility-is-policy-data
   (is (loop.core/eligible?
        #{:seon.agent.driver.capability/render}

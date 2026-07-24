@@ -8,8 +8,10 @@
   #?(:clj (:refer-clojure :exclude [await]))
   (:require [seon.agent.loop.core :as loop.core]
             [seon.agent.run.core :as run.core]
+            [seon.agent.turn.core :as turn.core]
             [seon.config.resolve :as config.resolve]
             [seon.db :as db]
+            [seon.error :as error]
             [seon.program.plan :as program.plan]
             [seon.schema :as schema]))
 
@@ -368,6 +370,63 @@
       {:seon.agent.driver/disposition :execute
        :seon.execution/selected-tier selected-tier})))
 
+(defn- phase-error-fault
+  [phase-error]
+  (or (when (#{:agent :core} (:seon.error/fault phase-error))
+        (:seon.error/fault phase-error))
+      (if (or (= :agent (:seon.error/kind phase-error))
+              (contains? error/agent-fault-kinds
+                         (:seon.error/kind phase-error)))
+        :agent
+        :core)))
+
+(defn- bounded-phase-error-message
+  [phase-error]
+  (let [message (:seon.error/message phase-error)
+        maximum-characters 4096]
+    (subs message 0 (min maximum-characters (count message)))))
+
+(defn- ^:async settle-phase-error!
+  "Persist one direct phase error and atomically fault/release the held run."
+  [held phase-error now]
+  (let [run (:seon.agent.driver/run held)
+        turn (:seon.agent.run/current-turn run)
+        agent-id (:seon.agent/id run)
+        run-id (:seon.agent.run/id run)
+        claim-epoch (:seon.agent.run/claim-epoch held)
+        run-fence (run.core/run-fence agent-id run-id claim-epoch)
+        tx-data
+        (if turn
+          (turn.core/phase-error-close-tx-data
+           run-fence agent-id run-id
+           (:seon.agent.turn/id turn)
+           (:seon.agent.turn/phase turn)
+           (into []
+                 (comp
+                  (filter #(= :open (:seon.ai.attempt/outcome %)))
+                  (map :seon.ai.attempt/id))
+                 (:seon.agent.turn/llm-attempts turn))
+           now
+           (bounded-phase-error-message phase-error))
+          (run.core/close-tx-data
+           agent-id run-id claim-epoch :error now))
+        report
+        (await
+         (db/transact!
+          {::db/db (:seon.db/db held)
+           ::db/tx-data tx-data}))
+        recorded
+        (error/record!
+         {::error/raw
+          (ex-info (:seon.error/message phase-error) phase-error)
+          ::error/fault (phase-error-fault phase-error)})]
+    (if (run.core/error-value? report)
+      report
+      {:seon.db/db (:db-after report)
+       :seon.agent.driver/closed? true
+       :seon.agent.run/closed-reason :error
+       :seon.agent.driver/error recorded})))
+
 (defn ^:async drive-claim!
   "Advance one held run until close, loss, or a clean tier handoff."
   [claim]
@@ -394,33 +453,38 @@
              :seon.agent.driver/closed? true
              :seon.agent.run/closed-reason reason}))
         (if-not (loop.core/eligible? capabilities run)
-        (await (release! held))
-        (let [step (loop.core/next-step run)
-              result
+          (await (release! held))
+          (let [step (loop.core/next-step run)
+                result
+                (await
+                 ((leaf-fn :seon.agent.driver/execute-step!)
+                  (assoc held :seon.agent.driver/step step)))]
+            (cond
+              (run.core/error-value? result)
+              (await (settle-phase-error! held result now))
+              (:seon.agent.driver/closed? result) result
+              (:seon.agent.driver/released? result) result
+              (:seon.db/db result)
+              (let [next-state
+                    (await
+                     (acquire-run-state!
+                      (:seon.db/db result)
+                      (:seon.agent/id run)
+                      (:seon.agent.run/id run)))]
+                (if (run.core/error-value? next-state)
+                  next-state
+                  (recur
+                   (merge held next-state
+                          {:seon.agent.run/claim-epoch
+                           (:seon.agent.run/claim-epoch held)}))))
+              :else
               (await
-               ((leaf-fn :seon.agent.driver/execute-step!)
-                (assoc held :seon.agent.driver/step step)))]
-          (cond
-            (run.core/error-value? result) result
-            (:seon.agent.driver/closed? result) result
-            (:seon.agent.driver/released? result) result
-            (:seon.db/db result)
-            (let [next-state
-                  (await
-                   (acquire-run-state!
-                    (:seon.db/db result)
-                    (:seon.agent/id run)
-                    (:seon.agent.run/id run)))]
-              (if (run.core/error-value? next-state)
-                next-state
-                (recur
-                 (merge held next-state
-                        {:seon.agent.run/claim-epoch
-                         (:seon.agent.run/claim-epoch held)}))))
-            :else
-            {:seon.error/message
-             (str "The " (name step) " leaf returned no database value.")
-             :seon.error/kind :core-bug})))))))
+               (settle-phase-error!
+                held
+                {:seon.error/message
+                 (str "The " (name step) " leaf returned no database value.")
+                 :seon.error/kind :core-bug}
+                now)))))))))
 
 (defn ^:async drive-run!
   "Claim and drive one open run; a CAS loser returns its direct error value."

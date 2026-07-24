@@ -40,6 +40,15 @@
     (is (= (select-keys expected-defaults resolve/web-capability-attributes)
            (resolve/web-capability-configuration singleton)))))
 
+(deftest attempt-timeout-process-fallback-is-portable
+  (is (= 120000 (resolve/llm-attempt-timeout-ms {})))
+  (is (= 42000
+         (resolve/llm-attempt-timeout-ms
+          {"SEON_LLM_ATTEMPT_TIMEOUT_MS" "42000"})))
+  (is (= 120000
+         (resolve/llm-attempt-timeout-ms
+          {"SEON_LLM_ATTEMPT_TIMEOUT_MS" "not-positive"}))))
+
 (deftest explicit-sections-override-without-hidden-call-site-fallbacks
   (let [manifest
         {:seon.config/llm-retry

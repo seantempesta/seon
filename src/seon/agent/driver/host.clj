@@ -76,24 +76,21 @@
          (db/pull {::db/db database
                    ::db/pull-pattern (ai.core/config-pull-pattern)
                    ::db/ref [:seon.config/id "cluster"]}))
-        attempt-timeout-ms (:seon.ai/agent-attempt-timeout-ms agent-row)]
-    (if-not (pos-int? attempt-timeout-ms)
-      {:seon.error/message
-       "The acquired agent has no positive durable LLM attempt timeout."
-       :seon.error/kind :configuration}
-      (merge
-       {:seon.ai/config-resolution
-        (ai.core/resolved-config-from-rows
-         ai.core/shipped-defaults config-row agent-row attempt-timeout-ms)
-        :seon.config.llm-retry/maximum-wait-ms
-        (:seon.config.llm-retry/maximum-wait-ms config-row)
-        :seon.config.llm-retry/maximum-total-wait-ms
-        (:seon.config.llm-retry/maximum-total-wait-ms config-row)
-        :seon.config.llm-retry/default-retries
-        (:seon.config.llm-retry/default-retries config-row)
-        :seon.config.model-stream/partial-publish-settle-ms
-        (:seon.config.model-stream/partial-publish-settle-ms config-row)}
-       (ai.core/reply-policy-from-rows config-row agent-row)))))
+        attempt-timeout-ms
+        (config.resolve/llm-attempt-timeout-ms (System/getenv))]
+    (merge
+     {:seon.ai/config-resolution
+      (ai.core/resolved-config-from-rows
+       ai.core/shipped-defaults config-row agent-row attempt-timeout-ms)
+      :seon.config.llm-retry/maximum-wait-ms
+      (:seon.config.llm-retry/maximum-wait-ms config-row)
+      :seon.config.llm-retry/maximum-total-wait-ms
+      (:seon.config.llm-retry/maximum-total-wait-ms config-row)
+      :seon.config.llm-retry/default-retries
+      (:seon.config.llm-retry/default-retries config-row)
+      :seon.config.model-stream/partial-publish-settle-ms
+      (:seon.config.model-stream/partial-publish-settle-ms config-row)}
+     (ai.core/reply-policy-from-rows config-row agent-row))))
 
 (defn- bounded-llm-transport!
   [host request]

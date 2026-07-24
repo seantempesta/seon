@@ -156,6 +156,33 @@
      :seon.agent.run/claimant]
     [:db/retract [:seon.agent/id agent-id] :seon.agent/run]]))
 
+(defn phase-error-close-tx-data
+  "Fault a phase, terminalize its open attempts, and release the run atomically."
+  [run-fence agent-id run-id turn-id phase open-attempt-ids
+   closed-at error-message]
+  (into
+   (vec run-fence)
+   (concat
+    [(phase-fence turn-id phase)]
+    (mapcat
+     (fn [attempt-id]
+       [[:db/retract [:seon.ai.attempt/id attempt-id]
+         :seon.ai.attempt/partial-text]
+        [:db.fn/cas [:seon.ai.attempt/id attempt-id]
+         :seon.ai.attempt/outcome :open :crashed]])
+     open-attempt-ids)
+    [{:seon.agent.turn/id turn-id
+      :seon.agent.turn/phase :published
+      :seon.agent.turn/status :error
+      :seon.agent.turn/error error-message}
+     {:seon.agent.run/id run-id
+      :seon.agent.run/status :closed
+      :seon.agent.run/closed-reason :error
+      :seon.agent.run/closed-at closed-at}
+     [:db/retract [:seon.agent.run/id run-id]
+      :seon.agent.run/claimant]
+     [:db/retract [:seon.agent/id agent-id] :seon.agent/run]])))
+
 (defn next-attempt-ordinal
   "Derive the next ordinal exclusively from durable attempt rows."
   [attempts]

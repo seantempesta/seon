@@ -1576,6 +1576,18 @@
                    (catch #?(:cljs :default :default Throwable) _ nil)))]
     (if (and (int? parsed) (pos? parsed)) parsed fallback)))
 
+(defn llm-attempt-timeout-ms
+  "Resolve the process fallback below an optional per-agent attempt timeout.
+
+   Both claimant tiers pass this value to `seon.ai.core/resolved-config-from-rows`,
+   whose agent row remains authoritative when it declares the optional
+   `:seon.ai/agent-attempt-timeout-ms` override."
+  {:malli/schema
+   [:=> [:cat [:map-of :string :string]] :int]}
+  [environment]
+  (positive-environment-int
+   environment "SEON_LLM_ATTEMPT_TIMEOUT_MS" 120000))
+
 (defn- declared-attempt-timeouts
   [manifest]
   (keep (fn [configuration]
@@ -1590,8 +1602,7 @@
   [manifest environment run]
   (let [attempt-horizon
         (reduce max
-                (positive-environment-int
-                 environment "SEON_LLM_ATTEMPT_TIMEOUT_MS" 120000)
+                (llm-attempt-timeout-ms environment)
                 (declared-attempt-timeouts manifest))
         run-deadline (:seon.config.run/deadline-ms run)
         turn-horizon
