@@ -1140,6 +1140,22 @@ MORNING ITEMS (accumulating):
   (settleclose 1a47c1062 + 5cc3b32e1: break-8 fixture class swept
   suite-wide, program-source digest selection fixed). A REAL
   MILESTONE — but NOT graduation: the goal's bar is PROVABLY ALIVE.
+- ★ CFGID SOURCE FIXED; LIVE GATE CORRECTLY STOPPED
+  (`fdba88aad` + `7b16ca694`, 2026-07-24): the portable durable-attempt
+  owner now persists the adapters' actual `:seon.ai/text` response, and one
+  portable `seon.config.resolve/cluster-config-lookup-ref` is the config
+  singleton acquisition identity for pod, claimant, execution, render, and
+  web consumers. Focused JVM proof is 9 tests / 36 assertions / 0F / 0E.
+  The requested `cfgid` gate made no paid call: its preflight found the
+  artifact manifest not current for the source commit, no target pod, and the
+  still-open named-cluster lifecycle defect aliasing default host/web records
+  with `:current-spec? false`. Evidence:
+  `tmp/orchestrator/cfgid-gate.log`. Earliest unsettled integrated contract is
+  unchanged: a rebuilt-cluster DeepSeek attempt must persist a non-empty reply
+  blob, acquire both invocation limits, advance through `:evaling`, and write
+  terminal eval receipts. The orchestrator's default rebuild and final
+  re-drive are the dependency-ready refill; do not archive the config issue
+  before those datoms exist.
 - ★ DRIVE6 — LLM ATTEMPT SUCCEEDS (2026-07-24 ~4am): the JVM claimant
   made a REAL DeepSeek call — attempt :open→HTTP 200→:success at tx
   536873735. Transport works; the pod→JVM chain paid off. Nothing-

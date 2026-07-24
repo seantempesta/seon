@@ -1448,6 +1448,21 @@ the variable-weight values they select.
 
 ## Claimant acquisition and phase-settlement scars (2026-07-24)
 
+- **A singleton identity is one portable Datahike lookup ref, not a copied
+  attribute/value pair.** Owning only the scalar value still lets another tier
+  substitute a schema keyword or literal in the lookup-ref value. Define the
+  complete lookup ref beside the identity registration in
+  `seon.config.resolve`, and make pod, claimant, execution, and web acquisition
+  pass that exact value. A focused consumer regression must assert the shared
+  ref itself; matching literals do not prove acquisition consistency
+  (`7b16ca694`).
+- **Persist the provider response key the adapter actually produces.** Both
+  OpenAI-compatible JVM and pod interpreters return visible completion text as
+  `:seon.ai/text`. Reading an unnamespaced `:text` after a successful HTTP
+  response silently publishes the empty content hash while the attempt still
+  terminalizes `:success`. The portable durable-attempt owner now reads
+  `:seon.ai/text`, with a regression that captures the exact non-empty blob
+  request (`fdba88aad`).
 - **An optional entity override must sit above one shared process fallback.**
   Pod and JVM claimants must pass the same resolved process attempt timeout to
   `seon.ai.core/resolved-config-from-rows`; that resolver alone applies an
