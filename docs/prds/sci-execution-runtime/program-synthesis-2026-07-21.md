@@ -1086,6 +1086,17 @@ MORNING ITEMS (accumulating):
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- ISSUE TRIAGE ACCEPTED + COMMITTED (7df2bd115): honest count
+  126→121 open (5 source-verified archives; the old '113' was
+  wrong); 42 blockers / 71 friction / 8 cleanup; 54 fold-into-unit
+  stamped; 36 fix-tonight RANKED (top-10 in the report); 31
+  needs-owner → MORNING ITEMS; index regenerated, check passing.
+  The retry/kb/testrun src edits are the BN-1 lane's red-cluster
+  mandate (triage confirmed docs-only) — verify at its return.
+  FIX-TONIGHT DISPATCH #1: ensurepath (ensure-database wrong-path
+  creation) + hosterr (host-session errors vanish silently) — both
+  disjoint from the wave; next refills from the ranked list as
+  slots free.
 - BN-5/10 STOPPED CORRECTLY at the overlap gate (its consumers =
   BN-1's live files run.cljs/serve.cljs); requeues on BN-1's commit;
   BN-1 (claim-epoch) is the wave's critical path. WATCH ITEM: tree
