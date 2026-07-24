@@ -1104,6 +1104,16 @@ MORNING ITEMS (accumulating):
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- FULL CLJS GREEN (e5d5fa780, Fable lane, accepted): 1,592 tests /
+  7,866 assertions / 0F / 0E — the checkpoint's first fully green
+  CLJS suite. The last fixture now seeds through canonical-schema-
+  rows + canonical-database-attributes with the forwarding assertion
+  STRENGTHENED to the per-page wire shape. New scar recorded:
+  register! permits forward references, so the canonical producers
+  outside the full require graph emit dangling references failing
+  deep in build-projection (future class candidate). CODEX CREDITS
+  RESTORED (owner topped up; probe green) — Sol fleet back. SETTLE
+  RERUN waits only on querycache's landing.
 - BN-5/10/6 CLOSED (accepted): BN-5 = REAL production defects fixed
   (run-limit + historical consumers now read reply-policy-from-rows)
   · BN-6 = three web limits gained their missing runtime readers
