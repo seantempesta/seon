@@ -32,11 +32,18 @@
 (def id-attr :portable.record/id)
 (def tx-source-attr :portable.tx/source)
 (def partial-text-attr :portable.attempt/partial-text)
+(def component-attr :portable.record/children)
+(def child-edn-attr :portable.record.child/value)
 
 (defn- register-contract-schema! []
   (schema/register! id-attr [:string {:seon.db/identity true}])
   (schema/register! set-attr [:set :keyword])
   (schema/register! edn-attr [:or :keyword :map])
+  (schema/register! child-edn-attr [:or :keyword :map])
+  (schema/register! component-attr
+                    [:vector {:seon.db/component true}
+                     [:map {:closed true}
+                      [child-edn-attr child-edn-attr]]])
   (schema/register! tx-source-attr :keyword))
 
 (deftest no-history-registration-derives-the-portable-datahike-facet
@@ -223,7 +230,8 @@
 
     (testing "transaction call shapes, full report, encoding, and replay"
       (let [tx [{id-attr "one" set-attr #{:red :blue}
-                 edn-attr {:portable.value/n 2}}]
+                 edn-attr {:portable.value/n 2}
+                 component-attr [{child-edn-attr {:portable.child/n 3}}]}]
             first-report
             (await (transact! {::db/tx-data tx
                                ::db/db database
@@ -245,6 +253,10 @@
         (is (= "minted-op" (::protocol/request-id wire)))
         (is (= (pr-str {:portable.value/n 2})
                (get-in (::protocol/transaction-data wire) [0 edn-attr])))
+        (is (= (pr-str {:portable.child/n 3})
+               (get-in (::protocol/transaction-data wire)
+                       [0 component-attr 0 child-edn-attr]))
+            "component validation sees the encoded transaction projection")
         (is (set? (get-in (::protocol/transaction-data wire) [0 set-attr])))
         (let [request-count (count @requests)
               malformed (await (transact! [{id-attr "one" edn-attr 42}]))]

@@ -389,17 +389,39 @@
                           {::db/attr attr ::db/actual-value value
                            :seon.error/kind :user-input}))))
 
+(declare validation-entity)
+
+(defn- validation-tree
+  [value]
+  (cond
+    (map? value) (validation-entity value)
+    (vector? value) (mapv validation-tree value)
+    (set? value) (into #{} (map validation-tree) value)
+    (sequential? value) (mapv validation-tree value)
+    :else value))
+
+(defn- validation-value
+  [attr value]
+  (validation-tree
+   (if (and (edn-encoded-attr? attr) (string? value))
+     (try
+       (reader/read-string value)
+       (catch #?(:clj Throwable :cljs :default) _ ::invalid-edn-slot))
+     value)))
+
+(defn- validation-entity
+  [entity]
+  (reduce-kv (fn [result attr value]
+               (assoc result attr (validation-value attr value)))
+             {}
+             entity))
+
 (defn validate-entity-values!
   "Validate one transaction entity using registered Malli forms."
   [entity]
   (doseq [[attr value] entity
           :when (and (not (system-attr? attr)) (registered? attr))]
-    (let [logical-value
-          (if (and (edn-encoded-attr? attr) (string? value))
-            (try
-              (reader/read-string value)
-              (catch #?(:clj Throwable :cljs :default) _ ::invalid-edn-slot))
-            value)]
+    (let [logical-value (validation-value attr value)]
       (when (and (acquired-component-schema? attr)
                  (not (valid-value? attr logical-value)))
         (throw (ex-info
