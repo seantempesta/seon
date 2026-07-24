@@ -1,19 +1,19 @@
 (ns seon.web.reactive.call-test
-  "The agent-call security boundary and agent-routed invocation.
+  "The agent-call capability, validation, and transaction boundary.
 
    (b) The capability gate performs one query at one immutable database value.
        An agent-authored function resolves + is allowed regardless of its
        application namespace or original author; `fs`/core symbols are refused
        because they have no agent-authored source transaction.
 
-   (c) A granted call captures one immutable database value and sends one ordinary
-       positional invocation through the supervised execution child."
+   (c) A granted call captures one immutable database value and acknowledges
+       only after its interaction fact commits."
   (:require
     [clojure.string :as str]
     [cljs.test :refer [async deftest is]]
+    [seon.agent.run :as run]
     [seon.db :as db]
-    [seon.execution :as execution]
-    [seon.execution.host :as execution.host]
+    [seon.db.id :as db.id]
     [seon.runtime.admission :as admission]
     [seon.web.reactive.call :as call]
     [seon.web.reactive.transform :as transform]))
@@ -44,9 +44,11 @@
               ([request]
                (swap! requests conj request)
                (js/Promise.resolve
-                (when (= (str granted-sym)
+               (when (= (str granted-sym)
                          (second (:seon.db/args request)))
-                  101)))
+                  {:seon.fn/source-fingerprint
+                   (apply str (repeat 64 "a"))
+                   :seon.fn/spec "[:=> [:cat :string] :string]"})))
               ([query-form & inputs]
                (js/Promise.reject
                 (ex-info "unexpected positional query"
@@ -65,6 +67,7 @@
                    (vec (array-seq results))
                    query (:seon.db/query (first @requests))]
                (is (= agent-id (::call/agent-id granted)))
+               (is (= granted-sym (::call/handler granted)))
                (is (= database (:seon.db/db (first @requests))))
                (is (= [agent-id (str granted-sym)]
                       (:seon.db/args (first @requests))))
@@ -90,104 +93,44 @@
              (set! db/query original-query)
              (done)))))))
 
-;; ---------------------------------------------------------------------------
-;; (c) Granted invoke crosses one database-value-pinned child boundary.
-;; ---------------------------------------------------------------------------
-
-(deftest call-invokes-through-one-database-value-pinned-child-plan
+(deftest invalid-interaction-is-flat-error-and-never-allocates
   (async done
-    (let [original-prepare execution/prepare-invocations!
-          original-invoke execution.host/invoke!
-          prepared (atom nil)]
-      (set! execution/prepare-invocations!
-            (fn [request]
-              (reset! prepared request)
-              (js/Promise.resolve
-               [{::execution/message execution/invoke-message
-                 ::execution/protocol-version execution/protocol-version
-                 ::execution/agent-id agent-id
-                 ::execution/invocation-id "call-test"
-                 :seon.db/db database
-                 ::execution/function-identity
-                 {::execution/function-symbol granted-sym
-                  ::execution/source-digest (apply str (repeat 64 "a"))}
-                 ::execution/arguments ["hello from call"]
-                 ::execution/deadline-ms 9999999999999
-                 ::execution/result-limit-bytes 4096}])))
-      (set! execution.host/invoke!
+    (let [original-deadline run/effective-deadline-ms
+          original-allocate db.id/allocate!
+          allocations (atom 0)
+          capability
+          {::call/agent-id agent-id
+           ::call/handler granted-sym
+           ::call/handler-source-fingerprint (apply str (repeat 64 "b"))
+           ::call/handler-spec "[:=> [:cat :int] :int]"}]
+      (set! run/effective-deadline-ms
+            (fn [_] (js/Promise.resolve 60000)))
+      (set! db.id/allocate!
             (fn [_]
-              (js/Promise.resolve
-               {::execution/message execution/result-message
-                ::execution/protocol-version execution/protocol-version
-                ::execution/invocation-id "call-test"
-                :seon.db/db database
-                ::execution/result {:my.result/accepted? true}
-                ::execution/result-bytes 32})))
-      (-> (call/invoke! database agent-id granted-sym ["hello from call"])
-          (.then
-           (fn [result]
-             (is (true? (::call/ok? result)) (pr-str result))
-             (is (identical? database (:seon.db/db @prepared)))
-             (is (= ["hello from call"]
-                    (get-in @prepared
-                            [::execution/invocation-plans 0
-                             ::execution/arguments])))))
-          (.catch (fn [error] (is false (str error))))
-          (.finally
-           (fn []
-             (set! execution/prepare-invocations! original-prepare)
-             (set! execution.host/invoke! original-invoke)
-             (done)))))))
-
-(deftest failed-child-invocation-preserves-the-structured-error-value
-  (async done
-    (let [original-prepare execution/prepare-invocations!
-          original-invoke execution.host/invoke!
-          failure {:seon.error/message "Quantity must be positive."
-                   :seon.error/kind :user-input
-                   :seon.error/data {:my.order/quantity -1}}]
-      (set! execution/prepare-invocations!
-            (fn [_]
-              (js/Promise.resolve
-               [{::execution/message execution/invoke-message
-                 ::execution/protocol-version execution/protocol-version
-                 ::execution/agent-id agent-id
-                 ::execution/invocation-id "call-failure"
-                 :seon.db/db database
-                 ::execution/function-identity
-                 {::execution/function-symbol granted-sym
-                  ::execution/source-digest (apply str (repeat 64 "b"))}
-                 ::execution/arguments [{:my.order/quantity -1}]
-                 ::execution/deadline-ms 9999999999999
-                 ::execution/result-limit-bytes 4096}])))
-      (set! execution.host/invoke!
-            (fn [_]
-              (js/Promise.resolve
-               {::execution/message execution/error-message
-                ::execution/protocol-version execution/protocol-version
-                ::execution/invocation-id "call-failure"
-                :seon.db/db database
-                ::execution/error failure})))
-      (-> (call/invoke! database agent-id granted-sym
-                        [{:my.order/quantity -1}])
+              (swap! allocations inc)
+              (js/Promise.resolve {})))
+      (-> (call/submit! database capability ["not-an-int"])
           (.then
            (fn [result]
              (is (false? (::call/ok? result)))
-             (is (= failure (::call/error result))
-                 "message, kind, and raw error data survive the call boundary")))
+             (is (= :user-input
+                    (:seon.error/kind (::call/error result))))
+             (is (string? (:seon.error/message (::call/error result))))
+             (is (zero? @allocations)
+                 "schema refusal precedes identity allocation and transact")))
           (.catch (fn [error] (is false (str error))))
           (.finally
            (fn []
-             (set! execution/prepare-invocations! original-prepare)
-             (set! execution.host/invoke! original-invoke)
+             (set! run/effective-deadline-ms original-deadline)
+             (set! db.id/allocate! original-allocate)
              (done)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; (d) HTTP boundary — agent-call injection is refused and malformed args end.
 ;; The PoC sends a transit value that decodes to a list.
-;; the old synthesize-and-eval invoke!, the list spliced in as code and ran
+;; With the old synthesize-and-eval path, the list spliced in as code and ran
 ;; (`(js/require "child_process")` etc.). Now the ?args= decode is DATA-ONLY
-;; and invoke! is resolve-and-apply — the injected expression can never run.
+;; and submission only commits data — the injected expression can never run.
 ;; ---------------------------------------------------------------------------
 
 (defn- call-req
@@ -209,7 +152,7 @@
 (deftest datastar-success-is-an-empty-acknowledgement
   (let [req (js/Request. "http://seon.test/agent/id/call"
                          #js {:headers #js {"datastar-request" "true"}})
-        response (@#'call/success-response req)]
+        response (@#'call/success-response req "interaction-1")]
     (is (= 204 (.-status response)))
     (is (nil? (.-body response))
         "the live feed, not a duplicate body, updates UI")))
@@ -269,7 +212,7 @@
   (async done
     (let [original-db db/db
           original-capability call/capability-check
-          original-invoke call/invoke!
+          original-submit call/submit!
           observed (atom [])]
       (set! db/db
             (fn
@@ -279,11 +222,18 @@
             (fn [database-value route-agent-id _]
               (is (= agent-id route-agent-id))
               (swap! observed conj database-value)
-              (js/Promise.resolve {::call/agent-id agent-id})))
-      (set! call/invoke!
-            (fn [database-value _ _ _]
+              (js/Promise.resolve
+               {::call/agent-id agent-id
+                ::call/handler granted-sym
+                ::call/handler-source-fingerprint
+                (apply str (repeat 64 "a"))
+                ::call/handler-spec
+                "[:=> [:cat :string] :string]"})))
+      (set! call/submit!
+            (fn [database-value _ _]
               (swap! observed conj database-value)
-              (js/Promise.resolve {::call/ok? true})))
+              (js/Promise.resolve
+               {::call/ok? true ::call/interaction-id "interaction-1"})))
       (-> (call/handle! (call-req granted-sym
                                   (transform/encode-args ["value"])))
           (.then
@@ -296,25 +246,31 @@
            (fn []
              (set! db/db original-db)
              (set! call/capability-check original-capability)
-             (set! call/invoke! original-invoke)
+             (set! call/submit! original-submit)
              (done)))))))
 
-(deftest call-refuses-injected-list-arg-and-never-invokes
+(deftest call-refuses-injected-list-arg-and-never-submits
   ;; A granted fn (capability passes) called with the list-shaped ?args=. The
-  ;; data-only whitelist refuses it with a 422 "bad args" BEFORE invoke!, so the
-  ;; injected expression never executes and the granted fn never runs.
+  ;; data-only whitelist refuses it with a 422 "bad args" before submission, so
+  ;; the injected expression never becomes a database fact.
   (async done
     (let [payload "[[\"~#list\",[\"~$js/require\",\"child_process\"]]]"
           invocations (atom 0)
           original-db db/db
           original-capability call/capability-check
-          original-invoke call/invoke!]
+          original-submit call/submit!]
       (set! db/db (fn
                     ([] (js/Promise.resolve database))
                     ([_] (js/Promise.resolve database))))
       (set! call/capability-check
-            (fn [_ _ _] (js/Promise.resolve {::call/agent-id agent-id})))
-      (set! call/invoke! (fn [& _] (swap! invocations inc)))
+            (fn [_ _ _]
+              (js/Promise.resolve
+               {::call/agent-id agent-id
+                ::call/handler granted-sym
+                ::call/handler-source-fingerprint
+                (apply str (repeat 64 "a"))
+                ::call/handler-spec "[:=> [:cat :string] :string]"})))
+      (set! call/submit! (fn [& _] (swap! invocations inc)))
       (-> (call/handle! (call-req granted-sym payload))
           (.then
            (fn [response]
@@ -327,7 +283,7 @@
            (fn []
              (set! db/db original-db)
              (set! call/capability-check original-capability)
-             (set! call/invoke! original-invoke)
+             (set! call/submit! original-submit)
              (done)))))))
 
 (deftest call-malformed-args-writes-response-not-hang

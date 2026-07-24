@@ -50,14 +50,21 @@
 (defn current-phase
   "Cursor phase, or `:unstarted` when the run has no current turn."
   [run]
-  (or (get-in run [:seon.agent.run/current-turn :seon.agent.turn/phase])
-      :unstarted))
+  (if (and (:seon.agent.interaction/id run)
+           (contains? #{:pending :running}
+                      (:seon.agent.interaction/status run)))
+    :interaction
+    (or (get-in run [:seon.agent.run/current-turn :seon.agent.turn/phase])
+        :unstarted)))
 
 (defn eligible?
   "Whether declared claimant capabilities can execute the next phase."
   [capabilities run]
   (let [phase (current-phase run)]
-    (or (and (contains? capabilities :seon.agent.driver.capability/render)
+    (or (and (contains? capabilities
+                        :seon.agent.driver.capability/interaction)
+             (= :interaction phase))
+        (and (contains? capabilities :seon.agent.driver.capability/render)
              (= :unstarted phase))
         (and (contains? capabilities :seon.agent.driver.capability/llm)
              (contains? #{:rendered :attempt-open} phase))
@@ -70,6 +77,7 @@
   "Return the one step authorized by the persisted cursor."
   [run]
   (case (current-phase run)
+    :interaction :interaction
     :unstarted :render
     :rendered :open-attempt
     :attempt-open :settle-attempt

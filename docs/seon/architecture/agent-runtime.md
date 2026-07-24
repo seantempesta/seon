@@ -40,11 +40,21 @@ observation of the run and the configured lease policy.
 
 ## Runs are claimable database state
 
-A run is the bounded unit opened by a message or due schedule. It records its
-identity, owning agent, trigger and cause, work limit, absolute deadline,
-heartbeat, status, and terminal reason. The agent's
+A run is the bounded unit opened by a message, due schedule, or authored
+interaction. It records its identity, owning agent, trigger and cause, work
+limit, absolute deadline, heartbeat, status, and terminal reason. The agent's
 `:seon.agent/run` ref points to the current open run and is part of every work
 fence.
+
+An authored interaction is also a run entity. Its submission transaction
+records a generated interaction identity, the pinned handler symbol and source
+fingerprint, schema-projected ordered arguments, subject refs, and
+`:pending` status. Request provenance remains the transaction's
+`:seon.db/user` and `:seon.db/process`; it is not copied onto the interaction.
+Submission leaves the agent's current-run ref absent so multiple interactions
+can queue as database facts. First claim atomically CASes that absent pointer
+to the interaction run while acquiring claimant epoch `1`. The same pointer
+and epoch fence then governs every receipt and terminal transition.
 
 Custody lives on that run:
 
@@ -86,8 +96,9 @@ transaction.
 6. commit the phase result under the run and phase fences; and
 7. continue, close, or release for a clean tier handoff.
 
-Claimants advertise capabilities such as render, model I/O, eval, and publish.
-Eligibility is a pure function of that set and the persisted turn phase.
+Claimants advertise capabilities such as interaction, render, model I/O, eval,
+and publish. Eligibility is a pure function of that set and the persisted
+interaction status or turn phase.
 Claimants do not route by agent identity or keep a private queue of runs.
 Database interests are ephemeral wakeups that request another scan; the scan
 and CAS determine authority.
@@ -111,6 +122,14 @@ On the JVM, a scan starts at most one named virtual thread per run in that
 claimant process. That thread drives the held claim until it closes, loses the
 fence, or reaches a phase the leaf cannot execute. Eval work enters the bounded
 platform eval pool; the claim virtual thread parks for its result.
+
+For an interaction, the claimant first CASes `:pending → :running` under the
+held run fence. Only that committed receipt admits the pinned handler through
+the guarded SCI door and bounded eval pool. Success or a flat error is
+schema-projected into ordinary data and committed with
+`:running → :done|:error` in the same fenced transaction that closes the run.
+A replacement claimant that observes `:running` records `:interrupted` and
+does not replay the authored handler.
 
 ## Turns have a durable phase cursor
 

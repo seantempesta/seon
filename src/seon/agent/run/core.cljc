@@ -63,6 +63,21 @@
       [:db/add run-ref :seon.agent.run/last-beat-at beat-at]]
      (consume-input-data run-id input-ref))))
 
+(defn attach-acquire-tx-data
+  "First claim of a queued interaction run.
+
+   The submission transaction deliberately leaves the agent pointer absent.
+   This claim transition first CASes the idle pointer from nil to the queued
+   run, then uses the same claimant/epoch/heartbeat facts as an ordinary first
+   claim."
+  [agent-id run-id claimant beat-at]
+  (let [run-ref [:seon.agent.run/id run-id]]
+    [[:db.fn/cas [:seon.agent/id agent-id]
+      :seon.agent/run nil run-ref]
+     [:db.fn/cas run-ref :seon.agent.run/claimant nil claimant]
+     [:db.fn/cas run-ref :seon.agent.run/claim-epoch nil 1]
+     [:db/add run-ref :seon.agent.run/last-beat-at beat-at]]))
+
 (defn reacquire-tx-data
   "Claim a released run without displacing another claimant."
   [agent-id run-id observed-epoch claimant beat-at input-ref]
@@ -111,6 +126,14 @@
   (cond
     (not= :open (:seon.agent.run/status run)) nil
     (some? (:seon.agent.run/paused-at run)) nil
+    (and (:seon.agent.interaction/id run)
+         (not (:seon.agent.run/attached? run))
+         (nil? claimant)
+         (nil? claim-epoch))
+    {:seon.agent.run/claim-transition :attach-acquire
+     :seon.agent.run/claim-epoch 1
+     :seon.db/tx-data
+     (attach-acquire-tx-data agent-id run-id process-claimant now)}
     (nil? claimant)
     (if (nil? claim-epoch)
       {:seon.agent.run/claim-transition :acquire

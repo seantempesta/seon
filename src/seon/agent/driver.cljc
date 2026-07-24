@@ -6,7 +6,8 @@
    phase they advertise; cursor and receipt transaction builders remain in the
    portable cores."
   #?(:clj (:refer-clojure :exclude [await]))
-  (:require [seon.agent.loop.core :as loop.core]
+  (:require [seon.agent.interaction :as interaction]
+            [seon.agent.loop.core :as loop.core]
             [seon.agent.run.core :as run.core]
             [seon.agent.turn.core :as turn.core]
             [seon.config.resolve :as config.resolve]
@@ -19,7 +20,8 @@
 
 (schema/register!
  :seon.agent.driver/capability
- [:enum :seon.agent.driver.capability/render
+ [:enum :seon.agent.driver.capability/interaction
+  :seon.agent.driver.capability/render
   :seon.agent.driver.capability/llm
   :seon.agent.driver.capability/eval
   :seon.agent.driver.capability/publish])
@@ -49,11 +51,15 @@
                  :seon.agent.driver/missing-leaf key}))))
 
 (def ^:private open-runs-query
-  '[:find ?agent-id ?run-id
+  '[:find ?agent-id ?run-id ?started-at
     :where
     [?agent :seon.agent/id ?agent-id]
-    [?agent :seon.agent/run ?run]
+    (or-join [?agent ?run]
+      [?agent :seon.agent/run ?run]
+      (and [?run :seon.agent.interaction/id _]
+           [?run :seon.agent.run/agent ?agent]))
     [?run :seon.agent.run/id ?run-id]
+    [?run :seon.agent.run/started-at ?started-at]
     [?run :seon.agent.run/status :open]
     (not [?run :seon.agent.run/paused-at _])])
 
@@ -87,6 +93,16 @@
    :seon.agent.run/claimant
    :seon.agent.run/claim-epoch
    :seon.agent.run/paused-at
+   :seon.agent.interaction/id
+   :seon.agent.interaction/handler
+   :seon.agent.interaction/handler-source-fingerprint
+   :seon.agent.interaction/arguments
+   :seon.agent.interaction/status
+   :seon.agent.interaction/result
+   :seon.agent.interaction/error
+   {:seon.agent.run/agent
+    [:seon.agent/id
+     {:seon.agent/run [:seon.agent.run/id]}]}
    {:seon.agent.run/cause [:db/id :seon.agent.message/id]}
    {:seon.agent.run/consumed-input [:db/id]}
    {:seon.agent.turn/_run
@@ -175,9 +191,16 @@
 
 (defn- acquired-run
   [run agent-id]
-  (cond-> (assoc run :seon.agent/id agent-id)
-    (latest-turn run)
-    (assoc :seon.agent.run/current-turn (latest-turn run))))
+  (let [attached-run-id
+        (get-in run [:seon.agent.run/agent
+                     :seon.agent/run
+                     :seon.agent.run/id])]
+    (cond-> (assoc run
+                   :seon.agent/id agent-id
+                   :seon.agent.run/attached?
+                   (= (:seon.agent.run/id run) attached-run-id))
+      (latest-turn run)
+      (assoc :seon.agent.run/current-turn (latest-turn run)))))
 
 (defn ^:async acquire-run-state!
   "Read one run and the one claim policy at an explicit database value."
@@ -233,9 +256,10 @@
           state
           (let [run (:seon.agent.driver/run state)
                 input-ref
-                (or (:seon.agent.run/input-ref request)
-                    (:seon.agent.driver/pending-input state)
-                    (when-not (consumed-cause? run) (cause-ref run)))
+                (when-not (:seon.agent.interaction/id run)
+                  (or (:seon.agent.run/input-ref request)
+                      (:seon.agent.driver/pending-input state)
+                      (when-not (consumed-cause? run) (cause-ref run))))
                 plan
                 (when
                  (loop.core/eligible?
@@ -500,16 +524,36 @@
       (if-let [reason (close-reason run
                                     (:seon.agent.driver/policy held)
                                     now)]
-        (let [report
+        (let [interaction-id (:seon.agent.interaction/id run)
+              interaction-status (:seon.agent.interaction/status run)
+              tx-data
+              (if (and interaction-id
+                       (contains? #{:pending :running} interaction-status))
+                (interaction/error-tx-data
+                 {:seon.agent/id (:seon.agent/id run)
+                  :seon.agent.run/id (:seon.agent.run/id run)
+                  :seon.agent.run/claim-epoch
+                  (:seon.agent.run/claim-epoch held)
+                  :seon.agent.interaction/id interaction-id
+                  :seon.agent.interaction/observed-status interaction-status
+                  :seon.agent.interaction/terminal-status
+                  (if (= :running interaction-status) :interrupted :error)
+                  :seon.agent.interaction/error
+                  {:seon.error/message
+                   (str "The interaction closed before settlement: "
+                        (name reason) ".")
+                   :seon.error/kind :agent}
+                  :seon.agent.interaction/settled-at now})
+                (run.core/close-tx-data
+                 (:seon.agent/id run)
+                 (:seon.agent.run/id run)
+                 (:seon.agent.run/claim-epoch held)
+                 reason now))
+              report
               (await
                (db/transact!
                 {::db/db (:seon.db/db held)
-                 ::db/tx-data
-                 (run.core/close-tx-data
-                  (:seon.agent/id run)
-                  (:seon.agent.run/id run)
-                  (:seon.agent.run/claim-epoch held)
-                  reason now)}))]
+                 ::db/tx-data tx-data}))]
           (if (run.core/error-value? report)
             report
             {:seon.db/db (:db-after report)
@@ -573,9 +617,14 @@
                ::db/query open-runs-query}))]
         (if (run.core/error-value? rows)
           rows
-          (loop [remaining (vec (sort rows))
+          (loop [remaining
+                 (vec
+                  (sort-by (fn [[agent-id run-id started-at]]
+                             [(run.core/instant-ms started-at)
+                              agent-id run-id])
+                           rows))
                  results []]
-            (if-let [[agent-id run-id] (first remaining)]
+            (if-let [[agent-id run-id _started-at] (first remaining)]
               (recur
                (subvec remaining 1)
                (conj results

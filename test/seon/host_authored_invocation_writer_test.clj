@@ -1,294 +1,288 @@
 (ns seon.host-authored-invocation-writer-test
-  "Pinned authored-function invocation through the JVM host tier."
-  (:require [clojure.test :refer [deftest is testing]]
-            [sci.core :as sci]
-            [sci.ctx-store]
+  "Interaction claims invoke authored functions through the surviving JVM door."
+  (:require [clojure.edn :as edn]
+            [clojure.test :refer [deftest is testing]]
+            [seon.agent.driver :as driver]
+            [seon.agent.driver.host :as driver.host]
+            [seon.agent.interaction :as interaction]
+            [seon.agent.interaction.render :as interaction.render]
             [seon.content-hash :as content-hash]
+            [seon.db :as db]
             [seon.db.host :as db.host]
             [seon.db.id :as db.id]
             [seon.db.protocol :as protocol]
-            [seon.db.transport.uds :as uds]
             [seon.db.writer-test-support :as writer-test]
             [seon.db.writer :as writer]
             [seon.host :as host]
             [seon.host.context :as context]
-            [seon.host.graduate :as graduate]
-            [seon.host.instrument :as instrument]
-            [seon.host-registry-writer-test :as registry-test])
-  (:import [java.io File]
-           [java.nio.channels SocketChannel]))
+            [seon.host-registry-writer-test :as registry-test]
+            [seon.schema :as schema])
+  (:import [java.io File]))
 
-(def ^:private value-sampling-policy
-  (var-get #'registry-test/value-sampling-policy))
 (def ^:private dependencies
   (var-get #'registry-test/dependencies))
-(def ^:private host-session!
-  (var-get #'registry-test/host-session!))
 (def ^:private socket-path
   (var-get #'registry-test/socket-path))
+(def ^:private value-sampling-policy
+  (var-get #'registry-test/value-sampling-policy))
+(def ^:private runtime-policy
+  (merge
+   value-sampling-policy
+   {:seon.config.watchdog/stale-ms 120000
+    :seon.config.claim-driver/invocation-deadline-ms 30000
+    :seon.config.claim-driver/invocation-result-maximum-bytes 1048576
+    :seon.config.shell/default-timeout-ms 30000
+    :seon.config.shell/kill-grace-ms 1000}))
 
-(def ^:private agent-candidates
-  (db.id/candidate-manifest
-   {:seon.agent/id :seon.db.id.generator/human-readable}
-   [{:seon.db.id/key :fixture/agent
-     :seon.db.id/identity-attr :seon.agent/id}]))
-(def ^:private agent-id
-  (:seon.db.id/value (first agent-candidates)))
-(def ^:private home-ns
-  (symbol (str "my.agent." agent-id)))
+(def ^:private config-manifest-digest
+  "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789")
 
-(def ^:private helper-a "(defn helper [] :helper-a)")
-(def ^:private caller-a
-  (str "(defn caller\n"
-       "  {:malli/schema [:=> [:cat :int] [:tuple :keyword :int :keyword]]}\n"
-       "  [x] [:a x ((resolve '" home-ns "/helper))])"))
-(def ^:private private-a "(defn- private-answer [] :private-a)")
-(def ^:private square-source
-  (str "(defn square\n"
-       "  {:malli/schema [:=> [:cat :int] :int]\n"
-       "   :test (fn [] (assert (= 9 (square 3))))}\n"
-       "  [x] (* x x))"))
-(def ^:private helper-b "(defn helper [] :helper-b)")
-(def ^:private caller-b
-  (str "(defn caller\n"
-       "  {:malli/schema [:=> [:cat :int] [:tuple :keyword :int :keyword]]}\n"
-       "  [x] [:b x ((resolve '" home-ns "/helper))])"))
+(defn- selected-manifest []
+  (edn/read-string
+   (slurp (System/getenv "SEON_WRITER_ARTIFACT_MANIFEST"))))
 
-(defn- function-row
-  ([sym source spec] (function-row sym source spec false))
-  ([sym source spec private?]
-   {:seon.fn/sym (str sym)
-    :seon.fn/ns {:seon.ns/name (symbol (namespace sym))}
-    :seon.fn/source source
-    :seon.fn/source-fingerprint (content-hash/sha-256 source)
-    :seon.fn/execution-tier :nursery
-    :seon.fn/fn-var? true
-    :seon.fn/arglists "([])"
-    :seon.fn/doc "Authored invocation test function."
-    :seon.fn/private? private?
-    :seon.fn/spec spec
-    :seon.fn/created-at (java.util.Date.)}))
+(defn- host-startgate []
+  (let [manifest (selected-manifest)
+        runtime-root
+        (java.nio.file.Path/of
+         (:seon.dev.artifact/runtime-root manifest)
+         (make-array String 0))]
+    {:seon.startgate/release-digest
+     (:seon.dev.artifact/application-digest manifest)
+     :seon.startgate/execution-digest
+     (:seon.dev.artifact/execution-digest manifest)
+     :seon.startgate/config-manifest-digest config-manifest-digest
+     :seon.startgate/base-projection-path
+     (str (.resolve runtime-root
+                    (:seon.dev.artifact/base-projection-path manifest)))
+     :seon.startgate/base-projection-digest
+     (:seon.dev.artifact/base-projection-digest manifest)}))
 
-(defn- invoke-authored!
-  [live invocation-id database function-symbol source-digest arguments]
-  (uds/write-frame!
-   (::registry-test/output live)
-   {:seon.execution/message :seon.execution.message/invoke
-    :seon.execution/protocol-version 3
-    :seon.execution/agent-id agent-id
-    :seon.execution/invocation-id invocation-id
-    :seon.db/db database
-    :seon.execution/function-identity
-    {:seon.execution/function-symbol function-symbol
-     :seon.execution/source-digest source-digest}
-    :seon.execution/arguments arguments
-    :seon.execution/deadline-ms (+ (System/currentTimeMillis) 30000)
-    :seon.execution/result-limit-bytes 1000000})
-  (uds/read-frame (::registry-test/input live)))
-
-(defn- error-message [response]
-  (get-in response [:seon.execution/error :seon.error/message]))
-
-(defn- query-function [session sym]
+(defn- initialization-fingerprint [session]
   (ffirst
    (context/query-writer!
     session
-    '[:find (pull ?function [*])
-      :in $ ?sym
-      :where [?function :seon.fn/sym ?sym]]
-    [(str sym)])))
+    '[:find ?fingerprint
+      :where
+      [?initialization :seon.db.initialization/id "database"]
+      [?initialization :seon.db.initialization/fingerprint ?fingerprint]]
+    [])))
 
-(defn- seed-database! [session database-name]
+(defn- aligned-host-startgate [session]
+  (let [startgate (host-startgate)
+        artifact
+        (-> (slurp (:seon.startgate/base-projection-path startgate))
+            edn/read-string
+            (assoc :seon.db.initialization/fingerprint
+                   (initialization-fingerprint session)))
+        text (str (pr-str artifact) "\n")
+        path (str "tmp/r52-base-projection-" (random-uuid) ".edn")]
+    (spit path text)
+    (assoc startgate
+           :seon.startgate/base-projection-path path
+           :seon.startgate/base-projection-digest
+           (content-hash/sha-256 text)
+           ::base-projection-path path)))
+
+(defn- install-divergence-cache! [session agent-id]
+  (let [base-artifact
+        (-> (host-startgate)
+            :seon.startgate/base-projection-path
+            slurp
+            edn/read-string)
+        base (:seon.dev.artifact/base-projection base-artifact)
+        delta {}
+        head (context/resolve-head! session)
+        row
+        {:seon.runtime.admission.cache/id "committed-projection"
+         :seon.runtime.admission.cache/base-fingerprint
+         (:seon.schema.projection/fingerprint base)
+         :seon.runtime.admission.cache/divergence-fingerprint
+         (schema/canonical-data-fingerprint delta)
+         :seon.runtime.admission.cache/composed-fingerprint
+         (:seon.schema.projection/fingerprint
+          (schema/compose-projection-data base delta))
+         :seon.runtime.admission.cache/basis-t (inc (:t head))
+         :seon.runtime.admission.cache/delta (pr-str delta)}
+        report
+        (binding [context/*agent-id* agent-id]
+          (context/transact-writer! session head [row]))]
+    (is (:seon.db/ok? report) (pr-str report))))
+
+(def ^:private square-source
+  "(defn square {:malli/schema [:=> [:cat :int] :int]} [x] (* x x))")
+
+(defn- function-row [handler]
+  {:seon.fn/sym (str handler)
+   :seon.fn/ns {:seon.ns/name (symbol (namespace handler))}
+   :seon.fn/source square-source
+   :seon.fn/source-fingerprint (content-hash/sha-256 square-source)
+   :seon.fn/execution-tier :nursery
+   :seon.fn/fn-var? true
+   :seon.fn/arglists "([x])"
+   :seon.fn/doc "R52 guarded interaction fixture."
+   :seon.fn/private? false
+   :seon.fn/spec "[:=> [:cat :int] :int]"
+   :seon.fn/created-at (java.util.Date.)})
+
+(defn- seed! [session database-name agent-id agent-candidates handler]
   (let [seed
         (writer-test/seed-canonical-schema!
          session database-name
-         [value-sampling-policy
+         [runtime-policy
           {:seon.user/id "user"}
-          {:seon.db.process/id :seon.db.process/repl}])
-        _ (is (true? (::protocol/success? seed)) (pr-str seed))
-        database (db.host/resolve-db! session nil false)
-        allocated
+          {:seon.db.process/id :seon.db.process/repl}])]
+    (is (true? (::protocol/success? seed)) (pr-str seed)))
+  (let [allocated
         (db.host/call!
          session
          (protocol/transaction-request
           {::protocol/request-id (str (random-uuid))
-           :seon.db/db database
+           :seon.db/db (db.host/resolve-db! session nil false)
            ::protocol/transaction-data [{:seon.agent/id agent-id}]
-           ::protocol/generated-candidates agent-candidates}))
-        _ (is (true? (::protocol/success? allocated)) (pr-str allocated))]
-    (let [installed
-          (sci/eval-string*
-           (context/fork-context (context/build-base! session))
-           (str "(require 'seon.db)"
-                "(seon.db/transact! {:seon.db/tx-data "
-                (pr-str [{:seon.db/user [:seon.agent/id agent-id]
-                          :seon.db/process
-                          [:seon.db.process/id :seon.db.process/repl]}
-                         {:seon.fn/sym "seed/install-probe"
-                          :seon.fn/spec "[:=> [:cat :int] :int]"
-                          :seon.fn/schema-error "none"
-                          :seon.fn/read-attrs [:seed/attr]}])
-                "})"))]
-      (is (map? (:db-after installed)) (pr-str installed)))
-    (let [database-before-functions (context/resolve-head! session)]
-      (binding [context/*agent-id* agent-id]
-      (let [seeded
-            (context/transact-writer!
-             session
-             [(function-row (symbol (str home-ns "/helper")) helper-a
-                            "[:=> [:cat] :keyword]")
-              (function-row (symbol (str home-ns "/caller")) caller-a
-                            "[:=> [:cat :int] [:tuple :keyword :int :keyword]]")
-              (function-row (symbol (str home-ns "/private-answer")) private-a
-                            "[:=> [:cat] :keyword]" true)
-              (function-row (symbol (str home-ns "/square")) square-source
-                            "[:=> [:cat :int] :int]")])]
-        (is (:seon.db/ok? seeded) (pr-str seeded))))
-      database-before-functions)))
+           ::protocol/generated-candidates agent-candidates}))]
+    (is (true? (::protocol/success? allocated)) (pr-str allocated)))
+  (let [startgate (host-startgate)
+        report
+        (binding [context/*agent-id* agent-id]
+          (context/transact-writer!
+           session
+           [{:seon.db.initialization/id "database"
+             :seon.db.initialization/release-digest
+             (:seon.startgate/release-digest startgate)
+             :seon.db.initialization/config-manifest-digest
+             (:seon.startgate/config-manifest-digest startgate)}
+            (function-row handler)]))]
+    (is (:seon.db/ok? report) (pr-str report)))
+  (install-divergence-cache! session agent-id))
 
-(deftest pinned-authored-invocation-is-version-correct-and-isolated
-  (let [database-name (str "host-authored-" (random-uuid))
-        request-path (socket-path "authored-writer")
-        host-socket (socket-path "authored-host")
-        server (writer-test/start! {::writer/dependencies (dependencies)
-                               ::writer/database-name database-name
-                               ::writer/backend :memory
-                               ::writer/request-socket-path request-path})
-        session (context/writer-session
-                 {::context/writer-socket-path request-path
-                  ::context/database-name database-name
-                  ::context/backend :memory})
-        started (atom nil)]
+(deftest interaction-fact-claims-executes-settles-and-renders
+  (let [database-name (str "interaction-" (random-uuid))
+        request-path (socket-path "interaction-writer")
+        host-socket (socket-path "interaction-host")
+        agent-candidates
+        (db.id/candidate-manifest
+         {:seon.agent/id :seon.db.id.generator/human-readable}
+         [{:seon.db.id/key ::agent
+           :seon.db.id/identity-attr :seon.agent/id}])
+        agent-id (:seon.db.id/value (first agent-candidates))
+        handler (symbol (str "my.agent." agent-id "/square"))
+        server
+        (writer-test/start!
+         {::writer/dependencies (dependencies)
+          ::writer/database-name database-name
+          ::writer/backend :memory
+          ::writer/request-socket-path request-path})
+        session
+        (context/writer-session
+         {::context/writer-socket-path request-path
+          ::context/database-name database-name
+          ::context/backend :memory})
+        started (atom nil)
+        startgate (atom nil)]
     (try
-      (let [database-before-functions (seed-database! session database-name)
-            database-a (context/resolve-head! session)
-            caller-sym (symbol (str home-ns "/caller"))
-            helper-sym (symbol (str home-ns "/helper"))
-            private-sym (symbol (str home-ns "/private-answer"))
-            square-sym (symbol (str home-ns "/square"))
-            caller-digest (content-hash/sha-256 caller-a)
-            private-digest (content-hash/sha-256 private-a)
-            square-digest (content-hash/sha-256 square-source)]
-        (reset! started
-                (host/start! {::host/socket-path host-socket
-                              ::context/writer-socket-path request-path
-                              ::context/database-name database-name
-                              ::context/backend :memory}))
-        (let [live (host-session! host-socket agent-id database-name)]
-          (try
-            (testing "matching nursery roots invoke directly and stay instrumented"
-              (let [retained (get @(::host/contexts @started) agent-id)]
-                (is (= caller-digest
-                       (:seon.fn/source-fingerprint
-                        (meta @(sci/resolve retained caller-sym))))))
-              (is (= [:a 2 :helper-a]
-                     (:seon.execution/result
-                      (invoke-authored! live "direct-a" database-a caller-sym
-                                        caller-digest [2]))))
-              (let [wrong (invoke-authored! live "direct-wrong" database-a
-                                             caller-sym caller-digest ["bad"])]
-                (is (= :agent
-                       (get-in wrong
-                               [:seon.execution/error :seon.error/kind])))
-                (is (re-find #"malli/instrument-input.*caller"
-                             (error-message wrong))
-                    (pr-str wrong))))
-            (testing "qualified private authored functions match the child policy"
-              (is (= :private-a
-                     (:seon.execution/result
-                      (invoke-authored! live "private-a" database-a private-sym
-                                        private-digest [])))))
-            (testing "absent and mismatched identities reject before invocation"
-              (is (= "The requested current agent function does not exist."
-                     (error-message
-                      (invoke-authored!
-                       live "absent-at-database" database-before-functions
-                       caller-sym caller-digest [1])))
-                  "a matching live root cannot bypass the pinned database")
-              (is (= "The requested current agent function does not exist."
-                     (error-message
-                      (invoke-authored!
-                       live "absent" database-a
-                       (symbol (str home-ns "/absent")) caller-digest []))))
-              (is (= "The requested function source is no longer current."
-                     (error-message
-                      (invoke-authored!
-                       live "mismatch" database-a caller-sym
-                       (apply str (repeat 64 "f")) [1])))))
-            (testing "R48 refusal leaves the authored invocation interpreted"
-              (let [row (query-function session square-sym)
-                    refused
-                    (graduate/graduate!
-                     {::context/base (::host/base @started)
-                      ::context/registry
-                      (get-in @started [::host/base ::context/registry])
-                      ::context/writer (::host/writer @started)
-                      ::graduate/function-row row
-                      ::graduate/contexts
-                      (vec (vals @(::host/contexts @started)))})]
-                (is (= :R48
-                       (get-in refused
-                               [:seon.error/data
-                                :seon.host.graduate/ruling]))
-                    (pr-str refused))
-                (is (= :P4
-                       (get-in refused
-                               [:seon.error/data
-                                :seon.host.graduate/reopen-when])))
-                (let [retained (get @(::host/contexts @started) agent-id)]
-                  (is (= square-digest
-                         (:seon.fn/source-fingerprint
-                          (meta @(sci/resolve retained square-sym))))))
-                (is (= 25
-                       (:seon.execution/result
-                        (invoke-authored! live "r48-nursery" database-a square-sym
-                                          square-digest [5]))))))
-            (testing "an A request replays in a detached fork while live roots stay B"
-              (binding [context/*agent-id* agent-id]
-                (is (:seon.db/ok?
-                     (context/transact-writer!
-                      session
-                      [(function-row helper-sym helper-b
-                                     "[:=> [:cat] :keyword]")
-                       (function-row caller-sym caller-b
-                                     "[:=> [:cat :int] [:tuple :keyword :int :keyword]]")]))))
-              (doseq [sym [helper-sym caller-sym]]
-                (let [row (query-function session sym)]
-                  (is (::graduate/ok?
-                       (graduate/install-nursery!
-                        {::context/base (::host/base @started)
-                         ::context/registry
-                         (get-in @started [::host/base ::context/registry])
-                         ::graduate/function-row row
-                         ::graduate/contexts
-                         (vec (vals @(::host/contexts @started)))})))))
-              (let [retained (get @(::host/contexts @started) agent-id)
-                    apply-ledger
-                    (::instrument/apply-ledger
-                     (::instrument/state @started))
-                    ledger-before @apply-ledger
-                    live-b (sci.ctx-store/with-ctx retained
-                             (sci/eval-string*
-                              retained
-                              (str "(" home-ns "/caller 3)")))]
-                (is (= [:b 3 :helper-b] live-b))
-                (is (= [:a 3 :helper-a]
-                       (:seon.execution/result
-                        (invoke-authored! live "pinned-a" database-a caller-sym
-                                          caller-digest [3]))))
-                (is (= ledger-before @apply-ledger)
-                    "ephemeral reconciliation never retains apply-ledger rows")
-                (is (= [:b 3 :helper-b]
-                       (sci.ctx-store/with-ctx retained
-                         (sci/eval-string*
-                          retained
-                          (str "(" home-ns "/caller 3)"))))
-                    "pinned replay leaves the retained/shared B roots intact")))
-            (finally
-              (try (.close ^SocketChannel (::registry-test/channel live))
-                   (catch Throwable _))))))
+      (seed! session database-name agent-id agent-candidates handler)
+      (reset! started
+              (host/start!
+               (merge
+                (reset! startgate (aligned-host-startgate session))
+                {::host/socket-path host-socket
+                 ::context/writer-socket-path request-path
+                 ::context/database-name database-name
+                 ::context/backend :memory})))
+      (testing "one queued fact enters the existing claim and guarded eval path"
+        (let [database-leaf
+              (driver.host/database-leaf (::host/writer @started))
+              now (java.util.Date.)
+              allocation
+              (binding [db/*leaf* database-leaf]
+                (db.id/allocate!
+                 {::db/db (context/resolve-head! session)
+                  ::db.id/allocations
+                  [{::db.id/key ::interaction-id
+                    ::db.id/identity-attr :seon.agent.interaction/id}
+                   {::db.id/key ::run-id
+                    ::db.id/identity-attr :seon.agent.run/id}]
+                  ::db.id/transaction-builder
+                  (fn [ids]
+                    {::db/tx-data
+                     (interaction/open-tx-data
+                      {:seon.agent.interaction/id
+                       (get ids ::interaction-id)
+                       :seon.agent.run/id (get ids ::run-id)
+                       :seon.agent/id agent-id
+                       :seon.agent.interaction/handler handler
+                       :seon.agent.interaction/handler-source-fingerprint
+                       (content-hash/sha-256 square-source)
+                       :seon.agent.interaction/arguments [6]
+                       :seon.agent.interaction/subjects
+                       #{[:seon.agent/id agent-id]}
+                       :seon.agent.interaction/requested-at now
+                       :seon.agent.run/deadline
+                       (java.util.Date. (+ (.getTime now) 60000))})})}))
+              interaction-id
+              (get-in allocation [::db.id/ids ::interaction-id])
+              platform-leaf
+              {:seon.agent.driver/capabilities
+               #{:seon.agent.driver.capability/interaction}
+               :seon.agent.driver/now #(java.util.Date.)
+               :seon.agent.driver/execute-step!
+               #(#'driver.host/execute-step! @started nil %)}
+              driven
+              (driver/call-with-leaf
+               platform-leaf database-leaf
+               #(driver/scan!))
+              head (context/resolve-head! session)
+              stored
+              (binding [db/*leaf* database-leaf]
+                (db/pull
+                 {::db/db head
+                  ::db/pull-pattern
+                  [:seon.agent.interaction/status
+                   :seon.agent.interaction/result
+                   :seon.agent.interaction/error
+                   :seon.agent.run/status
+                   :seon.agent.run/closed-reason]
+                  ::db/ref
+                  [:seon.agent.interaction/id interaction-id]}))
+              provenance
+              (binding [db/*leaf* database-leaf]
+                (db/query
+                 {::db/db head
+                  ::db/query
+                  '[:find ?user-id ?process-id
+                    :in $ ?interaction-id
+                    :where
+                    [?interaction :seon.agent.interaction/id
+                     ?interaction-id ?tx]
+                    [?tx :seon.db/user ?user]
+                    [?user :seon.user/id ?user-id]
+                    [?tx :seon.db/process ?process]
+                    [?process :seon.db.process/id ?process-id]]
+                  ::db/args [interaction-id]}))
+              rendered
+              (binding [db/*leaf* database-leaf]
+                (interaction.render/render-html
+                 {::db/db head
+                  :seon.agent/id agent-id
+                  :seon.render/node
+                  {:seon.agent.ctx/token-cap 512}}))]
+          (is (not (:seon.error/message allocation)) (pr-str allocation))
+          (is (= :completed
+                 (get-in driven [0 :seon.agent.run/closed-reason]))
+              (pr-str driven))
+          (is (= {:seon.agent.interaction/status :done
+                  :seon.agent.interaction/result 36
+                  :seon.agent.run/status :closed
+                  :seon.agent.run/closed-reason :completed}
+                 stored))
+          (is (= #{["user" :seon.db.process/repl]} provenance))
+          (is (some? rendered))
+          (is (re-find #"36" (pr-str rendered)))))
       (finally
         (when @started (host/stop! @started))
+        (when-let [path (::base-projection-path @startgate)]
+          (.delete (File. ^String path)))
         (context/close-session! session)
         (writer/stop! server)
         (.delete (File. ^String request-path))

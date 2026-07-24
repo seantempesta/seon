@@ -9,6 +9,7 @@
    [malli.core :as m]
    [malli.generator :as mg]
    [malli.util :as mu]
+   [seon.agent.interaction :as interaction]
    [seon.db.protocol :as protocol]
    [seon.db.transport.uds :as uds]
    [seon.schema :as schema]))
@@ -51,7 +52,7 @@
       (fn [shape]
         (map #(assoc % :root root) (wire-shape-variants shape)))
       (message-leaves (m/schema root options))))
-   [::protocol/request ::protocol/response]))
+   [::protocol/request ::protocol/response ::interaction/entity]))
 
 (defn- round-trip-property
   [{:keys [shape root]} options]

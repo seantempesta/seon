@@ -26,6 +26,20 @@ immutable replica and database session. It never executes agent-authored code. C
 authored renders behind the guarded execution door and commit or return ordinary
 render data; the web-render process performs only trusted pure derivation.
 
+## Interactions are database transactions
+
+An interactive control posts the authored handler symbol and ordinary
+arguments. The route validates the handler's exact committed schema and source
+identity, transacts one pending interaction/run fact, and acknowledges
+immediately. The HTTP response is never an execution-result channel.
+
+The existing claimant machinery acquires and executes the interaction. Its
+result or flat error becomes committed interaction facts. A normal HTML block
+queries the latest terminal outcome for the page's agent and returns no render
+when no such fact exists. The existing database interest, equality
+suppression, latest-wins mailbox, and Datastar morph chain therefore own every
+visible outcome; reconnecting derives the same surface from database truth.
+
 ## The block and its two renders
 
 A **block** (`:seon.agent.ctx/block`, registered in [[data-model]]) carries up to

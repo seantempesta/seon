@@ -418,6 +418,48 @@ correct for child-protocol resurrection, wrong for the plan-named
 host lane. R52 (interactions=transactions) stays PROVISIONAL; lane
 checks plan §2 ledger for reactive.call's assigned disposition.
 
+R52 IMPLEMENTED (2026-07-24; awaiting owner ratification): one
+interaction entity is also one open `:interaction` run. Submission
+validates the exact committed handler schema/source fingerprint,
+commits the generated interaction/run identities with tx
+user+process provenance, and acknowledges without awaiting authored
+code. The existing claimant scan attaches an idle agent, CASes
+`pending→running`, invokes through the bounded JVM guard/eval pool,
+and atomically closes the run with ordinary result or flat error
+facts. A takeover of a durable `running` receipt records
+`interrupted`; it never blind-replays the handler. The agent page's
+`interaction-outcome` block queries terminal facts and omits itself
+when none exist, so delivery remains interest→reactive→morph and
+reconnect repaints from the database.
+
+R52 INTEGRATED PROOF: the registry-driven codec property adds
+`:seon.agent.interaction/entity` and passes its 3 variants × 100
+generated trials; focused claimant/reactive-call CLJS is 22 tests /
+103 assertions green; the writer regression is 1 test / 10
+assertions green for fact→scan/claim→guarded authored
+execution→terminal facts+tx provenance→derived render. Invalid
+handler arguments remain a flat 422 error and allocate no fact.
+UI-LATENCY-RISK: canvas controls use Datastar `@post(..., {retry:
+'never'})` and clear request-pending state on HTTP acknowledgement;
+no current caller consumes the old inline response body. The outcome
+morph arrives one claim cycle later, so a future control that assumes
+same-request visual settlement must be recorded as latency evidence,
+never repaired with a wait.
+
+R52 RESET EVIDENCE/BLOCKER: the surviving `client` build is green
+(453 files, zero errors), but the protected operator owner still
+launches `watch client execution test` after U9 deleted the
+`execution` build. `bin/seon up` therefore remains
+`rebuild-pending` and times out its first flush; the supervised
+attempt was closed with `bin/seon down`. The durable follow-up is
+[[operator-watcher-still-requests-deleted-execution-build]]. The
+earliest unsettled integration contract is now operator publication
+of the surviving build vector; its proof is a current artifact plus
+green `bin/test-writer`. The dependency-ready portfolio remains U9
+host-lane/pod deletion convergence, and the final graduation gate is
+the reset default cluster with claimant interaction outcome visible
+through the live page/feed.
+
 R45-S6 MEASURED (~17:50, lane landed+accepted): writer JVM load
 source 10.9s → AOT 2.3-3.2s → AOT+CDS ~2.05s (3 runs each; meets
 the 2-4s phase-1 budget). Opt-in behind the build dial; manifest

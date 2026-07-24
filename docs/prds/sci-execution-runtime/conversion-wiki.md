@@ -1836,9 +1836,21 @@ the variable-weight values they select.
 
 ## R52 interaction handoff scar (2026-07-24)
 
-- **A browser interaction is not a synchronous execution channel.** Until the
-  database interaction owner lands, validated requests refuse loudly as ordinary
-  error values; they neither await a retired child nor silently drop work.
+- **A browser interaction is not a synchronous execution channel.** Validation
+  pins the committed authored source and schema, then one transaction records
+  an interaction/run fact and the route acknowledges. The existing claimant
+  CASes the queued run onto an idle agent, records `:running` before guarded
+  execution, and atomically closes it with ordinary result/error facts.
+- **A durable running receipt forbids blind replay.** If claimant custody is
+  lost after `:pending → :running`, a replacement records `:interrupted`
+  rather than executing an authored side effect twice. The page queries
+  terminal facts and omits its surface when absent; it never reads an inline
+  HTTP result.
+- **Ordered mixed arguments are one EDN slot, not cardinality-many datoms.**
+  The stored attribute is an explicit cardinality-one string union over named
+  EDN-safe shapes; the request contract additionally requires every argument
+  to satisfy the ordinary-wire predicate. This keeps argument order without
+  turning the browser interaction into an untyped serialization escape hatch.
 
 ## R45 S6 writer AOT scar (2026-07-24)
 

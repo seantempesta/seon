@@ -4,6 +4,7 @@
    #?(:clj [clojure.test :refer [deftest is testing]]
       :cljs [cljs.test :refer [deftest is testing]])
    [seon.agent.driver :as driver]
+   [seon.agent.interaction :as interaction]
    [seon.agent.loop.core :as loop.core]
    [seon.agent.run.core :as run.core]
    [seon.agent.turn.core :as turn.core]
@@ -24,6 +25,18 @@
    :seon.agent.run/last-beat-at old-beat})
 
 (deftest acquisition-reacquisition-and-steal-are-distinct
+  (testing "a queued interaction attaches through the first claim CAS"
+    (let [plan
+          (run.core/claim-plan
+           (assoc base-run
+                  :seon.agent.interaction/id "interaction-u2"
+                  :seon.agent.run/attached? false)
+           claimant-a now 1000 nil)]
+      (is (= :attach-acquire
+             (:seon.agent.run/claim-transition plan)))
+      (is (= [:db.fn/cas [:seon.agent/id agent-id]
+              :seon.agent/run nil [:seon.agent.run/id run-id]]
+             (first (:seon.db/tx-data plan))))))
   (testing "first acquisition asserts both absent values"
     (let [plan (run.core/claim-plan base-run claimant-a now 1000 nil)]
       (is (= :acquire (:seon.agent.run/claim-transition plan)))
@@ -158,6 +171,16 @@
 
 (deftest phase-eligibility-is-policy-data
   (is (loop.core/eligible?
+       #{:seon.agent.driver.capability/interaction}
+       (assoc base-run
+              :seon.agent.interaction/id "interaction-u2"
+              :seon.agent.interaction/status :pending)))
+  (is (= :interaction
+         (loop.core/next-step
+          (assoc base-run
+                 :seon.agent.interaction/id "interaction-u2"
+                 :seon.agent.interaction/status :pending))))
+  (is (loop.core/eligible?
        #{:seon.agent.driver.capability/render}
        base-run))
   (is (not
@@ -169,6 +192,43 @@
        (assoc base-run
               :seon.agent.run/current-turn
               {:seon.agent.turn/phase :reply-ready}))))
+
+(deftest interaction-receipts-share-the-held-run-fence
+  (let [interaction-id "interaction-u2"
+        fence (run.core/run-fence agent-id run-id 3)
+        start
+        (interaction/start-tx-data
+         {:seon.agent/id agent-id
+          :seon.agent.run/id run-id
+          :seon.agent.run/claim-epoch 3
+          :seon.agent.interaction/id interaction-id})
+        interrupted
+        (interaction/error-tx-data
+         {:seon.agent/id agent-id
+          :seon.agent.run/id run-id
+          :seon.agent.run/claim-epoch 3
+          :seon.agent.interaction/id interaction-id
+          :seon.agent.interaction/observed-status :running
+          :seon.agent.interaction/terminal-status :interrupted
+          :seon.agent.interaction/error
+          {:seon.error/message "claimant stopped"
+           :seon.error/kind :agent}
+          :seon.agent.interaction/settled-at now})]
+    (is (= fence (subvec start 0 2)))
+    (is (= [:db.fn/cas [:seon.agent.interaction/id interaction-id]
+            :seon.agent.interaction/status :pending :running]
+           (last start)))
+    (is (= fence (subvec interrupted 0 2)))
+    (is (some
+         #{[:db.fn/cas [:seon.agent.interaction/id interaction-id]
+            :seon.agent.interaction/status :running :interrupted]}
+         interrupted))
+    (is (some
+         #{[:db/add [:seon.agent.interaction/id interaction-id]
+            :seon.agent.interaction/error
+            {:seon.error/message "claimant stopped"
+             :seon.error/kind :agent}]}
+         interrupted))))
 
 (defn- disposition-fixture [plan inventory]
   (let [schema-projection

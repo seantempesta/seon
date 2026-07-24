@@ -464,6 +464,10 @@
     :seon.render/ai seon.agent.ctx.namespaces/namespaces-block}
    {:seon.agent.ctx/name :canvas :seon.agent.ctx/priority 35
     :seon.render/ai seon.agent.ctx.canvas/canvas-block}
+   {:seon.agent.ctx/name :interaction-outcome
+    :seon.agent.ctx/priority 39
+    :seon.agent.ctx/token-cap 512
+    :seon.render/html seon.agent.interaction.render/render-html}
    ;; The derived seon.warn registry (15 checks: spec hygiene, failed evals,
    ;; bad-ref translation, fs denials, hop dead-letters, slow evals, failing
    ;; tests, unresolved canvases). Re-enabled by owner ruling 2026-07-20 —

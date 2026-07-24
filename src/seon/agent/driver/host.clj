@@ -6,6 +6,7 @@
             [my.blob.host :as blob.host]
             [seon.ai.core :as ai.core]
             [seon.agent.driver :as driver]
+            [seon.agent.interaction :as interaction]
             [seon.agent.message :as message]
             [seon.agent.message.leaf :as message.leaf]
             [seon.agent.run.core :as run.core]
@@ -16,6 +17,7 @@
             [seon.db :as db]
             [seon.db.host :as db.host]
             [seon.db.id :as db.id]
+            [seon.db.protocol :as protocol]
             [seon.eval.receipt :as eval.receipt]
             [seon.host.context :as context]
             [seon.host.eval :as host.eval]
@@ -23,8 +25,7 @@
             [seon.host.invoke :as invoke]
             [seon.host.session.leaf :as session]
             [seon.program.edge :as edge]
-            [seon.program.plan :as plan]
-            [seon.repl.parse :as repl.parse])
+            [seon.program.plan :as plan])
   (:import [java.nio.file Files Path]
            [java.util.concurrent Callable ExecutorService Future
             ScheduledExecutorService TimeUnit]))
@@ -65,7 +66,8 @@
 (defn claimant-capabilities
   "Derive claimant policy from installed platform leaves."
   [host]
-  (cond-> #{:seon.agent.driver.capability/eval}
+  (cond-> #{:seon.agent.driver.capability/eval
+            :seon.agent.driver.capability/interaction}
     (and (fn? (:seon.agent.driver/llm-transport! host))
          (map? (:seon.agent.driver/blob-leaf host)))
     (conj :seon.agent.driver.capability/llm)))
@@ -159,7 +161,6 @@
    ::session/interrupt-lock (Object.)
    ::session/interrupt-fired? (atom false)
    ::session/worker-phase (atom :idle)
-   ::session/live-values (atom {::session/order [] ::session/values {}})
    ::session/contexts (:seon.host/contexts host)
    ::session/writer (:seon.host/writer host)
    ::session/projection-state (:seon.host/projection-state host)
@@ -286,6 +287,169 @@
        :seon.error/kind :core-bug
        :seon.error/data {:seon.config/key missing}}
       configuration)))
+
+(defn- flat-interaction-error
+  [value]
+  (let [error
+        (if (and (map? value) (string? (:seon.error/message value)))
+          value
+          {:seon.error/message (str value)
+           :seon.error/kind :agent})
+        projected
+        (::protocol/projected-value
+         (protocol/wire-projection
+          (select-keys error
+                       [:seon.error/message
+                        :seon.error/kind
+                        :seon.error/data])))
+        projected
+        (if (and (contains? projected :seon.error/data)
+                 (not (interaction/persisted-value?
+                       (:seon.error/data projected))))
+          (dissoc projected :seon.error/data)
+          projected)]
+    (if (and (map? projected)
+             (string? (:seon.error/message projected)))
+      projected
+      {:seon.error/message
+       "The interaction failed without ordinary error data."
+       :seon.error/kind :core-bug})))
+
+(defn- interaction-invocation
+  [run claim-epoch database configuration]
+  {:seon.execution/invocation-id (str (random-uuid))
+   :seon.execution/agent-id (:seon.agent/id run)
+   :seon.db/db database
+   :seon.execution/function-identity
+   {:seon.execution/function-symbol
+    (:seon.agent.interaction/handler run)
+    :seon.execution/source-digest
+    (:seon.agent.interaction/handler-source-fingerprint run)}
+   :seon.execution/arguments
+   (:seon.agent.interaction/arguments run)
+   :seon.execution/deadline-ms
+   (+ (System/currentTimeMillis)
+      (:seon.config.claim-driver/invocation-deadline-ms configuration))
+   :seon.execution/result-limit-bytes
+   (:seon.config.claim-driver/invocation-result-maximum-bytes configuration)
+   :seon.execution/run-fence
+   {:seon.agent.run/id (:seon.agent.run/id run)
+    :seon.agent.run/claim-epoch claim-epoch
+    :seon.config/configuration configuration}})
+
+(defn- interaction-step!
+  [host
+   {:seon.agent.driver/keys [run]
+    claim-epoch :seon.agent.run/claim-epoch
+    database :seon.db/db}]
+  (let [agent-id (:seon.agent/id run)
+        run-id (:seon.agent.run/id run)
+        interaction-id (:seon.agent.interaction/id run)
+        status (:seon.agent.interaction/status run)]
+    (if (= :running status)
+      (let [report
+            (db/transact!
+             {::db/db database
+              ::db/tx-data
+              (interaction/error-tx-data
+               {:seon.agent/id agent-id
+                :seon.agent.run/id run-id
+                :seon.agent.run/claim-epoch claim-epoch
+                :seon.agent.interaction/id interaction-id
+                :seon.agent.interaction/observed-status :running
+                :seon.agent.interaction/terminal-status :interrupted
+                :seon.agent.interaction/error
+                {:seon.error/message
+                 "The prior claimant stopped after admitting this interaction; the authored handler was not replayed."
+                 :seon.error/kind :agent}
+                :seon.agent.interaction/settled-at (java.util.Date.)})})]
+        (if (:seon.error/message report)
+          report
+          {:seon.db/db (:db-after report)
+           :seon.agent.driver/closed? true
+           :seon.agent.run/closed-reason :error}))
+      (let [configuration (invocation-configuration! database)]
+        (if (:seon.error/message configuration)
+          configuration
+          (let [started
+                (db/transact!
+                 {::db/db database
+                  ::db/tx-data
+                  (interaction/start-tx-data
+                   {:seon.agent/id agent-id
+                    :seon.agent.run/id run-id
+                    :seon.agent.run/claim-epoch claim-epoch
+                    :seon.agent.interaction/id interaction-id})})]
+            (if (:seon.error/message started)
+              started
+              (let [admitted-db (:db-after started)
+                    host-session (driver-session host agent-id)
+                    task
+                    (.submit
+                     ^ExecutorService (:seon.host/eval-pool host)
+                     ^Callable
+                     #(invoke/execute-invocation!
+                       host-session
+                       (interaction-invocation
+                        run claim-epoch admitted-db configuration)))
+                    raw (.get ^Future task)
+                    head (context/resolve-head! (:seon.host/writer host))
+                    bounded
+                    (when-not (or (:seon.error/message raw)
+                                  (:seon.eval/fenced? raw))
+                      (session/bounded-result
+                       raw
+                       (:seon.config.claim-driver/invocation-result-maximum-bytes
+                        configuration)))
+                    error
+                    (cond
+                      (:seon.error/message raw) raw
+                      (:seon.eval/fenced? raw)
+                      {:seon.error/message
+                       "The run fence was lost before the interaction handler could execute."
+                       :seon.error/kind :agent}
+                      (not (::session/ok? bounded))
+                      (::session/error bounded))
+                    projected
+                    (when-not error
+                      (::protocol/projected-value
+                       (protocol/wire-projection (::session/value bounded))))
+                    error
+                    (or error
+                        (when-not
+                         (interaction/persisted-value? projected)
+                          {:seon.error/message
+                           "The interaction result has no lossless persisted-data projection."
+                           :seon.error/kind :agent}))
+                    tx-data
+                    (if error
+                      (interaction/error-tx-data
+                       {:seon.agent/id agent-id
+                        :seon.agent.run/id run-id
+                        :seon.agent.run/claim-epoch claim-epoch
+                        :seon.agent.interaction/id interaction-id
+                        :seon.agent.interaction/observed-status :running
+                        :seon.agent.interaction/terminal-status :error
+                        :seon.agent.interaction/error
+                        (flat-interaction-error error)
+                        :seon.agent.interaction/settled-at
+                        (java.util.Date.)})
+                      (interaction/success-tx-data
+                       {:seon.agent/id agent-id
+                        :seon.agent.run/id run-id
+                        :seon.agent.run/claim-epoch claim-epoch
+                        :seon.agent.interaction/id interaction-id
+                        :seon.agent.interaction/result projected
+                        :seon.agent.interaction/settled-at
+                        (java.util.Date.)}))
+                    settled
+                    (db/transact! {::db/db head ::db/tx-data tx-data})]
+                (if (:seon.error/message settled)
+                  settled
+                  {:seon.db/db (:db-after settled)
+                   :seon.agent.driver/closed? true
+                   :seon.agent.run/closed-reason
+                   (if error :error :completed)})))))))))
 
 (defn- installed-binding-namespaces
   [tier-inventory]
@@ -464,7 +628,7 @@
           planned
           (let [disposition (:seon.agent.driver/disposition planned)
                 execution-plan (:seon.execution/plan planned)]
-            (case (:seon.agent.driver/disposition disposition)
+            (case disposition
               :no-dispatch
               (deliver-no-dispatch-reply!
                database agent-id run-id claim-epoch turn-id
@@ -541,6 +705,8 @@
 
 (defn- execute-step! [host storage-view claim]
   (case (:seon.agent.driver/step claim)
+    :interaction (interaction-step! host claim)
+
     :open-attempt
     (binding [blob/*leaf* (:seon.agent.driver/blob-leaf host)]
       (let [result

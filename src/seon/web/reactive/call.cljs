@@ -1,58 +1,21 @@
 (ns seon.web.reactive.call
-  "Route hiccup-authored calls into an agent sandbox.
+  "Validate browser-authored calls and commit interaction facts.
 
-   This is the THIRD door of the one sandboxed-execution service (eval +
-   render are the other two): an interaction is just an eval authored as
-   hiccup and routed by its namespace. The browser POSTs a standard Datastar
-   `@post('/agent/{id}/call?fn=…&args=…')` (produced by
-   `seon.web.reactive.transform`).
-   The route supplies the executing agent independently from the function's
-   ordinary Clojure namespace. We capability-check that the route agent is live
-   and the function is an agent-authored fact in the shared program graph, then
-   invoke it through the route agent's eval —
-   which transacts, and the existing reactive feed
-   (`listen!` → render → SSE push) updates the UI.
-
-   ## Agent is the route; namespace organizes code
-
-   `/agent/{id}/call` selects the supervised agent runtime. `fn` remains the
-   exact qualified Clojure function, which may live in any namespace the agent
-   authored. Namespace structure never has to encode an agent id.
-
-   ## The capability gate (the security boundary)
-
-   [[capability-check]] is the refusal point — it runs BEFORE any invocation:
-
-   One query at the request's immutable database value proves that the route
-   agent is live and that the registered `:seon.fn` source transaction was
-   authored by an agent through the REPL process. Agent-authored functions are
-   shared capabilities; a dead route agent, core function, or missing function
-   is refused.
-
-   A refused call is NEVER invoked; it returns a clean error value (403).
-   This is the same surface idea as the SCI canvas sandbox that denies `fs` (the
-   symbol simply doesn't resolve) — but as an explicit, queryable pre-invoke
-   gate, because for an interaction the refusal IS the security claim.
-
-   ## Invoke = resolve-and-apply (args stay DATA, never recompiled)
-
-   A granted call is NOT synthesized into a source string and eval'd — that
-   would let an attacker-controlled arg expression execute (an arg printed into
-   source then re-read as code is the classic break-out). Instead [[invoke!]]
-   resolves the granted symbol in the selected supervised Bun child and applies
-   it to the args as VALUES. The
-   resolved `f` is still the always-on-instrumented var, so its own
-   `:malli/schema` is enforced (no second validator to drift); a bad arg or a
-   throw surfaces as a value (422), not a crash, because [[invoke!]] catches it.
-   The `?args=` query is additionally decoded DATA-ONLY
-   (`seon.web.reactive.transform/decode-args`) so a symbol/list/tagged value is
-   refused before invoke — belt-and-suspenders behind resolve-and-apply."
+   The HTTP request never waits for authored execution. It capability-checks
+   the live route agent and exact committed handler row, validates the
+   schema-projected argument vector, commits one pending interaction/run fact,
+   and acknowledges. Existing JVM claimants execute that fact; the page learns
+   its outcome only from committed result/error facts through the normal
+   database-interest → reactive render → Datastar morph chain."
   (:require
     [clojure.string :as str]
+    [seon.agent.interaction :as interaction]
+    [seon.agent.run :as run]
     [seon.db :as db]
-    [seon.execution :as execution]
+    [seon.db.id :as db.id]
     [seon.log :as log]
     [seon.runtime.admission :as admission]
+    [seon.schema :as schema]
     [seon.web.reactive.transform :as transform]))
 
 ;; ============================================================
@@ -74,7 +37,8 @@
          (db/query
           {:seon.db/db database
            :seon.db/query
-           '[:find ?function .
+           '[:find (pull ?function
+                         [:seon.fn/source-fingerprint :seon.fn/spec]) .
              :in $ ?agent-id ?function-symbol
              :where
              [?agent :seon.agent/id ?agent-id]
@@ -90,14 +54,25 @@
            :seon.db/args [agent-id (str fn-sym)]}))]
     (cond
       (:seon.error/message granted) granted
-      (some? granted) {::agent-id agent-id}
+      (and (string? (:seon.fn/source-fingerprint granted))
+           (string? (:seon.fn/spec granted)))
+      {::agent-id agent-id
+       ::handler fn-sym
+       ::handler-source-fingerprint
+       (:seon.fn/source-fingerprint granted)
+       ::handler-spec (:seon.fn/spec granted)}
+      (some? granted)
+      {:seon.error/message
+       (str "The committed interaction handler " fn-sym
+            " has no complete source identity and schema.")
+       :seon.error/kind :core-bug}
       :else
       {::refused
        (str "`" fn-sym "` is not a shared agent-authored function available "
             "to live agent " agent-id ".")})))
 
 ;; ============================================================
-;; Invoke — through the one supervised authored-execution service.
+;; Submission — one generated interaction/run fact, no execution.
 ;; ============================================================
 
 (defn- err->msg [e]
@@ -112,22 +87,69 @@
      {:seon.error/message (str value)
       :seon.error/kind kind})))
 
-(defn ^:async invoke!
-  "Refuse retired synchronous interaction execution as a flat error value."
-  {:malli/schema [:=> [:catn [::db :seon.db/db] [::agent-id :string]
-                       [::fn-sym :symbol]
-                       [::args [:sequential :any]]]
-                  :any]}
-  [database agent-id fn-sym args]
-  {::ok? false
-   ::unavailable? true
-   ::error {:seon.error/message
-             "Interaction execution is being rehomed under R52."
-             :seon.error/kind :seon.runtime/unavailable
-             :seon.error/data {:seon.web.reactive.call/agent-id agent-id
-                               :seon.web.reactive.call/function-symbol fn-sym
-                               :seon.web.reactive.call/arguments args
-                               :seon.web.reactive.call/database database}}})
+(defn ^:async submit!
+  "Validate and commit one pending interaction fact, returning its durable id."
+  {:malli/schema
+   [:=> [:catn [::db :seon.db/db]
+                 [::capability :map]
+                 [::args :seon.agent.interaction/arguments]]
+    :map]}
+  [database capability args]
+  (let [agent-id (::agent-id capability)
+        handler (::handler capability)
+        validated
+        (interaction/validate-request
+         {:seon.agent/id agent-id
+          :seon.agent.interaction/handler handler
+          :seon.agent.interaction/handler-source-fingerprint
+          (::handler-source-fingerprint capability)
+          :seon.agent.interaction/handler-spec
+          (::handler-spec capability)
+          :seon.agent.interaction/arguments args
+          :seon.schema/projection (schema/current-projection)})]
+    (if (:seon.error/message validated)
+      {::ok? false ::error validated}
+      (let [deadline-ms
+            (await
+             (run/effective-deadline-ms
+              {:seon.db/db database :seon.agent/id agent-id}))]
+        (if (:seon.error/message deadline-ms)
+          {::ok? false ::unavailable? true ::error deadline-ms}
+          (let [now (js/Date.)
+                deadline (js/Date. (+ (.getTime now) deadline-ms))
+                allocation
+                (await
+                 (db/without-agent
+                  #(db.id/allocate!
+                    {::db/db database
+                     ::db.id/allocations
+                     [{::db.id/key ::interaction-id
+                       ::db.id/identity-attr
+                       :seon.agent.interaction/id}
+                      {::db.id/key ::run-id
+                       ::db.id/identity-attr :seon.agent.run/id}]
+                     ::db.id/transaction-builder
+                     (fn [ids]
+                       {::db/tx-data
+                        (interaction/open-tx-data
+                         {:seon.agent.interaction/id
+                          (get ids ::interaction-id)
+                          :seon.agent.run/id (get ids ::run-id)
+                          :seon.agent/id agent-id
+                          :seon.agent.interaction/handler handler
+                          :seon.agent.interaction/handler-source-fingerprint
+                          (::handler-source-fingerprint capability)
+                          :seon.agent.interaction/arguments args
+                          :seon.agent.interaction/subjects
+                          #{[:seon.agent/id agent-id]}
+                          :seon.agent.interaction/requested-at now
+                          :seon.agent.run/deadline deadline})})})))]
+            (if (:seon.error/message allocation)
+              {::ok? false ::unavailable? true ::error allocation}
+              {::ok? true
+               ::interaction-id
+               (get-in allocation
+                       [::db.id/ids ::interaction-id])})))))))
 
 ;; ============================================================
 ;; HTTP handler — POST /agent/{id}/call. The Ring request carries the native
@@ -151,11 +173,11 @@
 
    The database listener owns the visible update. Direct API callers retain
    the small JSON acknowledgement."
-  [^js req]
+  [^js req interaction-id]
   (if (datastar-request? req)
     (js/Response. nil #js {:status 204
                            :headers #js {"Cache-Control" "no-store"}})
-    (json-response 200 {::ok? true})))
+    (json-response 200 {::ok? true ::interaction-id interaction-id})))
 
 (defn- query-val [^js req k]
   (try
@@ -192,19 +214,20 @@
     (catch :default _ {})))
 
 (defn ^:async handle!
-  "POST /agent/{id}/call — gate a call descriptor and invoke if granted.
+  "POST /agent/{id}/call — validate and transact an interaction if granted.
 
    Parses the call descriptor, capability-checks, and (only if
-   granted) invokes. The fn symbol rides `?fn=`; the fn-CALL case carries its
+   granted) submits. The fn symbol rides `?fn=`; the fn-CALL case carries its
    render-time args in `?args=` (transit, decoded DATA-ONLY), the fn-REF case
    takes the POST body's Datastar signals as a single map argument. Responses:
-   200 `{ok? true}` on success; 403 with the refusal reason when the capability
-   gate denies the fn (never invoked); 422 when the invoked fn fails OR when
-   `?args=` is malformed / non-data (refused before invoke); 400 for a missing
+   204 for Datastar or 200 with the durable interaction id on success; 403 with
+   the refusal reason when the capability gate denies the fn; 422 when the
+   argument schema fails OR when
+   `?args=` is malformed / non-data (refused before submission); 400 for a missing
    fn. Every path through here writes exactly one response — a bad `?args=`
    decode is caught inside the promise chain, never a hung request. The UI
-  update is the reactive feed's job — the invoked fn's transact fans out via
-  the web UI tx-listener."
+  update is the reactive feed's job — committed outcome facts fan out via the
+  web UI transaction listener."
   [request]
   (let [^js req (:seon.http/request request)]
     (if-not (admission/available?)
@@ -214,7 +237,7 @@
                       ::error
                       (error-value
                        (get (admission/unavailable) :seon/error)
-                       :core)})
+                       :core-bug)})
       (let [fn-str (query-val req "fn")
             route-agent-id (get-in request [:path-params :id])]
        (if (or (str/blank? route-agent-id) (str/blank? fn-str))
@@ -261,21 +284,28 @@
                                          ::error
                                          (error-value (str "bad args: " arg-error)
                                                       :user-input)}))
-                   (let [{ok? ::ok? err ::error}
-                         (await (invoke! database agent-id fn-sym args))]
+                   (let [{ok? ::ok? err ::error
+                          interaction-id ::interaction-id
+                          unavailable? ::unavailable?}
+                         (await (submit! database cap args))]
                      (if ok?
                        (do
-                         (log/info-console! "seon.web.reactive.call" "agent call OK"
+                         (log/info-console! "seon.web.reactive.call"
+                                            "interaction accepted"
                                             {:seon.web.call/fn fn-str
-                                             :seon.agent/id agent-id})
-                         (success-response req))
+                                             :seon.agent/id agent-id
+                                             :seon.agent.interaction/id
+                                             interaction-id})
+                         (success-response req interaction-id))
                        (do
                          (log/error-console! "seon.web.reactive.call"
-                                             "agent call invoke error"
+                                             "interaction refused"
                                              (:seon.error/message err))
-                         (json-response 422 {::ok? false
-                                             ::error err}))))))))
+                         (json-response (if unavailable? 503 422)
+                                        {::ok? false
+                                         ::error err}))))))))
            (catch :default e
              (log/error-console! "seon.web.reactive.call" "agent call threw" e)
              (json-response 500 {::ok? false
-                                 ::error (error-value (err->msg e) :core)}))))))))
+                                 ::error
+                                 (error-value (err->msg e) :core-bug)}))))))))

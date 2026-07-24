@@ -133,6 +133,7 @@ value either satisfies its owning identity schema or is rejected.
 | identity attr | malli shape | datahike valueType | role |
 |---|---|---|---|
 | `:seon.agent/id` | `[:and {:seon.db/identity true :seon.db.id/generator :seon.db.id.generator/human-readable} :seon.db.id/agent-value]` | `:db.type/string` | readable agent natural key; `root` is reserved, not generated |
+| `:seon.agent.interaction/id` | `[:and {:seon.db/identity true :seon.db.id/generator :seon.db.id.generator/compact} :seon.db.id/compact-value]` | `:db.type/string` | compact authored-interaction key; shares an entity with its run identity |
 | `:seon.agent.run/id` | `[:and {:seon.db/identity true :seon.db.id/generator :seon.db.id.generator/compact} :seon.db.id/compact-value]` | `:db.type/string` | compact **fencing token** |
 | `:seon.agent.turn/id` | `[:and {:seon.db/identity true :seon.db.id/generator :seon.db.id.generator/compact} :seon.db.id/compact-value]` | `:db.type/string` | compact turn key |
 | `:seon.agent.message/id` | `[:and {:seon.db/identity true :seon.db.id/generator :seon.db.id.generator/compact} :seon.db.id/compact-value]` | `:db.type/string` | compact message key |
@@ -493,7 +494,7 @@ is produced (§3).
 | `:seon.agent.run/id` | `[:and {:seon.db/identity true :seon.db.id/generator :seon.db.id.generator/compact} :seon.db.id/compact-value]` | string / one / identity | compact fencing token |
 | `:seon.agent.run/agent` | `:seon.db/ref` | ref / one | back-ref → agent |
 | `:seon.agent.run/started-at` | `:inst` | instant / one | wake time |
-| `:seon.agent.run/trigger` | `[:enum :message :schedule]` | keyword / one | value enum |
+| `:seon.agent.run/trigger` | `[:enum :message :schedule :recovery :interaction]` | keyword / one | value enum |
 | `:seon.agent.run/cause` | `:seon.db/ref` | ref / one | → the waking message (when `:message`) |
 | `:seon.agent.run/turn-limit` | `:int` | long / one | work bound (bumpable) |
 | `:seon.agent.run/deadline` | `:inst` | instant / one | absolute clock bound |
@@ -503,7 +504,7 @@ is produced (§3).
 | `:seon.agent.run/paused-at` | `:inst` | instant / one | presence ⇒ derived `:paused` |
 | `:seon.agent.run/remaining-ms` | `:int` | long / one | banked at pause, re-extends deadline at resume |
 | `:seon.agent.run/status` | `[:enum :open :closed]` | keyword / one | value enum |
-| `:seon.agent.run/closed-reason` | `[:enum :completed :waited :turn-limit :deadline-exceeded :terminated :superseded :error :crashed]` | keyword / one | present iff `:closed` |
+| `:seon.agent.run/closed-reason` | `[:enum :completed :waited :turn-limit :deadline-exceeded :terminated :superseded :error :no-forms :crashed :quiesced]` | keyword / one | present iff `:closed` |
 | `:seon.agent.run/result` | `:string` | string / one | optional bounded terminal summary |
 | `:seon.agent.run/result-ref` | `:seon.db/ref` | ref / one | optional addressable work product |
 | `:seon.agent.run/closed-at` | `:inst` | instant / one | present when the run closes |
@@ -513,6 +514,27 @@ epoch, `last-beat-at`, the observation instant, and the configured stale
 interval. Claimant identifies custody; epoch fences authority. `turn-count` /
 `now` / `snapshot` are also derived-read scalars, not stored datoms. The claim
 and run model lives in [[agent-runtime]].
+
+#### Interaction run facts — `:seon.agent.interaction/*`
+
+One interaction and one run are the same database entity, identified by both
+generated identities. There is no entity-kind discriminator.
+
+| attribute | malli | datahike facet | notes |
+|---|---|---|---|
+| `:seon.agent.interaction/id` | compact generated identity | string / one / identity | stable interaction lookup |
+| `:seon.agent.interaction/handler` | `:qualified-symbol` | symbol / one | authored handler |
+| `:seon.agent.interaction/handler-source-fingerprint` | 64-character string | string / one | pins the committed source acquired with the handler schema |
+| `:seon.agent.interaction/arguments` | ordered vector of ordinary wire values in one EDN slot | string / one | schema-projected arguments preserve call order |
+| `:seon.agent.interaction/subjects` | non-empty set of `:seon.db/ref` | ref / many | facts whose pages may derive the outcome |
+| `:seon.agent.interaction/status` | `[:enum :pending :running :done :error :interrupted]` | keyword / one | durable admission/settlement receipt |
+| `:seon.agent.interaction/result` | ordinary wire value in one EDN slot | string / one | optional, present with `:done` |
+| `:seon.agent.interaction/error` | flat error value in one EDN slot | string / one | optional, present with `:error` or `:interrupted` |
+
+Request provenance is the transaction metadata attached to the interaction
+datoms. It is recovered through their transaction entity's `:seon.db/user` and
+`:seon.db/process`; no `created-by`, `created-at`, or copied provenance
+attributes exist.
 
 ### 4.4 turn — `:seon.agent.turn/*`
 
