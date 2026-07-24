@@ -1269,6 +1269,40 @@ the variable-weight values they select.
   connection Promise pending long enough to prove owner close stops recovery
   during the attempt (`test/seon/db_remote_contract_test.cljs`).
 
+## Descriptor-policy consumer scar (2026-07-23)
+
+- **Provider tests assert descriptor keys, not family folklore.** A shared
+  OpenAI-compatible wire core does not imply shared thinking fields or missing
+  defaults. Select the descriptor whose
+  `:seon.ai.provider/thinking-policy` promises the behavior under test:
+  DeepSeek emits its `thinking` toggle, Z.AI emits `reasoning_effort`, and the
+  generic descriptor omits both while shipping its current default base URL.
+  To prove the missing-endpoint error, remove the URL from the resolved
+  request explicitly instead of assuming a catalog row lacks one.
+
+## Reply-policy consumer scar (2026-07-23)
+
+- **A split policy requires every consumer to resolve both axes from both
+  rows.** Run limits and historical-attempt validation must acquire the
+  cluster and agent policy facts, pass them through
+  `seon.ai/reply-policy-from-rows`, and consume reply evaluation separately
+  from wire streaming. Reading the retired mode field directly silently
+  ignores explicit per-agent overrides.
+- **Historical fixtures are persisted entities, not convenient partial
+  maps.** Keep projection fixtures valid against `:seon.ai.attempt/entity`,
+  including compact identity, config digest, deadline, and reply evaluation,
+  so fail-closed production validation proves ordering and drift rather than
+  rejecting an impossible test row first.
+
+## Web-limit reader scar (2026-07-23)
+
+- **A validated limit is not real until its enforcement point reads it.**
+  Thread the operation's frozen configuration to extraction, read link count,
+  HTML character count, and HTML nesting depth where those bounds fire, and
+  include every required fact in the loud missing-limit gate. Literal defaults
+  in a leaf make accepted manifest overrides dishonest
+  (`seon.agent.web/fetch` → `seon.agent.web.pod/extract-content`).
+
 ## Computed cold-boot schema population scar (2026-07-23)
 
 - **A computed inventory is only as complete as its persisted-entity

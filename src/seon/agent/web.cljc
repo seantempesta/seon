@@ -300,7 +300,8 @@
             :else
             (let [final-url (::final-url res)
                   {:keys [md title extractor links]}
-                  (pod/extract-content (::lane res) (::body res) final-url)
+                  (pod/extract-content
+                   (::lane res) (::body res) final-url configuration)
                   md        (or md "")
                   total     (tokens/estimate md)
                   {bok? :my.blob/ok? hash :my.blob/hash berr :my.blob/error}

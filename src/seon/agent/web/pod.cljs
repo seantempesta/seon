@@ -23,29 +23,32 @@
 (def default-max-bytes       "Streamed-body byte cap (openclaw's number)." 2000000)
 (def default-max-preview-tokens "Preview cap — deliberately small; the full doc is one blob/text away." 2000)
 (def default-max-redirects   "Redirect-hop cap; every hop re-passes the SSRF guard." 5)
-(def default-links-cap       "Max link rows carried in the response." 25)
-
 (def default-search-results  "Result rows returned when unspecified." 10)
 (def max-search-results      "Hard cap on search result rows (safety constraint)." 20)
-
-(def max-html-chars     "Skip the DOM parse above this HTML size (fall back to regex)." 1000000)
-(def max-nesting-depth  "Skip the DOM parse above this estimated tag nesting." 3000)
 
 (declare extract extract-links)
 
 (defn extract-content
   "Extract one transport body into portable content data."
-  [lane body final-url]
-  (case lane
-    :html (let [{:keys [text title extractor]} (extract body final-url)]
-            {:md text :title title :extractor extractor
-             :links (extract-links text final-url default-links-cap)})
-    :markdown {:md body :extractor :markdown-passthrough
-               :links (extract-links body final-url default-links-cap)}
-    :json {:md (try (.stringify js/JSON (.parse js/JSON body) nil 2)
-                    (catch :default _ body))
-           :extractor :json}
-    :text {:md body :extractor :text}))
+  [lane body final-url configuration]
+  (let [link-count (:seon.config.web/default-link-count configuration)
+        maximum-html-characters
+        (:seon.config.web/maximum-html-characters configuration)
+        maximum-html-nesting-depth
+        (:seon.config.web/maximum-html-nesting-depth configuration)]
+    (case lane
+      :html
+      (let [{:keys [text title extractor]}
+            (extract body final-url
+                     maximum-html-characters maximum-html-nesting-depth)]
+        {:md text :title title :extractor extractor
+         :links (extract-links text final-url link-count)})
+      :markdown {:md body :extractor :markdown-passthrough
+                 :links (extract-links body final-url link-count)}
+      :json {:md (try (.stringify js/JSON (.parse js/JSON body) nil 2)
+                      (catch :default _ body))
+             :extractor :json}
+      :text {:md body :extractor :text})))
 
 (defn projection->response
   "Rebuild a cached public response from its projection and blob."
@@ -381,11 +384,11 @@
    Returns {:text md :title t :extractor :readability|:raw}. Guards
    (size + nesting) and any readability failure fall back to the regex
    converter (extractor :raw) — never a throw."
-  [html final-url]
+  [html final-url maximum-html-characters maximum-html-nesting-depth]
   (let [fallback (fn [] (let [{:keys [text title]} (html->markdown html)]
                           {:text text :title title :extractor :raw}))]
-    (if (or (> (count html) max-html-chars)
-            (exceeds-nesting? html max-nesting-depth))
+    (if (or (> (count html) maximum-html-characters)
+            (exceeds-nesting? html maximum-html-nesting-depth))
       (fallback)
       (if-let [deps (readability-deps)]
         (try

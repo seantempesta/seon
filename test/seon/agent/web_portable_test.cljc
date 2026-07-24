@@ -30,6 +30,10 @@
          (second internal/fetch-limit-keys)))
   (is (= :seon.config.web/maximum-search-results
          (last internal/search-limit-keys)))
+  (is (every? (set internal/fetch-limit-keys)
+              [:seon.config.web/default-link-count
+               :seon.config.web/maximum-html-characters
+               :seon.config.web/maximum-html-nesting-depth]))
   (is (= :seon.config.web/default-timeout-ms
          (internal/missing-limit-key {} internal/fetch-limit-keys)))
   (is (= :seon.config.web/default-timeout-ms

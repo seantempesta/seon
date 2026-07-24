@@ -10,7 +10,10 @@
   [:seon.config.web/default-timeout-ms
    :seon.config.web/maximum-response-bytes
    :seon.config.web/default-preview-tokens
-   :seon.config.web/maximum-redirects])
+   :seon.config.web/maximum-redirects
+   :seon.config.web/default-link-count
+   :seon.config.web/maximum-html-characters
+   :seon.config.web/maximum-html-nesting-depth])
 
 (def search-limit-keys
   [:seon.config.web/default-timeout-ms

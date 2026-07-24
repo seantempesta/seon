@@ -145,6 +145,31 @@
        "<p>See <a href=\"/next\">the next page</a> for more.</p>"
        "</article></body></html>"))
 
+(deftest configured-extraction-limits-fire-at-the-pod-boundary
+  (let [base (config/resolve-config-singleton {})
+        links
+        (int/extract-content
+         :markdown
+         "[one](https://example.com/one) [two](https://example.com/two)"
+         "https://example.com"
+         (assoc base :seon.config.web/default-link-count 1))
+        size-fallback
+        (int/extract-content
+         :html "<article><p>body</p></article>" "https://example.com"
+         (assoc base :seon.config.web/maximum-html-characters 1))
+        nesting-fallback
+        (int/extract-content
+         :html "<div><div><p>body</p></div></div>" "https://example.com"
+         (assoc base
+                :seon.config.web/maximum-html-characters 1000
+                :seon.config.web/maximum-html-nesting-depth 1))]
+    (is (= 1 (count (:links links)))
+        "the configured link-count bounds the extracted rows")
+    (is (= :raw (:extractor size-fallback))
+        "the configured character ceiling skips DOM readability")
+    (is (= :raw (:extractor nesting-fallback))
+        "the configured nesting ceiling skips DOM readability")))
+
 (deftest html-extracts-blobs-and-previews-honestly
   (async done
     (reset! int/!lookup-impl (public-dns))
