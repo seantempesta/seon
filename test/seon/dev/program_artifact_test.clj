@@ -7,6 +7,11 @@
 (defn- source [file resource-name]
   {:file (str file) :resource-name resource-name})
 
+(defn- executable! [path text]
+  (spit (str path) text)
+  (.setExecutable (.toFile path) true false)
+  path)
+
 (deftest artifact-selects-only-admitted-cljs-sources
   (let [parent (fs/create-temp-dir {:prefix "seon-program-artifact-"})
         project (fs/path parent "project")
@@ -112,6 +117,41 @@
       (is (= ['seon.client]
              (get-in derived
                      [:shadow.build.modules/config :main :entries]))))))
+
+(deftest manifest-resolution-stays-in-the-bounded-babashka-reader
+  (let [project (fs/create-temp-dir {:prefix "seon-page-plan-manifest-"})
+        selected (fs/path project "config/system.edn")
+        resolver (fs/path project "fake-bb")
+        failed-resolver (fs/path project "failed-bb")
+        expected
+        {:seon.dev.artifact/config-manifest
+         {:seon.config/database
+          {:seon.config.database.initialization/page-rows 256}}
+         :seon.dev.artifact/default-page-rows 64}]
+    (try
+      (fs/create-dirs (fs/parent selected))
+      (spit (str selected) "{}")
+      (executable!
+       resolver
+       (str "#!/bin/sh\n"
+            "printf '%s\\n' 'SEON_RESOLVED_MANIFEST_EDN "
+            (pr-str expected) "'\n"))
+      (executable!
+       failed-resolver
+       "#!/bin/sh\nprintf '%s\\n' 'reader failed' >&2\nexit 7\n")
+      (is (= expected
+             (#'program-artifact/resolve-manifest-with-babashka
+              (.toFile project)
+              {"SEON_BB_EXECUTABLE" (str resolver)}
+              (.toFile selected))))
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"manifest resolver failed"
+           (#'program-artifact/resolve-manifest-with-babashka
+            (.toFile project)
+            {"SEON_BB_EXECUTABLE" (str failed-resolver)}
+            (.toFile selected))))
+      (finally (fs/delete-tree project)))))
 
 (deftest row-flush-publishes-the-live-derivation-byte-for-byte
   (let [project (fs/create-temp-dir {:prefix "seon-program-rows-publish-"})

@@ -4,17 +4,19 @@
             [clojure.java.io :as io]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
-            [seon.config.resolve :as config.resolve]
             [seon.dev.program-inventory :as program-inventory])
   (:import [java.io File]
            [java.nio.charset StandardCharsets]
            [java.nio.file CopyOption DirectoryNotEmptyException Files
             StandardCopyOption]
            [java.security MessageDigest]
-           [java.time ZoneId]))
+           [java.time ZoneId]
+           [java.util.concurrent TimeUnit]))
 
 (def ^:private program-row-marker "SEON_PROGRAM_ROWS_EDN ")
 (def ^:private page-plan-marker "SEON_PAGE_PLAN_EDN ")
+(def ^:private resolved-manifest-marker "SEON_RESOLVED_MANIFEST_EDN ")
+(def ^:private manifest-resolver-timeout-ms 30000)
 (def ^:private prepared-program-rows ::prepared-program-rows)
 (def ^:private prepared-program-sources ::prepared-program-sources)
 (def ^:private prepared-page-plans ::prepared-page-plans)
@@ -227,6 +229,67 @@
    "process.stdout.write(\"\\n" page-plan-marker "\" + "
    "cljs.core.pr_str(seon$page$plan) + \"\\n\");\n"))
 
+(defn- resolve-manifest-with-babashka [^File root environment selected]
+  (let [resolver-form
+        (str
+         "(require '[seon.config.resolve :as resolve]) "
+         "(let [environment (into {} (System/getenv)) "
+         "manifest (resolve/read-manifest "
+         "(System/getenv \"SEON_PAGE_PLAN_CONFIG_PATH\") environment)] "
+         "(println (str \"" resolved-manifest-marker "\" "
+         "(pr-str {:seon.dev.artifact/config-manifest manifest "
+         ":seon.dev.artifact/default-page-rows "
+         "resolve/default-initialization-page-rows}))))")
+        executable (get environment "SEON_BB_EXECUTABLE" "bb")
+        builder
+        (ProcessBuilder.
+         ^java.util.List
+         [executable
+          "--config" (.getCanonicalPath (io/file root "bb.edn"))
+          "--deps-root" (.getCanonicalPath root)
+          "-e" resolver-form])
+        process-environment (.environment builder)]
+    (.directory builder root)
+    (.clear process-environment)
+    (.putAll process-environment
+             (assoc environment
+                    "SEON_PAGE_PLAN_CONFIG_PATH"
+                    (.getCanonicalPath ^File selected)))
+    (let [process (.start builder)
+          completed?
+          (.waitFor process manifest-resolver-timeout-ms
+                    TimeUnit/MILLISECONDS)]
+      (when-not completed?
+        (.destroyForcibly process)
+        (.waitFor process)
+        (throw
+         (ex-info "The page-plan manifest resolver timed out."
+                  {:seon.dev.artifact/timeout-ms
+                   manifest-resolver-timeout-ms
+                   :seon.dev.artifact/path
+                   (.getCanonicalPath ^File selected)})))
+      (let [output (slurp (.getInputStream process))
+            error-output (str/trim (slurp (.getErrorStream process)))
+            marker-index (str/last-index-of output resolved-manifest-marker)]
+        (when-not (zero? (.exitValue process))
+          (throw
+           (ex-info "The page-plan manifest resolver failed."
+                    {:seon.dev.artifact/exit (.exitValue process)
+                     :seon.dev.artifact/error error-output
+                     :seon.dev.artifact/path
+                     (.getCanonicalPath ^File selected)})))
+        (when-not marker-index
+          (throw
+           (ex-info "The page-plan manifest resolver returned no manifest."
+                    {:seon.dev.artifact/output (str/trim output)
+                     :seon.dev.artifact/error error-output
+                     :seon.dev.artifact/path
+                     (.getCanonicalPath ^File selected)})))
+        (edn/read-string
+         (str/trim
+          (subs output
+                (+ marker-index (count resolved-manifest-marker)))))))))
+
 (defn- resolved-build-configuration [state]
   (let [root (canonical-file (io/file ".") (:project-dir state))
         environment
@@ -235,8 +298,9 @@
           (assoc "SEON_HOST_TIMEZONE" (str (ZoneId/systemDefault))))
         configured (get environment "SEON_CONFIG")
         selected (canonical-file root (or configured "config/system.edn"))
-        manifest (config.resolve/read-manifest
-                  (.getCanonicalPath ^File selected) environment)
+        resolved (resolve-manifest-with-babashka
+                  root environment selected)
+        manifest (:seon.dev.artifact/config-manifest resolved)
         manifest-text (pr-str manifest)]
     {:seon.dev.artifact/config-manifest-digest (digest manifest-text)
      :seon.dev.artifact/config-manifest-path (.getCanonicalPath ^File selected)
@@ -244,7 +308,7 @@
      (get-in manifest
              [:seon.config/database
               :seon.config.database.initialization/page-rows]
-             config.resolve/default-initialization-page-rows)
+             (:seon.dev.artifact/default-page-rows resolved))
      :seon.dev.artifact/environment
      (assoc environment "SEON_CONFIG" (.getCanonicalPath ^File selected))}))
 
