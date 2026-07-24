@@ -418,6 +418,16 @@ correct for child-protocol resurrection, wrong for the plan-named
 host lane. R52 (interactions=transactions) stays PROVISIONAL; lane
 checks plan §2 ledger for reactive.call's assigned disposition.
 
+R45-S6 MEASURED (~17:50, lane landed+accepted): writer JVM load
+source 10.9s → AOT 2.3-3.2s → AOT+CDS ~2.05s (3 runs each; meets
+the 2-4s phase-1 budget). Opt-in behind the build dial; manifest
+fields backward-compatible (14ce293b8). Canonical cutover = an
+orchestrator checkpoint (digest-published artifacts + one process.clj
+argv change) at the next coherent-tree boot. R45 SCOREBOARD (from
+455s morning baseline): Bun start 2.03s · cluster open 9.21s ·
+writer 2.05s pending cutover · S1-S6 all landed. Remaining: cutover
+checkpoint, green default, re-drive-3, u9delete2 convergence.
+
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 
 ## older restart protocol below until morning)
