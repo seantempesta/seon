@@ -265,6 +265,37 @@
         (is (string? (:seon.capability/op-id first-outcome)))
         (is (not (contains? first-outcome :seon.capability/replayed?))))
 
+      ;; The claimant wrapper delegates to the portable allocator rather
+      ;; than reinterpreting its transaction-builder contract. In
+      ;; particular, the builder returns a transaction request map; that
+      ;; map must never be mistaken for transaction data at the writer
+      ;; boundary.
+      (let [allocated
+            (sci/eval-string*
+             ctx
+             (str "(require '[seon.db.id :as id])"
+                  "(let [database (seon.db/db)]"
+                  "  (id/allocate!"
+                  "   {:seon.db/db database"
+                  "    :seon.db.id/allocations"
+                  "    [{:seon.db.id/key :fixture/turn"
+                  "      :seon.db.id/identity-attr :seon.agent.turn/id}]"
+                  "    :seon.db.id/transaction-builder"
+                  "    (fn [ids]"
+                  "      {:seon.db/tx-data"
+                  "       [{:seon.agent.turn/id (:fixture/turn ids)}]})}))"))]
+        (is (map? (:db-after allocated)) (pr-str allocated))
+        (is (string? (get-in allocated
+                             [:seon.db.id/ids :fixture/turn]))
+            (pr-str allocated))
+        (is (= 1
+               (sci/eval-string*
+                ctx
+                (str "(count"
+                     " (seon.db/query"
+                     "  (quote [:find ?e"
+                     "          :where [?e :seon.agent.turn/id]])))")))))
+
       ;; A caller-supplied op-id commits once; the repeated call returns
       ;; the recorded outcome instead of re-executing.
       (let [outcome (sci/eval-string*

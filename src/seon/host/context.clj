@@ -391,58 +391,7 @@
          database-functions "remove!" [block-name] *agent-id*
          (remove #(= block-name (:seon.agent.ctx/name %)) current))))))
 
-(defn- host-allocate!
-  [database-functions request]
-  (try
-    (let [database (or (:seon.db/db request)
-                       ((get database-functions 'db)))
-          allocations (:seon.db.id/allocations request)
-          attributes (->> allocations
-                          (map :seon.db.id/identity-attr)
-                          distinct
-                          (sort-by str)
-                          vec)
-          rows ((get database-functions 'query)
-                {:seon.db/db database
-                 :seon.db/query db.id/generator-policy-query
-                 :seon.db/args [attributes]})]
-      (if (:seon.error/message rows)
-        rows
-        (loop [attempt 1]
-          (let [manifest (db.id/candidate-manifest (into {} rows)
-                                                   allocations)
-                ids (into {}
-                          (map (juxt :seon.db.id/key
-                                     :seon.db.id/value))
-                          manifest)
-                transaction-data
-                ((:seon.db.id/transaction-builder request) ids)
-                result
-                ((get database-functions 'transact!)
-                 (cond-> {:seon.db/db database
-                          :seon.db/tx-data transaction-data
-                          :seon.db.id/generated-candidates manifest}
-                   (:seon.db/expected-db request)
-                   (assoc :seon.db/expected-db
-                          (:seon.db/expected-db request))))]
-            (if (and (= protocol/generated-candidate-conflict-error
-                        (get-in result
-                                [:seon.error/data
-                                 ::protocol/error-kind]))
-                     (< attempt 16))
-              (recur (inc attempt))
-              (if (:seon.error/message result)
-                result
-                (assoc result :seon.db.id/ids ids)))))))
-    (catch Throwable throwable
-      {:seon.error/message (or (.getMessage throwable) (str throwable))
-       :seon.error/kind
-       (or (:seon.error/kind (ex-data throwable)) :core-bug)
-       :seon.error/data (or (ex-data throwable)
-                            {:seon.db.id/error
-                             :seon.db.id.error/allocation-failed})})))
-
- ;;; Wrapper registry — the ONE capability-provisioning mechanism.
+;;; Wrapper registry — the ONE capability-provisioning mechanism.
 
 (defn registry
   "Create one empty wrapper registry for one host base.
@@ -751,8 +700,10 @@
     ::wrappers
     {'allocate! {::wrapper-fn
                  (fn [request]
-                   (host-allocate! (bound-database-functions writer)
-                                   request))
+                   (binding [db/*leaf*
+                             (db.host/leaf
+                              writer #(database-context writer))]
+                     (db.id/allocate! request)))
                  ::arglists '([request])}
      'candidate-manifest {::wrapper-fn db.id/candidate-manifest
                           ::arglists '([generator-policies allocations])
