@@ -10,7 +10,7 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (48)
+## Blocker (49)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -37,6 +37,7 @@ See `README.md` for the convention.
 | [Let the common Inspect pod solver address an existing agent](inspect-pod-solver-cannot-address-existing-agent.md) | blocker | agent |
 | [Make the downstream runtime package self-contained](downstream-runtime-package-is-not-self-contained.md) | blocker | Core |
 | [Make writer drain proof consumable by the operator](planned-restart-cannot-observe-writer-drain-result.md) | blocker | Core |
+| [Page-plan config digest drift blocks fresh default apply](page-plan-config-digest-drift-blocks-fresh-default-apply.md) | blocker | general |
 | [Plan a visible JVM claimant reply on an inspected tier](jvm-claimant-rejects-visible-reply-without-exact-execution-plan.md) | blocker | agent |
 | [Pod remains ready after losing its web listener](pod-remains-ready-after-web-listener-loss.md) | blocker | UI |
 | [Preserve context identity in the in-pod agent view](in-pod-agent-view-omits-context-name.md) | blocker | UI |
@@ -63,7 +64,7 @@ See `README.md` for the convention.
 | [Writer run-readiness! busy-spins when a ready source has no runtime](writer-run-readiness-busy-spins-without-runtime.md) | blocker | Core |
 | [seon.agent.ctx file reads bypass the filesystem grant](agent-ctx-file-reads-bypass-fs-grant.md) | blocker | agent |
 
-## Friction (71)
+## Friction (72)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -137,6 +138,7 @@ See `README.md` for the convention.
 | [Transcript decay does not bound total context](transcript-decay-does-not-bound-total-context.md) | friction | agent |
 | [Turn debug treated a database error as an entity id](turn-debug-treated-database-error-as-entity-id.md) | friction | Core |
 | [Unbounded runtime acquisitions exceed the negotiated frame](unbounded-runtime-acquisitions-exceed-frame.md) | friction | agent |
+| [test-cljs compile failure retains a live lock owner](test-cljs-compile-failure-retains-live-lock-owner.md) | friction | general |
 | [try in expression position inside a compiled ^:async fn auto-awaits](async-try-expression-iife-auto-awaits.md) | friction | agent |
 
 ## Cleanup (8)

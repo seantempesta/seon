@@ -483,6 +483,34 @@ dispatched with the execution-* vocabulary-collision warning (child
 keys die; client-identity keys survive). Then: green default →
 S6 cutover checkpoint → re-drive-3.
 
+OPERATOR EXECUTION-BUILD RETIREMENT (~21:45): `41d911add` deletes the
+child build id/output/inventory/runtime digest from config, artifact
+publication, release packaging, process schemas, launch descriptors,
+ACME, and matching tests. The watcher now launches exactly `client
+test`; live logs show both builds complete and the operator announces
+watcher ready. The surviving `execution-digest` intentionally remains
+the exact client entry-file identity consumed by S4 startgate and
+host-session admission; no confusing-key rename was made without an
+owner ruling. Focused operator proof is 130 tests / 733 assertions and
+portable launch proof is 12 / 78, both green. Full operator sweep is
+not green: concurrent operational-envelope cluster tests fail and the
+runner retains an accept loop after five minutes.
+
+The first timed `bin/seon up` crossed watcher, writer, and host readiness,
+then correctly refused the old applied release at **111.30s**. The
+non-destructive apply could not converge because the old database schema
+typed `:seon.eval/home-requires` as a string; the pre-authorized reset
+removed that conflict. Fresh apply then exposed a different independent
+blocker: the published page plan names config digest `adc1e407…` while
+the selected launch manifest names `607f6793…`. That failure is recorded
+in [[page-plan-config-digest-drift-blocks-fresh-default-apply]]; default
+is down. Earliest unsettled contract is now page-plan/config-manifest
+identity convergence, whose integrated proof is fresh apply plus pod and
+web-render readiness. Next dependency-ready refill after it is S6 cutover
+checkpoint, then re-drive-3. Final graduation remains the reset default
+cluster with claimant interaction outcome visible through the live
+page/feed.
+
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 
 ## older restart protocol below until morning)

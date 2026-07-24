@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, operator, build]
 ---
@@ -36,3 +36,31 @@ protected `script/seon/dev/**` owner.
   then starts the writer, claimant host, pod leaf, and web-render processes.
 - `bin/test-writer` accepts that current artifact without a manual fixture
   manifest.
+
+## Owner
+
+The operator artifact/config/process/release boundary owns the flavor build
+vector and its published launch identity.
+
+## Resolution
+
+Resolved by `41d911add`. The child build id, output, inventory, imported
+runtime digest, release members, launch fields, and readiness expectation were
+deleted together. The surviving `execution-digest` remains the exact client
+entry-file identity required by startgate and host-session admission.
+The original end-to-end writer/pod acceptance cannot complete in the current
+dirty tree because page-plan publication now fails at a later boundary; that
+independent blocker has its own issue and does not keep this deleted-build
+root cause open.
+
+## Proof
+
+- `logs/operator/watcher/b84bc41c-a204-408e-b83e-9fb118a1b350.log`
+  watches only `client` and `test`; both builds complete, and `bin/seon up`
+  reports `watcher ready`.
+- The same bring-up starts the writer and host before the pod independently
+  refuses an old applied release identity. A fresh apply is now blocked later
+  by [[page-plan-config-digest-drift-blocks-fresh-default-apply]], not watcher
+  publication.
+- Focused operator gate: 130 tests, 733 assertions, zero failures.
+- Portable launch gate: 12 tests, 78 assertions, zero failures.
