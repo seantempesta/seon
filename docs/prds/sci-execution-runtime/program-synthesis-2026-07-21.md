@@ -1154,6 +1154,27 @@ MORNING ITEMS (accumulating):
   consistency + phase-error-must-fault-and-release). After: rebuild +
   re-drive. LADDER: pod contract → pod crash → pod-vs-JVM routing →
   claimant config + driver wedge. Each re-drive one layer deeper.
+- ★ CLAIMANTPATH SETTLED (2026-07-24): commit `094e7a7e6` closes
+  both entangled attempt-path blockers. Pod and JVM now acquire the
+  attempt-timeout fallback through one portable resolver, with the
+  optional agent row remaining an override. Every direct phase error
+  now performs one epoch/phase-fenced terminal transaction: crash
+  open attempts, publish turn error, close run error, retract
+  claimant and current-run connection, then persist the flat fault.
+  Integrated proof: focused writer 22/137/0/0; portable driver
+  12/53/0/0; portable config 4/57/0/0. Isolated `claimantpath`
+  live proof reached JVM host workload PID 23197 at epoch 2 and
+  exposed a new identity-allocation null-Future core error; the run
+  closed `:error`, turn published `:error`, fault entity 6534
+  persisted, and custody was absent — the nothing-wedges contract
+  held. Earliest unsettled contract is now
+  [[../../seon/issues/jvm-claimant-id-allocation-future-is-null]];
+  its integrated proof is a durable attempt receipt followed by
+  provider success/reply or the next visible terminal fault. Next
+  dependency-ready refill: diagnose the serialized-writer allocation
+  Future at `seon.db.id/allocate!`; final graduation gate remains the
+  orchestrator's rebuilt default-cluster DeepSeek redrive plus
+  database-backed memory turn.
 - ★ ROOT CAUSE CORRECTED + FIXED (2026-07-24, ~2:30am): my
   "long-lived claimant transport" diagnosis was WRONG (lane caught
   it) — the failing PID 35849 was the BUN POD, not the JVM claimant

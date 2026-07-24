@@ -103,6 +103,16 @@ concurrency recipe §adoption. Gotchas pre-ruled: interrupt-during-
 UDS costs a pool member (accepted); re-budget heap (-Xmx is
 writer-sized); raise pool-wait-timeout for waiter counts.
 
+Corrective checkpoint `094e7a7e6` (2026-07-24) closes the attempt-timeout
+acquisition split and the direct-phase-error lease wedge in this owner.
+Focused writer proof is 22 tests/137 assertions; portable driver and config
+proof is 16 tests/110 assertions. The isolated `claimantpath` drive proves an
+epoch-2 JVM phase error now persists a fault and atomically closes/releases the
+run instead of heartbeating forever. The next dependency-ready U2 exit is the
+new [[../../seon/issues/jvm-claimant-id-allocation-future-is-null]] blocker:
+open a durable attempt after fixing the serialized-writer identity allocation
+leaf, then reach provider success/reply or another visible terminal fault.
+
 ### U3 — Writer admission fix (M) — READY, parallel with U2
 
 Remove the artificial ceiling: admit >1 in-flight `:mutation` per

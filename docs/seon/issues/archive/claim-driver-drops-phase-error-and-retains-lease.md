@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, runtime, database]
 ---
@@ -65,3 +65,22 @@ dispatch and must not become a second lifecycle mechanism.
   later claimant can make progress without a restart or operator action.
 - A regression covers an error before attempt admission and an error after a
   durable receipt opens.
+
+## Resolution
+
+Commit `094e7a7e6` routes every direct phase error and malformed leaf result
+through one portable settlement path. Under the held run/epoch/phase fences,
+one transaction marks each open attempt `:crashed`, clears partial text,
+publishes the turn as `:error`, closes the run with reason `:error`, retracts
+claimant custody, and retracts the agent's current-run connection. The same
+path records the flat error through `seon.error/record!`.
+
+The real-writer regression covers both a `:rendered` failure before attempt
+admission and an `:attempt-open` failure with a durable open receipt. It
+asserts the persisted fault, crashed receipt, terminal turn and run, retracted
+lease, and retracted current-run connection. The isolated `claimantpath` live
+drive supplied an independent production-path proof: host workload PID `23197`
+acquired run `t2we0v3ww65y` at epoch `2`; a later phase error produced fault
+entity `6534`, turn `np3u8fp3vek5` became `:published`/`:error`, the run became
+`:closed`/`:error`, and current claimant custody was absent. No heartbeat-only
+wedge remained. Evidence is in `tmp/orchestrator/claimantpath-gate.log`.

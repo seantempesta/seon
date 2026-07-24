@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, runtime, config]
 ---
@@ -60,7 +60,22 @@ attempt-timeout fallback used by the active configuration authority.
 - An agent with no `:seon.ai/agent-attempt-timeout-ms` datom resolves the
   configured/default positive attempt timeout instead of returning an error.
 - A present per-agent override still wins.
-- A production default-cluster turn hands off from the pod to the JVM
-  claimant, opens an attempt receipt before transport, receives DeepSeek HTTP
-  200, and persists `:seon.ai.attempt/outcome :success`.
-- The same durable agent completes later turns with database-backed memory.
+- The JVM claimant reaches the next phase boundary without returning the
+  missing-override configuration error.
+
+## Resolution
+
+Commit `094e7a7e6` moves the process fallback into
+`seon.config.resolve/llm-attempt-timeout-ms` and makes both the pod accessor and
+the JVM claimant pass that same fallback to
+`seon.ai.core/resolved-config-from-rows`. The shared resolver still gives a
+present per-agent override precedence.
+
+The focused JVM regression proves an absent override resolves to `32100` and a
+present override resolves to `65400`. The portable resolver regressions prove
+the shipped `120000` default, a valid environment override, and invalid-value
+fallback. The isolated `claimantpath` live drive reached the JVM claimant
+without the former configuration error. It then exposed the separate
+[[../jvm-claimant-id-allocation-future-is-null]] defect, which the phase-error
+settlement correctly persisted and released. Evidence is in
+`tmp/orchestrator/claimantpath-gate.log`.

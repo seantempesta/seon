@@ -1445,3 +1445,22 @@ the variable-weight values they select.
   reference now reports the registering key plus the missing key and namespace
   on both tiers (`c2c5faeff`,
   [[../../../seon/issues/archive/claimant-host-drains-after-clean-restart]]).
+
+## Claimant acquisition and phase-settlement scars (2026-07-24)
+
+- **An optional entity override must sit above one shared process fallback.**
+  Pod and JVM claimants must pass the same resolved process attempt timeout to
+  `seon.ai.core/resolved-config-from-rows`; that resolver alone applies an
+  optional `:seon.ai/agent-attempt-timeout-ms` override. Requiring the entity
+  attribute in one claimant turns ordinary inheritance into a tier-specific
+  configuration failure. Put environment parsing and shipped fallback in
+  portable `seon.config.resolve`, and make every tier delegate to it
+  (`094e7a7e6`).
+- **A phase error is a fenced durable terminal transition, never a returned
+  thread-local value.** Under the held run epoch and observed turn phase, one
+  transaction crashes every open attempt, clears partial presentation text,
+  marks the turn `:published`/`:error`, closes the run `:error`, and retracts
+  both claimant custody and the agent's current-run connection. Record the
+  same flat error as a fault datom after the transition; malformed leaf output
+  uses this path too. A dispatch thread returning an error without this
+  settlement recreates a heartbeat-only wedge (`094e7a7e6`).
