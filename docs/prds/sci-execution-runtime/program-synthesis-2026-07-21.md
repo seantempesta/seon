@@ -1086,6 +1086,12 @@ MORNING ITEMS (accumulating):
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- HOSTERR FIXED+ARCHIVED (d1e6612fe + d68d6a25a, 36/198 green):
+  flat writer errors recognized, startup error frame before EOF,
+  structured Throwable logging — silent loss dead. 119 OPEN.
+  Refills: homeschema (registration-before-reference) + querycache
+  (foreign database-value retention) dispatched, disjoint from both
+  closers.
 - BN-1/9 LANDED (546718cb4 + 4 more, accepted): claim-epoch
   threaded through every current-run acquisition/mutation
   (production CAS fence now satisfiable from web/client paths);
