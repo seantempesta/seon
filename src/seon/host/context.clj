@@ -281,6 +281,22 @@
       (seq (:seon.schema.projection/forms
             (::projection @(::projection-state writer))))))})
 
+(defn committed-schema-definition
+  "Return one schema definition from the claimant's committed projection."
+  {:malli/schema
+   [:=> [:catn [::writer ::writer]
+                [:seon.schema/registry-key :seon.schema/registry-key]]
+    :any]}
+  [writer schema-key]
+  (let [current @(::projection-state writer)]
+    (when-let [fault (::fault current)]
+      (throw
+       (ex-info "The committed schema projection is unavailable."
+                {:seon.error/kind :core-bug
+                 :seon/error fault})))
+    (get-in current
+            [::projection :seon.schema.projection/forms schema-key])))
+
 (defn- bound-database-functions
   [writer]
   (db/bind-leaf (db.host/leaf writer #(database-context writer))))
@@ -777,7 +793,9 @@
                          :seon.error/kind :user-input}})))
                  ::arglists '([schema-key schema])
                  ::doc "Register one schema; the eval tee persists the canonical row."}
-     'schema-definition {::wrapper-fn schema/schema-definition
+     'schema-definition {::wrapper-fn
+                         (fn [schema-key]
+                           (committed-schema-definition writer schema-key))
                          ::arglists '([schema-key])
                          ::doc "Return one registered schema's canonical definition."}}})
   (install!

@@ -105,6 +105,38 @@
     (is (some? registered))
     (is (identical? registered resolved))))
 
+(deftest claimant-toolkit-schema-introspection-uses-the-committed-projection
+  (let [writer (unconnected-writer)
+        projection
+        (schema/build-projection
+         {:my.plan/title [:string {:min 1}]
+          :my.plan/goal :string
+          :my.plan/pace [:enum :one-shot :multi-session]
+          :my.plan/children [:vector :map]
+          :my.plan/plan-request
+          [:map
+           [:my.plan/title :my.plan/title]
+           [:my.plan/goal {:optional true} :my.plan/goal]
+           [:my.plan/pace {:optional true} :my.plan/pace]
+           [:my.plan/children {:optional true} :my.plan/children]]
+          :my.kb/claim [:string {:min 1}]})
+        base (context/build-base! writer)
+        _ (reset! (::context/projection-state writer)
+                  {::context/database {:db-name "registry-test" :t 1}
+                   ::context/projection projection})
+        ctx (context/fork-context base)]
+    (is (= #{:my.plan/title
+             :my.plan/goal
+             :my.plan/pace
+             :my.plan/children}
+           (sci/eval-string*
+            ctx
+            "(my.plan.internal/schema-map-keys :my.plan/plan-request)")))
+    (is (= [:string {:min 1}]
+           (sci/eval-string*
+            ctx
+            "(seon.schema/schema-definition :my.kb/claim)")))))
+
 (deftest capability-installation-publishes-its-leaf-inventory
   (let [base (context/build-base! (unconnected-writer))
         inventory (::context/tier-inventory base)
