@@ -570,6 +570,15 @@ reset/apply lifecycle. Next refill is the release-digest owner first because
 it blocks every startup; final graduation remains the live claimant
 interaction outcome through the page/feed after reset.
 
+APPLY GREEN (~19:00): rootslotnil ACCEPTED — double-decode root
+cause (leading-; text read as EDN comment → nil), decode-once fix
+aa87f4713; FRESH APPLY SUCCEEDS 37.41s, root created. Three operator
+faults remain (issues filed): reset admission-before-init-schema
+ordering · apply retains writer generation · SOURCE-UNCHANGED up
+publishes new release digest each run (breaks R45 determinism —
+serious; standing byte-identical regression required). operatorboot
+lane owns all three + the five-ready timed proof.
+
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 
 ## older restart protocol below until morning)
