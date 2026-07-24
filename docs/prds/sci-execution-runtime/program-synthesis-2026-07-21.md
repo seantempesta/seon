@@ -1140,6 +1140,20 @@ MORNING ITEMS (accumulating):
   (settleclose 1a47c1062 + 5cc3b32e1: break-8 fixture class swept
   suite-wide, program-source digest selection fixed). A REAL
   MILESTONE — but NOT graduation: the goal's bar is PROVABLY ALIVE.
+- ★ FINAL-DRIVE VERDICT (2026-07-24, ~3am): NOT-ALIVE, but the
+  pod-LLM removal WORKED — the JVM claimant (epoch 2) now picks up
+  turns (one layer deeper: we're inside the claimant attempt path).
+  Turn WEDGED: 711 heartbeats, no attempt receipt, reply=''. TWO new
+  blockers: (A) claimant treats the OPTIONAL :seon.ai/agent-attempt-
+  timeout-ms as REQUIRED (ordinary agents inherit it) → config error
+  before the transport; (B) the NOTHING-WEDGES violation — the claim
+  driver DROPS that phase error and RETAINS the lease, heartbeating
+  forever instead of faulting+releasing. Resilience PASSED a 3rd time
+  (5 processes stable, no drain/desync — framedesync holds).
+  claimantpath lane (BOTH, one lane — shared path; config-acquisition
+  consistency + phase-error-must-fault-and-release). After: rebuild +
+  re-drive. LADDER: pod contract → pod crash → pod-vs-JVM routing →
+  claimant config + driver wedge. Each re-drive one layer deeper.
 - ★ ROOT CAUSE CORRECTED + FIXED (2026-07-24, ~2:30am): my
   "long-lived claimant transport" diagnosis was WRONG (lane caught
   it) — the failing PID 35849 was the BUN POD, not the JVM claimant
