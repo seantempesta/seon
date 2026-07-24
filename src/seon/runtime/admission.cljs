@@ -238,6 +238,28 @@
   [value]
   (and (map? value) (string? (:seon.error/message value))))
 
+(defn- ^:async acquire-row-pages!
+  [database entity-ids identity-attr form-attr]
+  (loop [pending-ids (seq entity-ids)
+         rows []]
+    (if-let [entity-id (first pending-ids)]
+      (let [page-rows
+            (await
+             (db/query
+              {::db/db database
+               ::db/query committed-row-query
+               ;; One canonical row is the minimum exact page. Forms are
+               ;; variable-length strings, so no larger entity-count can
+               ;; imply a result-weight bound.
+               ::db/args
+               [[entity-id] identity-attr form-attr
+                schema/asserting-transaction-provenance-pattern]
+               ::db/max-result-weight acquisition-page-max-result-weight}))
+            _ (when (failed-read? page-rows)
+                (acquisition-error! :query page-rows))]
+        (recur (next pending-ids) (into rows page-rows)))
+      rows)))
+
 (defn- ^:async acquire-identity-stream!
   [database identity-attr form-attr]
   (loop [cursor nil
@@ -258,17 +280,9 @@
           entity-ids (mapv first (:datahike.index-page/datoms page))
           page-rows
           (if (seq entity-ids)
-            (await
-             (db/query
-              {::db/db database
-               ::db/query committed-row-query
-               ::db/args
-               [entity-ids identity-attr form-attr
-                schema/asserting-transaction-provenance-pattern]
-               ::db/max-result-weight acquisition-page-max-result-weight}))
+            (await (acquire-row-pages!
+                    database entity-ids identity-attr form-attr))
             [])
-          _ (when (failed-read? page-rows)
-              (acquisition-error! :query page-rows))
           next-rows (into rows page-rows)
           _ (log/info-console!
              "seon.runtime.admission"

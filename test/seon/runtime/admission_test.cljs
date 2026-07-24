@@ -362,6 +362,86 @@
                     (is false (str "paged acquisition threw — " error))
                     (done)))))))
 
+(deftest committed-acquisition-pages-variable-weight-rows-one-at-a-time
+  (async done
+    (let [source-fragment (apply str (repeat 2000 "x"))
+          entities
+          (into {}
+                (map (fn [entity-id]
+                       [entity-id
+                        {:db/id entity-id
+                         :seon.fn/sym (str "probe.large/f" entity-id)
+                         :seon.fn/spec "[:=> [:cat :string] :string]"
+                         :seon.fn/source source-fragment}]))
+                (range 1000 1040))
+          entity-ids (vec (sort (keys entities)))
+          !query-requests (atom [])
+          index-page
+          (fn [request]
+            (let [identity-attr (first (::db/components request))]
+              (if (= :seon.schema/key identity-attr)
+                {:datahike.index-page/datoms []
+                 :datahike.index-page/complete? true}
+                (let [offset (if (::db/cursor request) 32 0)
+                      ids (subvec entity-ids offset (min (+ offset 32)
+                                                        (count entity-ids)))
+                      complete? (= (count entity-ids) (+ offset (count ids)))]
+                  (cond->
+                   {:datahike.index-page/datoms
+                    (mapv (fn [entity-id]
+                            [entity-id identity-attr
+                             (:seon.fn/sym (get entities entity-id))
+                             42 true])
+                          ids)
+                    :datahike.index-page/complete? complete?}
+                    (not complete?)
+                    (assoc :datahike.index-page/cursor
+                           [(peek ids) identity-attr
+                            (:seon.fn/sym (get entities (peek ids)))
+                            42 true]))))))
+          query
+          (fn [request]
+            (swap! !query-requests conj request)
+            (let [[[entity-id] identity-attr form-attr _] (::db/args request)
+                  entity (get entities entity-id)]
+              (if (and entity
+                       (contains? entity identity-attr)
+                       (contains? entity form-attr))
+                [[(get entity identity-attr)
+                  (get entity form-attr)
+                  core-asserting-transaction]]
+                [])))]
+      (-> (with-acquisition-seams
+            {::index-page index-page
+             ::query query}
+            acquire-test-program!)
+          (.then
+           (fn [acquired]
+             (is (> (reduce + (map count
+                                   (map second
+                                        (::admission/function-source-rows
+                                         acquired))))
+                    60000)
+                 "the synthetic source population exceeds one read budget")
+             (is (= 40
+                    (count (::admission/function-contract-rows acquired))))
+             (is (= 40
+                    (count (::admission/function-source-rows acquired))))
+             (is (= 80 (count @!query-requests)))
+             (is (every? #(= 1 (count (first (::db/args %))))
+                         @!query-requests)
+                 "each variable-weight read contains one canonical row")
+             (is (every? #(= 60000 (::db/max-result-weight %))
+                         @!query-requests)
+                 "every row page retains the unchanged result-weight breaker")
+             (is (every? #(identical? acquisition-database (::db/db %))
+                         @!query-requests)
+                 "every row page reads the exact frozen database value")
+             (done)))
+          (.catch (fn [error]
+                    (is false (str "bounded acquisition threw — " error))
+                    (done)))))))
+
 (deftest committed-acquisition-omits-functions-without-spec
   (async done
     (-> (with-acquisition-seams {} acquire-test-program!)
