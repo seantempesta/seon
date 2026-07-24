@@ -41,15 +41,17 @@
 (def ^:private interpreter-step-budget-config-key-index 2)
 (def ^:private deadline-config-key-index 3)
 (def ^:private output-config-key-index 4)
+(def ^:private fired-policy-kind-index 5)
+(def ^:private policy-reported-index 6)
 
-(declare check-holder!)
+(declare check-holder! unreported-policy-kind)
 
 (defn holder
   "Create one stable interpreter-step counter for a retained SCI context."
   {:malli/schema [:=> [:cat] ::holder]}
   []
   (let [holder {::interpreter-step-counter (long-array 3)
-                ::control-cell (object-array 5)}]
+                ::control-cell (object-array 7)}]
     (assoc holder ::check! (fn [] (check-holder! holder)))))
 
 (defn reset!
@@ -69,6 +71,8 @@
         interpreter-step-budget-config-key)
   (aset control-cell deadline-config-key-index deadline-config-key)
   (aset control-cell output-config-key-index output-config-key)
+  (aset control-cell fired-policy-kind-index nil)
+  (aset control-cell policy-reported-index nil)
   holder)
 
 (defn install-interrupted!
@@ -136,6 +140,7 @@
                              [::policy-kind ::policy-kind]]
                   :map]}
   [holder kind]
+  (aset ^objects (::control-cell holder) policy-reported-index true)
   (let [{::keys [config-key interpreter-steps-used] :as data}
         (policy-data holder kind)
         message (policy-message kind config-key interpreter-steps-used)
@@ -153,6 +158,7 @@
                              [::policy-kind ::policy-kind]]
                   :any]}
   [holder kind]
+  (aset ^objects (::control-cell holder) fired-policy-kind-index kind)
   (let [{::keys [config-key interpreter-steps-used] :as data}
         (policy-data holder kind)]
     (interrupt/interrupt!
@@ -171,7 +177,10 @@
   {:malli/schema [:=> [:catn [::holder ::holder] [::throwable :any]]
                   [:or :nil :map]]}
   [holder throwable]
-  (when-let [{::keys [policy-kind]} (policy-throwable-data throwable)]
+  (when-let [policy-kind
+             (or (::policy-kind (policy-throwable-data throwable))
+                 (unreported-policy-kind holder))]
+    (aset ^objects (::control-cell holder) policy-reported-index true)
     (let [{::keys [config-key interpreter-steps-used] :as data}
           (policy-data holder policy-kind)
           message
@@ -207,15 +216,27 @@
   [{::keys [check!]}]
   check!)
 
+(defn- unreported-policy-kind
+  [{::keys [^objects control-cell]}]
+  (when-not (aget control-cell policy-reported-index)
+    (aget control-cell fired-policy-kind-index)))
+
 (defn call!
-  "Reset, arm, and execute one SCI invocation through the policy door."
+  "Reset, arm, and execute one SCI invocation through the policy door.
+
+   A dependency may catch SCI's interrupt marker and return normally. The
+   holder retains that policy trip, so the door still returns the canonical
+   flat steering value instead of letting the dependency downgrade it."
   {:malli/schema [:=> [:cat ::call-request] :any]}
   [{::keys [holder policy evaluate! arm-deadline!]}]
   (reset! holder policy)
   (let [disarm! #?(:clj (when arm-deadline! (arm-deadline! holder))
                    :cljs nil)]
     (try
-      (evaluate!)
+      (let [value (evaluate!)]
+        (if-let [kind (unreported-policy-kind holder)]
+          (policy-error! holder kind)
+          value))
       (finally
         (when disarm! (disarm!))
         (install-interrupted! holder nil)))))

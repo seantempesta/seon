@@ -1,9 +1,12 @@
 (ns seon.host.guard-context-test
   (:require [clojure.test :refer [deftest is testing]]
+            [malli.core :as m]
+            [malli.sci :as malli.sci]
             [sci.core :as sci]
             [sci.ctx-store]
             [seon.host.eval :as eval]
-            [seon.host.guard :as guard]))
+            [seon.host.guard :as guard]
+            [seon.schema :as schema]))
 
 (defn- policy [interpreter-step-budget]
   {::guard/interpreter-step-budget interpreter-step-budget
@@ -73,3 +76,83 @@
     (is (= :seon.config.guard/output-cap
            (get-in envelope
                    [:seon/error :seon.error/data ::guard/config-key])))))
+
+(deftest schema-predicate-loop-returns-the-door-budget-error
+  (let [holder (guard/holder)
+        ctx (assoc (sci/init {:interrupt-fn (guard/interrupt-fn holder)})
+                   ::guard/holder holder
+                   :interrupt-fn (guard/interrupt-fn holder))
+        predicate-sym 'seon.guard-probe/loops?
+        predicate-var
+        (guard/call!
+         {::guard/holder holder
+          ::guard/policy (policy 1000)
+          ::guard/evaluate!
+          #(sci/eval-string*
+            ctx
+            "(defn loops? [_] (loop [] (recur)))")})
+        definition
+        [:fn {:error/message "must terminate"
+              :gen/schema :string}
+         predicate-sym]
+        projection
+        (with-redefs [malli.sci/evaluator
+                      (fn [& _]
+                        (throw
+                         (ex-info "Malli opened its private SCI evaluator."
+                                  {})))]
+          (schema/build-projection
+           {:seon.guard-probe/value definition}
+           {}
+           {:seon.schema/schema-admissions
+            {:seon.guard-probe/value
+             {:seon.schema.admission/source :core}}
+            :seon.schema/predicate-functions
+            {predicate-sym @predicate-var}}))
+        validator
+        (schema/projection-validator projection :seon.guard-probe/value)
+        result
+        (guard/call!
+         {::guard/holder holder
+         ::guard/policy (policy 25)
+          ::guard/evaluate!
+          #(sci.ctx-store/with-ctx ctx (validator "value"))})
+        contract
+        (m/function-schema
+         [:=> [:cat
+               [:fn {:error/message "must terminate"
+                     :gen/schema :string}
+                @predicate-var]]
+          :string])
+        instrumented
+        (m/-instrument
+         {:schema contract
+          :report
+          (fn [_ data]
+            (throw
+             (ex-info "Malli replaced the swallowed predicate interrupt."
+                      data)))}
+         identity
+         {:registry (:seon.schema.projection/registry projection)})
+        replacement-throwable
+        (try
+          (guard/call!
+           {::guard/holder holder
+            ::guard/policy (policy 25)
+            ::guard/evaluate!
+            #(sci.ctx-store/with-ctx ctx (instrumented "value"))})
+          nil
+          (catch Throwable throwable throwable))
+        replacement-error
+        (guard/steering-error! holder replacement-throwable)]
+    (is (= :budget (:seon.error/kind result)) (pr-str result))
+    (is (= :seon.config.guard/agent-eval-interpreter-step-budget
+           (get-in result [:seon.error/data ::guard/config-key])))
+    (is (= 26
+           (get-in result
+                   [:seon.error/data ::guard/interpreter-steps-used])))
+    (is (= :budget (:seon.error/kind replacement-error))
+        (pr-str replacement-error))
+    (is (= 26
+           (get-in replacement-error
+                   [:seon.error/data ::guard/interpreter-steps-used])))))

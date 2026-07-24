@@ -63,7 +63,8 @@
    validates them with each referenced declaration's own admission source.
    Returns advisory findings that remain non-terminal."
   [{:seon.schema/keys [identity definition compiled role admission
-                       pure-predicate-symbols canonical-keys]}]
+                       predicate-symbols pure-predicate-symbols
+                       canonical-keys]}]
   (let [authored?
         (= :agent (:seon.schema.admission/source admission))
         advisories (volatile! [])
@@ -98,8 +99,12 @@
                  "rewrite the authored contract.")
             {}))
          (when (and authored? (= :fn schema-type))
-           (let [predicate (guarded-predicate-symbol schema)]
-             (when-not (and (qualified-symbol? predicate)
+           (let [predicate (guarded-predicate-symbol schema)
+                 prebound?
+                 (and (not (qualified-symbol? predicate))
+                      (seq predicate-symbols)
+                      (every? qualified-symbol? predicate-symbols))]
+             (when-not (and (or (qualified-symbol? predicate) prebound?)
                             (guarded-predicate-properties-complete? properties))
                (contract-error!
                 identity definition path
@@ -109,18 +114,22 @@
                      "a nonblank `:error/message`/`:error/fn`, and a bounded "
                      "`:gen/schema`, `:gen/elements`, or `:gen/return`.")
                 {:seon.schema/predicate predicate}))
-             (when (and authored?
-                        (not (contains? pure-predicate-symbols predicate)))
+             (when-let [unproved
+                        (if prebound?
+                          (first (remove pure-predicate-symbols
+                                         (sort predicate-symbols)))
+                          (when-not (contains? pure-predicate-symbols predicate)
+                            predicate))]
                (contract-error!
                 identity definition path
                 :seon.schema/unproved-predicate-purity
-                (str identity " references predicate " predicate
+                (str identity " references predicate " unproved
                      ", but its existing program-graph call edges do not yet "
                      "prove a pure, capability-free transitive call graph. "
                      "Keep the predicate as a separately schema'd corpus "
                      "function, then re-register this contract after the "
                      "execution planner admits that graph.")
-                {:seon.schema/predicate predicate}))))
+                {:seon.schema/predicate unproved}))))
          (when (= :maybe schema-type)
            (cond
              (and authored? (map-value-maybe? compiled path))

@@ -87,7 +87,7 @@
          (sci/eval-string*
           ctx "(:sci/built-in (meta #'seon.shared-upgrade/answer))")))))
 
-(deftest graduation-keeps-agent-authored-corpus-vars-writable
+(deftest graduation-refusal-keeps-agent-authored-corpus-vars-interpreted
   (let [base (build-base)
         registry (::context/registry base)
         caller (context/fork-context base)
@@ -115,14 +115,22 @@
          (sci/eval-string*
           caller
           "(:sci/built-in (meta #'my.agent.shared-graduation/answer))")))
-    (let [graduated
+    (let [refused
           (with-redefs [context/transact-writer!
                         (fn [_writer _transaction-data]
-                          {:seon.db/ok? true})]
+                          (throw
+                           (ex-info
+                            "R48 refusal must not transact a graduation fact."
+                            {})))]
             (graduate/graduate!
              (assoc request ::context/writer (unconnected-writer))))]
-      (is (::graduate/ok? graduated) (pr-str graduated))
-      (is (= :graduated (::graduate/tier graduated)))
+      (is (= :R48
+             (get-in refused
+                     [:seon.error/data :seon.host.graduate/ruling]))
+          (pr-str refused))
+      (is (= :P4
+             (get-in refused
+                     [:seon.error/data :seon.host.graduate/reopen-when])))
       (is (= 42 (sci/eval-string* caller "(shared/answer 41)")))
       (let [edited
             (eval-form!
@@ -131,6 +139,36 @@
                   "(defn answer [x] (+ x 2))"))]
         (is (:seon.eval/ok? edited) (pr-str edited))
         (is (= 43 (sci/eval-string* caller "(shared/answer 41)")))))))
+
+(deftest legacy-graduated-rows-rebuild-as-interpreted-corpus-functions
+  (let [base (build-base)
+        registry (::context/registry base)
+        source "(defn answer [x] (inc x))"
+        legacy-row
+        {:seon.fn/sym "my.agent.legacy-graduation/answer"
+         :seon.fn/source source
+         :seon.fn/source-fingerprint (graduate/fingerprint source)
+         :seon.fn/execution-tier :graduated
+         :seon.fn/spec "[:=> [:cat :int] :int]"}
+        report
+        (with-redefs [context/query-writer!
+                      (fn [_writer _query _arguments] [[legacy-row]])]
+          (graduate/rebuild!
+           {::context/base base
+            ::context/registry registry
+            ::context/writer (unconnected-writer)}))
+        caller (context/fork-context base)]
+    (is (= :nursery (graduate/effective-tier legacy-row)))
+    (is (= 0 (::graduate/graduated report)) (pr-str report))
+    (is (= 1 (::graduate/nursery report)) (pr-str report))
+    (is (= []
+           (::graduate/failures report))
+        (pr-str report))
+    (is (= 42
+           (sci/eval-string*
+            caller
+            "(require '[my.agent.legacy-graduation :as legacy])
+             (legacy/answer 41)")))))
 
 (deftest agent-owned-vars-remain-redefinable
   (let [base (build-base)

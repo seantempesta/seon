@@ -87,18 +87,6 @@
    (str "(require '[" home-ns " :as graduated])"
         " (graduated/sum-squares 5)")))
 
-(defn- sample-call-nanos [ctx n]
-  (let [form (str "(dotimes [_ " n "] (graduated/sum-squares 100))")]
-    (dotimes [_ 3] (sci/eval-string* ctx form))
-    (mapv (fn [_]
-            (let [started (System/nanoTime)]
-              (sci/eval-string* ctx form)
-              (- (System/nanoTime) started)))
-          (range 7))))
-
-(defn- median [values]
-  (nth (vec (sort values)) (quot (count values) 2)))
-
 (deftest trust-gate-is-a-pure-conjunction-over-recorded-facts
   (let [source "(defn answer [] 42)"
         fingerprint (graduate/fingerprint source)
@@ -124,7 +112,7 @@
               (assoc green ::graduate/recorded-fingerprint
                      (graduate/fingerprint (str source " "))))))))
 
-(deftest one-recorded-function-graduates-invalidates-and-rebuilds
+(deftest native-graduation-refuses-and-legacy-rows-rebuild-in-the-nursery
   (let [database-name (str "host-u3-" (random-uuid))
         request-path (socket-path "u3-writer")
         host-socket (socket-path "u3-host")
@@ -213,32 +201,30 @@
             (is (= :nursery (:seon.fn/execution-tier row-v1)))
             (is (::graduate/ok? nursery) (pr-str nursery))
             (is (= 55 (caller-value caller-ctx)))
-            (let [nursery-nanos (sample-call-nanos caller-ctx 10000)
-                  graduated
+            (let [refused
                   (graduate/graduate!
                    {::context/base base
                     ::context/registry registry
                     ::context/writer session
                     ::graduate/function-row row-v1
                     ::graduate/contexts [author-ctx caller-ctx]})
-                  compiled-nanos (sample-call-nanos caller-ctx 10000)
-                  speedup (/ (double (median nursery-nanos))
-                             (double (median compiled-nanos)))
-                  row-graduated (query-one-function session fn-sym)]
-              (is (::graduate/ok? graduated) (pr-str graduated))
-              (is (graduate/trust-gate?
-                   (::graduate/gate-facts graduated)))
-              (is (= "nil"
-                     (get-in graduated [::graduate/gate-facts
-                                        ::graduate/nursery-test
-                                        ::graduate/result-edn])))
-              (is (= :graduated
-                     (:seon.fn/execution-tier row-graduated)))
-              (is (> speedup 1.0)
-                  (pr-str {:calls 10000
-                           :nursery-nanos nursery-nanos
-                           :compiled-nanos compiled-nanos
-                           :speedup speedup}))
+                  row-after-refusal (query-one-function session fn-sym)]
+              (is (= :core-bug (:seon.error/kind refused))
+                  (pr-str refused))
+              (is (= :R48
+                     (get-in refused
+                             [:seon.error/data
+                              :seon.host.graduate/ruling])))
+              (is (= :P4
+                     (get-in refused
+                             [:seon.error/data
+                              :seon.host.graduate/reopen-when])))
+              (is (re-find #"R48.*P4"
+                           (:seon.error/message refused)))
+              (is (= :nursery
+                     (:seon.fn/execution-tier row-after-refusal)))
+              (is (= 55 (caller-value caller-ctx))
+                  "refusal leaves the interpreted registry root installed")
               (let [edited (invoke-source! live agent-id "u3-define-v2"
                                            (context/resolve-head! session)
                                            source-v2)
@@ -251,20 +237,37 @@
                 (is (= :nursery (graduate/effective-tier row-v2)))
                 (is (= 56 (caller-value caller-ctx))
                     "the linked registry var falls back on source eval")
-                (let [regraduated
+                (let [refused-again
                       (graduate/graduate!
                        {::context/base base
                         ::context/registry registry
                         ::context/writer session
                         ::graduate/function-row row-v2
                         ::graduate/contexts [author-ctx caller-ctx]})]
-                  (is (::graduate/ok? regraduated) (pr-str regraduated))
-                  (is (= 56 (caller-value caller-ctx)))))))
+                  (is (= :R48
+                         (get-in refused-again
+                                 [:seon.error/data
+                                  :seon.host.graduate/ruling])))
+                  (is (= 56 (caller-value caller-ctx))))
+                ;; Simulate a row graduated by the retired tests-pass gate.
+                ;; Restart must ignore that stale execution-tier fact.
+                (let [legacy
+                      (context/transact-writer!
+                       session
+                       [{:seon.fn/sym fn-sym
+                         :seon.fn/source-fingerprint
+                         (:seon.fn/source-fingerprint row-v2)
+                         :seon.fn/execution-tier :graduated}])
+                      legacy-row (query-one-function session fn-sym)]
+                  (is (:seon.db/ok? legacy) (pr-str legacy))
+                  (is (= :graduated
+                         (:seon.fn/execution-tier legacy-row)))
+                  (is (= :nursery
+                         (graduate/effective-tier legacy-row)))))))
           (finally
             (try (.close ^SocketChannel (::registry-test/channel live))
                  (catch Throwable _)))))
-      ;; Process-local compiled state disappears; the next host derives it
-      ;; from the exact current source + fingerprint + tier facts.
+      ;; A matching legacy :graduated fact cannot restore native code.
       (host/stop! @started)
       (reset! started
               (host/start! {::host/socket-path host-socket
@@ -274,7 +277,8 @@
       (let [report (::host/graduation-report @started)
             live (host-session! host-socket agent-id database-name)]
         (try
-          (is (= 1 (::graduate/graduated report)) (pr-str report))
+          (is (= 0 (::graduate/graduated report)) (pr-str report))
+          (is (= 1 (::graduate/nursery report)) (pr-str report))
           (let [response
                 (invoke-batch!
                  live agent-id turn-id "u3-after-restart"

@@ -152,21 +152,14 @@
            {:seon.schema.admission/source :core}}))))
 
 (deftest named-predicate-generators-produce-valid-values
-  (let [sci-options
-        (schema/predicate-sci-options
-         {'seon.schema/malli-form? schema/malli-form?
-          'seon.db.protocol/ordinary-wire-value?
-          protocol/ordinary-wire-value?
-          'seon.ai.tokens/printable-value? tokens/printable-value?})
-        options {::m/sci-options sci-options}]
-    (doseq [schema-key [:seon.schema/malli-form
-                        :seon.db.protocol/ordinary-wire-value
-                        :seon.ai.tokens/printable-value]]
-      (let [compiled (m/schema schema-key options)]
-        (dotimes [_ 40]
-          (let [generated (mg/generate compiled)]
-            (is (m/validate compiled generated)
-                (str schema-key " generated " (pr-str generated)))))))))
+  (doseq [schema-key [:seon.schema/malli-form
+                      :seon.db.protocol/ordinary-wire-value
+                      :seon.ai.tokens/printable-value]]
+    (let [compiled (m/schema schema-key)]
+      (dotimes [_ 40]
+        (let [generated (mg/generate compiled)]
+          (is (m/validate compiled generated)
+              (str schema-key " generated " (pr-str generated))))))))
 
 (deftest guarded-predicate-admission-has-an-execution-planner-seam
   (let [definition

@@ -215,9 +215,9 @@
                       (invoke-authored!
                        live "mismatch" database-a caller-sym
                        (apply str (repeat 64 "f")) [1])))))
-            (testing "the same invocation path serves a graduated JVM root"
+            (testing "R48 refusal leaves the authored invocation interpreted"
               (let [row (query-function session square-sym)
-                    outcome
+                    refused
                     (graduate/graduate!
                      {::context/base (::host/base @started)
                       ::context/registry
@@ -226,14 +226,22 @@
                       ::graduate/function-row row
                       ::graduate/contexts
                       (vec (vals @(::host/contexts @started)))})]
-                (is (::graduate/ok? outcome) (pr-str outcome))
+                (is (= :R48
+                       (get-in refused
+                               [:seon.error/data
+                                :seon.host.graduate/ruling]))
+                    (pr-str refused))
+                (is (= :P4
+                       (get-in refused
+                               [:seon.error/data
+                                :seon.host.graduate/reopen-when])))
                 (let [retained (get @(::host/contexts @started) agent-id)]
                   (is (= square-digest
                          (:seon.fn/source-fingerprint
                           (meta @(sci/resolve retained square-sym))))))
                 (is (= 25
                        (:seon.execution/result
-                        (invoke-authored! live "graduated" database-a square-sym
+                        (invoke-authored! live "r48-nursery" database-a square-sym
                                           square-digest [5]))))))
             (testing "an A request replays in a detached fork while live roots stay B"
               (binding [context/*agent-id* agent-id]

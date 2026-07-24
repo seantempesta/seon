@@ -1,9 +1,10 @@
 (ns seon.host.graduate
-  "Derive trusted JVM function bindings from recorded corpus facts."
+  "Own corpus graduation admission and interpreted JVM function bindings."
   (:require [clojure.edn :as edn]
             [malli.core :as m]
             [sci.ctx-store]
             [seon.content-hash :as content-hash]
+            [seon.error :as error]
             [seon.host.context :as context]
             [seon.host.record :as record]
             [seon.schema :as schema])
@@ -127,12 +128,10 @@
 (defn effective-tier
   "Derive the executable tier from current source and graduation facts."
   {:malli/schema [:=> [:cat ::function-row] ::tier]}
-  [function-row]
-  (if (and (= :graduated (:seon.fn/execution-tier function-row))
-           (= (fingerprint (:seon.fn/source function-row))
-              (:seon.fn/source-fingerprint function-row)))
-    :graduated
-    :nursery))
+  [_function-row]
+  ;; R48: stored graduation facts predate pure-call-graph admission. Until P4
+  ;; proves door-equivalence, every corpus function executes through SCI.
+  :nursery)
 
 (defn- error-result [message]
   {::ok? false ::error (str message)})
@@ -145,18 +144,6 @@
 
 (defn- row-name [function-row]
   (some-> function-row row-symbol name symbol))
-
-(defn- source-form [function-row]
-  (let [source (:seon.fn/source function-row)
-        lib (row-lib function-row)
-        forms (record/read-forms {::record/source source
-                                  ::record/ns-sym lib})
-        form (first forms)]
-    (when (and (= 1 (count forms))
-               (seq? form)
-               (contains? '#{defn defn-} (first form))
-               (= (row-name function-row) (second form)))
-      form)))
 
 (defn- schema-valid? [function-row]
   (boolean
@@ -182,17 +169,6 @@
         (throw
          (ex-info "The recorded source did not produce one SCI function var."
                   {:seon.host.graduate/envelope envelope}))))))
-
-(defn- compiled-var [function-row]
-  (let [lib (row-lib function-row)
-        form (source-form function-row)
-        target-ns (or (find-ns lib) (create-ns lib))]
-    (when-not form
-      (throw (ex-info "Graduation requires one recorded defn form."
-                      {:seon.fn/sym (:seon.fn/sym function-row)})))
-    (binding [*ns* target-ns]
-      (clojure.core/refer 'clojure.core)
-      (clojure.core/eval form))))
 
 (defn- test-outcome
   ([function-var]
@@ -253,69 +229,32 @@
       (error-result (or (.getMessage throwable) (str throwable))))))
 
 (defn graduate!
-  "Promote one recorded function after the computed trust gate passes."
+  "Refuse native graduation until P4 proves door-equivalent purity."
   {:malli/schema [:=> [:cat ::graduate-request] :map]}
-  [{base ::context/base
-    registry ::context/registry
-    writer ::context/writer
-    function-row ::function-row
-    contexts ::contexts}]
-  (try
-    (let [source (:seon.fn/source function-row)
-          current-fingerprint (fingerprint source)
-          [interpreted-ctx interpreted] (nursery-context+var base function-row)
-          nursery-test (test-outcome interpreted-ctx interpreted)
-          schema-valid (schema-valid? function-row)
-          test-covered (boolean (:test (meta interpreted)))
-          preflight? (and schema-valid test-covered (::ok? nursery-test))
-          compiled (when preflight? (compiled-var function-row))
-          compiled-test (if compiled
-                          (test-outcome compiled)
-                          (error-result
-                           "Compilation did not run before preflight passed."))
-          facts {::schema-valid? schema-valid
-                 ::test-covered? (boolean (and test-covered compiled
-                                                (:test (meta compiled))))
-                 ::source source
-                 ::fingerprint current-fingerprint
-                 ::recorded-fingerprint
-                 (:seon.fn/source-fingerprint function-row)
-                 ::nursery-test nursery-test
-                 ::compiled-test compiled-test}]
-      (if-not (trust-gate? facts)
-        (assoc (error-result "The function did not pass the graduation gate.")
-               ::gate-facts facts)
-        (let [recorded
-              (context/transact-writer!
-               writer
-               [{:seon.fn/sym (:seon.fn/sym function-row)
-                 :seon.fn/source-fingerprint current-fingerprint
-                 :seon.fn/execution-tier :graduated}])]
-          (if-not (:seon.db/ok? recorded)
-            (assoc (error-result "The graduation facts did not commit.")
-                   :seon/error recorded)
-            (do
-              (install-implementation! registry contexts function-row @compiled)
-              {::ok? true
-               ::tier :graduated
-               ::fingerprint current-fingerprint
-               ::gate-facts facts})))))
-    (catch Throwable throwable
-      (error-result (or (.getMessage throwable) (str throwable))))))
+  [_request]
+  (let [message
+        (str "Owner ruling R48 refuses native corpus graduation until the "
+             "P4/R33 pure-call-graph admission gate proves door-equivalent "
+             "execution; the function remains interpreted in the nursery.")
+        throwable
+        (ex-info message
+                 {:seon.error/kind :core-bug
+                  :seon.host.graduate/ruling :R48
+                  :seon.host.graduate/reopen-when :P4})]
+    (error/record! {:seon.error/raw throwable
+                    :seon.error/fault :core})))
 
 (defn- install-row! [base registry function-row]
   (try
     (let [tier (effective-tier function-row)
-          function-var (if (= :graduated tier)
-                         (compiled-var function-row)
-                         (second (nursery-context+var base function-row)))]
+          function-var (second (nursery-context+var base function-row))]
       (install-implementation! registry [] function-row @function-var)
       {::ok? true ::tier tier})
     (catch Throwable throwable
       (error-result (or (.getMessage throwable) (str throwable))))))
 
 (defn rebuild!
-  "Rebuild registry implementations from current corpus graduation facts."
+  "Rebuild every recorded corpus function as an interpreted registry binding."
   {:malli/schema [:=> [:cat ::rebuild-request] ::rebuild-report]}
   [{base ::context/base
     registry ::context/registry
