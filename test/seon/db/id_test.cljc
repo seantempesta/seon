@@ -8,7 +8,7 @@
    #?@(:clj [[datahike.api :as d]])
    #?@(:clj [[datahike.writing :as writing]])
    [malli.core :as m]
-   #?@(:cljs [[seon.db :as db]])
+   [seon.db :as db]
    [seon.db.id :as id]
    [seon.db.id.schema :as id.schema]
    [seon.schema :as schema]))
@@ -222,6 +222,49 @@
 
 #?(:clj
    (do
+     (deftest jvm-database-value-allocation-uses-the-serialized-facade
+       (let [database {:db-name "claimant"
+                       :store-id [(random-uuid) :db]
+                       :t 42
+                       :as-of nil
+                       :since nil
+                       :history false
+                       :datahike/commit-id (random-uuid)}
+             transaction-requests (atom [])
+             request
+             {::db/db database
+              ::id/allocations
+              [{::id/key allocation-key
+                ::id/identity-attr identity-attr}]
+              ::id/transaction-builder
+              (fn [{record-id allocation-key}]
+                {::db/tx-data
+                 [{identity-attr record-id
+                   :idtest.record/source "claimant"}]})}
+             result
+             (with-redefs
+               [db/query
+                (fn [query-request]
+                  (is (= database (::db/db query-request)))
+                  [[identity-attr compact-generator]])
+                db/transact!
+                (fn [transaction-request]
+                  (swap! transaction-requests conj transaction-request)
+                  {::id/eids {allocation-key 77}})]
+               (id/allocate! request))
+             transaction-request (first @transaction-requests)
+             generated (first (::id/generated-candidates
+                               transaction-request))]
+         (is (= 77 (get-in result [::id/eids allocation-key])))
+         (is (= (::id/value generated)
+                (get-in result [::id/ids allocation-key])))
+         (is (= database (::db/db transaction-request)))
+         (is (= allocation-key (::id/key generated)))
+         (is (= identity-attr (::id/identity-attr generated)))
+         (is (= [{identity-attr (::id/value generated)
+                  :idtest.record/source "claimant"}]
+                (::db/tx-data transaction-request)))))
+
      (defn- jvm-allocation-conn
        ([] (jvm-allocation-conn :canonical))
        ([writer-mode]

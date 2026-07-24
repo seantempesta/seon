@@ -6,11 +6,11 @@
    adapters only propose values. Agent ids use three readable word segments,
    while every other generated persistent identity uses a 12-character CUID2.
    The database writer remains the authority for uniqueness and commit."
+  #?(:clj (:refer-clojure :exclude [await]))
   (:require
    [clojure.string :as str]
    [malli.core :as m]
-   #?(:cljs [seon.db :as db]
-      :default [seon.db :as-alias db])
+   [seon.db :as db]
    [seon.db.id.schema :as id.schema]
    [seon.schema :as schema]
    #?@(:bb []
@@ -25,6 +25,8 @@
       :clj [(:import
              [com.github.kkuegler RandomHumanReadableIdGenerator]
              [io.github.thibaultmeyer.cuid CUID])]))
+
+#?(:clj (defmacro await [value] value))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Syntax and policy
@@ -1188,65 +1190,63 @@
          [?schema :seon.schema/key ?identity-attr]
          [?schema :seon.db.id/generator ?generator]])
 
-     #?(:cljs
-        (do
-          (defn- validate-generator-policies!
-            [allocations policies]
-            (let [required (set (map ::identity-attr allocations))]
-              (when-not (m/validate ::generator-policies policies)
-                (throw
-                 (ex-info "Database returned invalid generated identity policies."
-                          {::error :seon.db.id.error/invalid-generator-policies
-                           ::generator-policies policies
-                           :seon.error/kind :core-bug})))
-              (doseq [identity-attr required]
-                (let [generator (get policies identity-attr)]
-                  (when-not generator
-                    (throw
-                     (ex-info "Generated identity attribute has no stored generator policy."
-                              {::error :seon.db.id.error/missing-generator-policy
-                               ::identity-attr identity-attr
-                               :seon.error/kind :core-bug})))
-                  (when (and (= generator :seon.db.id.generator/human-readable)
-                             (not= identity-attr :seon.agent/id))
-                    (throw
-                     (ex-info "Human-readable generation is reserved for :seon.agent/id."
-                              {::error :seon.db.id.error/human-readable-non-agent
-                               ::identity-attr identity-attr
-                               ::generator generator
-                               :seon.error/kind :core-bug})))
-                  (when (and (= identity-attr :seon.agent/id)
-                             (not= generator
-                                   :seon.db.id.generator/human-readable))
-                    (throw
-                     (ex-info ":seon.agent/id must use the human-readable generator."
-                              {::error :seon.db.id.error/agent-generator
-                               ::identity-attr identity-attr
-                               ::generator generator
-                               :seon.error/kind :core-bug})))))
-              (select-keys policies required)))
+     (defn- validate-generator-policies!
+       [allocations policies]
+       (let [required (set (map ::identity-attr allocations))]
+         (when-not (m/validate ::generator-policies policies)
+           (throw
+            (ex-info "Database returned invalid generated identity policies."
+                     {::error :seon.db.id.error/invalid-generator-policies
+                      ::generator-policies policies
+                      :seon.error/kind :core-bug})))
+         (doseq [identity-attr required]
+           (let [generator (get policies identity-attr)]
+             (when-not generator
+               (throw
+                (ex-info "Generated identity attribute has no stored generator policy."
+                         {::error :seon.db.id.error/missing-generator-policy
+                          ::identity-attr identity-attr
+                          :seon.error/kind :core-bug})))
+             (when (and (= generator :seon.db.id.generator/human-readable)
+                        (not= identity-attr :seon.agent/id))
+               (throw
+                (ex-info "Human-readable generation is reserved for :seon.agent/id."
+                         {::error :seon.db.id.error/human-readable-non-agent
+                          ::identity-attr identity-attr
+                          ::generator generator
+                          :seon.error/kind :core-bug})))
+             (when (and (= identity-attr :seon.agent/id)
+                        (not= generator
+                              :seon.db.id.generator/human-readable))
+               (throw
+                (ex-info ":seon.agent/id must use the human-readable generator."
+                         {::error :seon.db.id.error/agent-generator
+                          ::identity-attr identity-attr
+                          ::generator generator
+                          :seon.error/kind :core-bug})))))
+         (select-keys policies required)))
 
-          (defn- generator-policy-request
-            [database allocations]
-            {::db/query generator-policy-query
-             ::db/db database
-             ::db/args [(->> allocations
-                             (map ::identity-attr)
-                             distinct
-                             (sort-by str)
-                             vec)]})
+     (defn- generator-policy-request
+       [database allocations]
+       {::db/query generator-policy-query
+        ::db/db database
+        ::db/args [(->> allocations
+                        (map ::identity-attr)
+                        distinct
+                        (sort-by str)
+                        vec)]})
 
-          (defn- ^:async acquire-generator-policies!
-            [database allocations]
-            (let [rows (await
-                        (db/query
-                         (generator-policy-request database allocations)))]
-              (when (and (map? rows) (:seon.error/message rows))
-                (throw
-                 (ex-info "Generated identity policy acquisition failed."
-                          {:seon.db/error rows
-                           :seon.error/kind :core-bug})))
-              (validate-generator-policies! allocations (into {} rows))))))
+     (defn- ^:async acquire-generator-policies!
+       [database allocations]
+       (let [rows (await
+                   (db/query
+                    (generator-policy-request database allocations)))]
+         (when (and (map? rows) (:seon.error/message rows))
+           (throw
+            (ex-info "Generated identity policy acquisition failed."
+                     {:seon.db/error rows
+                      :seon.error/kind :core-bug})))
+         (validate-generator-policies! allocations (into {} rows))))
 
      #?(:clj
         (defn assert-allocation-writer!
@@ -1330,56 +1330,55 @@
        [(dissoc built ::dependent-identities)
         (attach-dependent-identities! manifest (::dependent-identities built))])
 
-     #?(:cljs
-        (defn- allocation-transaction-request
-          [database built manifest]
-          (-> built
-              (assoc ::db/db database)
-              (assoc ::generated-candidates manifest))))
+     (defn- allocation-transaction-request
+       [database built manifest]
+       (-> built
+           (assoc ::db/db database)
+           (assoc ::generated-candidates manifest)))
 
-     #?(:cljs
-        (defn ^:async ^:private allocate-attempt!
-          [{::keys [allocations transaction-builder generator-policies]
-            database ::db/db
-            :as request}
-           attempt]
-          (let [candidate-manifest (candidate-round! generator-policies
-                                                     allocations)
-                ids            (candidate-map candidate-manifest)
-                raw-built      (transaction-builder ids)]
+     (defn ^:async ^:private allocate-attempt!
+       [{::keys [allocations transaction-builder generator-policies]
+         database ::db/db
+         :as request}
+        attempt]
+       (let [candidate-manifest (candidate-round! generator-policies
+                                                  allocations)
+             ids            (candidate-map candidate-manifest)
+             raw-built      (transaction-builder ids)]
+         #?(:cljs
             (when (instance? js/Promise raw-built)
               (throw
                (ex-info "The allocation transaction builder must be pure and synchronous."
                         {::error :seon.db.id.error/async-builder
-                         :seon.error/kind :core-bug})))
-            (let [[built manifest]
-                  (normalize-built-allocation! candidate-manifest raw-built)
-                  transaction-request
-                  (allocation-transaction-request database built manifest)
-                  result (await (db/transact! transaction-request))]
-              (cond
-                (not (error-value? result))
-                (let [eids (::eids result)]
-                  (if (= (set (keys ids)) (set (keys eids)))
-                    (assoc result ::ids ids)
-                    (failure
-                     "The sole writer committed an allocation without returning every eid."
-                     :core-bug
-                     {::error :seon.db.id.error/incomplete-writer-response
-                      ::ids ids
-                      ::eids eids})))
+                         :seon.error/kind :core-bug}))))
+         (let [[built manifest]
+               (normalize-built-allocation! candidate-manifest raw-built)
+               transaction-request
+               (allocation-transaction-request database built manifest)
+               result (await (db/transact! transaction-request))]
+           (cond
+             (not (error-value? result))
+             (let [eids (::eids result)]
+               (if (= (set (keys ids)) (set (keys eids)))
+                 (assoc result ::ids ids)
+                 (failure
+                  "The sole writer committed an allocation without returning every eid."
+                  :core-bug
+                  {::error :seon.db.id.error/incomplete-writer-response
+                   ::ids ids
+                   ::eids eids})))
 
-                (exact-generated-conflict? result manifest)
-                (if (< attempt id.schema/maximum-attempts)
-                  (await (allocate-attempt! request (inc attempt)))
-                  (failure
-                   "Generated identity allocation exhausted its bounded collision retries."
-                   :core-bug
-                   {::error :seon.db.id.error/exhausted
-                    ::attempts attempt
-                    ::allocations allocations}))
+             (exact-generated-conflict? result manifest)
+             (if (< attempt id.schema/maximum-attempts)
+               (await (allocate-attempt! request (inc attempt)))
+               (failure
+                "Generated identity allocation exhausted its bounded collision retries."
+                :core-bug
+                {::error :seon.db.id.error/exhausted
+                 ::attempts attempt
+                 ::allocations allocations}))
 
-                :else result)))))
+             :else result))))
 
      #?(:clj
         (do
@@ -1474,18 +1473,28 @@
                (or (ex-data e) {::error :seon.db.id.error/allocation-failed})))))
         :clj
         (defn allocate!
-          "Allocate identities through a configured serialized Datahike writer.
+          "Allocate identities through the one serialized database writer.
 
-      Configure the first local connection with `allocation-connect-config`.
-      The writer validates every managed identity assertion before commit;
-      this entry point additionally owns generation, collision retry, and the
-      returned allocation-key-to-entity mapping."
+      A supplied immutable `:seon.db/db` value uses the portable `seon.db`
+      facade, including from a JVM claimant. Otherwise a local connection must
+      be configured with `allocation-connect-config`. Both paths retain the
+      same candidate grammar, collision retry, and allocation receipt."
           {:malli/schema [:=> [:cat ::allocate-request] ::allocate-response]}
           [request]
           (try
             (validate-request! request)
-            (assert-allocation-writer! (:seon.db/conn request))
-            (allocate-jvm-attempt! request 1)
+            (if-let [database (::db/db request)]
+              (let [policies
+                    (or (::generator-policies request)
+                        (acquire-generator-policies!
+                         database (::allocations request)))]
+                (validate-generator-policies! (::allocations request) policies)
+                (allocate-attempt!
+                 (assoc request ::generator-policies policies)
+                 1))
+              (do
+                (assert-allocation-writer! (:seon.db/conn request))
+                (allocate-jvm-attempt! request 1)))
             (catch Throwable throwable
               (failure
                (or (.getMessage throwable) (str throwable))
