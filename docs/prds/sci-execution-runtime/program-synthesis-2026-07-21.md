@@ -1150,6 +1150,18 @@ MORNING ITEMS (accumulating):
   (`tmp/orchestrator/replmode-gate.log`). The orchestrator owns the
   required frozen-tree rebuild, restart, and fresh live agent re-drive;
   this source lane ran no cluster.
+- ★ DATABASE FRAME-DESYNCHRONIZATION BLOCKER SOURCE-FIXED
+  (`0b8ad3537`, 2026-07-24): the fault exposed two independently
+  scheduled output holders on one UDS socket. A partial unsolicited
+  event remained in `::event-state`, then a newly queued response in
+  `::outputs` preempted it, splicing the response frame into the event
+  before its suffix. This was frame scheduling, not C1 codec totality.
+  Opening responses, request responses, and events now share the one
+  ordered `::outputs` deque. The real-socket partial-write regression
+  and focused JVM 40/217 plus CLJS 23/80 gates are green with zero
+  failures/errors (`tmp/orchestrator/framedesync-gate.log`). The
+  orchestrator owns the coordinated rebuild, restart, and core-fault
+  live re-drive; this source lane ran no cluster.
 - ★ LIVE PROOF VERDICT: NOT-YET-ALIVE, ROOT-CAUSED (2026-07-24).
   Web: the JVM /data tier MORPHS correctly on transact (SSE datastar
   ALIVE, marker at basis 536871707) — but 5 web bugs filed: agent/
@@ -1160,11 +1172,12 @@ MORNING ITEMS (accumulating):
   still requires RETIRED :seon.config/repl-mode (turn.cljs:351, a
   BN-5 reply-policy straggler) → every turn faults on output
   validation; (2) that fault DESYNCS the wire frame ('on.e' read as
-  a length) → pod :crash — the C1 codec class made concrete. FIXES:
-  replmode lane (contract, unblocks turns) + framedesync lane
-  (atomic frame write / catch-before-write, or STOP for owner's C1
-  decision). After both: rebuild+restart+RE-DRIVE. Graduation still
-  NOT claimed — the goal's bar is an agent completing real work.
+  a length) → pod :crash. The completed source lanes root-caused and
+  fixed both links: the prompt contract now matches explicit reply
+  policy, and one ordered UDS output deque prevents a response from
+  preempting a partial event frame. After both:
+  rebuild+restart+RE-DRIVE. Graduation still NOT claimed — the goal's
+  bar is an agent completing real work.
 - ★ LIVE PROOFS RUNNING (2026-07-24, cluster verified ready, root
   / = HTTP 200): livedrive (DeepSeek multi-turn agent with cross-turn
   db memory — the provably-alive test) + webverify (runbook:

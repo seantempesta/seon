@@ -1367,6 +1367,19 @@ the variable-weight values they select.
   reconnect (`src/seon/host.clj`,
   `test/seon/host_conformance_writer_test.clj`).
 
+## UDS frame scheduling scar (2026-07-24)
+
+- **One physical socket requires one ordered output sequence.** A complete
+  encoded `ByteBuffer` is not an atomic frame write when the channel is
+  non-blocking. If responses live in one deque while unsolicited events live
+  in a separate active-output slot, a newly queued response can preempt a
+  partially written event and splice one frame into another. Queue opening
+  responses, request responses, and events in the same `::outputs` deque;
+  keep event state only for admission and completion ownership. The deque head
+  remains the active frame until its buffer is exhausted
+  (`src/seon/db/transport/uds.cljc`,
+  `test/seon/db/transport_uds_test.clj`).
+
 ## Computed-bootstrap fixture scar (2026-07-23)
 
 - **Host transaction data is never SCI source.** `pr-str` preserves symbol
