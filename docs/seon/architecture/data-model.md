@@ -401,8 +401,10 @@ attribute list exists.
 and is banned in agent contracts. A genuinely polymorphic slot is a named
 registered `[:fn]` predicate schema carrying `:error/message` and a
 `:gen/schema` generator hint. Predicates are corpus data like every other
-function: they compile on any tier by resolving through the corpus-loaded SCI
-environment behind the guarded door, so contracts validate fully on the tier
+function: the schema projection resolves each predicate symbol to its admitted
+callable from the corpus-loaded SCI environment before Malli compilation.
+Malli never constructs a private SCI context; predicate execution remains in
+the surrounding guarded invocation, so contracts validate fully on the tier
 that holds the value. Predicate admission is one computed rule — the
 predicate's derived call graph must be pure and capability-free (portability
 is derived from the program graph, never declared) — and the writer trusts

@@ -178,11 +178,19 @@ claimants.
 
 ## Guarded evaluation door
 
-Every SCI invocation—agent eval, authored render, or plan function—passes
-through one guarded door. A retained SCI context owns one stable
+Every SCI invocation—agent eval, authored render, plan function, or schema
+predicate—passes through one guarded door. A retained SCI context owns one stable
 interpreter-step counter;
 each invocation resets it from the resolved policy and installs the current
 platform interrupt predicate.
+
+Malli never constructs or forks a private SCI context. The schema projection
+resolves every admitted `[:fn]` symbol to its already-materialized corpus
+callable before Malli compiles the schema. Predicate invocation therefore runs
+in the surrounding retained corpus context and charges that invocation's
+holder. If Malli catches SCI's interrupt marker or replaces it with a schema
+error, the holder retains the fired policy kind and the door still returns the
+canonical flat steering value.
 
 The door enforces three independent abort-only circuit breakers:
 

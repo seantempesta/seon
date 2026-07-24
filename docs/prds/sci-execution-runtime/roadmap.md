@@ -26,7 +26,7 @@ transition ledger.
 | U1.5 | pod dials the host: tier-as-data dispatch, one REAL turn end-to-end (pod renders, host evals) | **DONE** |
 | U4 | eval-record/receipt/corpus integration over the marked seams (subsumes register R2 — the program-row rejection diagnosis) | **DONE** |
 | U5 | toolkit port — corrected dependency loader → registry provisioning → stdlib shims shape | **DONE** `48b31f59`, `535e8c9d`, `f037cbbf`, `5ac8f0ef`, `67358be2` |
-| U3 | graduation walking skeleton (one corpus fn: fingerprint → both-tier tests → JVM eval → epoch re-link) | **DONE** `f53f5d94`, `a50845bd` |
+| U3 | graduation walking skeleton; R48 interim containment refusal until P4/R33 pure-call-graph admission | **ESCAPE CLOSED** `3bb7c2d39`; native gate reopens only at P4 |
 | U6 | instrumentation over sci vars (B1 deferred item 5) | after U4 |
 | U7 | park/idle policy + warm spares (owner-ruled shape) | after U1.5 |
 | U8 | steering/context re-alignment: all agent-facing guidance teaches the sync idiom | before cutover |
@@ -513,6 +513,16 @@ sub-loop/preflight, renders stay pod-served, and `record-eval-terminal!`
 failures surface as `::record-error` on the envelope (batch continues).
 
 ### U3 — graduation walking skeleton — DONE (2026-07-20)
+
+R48 containment ruling (2026-07-24) supersedes the native-execution claims
+below. The original walking skeleton remains historical differential-test and
+registry-link evidence, but tests-pass no longer admits native code.
+`graduate!` returns a flat refusal naming R48 and the P4 reopen gate, performs
+no host eval or tier transaction, and matching legacy `:graduated` rows derive
+`:nursery` and rebuild through SCI (`3bb7c2d39`). Native compilation may reopen
+only after P4/R33 proves the exact transitive call graph pure,
+capability-free, and door-equivalent. The original measurements below are not
+current execution behavior.
 
 One real agent-authored corpus function now crosses the complete
 graduation pipeline. The host harness records `sum-squares` through U4

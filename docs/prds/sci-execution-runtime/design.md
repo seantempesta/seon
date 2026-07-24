@@ -96,14 +96,18 @@ support it and heals when they don't. No notification queue.
 
 - Tier 0 (nursery): sci interprets agent code. Instant, sandboxed,
   per-context. Fast enough for orchestration (12 ms p50 turns).
-- Tier 1 (graduated): a fn whose fingerprint passes the gate is compiled
-  ONCE from corpus source — JVM `eval` → bytecode → HotSpot for
-  data/db work; the real CLJS compiler → pod bundle for js-needing
-  work — and installed in the shared binding table. Var-epoch bump
-  re-links every call site safely (JIT-proven).
-- The GATE is a trust promotion, not a speed switch: schema-valid,
-  test-covered, and differential-tested (same tests green in tier 0 and
-  tier 1) — compiled code is outside the sandbox fence.
+- Tier 1 (graduated): native compilation is admitted only after the P4/R33
+  transitive call graph proves the exact source pure, capability-free, and
+  door-equivalent. The compiled projection is installed in the shared binding
+  table; a var-epoch bump re-links every call site safely.
+- The GATE is a trust promotion, not a speed switch. Schema validity, test
+  coverage, and same-result differential tests remain mandatory sanity checks,
+  but they cannot substitute for the computed P4/R33 proof.
+- Until that proof exists, `graduate!` refuses with the flat R48/P4 error and
+  performs no compilation or tier transaction. Stored `:graduated` rows from
+  the retired tests-pass gate derive an effective `:nursery` tier and rebuild
+  through SCI. The invocation deadline remains the runaway backstop after
+  native admission eventually opens.
 - The compiled artifact is a derived, fingerprinted projection of the
   corpus: source edit → fingerprint change → tier drops back to nursery
   until re-graduation. Derive-don't-store, applied to compilation.

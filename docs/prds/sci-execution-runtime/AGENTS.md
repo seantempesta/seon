@@ -146,12 +146,12 @@ conditional source. JS-bound private helpers and their callers are exclusions
 with dependency reasons. Gate: zero portable failures, both boot ledgers in the
 kill drill, full writer + CLJS suites, and drill PASS.
 
-U3 graduation skeleton: ONE real corpus fn through fingerprint →
-both-tier differential tests → JVM `eval` compile → registry re-install
-→ epoch re-link proof (U2's live-swap test is the template). The trust
-gate is a pure predicate over facts (schema-valid + test-refs green) —
-no hand list. Gate: the fn measurably faster post-graduation; edit
-drops it back to nursery (fingerprint change).
+U3 graduation skeleton is historical evidence only. R48 closes its
+tests-pass native escape: `graduate!` refuses until P4/R33 proves the exact
+transitive call graph pure, capability-free, and door-equivalent; matching
+legacy `:graduated` rows rebuild as nursery SCI functions. Keep the
+differential test as a sanity check for the future P4 gate, never as native
+admission by itself.
 
 U6 instrumentation: malli wrappers over sci vars at provisioning time
 (B1 proved the envelope shape); derive which vars from the program
