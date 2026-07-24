@@ -407,6 +407,17 @@ return values gets recorded as UI-latency-risk evidence, never a
 wait hack. Caller table: client.cljs + web/serve.cljs dead bands ·
 ctx/driver + turn + datastar local · reactive/call = this ruling.
 
+RULING REVERSAL (~17:20, recorded honestly): orchestrator sci-in-pod
+ruling was WRONG — u9delete stop-and-quote caught it; deletion plan
+§4 is explicit: pod keeps NO eval engine; the surviving boundary is
+HOST-LANE DISPATCH (narrow pod UDS client → JVM eval door). Lane now
+building that client fresh in the session family (CLJS leaf) from
+the server-side protocol; authored renders rewired to it; then S2
+self-host death. The earlier "no new RPC" override was too broad —
+correct for child-protocol resurrection, wrong for the plan-named
+host lane. R52 (interactions=transactions) stays PROVISIONAL; lane
+checks plan §2 ledger for reactive.call's assigned disposition.
+
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 
 ## older restart protocol below until morning)
