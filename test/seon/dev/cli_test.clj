@@ -1484,6 +1484,9 @@
                            (transition))
        #'cli/require-no-retained-restore! (fn [_ operation]
                                            (swap! calls conj operation))
+       #'cluster/apply! (fn [selected]
+                          (swap! calls conj [:apply selected])
+                          {:seon.cluster.apply/ok? true})
        #'cluster/open! (fn [selected]
                          (swap! calls conj [:open selected])
                          ready)
@@ -1495,14 +1498,21 @@
                           (stop-result :seon.dev.process.operation/down
                                        #{process/pod-id}))}
       (fn []
+        (with-out-str (#'cli/cluster! configuration ["apply" "experiment"]))
         (with-out-str (#'cli/cluster! configuration ["open" "experiment"]))
         (with-out-str (#'cli/cluster! configuration
                                       ["restart" "experiment"]))
         (with-out-str (#'cli/cluster! configuration ["close" "experiment"]))))
     (is (= [[:lock configuration :stack 1800000]
+            :cluster-apply [:apply request]
+            [:lock configuration :stack 1800000]
             :cluster-open [:open request]
             [:lock configuration :stack 1800000]
             :cluster-restart [:restart request]
             [:lock configuration :stack 1800000]
             :cluster-close [:close request]]
            @calls))))
+
+(deftest help-advertises-the-explicit-cluster-apply-command
+  (is (str/includes? (with-out-str (#'cli/help!))
+                     "cluster apply NAME")))

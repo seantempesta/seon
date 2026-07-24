@@ -1095,7 +1095,7 @@
       (when (str/blank? cluster-name)
         (throw
          (ex-info
-          "Use `cluster open|restart|close|status <name>`."
+          "Use `cluster apply|open|restart|close|status <name>`."
           {:seon.dev.cli/arguments (vec arguments)})))
       (when (and (seq options) (or (not= "status" operation) (not edn?)))
         (throw
@@ -1105,6 +1105,16 @@
                      {::cluster/configuration configuration
                       ::cluster/name cluster-name})]
         (case operation
+          "apply"
+          (let [result
+                (state/with-lock
+                 configuration :stack 1800000
+                 #(do
+                    (require-no-retained-restore! configuration :cluster-apply)
+                    (cluster/apply! request)))]
+            (println (str "● cluster " cluster-name " applied"))
+            (prn result))
+
           "open"
           (let [status
                 (state/with-lock
@@ -1154,7 +1164,7 @@
 
           (throw
            (ex-info
-            "Choose `cluster open`, `cluster restart`, `cluster close`, `cluster status`, `cluster reset`, `cluster restore`, or `cluster undo`."
+            "Choose `cluster apply`, `cluster open`, `cluster restart`, `cluster close`, `cluster status`, `cluster reset`, `cluster restore`, or `cluster undo`."
             {:seon.dev.cli/arguments (vec arguments)})))))))
 
 (defn- pod-test-arguments [arguments]
@@ -1240,6 +1250,7 @@
          "  test changed --path PATH...  run affected tests from the warm graph\n"
          "  test pod|database|operator|all [selector]\n"
          "  skills sync|check        generate or verify tool-facing skill adapters\n"
+         "  cluster apply NAME       apply release, config, and initial agent\n"
          "  cluster open|restart|close|status NAME [--edn]\n"
          "  cluster reset <name>     drain and reset one named database\n"
          "  cluster restore <branch> restore one exact retained branch head\n"

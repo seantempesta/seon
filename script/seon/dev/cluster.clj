@@ -1,6 +1,9 @@
 (ns seon.dev.cluster
   "Autonomous pod lifecycle for cluster databases using an existing writer."
   (:require [babashka.fs :as fs]
+            [babashka.process :as shell]
+            [clojure.edn :as edn]
+            [clojure.string :as str]
             [malli.core :as m]
             [seon.db.protocol :as protocol]
             [seon.dev.artifact :as artifact]
@@ -25,6 +28,13 @@
   [::configuration config/configuration-schema]
   [::target-configuration config/configuration-schema]
   [::name ::name]])
+(schema/register!
+ ::apply-result
+ [:map
+  [:seon.cluster.apply/ok? [:= true]]])
+
+(def ^:private apply-result-byte-limit (* 1024 1024))
+(def ^:private apply-diagnostic-character-limit 4096)
 
 (defn- validate!
   [schema-key value message]
@@ -71,6 +81,80 @@
        (ex-info "The shared writer artifact manifest is absent."
                 {:seon.dev.cluster/artifact-manifest
                  (:seon.dev.config/artifact-manifest configuration)}))))
+
+(defn- current-manifest!
+  [configuration]
+  (or (artifact/current-manifest configuration)
+      (throw
+       (ex-info "The shared runtime artifact is absent or changed."
+                {:seon.dev.cluster/artifact-manifest
+                 (:seon.dev.config/artifact-manifest configuration)}))))
+
+(defn- bounded-diagnostic
+  [value]
+  (let [value (str/trim (or value ""))]
+    (subs value 0
+          (min apply-diagnostic-character-limit (count value)))))
+
+(defn- require-apply-readiness!
+  [target-configuration manifest pod]
+  (let [status (process/status target-configuration manifest)
+        writer
+        (get-in status
+                [:seon.dev.target/external-dependencies process/writer-id])
+        retained-pod (process/read-process target-configuration process/pod-id)]
+    (when-not (:seon.dev.process/ready? writer)
+      (throw
+       (ex-info "Cluster apply requires the shared writer to be ready."
+                {:seon.dev.process/id process/writer-id
+                 :seon.dev.process/status writer})))
+    (when retained-pod
+      (throw
+       (ex-info "Cluster apply requires the selected pod to be closed."
+                {:seon.dev.process/id process/pod-id
+                 :seon.dev.process/status
+                 (process/reported-process-status retained-pod)})))
+    (when-not (= process/pod-id (:seon.dev.process/id pod))
+      (throw
+       (ex-info "The selected artifact has no canonical pod command."
+                {:seon.dev.process/id (:seon.dev.process/id pod)})))
+    status))
+
+(defn- read-apply-result!
+  [path process-result]
+  (when-not (zero? (:exit process-result))
+    (throw
+     (ex-info "Cluster apply exited unsuccessfully."
+              {:seon.dev.cluster/exit (:exit process-result)
+               :seon.dev.cluster/output
+               (bounded-diagnostic (:out process-result))
+               :seon.dev.cluster/error
+               (bounded-diagnostic (:err process-result))
+               :seon.dev.cluster/apply-result-path path})))
+  (when-not (fs/regular-file? path)
+    (throw
+     (ex-info "Cluster apply exited without an EDN result."
+              {:seon.dev.cluster/apply-result-path path})))
+  (when (> (fs/size path) apply-result-byte-limit)
+    (throw
+     (ex-info "The cluster apply result exceeds the operator limit."
+              {:seon.dev.cluster/apply-result-path path
+               :seon.dev.cluster/result-bytes (fs/size path)
+               :seon.dev.cluster/result-byte-limit
+               apply-result-byte-limit})))
+  (let [result (edn/read-string (slurp path))]
+    (validate! ::apply-result result
+               "The cluster apply result is invalid.")))
+
+(defn- apply-command
+  [target-configuration pod result-path]
+  {:seon.dev.cluster/argv
+   (conj (:seon.dev.process/argv pod) "cluster-apply")
+   :seon.dev.cluster/environment
+   (assoc (:seon.dev.process/environment pod)
+          "SEON_CLUSTER_APPLY_RESULT" result-path)
+   :seon.dev.cluster/directory
+   (:seon.dev.config/root target-configuration)})
 
 (defn ensure-package-skeleton!
   "Materialize missing manifests for one cluster package root."
@@ -132,6 +216,41 @@
             (:seon.dev.config/launch-descriptor target-configuration))
            (ensure-under-lock! target-configuration manifest
                                acquire-owned!)))))))
+
+(defn apply!
+  "Apply one current release to a closed cluster through the client artifact."
+  {:malli/schema [:=> [:cat ::request] ::apply-result]}
+  [{::keys [configuration target-configuration] :as request}]
+  (validate! ::request request "The cluster apply request is invalid.")
+  (state/with-lock
+   configuration :cluster 600000
+   (fn []
+     (let [manifest (current-manifest! configuration)
+           pod (get (process/specs target-configuration manifest)
+                    process/pod-id)
+           _ (require-apply-readiness! target-configuration manifest pod)
+           _ (ensure-package-skeleton!
+              (:seon.dev.config/launch-descriptor target-configuration))
+           process-dir
+           (get-in target-configuration
+                   [:seon.dev.config/launch-descriptor
+                    ::launch/process ::launch/process-dir])
+           result-path
+           (str (fs/path process-dir "cluster-apply"
+                         (str (random-uuid) ".edn")))
+           {:seon.dev.cluster/keys [argv environment directory]}
+           (apply-command target-configuration pod result-path)
+           _ (fs/create-dirs (fs/parent result-path))
+           process-result
+           (shell/sh {:continue true
+                      :dir directory
+                      :env environment
+                      :out :string
+                      :err :string
+                      :cmd argv})
+           result (read-apply-result! result-path process-result)]
+       (config/publish-applied-manifest! target-configuration)
+       result))))
 
 (defn- stop-under-lock!
   [target-configuration operation]

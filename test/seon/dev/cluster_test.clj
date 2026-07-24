@@ -1,7 +1,9 @@
 (ns seon.dev.cluster-test
   (:require [babashka.fs :as fs]
+            [babashka.process :as shell]
             [cheshire.core :as json]
             [clojure.edn :as edn]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is run-tests]]
             [seon.dev.artifact :as artifact]
             [seon.dev.cluster :as cluster]
@@ -113,6 +115,141 @@
                (:seon.dev.config/launch-descriptor
                 target-configuration))]
              @package-roots)))))
+
+(deftest apply-runs-the-current-pod-artifact-once-and-publishes-after-success
+  (let [{::cluster/keys [configuration target-configuration] :as request}
+        (target-request)
+        root (fs/create-temp-dir {:prefix "seon-cluster-apply-"})
+        process-dir (str (fs/path root "process"))
+        target-configuration
+        (-> target-configuration
+            (assoc :seon.dev.config/root (str root))
+            (assoc-in [:seon.dev.config/launch-descriptor
+                       ::launch/process ::launch/process-dir]
+                      process-dir))
+        request (assoc request ::cluster/target-configuration
+                       target-configuration)
+        manifest {:seon.dev.artifact/application-digest "application"}
+        pod {:seon.dev.process/id process/pod-id
+             :seon.dev.process/argv ["/runtime/bun" "/runtime/client.js"]
+             :seon.dev.process/environment {"EXISTING" "pod"}}
+        result {:seon.cluster.apply/ok? true
+                :seon.cluster.apply/changed? false}
+        effects (atom [])]
+    (try
+      (with-redefs
+       [artifact/current-manifest
+        (fn [selected]
+          (is (= configuration selected))
+          manifest)
+        process/specs
+        (fn [selected selected-manifest]
+          (is (= target-configuration selected))
+          (is (= manifest selected-manifest))
+          {process/pod-id pod})
+        process/status
+        (fn [selected selected-manifest]
+          (is (= target-configuration selected))
+          (is (= manifest selected-manifest))
+          {:seon.dev.target/external-dependencies
+           {process/writer-id {:seon.dev.process/ready? true}}})
+        process/read-process
+        (fn [selected id]
+          (is (= target-configuration selected))
+          (is (= process/pod-id id))
+          nil)
+        cluster/ensure-package-skeleton!
+        (fn [_] (swap! effects conj :packages))
+        state/with-lock
+        (fn [selected owner timeout-ms transition]
+          (swap! effects conj [:lock selected owner timeout-ms])
+          (transition))
+        shell/sh
+        (fn [{:keys [cmd env dir]}]
+          (swap! effects conj [:run cmd env dir])
+          (spit (get env "SEON_CLUSTER_APPLY_RESULT")
+                (str (pr-str result) "\n"))
+          {:exit 0 :out "" :err ""})
+        config/publish-applied-manifest!
+        (fn [selected]
+          (swap! effects conj [:publish selected])
+          selected)]
+       (is (= result (cluster/apply! request))))
+      (let [[lock packages run publish] @effects
+            [_ argv environment directory] run]
+        (is (= [:lock configuration :cluster 600000] lock))
+        (is (= :packages packages))
+        (is (= ["/runtime/bun" "/runtime/client.js" "cluster-apply"]
+               argv))
+        (is (= "pod" (get environment "EXISTING")))
+        (is (str/starts-with?
+             (get environment "SEON_CLUSTER_APPLY_RESULT")
+             (str (fs/path process-dir "cluster-apply"))))
+        (is (= (str root) directory))
+        (is (= [:publish target-configuration] publish)))
+      (finally (fs/delete-tree root {:force true})))))
+
+(deftest apply-requires-a-ready-writer-and-an-absent-pod
+  (let [{::cluster/keys [target-configuration] :as request} (target-request)
+        manifest {:seon.dev.artifact/application-digest "application"}
+        pod {:seon.dev.process/id process/pod-id}
+        ran? (atom false)]
+    (with-redefs [artifact/current-manifest (constantly manifest)
+                  process/specs (fn [_ _] {process/pod-id pod})
+                  state/with-lock (fn [_ _ _ transition] (transition))
+                  shell/sh (fn [_] (reset! ran? true))]
+      (with-redefs [process/status
+                    (fn [_ _]
+                      {:seon.dev.target/external-dependencies
+                       {process/writer-id
+                        {:seon.dev.process/ready? false}}})
+                    process/read-process (constantly nil)]
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo #"writer to be ready"
+             (cluster/apply! request))))
+      (with-redefs [process/status
+                    (fn [_ _]
+                      {:seon.dev.target/external-dependencies
+                       {process/writer-id
+                        {:seon.dev.process/ready? true}}})
+                    process/read-process
+                    (fn [selected id]
+                      (is (= target-configuration selected))
+                      (is (= process/pod-id id))
+                      {:seon.dev.process/id process/pod-id})
+                    process/reported-process-status (constantly
+                                                     :seon.dev.process.status/alive)]
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo #"pod to be closed"
+             (cluster/apply! request)))))
+    (is (false? @ran?))))
+
+(deftest apply-never-publishes-the-selected-manifest-after-client-failure
+  (let [{::cluster/keys [target-configuration] :as request} (target-request)
+        manifest {:seon.dev.artifact/application-digest "application"}
+        pod {:seon.dev.process/id process/pod-id
+             :seon.dev.process/argv ["/runtime/bun" "/runtime/client.js"]
+             :seon.dev.process/environment {}}
+        published? (atom false)]
+    (with-redefs [artifact/current-manifest (constantly manifest)
+                  process/specs (fn [_ _] {process/pod-id pod})
+                  process/status
+                  (fn [_ _]
+                    {:seon.dev.target/external-dependencies
+                     {process/writer-id {:seon.dev.process/ready? true}}})
+                  process/read-process (constantly nil)
+                  cluster/ensure-package-skeleton! (constantly nil)
+                  state/with-lock (fn [_ _ _ transition] (transition))
+                  fs/create-dirs (constantly nil)
+                  shell/sh (constantly {:exit 1
+                                        :out "apply output"
+                                        :err "apply failed"})
+                  config/publish-applied-manifest!
+                  (fn [_] (reset! published? true))]
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo #"exited unsuccessfully"
+           (cluster/apply! request))))
+    (is (false? @published?))))
 
 (deftest close-stops-only-the-pod-and-does-not-delete-cluster-data
   (let [{::cluster/keys [target-configuration] :as request} (target-request)
