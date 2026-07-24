@@ -118,7 +118,11 @@
                  (or (:seon.error/kind recorded) :core-bug)}]
     (log/error-console! "seon.web.serve" operation recorded)
     (write-status! nil 500 "application/json; charset=utf-8"
-                   (js/JSON.stringify (clj->js failure)))))
+                   (js/JSON.stringify
+                    #js {"seon.error/message"
+                         (:seon.error/message failure)
+                         "seon.error/kind"
+                         (name (:seon.error/kind failure))}))))
 
 (defn- through-terminal-fault-door
   "Run one HTTP handler behind the sole terminal core-fault catch."
