@@ -174,6 +174,21 @@ Bonus U9 feed proof also failed: the in-pod path is active, but
 `render-agent-view!` omits `:seon.agent.ctx/name` on its third surface and the
 feed emits `render error: :malli.core/invalid-output`.
 
+CHECKPOINT + REDRIVE-2 (~10:10): all five morning lanes LANDED
+(noroots, containment, issuesindex, u9s0a, r45s3-graduated); default
+rebuilt on the coherent tree (page-plan.edn first publish, processes
+verified started after artifact). Re-drive verdict: NOT CLEARED, one
+rung deeper — (a) claimant NPE: resolved-target→canonical-target
+(namespace nil) uncaught throw ESCAPED settlement, wedged 900s
+(violates nothing-throws + one-settlement-choke); (b) u9s0a
+regression: in-pod agent view invalid-output, surface missing
+:seon.agent.ctx/name (child-readiness error GONE — move works).
+Timeout terminalization proved live (:interrupted + closed at
+deadline). Lanes live: npefix ∥ agentview (u9s0a resumed) ∥
+s4startgate. Tooling: bin/codex-agent is the one lane launcher
+(tracked/watchable/stop+resume, AGENTS.md rule). Next: lanes land →
+re-drive-3 → S5/C1/web-UI refills.
+
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 
 ## older restart protocol below until morning)
