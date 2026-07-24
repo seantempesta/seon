@@ -1028,6 +1028,13 @@ COMPLETELY before dispatching anything.
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- PARALLEL FIX POSTURE (owner, 2026-07-23 late): FOUR lanes on the
+  break chain — cljshang (#6) + writercp (#7) fixing; SEAMSWEEP
+  audit (read-only) batch-predicting remaining breaks from the day's
+  producer/consumer contract changes (signature/config/artifact-
+  membership/limit-growth sweep) so discovery stops being serial;
+  statusfix on the two-config-paths smell. Discipline: no duplicate
+  coverage, file-disjoint fixes, audits read-only.
 - CHECKPOINT SUITE RESULTS (first full sweep since morning):
   OPERATOR GREEN 316/1,831. CLJS = TIMEOUT not failures (compile
   13s/56 ns, then javascript-exit 124 at the 30min cap, complete?
