@@ -1140,6 +1140,18 @@ MORNING ITEMS (accumulating):
   (settleclose 1a47c1062 + 5cc3b32e1: break-8 fixture class swept
   suite-wide, program-source digest selection fixed). A REAL
   MILESTONE — but NOT graduation: the goal's bar is PROVABLY ALIVE.
+- ★ RE-DRIVE VERDICT (2026-07-24): NOT-ALIVE, but 2 of 3 original
+  live blockers DEAD — turns now OPEN and advance (:rendered →
+  :attempt-open → :published; render-prompt fix worked) and
+  FRAME-RESILIENCE PASSED (a core fault left the pod READY, next
+  request succeeded — the framedesync integrated proof). The agent
+  reached real DeepSeek calls. REMAINING BLOCKER: 11/11 attempts
+  :provider-error on the LONG-LIVED CLAIMANT while the identical
+  prompt SUCCEEDS via a fresh JVM leaf (localized to the claimant's
+  LLM transport; the error drops its cause). Lanes: claimantllm
+  (restore diagnostics → root-cause long-lived-vs-fresh → fix) +
+  agentsrun (config pull-pattern output contract + persist the
+  dropped /agents/run fault datom). After: rebuild + FINAL re-drive.
 - ★ RENDER-PROMPT REPLY-POLICY BLOCKER SOURCE-FIXED (`a88e11505`,
   2026-07-24): the public output contract now requires the registered
   `:seon.ai/wire-stream?` and `:seon.ai/reply-evaluation` projections
