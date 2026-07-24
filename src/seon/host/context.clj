@@ -1526,31 +1526,86 @@
                   {:seon.error/kind :core-bug}))))
             [ctx target-var])))))
 
-(def ^:private committed-schema-query
-  '[:find ?key ?form (pull ?tx ?provenance-pattern)
-    :in $ ?provenance-pattern
-    :where
-    [?schema :seon.schema/key ?key]
-    [?schema :seon.schema/form ?form ?tx]])
+(def ^:private acquisition-page-size 32)
+(def ^:private acquisition-page-max-result-weight 60000)
 
-(def ^:private committed-function-contract-query
-  '[:find ?sym ?form (pull ?tx ?provenance-pattern)
-    :in $ ?provenance-pattern
+(def ^:private committed-row-query
+  '[:find ?identity ?form (pull ?tx ?provenance-pattern)
+    :in $ [?e ...] ?identity-attr ?form-attr ?provenance-pattern
     :where
-    [?function :seon.fn/sym ?sym]
-    [?function :seon.fn/spec ?form ?tx]])
+    [?e ?identity-attr ?identity]
+    [?e ?form-attr ?form ?tx]])
 
-(def ^:private committed-function-source-query
-  '[:find ?sym ?source (pull ?tx ?provenance-pattern)
-    :in $ ?provenance-pattern
-    :where
-    [?function :seon.fn/sym ?sym]
-    [?function :seon.fn/source ?source ?tx]])
+(defn- failed-read?
+  [value]
+  (and (map? value) (string? (:seon.error/message value))))
 
-(def ^:private committed-projection-row-limit 4096)
+(defn- acquisition-error!
+  [stage identity-attr form-attr value]
+  (throw
+    (ex-info
+      (str "Committed program acquisition failed while reading "
+           identity-attr " + " form-attr " at stage " stage ".")
+      {:seon.db/error value
+       :seon.host.context/stage stage
+       :seon.host.context/identity-attribute identity-attr
+       :seon.host.context/form-attribute form-attr
+       :seon.error/kind :core-bug})))
+
+(defn- acquire-row-pages!
+  [query! database entity-ids identity-attr form-attr]
+  (reduce
+    (fn [rows entity-id]
+      (let [page-rows
+            (query!
+              {:seon.db/db database
+               :seon.db/query committed-row-query
+               ;; One canonical row is the minimum exact page. Forms are
+               ;; variable-length strings, so a larger entity-count cannot
+               ;; imply a bounded result weight.
+               :seon.db/args
+               [[entity-id] identity-attr form-attr
+                schema/asserting-transaction-provenance-pattern]
+               :seon.db/max-result-weight
+               acquisition-page-max-result-weight})]
+        (when (failed-read? page-rows)
+          (acquisition-error! :query identity-attr form-attr page-rows))
+        (into rows page-rows)))
+    []
+    entity-ids))
+
+(defn- acquire-identity-stream!
+  [index-page! query! database identity-attr form-attr]
+  (loop [cursor nil
+         rows []]
+    (let [page
+          (index-page!
+            (cond-> {:seon.db/db database
+                     :seon.db/index :aevt
+                     :seon.db/components [identity-attr]
+                     :seon.db/direction :forward
+                     :seon.db/limit acquisition-page-size
+                     :seon.db/max-result-weight
+                     acquisition-page-max-result-weight}
+              cursor (assoc :seon.db/cursor cursor)))]
+      (when (failed-read? page)
+        (acquisition-error! :index-page identity-attr form-attr page))
+      (let [entity-ids (mapv first (:datahike.index-page/datoms page))
+            page-rows
+            (acquire-row-pages!
+              query! database entity-ids identity-attr form-attr)
+            next-rows (into rows page-rows)]
+        (if (:datahike.index-page/complete? page)
+          next-rows
+          (recur (:datahike.index-page/cursor page) next-rows))))))
 
 (defn acquire-committed-projection!
-  "Acquire and compile the complete committed program at one database value."
+  "Acquire and compile the complete committed program at one database value.
+
+   Each identity stream is paged through AEVT and every variable-size form is
+   then read one entity at a time. The immutable database value pins all reads
+   while the per-request result-weight bound remains independent of total
+   corpus size."
   {:malli/schema
    [:function
     [:=> [:catn [::writer ::writer]] :map]
@@ -1563,70 +1618,28 @@
     (let [database (resolve-head! writer)]
       (if (:seon/error database)
         database
-        (let [member (fn [query]
-                       {::protocol/operation protocol/query-operation
-                        :seon.db/db database
-                        ::protocol/query-form query
-                        ::protocol/arguments
-                        [schema/asserting-transaction-provenance-pattern]
-                        :datahike.resource/max-work 1000000
-                        ;; One sentinel proves the claimed complete population
-                        ;; did not stop at Datahike's early-stop row limit.
-                        ;; Datahike charges every tuple cell, so admit the
-                        ;; widest projection row while the explicit row-count
-                        ;; check below remains the population bound.
-                        :datahike.resource/max-results
-                        (* 4 (inc committed-projection-row-limit))
-                        :datahike.resource/max-result-weight (* 3 1024 1024)})
-              response
-              (writer-call!
-                writer
-                (protocol/execute-many-request
-                  {::protocol/request-id (str (random-uuid))
-                   ::protocol/members
-                   [(member committed-schema-query)
-                    (member committed-function-contract-query)
-                    (member committed-function-source-query)]
-                   :datahike.resource/max-result-weight (* 6 1024 1024)}))]
-          (if-not (::protocol/success? response)
-            {:seon.error/message
-             (str "The database writer rejected the projection read: "
-                  (or (::protocol/error response)
-                      (::protocol/error-kind response)))
-             :seon.error/kind :core-bug
-             :seon.error/data
-             (select-keys response [::protocol/error-kind
-                                    ::protocol/request-id])}
-            (let [[schemas contracts sources] (::protocol/results response)]
-              (if-not (every? ::protocol/success? [schemas contracts sources])
-                {:seon/error
-                 {:seon.error/message
-                  "Committed schema projection acquisition failed."
-                  :seon.error/kind :core-bug
-                  :seon.error/data
-                  {:seon.host.context/member-results [schemas contracts]}}}
-                (let [schema-rows (:datahike.query/result schemas)
-                      contract-rows (:datahike.query/result contracts)
-                      source-rows (:datahike.query/result sources)]
-                  (if (or (> (count schema-rows)
-                             committed-projection-row-limit)
-                          (> (count contract-rows)
-                             committed-projection-row-limit)
-                          (> (count source-rows)
-                             committed-projection-row-limit))
-                    {:seon/error
-                     {:seon.error/message
-                      "Committed schema projection exceeds its complete-row bound."
-                      :seon.error/kind :core-bug}}
-                    {::database database
-                     ::projection
-                     (schema/projection-from-rows
-                       {:seon.schema/schema-rows schema-rows
-                        :seon.schema/function-contract-rows
-                        contract-rows
-                        :seon.schema/function-source-rows source-rows
-                        :seon.schema/artifact-exports
-                        artifact-exports})}))))))))
+        (let [database-functions (bound-database-functions writer)
+              index-page! (get database-functions 'index-page)
+              query! (get database-functions 'query)
+              schema-rows
+              (acquire-identity-stream!
+                index-page! query! database
+                :seon.schema/key :seon.schema/form)
+              contract-rows
+              (acquire-identity-stream!
+                index-page! query! database
+                :seon.fn/sym :seon.fn/spec)
+              source-rows
+              (acquire-identity-stream!
+                index-page! query! database
+                :seon.fn/sym :seon.fn/source)]
+          {::database database
+           ::projection
+           (schema/projection-from-rows
+             {:seon.schema/schema-rows schema-rows
+              :seon.schema/function-contract-rows contract-rows
+              :seon.schema/function-source-rows source-rows
+              :seon.schema/artifact-exports artifact-exports})})))
     (catch Throwable throwable
       {:seon/error
        {:seon.error/message

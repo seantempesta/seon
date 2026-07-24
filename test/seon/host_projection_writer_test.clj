@@ -1,7 +1,6 @@
 (ns seon.host-projection-writer-test
   "Committed schema projection admission and publication proofs."
   (:require [clojure.test :refer [deftest is testing]]
-            [seon.db.protocol :as protocol]
             [seon.host :as host]
             [seon.host.context :as context]
             [seon.host.sample :as host.sample]
@@ -13,6 +12,52 @@
 (defn- acquired [t k form]
   {::context/database {:db-name "projection-test" :t t}
    ::context/projection (projection k form)})
+
+(defn- acquisition-functions
+  [populations calls]
+  (let [form-entities
+        (into {}
+              (map
+                (fn [[[identity-attr form-attr] rows]]
+                  [[identity-attr form-attr]
+                   (mapv (fn [i row]
+                           {:entity-id [identity-attr form-attr i]
+                            :row row})
+                         (range)
+                         rows)]))
+              populations)
+        identity-entities
+        (reduce-kv
+          (fn [result [identity-attr _] entities]
+            (update result identity-attr (fnil into []) entities))
+          {}
+          form-entities)]
+    {'index-page
+     (fn [request]
+       (swap! calls conj [:index-page request])
+       (let [identity-attr (first (:seon.db/components request))
+             offset (or (:seon.db/cursor request) 0)
+             population (get identity-entities identity-attr [])
+             page (subvec population
+                          offset
+                          (min (count population)
+                               (+ offset (:seon.db/limit request))))
+             next-offset (+ offset (count page))]
+         (cond-> {:datahike.index-page/datoms
+                  (mapv (comp vector :entity-id) page)
+                  :datahike.index-page/complete?
+                  (= next-offset (count population))}
+           (< next-offset (count population))
+           (assoc :datahike.index-page/cursor next-offset))))
+     'query
+     (fn [request]
+       (swap! calls conj [:query request])
+       (let [[[entity-id] identity-attr form-attr] (:seon.db/args request)]
+         (if-let [entry
+                  (some #(when (= entity-id (:entity-id %)) %)
+                        (get form-entities [identity-attr form-attr]))]
+           [(:row entry)]
+           [])))}))
 
 (deftest publication-is-monotonic-across-success-and-fault-races
   (let [state (atom (acquired 9 :projection.test/nine :int))
@@ -56,50 +101,108 @@
 
 (deftest one-database-value-pins-both-authority-queries
   (let [database {:db-name "projection-test" :t 42}
-        request (atom nil)
-        response
-        (protocol/success
-          {::protocol/results
-           [(protocol/success {:datahike.query/result
-                               #{[:projection.test/value ":int"
-                                  {:seon.db/process
-                                   {:seon.db.process/id
-                                    :seon.db.process/boot}}]}})
-            (protocol/success {:datahike.query/result #{}})
-            (protocol/success {:datahike.query/result #{}})]})]
+        calls (atom [])
+        populations
+        {[:seon.schema/key :seon.schema/form]
+         [[:projection.test/value ":int"
+           {:seon.db/process
+            {:seon.db.process/id :seon.db.process/boot}}]]
+         [:seon.fn/sym :seon.fn/spec] []
+         [:seon.fn/sym :seon.fn/source] []}]
     (with-redefs [context/resolve-head! (fn [_] database)]
       (with-redefs-fn
-        {#'context/writer-call! (fn [_ sent]
-                                  (reset! request sent)
-                                  response)}
+        {#'context/bound-database-functions
+         (fn [_] (acquisition-functions populations calls))}
         (fn []
           (let [result (context/acquire-committed-projection! {})]
             (is (= 42 (get-in result [::context/database :t])))
-            (is (= [database database database]
-                   (mapv :seon.db/db (::protocol/members @request))))
-            (is (= [[schema/asserting-transaction-provenance-pattern]
-                    [schema/asserting-transaction-provenance-pattern]
-                    [schema/asserting-transaction-provenance-pattern]]
-                   (mapv ::protocol/arguments
-                         (::protocol/members @request))))))))))
+            (is (every? #(= database (:seon.db/db (second %))) @calls))
+            (is (every? #(= 60000
+                            (:seon.db/max-result-weight (second %)))
+                        @calls))
+            (is (= 3 (count (filter #(= :index-page (first %)) @calls))))
+            (is (= 1 (count (filter #(= :query (first %)) @calls))))))))))
 
-(deftest cap-plus-one-sentinel-refuses-a-silently-partial-population
+(deftest variable-size-source-population-is-bounded-per-row-not-in-aggregate
   (let [database {:db-name "projection-test" :t 42}
-        rows (mapv (fn [i] [(keyword "projection.overflow" (str "k" i))
-                            ":int"])
-                   (range 4097))
-        response
-        (protocol/success
-          {::protocol/results
-           [(protocol/success {:datahike.query/result rows})
-            (protocol/success {:datahike.query/result []})]})]
+        calls (atom [])
+        source (apply str (repeat 2000 "x"))
+        source-rows
+        (mapv (fn [i]
+                [(str "projection.test/f" i) source
+                 {:seon.db/process
+                  {:seon.db.process/id :seon.db.process/boot}}])
+              (range 40))
+        populations
+        {[:seon.schema/key :seon.schema/form] []
+         [:seon.fn/sym :seon.fn/spec] []
+         [:seon.fn/sym :seon.fn/source] source-rows}]
     (with-redefs [context/resolve-head! (fn [_] database)]
       (with-redefs-fn
-        {#'context/writer-call! (fn [_ _] response)}
+        {#'context/bound-database-functions
+         (fn [_] (acquisition-functions populations calls))}
         (fn []
-          (is (= :core-bug
-                 (get-in (context/acquire-committed-projection! {})
-                         [:seon/error :seon.error/kind]))))))))
+          (let [result (context/acquire-committed-projection! {})
+                source-queries
+                (filter
+                  (fn [[operation request]]
+                    (and (= :query operation)
+                         (= :seon.fn/source
+                            (nth (:seon.db/args request) 2))))
+                  @calls)]
+            (is (nil? (:seon/error result)))
+            (is (> (reduce + (map (comp count second) source-rows))
+                   60000))
+            (is (= 40 (count source-queries)))
+            (is (every? #(= 1
+                            (count (first
+                                     (:seon.db/args (second %)))))
+                        source-queries))))))))
+
+(deftest acquisition-failure-names-the-population-and-stage
+  (let [database {:db-name "projection-test" :t 42}
+        calls (atom [])
+        functions
+        (assoc
+          (acquisition-functions
+            {[:seon.schema/key :seon.schema/form] []
+             [:seon.fn/sym :seon.fn/spec] []
+             [:seon.fn/sym :seon.fn/source]
+             [["projection.test/f" "(defn f [] 1)"
+               {:seon.db/process
+                {:seon.db.process/id :seon.db.process/boot}}]]}
+            calls)
+          'query
+          (fn [request]
+            (if (= :seon.fn/source
+                   (nth (:seon.db/args request) 2))
+              {:seon.error/message "bounded source read rejected"
+               :seon.error/kind :resource-limit}
+              [])))]
+    (with-redefs [context/resolve-head! (fn [_] database)]
+      (with-redefs-fn
+        {#'context/bound-database-functions (fn [_] functions)}
+        (fn []
+          (let [error
+                (:seon/error
+                  (context/acquire-committed-projection! {}))]
+            (is (= :query
+                   (get-in error
+                           [:seon.error/data
+                            :seon.host.context/stage])))
+            (is (= :seon.fn/sym
+                   (get-in error
+                           [:seon.error/data
+                            :seon.host.context/identity-attribute])))
+            (is (= :seon.fn/source
+                   (get-in error
+                           [:seon.error/data
+                            :seon.host.context/form-attribute])))
+            (is (= "bounded source read rejected"
+                   (get-in error
+                           [:seon.error/data
+                            :seon.db/error
+                            :seon.error/message])))))))))
 
 (deftest acquisition-does-not-replace-jvm-private-candidates
   (let [before (schema/snapshot-state)
@@ -107,18 +210,18 @@
     (try
       (schema/register! private-key [:map [:projection.test.jvm/id :int]])
       (let [database {:db-name "projection-test" :t 5}
-            response
-            (protocol/success
-              {::protocol/results
-               [(protocol/success
-                  {:datahike.query/result
-                   #{[:projection.test.browser/id ":int"]
-                     [:projection.test.browser/shape
-                      "[:map [:projection.test.browser/id :projection.test.browser/id]]"]}})
-                (protocol/success {:datahike.query/result #{}})]})]
+            calls (atom [])
+            populations
+            {[:seon.schema/key :seon.schema/form]
+             [[:projection.test.browser/id ":int"]
+              [:projection.test.browser/shape
+               "[:map [:projection.test.browser/id :projection.test.browser/id]]"]]
+             [:seon.fn/sym :seon.fn/spec] []
+             [:seon.fn/sym :seon.fn/source] []}]
         (with-redefs [context/resolve-head! (fn [_] database)]
           (with-redefs-fn
-            {#'context/writer-call! (fn [_ _] response)}
+            {#'context/bound-database-functions
+             (fn [_] (acquisition-functions populations calls))}
             (fn []
               (let [result (context/acquire-committed-projection! {})]
                 (is (schema/valid-candidate-value?

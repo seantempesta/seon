@@ -423,7 +423,16 @@
                       nil
                       (catch :default error error))]
           (is (= :seon.schema/invalid-schema
-                 (:seon.schema/error (ex-data error))))))
+                 (:seon.schema/error (ex-data error))))
+          (is (= parent (:seon.schema/key (ex-data error))))
+          (is (= child
+                 (:seon.schema/missing-reference (ex-data error))))
+          (is (= "schematest.forward"
+                 (:seon.schema/missing-reference-namespace
+                   (ex-data error))))
+          (is (str/includes?
+                (ex-message error)
+                "Missing schema reference :schematest.forward/child"))))
       (finally
         (schema/restore-state! before)))))
 

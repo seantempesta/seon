@@ -82,12 +82,23 @@
                   [[:projection.test/id ":int"]
                    [:projection.test/id ":string"]]
                   :seon.schema/function-contract-rows []})))
-  (is (thrown? clojure.lang.ExceptionInfo
-               (schema/projection-from-rows
-                 {:seon.schema/schema-rows
-                  [[:projection.test/shape
-                    "[:map [:projection.test/missing :projection.test/missing]]"]]
-                  :seon.schema/function-contract-rows []}))))
+  (let [error
+        (try
+          (schema/projection-from-rows
+            {:seon.schema/schema-rows
+             [[:projection.test/shape
+               "[:map [:projection.test/missing :projection.test/missing]]"]]
+             :seon.schema/function-contract-rows []})
+          nil
+          (catch clojure.lang.ExceptionInfo error error))]
+    (is (= :projection.test/shape
+           (:seon.schema/key (ex-data error))))
+    (is (= :projection.test/missing
+           (:seon.schema/missing-reference (ex-data error))))
+    (is (= "projection.test"
+           (:seon.schema/missing-reference-namespace (ex-data error))))
+    (is (re-find #"Missing schema reference :projection.test/missing"
+                 (ex-message error)))))
 
 (deftest missing-provenance-fails-closed-as-agent-authored
   (let [projection

@@ -212,6 +212,18 @@
       (into [head (assoc props :seon.entity/id-attr id-attr)] body))
     v))
 
+(defn- missing-schema-reference
+  [error]
+  (loop [cause error]
+    (when cause
+      (let [{:keys [type data]} (ex-data cause)
+            missing (:schema data)]
+        (if (and (= :malli.core/invalid-schema type)
+                 (or (keyword? missing) (symbol? missing))
+                 (namespace missing))
+          missing
+          (recur (ex-cause cause)))))))
+
 (defn assert-compilable-schema!
   "Projection-build gate: reject invalid Malli forms before a candidate
    population can be admitted. Compiles `k` against the complete `schemas`
@@ -230,21 +242,30 @@
       (m/schema k (assoc compile-options :registry registry)))
     nil
     (catch #?(:clj Exception :cljs :default) e
-      (throw (ex-info
-               (str "schema/register! " k ": " (pr-str v)
-                    " is not a valid Malli schema (" (ex-message e) "). "
-                    "Common storable attr types: :string :int :double "
-                    ":float :boolean :keyword :inst :uuid :symbol "
-                    ":seon.db/ref, [:enum :a :b], or a container "
-                    "[:vector <type>] / [:set <type>]. (:number is NOT "
-                    "a type — use :int or :double.) If the form "
-                    "references another schema keyword, register that "
-                    "keyword in the same admitted schema population.")
-               {:seon.schema/error :seon.schema/invalid-schema
-                :seon.schema/key   k
-                :seon.schema/definition v
-                :seon.error/kind   :user-input}
-               e))))))
+      (let [missing (missing-schema-reference e)
+            missing-ns (some-> missing namespace)]
+        (throw (ex-info
+                 (str "schema/register! " k ": " (pr-str v)
+                      " is not a valid Malli schema (" (ex-message e) "). "
+                      (when missing
+                        (str "Missing schema reference " missing
+                             " from namespace " missing-ns ". "))
+                      "Common storable attr types: :string :int :double "
+                      ":float :boolean :keyword :inst :uuid :symbol "
+                      ":seon.db/ref, [:enum :a :b], or a container "
+                      "[:vector <type>] / [:set <type>]. (:number is NOT "
+                      "a type — use :int or :double.) If the form "
+                      "references another schema keyword, register that "
+                      "keyword in the same admitted schema population.")
+                 (cond-> {:seon.schema/error :seon.schema/invalid-schema
+                          :seon.schema/key   k
+                          :seon.schema/definition v
+                          :seon.error/kind   :user-input}
+                   missing
+                   (assoc :seon.schema/missing-reference missing
+                          :seon.schema/missing-reference-namespace
+                          missing-ns))
+                 e)))))))
 
 (defn assert-non-nilable-value-schema!
   "Projection-build gate: reject a top-level nilable value schema whose inner
