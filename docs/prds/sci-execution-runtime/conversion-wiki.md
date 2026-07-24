@@ -1033,6 +1033,13 @@ the anchor stays the state ledger.
   initialization or embedding backfill while the marker is `in-progress`. The
   final page first proves every predecessor receipt, removes stale boot-owned
   program identities in bounded transactions, then commits `complete`.
+- **A bare file-database ensure is open-existing, never create-if-absent.**
+  Derive creation authority only from writer startup or an initialization
+  page, then let the registry's one open/create choke point call Datahike's
+  `database-exists?` before creating a parent directory or store. A missing
+  database returns the protocol's not-found value; a live logical route also
+  rejects a different backend path (`src/seon/db/{writer,registry}.clj`,
+  `d0a73db8e`).
 - **No-op pages still need receipts.** Attribute declaration pages can already
   be converged, but their ordinal is still part of the restart proof. Commit an
   empty domain transaction with the normal protocol receipt rather than

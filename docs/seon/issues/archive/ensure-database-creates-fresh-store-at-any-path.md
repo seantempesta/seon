@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, database, architecture]
 ---
@@ -47,3 +47,21 @@ The U1 host mitigates on its side: `seon.host.context` sends ensure only
 with explicitly configured backend/path (never guessed), and only after
 a not-found head resolution. That narrows the host's exposure but does
 not remove the writer-side hazard for other clients.
+
+## Resolution
+
+Resolved on 2026-07-23 by `d0a73db8e`. The writer now derives explicit
+file-database creation authority only from its startup path or a supplied
+initialization page. The registry's one open/create choke point calls
+Datahike's `database-exists?` first and returns
+`:seon.db.protocol.error/not-found` before creating a parent directory or
+store when that authority is absent. The existing logical-route validation
+continues to reject a known database name whose backend path changes.
+
+Recurring proof lives in
+`seon.db.writer-initialization-test/bare-file-ensure-refuses-an-absent-store`
+and
+`seon.db.writer-initialization-test/bare-file-ensure-refuses-a-known-name-at-another-path`.
+The focused writer-initialization gate passed 14 tests / 83 assertions and
+the registry lifecycle gate passed 23 tests / 141 assertions; the captured
+run is `tmp/orchestrator/ensurepath-gate.log`.

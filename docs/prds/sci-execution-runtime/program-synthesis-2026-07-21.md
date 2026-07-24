@@ -1116,6 +1116,11 @@ MORNING ITEMS (accumulating):
   creation) + hosterr (host-session errors vanish silently) — both
   disjoint from the wave; next refills from the ranked list as
   slots free.
+- FIX-TONIGHT ensurepath LANDED (`d0a73db8e`): external bare file
+  ensure is open-existing only; absent stores return not-found before
+  filesystem creation, and known logical routes reject path changes.
+  Focused writer initialization 14/83 + registry lifecycle 23/141
+  green; blocker issue archived with recurring proof.
 - BN-5/10 STOPPED CORRECTLY at the overlap gate (its consumers =
   BN-1's live files run.cljs/serve.cljs); requeues on BN-1's commit;
   BN-1 (claim-epoch) is the wave's critical path. WATCH ITEM: tree
@@ -1133,7 +1138,7 @@ MORNING ITEMS (accumulating):
   rerun, not eight partial ones).
 - SEAM SWEEP ACCEPTED + BATCH WAVE DISPATCHED (research/
   integration-seam-sweep-2026-07-23.md: 11 breaks-now + 2 suspicious
-  + 2 breaks-on-growth beyond the chain's 7; four consumer groups
+  and 2 breaks-on-growth beyond the chain's 7; four consumer groups
   explain 18 of the unmasked reds). WAVE (all session-resumes with
   owned files + protected maps): cljsreds session → BN-1 claim-epoch
   production callers (4 sites silently failing the CAS fence — the

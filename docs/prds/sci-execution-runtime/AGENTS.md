@@ -49,9 +49,11 @@ owner and deleted spec instead of building it — that is the bar).
 1. Writer databases release when their LAST connection closes — hold ONE
    retained channel; never per-call reconnect (`seon.host.context` does
    this correctly; copy it).
-2. `ensure-database` with a wrong path SILENTLY CREATES a fresh store
-   (open issue `ensure-database-creates-fresh-store-at-any-path`) —
-   always take store paths from configuration, never guess.
+2. External bare `ensure-database` is open-existing only for a file database;
+   creation requires an initialization page. The writer checks Datahike's
+   `database-exists?` before any parent/store creation, and a live logical
+   route rejects a different backend path. Still take store paths from
+   configuration, never guess (`d0a73db8e`).
 3. Bun does not carry AsyncLocalStorage into process-level
    unhandledRejection (commit `6c9bfe83`) — on the pod side, attach
    rejection handlers to the owning Promise, never rely on ambient scope

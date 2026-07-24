@@ -10,7 +10,7 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (42)
+## Blocker (41)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -55,7 +55,6 @@ See `README.md` for the convention.
 | [Value drill has no total work bounds](value-drill-has-no-total-work-bounds.md) | blocker | UI |
 | [Value-drill result literals failed boot schema admission](value-drill-result-literals-failed-boot-schema-admission.md) | blocker | Core |
 | [Writer run-readiness! busy-spins when a ready source has no runtime](writer-run-readiness-busy-spins-without-runtime.md) | blocker | Core |
-| [ensure-database silently creates a fresh store at any requested path](ensure-database-creates-fresh-store-at-any-path.md) | blocker | Core |
 
 ## Friction (71)
 
