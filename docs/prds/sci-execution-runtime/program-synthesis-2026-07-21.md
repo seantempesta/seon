@@ -49,6 +49,25 @@ parallel portfolio remains u9s0a + containment + noroots; the next
 spine refill is S4 startgate only after these S3 live numbers land.
 Final graduation remains U12's 100-agent kill/restart demonstration.
 
+U9 S0a SOURCE INTEGRATED (09:09; live proof blocked on the R45
+publisher): `e74cae74a` moves `render-agent-view!` into
+`seon.agent.ctx.driver`, calls it directly from the Datastar feed at
+the feed's exact immutable database value, resolves trusted renderers
+in the pod, and sends only authored renderer leaves through
+`prepare-invocations!` plus the guarded host door. The dying
+`seon.execution.runtime/render-agent-view!` compiled-function entry is
+gone. Focused proofs are green: driver 5/30, Datastar 18/84, and UI
+projection 1/4. The required real-agent feed gate has NOT run:
+`u9s0a` remains down because the coordinated canonical rebuild still
+fails its first client flush in the page-plan hook
+(`tmp/orchestrator/r45s3-gate.log`; watcher generations
+`cb379bd6-cf41-438c-b79c-36ba8c719a76` and
+`2785c268-f8a8-4810-957d-62a0ae756278`). Do not start U9 S1 or the
+web-UI refill until an admitted artifact opens `u9s0a` and a real
+`/agent/{id}` feed morphs without `execution child did not become
+ready`; then close the cluster and append that proof to
+`tmp/orchestrator/u9s0a-gate.log`.
+
 Orchestrator review note (08:25): 170d97862 verified computed-rule
 (capability manifest → namespaces, no hand list). 60d09ef38 flagged
 PROVISIONAL: `no-dispatch-reply?` bypasses the planner instead of
