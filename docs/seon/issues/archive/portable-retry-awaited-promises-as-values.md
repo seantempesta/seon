@@ -2,7 +2,7 @@
 type: issue
 status: resolved
 severity: blocker
-tags: [issue, runtime, clojurescript, portability]
+tags: [issue, runtime]
 ---
 
 # Portable retry awaited Promises as values
@@ -15,5 +15,7 @@ stopped after its first attempt.
 
 Resolved on 2026-07-23 by making the two platform edges explicit:
 the JVM invokes the synchronous thunk and sleep directly, while CLJS uses its
-native async `await` transform. The retry and DiffusionGemma regressions plus
-the complete CLJS checkpoint own the recurring proof.
+native async `await` transform. The CLJS sleep Promise now explicitly resolves
+`true`, matching the interruptible boolean contract instead of returning nil
+after a successful timer. The retry and DiffusionGemma regressions plus the
+complete CLJS checkpoint own the recurring proof.

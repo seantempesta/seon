@@ -1225,3 +1225,34 @@ the variable-weight values they select.
   the later reload test. Preserve this order of falsifiers: tail, namespace,
   exact selector, then exact-var halves only when namespace output has no
   per-test start marker.
+
+## Portable async macro resolution scar (2026-07-23)
+
+- **A same-namespace CLJ identity macro can erase CLJS `await`.** A `.cljc`
+  namespace that defines `(defmacro await [value] value)` for its synchronous
+  JVM branch also exposes that macro while compiling the CLJS branch. The
+  apparent `(await (thunk))` then returns the Promise itself, so value
+  predicates inspect a Promise and retry loops silently stop after one
+  attempt. Once the Promise is honestly awaited, its resolved value also
+  matters: an interruptible sleep contract returning boolean must explicitly
+  resolve `true`; a bare timer callback resolves `nil` and looks interrupted.
+  Keep the platform choice at each async leaf call:
+  `#?(:clj (thunk) :cljs (await (thunk)))`; never shadow the CLJS async
+  transform with a portable identity macro (`src/seon/retry.cljc`).
+
+## Computed cold-boot schema population scar (2026-07-23)
+
+- **A computed inventory is only as complete as its persisted-entity
+  declarations.** Canonical database attributes derive from entries of maps
+  marked `:seon.db/entity true` plus persistence facets on standalone
+  attributes. Component children, transaction roots, and optional persisted
+  fields are still entities and attributes even when an API response schema
+  resembles them. Declare those persisted shapes at their owners; never add a
+  fallback attribute list to boot.
+- **Parity cannot compare two names for the same derivation.** The old
+  initialization assertion compared its attribute value to
+  `agent-bootstrap-attrs`, which was the exact value used to construct it, and
+  spot-checked only one deleted-list member. Preserve the removed cold-boot
+  contract as test evidence and assert that the computed population is its
+  superset. Also assert a persisted declaration that the old list omitted, so
+  the regression proves computation can grow beyond frozen history.

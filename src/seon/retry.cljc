@@ -27,10 +27,7 @@
    FUTURE (not built — `again` also has it): a circuit-breaker
    (consecutive-failure trip + half-open probe) would compose as another
    manipulator; add it here when a caller needs it."
-  #?(:clj (:refer-clojure :exclude [await]))
   (:require [seon.schema :as schema]))
-
-#?(:clj (defmacro await [value] value))
 
 ;;; ============================================================
 ;;; STRATEGY shape — a (possibly infinite) seq of delays in ms. Specced
@@ -148,7 +145,9 @@
          (.interrupt (Thread/currentThread))
          false))
      :cljs
-     (js/Promise. (fn [resolve] (js/setTimeout resolve ms)))))
+     (js/Promise.
+      (fn [resolve]
+        (js/setTimeout #(resolve true) ms)))))
 
 (schema/register! :seon.retry/with-retry-request
   [:map
@@ -190,7 +189,8 @@
   [{:seon.retry/keys [thunk strategy retry? override on-retry]}]
   (loop [delays  (seq strategy)
          retries 0]
-    (let [result (await (thunk))]
+    (let [result #?(:clj (thunk)
+                    :cljs (await (thunk)))]
       (if (or (nil? delays) (not (retry? result)))
         {:seon.retry/result result :seon.retry/retries retries}
         (let [wait (max 0 (or (and override (override result))
@@ -199,7 +199,8 @@
             (on-retry {:seon.retry/attempt  (inc retries)
                        :seon.retry/delay-ms wait
                        :seon.retry/result   result}))
-          (let [continued? (await (sleep! wait))]
+          (let [continued? #?(:clj (sleep! wait)
+                              :cljs (await (sleep! wait)))]
             (if continued?
               (recur (next delays) (inc retries))
               {:seon.retry/result result
