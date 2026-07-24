@@ -33,6 +33,32 @@ file — that is the summary you read back.
 For a read-only investigation instead, swap that one flag for
 `-s read-only -c approval_policy=never`.
 
+## Launching under the Claude Code harness — tracked, never nohup
+
+When the orchestrator is a Claude Code session, launch every lane as a
+harness-tracked background command: run the plain `codex exec ...` line
+through the Bash tool with `run_in_background: true` — **no `nohup`, no
+trailing `&`**. Verified 2026-07-24 (probe lane `bmxosu25m`): the lane
+appears in the user's background-tasks panel under the Bash call's
+description, keeps writing its `-o` summary and stdout log exactly as
+before, and the harness re-invokes the orchestrator automatically when
+the process exits.
+
+Why this is the rule: `nohup ... &` detaches the process from the
+harness — the user's UI shows nothing running, the orchestrator gets no
+completion signal, and every session ends up hand-rolling
+sleep-and-poll watcher loops to compensate (2026-07-24 morning: four
+detached lanes, an invisible fleet, and an owner asking "what are you
+waiting for?"). Tracked launches delete that whole failure class.
+
+Mechanics that still apply unchanged: `< /dev/null` (stdin gotcha
+below), `-o` summary files, per-run stdout redirect into
+`tmp/orchestrator/<lane>-stdout.log`, and independent verification of
+the diff. Give each Bash call a description naming the lane (that
+string is what the user's panel shows). Detached `nohup` remains
+acceptable only when a lane must survive the orchestrator session
+itself dying — the rare case, not the default.
+
 ## CRITICAL gotcha — always redirect stdin
 
 `codex exec` reads stdin whenever stdin is not a TTY and **blocks until EOF**.

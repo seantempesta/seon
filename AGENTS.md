@@ -251,7 +251,11 @@ The top-level Fable orchestrator designs, grounds specs, reviews diffs,
 rules on stops, and runs serial integration gates; implementation goes to
 codex sol lanes. Haiku is only for quick reads. Never haiku for coding.
 Codex uses its configured coding model—Claude aliases are not portable
-model names.
+model names. Launch codex lanes harness-tracked (Bash
+`run_in_background`, never `nohup ... &`) so they surface in the user's
+task panel and completion re-invokes the orchestrator — mechanics in
+`docs/seon/reference/driving-codex-agents.md` §"Launching under the
+Claude Code harness".
 
 For research, use one agent with the complete relevant context rather than many
 agents with slivers. Independent source domains may run in parallel, but one
