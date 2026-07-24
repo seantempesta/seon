@@ -443,6 +443,12 @@ def wait_group_absent(process_group: int) -> bool:
             os.killpg(process_group, 0)
         except ProcessLookupError:
             return True
+        except PermissionError:
+            # macOS can report EPERM briefly while the just-killed session is
+            # being reaped.  It is not evidence that the group is absent, so
+            # retain the existing bounded observation and publish only after
+            # the kernel reports ESRCH.
+            pass
         time.sleep(0.01)
     return False
 

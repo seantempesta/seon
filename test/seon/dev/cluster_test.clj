@@ -80,6 +80,16 @@
                    (cluster/request {::cluster/configuration configuration
                                      ::cluster/name invalid}))))))
 
+(deftest default-name-keeps-the-owning-writer-and-database-route
+  (let [configuration (config/load! (System/getProperty "user.dir"))
+        name (:seon.dev.config/cluster-name configuration)
+        request (cluster/request {::cluster/configuration configuration
+                                  ::cluster/name name})]
+    (is (= name (::cluster/name request)))
+    (is (= (:seon.dev.config/launch-descriptor configuration)
+           (:seon.dev.config/launch-descriptor
+            (::cluster/target-configuration request))))))
+
 (deftest package-clusters-live-in-operator-state-not-the-immutable-release
   (let [source (::cluster/configuration (target-request))
         configuration

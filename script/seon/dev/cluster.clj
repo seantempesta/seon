@@ -52,7 +52,11 @@
   {:malli/schema [:=> [:cat ::target-request] ::request]}
   [{::keys [configuration name] :as target}]
   (validate! ::target-request target "The cluster request is invalid.")
-  (let [cluster-base
+  (if (= name (:seon.dev.config/cluster-name configuration))
+    {::configuration configuration
+     ::target-configuration (config/select-manifest configuration nil)
+     ::name name}
+    (let [cluster-base
         (fs/parent (:seon.dev.config/cluster-dir configuration))
         state-root (fs/parent (fs/parent cluster-base))
         source (:seon.dev.config/launch-descriptor configuration)
@@ -75,7 +79,7 @@
      (-> configuration
          (config/select-launch-descriptor descriptor)
          (config/select-manifest nil))
-     ::name name}))
+     ::name name})))
 
 (defn- manifest!
   [configuration]
@@ -235,10 +239,24 @@
   {:malli/schema [:=> [:cat ::request] ::apply-result]}
   [{::keys [configuration target-configuration] :as request}]
   (validate! ::request request "The cluster apply request is invalid.")
-  (state/with-lock
-   configuration :cluster 600000
-   (fn []
-     (let [manifest (current-manifest! configuration)
+  (process/with-startup-ownership
+   target-configuration
+   (fn [acquire-owned!]
+     (state/with-lock
+      configuration :cluster 600000
+      (fn []
+        (let [manifest (current-manifest! configuration)
+              writer (get (process/specs target-configuration manifest)
+                          process/writer-id)
+              direct-writer?
+              (= (:seon.dev.config/process-dir configuration)
+                 (:seon.dev.config/process-dir target-configuration))
+              _ (when direct-writer?
+                  (process/ensure!
+                   target-configuration writer
+                   (fn [id acquire!]
+                     (acquire-owned! id acquire!
+                                     #(process/stop! target-configuration id)))))
            pod (get (process/specs target-configuration manifest)
                     process/pod-id)
            _ (require-apply-readiness! target-configuration manifest pod)
@@ -263,7 +281,7 @@
                       :cmd argv})
            result (read-apply-result! result-path process-result)]
        (config/publish-applied-manifest! target-configuration)
-       result))))
+       result))))))
 
 (defn- stop-under-lock!
   [target-configuration operation]
