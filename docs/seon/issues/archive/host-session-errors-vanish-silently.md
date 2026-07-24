@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, agent, architecture, database]
 ---
@@ -37,3 +37,18 @@ values at this boundary; a silent close is the violation.
   the fake writer by killing it between sessions).
 - The host process logs one line per session terminated by a Throwable.
 - No behavior change for healthy sessions.
+
+## Resolution
+
+Resolved on 2026-07-23 by `d1e6612fe`. `accept-startup!` now consumes the
+database leaf's canonical flat error value and sends its message through the
+existing bounded startup error frame. A non-timeout session Throwable still
+records one core fault and now also emits one structured error log event.
+
+Recurring proof lives in `seon.host-conformance-writer-test`: the fake writer
+is stopped between sessions, the next session receives a keyed startup error
+frame before EOF, the writer is restarted, and a following healthy session
+receives READY. The malformed-frame regression asserts one persisted core
+fault and exactly one keyed error log event. The focused gate passed 36 tests
+and 198 assertions; its full transcript is
+`tmp/orchestrator/hosterr-gate.log`.

@@ -1132,6 +1132,15 @@ MORNING ITEMS (accumulating):
   creation) + hosterr (host-session errors vanish silently) — both
   disjoint from the wave; next refills from the ranked list as
   slots free.
+- HOSTERR FIXED+ARCHIVED (`d1e6612fe`): host startup now recognizes the
+  database leaf's canonical flat error value and sends the existing bounded
+  startup error frame before EOF; non-timeout session Throwables retain their
+  core-fault datom and emit one structured error log event. The real fake
+  writer is stopped and restarted between sessions in the recurring
+  conformance proof; 36 tests / 198 assertions green
+  (`tmp/orchestrator/hosterr-gate.log`). The adjacent projection fake now
+  recognizes function-source rows, restoring the suite's current three-member
+  acquisition contract.
 - FIX-TONIGHT ensurepath LANDED (`d0a73db8e`): external bare file
   ensure is open-existing only; absent stores return not-found before
   filesystem creation, and known logical routes reject path changes.

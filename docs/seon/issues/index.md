@@ -56,7 +56,7 @@ See `README.md` for the convention.
 | [Value-drill result literals failed boot schema admission](value-drill-result-literals-failed-boot-schema-admission.md) | blocker | Core |
 | [Writer run-readiness! busy-spins when a ready source has no runtime](writer-run-readiness-busy-spins-without-runtime.md) | blocker | Core |
 
-## Friction (71)
+## Friction (70)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -88,7 +88,6 @@ See `README.md` for the convention.
 | [Fresh boot takes 271s, re-deriving state the build already computed](fresh-boot-271s-rederives-build-computed-state.md) | friction | general |
 | [Give Inspect live callers an ownership-fenced cluster lease](inspect-live-cluster-caller-drift.md) | friction | agent |
 | [Give root a dedicated system layout](root-page-is-an-ordinary-agent-layout.md) | friction | UI |
-| [Host session errors vanish silently](host-session-errors-vanish-silently.md) | friction | agent |
 | [Include new CLJS namespaces in changed-test runtime artifacts](changed-test-new-cljs-namespace-misses-runtime-file.md) | friction | Core |
 | [Inspect product snapshot assumes nonexistent evidence](inspect-product-snapshot-assumes-nonexistent-evidence.md) | friction | agent |
 | [Installed schema map misclassified as database error](installed-schema-map-misclassified-as-database-error.md) | friction | agent |

@@ -1309,3 +1309,16 @@ the variable-weight values they select.
   `:optimize-prepare` and `:flush`. Carry the exact pre-optimization program
   source text through the existing hook state with its derived rows, so the
   digest guard binds one coherent build transaction.
+
+## Error boundary shape scar (2026-07-23)
+
+- **A retired nested error check silently turns a flat failure into success
+  data.** The database leaf returns canonical flat values with
+  `:seon.error/message`, but host startup still checked the former
+  `{:seon/error {...}}` envelope and entered healthy-session setup. At every
+  boundary, recognize the current producer's exact error keys and route the
+  value through the existing consumer error frame; do not translate through a
+  second error shape. Prove transport failure with a real retained session
+  severed between calls, then assert error keys before EOF and a healthy
+  reconnect (`src/seon/host.clj`,
+  `test/seon/host_conformance_writer_test.clj`).
