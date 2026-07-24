@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, web, runtime]
 ---
@@ -25,6 +25,18 @@ At 2026-07-24T05:31:15.736Z, the `/agents/run` catch logged a real
 `:malli.core/invalid-output` from `seon.ai/config-pull-pattern`. At basis
 transaction `536871857`, the core-fault count remained four and a query for
 core-fault datoms after `536871841` returned empty.
+
+Commit `762424f91` routes the terminal catch through
+`seon.error/record!` with `:seon.error/fault :core` before logging and
+constructing the HTTP 500 response.
+
+Focused proof exercises the real injected persistence hook: the caught
+rejection produced exactly one core-fault transaction projection before the
+response assertions. `bin/test-cljs
+--test=seon.web.serve-test/agent-run-core-fault-persists-before-http-500`
+passed 1 test / 4 assertions with zero failures/errors. The full transcript is
+`tmp/orchestrator/faultdatom-gate.log`. Per lane constraint, no cluster was
+started.
 
 Without a restart, all five processes retained their generations,
 `/_seon/ready` returned HTTP 200, `/` returned HTTP 200, and a subsequent
