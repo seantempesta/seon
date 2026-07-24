@@ -4,16 +4,20 @@
             [clojure.java.io :as io]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
+            [seon.config.resolve :as config.resolve]
             [seon.dev.program-inventory :as program-inventory])
   (:import [java.io File]
            [java.nio.charset StandardCharsets]
            [java.nio.file CopyOption DirectoryNotEmptyException Files
             StandardCopyOption]
-           [java.security MessageDigest]))
+           [java.security MessageDigest]
+           [java.time ZoneId]))
 
 (def ^:private program-row-marker "SEON_PROGRAM_ROWS_EDN ")
+(def ^:private page-plan-marker "SEON_PAGE_PLAN_EDN ")
 (def ^:private prepared-program-rows ::prepared-program-rows)
 (def ^:private prepared-program-sources ::prepared-program-sources)
+(def ^:private prepared-page-plans ::prepared-page-plans)
 (def ^:private shadow-node-devtools-client
   'shadow.cljs.devtools.client.node)
 
@@ -187,11 +191,11 @@
             resource-id))
         (:sources state)))
 
-(defn- program-row-build-js []
+(defn- program-row-build-js [config-manifest-digest page-rows]
   (str
+   "var seon$program$manifest = seon.config.load_manifest();\n"
    "var seon$program$configuration = "
-   "seon.config.resolve_config_singleton"
-   "(cljs.core.PersistentArrayMap.EMPTY);\n"
+   "seon.config.resolve_config_singleton(seon$program$manifest);\n"
    "var seon$program$raw$rows = cljs.core.concat("
    "seon.client.index_core_BANG_(seon$program$configuration),"
    "seon.client.index_schemas());\n"
@@ -203,8 +207,46 @@
    "cljs.core.dissoc,row,"
    "seon.client.compiled_program_wall_clock_attrs);"
    "},seon$program$raw$rows)));\n"
+   "var seon$program$row$text = "
+   "\"{:seon.dev.artifact/program-rows \" + "
+   "cljs.core.pr_str(seon$program$rows) + \"}\\n\";\n"
+   "var seon$program$row$digest = require(\"crypto\")"
+   ".createHash(\"sha256\").update(seon$program$row$text,\"utf8\")"
+   ".digest(\"hex\");\n"
+   "var seon$page$plan = seon.client.build_page_plan("
+   "cljs.core.PersistentArrayMap.createAsIfByAssoc(["
+   "cljs.core.keyword(\"seon.db/program\"),seon$program$rows,"
+   "cljs.core.keyword(\"seon.execution/artifact-digest\"),"
+   "seon$program$row$digest,"
+   "cljs.core.keyword(\"seon.db.initialization/config-manifest-digest\"),"
+   (pr-str config-manifest-digest) ","
+   "cljs.core.keyword(\"seon.db.initialization/page-rows\"),"
+   page-rows "]));\n"
    "process.stdout.write(\"\\n" program-row-marker "\" + "
-   "cljs.core.pr_str(seon$program$rows) + \"\\n\");\n"))
+   "cljs.core.pr_str(seon$program$rows) + \"\\n\");\n"
+   "process.stdout.write(\"\\n" page-plan-marker "\" + "
+   "cljs.core.pr_str(seon$page$plan) + \"\\n\");\n"))
+
+(defn- resolved-build-configuration [state]
+  (let [root (canonical-file (io/file ".") (:project-dir state))
+        environment
+        (cond-> (into {} (System/getenv))
+          (str/blank? (System/getenv "SEON_HOST_TIMEZONE"))
+          (assoc "SEON_HOST_TIMEZONE" (str (ZoneId/systemDefault))))
+        configured (get environment "SEON_CONFIG")
+        selected (canonical-file root (or configured "config/system.edn"))
+        manifest (config.resolve/read-manifest
+                  (.getCanonicalPath ^File selected) environment)
+        manifest-text (pr-str manifest)]
+    {:seon.dev.artifact/config-manifest-digest (digest manifest-text)
+     :seon.dev.artifact/config-manifest-path (.getCanonicalPath ^File selected)
+     :seon.dev.artifact/page-rows
+     (get-in manifest
+             [:seon.config/database
+              :seon.config.database.initialization/page-rows]
+             config.resolve/default-initialization-page-rows)
+     :seon.dev.artifact/environment
+     (assoc environment "SEON_CONFIG" (.getCanonicalPath ^File selected))}))
 
 (defn- unoptimized-build-state [state]
   (if-not (= :release (:mode state))
@@ -251,6 +293,7 @@
                 {:seon.dev.artifact/build-id
                  (:shadow.build/build-id state)})))
     (let [parent (.getParentFile ^File target)
+          build-configuration (resolved-build-configuration state)
           build-root (io/file parent
                               (str ".program-rows-build-" (random-uuid)))
           build-output (io/file build-root "program-rows.js")
@@ -261,7 +304,12 @@
               (assoc-in [:node-config :output-to] build-output)
               (assoc-in [:build-options :output-dir] build-root)
               (assoc-in [:build-options :cljs-runtime-path] "cljs-runtime")
-              (assoc-in [:output append-id :js] (program-row-build-js)))]
+              (assoc-in
+               [:output append-id :js]
+               (program-row-build-js
+                (:seon.dev.artifact/config-manifest-digest
+                 build-configuration)
+                (:seon.dev.artifact/page-rows build-configuration))))]
       (try
         (.mkdirs build-root)
         (spit program-source-file program-source-text)
@@ -271,7 +319,7 @@
           ((requiring-resolve 'shadow.build.async/wait-for-pending-tasks!)
            flushed))
         (let [environment
-              (assoc (into {} (System/getenv))
+              (assoc (:seon.dev.artifact/environment build-configuration)
                      "SEON_PROGRAM_SOURCE_PATH"
                      (.getCanonicalPath ^File program-source-file)
                      "SEON_PROGRAM_SOURCE_DIGEST" program-source-digest)
@@ -280,23 +328,45 @@
               (shell/sh executable (.getCanonicalPath build-output)
                         :env environment)
               output (:out result)
-              marker-index (str/last-index-of output program-row-marker)]
+              row-marker-index (str/last-index-of output program-row-marker)
+              page-plan-marker-index (str/last-index-of output page-plan-marker)]
           (when-not (zero? (:exit result))
             (throw
              (ex-info "The compiled program-row derivation failed."
                       {:seon.dev.artifact/exit (:exit result)
                        :seon.dev.artifact/error (str/trim (:err result))})))
-          (when-not marker-index
+          (when-not row-marker-index
             (throw
              (ex-info "The compiled program-row derivation returned no rows."
                       {:seon.dev.artifact/output (str/trim output)
                        :seon.dev.artifact/error (str/trim (:err result))})))
+          (when-not page-plan-marker-index
+            (throw
+             (ex-info "The compiled program-row derivation returned no page plan."
+                      {:seon.dev.artifact/output (str/trim output)
+                       :seon.dev.artifact/error (str/trim (:err result))})))
           (let [program-row-text
                 (str/trim
-                 (subs output (+ marker-index (count program-row-marker))))]
+                 (subs output
+                       (+ row-marker-index (count program-row-marker))
+                       page-plan-marker-index))
+                page-plan-text
+                (str/trim
+                 (subs output
+                       (+ page-plan-marker-index (count page-plan-marker))))
+                program-row-artifact-text
+                (str "{:seon.dev.artifact/program-rows "
+                     program-row-text "}\n")]
             {:seon.dev.artifact/program-rows
              (edn/read-string program-row-text)
-             :seon.dev.artifact/program-row-text program-row-text}))
+             :seon.dev.artifact/program-row-text program-row-text
+             :seon.dev.artifact/program-row-artifact-digest
+             (digest program-row-artifact-text)
+             :seon.dev.artifact/page-plan
+             (edn/read-string page-plan-text)
+             :seon.dev.artifact/page-plan-text page-plan-text
+             :seon.dev.artifact/config-manifest-digest
+             (:seon.dev.artifact/config-manifest-digest build-configuration)}))
         (finally
           (delete-tree! build-root))))))
 
@@ -316,7 +386,7 @@
 
 (defn ^{:shadow.build/stage :optimize-prepare} prepare-program-rows!
   "Prepare exact compiled boot rows before release optimization rewrites code."
-  [state program-source-relative-path relative-path]
+  [state program-source-relative-path relative-path page-plan-relative-path]
   (let [program-source-text (artifact-text state)
         prepared
         (assoc (derive-program-rows
@@ -325,6 +395,7 @@
                (digest program-source-text))]
     (-> state
         (assoc-in [prepared-program-rows relative-path] prepared)
+        (assoc-in [prepared-page-plans page-plan-relative-path] prepared)
         (assoc-in [prepared-program-sources program-source-relative-path]
                   program-source-text))))
 
@@ -368,4 +439,37 @@
     (atomic-spit!
      target
      (str "{:seon.dev.artifact/program-rows " compiled-row-text "}\n"))
+    state))
+
+(defn ^{:shadow.build/stage :flush} publish-page-plan!
+  "Publish the precomputed initialization pages for one exact row artifact."
+  [state program-row-relative-path relative-path]
+  (let [program-row-file (output-file state program-row-relative-path)
+        _ (when-not (.isFile program-row-file)
+            (throw
+             (ex-info "The program-row artifact must publish before its page plan."
+                      {:seon.dev.artifact/path program-row-relative-path})))
+        program-row-digest (digest (slurp program-row-file))
+        prepared (get-in state [prepared-page-plans relative-path])
+        page-plan (:seon.dev.artifact/page-plan prepared)
+        page-plan-text (:seon.dev.artifact/page-plan-text prepared)]
+    (when-not prepared
+      (throw
+       (ex-info "The pre-optimization page plan is absent."
+                {:seon.dev.artifact/path relative-path})))
+    (when-not (= program-row-digest
+                 (:seon.dev.artifact/program-row-artifact-digest prepared))
+      (throw
+       (ex-info "Program rows changed after the page plan was prepared."
+                {:seon.dev.artifact/path program-row-relative-path
+                 :seon.dev.artifact/expected
+                 (:seon.dev.artifact/program-row-artifact-digest prepared)
+                 :seon.dev.artifact/actual program-row-digest})))
+    (when-not (map? page-plan)
+      (throw
+       (ex-info "The compiled boot derivation returned an invalid page plan."
+                {:seon.dev.artifact/value-type (type page-plan)})))
+    (atomic-spit!
+     (output-file state relative-path)
+     (str "{:seon.dev.artifact/page-plan " page-plan-text "}\n"))
     state))

@@ -371,6 +371,7 @@
    :seon.dev.release/runtime-assets-member :seon.release.member/runtime-assets
    :seon.dev.release/program-source-member :seon.release.member/program-source
    :seon.dev.release/program-row-member :seon.release.member/program-row
+   :seon.dev.release/page-plan-member :seon.release.member/page-plan
    :seon.dev.release/client-inventory-member
    :seon.release.member/client-inventory
    :seon.dev.release/execution-inventory-member
@@ -397,6 +398,7 @@
    :seon.release.member/runtime-assets "runtime/web"
    :seon.release.member/program-source "runtime/program-sources.edn"
    :seon.release.member/program-row "runtime/program-rows.edn"
+   :seon.release.member/page-plan "runtime/page-plan.edn"
    :seon.release.member/client-inventory
    "runtime/client/program-inventory.edn"
    :seon.release.member/execution-inventory
@@ -2910,6 +2912,8 @@
               "acme-client" "acme-execution"
               "out-acme/client/program-sources.edn"]]]
       (let [runtime-root (str (fs/path directory (name flavor)))
+            page-plan-relative-path
+            (str (fs/path (fs/parent relative-path) "page-plan.edn"))
             configuration
             (-> (target-config base directory)
                 (assoc :seon.dev.config/artifact-flavor flavor
@@ -2926,12 +2930,19 @@
                    (apply str (repeat 64 "b"))
                    :seon.dev.artifact/program-source-path relative-path
                    :seon.dev.artifact/program-source-digest
-                   (apply str (repeat 64 "a")))
+                   (apply str (repeat 64 "a"))
+                   :seon.dev.artifact/page-plan-path page-plan-relative-path
+                   :seon.dev.artifact/page-plan-digest
+                   (apply str (repeat 64 "f")))
             pod (get (process/specs configuration manifest) process/pod-id)]
         (is (= (str (fs/path runtime-root relative-path))
                (get-in pod [:seon.dev.process/environment
                             "SEON_PROGRAM_SOURCE_PATH"]))
-            (str (name flavor) " uses its admitted manifest path"))))))
+            (str (name flavor) " uses its admitted manifest path"))
+        (is (= (str (fs/path runtime-root page-plan-relative-path))
+               (get-in pod [:seon.dev.process/environment
+                            "SEON_PAGE_PLAN_PATH"]))
+            (str (name flavor) " uses its admitted page-plan path"))))))
 
 (deftest process-specs-reject-changed-bun-executable-bytes
   (let [base (test-config)
@@ -3214,6 +3225,8 @@
         program-source-relative-path "out/client/program-sources.edn"
         program-source-file
         (fs/path runtime-root program-source-relative-path)
+        page-plan-relative-path "out/client/page-plan.edn"
+        page-plan-file (fs/path runtime-root page-plan-relative-path)
         execution-file (fs/path runtime-root "execution/main.js")]
     (try
       (fs/create-dirs (fs/parent bootstrap-file))
@@ -3221,6 +3234,7 @@
       (fs/create-dirs (fs/parent execution-file))
       (spit (str bootstrap-file) "published")
       (spit (str program-source-file) "published-program-source")
+      (spit (str page-plan-file) "published-page-plan")
       (spit (str execution-file) "published-execution")
       (let [selected (target-config configuration directory)
             digest (artifact/digest-paths runtime-root ["out/bootstrap"])
@@ -3233,6 +3247,10 @@
                             program-source-relative-path
                             :seon.dev.artifact/program-source-digest
                             (apply str (repeat 64 "a"))
+                            :seon.dev.artifact/page-plan-path
+                            page-plan-relative-path
+                            :seon.dev.artifact/page-plan-digest
+                            (apply str (repeat 64 "f"))
                             :seon.dev.artifact/bootstrap-digest digest
                             :seon.dev.artifact/execution-output
                             (str execution-file)
@@ -3263,6 +3281,12 @@
         (is (= (apply str (repeat 64 "a"))
                (get-in pod [:seon.dev.process/environment
                             "SEON_PROGRAM_SOURCE_DIGEST"])))
+        (is (= (str page-plan-file)
+               (get-in pod [:seon.dev.process/environment
+                            "SEON_PAGE_PLAN_PATH"])))
+        (is (= (apply str (repeat 64 "f"))
+               (get-in pod [:seon.dev.process/environment
+                            "SEON_PAGE_PLAN_DIGEST"])))
         (is (= (:seon.dev.artifact/application-digest manifest)
                (get-in pod [:seon.dev.process/environment
                             "SEON_APPLICATION_DIGEST"])))
@@ -3667,6 +3691,16 @@
           (is (= (artifact/current-program-source-digest config)
                  (get-in pod [:seon.dev.process/environment
                               "SEON_PROGRAM_SOURCE_DIGEST"])))
+          (is (= (str (fs/path
+                       (fs/parent (:seon.dev.config/program-source config))
+                       "page-plan.edn"))
+                 (get-in pod [:seon.dev.process/environment
+                              "SEON_PAGE_PLAN_PATH"])))
+          (is (= (get (#'process/release-member
+                        manifest :seon.dev.release/page-plan-member)
+                      :seon.dev.release/sha-256)
+                 (get-in pod [:seon.dev.process/environment
+                              "SEON_PAGE_PLAN_DIGEST"])))
           (is (= (artifact/current-execution-digest config)
                  (get-in
                   (edn/read-string

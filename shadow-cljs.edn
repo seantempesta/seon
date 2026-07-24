@@ -60,12 +60,16 @@
    :main             seon.client/-main
    :build-hooks      [[seon.dev.program-artifact/prepare-program-rows!
                        "out/client/program-sources.edn"
-                       "out/client/program-rows.edn"]
+                       "out/client/program-rows.edn"
+                       "out/client/page-plan.edn"]
                       [seon.dev.program-artifact/publish!
                        "out/client/program-sources.edn"]
                       [seon.dev.program-artifact/publish-rows!
                        "out/client/program-sources.edn"
                        "out/client/program-rows.edn"]
+                      [seon.dev.program-artifact/publish-page-plan!
+                       "out/client/program-rows.edn"
+                       "out/client/page-plan.edn"]
                       [seon.dev.program-artifact/publish-inventory!
                        "out/client/program-inventory.edn"]]
    ;; Normal pods ship runtime code, not the platform test graph. Agent-authored
@@ -105,12 +109,16 @@
    :main             seon.client/-main
    :build-hooks      [[seon.dev.program-artifact/prepare-program-rows!
                        "out-acme/client/program-sources.edn"
-                       "out-acme/client/program-rows.edn"]
+                       "out-acme/client/program-rows.edn"
+                       "out-acme/client/page-plan.edn"]
                       [seon.dev.program-artifact/publish!
                        "out-acme/client/program-sources.edn"]
                       [seon.dev.program-artifact/publish-rows!
                        "out-acme/client/program-sources.edn"
                        "out-acme/client/program-rows.edn"]
+                      [seon.dev.program-artifact/publish-page-plan!
+                       "out-acme/client/program-rows.edn"
+                       "out-acme/client/page-plan.edn"]
                       [seon.dev.program-artifact/publish-inventory!
                        "out-acme/client/program-inventory.edn"]]
    ;; `acme.pod` is listed DIRECTLY in :preloads (not only via bin/acme's
@@ -144,12 +152,16 @@
    :main             seon.client/-main
    :build-hooks      [[seon.dev.program-artifact/prepare-program-rows!
                        "out-bench/client/program-sources.edn"
-                       "out-bench/client/program-rows.edn"]
+                       "out-bench/client/program-rows.edn"
+                       "out-bench/client/page-plan.edn"]
                       [seon.dev.program-artifact/publish!
                        "out-bench/client/program-sources.edn"]
                       [seon.dev.program-artifact/publish-rows!
                        "out-bench/client/program-sources.edn"
                        "out-bench/client/program-rows.edn"]
+                      [seon.dev.program-artifact/publish-page-plan!
+                       "out-bench/client/program-rows.edn"
+                       "out-bench/client/page-plan.edn"]
                       [seon.dev.program-artifact/publish-inventory!
                        "out-bench/client/program-inventory.edn"]]
    :devtools         {:enabled  true

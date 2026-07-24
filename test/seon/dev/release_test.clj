@@ -24,6 +24,7 @@
     (spit (str (fs/path root "writer.jar")) "writer")
     (spit (str (fs/path root "program-sources.edn")) "{}")
     (spit (str (fs/path root "program-rows.edn")) "{}")
+    (spit (str (fs/path root "page-plan.edn")) "{}")
     (spit (str (fs/path root "client/main.js")) "pod")
     (spit (str (fs/path root "execution/main.js")) "execution")
     (spit (str (fs/path root "client/program-inventory.edn")) "{}")
@@ -50,6 +51,7 @@
    :seon.release.member/runtime-assets "web"
    :seon.release.member/program-source "program-sources.edn"
    :seon.release.member/program-row "program-rows.edn"
+   :seon.release.member/page-plan "page-plan.edn"
    :seon.release.member/client-inventory "client/program-inventory.edn"
    :seon.release.member/execution-inventory "execution/program-inventory.edn"
    :seon.release.member/babashka "bb"
@@ -84,6 +86,7 @@
    :seon.dev.release/runtime-assets-member :seon.release.member/runtime-assets
    :seon.dev.release/program-source-member :seon.release.member/program-source
    :seon.dev.release/program-row-member :seon.release.member/program-row
+   :seon.dev.release/page-plan-member :seon.release.member/page-plan
    :seon.dev.release/client-inventory-member
    :seon.release.member/client-inventory
    :seon.dev.release/execution-inventory-member
@@ -235,6 +238,7 @@
                ["execution.js" "execution"]
                ["program-sources.edn" "{}"]
                ["program-rows.edn" "{}"]
+               ["page-plan.edn" "{}"]
                ["client-program-inventory.edn" "{}"]
                ["execution-program-inventory.edn" "{}"]
                ["bb" "bb"] ["operator.jar" "operator"]
@@ -269,6 +273,8 @@
               (str (fs/path inputs "program-sources.edn"))
               ::release/program-row
               (str (fs/path inputs "program-rows.edn"))
+              ::release/page-plan
+              (str (fs/path inputs "page-plan.edn"))
               ::release/client-inventory
               (str (fs/path inputs "client-program-inventory.edn"))
               ::release/execution-inventory

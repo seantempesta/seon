@@ -117,11 +117,19 @@
   (let [project (fs/create-temp-dir {:prefix "seon-program-rows-publish-"})
         source-file (fs/path project "src/example/core.cljs")
         row-output (fs/path project "out/client/program-rows.edn")
+        page-plan-output (fs/path project "out/client/page-plan.edn")
         state {:project-dir (.toFile project)
                :sources {:core (source source-file "example/core.cljs")}}
         rows [{:seon.fn/sym "example.core/value"
                :seon.fn/source "(defn value [] 42)"}]
-        compiled-row-text (pr-str rows)]
+        compiled-row-text (pr-str rows)
+        row-artifact-text
+        (str "{:seon.dev.artifact/program-rows " compiled-row-text "}\n")
+        page-plan
+        {:seon.db.initialization/fingerprint "page-plan"
+         :seon.db/initialization-pages
+         [{:seon.db.initialization/page-index 0}]}
+        page-plan-text (pr-str page-plan)]
     (try
       (fs/create-dirs (fs/parent source-file))
       (spit (str source-file) "(ns example.core)\n(defn value [] 42)\n")
@@ -133,12 +141,17 @@
            (is (= (str (fs/canonicalize row-output))
                   (str target)))
            {:seon.dev.artifact/program-rows rows
-            :seon.dev.artifact/program-row-text compiled-row-text})}
+            :seon.dev.artifact/program-row-text compiled-row-text
+            :seon.dev.artifact/program-row-artifact-digest
+            (program-artifact/digest row-artifact-text)
+            :seon.dev.artifact/page-plan page-plan
+            :seon.dev.artifact/page-plan-text page-plan-text})}
         #(let [prepared
                (program-artifact/prepare-program-rows!
                 state
                 "out/client/program-sources.edn"
-                "out/client/program-rows.edn")
+                "out/client/program-rows.edn"
+                "out/client/page-plan.edn")
                changed
                (assoc prepared :sources {})]
            (program-artifact/publish!
@@ -148,15 +161,23 @@
                 (program-artifact/publish-rows!
                  changed
                  "out/client/program-sources.edn"
-                 "out/client/program-rows.edn")))))
+                 "out/client/program-rows.edn")))
+           (is (identical?
+                changed
+                (program-artifact/publish-page-plan!
+                 changed
+                 "out/client/program-rows.edn"
+                 "out/client/page-plan.edn")))))
       (is (= (program-artifact/artifact-text state)
              (slurp (str (fs/path project
                                   "out/client/program-sources.edn")))))
       (is (= {:seon.dev.artifact/program-rows rows}
              (edn/read-string (slurp (str row-output)))))
-      (is (= (str "{:seon.dev.artifact/program-rows "
-                  compiled-row-text
-                  "}\n")
+      (is (= row-artifact-text
              (slurp (str row-output))))
+      (is (= {:seon.dev.artifact/page-plan page-plan}
+             (edn/read-string (slurp (str page-plan-output)))))
+      (is (= (str "{:seon.dev.artifact/page-plan " page-plan-text "}\n")
+             (slurp (str page-plan-output))))
       (is (empty? (fs/glob (fs/parent row-output) ".*.tmp")))
       (finally (fs/delete-tree project)))))

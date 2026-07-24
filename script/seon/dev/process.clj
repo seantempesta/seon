@@ -298,6 +298,11 @@
        (:seon.dev.config/program-source config)
        :seon.dev.artifact/program-source-digest
        (artifact/current-program-source-digest config)
+       :seon.dev.artifact/page-plan-path
+       (str (fs/path (fs/parent (:seon.dev.config/program-source config))
+                     "page-plan.edn"))
+       :seon.dev.artifact/page-plan-digest
+       (member-sha :seon.dev.release/page-plan-member)
        :seon.dev.artifact/application-digest
        (:seon.dev.release/application-sha-256 manifest)
        :seon.dev.artifact/release-manifest-digest
@@ -464,16 +469,31 @@
           (if source-checkout?
             (str (fs/path runtime-root program-source-relative-path))
             program-source-relative-path))
+        page-plan-relative-path
+        (:seon.dev.artifact/page-plan-path manifest)
+        page-plan-digest
+        (:seon.dev.artifact/page-plan-digest manifest)
+        page-plan-path
+        (when (and runtime-root page-plan-relative-path)
+          (if source-checkout?
+            (str (fs/path runtime-root page-plan-relative-path))
+            page-plan-relative-path))
         _ (when-not (apply = (map some? [runtime-root
                                          program-source-relative-path
-                                         program-source-digest]))
+                                         program-source-digest
+                                         page-plan-relative-path
+                                         page-plan-digest]))
             (throw
-             (ex-info "The runtime root and program source must be admitted together."
+             (ex-info "The runtime root and boot sidecars must be admitted together."
                       {:seon.dev.artifact/runtime-root runtime-root
                        :seon.dev.artifact/program-source-path
                        program-source-relative-path
                        :seon.dev.artifact/program-source-digest
-                       program-source-digest})))
+                       program-source-digest
+                       :seon.dev.artifact/page-plan-path
+                       page-plan-relative-path
+                       :seon.dev.artifact/page-plan-digest
+                       page-plan-digest})))
         pod-environment (cond->
                           (assoc
                            environment
@@ -498,7 +518,12 @@
                           (assoc "SEON_PROGRAM_SOURCE_PATH"
                                  program-source-path
                                  "SEON_PROGRAM_SOURCE_DIGEST"
-                                 program-source-digest))
+                                 program-source-digest)
+                          page-plan-path
+                          (assoc "SEON_PAGE_PLAN_PATH"
+                                 page-plan-path
+                                 "SEON_PAGE_PLAN_DIGEST"
+                                 page-plan-digest))
         java (get environment "JAVA_CMD" "java")
         bun-identity
         (select-keys manifest
@@ -904,6 +929,8 @@
                                      "SEON_RUNTIME_ROOT"])
           program-source (get-in spec [:seon.dev.process/environment
                                        "SEON_PROGRAM_SOURCE_PATH"])
+          page-plan (get-in spec [:seon.dev.process/environment
+                                  "SEON_PAGE_PLAN_PATH"])
           execution-output (:seon.dev.process/execution-output spec)
           expected-execution (:seon.dev.process/execution-digest spec)]
       (if (:seon.dev.process/release-manifest-digest spec)
@@ -911,11 +938,16 @@
         ;; checks presence and never repeats package hashing on every probe.
         (and runtime-root (fs/directory? runtime-root)
              execution-output (fs/regular-file? execution-output)
-             program-source (fs/regular-file? program-source))
+             program-source (fs/regular-file? program-source)
+             page-plan (fs/regular-file? page-plan))
         (and runtime-root
              (fs/directory? (fs/path runtime-root "out/bootstrap"))
              execution-output
              (fs/regular-file? execution-output)
+             program-source
+             (fs/regular-file? program-source)
+             page-plan
+             (fs/regular-file? page-plan)
              (try
                (and
                 (= expected
