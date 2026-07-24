@@ -122,8 +122,9 @@
      (str "(require '[clojure.tools.build.api :as b]) "
           "(b/compile-clj {:basis (b/create-basis {:project \"deps.edn\" :aliases [:writer]}) "
           ":class-dir " (pr-str writer-aot-class-dir) " "
-          ":ns-compile " (pr-str (vec (remove writer-aot-excluded-namespaces
-                                                   writer-aot-namespaces))) " "
+          ":ns-compile (quote "
+          (pr-str (vec (remove writer-aot-excluded-namespaces
+                                      writer-aot-namespaces))) ") "
           ":java-cmd " (pr-str writer-java-command) " "
           ":java-opts " (pr-str writer-jvm-options) "})")]
     :out :capture :err :capture}
@@ -175,11 +176,11 @@
   ;; AppCDS records class metadata against this exact jar and JDK. It is a
   ;; build output, never a mutable runtime cache.
   (checked-process!
-   {:command-args (into [writer-java-command
-                         (str "-XX:ArchiveClassesAtExit=" writer-aot-cds-file)]
+   {:command-args (into [writer-java-command]
                         (concat writer-jvm-options
-                                ["-cp" server-uber-file "clojure.main" "-e"
-                                 "(do (require 'seon.db.server) (shutdown-agents))"]))
+                                [(str "-XX:ArchiveClassesAtExit=" writer-aot-cds-file)
+                                 "-cp" server-uber-file "clojure.main" "-e"
+                                 "(do (require 'seon.db.server) (shutdown-agents)"]))
     :out :capture :err :capture}
    "Writer AppCDS archive generation failed")
   writer-aot-cds-file)

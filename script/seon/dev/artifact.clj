@@ -71,6 +71,10 @@
    [:seon.dev.artifact/maintained-dependencies
     [:vector {:min 6 :max 6} maintained-dependency-schema]]
    [:seon.dev.artifact/writer-digest [:re #"[0-9a-f]{64}"]]
+   ;; AppCDS is opt-in until an orchestrator checkpoint proves the paired
+   ;; archive and writer artifact together; existing manifests stay valid.
+   [:seon.dev.artifact/writer-cds-path {:optional true} :string]
+   [:seon.dev.artifact/writer-cds-digest {:optional true} [:re #"[0-9a-f]{64}"]]
    [:seon.dev.artifact/client-digest [:re #"[0-9a-f]{64}"]]
    [:seon.dev.artifact/execution-digest [:re #"[0-9a-f]{64}"]]
    [:seon.dev.artifact/execution-runtime-digest [:re #"[0-9a-f]{64}"]]
