@@ -538,45 +538,54 @@
              (set! agent/message! original-message)
              (done)))))))
 
-(deftest agent-run-core-fault-persists-before-http-500
+(deftest terminal-fault-door-persists-sync-and-async-core-faults
   (async done
-    (let [handler (deref #'serve/handle-agent-run!)
-          batches (atom [])
-          original-db db/db
-          request (js/Request.
-                   "http://127.0.0.1/agents/run"
-                   #js {:method "POST"
-                        :headers #js {"Content-Type" "application/json"}
-                        :body "{\"input\":\"work\"}"})]
-      (set! db/db
-            (fn
-              ([] (js/Promise.reject (js/Error. "injected core fault")))
-              ([_] (js/Promise.reject (js/Error. "injected core fault")))))
+    (let [door (deref #'serve/through-terminal-fault-door)
+          batches (atom [])]
       (error/set-db-hooks!
        {:seon.error/transact!
         (fn [tx-data]
           (swap! batches conj tx-data)
           (js/Promise.resolve {:seon.db/ok? true}))
         :seon.error/branch-head (constantly nil)})
-      (-> (error/expecting-core-fault! #(handler request nil))
+      (->
+       (error/expecting-core-fault!
+        #(js/Promise.all
+          #js [(door "async handler failed"
+                     (fn []
+                       (js/Promise.reject
+                        (js/Error. "injected async core fault"))))
+               (door "sync handler failed"
+                     (fn []
+                       (throw (js/Error. "injected sync core fault"))))]))
           (.then
-           (fn [response]
+           (fn [responses]
              (let [faults (filter #(= :core (:seon.error/fault %))
                                   (mapcat identity @batches))]
-               (is (= 1 (count faults))
-                   "the terminal catch persists exactly one core-fault datom")
-               (is (= "injected core fault"
-                      (:seon.error/message (first faults))))
-               (is (= 500 (.-status response)))
-               (.json response))))
+               (is (= 2 (count faults))
+                   "the one door persists one datom per caught failure")
+               (is (= #{"injected async core fault"
+                        "injected sync core fault"}
+                      (set (map :seon.error/message faults))))
+               (is (every? #(= 500 (.-status %)) (array-seq responses)))
+               (js/Promise.all
+                (into-array (map #(.json %) (array-seq responses)))))))
           (.then
-           (fn [body]
-             (is (= "Error: injected core fault" (aget body "error")))))
+           (fn [bodies]
+             (is (= #{"injected async core fault"
+                      "injected sync core fault"}
+                    (into #{}
+                          (map #(aget % "seon.error/message"))
+                          (array-seq bodies))))
+             (is (= #{"core-bug"}
+                    (into #{}
+                          (map #(aget % "seon.error/kind"))
+                          (array-seq bodies))))))
           (.catch (fn [exception]
-                    (is false (str "agents/run catch rejected: " exception))))
+                    (is false (str "terminal fault door rejected: "
+                                   exception))))
           (.finally
            (fn []
-             (set! db/db original-db)
              (error/set-db-hooks! {})
              (done)))))))
 

@@ -103,6 +103,38 @@
                       "Pragma" "no-cache"
                       "Expires" "0"}}))
 
+(defn- bounded-error-message [value]
+  (let [message (str (or value "Internal server error."))]
+    (subs message 0 (min 1024 (count message)))))
+
+(defn- terminal-core-fault!
+  "Persist one caught handler failure before returning the shared flat 500."
+  [operation raw]
+  (let [recorded (error/record! {:seon.error/raw raw
+                                 :seon.error/fault :core})
+        failure {:seon.error/message
+                 (bounded-error-message (:seon.error/message recorded))
+                 :seon.error/kind
+                 (or (:seon.error/kind recorded) :core-bug)}]
+    (log/error-console! "seon.web.serve" operation recorded)
+    (write-status! nil 500 "application/json; charset=utf-8"
+                   (js/JSON.stringify (clj->js failure)))))
+
+(defn- through-terminal-fault-door
+  "Run one HTTP handler behind the sole terminal core-fault catch."
+  [operation thunk]
+  (try
+    (let [result (thunk)]
+      (if (instance? js/Promise result)
+        (.catch result #(terminal-core-fault! operation %))
+        result))
+    (catch :default error
+      (terminal-core-fault! operation error))))
+
+(defn- terminal-handler [operation handler]
+  (fn [& args]
+    (through-terminal-fault-door operation #(apply handler args))))
+
 (defn- handle-readiness!
   "Report current executable admission; this can turn false after startup."
   ([_req res]
@@ -490,10 +522,7 @@
                  (catch :default e
                    (log/error-console! "seon.web.serve" "/log parse failed" e)
                    (write-status! res 400 "text/plain; charset=utf-8"
-                                  (str "bad log body: " e))))))
-      (.catch (fn [err]
-                (log/error-console! "seon.web.serve" "/log body read failed" err)
-                (write-status! res 500 "text/plain; charset=utf-8" (str err))))))
+                                  (str "bad log body: " e))))))))
 
 (defn- handle-config-apply!
   "Apply one operator-resolved config payload through the live pod.
@@ -592,12 +621,7 @@
                                      result)
                  (write-status! res 500 "text/plain; charset=utf-8"
                                 (:seon.error/message result)))
-               (write-status! res 204 "text/plain; charset=utf-8" ""))))
-          (.catch
-           (fn [error]
-             (log/error-console! "seon.web.serve" "/clear threw" error)
-             (write-status! res 500 "text/plain; charset=utf-8"
-                            (str error))))))))
+               (write-status! res 204 "text/plain; charset=utf-8" ""))))))))
 
 (defn- parse-agent-namespace
   "Parse one optional form field as a ClojureScript namespace symbol."
@@ -666,12 +690,7 @@
                              (if (= :user-input (:seon.error/kind result))
                                422
                                500)
-                             "text/plain; charset=utf-8" message)))))
-      (.catch
-        (fn [err]
-          (log/error-console! "seon.web.serve" "POST /agents failed" err)
-          (write-status! res 500 "text/plain; charset=utf-8"
-                         (str "create agent failed: " err))))))
+                             "text/plain; charset=utf-8" message)))))))
 
 (schema/register! ::ring-request :any)
 
@@ -682,13 +701,15 @@
    the single agent-creation transition above."
   {:malli/schema [:=> [:catn [::ring-request ::ring-request]] :any]}
   [ring-request]
-  (if (admission/available?)
-    (handle-create-agent! (:seon.http/request ring-request) nil)
-    (write-status!
-      nil
-      503 "text/plain; charset=utf-8"
-      (get-in (admission/unavailable)
-              [:seon/error :seon.error/message]))))
+  (through-terminal-fault-door
+   "POST /agents failed"
+   #(if (admission/available?)
+      (handle-create-agent! (:seon.http/request ring-request) nil)
+      (write-status!
+       nil
+       503 "text/plain; charset=utf-8"
+       (get-in (admission/unavailable)
+               [:seon/error :seon.error/message])))))
 
 (defn- handle-complete-agent!
   "POST /agent/<id>/complete — external control: CLOSE the agent's open run
@@ -719,12 +740,7 @@
                    (log/error-console! "seon.web.serve"
                                        "/agent/<id>/complete refused" error)
                    (write-status! res 500 "text/plain; charset=utf-8"
-                                  (str error))))))
-      (.catch (fn [err]
-                (log/error-console! "seon.web.serve"
-                                    "/agent/<id>/complete threw" err)
-                (write-status! res 500 "text/plain; charset=utf-8"
-                               (str "complete failed: " err))))))
+                                  (str error))))))))
 
 ;; ============================================================
 ;; POST /agents/run — the one-shot composition door, built purely from the
@@ -949,18 +965,12 @@
 (defn- handle-operator-processes!
   "Return one demanded snapshot of the parent-owned execution children."
   [_req res]
-  (try
-    (write-status!
-     res 200 "application/json; charset=utf-8"
-     (js/JSON.stringify
-      (clj->js
-       (product-evidence-json-value
-        {:seon.execution.host/processes (execution-host/processes)}))))
-    (catch :default error
-      (write-status!
-       res 500 "application/json; charset=utf-8"
-       (js/JSON.stringify
-        #js {"seon.error/message" (or (.-message error) (str error))})))))
+  (write-status!
+   res 200 "application/json; charset=utf-8"
+   (js/JSON.stringify
+    (clj->js
+     (product-evidence-json-value
+      {:seon.execution.host/processes (execution-host/processes)})))))
 
 (defn- turn-evidence-row
   "Stable external projection of captured turn prompts and raw replies."
@@ -1650,23 +1660,16 @@
                                        :evals      (:evals result)
                                        :elapsed-ms (:elapsed_ms result)})
                    (write-status! res 200 "application/json; charset=utf-8"
-                                  (js/JSON.stringify (clj->js result)))))))
-      (.catch (fn [err]
-                (error/record! {:seon.error/raw err
-                                :seon.error/fault :core})
-                (log/error-console! "seon.web.serve" "/agents/run threw" err)
-                (write-status! res 500 "application/json; charset=utf-8"
-                               (js/JSON.stringify #js {:error (str err)}))))))
+                                  (js/JSON.stringify (clj->js result)))))))))
 
 (defn- handle-chat! [req res]
   ;; Agent-id resolution (audit P1 — 2026-05-24): query param wins,
   ;; else `(db/current-agent-id)`, else 400 — no silent "seon" fallback.
   (let [agent-id (or (query-param req "agent") (db/current-agent-id))]
-    (when-not agent-id
+    (if-not agent-id
       (write-status! res 400 "text/plain; charset=utf-8"
                      "missing 'agent' query param (no agent-id in scope)")
-      (throw (js/Error. "handle-chat!: no agent-id resolved")))
-    (-> (read-body req)
+      (-> (read-body req)
         (.then (fn [body]
                  (let [params (parse-urlencoded body)
                        text   (get params "text")]
@@ -1705,16 +1708,7 @@
                                                           result)
                                       (write-status! res 422 "text/plain; charset=utf-8"
                                                      (str "chat refused: "
-                                                          (:seon.error/message result)))))))
-                         (.catch (fn [err]
-                                   (log/error-console! "seon.web.serve" "/chat message! threw" err)
-                                   (write-status! res 500 "text/plain; charset=utf-8"
-                                                  (str "chat failed: " err)))))))))
-        (.catch (fn [err]
-                  (log/error-console! "seon.web.serve" "/chat body read failed" err)
-                  (try
-                    (write-status! res 500 "text/plain; charset=utf-8" (str err))
-                    (catch :default _ nil)))))))
+                                                          (:seon.error/message result))))))))))))))))
 
 ;; ============================================================
 ;; POST /stop — the graceful STOP: PAUSE the agent's open run (resumable).
@@ -1748,12 +1742,7 @@
                  (log/error-console! "seon.web.serve" "/stop refused" result)
                  (write-status! res 422 "text/plain; charset=utf-8"
                                 (:seon.error/message result)))
-               (write-status! res 204 "text/plain; charset=utf-8" ""))))
-          (.catch
-           (fn [error]
-             (log/error-console! "seon.web.serve" "/stop threw" error)
-             (write-status! res 500 "text/plain; charset=utf-8"
-                            (str error))))))))
+               (write-status! res 204 "text/plain; charset=utf-8" ""))))))))
 
 ;; ============================================================
 ;; POST /resume — wake a PAUSED run. `lifecycle/resume` clears `paused-at`,
@@ -1767,11 +1756,10 @@
 
 (defn- handle-resume! [req res]
   (let [agent-id (or (query-param req "agent") (db/current-agent-id))]
-    (when-not agent-id
+    (if-not agent-id
       (write-status! res 400 "text/plain; charset=utf-8"
                      "missing 'agent' query param (no agent-id in scope)")
-      (throw (js/Error. "handle-resume!: no agent-id resolved")))
-    (-> (js/Promise.resolve (db/with-agent agent-id (fn [] (lifecycle/resume))))
+      (-> (js/Promise.resolve (db/with-agent agent-id (fn [] (lifecycle/resume))))
         (.then (fn [result]
                  ;; Success is a derived state keyword; failures are direct
                  ;; error values.
@@ -1783,11 +1771,7 @@
                    (let [error (:seon.error/message result)]
                      (log/error-console! "seon.web.serve" "/resume refused" error)
                      (write-status! res 422 "text/plain; charset=utf-8"
-                                    (str "resume refused: " error))))))
-        (.catch (fn [err]
-                  (log/error-console! "seon.web.serve" "/resume threw" err)
-                  (write-status! res 500 "text/plain; charset=utf-8"
-                                 (str "resume failed: " err)))))))
+                                    (str "resume refused: " error))))))))))
 
 ;; ============================================================
 ;; CSRF / same-origin guard for state-changing POSTs. Loopback BINDING is not
@@ -1828,17 +1812,7 @@
             res
             (if (:seon.client/quiesced? result) 200 409)
             "application/edn; charset=utf-8"
-            (pr-str result))))
-        (.catch
-         (fn [error]
-           (log/error-console! "seon.web.serve"
-                               "operator quiesce failed" error)
-           (write-status!
-            res 500 "application/edn; charset=utf-8"
-            (pr-str
-             {:seon.client/quiesced? false
-              :seon.client/quiesce-error
-              (or (.-message error) (str error))})))))
+            (pr-str result)))))
     (write-status!
      res 503 "application/edn; charset=utf-8"
      (pr-str
@@ -1960,20 +1934,38 @@
 ;; resolved late by the router's db->routes. Only the non-core supplement
 ;; handlers are injected here.
 (router/install!
-  {:seon.web.router/static        serve-static!
-   :seon.web.router/readiness     handle-readiness!
-   :seon.web.router/chat          handle-chat!
-   :seon.web.router/stop          handle-stop!
-   :seon.web.router/resume        handle-resume!
-   :seon.web.router/clear         handle-clear!
-   :seon.web.router/log           handle-log!
-   :seon.web.router/complete      handle-complete-agent!
-   :seon.web.router/agent-run     handle-agent-run!
-   :seon.web.router/config-apply  handle-config-apply!
-   :seon.web.router/operator-quiesce handle-operator-quiesce!
-   :seon.web.router/operator-blobs handle-operator-blobs!
-   :seon.web.router/operator-processes handle-operator-processes!
-   :seon.web.router/product-evidence handle-product-evidence!
+  {:seon.web.router/static
+   (terminal-handler "static asset handler failed" serve-static!)
+   :seon.web.router/readiness
+   (terminal-handler "readiness handler failed" handle-readiness!)
+   :seon.web.router/chat
+   (terminal-handler "POST /chat failed" handle-chat!)
+   :seon.web.router/stop
+   (terminal-handler "POST /stop failed" handle-stop!)
+   :seon.web.router/resume
+   (terminal-handler "POST /resume failed" handle-resume!)
+   :seon.web.router/clear
+   (terminal-handler "POST /clear failed" handle-clear!)
+   :seon.web.router/log
+   (terminal-handler "POST /log failed" handle-log!)
+   :seon.web.router/complete
+   (terminal-handler "POST /agent/{id}/complete failed"
+                     handle-complete-agent!)
+   :seon.web.router/agent-run
+   (terminal-handler "POST /agents/run failed" handle-agent-run!)
+   :seon.web.router/config-apply
+   (terminal-handler "config apply handler failed" handle-config-apply!)
+   :seon.web.router/operator-quiesce
+   (terminal-handler "operator quiesce handler failed"
+                     handle-operator-quiesce!)
+   :seon.web.router/operator-blobs
+   (terminal-handler "operator blob handler failed" handle-operator-blobs!)
+   :seon.web.router/operator-processes
+   (terminal-handler "operator process handler failed"
+                     handle-operator-processes!)
+   :seon.web.router/product-evidence
+   (terminal-handler "product-evidence handler failed"
+                     handle-product-evidence!)
    :seon.web.router/same-origin?  same-origin?
    :seon.web.router/loopback-peer? loopback-peer?})
 
@@ -2103,10 +2095,8 @@
                                  (router/handle-request req server)))
                              :error
                              (fn [error]
-                               (log/error-console! "seon.web.serve"
-                                                   "Bun.serve request failed" error)
-                               (write-status! nil 500 "text/plain; charset=utf-8"
-                                              "Internal error"))})]
+                               (terminal-core-fault!
+                                "Bun.serve request failed" error))})]
             (gobj/set server "seonReadinessOnly" (boolean readiness-only?))
             (gobj/set server "seonRestoreCompletionResult"
                       restore-completion-result)
