@@ -32,6 +32,23 @@ handoff) ∥ Fable audit agent → research/overnight-fix-quality-audit-
 web-UI fixes (after u9s0a returns; serve.cljs owner), containment
 HIGH items. §8 preprocessing decisions confirmed at recommendations.
 
+R45 S3 SOURCE INTEGRATED (08:48; live proof pending the coordinated
+source-freeze): `1fc076d44` admits exact precomputed initialization
+pages and the applied-identity attrs; `dfb3a6edc` adds the explicit
+`cluster apply` operator; `dd919ebf6` publishes/digest-binds/packages
+`page-plan.edn`; `9a885319f` deletes runtime page derivation and runs
+seed → config reconcile → initial-agent birth → final identity stamp
+through the one client entry. Focused proofs: protocol/writer 34/191,
+artifact/process 124/663, cluster 8/63, CLI 45/123, all green.
+Earliest unsettled contract = actual flush must execute
+`build-page-plan` after the watcher reloads the new hook graph.
+Integrated proof that closes it = one coherent rebuild plus focused
+CLJS gate, then fresh apply / identical-basis reapply / prefix-cut
+resume and 64-vs-256 page timing on `r45s3`. Dependency-ready
+parallel portfolio remains u9s0a + containment + noroots; the next
+spine refill is S4 startgate only after these S3 live numbers land.
+Final graduation remains U12's 100-agent kill/restart demonstration.
+
 Orchestrator review note (08:25): 170d97862 verified computed-rule
 (capability manifest → namespaces, no hand list). 60d09ef38 flagged
 PROVISIONAL: `no-dispatch-reply?` bypasses the planner instead of
@@ -82,6 +99,24 @@ dispatched (planner :no-roots arm + one-delivery-path + timeout
 config fact; deletes no-dispatch-reply?). Alive caveat now needs:
 noroots + u9s0a landed → rebuild default → ONE re-drive. Lanes live:
 r45s3 ∥ u9s0a ∥ containment ∥ noroots.
+
+NO-ROOTS CLASS FIX STATUS (~08:55): source and portable proof complete,
+integration/live proof pending (`83fd9792d` + `87b7637bd`).
+`plan-execution`'s existing `:no-roots`
+condition now maps to the driver's `:no-dispatch` disposition;
+`no-dispatch-reply?` is deleted. The disposition delivers the exact reply
+through `message-transaction-for` + generated ID allocation in the same
+fenced transaction as `:reply-ready → :evaled`; ordinary publication remains
+the only `:evaled → :published`/`:done` owner. The claimant attempt timeout is
+now a reconciled config-singleton fact; claim-time `System/getenv` is gone.
+Portable focused proof: 29 tests, 176 assertions, zero failures. The focused
+writer regression is defined but `bin/test-writer` currently refuses because
+the current compiled program artifact is absent; noroots is forbidden to
+bring up a cluster. The program's EARLIEST UNSETTLED CONTRACT remains R45's
+actual-flush boundary above. The no-roots integrated proof waits on the same
+source-frozen default rebuild: publish the current artifact, run the focused
+writer selection, then perform the one lifecycle live re-drive and record the
+agent-to-user message plus `:published`/`:done` turn and released run custody.
 
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 

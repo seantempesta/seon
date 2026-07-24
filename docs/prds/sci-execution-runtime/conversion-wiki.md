@@ -1216,6 +1216,43 @@ the anchor stays the state ledger.
   (`src/seon/schema.cljc`, `src/seon/runtime/admission.cljs`,
   `src/seon/client.cljs`).
 
+## Precomputed initialization apply scars (2026-07-24)
+
+- **A sidecar cannot embed an identity that includes the sidecar itself.**
+  `page-plan.edn` is keyed by the SHA-256 of the exact
+  `program-rows.edn` artifact bytes plus the resolved config-manifest digest.
+  The release-wide application digest includes the page-plan digest and is
+  stamped only after apply completes. Trying to place that final digest inside
+  the page plan creates an unsatisfiable digest cycle.
+- **Precomputed pages are the pager's input, not a second pager.**
+  `:seon.db/precomputed-initialization` carries the exact ordered
+  `:seon.db/initialization-pages` vector, and
+  `seon.db.protocol/initialization-pages` returns that vector unchanged.
+  Apply must never rebuild schema ordering, attributes, fingerprints, or page
+  payloads from the program rows.
+- **Config reconciliation owns the config singleton.** Initialization pages
+  seed the user and shared-instruction identities; they do not also transact a
+  configuration row. The resolved manifest digest still participates in the
+  raw initialization fingerprint, while `reconcile-config!` remains the one
+  config write surface invoked by cluster apply.
+- **An idempotent apply must skip the transaction, not submit empty data.**
+  Datahike advances the basis transaction for an empty transaction. The
+  existing initialization entity therefore receives the release digest and
+  config-manifest digest only as the last apply transaction, and exact identity
+  equality returns before config reconciliation, agent birth, or any
+  transaction.
+- **Interrupted-apply proof preserves the real receipt identities.** A proof
+  cut exposes a prefix of the already-built page vector without changing page
+  payloads, fingerprints, page indices, or the declared page count. Publication
+  remains unavailable because completion is absent; an ordinary full re-run
+  uses the same page request IDs and resumes through the writer's durable
+  receipts.
+- **Build-time and operator manifest resolution must hash the same ordinary
+  value.** The flush hook resolves explicit `SEON_CONFIG` or
+  `config/system.edn`, supplies the same default host timezone as
+  `select-manifest`, and hashes `(pr-str manifest)`. Any difference is rejected
+  before a page reaches the writer.
+
 ## Source provenance and contract provenance are different facts
 
 A function contract row and its source row may have different asserting
@@ -1497,6 +1534,23 @@ the variable-weight values they select.
   configuration failure. Put environment parsing and shipped fallback in
   portable `seon.config.resolve`, and make every tier delegate to it
   (`094e7a7e6`).
+- **A process fallback becomes database configuration at manifest apply.**
+  Parsing `SEON_LLM_ATTEMPT_TIMEOUT_MS` for every claimed turn makes the
+  claimant's behavior depend on process-local state that is absent from the
+  immutable database value. Resolve the environment input once while applying
+  the manifest, persist
+  `:seon.config.claim-driver/llm-attempt-timeout-ms` on the config singleton,
+  and have the claimant pull that fact with its other configuration. Per-agent
+  timeout facts remain the only runtime override.
+- **No executable roots is a planner disposition, not a reply-parser
+  shortcut.** `plan-execution` already represents a formless reply with the
+  computed `:no-roots` unresolved reason. Map that exact reason set to
+  `:no-dispatch` at `execution-plan-disposition`; do not classify the same
+  reply again in the driver. Before advancing the cursor, transact the exact
+  reply through `message-transaction-for` and `db.id/allocate!` in the same
+  run-fenced transaction as `:reply-ready → :evaled`. Ordinary publication
+  then closes `:done`, while unresolved executable roots retain the steering
+  path.
 - **A phase error is a fenced durable terminal transition, never a returned
   thread-local value.** Under the held run epoch and observed turn phase, one
   transaction crashes every open attempt, clears partial presentation text,
