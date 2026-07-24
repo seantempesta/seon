@@ -995,13 +995,18 @@
     (cond
       (and (eval-batch-invocation? invocation)
            (= :bun (:seon.execution/selected-tier invocation)))
-      (if-let [eval-id (cross-tier-result-reference child-lane invocation)]
-        (js/Promise.resolve (tier-local-result-error invocation eval-id))
-        (invoke-in-lane! child-lane nil invocation))
+      (js/Promise.resolve
+       (host-error
+        invocation
+        "The Bun execution tier has retired; no package leaf host is available."
+        {:seon.error/kind :seon.runtime/unavailable}))
 
       (not (or (eval-batch-invocation? invocation)
                (authored-invocation? invocation)))
-      (invoke-in-lane! child-lane nil invocation)
+      (js/Promise.resolve
+       (host-error invocation
+                   "The invocation is not executable by the surviving JVM tier."
+                   {:seon.error/kind :core-bug}))
 
       :else
       (let [lookup (or (::eval-host-coordinate! (host-configuration))
@@ -1016,11 +1021,9 @@
                               (get-in coordinate
                                       [::coordinate-error
                                        :seon.error/message])})
-                 (let [lane (if (eval-batch-invocation? invocation)
-                              host-lane
-                              (if coordinate host-lane child-lane))
-                       socket-path (when (= host-lane lane) coordinate)]
-                   (if (and (= host-lane lane) (nil? socket-path))
+                 (let [lane host-lane
+                       socket-path coordinate]
+                   (if (nil? socket-path)
                      (host-error
                       invocation
                       "The selected JVM execution tier is unavailable."
