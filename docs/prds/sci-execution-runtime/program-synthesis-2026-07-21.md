@@ -343,6 +343,13 @@ artifact/writer-readiness repair: rerun `bin/seon cluster apply s5maintain`,
 restarting at the documented transaction/publication cuts, then inspect the
 cache row and `SEON-CORE-FAULT divergence cache delta-only repair` marker.
 
+OWNER AWAY WINDOW (~15:00-19:00, rulings before leaving): default
+reset FREELY authorized if apply cannot converge; Sol-dry fallback =
+Fable lanes (report spend); window queue as planned = writerready
+green boot → s4 final measure → re-drive-3 → W-R50-1/2 claimant
+settlement → S6 JVM classload → next U9 slice; s5maintain continues;
+reviews/anchor per landing; 15-min clock stays on.
+
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 
 ## older restart protocol below until morning)
