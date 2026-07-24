@@ -106,6 +106,15 @@ MORNING ITEMS (accumulating):
 
 ## Current state (2026-07-23 PM wind-down — supersedes the morning block)
 
+- HOMESCHEMA FIXED+ARCHIVED (2026-07-23 night): the single
+  `:seon.ns/name` symbol-identity declaration moved to the portable
+  `seon.ns.source` owner; home/render first referencers now require that
+  owner before registration. Cold JVM candidate projection, focused JVM
+  regression (1/2), CLJS home (9/18), render-function (6/24), and namespace
+  storage (1/6) gates are green; `:execution` and integration-driver cold
+  builds complete. Default restart was safely refused by unrelated dirty
+  `reference-code/datahike` dependency work; proof log:
+  `tmp/orchestrator/homeschema-gate.log`.
 - CONVERSION FIRST WAVE COMPLETE AND ACCEPTED: guarded door (U1) ·
   writer pipelining + fork basis fix, pushed (U3) · render purity +
   byte identity (U4) · JVM web/SSE tier (U5) · claim-native portable

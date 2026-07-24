@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, schema, test, runtime]
 ---
@@ -46,3 +46,19 @@ load order.
   `:seon.ns/name` identity schema with the same form.
 - Focused home, render, and execution-child schema gates pass without relying
   on test namespace order.
+
+## Resolution
+
+Resolved on 2026-07-23. The one `:seon.ns/name` declaration now lives in
+`seon.ns.source`, the portable owner of persisted namespace facts.
+`seon.agent.home` and `seon.agent.ctx.render-fns` require that owner before
+registering schemas that reference namespace identity; no test establishes the
+production load order.
+
+The cold JVM falsifier changed from a missing namespace form followed by
+`:malli.core/invalid-schema` to the canonical symbol-identity form and a
+successful home candidate projection. A source census found one declaration.
+The recurring JVM regression passed 1 test / 2 assertions; focused CLJS home,
+render-function, and namespace storage gates passed 9/18, 6/24, and 1/6.
+Cold `:execution` and `:execution-integration-client` builds also completed.
+Full output is retained in `tmp/orchestrator/homeschema-gate.log`.
