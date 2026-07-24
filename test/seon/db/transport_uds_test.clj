@@ -64,6 +64,13 @@
        (.putInt (alength payload))
        (.put payload)))))
 
+(defn- message-frame-with-options
+  [original-frame message & [maximum-frame-bytes on-core-error]]
+  (cond
+    on-core-error (original-frame message maximum-frame-bytes on-core-error)
+    maximum-frame-bytes (original-frame message maximum-frame-bytes)
+    :else (original-frame message)))
+
 (defn- joined-bytes
   [& frames]
   (let [buffer (ByteBuffer/allocate (reduce + (map alength frames)))]
@@ -910,11 +917,9 @@
     (try
       (with-redefs-fn
         {#'seon.db.transport.uds/message-frame
-         (fn [message & [ceiling]]
+         (fn [message & [ceiling on-core-error]]
            (.await release-encode)
-           (if ceiling
-             (original-frame message ceiling)
-             (original-frame message)))}
+           (message-frame-with-options original-frame message ceiling on-core-error))}
         (fn []
           (let [first-result (send! {::event 1})]
             (is (= uds/send-accepted (::uds/send-status first-result)))
@@ -1011,26 +1016,20 @@
     (try
       (with-redefs-fn
         {#'seon.db.transport.uds/message-frame
-         (fn [message & [ceiling]]
+         (fn [message & [ceiling on-core-error]]
            (case (::event message)
              :first
              (do
                (deliver first-entered (Thread/currentThread))
                (.await release-first)
-               (if ceiling
-                 (original-frame message ceiling)
-                 (original-frame message)))
+               (message-frame-with-options original-frame message ceiling on-core-error))
 
              :second
              (do
                (deliver second-entered (Thread/currentThread))
-               (if ceiling
-                 (original-frame message ceiling)
-                 (original-frame message)))
+               (message-frame-with-options original-frame message ceiling on-core-error))
 
-             (if ceiling
-               (original-frame message ceiling)
-               (original-frame message))))}
+             (message-frame-with-options original-frame message ceiling on-core-error)))}
         (fn []
           (let [first-result (send! {::event :first})]
             (is (= uds/send-accepted (::uds/send-status first-result)))
@@ -1119,12 +1118,10 @@
       (wait-until! "two physical session controls" #(= 2 (count @controls)))
       (with-redefs-fn
         {#'seon.db.transport.uds/message-frame
-         (fn [message & [ceiling]]
+         (fn [message & [ceiling on-core-error]]
            (.countDown both-entered)
            (.await release-encodes)
-           (if ceiling
-             (original-frame message ceiling)
-             (original-frame message)))}
+           (message-frame-with-options original-frame message ceiling on-core-error))}
         (fn []
           (let [results
                 (mapv (fn [control n]
@@ -1179,11 +1176,9 @@
       (wait-until! "64 physical session controls" #(= 64 (count @controls)))
       (with-redefs-fn
         {#'seon.db.transport.uds/message-frame
-         (fn [message & [ceiling]]
+         (fn [message & [ceiling on-core-error]]
            (.await release-encodes)
-           (if ceiling
-             (original-frame message ceiling)
-             (original-frame message)))}
+           (message-frame-with-options original-frame message ceiling on-core-error))}
         (fn []
           (let [results
                 (mapv (fn [control index]
@@ -1291,13 +1286,11 @@
             [slow-channel healthy-channel] channels]
         (with-redefs-fn
           {#'seon.db.transport.uds/message-frame
-           (fn [message & [ceiling]]
+           (fn [message & [ceiling on-core-error]]
              (when (= :slow (::event message))
                (deliver slow-entered true)
                (.await release-slow))
-             (if ceiling
-               (original-frame message ceiling)
-               (original-frame message)))}
+             (message-frame-with-options original-frame message ceiling on-core-error))}
           (fn []
             (is (= uds/send-accepted
                    (::uds/send-status ((::uds/send! slow)
@@ -1365,13 +1358,11 @@
             [first-channel current-channel] channels]
         (with-redefs-fn
           {#'seon.db.transport.uds/message-frame
-           (fn [message & [ceiling]]
+           (fn [message & [ceiling on-core-error]]
              (when (= :occupies-authority (::event message))
                (deliver first-entered true)
                (.await release-first))
-             (if ceiling
-               (original-frame message ceiling)
-               (original-frame message)))}
+             (message-frame-with-options original-frame message ceiling on-core-error))}
           (fn []
             (is (= uds/send-accepted
                    (::uds/send-status
@@ -1763,7 +1754,7 @@
     (try
       (with-redefs-fn
         {#'seon.db.transport.uds/message-frame
-         (fn [message & [ceiling]]
+         (fn [message & [ceiling on-core-error]]
            (deliver encode-entered true)
            (loop []
              (when-not @release-encode
@@ -1771,9 +1762,7 @@
                  (Thread/sleep 5)
                  (catch InterruptedException _))
                (recur)))
-           (if ceiling
-             (original-frame message ceiling)
-             (original-frame message)))}
+           (message-frame-with-options original-frame message ceiling on-core-error))}
         (fn []
           (write-bytes! channel (frame-bytes {::request :encode})
                         Integer/MAX_VALUE)
