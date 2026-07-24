@@ -1,9 +1,8 @@
 ---
 type: issue
 status: resolved
-tags:
-  - issue
-  - providers
+severity: cleanup
+tags: [issue, test]
 ---
 
 # OpenAI-compatible tests assumed obsolete family defaults

@@ -1,9 +1,8 @@
 ---
 type: issue
 status: resolved
-tags:
-  - issue
-  - runtime
+severity: friction
+tags: [issue, runtime]
 ---
 
 # Reply-policy consumers read the retired mode

@@ -10,7 +10,7 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (41)
+## Blocker (48)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -21,6 +21,7 @@ See `README.md` for the convention.
 | [Content-pin the Inspect source dependency](inspect-source-dependency-is-not-content-pinned.md) | blocker | agent |
 | [Contract predicate transitive purity awaits execution planner](contract-predicate-transitive-purity-awaits-execution-planner.md) | blocker | Core |
 | [Datahike force branch does not preserve secondary root](datahike-force-branch-does-not-preserve-secondary-root.md) | blocker | Core |
+| [Deliver a formless claimant reply through the transcript](formless-claimant-reply-is-not-delivered-to-the-transcript.md) | blocker | agent |
 | [Derive read dependencies from Datahike's parsed semantics](datahike-read-dependencies-miss-valid-query-and-pull-inputs.md) | blocker | UI |
 | [Fence accepted writes before retained-head preparation](restore-intent-lacks-exclusive-writer-fence.md) | blocker | Core |
 | [Freeze one turn input across provider retries](turn-retries-reread-provider-inputs.md) | blocker | agent |
@@ -28,18 +29,23 @@ See `README.md` for the convention.
 | [Full writer gate fails during runtime lane integration](full-writer-gate-fails-during-runtime-lane-integration.md) | blocker | Core |
 | [Implement browser-session navigation provenance](web-session-navigation-provenance-is-missing.md) | blocker | UI |
 | [Invalidate a cached failed Datastar render after its owner reloads](datastar-feed-retains-failed-render-after-hot-reload.md) | blocker | UI |
+| [JVM result surface does not implement R32 result-symbol handles](jvm-result-symbols-not-bound-r32.md) | blocker | Core |
 | [Keep a running target's bootstrap artifact immutable](shared-bootstrap-output-mutates-running-artifact.md) | blocker | Core |
 | [Keep database control entry independent of occupied handlers](uds-codec-capacity-can-delay-control-entry.md) | blocker | Core |
+| [Keep pod republication's reusable projection inside its contract](pod-republication-passes-nil-reusable-projection.md) | blocker | agent |
 | [Keep restore publication closed through completion](restore-completion-cannot-precede-admission.md) | blocker | Core |
-| [Key multi-source query sharing by every database value](multi-source-query-cache-retains-foreign-database-values.md) | blocker | Core |
 | [Let the common Inspect pod solver address an existing agent](inspect-pod-solver-cannot-address-existing-agent.md) | blocker | agent |
 | [Make the downstream runtime package self-contained](downstream-runtime-package-is-not-self-contained.md) | blocker | Core |
 | [Make writer drain proof consumable by the operator](planned-restart-cannot-observe-writer-drain-result.md) | blocker | Core |
+| [Page-plan build hook used the writer-only manifest boundary incorrectly](page-plan-hook-used-writer-only-manifest-reader.md) | blocker | general |
+| [Plan a visible JVM claimant reply on an inspected tier](jvm-claimant-rejects-visible-reply-without-exact-execution-plan.md) | blocker | agent |
 | [Pod remains ready after losing its web listener](pod-remains-ready-after-web-listener-loss.md) | blocker | UI |
 | [Private-function presence law is incomplete outside core indexing](private-function-presence-law-incomplete.md) | blocker | general |
 | [Project a turn's rendered transaction ref as its basis transaction](turn-debug-must-project-rendered-transaction-ref.md) | blocker | agent |
 | [Projected map keys are not drill paths](projected-map-keys-are-not-drill-paths.md) | blocker | UI |
+| [Pull JVM claimant limits from the cluster config identity](jvm-claimant-pulls-config-with-wrong-identity.md) | blocker | agent |
 | [Read-side attribute admission fails open (silent empty results, :all fallback)](read-side-attribute-admission-fails-open.md) | blocker | Core |
+| [Reconcile the JVM claimant for named clusters](named-cluster-open-does-not-reconcile-jvm-host.md) | blocker | agent |
 | [Reduce retained memory in each execution child](execution-children-retain-hundreds-of-megabytes.md) | blocker | agent |
 | [Restore writer admin transition is unimplemented](restore-writer-admin-transition-is-unimplemented.md) | blocker | Core |
 | [Retain complete model transport evidence in Inspect logs](inspect-model-transport-evidence-is-incomplete.md) | blocker | agent |
@@ -55,8 +61,9 @@ See `README.md` for the convention.
 | [Value drill has no total work bounds](value-drill-has-no-total-work-bounds.md) | blocker | UI |
 | [Value-drill result literals failed boot schema admission](value-drill-result-literals-failed-boot-schema-admission.md) | blocker | Core |
 | [Writer run-readiness! busy-spins when a ready source has no runtime](writer-run-readiness-busy-spins-without-runtime.md) | blocker | Core |
+| [seon.agent.ctx file reads bypass the filesystem grant](agent-ctx-file-reads-bypass-fs-grant.md) | blocker | agent |
 
-## Friction (70)
+## Friction (71)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -98,6 +105,7 @@ See `README.md` for the convention.
 | [Make program indexing independent of the active schema projection](program-indexer-drops-valid-specs-outside-active-schema-projection.md) | friction | agent |
 | [Operator trial processes leak across days](operator-trial-processes-leak-across-days.md) | friction | docs |
 | [Persisted program error prevents agent repair](persisted-program-error-prevents-agent-repair.md) | friction | agent |
+| [Pin the backward-compatibility writer below the maintained Konserve version](datahike-backward-compat-gate-writes-newer-konserve.md) | friction | Core |
 | [Plan completion has no checkable verification evidence](plan-completion-verification-evidence.md) | friction | agent |
 | [Plan reconcile scope can delete unseen work](plan-reconcile-scope-can-delete-unseen-work.md) | friction | agent |
 | [Planner home-ns step blocks the root on a self-recipient refusal](planner-home-ns-step-blocks-on-self-recipient.md) | friction | agent |
@@ -107,11 +115,11 @@ See `README.md` for the convention.
 | [Preserve distinct large BigInts in cardinality-many attributes](datahike-cljs-cardinality-many-collapses-large-bigints.md) | friction | Core |
 | [Prevent output data from becoming a phantom callable arity](callable-contract-output-data-becomes-phantom-arity.md) | friction | agent |
 | [Prove Kimi K3 completion and continuation compatibility](kimi-k3-continuation-compatibility.md) | friction | agent |
-| [Register namespace identity before home schemas reference it](home-schema-references-namespace-name-before-registration.md) | friction | Core |
 | [Remove local Datahike ownership from execution children](execution-artifact-packages-local-datahike.md) | friction | agent |
 | [Remove the Node module-register deprecation from CSS builds](tailwind-node-module-register-deprecation.md) | friction | UI |
 | [Remove undeclared-var warnings from the self-host bootstrap build](bootstrap-analyzer-api-emits-undeclared-var-warnings.md) | friction | agent |
 | [Render entity converters silently vanish on unresolved symbols](render-entity-converters-silently-vanish-on-unresolved-symbol.md) | friction | UI |
+| [Repair invalid existing issue frontmatter](issues-index-cannot-rebuild-with-invalid-existing-frontmatter.md) | friction | general |
 | [Restore focused agent edge-case coverage](removed-embedded-multiagent-coverage-needs-owner.md) | friction | agent |
 | [Root context replaces inherited capability requirements](root-context-replaces-base-capability-requires.md) | friction | agent |
 | [Root warnings block renders 146k tokens before its cap clips it](root-warnings-block-renders-146k-tokens-before-cap.md) | friction | agent |

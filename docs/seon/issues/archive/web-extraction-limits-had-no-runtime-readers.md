@@ -1,9 +1,8 @@
 ---
 type: issue
 status: resolved
-tags:
-  - issue
-  - runtime
+severity: friction
+tags: [issue, runtime]
 ---
 
 # Web extraction limits had no runtime readers

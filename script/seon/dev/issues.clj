@@ -76,26 +76,31 @@
         severity (get metadata "severity")]
     (cond-> []
       (nil? metadata)
-      (conj {::path relative-path ::problem :missing-frontmatter})
+      (conj {::path relative-path ::problem :missing-frontmatter
+             ::expected "delimited YAML frontmatter"})
 
       (not= "issue" (get metadata "type"))
       (conj {::path relative-path ::problem :invalid-type
-             ::actual (get metadata "type")})
+             ::expected "issue" ::actual (get metadata "type")})
 
       (not expected-status?)
       (conj {::path relative-path ::problem :invalid-status
+             ::expected (if (= :open location)
+                          ["open"]
+                          (sort legal-closed-statuses))
              ::actual status ::location location})
 
       (not (contains? legal-severities severity))
       (conj {::path relative-path ::problem :invalid-severity
-             ::actual severity})
+             ::expected severity-order ::actual severity})
 
       (not (contains? tags "issue"))
-      (conj {::path relative-path ::problem :missing-issue-tag})
+      (conj {::path relative-path ::problem :missing-issue-tag
+             ::expected "issue" ::actual (sort tags)})
 
       (not= 1 (count titles))
       (conj {::path relative-path ::problem :invalid-h1-count
-             ::actual (count titles)}))))
+             ::expected 1 ::actual (count titles)}))))
 
 (defn validation-errors
   "Return every lifecycle, metadata, filename, and title violation."
@@ -156,36 +161,55 @@
 
 (defn- issue-state [root]
   (let [issue-notes (notes root)
-        errors (validation-errors issue-notes)]
-    (when (seq errors)
-      (throw (ex-info "Issue authority is invalid."
-                      {::errors errors})))
+        errors (validation-errors issue-notes)
+        indexable-notes (filterv #(empty? (row-errors %)) issue-notes)]
     {::notes issue-notes
-     ::index (render-index issue-notes)
+     ::indexable-notes indexable-notes
+     ::errors errors
+     ::index (render-index indexable-notes)
      ::path (fs/path root "docs/seon/issues/index.md")}))
+
+(defn- require-valid! [result errors]
+  (when (seq errors)
+    (throw (ex-info "Issue authority is invalid; every valid note was indexed."
+                    {::errors errors
+                     ::result result})))
+  result)
 
 (defn check!
   "Validate issue notes and require the checked-in index to match."
   [root]
-  (let [{::keys [notes index path]} (issue-state root)
+  (let [{::keys [indexable-notes errors index path]} (issue-state root)
         actual (when (fs/regular-file? path) (slurp (str path)))]
     (when-not (= index actual)
       (throw (ex-info "Issue index is stale; run bin/issues-index."
-                      {::path (str path)})))
-    {::clean? true
-     ::open-count (count (filter #(= :open (::location %)) notes))
-     ::archive-count (count (filter #(= :archive (::location %)) notes))}))
+                      {::path (str path)
+                       ::errors errors})))
+    (require-valid!
+      {::clean? true
+       ::open-count (count (filter #(= :open (::location %)) indexable-notes))
+       ::archive-count (count (filter #(= :archive (::location %))
+                                     indexable-notes))}
+      errors)))
 
 (defn write!
-  "Validate issue notes and atomically replace the derived index."
+  "Atomically index valid issue notes, then report every invalid note."
   [root]
-  (let [{::keys [notes index path]} (issue-state root)
-        temporary (fs/path (str path "." (random-uuid) ".tmp"))]
+  (let [{::keys [indexable-notes errors index path]} (issue-state root)
+        temporary (fs/path (str path "." (random-uuid) ".tmp"))
+        result {::path (str path)
+                ::open-count (count (filter #(= :open (::location %))
+                                            indexable-notes))
+                ::archive-count (count (filter #(= :archive (::location %))
+                                               indexable-notes))}]
     (spit (str temporary) index)
     (fs/move temporary path {:replace-existing true :atomic-move true})
-    {::path (str path)
-     ::open-count (count (filter #(= :open (::location %)) notes))
-     ::archive-count (count (filter #(= :archive (::location %)) notes))}))
+    (require-valid! result errors)))
+
+(defn- print-errors! [errors]
+  (doseq [{::keys [path problem] :as error} errors]
+    (println (str path ": " (name problem) " "
+                  (pr-str (dissoc error ::path ::problem))))))
 
 (defn run!
   "Run the issue-index command for one repository root."
@@ -200,6 +224,8 @@
     (catch Exception error
       (binding [*out* *err*]
         (println (.getMessage error))
-        (when-let [data (ex-data error)]
-          (println (pr-str data))))
+        (if-let [errors (::errors (ex-data error))]
+          (print-errors! errors)
+          (when-let [data (ex-data error)]
+            (println (pr-str data)))))
       (System/exit 1))))
