@@ -371,6 +371,18 @@ owns coordination; the freeze rule names WHO freezes (top level).
 Post-checkpoint: u9delete re-dispatches immediately; S6 continues in
 parallel (measurement-only during freeze).
 
+VELOCITY INCIDENT (~15:45): s6 wired unproven writer-uber AOT into
+canonical bin/seon up → every boot gated on full-tree AOT compile
+during mass deletion; boot broken. Corrective: s6 ordered to revert
+canonical wiring FIRST (source boot restored), AOT behind opt-in
+dial until proven+measured, discovery set from artifact inventory
+not tree glob; canonical cutover = orchestrator-run checkpoint only.
+STANDING (pending owner ratification with the freeze rule): lanes
+never change the canonical boot/build path in place — opt-in dial +
+proven checkpoint cutover. Freeze released earlier: u9delete cutting
+(S1+), writerready closed (loud probe 0a51420e7 + AOT-regex fix
+fcd0825c1 landed; handshake proof pending next clean boot).
+
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 
 ## older restart protocol below until morning)
