@@ -251,11 +251,27 @@ The top-level Fable orchestrator designs, grounds specs, reviews diffs,
 rules on stops, and runs serial integration gates; implementation goes to
 codex sol lanes. Haiku is only for quick reads. Never haiku for coding.
 Codex uses its configured coding model—Claude aliases are not portable
-model names. Launch codex lanes harness-tracked (Bash
-`run_in_background`, never `nohup ... &`) so they surface in the user's
-task panel and completion re-invokes the orchestrator — mechanics in
-`docs/seon/reference/driving-codex-agents.md` §"Launching under the
-Claude Code harness".
+model names.
+
+Launch every codex lane harness-tracked and watchable — this exact
+shape, no `nohup`, no trailing `&`, run through the Bash tool with
+`run_in_background: true` and a description naming the lane:
+
+```bash
+codex exec -m gpt-5.6-sol -c model_reasoning_effort=high \
+  --dangerously-bypass-approvals-and-sandbox \
+  -o tmp/orchestrator/<lane>-summary.txt \
+  "<the full spec>" < /dev/null 2>&1 | tee tmp/orchestrator/<lane>-stdout.log
+```
+
+Tracked means the lane appears in the user's task panel and its exit
+re-invokes the orchestrator (no watcher loops); `tee` streams the live
+transcript to that panel while persisting the log; background stdout
+never enters the orchestrator's context — read the `-o` summary, then
+query the log selectively with `tail`/`rg`, never a whole-file read.
+`< /dev/null` is mandatory (codex blocks on open stdin). Full
+mechanics, resume recipe, and model dials:
+`docs/seon/reference/driving-codex-agents.md`.
 
 For research, use one agent with the complete relevant context rather than many
 agents with slivers. Independent source domains may run in parallel, but one
