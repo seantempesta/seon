@@ -23,7 +23,6 @@
     [malli.registry :as mr]
     [seon.agent]
     [seon.agent.lifecycle]
-    [seon.eval :as seval]
     [seon.render.handlers.eval]
     [seon.render.handlers.fn]
     [seon.render.handlers.message]
@@ -56,28 +55,6 @@
                   (cons [(keyword "schematest.input" (str "key-" i)) i]
                         (entries (inc i))))))]
       (entries 0))))
-
-(deftest every-registered-render-handler-resolves
-  (let [handlers
-        (for [entry (candidate-catalog)
-              [channel handler]
-              [[:seon.render/ai :seon.schema.catalog/render-ai]
-               [:seon.render/html :seon.schema.catalog/render-html]]
-              :let [handler-symbol (get entry handler)]
-              :when handler-symbol]
-          {:seon.schema.catalog/key
-           (:seon.schema.catalog/key entry)
-           :seon.render/channel channel
-           :seon.render/handler handler-symbol})]
-    (is (seq handlers)
-        "the entity catalog must expose registered render handlers")
-    (doseq [{:seon.schema.catalog/keys [key]
-             :seon.render/keys [channel handler]} handlers]
-      (testing (str key " " channel " " handler)
-        (is (qualified-symbol? handler)
-            "the registered handler must be qualified symbol data")
-        (is (fn? (seval/lookup-value handler))
-            "every registered render handler must resolve to a function")))))
 
 (deftest activation-publishes-one-state-through-a-stable-default-registry
   (let [before (schema/snapshot-state)

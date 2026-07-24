@@ -267,7 +267,7 @@
   ;; output is the analysis-cache + per-namespace compiled JS for
   ;; each namespace in :entries, suitable for runtime loading via
   ;; `shadow.cljs.bootstrap.node/init`. During initialization,
-  ;; `seon.eval/init-bootstrap!` exposes the exact module-scoped root objects
+  ;; `seon.diffusion.worker.eval` exposes the module-scoped root objects
   ;; enumerated by Shadow's own `bootstrap.env/loaded-ref`, so globally
   ;; evaluated bootstrap files see the already-compiled dependency graph.
   ;; Loaded namespaces land on globalThis, which is what
@@ -291,11 +291,10 @@
   ;; `+`). This is the failure the POC at
   ;; ../docs/research/scratch/seon-style-poc/ bottomed out.
   ;;
-  ;; cljs.js (the in-runtime compiler itself) is NOT in this
-  ;; bundle — it gets pulled into the main :client bundle via
-  ;; (:require [cljs.js :as cljs]) in seon.client / seon.eval and
-  ;; ships there. The bootstrap bundle only provides the
-  ;; analysis-cache cljs.js consumes at eval time.
+  ;; cljs.js (the worker-leaf compiler itself) is NOT in this bundle. It
+  ;; ships only in :worker-oracle-eval; the pod :client has no compiler or
+  ;; eval state. This bootstrap output is the analysis cache consumed by the
+  ;; isolated diffusion worker.
   ;; CLJS test runner — shadow's :node-test target. A full run compiles every
   ;; namespace matching `-test$`; bin/test-cljs supplies Shadow's explicit
   ;; :namespaces vector for a focused run. Both produce one JavaScript artifact at
@@ -336,11 +335,11 @@
   :bootstrap
   {:target     :bootstrap
    :output-dir "out/bootstrap"
-   ;; Expanded for the agent vocabulary needed by the spec's
-   ;; eval-batch / confidence-run path. Each new entry pulls its
+   ;; Expanded for the diffusion worker oracle's confidence-run vocabulary.
+   ;; Each new entry pulls its
    ;; transitive subtree into the bootstrap output (analyzer caches +
-   ;; per-ns JS), so the agent can `(require ...)` these from inside
-   ;; cljs.js eval and have the analyzer resolve their vars.
+   ;; per-ns JS), so the worker can `(require ...)` these inside its isolated
+   ;; cljs.js evaluation and have the analyzer resolve their vars.
    ;;
    ;; What each adds:
    ;; - cljs.core           — runtime + the must-have foundation

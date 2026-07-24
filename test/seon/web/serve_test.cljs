@@ -21,7 +21,6 @@
     [seon.db.restore :as restore]
     [seon.derive :as derive]
     [seon.error :as error]
-    [seon.eval :as seval]
     [seon.execution :as execution]
     [seon.execution.host :as execution-host]
     [seon.reactive :as reactive]

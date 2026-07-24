@@ -8,7 +8,6 @@
     [seon.config :as config]
     [seon.db :as db]
     [seon.db.protocol :as protocol]
-    [seon.eval]
     [seon.render.canvas :as canvas]))
 
 (def ^:private agent-id "tst-canvas-remote")

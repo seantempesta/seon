@@ -5,8 +5,7 @@
       :cljs [cljs.test :refer [deftest is testing]])
    #?(:clj [sci.core :as sci])
    #?(:clj [seon.host.eval :as host.eval])
-   #?(:clj [seon.host.record :as host.record]
-      :cljs [seon.eval :as eval])
+   #?(:clj [seon.host.record :as host.record])
    [seon.program.edge :as edge]))
 
 (def resolution
@@ -120,12 +119,8 @@
      ::edge/uncertainties (values ::edge/uncertainties)
      ::edge/terminals terminals}))
 
-#?(:cljs
-   (def ^:private pod-function-edge-tx
-     (deref #'eval/function-edge-tx)))
-
-(defn- tee-tx [bundle]
-  #?(:clj
+#?(:clj
+   (defn- tee-tx [_bundle]
      (host.record/tee-tx-data
       {:seon.host.record/forms [fixture-form]
        :seon.host.record/source (pr-str fixture-form)
@@ -133,14 +128,7 @@
        :seon.host.record/resolution resolution
        :seon.host.record/var-meta {}
        :seon.host.record/new-schema-keys #{}
-       :seon.host.record/at (java.util.Date.)})
-     :cljs
-     (pod-function-edge-tx
-      [{:seon.fn/sym "fixture.edge/subject"
-        :seon.fn/source (pr-str fixture-form)}]
-     resolution
-      {:seon.repl/current-ns 'fixture.edge
-       :seon.repl/aliases {'db 'seon.db}})))
+       :seon.host.record/at (java.util.Date.)})))
 
 #?(:clj
    (deftest host-resolution-snapshots-retained-sci-aliases-and-refers
@@ -164,10 +152,7 @@
                      'fixture.target/fetch)))))))
 
 (deftest direct-edge-bundle-is-exact-on-this-tier
-  (let [bundle (analyzed-bundle fixture-form)
-        persisted (tx-bundle (tee-tx bundle))
-        terminals (into {} (map (juxt ::edge/terminal-symbol identity))
-                        (::edge/terminals persisted))]
+  (let [bundle (analyzed-bundle fixture-form)]
     (is (= expected-calls (::edge/calls bundle)))
     (is (= #{:demo/name} (::edge/read-attributes bundle)))
     (is (= #{:demo/id :demo/name :demo/score}
@@ -176,28 +161,31 @@
     (is (= #{:constructed-keyword} (::edge/uncertainties bundle)))
     (is (= expected-effects
            (into {} (map (juxt ::edge/terminal-symbol ::edge/effect))
-                 (::edge/terminals bundle))))
-    (is (= expected-calls (set (keys terminals))))
-    (doseq [target expected-calls]
-      (is (= #{target}
-             (::edge/required-bindings (get terminals target)))))
-    (is (= (dissoc bundle ::edge/terminals)
-           (dissoc persisted ::edge/terminals)))
-    (is (= (set (::edge/terminals bundle))
-           (set (::edge/terminals persisted))))))
+                 (::edge/terminals bundle))))))
 
-(deftest persisted-terminal-connections-reconstruct-the-edge-bundle
-  (let [bundle (analyzed-bundle fixture-form)
-        persisted (tx-bundle (tee-tx bundle))
-        pulled
-        (-> persisted
-            (dissoc ::edge/function-symbol ::edge/terminals)
-            (assoc :seon.fn/sym (::edge/function-symbol persisted)
-                   ::edge/terminal-refs (::edge/terminals persisted)))
-        reconstructed (first (edge/reconstruct-bundles [pulled]))]
-    (is (= bundle reconstructed))
-    (is (= (edge/program-graph-digest [bundle])
-           (edge/program-graph-digest [reconstructed])))))
+#?(:clj
+   (deftest persisted-terminal-connections-reconstruct-the-edge-bundle
+     (let [bundle (analyzed-bundle fixture-form)
+           persisted (tx-bundle (tee-tx bundle))
+           terminals (into {} (map (juxt ::edge/terminal-symbol identity))
+                           (::edge/terminals persisted))
+           pulled
+           (-> persisted
+               (dissoc ::edge/function-symbol ::edge/terminals)
+               (assoc :seon.fn/sym (::edge/function-symbol persisted)
+                      ::edge/terminal-refs (::edge/terminals persisted)))
+           reconstructed (first (edge/reconstruct-bundles [pulled]))]
+       (is (= expected-calls (set (keys terminals))))
+       (doseq [target expected-calls]
+         (is (= #{target}
+                (::edge/required-bindings (get terminals target)))))
+       (is (= (dissoc bundle ::edge/terminals)
+              (dissoc persisted ::edge/terminals)))
+       (is (= (set (::edge/terminals bundle))
+              (set (::edge/terminals persisted))))
+       (is (= bundle reconstructed))
+       (is (= (edge/program-graph-digest [bundle])
+              (edge/program-graph-digest [reconstructed]))))))
 
 (deftest graph-digest-changes-with-any-edge-change
   (let [first-bundle (analyzed-bundle fixture-form)
