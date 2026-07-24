@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, runtime, schema]
 ---
@@ -56,6 +56,45 @@ The defining source path is:
 The exact live datoms and reply/eval evidence are retained in
 `tmp/orchestrator/drive7-gate.log`.
 
+## Resolution
+
+The corpus and paged committed acquisition were complete; the JVM claimant's
+fact-first namespace loader deliberately replays stored definitions without
+executing top-level `schema/register!` forms. The claimant wrapper for
+`seon.schema/schema-definition` nevertheless consulted the JVM process-local
+candidate registry, which therefore had no `my.plan` registrations.
+
+Commit `0ae0fda9e` binds schema lookup to the writer session's retained,
+immutable committed projection. The mechanism is namespace-independent: its
+regression proves the `:my.plan/plan-request` key set and an unrelated
+`:my.kb/claim` definition through the same live SCI registry path.
+
+The first isolated drive then reached plan persistence and exposed a second
+stale host-only allocation implementation. It treated the allocation builder's
+transaction request map as transaction data. Commit `3fd9137f6` deletes that
+duplicate and binds the claimant wrapper to the portable
+`seon.db.id/allocate!` contract. The real SCI-wrapper/serialized-writer
+regression passes 1 test / 19 assertions.
+
+On the rebuilt isolated `planschema` cluster, JVM claimant
+`99081@2026-07-24T10:21:35.424583Z` evaluated the nested `plan!` call
+successfully:
+
+```clojure
+{:my.plan/ok? true
+ :my.plan/root "mft542256r45"
+ :my.plan/ids
+ {:root "mft542256r45"
+  "schema" "q2oi8xrcv5iq"
+  "persist" "n2r7qiwi500m"
+  "read" "b770ervohnnj"}}
+```
+
+The same run committed the three `:my.planschema.memory/*` schemas, wrote the
+fact, and read back `"CLAIMANT_MEMORY_ALIVE"`. Full build, claim, eval,
+transaction, and clean-shutdown evidence is in
+`tmp/orchestrator/planschema-gate.log`.
+
 ## Owner
 
 The schema acquisition and binding-table owner for the JVM claimant must make
@@ -72,6 +111,7 @@ do not add a hand-maintained key list or a claimant-only bypass.
   `:my.plan/children`.
 - A host-tier `my.plan/plan!` call with nested labelled children returns
   `{:my.plan/ok? true ...}` and persists the root plus every child.
-- A rebuilt default-cluster DeepSeek drive creates that persistent plan,
-  advances its steps across later turns, writes and later reads schema-backed
-  facts, renders the final canvas, and closes `:completed`.
+- A rebuilt isolated-cluster DeepSeek drive creates the persistent nested plan
+  and writes and later reads a schema-backed fact through the JVM claimant.
+- The default-cluster cross-turn memory re-drive remains the program's final
+  integration gate, not an unresolved schema-acquisition defect.

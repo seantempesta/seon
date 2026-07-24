@@ -1496,3 +1496,23 @@ the variable-weight values they select.
   same flat error as a fault datom after the transition; malformed leaf output
   uses this path too. A dispatch thread returning an error without this
   settlement recreates a heartbeat-only wedge (`094e7a7e6`).
+- **Fact-first namespace replay is not schema acquisition.** The JVM claimant
+  correctly reconstructs corpus definitions without executing top-level
+  `schema/register!` side effects. Any toolkit schema introspection that then
+  reads the process-local candidate registry sees an empty `my.*` world even
+  though the committed schema rows are complete. Bind
+  `seon.schema/schema-definition` to the writer session's retained committed
+  projection, and prove completeness with at least two unrelated toolkit
+  namespaces; never repair one toolkit with a key list (`0ae0fda9e`).
+- **A platform wrapper may bind a portable owner; it must not reimplement its
+  contract.** The claimant's duplicate identity allocator mistook the pure
+  builder's transaction request map for transaction data and had already
+  drifted from dependent-identity and collision semantics. Bind the claimant
+  wrapper to portable `seon.db.id/allocate!` over the JVM database leaf and
+  regression-test it through SCI plus the serialized writer (`3fd9137f6`).
+- **An observation timeout terminalizes the active turn in the run-close
+  transaction.** Fence the agent current-run, claim epoch, and observed turn
+  phase first; then publish the turn as interrupted, close the run, and retract
+  custody together. A claimant whose late phase write loses that fence must
+  refresh durable run authority and stop when it observes the closed run,
+  rather than issuing a second settlement CAS (`f6dd94682`).

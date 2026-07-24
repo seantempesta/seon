@@ -107,6 +107,18 @@ restart proved watcher, writer, host, pod, and web-render all alive/ready; the
 host did not drain. See
 [[../../seon/issues/archive/claimant-host-drains-after-clean-restart]].
 
+The later `planschema` reset-boundary checkpoint proves acquisition
+completeness at its first toolkit consumer. Commit `0ae0fda9e` binds claimant
+schema lookup to the retained committed projection; `3fd9137f6` routes
+claimant identity allocation through the portable allocator; and `f6dd94682`
+atomically terminalizes an active turn on observation timeout. A live JVM
+claimant persisted nested plan root `mft542256r45`, registered and transacted a
+schema-backed memory fact, and read back `CLAIMANT_MEMORY_ALIVE`. All turns are
+terminal and custody is absent. The final completion-form placement refusal
+remains the earliest U2 contract; default-cluster cross-turn memory and U12
+remain the graduation gates. Evidence:
+`tmp/orchestrator/planschema-gate.log`.
+
 [[../source-cleanup/research/sci-execution-child-feasibility-2026-07-20]]
 (measured probe: retention, perf ratios, four semantic gaps, JVM context
 sharing, port inventory, bb impossibility) built on

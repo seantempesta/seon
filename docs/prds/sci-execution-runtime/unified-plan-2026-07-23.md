@@ -114,6 +114,14 @@ proof crossed the complete model boundary: host workload PID `50645`, DeepSeek
 HTTP 200, durable `:success` attempt, and a 163-byte reply blob. Commit
 `fdba88aad` also aligns reply-text and config-singleton acquisition.
 
+The `planschema` checkpoint (`0ae0fda9e`, `f6dd94682`, `3fd9137f6`) closes
+committed toolkit-schema lookup, active-turn timeout terminalization, and the
+claimant's stale allocation wrapper. The isolated JVM claimant persisted a
+nested `my.plan` root and a schema-backed memory fact, then read back
+`CLAIMANT_MEMORY_ALIVE`; every turn settled and custody is absent. The final
+single `seon.agent.lifecycle/complete` form still reproduces the separate
+exact-execution-plan refusal.
+
 The earliest unsettled U2 contract is now
 [[../../seon/issues/jvm-claimant-rejects-visible-reply-without-exact-execution-plan]]:
 the same valid reply is rejected before eval because no inspected tier yields

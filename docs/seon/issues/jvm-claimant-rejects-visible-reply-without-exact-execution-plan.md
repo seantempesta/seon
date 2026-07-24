@@ -28,6 +28,16 @@ absent, so this is not a wedge. Exact database values, claim/phase histories,
 and verbatim reply evidence are in
 `tmp/orchestrator/claimant2-gate.log`.
 
+The source-frozen `planschema` run `q5ddb6i4pp4z` narrows the remaining class.
+The same JVM claimant successfully executed six preceding forms, including
+`my.plan/plan!`, three schema registrations, a transaction, and its read-back.
+The final single registered form
+`(seon.agent.lifecycle/complete "PLANSCHEMA_ALIVE")` alone produced the same
+no-exact-execution-plan refusal. The turn became `:published`/`:error`, the run
+closed, and custody was absent, so this remains a placement/projection defect
+rather than a wedge. Evidence is in
+`tmp/orchestrator/planschema-gate.log`.
+
 ## Owner
 
 The derived `plan-execution` acquisition/enforcement boundary in

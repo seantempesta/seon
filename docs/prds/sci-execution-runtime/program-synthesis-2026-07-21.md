@@ -1163,11 +1163,30 @@ MORNING ITEMS (accumulating):
   fix unblocked eval — agent code runs through the guarded door on the
   JVM claimant). LAST-LAYER blocker: my.plan schema projection EMPTY
   on the claimant ('Accepted my.plan keys: .') → plan!/memory blocked;
-  + a timeout orphaned an :evaling turn (nothing-wedges gap). planschema
+  A timeout also orphaned an :evaling turn (nothing-wedges gap). planschema
   lane (my.* projection-acquisition completeness + timeout-terminalizes-
   turn). LADDER FULLY MAPPED: pod contract→crash→routing→claimant
   config→allocation→eval config→EVAL→my.plan projection. Every layer
   below memory now GREEN.
+- ★ PLANSCHEMA — MEMORY LAYER LIVE (2026-07-24 ~6:40am):
+  `0ae0fda9e` routes claimant schema introspection to the retained committed
+  projection, `f6dd94682` terminalizes an observation timeout's active turn in
+  the fenced run-close transition, and `3fd9137f6` deletes the claimant's
+  duplicate allocation implementation in favor of portable
+  `seon.db.id/allocate!`. Isolated JVM claimant
+  `99081@2026-07-24T10:21:35.424583Z` persisted nested plan root
+  `mft542256r45`, committed three `:my.planschema.memory/*` schemas, wrote the
+  fact, and read back `CLAIMANT_MEMORY_ALIVE`. Run `q5ddb6i4pp4z` has six
+  `:done`/`:published` turns plus one `:error`/`:published` turn, no running
+  turn, no claimant, and no agent current-run. The last completion form
+  reproduces the already-open exact-execution-plan issue, so the earliest
+  unsettled U2 contract remains that placement/projection boundary. Integrated
+  proof is the retained completion form producing a successful eval receipt
+  and `:completed` run on the default cross-turn-memory re-drive. The
+  dependency-ready parallel portfolio remains the pod republication and named
+  cluster reconciliation issues; the next refill is the execution-plan owner.
+  Final graduation remains the rebuilt default-cluster re-drive and later U12
+  fleet gate. Evidence: `tmp/orchestrator/planschema-gate.log`.
 - ★ DRIVE6 — LLM ATTEMPT SUCCEEDS (2026-07-24 ~4am): the JVM claimant
   made a REAL DeepSeek call — attempt :open→HTTP 200→:success at tx
   536873735. Transport works; the pod→JVM chain paid off. Nothing-

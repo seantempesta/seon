@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, runtime, web]
 ---
@@ -57,6 +57,30 @@ The default-cluster drive7 live drive on 2026-07-24 used agent
 The exact lifecycle, attempt, and eval datoms are retained in
 `tmp/orchestrator/drive7-gate.log`.
 
+## Resolution
+
+Commit `f6dd94682` makes observation-timeout settlement one fenced database
+transition. It begins with the agent current-run CAS, run claim-epoch CAS, and
+active turn phase CAS; then it publishes the turn as `:interrupted`, closes the
+run as `:superseded`, and retracts claimant and current-run custody together.
+There is no web-only run close.
+
+The portable driver also refreshes the minimal durable run authority after a
+late phase write loses its fence. A claimant displaced by the timeout therefore
+observes the already-closed run and does not attempt a second stale settlement
+CAS or record a core fault.
+
+Focused proof covers the exact active-turn timeout transaction and the
+late-claimant refresh path: the writer selection is 7 tests / 39 assertions and
+the CLJS selection is 14 tests / 64 assertions; the artifact-backed exact
+selections are 2 tests / 14 assertions on the writer and 2 / 11 in CLJS.
+
+The later isolated `planschema` run `q5ddb6i4pp4z` supplied an independent live
+terminality check after six successful evals and one separate planner refusal:
+all seven turns are `:published` and terminal, the run is closed, and both the
+agent current-run and run claimant queries are empty. Evidence is in
+`tmp/orchestrator/planschema-gate.log`.
+
 ## Owner
 
 The `/agents/run` request-settlement timeout and run-supersession owner must
@@ -76,6 +100,7 @@ one consistent transition; no web-only cleanup path may close only the run.
   transition and persists no core fault.
 - No current or history query can observe a terminal run with a
   `:running` turn after the timeout transition.
-- A rebuilt default-cluster drive repeats the bounded multi-turn request and
-  either completes normally or times out with every turn terminal and custody
-  released.
+- The artifact-backed timeout regression leaves every turn terminal, releases
+  custody, and records no stale-CAS core fault.
+- A rebuilt live multi-turn run independently leaves no running turn or
+  retained custody after settlement.
