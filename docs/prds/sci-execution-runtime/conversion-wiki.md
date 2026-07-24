@@ -1915,3 +1915,8 @@ the variable-weight values they select.
   success, apply drains that exact managed generation before publishing the
   applied manifest; a writer that was already converged remains under its
   existing owner.
+- **Launch-envelope generation is lifecycle identity, not configuration
+  identity.** Process convergence compares the envelope's data after removing
+  only `:seon.launch.envelope/generation` and normalizes its argv path. A
+  material envelope change still requires coordinated replacement; selecting
+  the same manifest for a second `up` reuses the ready generation.

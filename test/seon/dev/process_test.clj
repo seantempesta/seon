@@ -1389,6 +1389,35 @@
       (finally
         (fs/delete-tree directory {:force true})))))
 
+(deftest process-convergence-ignores-only-launch-envelope-generation
+  (let [root (fs/create-temp-dir {:prefix "seon-envelope-convergence-"})
+        first-path (str (fs/path root "launch-envelope-1.edn"))
+        second-path (str (fs/path root "launch-envelope-2.edn"))
+        environment {"PATH" (System/getenv "PATH")}
+        argv (fn [path] ["java" "--launch-envelope" path "--repl-port" "0"])
+        first-argv (argv first-path)
+        second-argv (argv second-path)
+        spec {:seon.dev.process/argv second-argv
+              :seon.dev.process/environment environment
+              :seon.dev.process/artifact-digest "writer"}
+        record {:seon.dev.process/argv first-argv
+                :seon.dev.process/environment-digest
+                (#'process/environment-digest environment first-argv)
+                :seon.dev.process/artifact-digest "writer"}]
+    (try
+      (spit first-path
+            (pr-str {:seon.launch.envelope/generation 1
+                     :seon.config/on-core-error :crash}))
+      (spit second-path
+            (pr-str {:seon.launch.envelope/generation 2
+                     :seon.config/on-core-error :crash}))
+      (is (#'process/same-process-spec? spec record))
+      (spit second-path
+            (pr-str {:seon.launch.envelope/generation 2
+                     :seon.config/on-core-error :continue}))
+      (is (false? (#'process/same-process-spec? spec record)))
+      (finally (fs/delete-tree root {:force true})))))
+
 (deftest ensure-refuses-to-replace-a-nonconverged-managed-process
   (let [record {:seon.dev.process/id process/pod-id
                 :seon.dev.process/pid 41}

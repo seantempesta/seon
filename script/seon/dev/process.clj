@@ -1459,8 +1459,41 @@
           (fs/delete-tree containment-dir {:force true}))
         (throw error))))))
 
+(defn- launch-envelope-path
+  [argv]
+  (some (fn [[argument value]]
+          (when (= "--launch-envelope" argument) value))
+        (partition 2 1 argv)))
+
+(defn- stable-launch-envelope
+  [argv]
+  (when-let [path (launch-envelope-path argv)]
+    (try
+      (dissoc (edn/read-string (slurp path))
+              :seon.launch.envelope/generation)
+      (catch Throwable _ [::unreadable-launch-envelope path]))))
+
+(defn- stable-process-argv
+  [argv]
+  (loop [remaining argv
+         stable []]
+    (if-let [argument (first remaining)]
+      (if (= "--launch-envelope" argument)
+        (recur (nnext remaining)
+               (conj stable argument ::launch-envelope))
+        (recur (next remaining) (conj stable argument)))
+      stable)))
+
+(defn- same-process-argv?
+  [expected actual]
+  (and (= (stable-process-argv expected)
+          (stable-process-argv actual))
+       (= (stable-launch-envelope expected)
+          (stable-launch-envelope actual))))
+
 (defn- same-process-spec? [spec record]
-  (and (= (:seon.dev.process/argv spec) (:seon.dev.process/argv record))
+  (and (same-process-argv? (:seon.dev.process/argv spec)
+                           (:seon.dev.process/argv record))
        (= (:seon.dev.process/artifact-digest spec)
           (:seon.dev.process/artifact-digest record))
        (= (environment-digest (:seon.dev.process/environment spec)
