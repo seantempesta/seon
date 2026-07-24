@@ -33,6 +33,7 @@
 (def current-run
   {:seon.agent.run/id "run-a"
    :seon.agent.run/status :open
+   :seon.agent.run/claim-epoch 7
    :seon.agent.run/started-at (js/Date. 1000)})
 
 (defn- finish!
@@ -89,6 +90,9 @@
                 (is (identical? database (::db/db current-request)))
                 (is (identical? database (::db/db transaction-request)))
                 (is (= :db.fn/cas (ffirst transaction-data)))
+                (is (= [:db.fn/cas [:seon.agent.run/id "run-a"]
+                        :seon.agent.run/claim-epoch 7 7]
+                       (second transaction-data)))
                 (is (= :db/retract (first (last transaction-data))))))))
        done
        [[#(set! db/current-agent-id %) current-agent-id]
@@ -237,12 +241,17 @@
                      {:seon.agent.message/id "message-a"})
                     tx (::db/tx-data built)]
                 (is (identical? database (::db/db @allocation)))
-                (is (identical? database (::db/expected-db built)))
+                (is (not (contains? built ::db/expected-db))
+                    "the allocation builder returns transaction data, not a
+                     second database-value fence")
                 (is (= :db.fn/cas (ffirst tx)))
-                (is (= "done" (:seon.agent.run/result (second tx))))
-                (is (= 99 (:seon.agent.run/result-ref (second tx))))
-                (is (= "message-a" (:seon.agent.message/id (nth tx 2))))
-                (is (= :closed (:seon.agent.run/status (nth tx 3))))
+                (is (= [:db.fn/cas [:seon.agent.run/id "run-a"]
+                        :seon.agent.run/claim-epoch 7 7]
+                       (second tx)))
+                (is (= "done" (:seon.agent.run/result (nth tx 2))))
+                (is (= 99 (:seon.agent.run/result-ref (nth tx 2))))
+                (is (= "message-a" (:seon.agent.message/id (nth tx 3))))
+                (is (= :closed (:seon.agent.run/status (nth tx 4))))
                 (is (= :db/retract (first (last tx))))))))
        done
        [[#(set! db/current-agent-id %) current-agent-id]
@@ -343,14 +352,18 @@
               (is (= :terminated result))
               (let [tx (::db/tx-data @transaction)]
                 (is (identical? database (::db/db @transaction)))
-                (is (identical? database (::db/expected-db @transaction)))
+                (is (not (contains? @transaction ::db/expected-db))
+                    "the transaction request carries its one database value")
                 (is (= :seon.agent/terminated-at (nth (first tx) 2)))
                 (is (= [:db.fn/retractAttribute
                         [:seon.agent/id "agent-a"]
                         :seon.agent/namespace]
                        (second tx)))
                 (is (= :seon.agent/run (nth (nth tx 2) 2)))
-                (is (= :closed (:seon.agent.run/status (nth tx 3))))
+                (is (= [:db.fn/cas [:seon.agent.run/id "run-a"]
+                        :seon.agent.run/claim-epoch 7 7]
+                       (nth tx 3)))
+                (is (= :closed (:seon.agent.run/status (nth tx 4))))
                 (is (= :db/retract (first (last tx))))))))
        done
        [[#(set! db/current-agent-id %) current-agent-id]

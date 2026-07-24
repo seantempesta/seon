@@ -2366,11 +2366,13 @@
   (await
    (loop [remaining current-runs
           results []]
-     (if-let [{run-id :seon.agent.run/id} (first remaining)]
+     (if-let [{run-id :seon.agent.run/id
+               claim-epoch :seon.agent.run/claim-epoch} (first remaining)]
        (let [result
              (await
               (agent-run/close-run!
                {:seon.agent.run/id run-id
+                :seon.agent.run/claim-epoch claim-epoch
                 :seon.agent.run/closed-reason :quiesced}))]
          (recur (next remaining) (conj results [run-id result])))
        results))))

@@ -937,7 +937,8 @@
               (js/Promise.resolve true)))
       (set! run/current-run
             (fn [_]
-              (js/Promise.resolve {:seon.agent.run/id "run-1"})))
+              (js/Promise.resolve {:seon.agent.run/id "run-1"
+                                   :seon.agent.run/claim-epoch 7})))
       (set! run/close-run!
             (fn [request]
               (reset! closed request)
@@ -960,6 +961,7 @@
           (.then
            (fn [result]
              (is (= {:seon.agent.run/id "run-1"
+                     :seon.agent.run/claim-epoch 7
                      :seon.agent.run/closed-reason :superseded}
                     @closed))
              (is (= {:error "stop before final projection"} result))))

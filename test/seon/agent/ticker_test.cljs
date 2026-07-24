@@ -42,14 +42,15 @@
     (let [now (js/Date. 2000)]
       (let [result
             (with-watchdog-authority
-              [["late" (js/Date. 1000)]
-               ["fresh" (js/Date. 3000)]]
+              [["late" (js/Date. 1000) 7]
+               ["fresh" (js/Date. 3000) 8]]
               (fn [database requests closes]
                 (-> (run/close-overdue-runs! {:seon.agent/now now})
                     (.then
                       (fn [closed]
                         (is (= ["late"] (:seon.agent.run/closed closed)))
                         (is (= [{:seon.agent.run/id "late"
+                                 :seon.agent.run/claim-epoch 7
                                  :seon.agent.run/closed-reason
                                  :deadline-exceeded}]
                                @closes))

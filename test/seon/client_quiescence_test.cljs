@@ -63,7 +63,9 @@
           (atom
            [{::db/db database
              ::run/current-runs
-             [{:seon.agent/id "agent-a" :seon.agent.run/id "run-a"}]
+             [{:seon.agent/id "agent-a"
+               :seon.agent.run/id "run-a"
+               :seon.agent.run/claim-epoch 7}]
              ::run/running-turns
              [{:seon.agent.run/id "run-b"
                :seon.agent.turn/id "turn-b"}]}
@@ -97,6 +99,7 @@
                       :seon.client/errored-turn-ids []}
                      result))
               (is (= {:seon.agent.run/id "run-a"
+                      :seon.agent.run/claim-epoch 7
                       :seon.agent.run/closed-reason :quiesced}
                      @close-request))
               (is (identical? final-database (::db/db @pull-request)))
@@ -156,7 +159,9 @@
           work
           {::db/db database
            ::run/current-runs
-           [{:seon.agent/id "agent-a" :seon.agent.run/id "run-a"}]
+           [{:seon.agent/id "agent-a"
+             :seon.agent.run/id "run-a"
+             :seon.agent.run/claim-epoch 7}]
            ::run/running-turns []}
           work-values (atom [work work])
           pull-count (atom 0)]

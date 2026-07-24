@@ -703,6 +703,8 @@
                  (if current
                    (run/close-run! {:seon.agent.run/id
                                     (:seon.agent.run/id current)
+                                    :seon.agent.run/claim-epoch
+                                    (:seon.agent.run/claim-epoch current)
                                     :seon.agent.run/closed-reason :completed})
                    nil))))
       (.then (fn [result]
@@ -1523,6 +1525,8 @@
           (await
            (run/close-run!
             {:seon.agent.run/id (:seon.agent.run/id current)
+             :seon.agent.run/claim-epoch
+             (:seon.agent.run/claim-epoch current)
              :seon.agent.run/closed-reason :superseded}))
           :else nil)]
     (if (:seon.error/message close-result)
@@ -1729,7 +1733,9 @@
                :else
                (run/pause! {:seon.agent/id agent-id
                             :seon.agent.run/id
-                            (:seon.agent.run/id current)}))))
+                            (:seon.agent.run/id current)
+                            :seon.agent.run/claim-epoch
+                            (:seon.agent.run/claim-epoch current)}))))
           (.then
            (fn [result]
              (if (:seon.error/message result)

@@ -58,7 +58,8 @@
                (reset! pull-request request)
                (js/Promise.resolve
                 {:seon.agent/run {:seon.agent.run/id "run-a"
-                                  :seon.agent.run/status :open}}))
+                                  :seon.agent.run/status :open
+                                  :seon.agent.run/claim-epoch 7}}))
               ([_ _] (js/Promise.resolve nil))
               ([_ _ _] (js/Promise.resolve nil))))
       (set! db/execute-many
@@ -66,7 +67,8 @@
               (reset! execute-request request)
               (js/Promise.resolve
                {::db/results
-                [(query-result #{["agent-b" "run-b"] ["agent-a" "run-a"]})
+                [(query-result
+                  #{["agent-b" "run-b" 8] ["agent-a" "run-a" 7]})
                  (query-result #{["run-b" "turn-b"]})]})))
       (finish!
        done
@@ -81,6 +83,9 @@
            (is (identical? database (::db/db work)))
            (is (= ["agent-a" "agent-b"]
                   (mapv :seon.agent/id (::run/current-runs work))))
+           (is (= [7 8]
+                  (mapv :seon.agent.run/claim-epoch
+                        (::run/current-runs work))))
            (is (every? #(identical? database (::db/db %))
                        (::db/members @execute-request)))))))))
 
@@ -186,8 +191,14 @@
               ([_ _ _] (js/Promise.resolve nil))))
       (set! db/transact!
             (fn [& requests]
-              (swap! transactions conj (first requests))
-              (js/Promise.resolve native-report)))
+              (let [request (first requests)
+                    epoch-cas (second (::db/tx-data request))]
+                (swap! transactions conj request)
+                (js/Promise.resolve
+                 (if (= 6 (nth epoch-cas 3))
+                   {:seon.error/message
+                    "The run claim epoch changed before commit."}
+                   native-report)))))
       (finish!
        done
        [[#(set! db/db %) original-db]
@@ -196,25 +207,42 @@
         [#(set! db/transact! %) original-transact]]
        (fn ^:async test-cas []
          (await (run/renew! {:seon.agent/id "agent-a"
-                             :seon.agent.run/id "run-a"}))
+                             :seon.agent.run/id "run-a"
+                             :seon.agent.run/claim-epoch 7}))
          (await (run/pause! {:seon.agent/id "agent-a"
-                             :seon.agent.run/id "run-a"}))
+                             :seon.agent.run/id "run-a"
+                             :seon.agent.run/claim-epoch 7}))
          (await (run/resume! {:seon.agent/id "agent-a"
-                              :seon.agent.run/id "run-a"}))
+                              :seon.agent.run/id "run-a"
+                              :seon.agent.run/claim-epoch 7}))
+         (let [stale
+               (await
+                (run/renew! {:seon.agent/id "agent-a"
+                             :seon.agent.run/id "run-a"
+                             :seon.agent.run/claim-epoch 6}))]
+           (is (= "The run claim epoch changed before commit."
+                  (:seon.error/message stale))))
          (let [renew-tx (::db/tx-data (nth @transactions 0))
                pause-tx (::db/tx-data (nth @transactions 1))
-               resume-tx (::db/tx-data (nth @transactions 2))]
+               resume-tx (::db/tx-data (nth @transactions 2))
+               stale-tx (::db/tx-data (nth @transactions 3))]
            (is (= [:db.fn/cas [:seon.agent.run/id "run-a"]
-                   :seon.agent.run/turn-limit 9 10]
+                   :seon.agent.run/claim-epoch 7 7]
                   (second renew-tx)))
            (is (= [:db.fn/cas [:seon.agent.run/id "run-a"]
+                   :seon.agent.run/turn-limit 9 10]
+                  (nth renew-tx 2)))
+           (is (= [:db.fn/cas [:seon.agent.run/id "run-a"]
                    :seon.agent.run/deadline deadline deadline]
-                  (second pause-tx)))
+                  (nth pause-tx 2)))
            (is (= [:db.fn/cas [:seon.agent.run/id "run-a"]
                    :seon.agent.run/paused-at paused-at paused-at]
-                  (second resume-tx)))
+                  (nth resume-tx 2)))
            (is (= :seon.agent.run/remaining-ms
-                  (nth (last resume-tx) 2)))))))))
+                  (nth (last resume-tx) 2)))
+           (is (= [:db.fn/cas [:seon.agent.run/id "run-a"]
+                   :seon.agent.run/claim-epoch 6 6]
+                  (second stale-tx)))))))))
 
 (deftest close-pause-and-resume-reuse-an-explicit-database-value
   (async done
@@ -265,15 +293,18 @@
           (run/pause!
            {:seon.agent/id "agent-a"
             :seon.agent.run/id "run-a"
+            :seon.agent.run/claim-epoch 7
             ::db/db database}))
          (await
           (run/resume!
            {:seon.agent/id "agent-a"
             :seon.agent.run/id "run-a"
+            :seon.agent.run/claim-epoch 7
             ::db/db database}))
          (await
           (run/close-run!
            {:seon.agent.run/id "run-a"
+            :seon.agent.run/claim-epoch 7
             :seon.agent.run/closed-reason :waited
             ::db/db database}))
          (is (zero? @db-calls))
@@ -292,6 +323,7 @@
           sent (atom nil)
           run-row {:seon.agent.run/id "run-a"
                    :seon.agent.run/status :open
+                   :seon.agent.run/claim-epoch 7
                    :seon.agent.run/agent
                    {:seon.agent/id "agent-a"
                     :seon.agent/purpose "check the result"
@@ -330,6 +362,7 @@
                (await
                 (run/close-run!
                  {:seon.agent.run/id "run-a"
+                  :seon.agent.run/claim-epoch 7
                   :seon.agent.run/closed-reason :turn-limit}))
                tx (::db/tx-data @transaction)]
            (is (= native-report result))
@@ -355,6 +388,7 @@
               ([_]
                (js/Promise.resolve
                 {:seon.agent.run/id "run-old"
+                 :seon.agent.run/claim-epoch 7
                  :seon.agent.run/agent
                  {:seon.agent/id "agent-a"
                   :seon.agent/run {:seon.agent.run/id "run-new"}}}))
@@ -373,6 +407,7 @@
          (await
           (run/close-run!
            {:seon.agent.run/id "run-old"
+            :seon.agent.run/claim-epoch 7
             :seon.agent.run/closed-reason :superseded}))
          (let [tx (::db/tx-data @transaction)]
            (is (= 1 (count tx)))

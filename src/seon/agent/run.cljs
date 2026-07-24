@@ -297,7 +297,8 @@
   [:vector
    [:map
     [:seon.agent/id :string]
-    [:seon.agent.run/id :seon.agent.run/id]]])
+    [:seon.agent.run/id :seon.agent.run/id]
+    [:seon.agent.run/claim-epoch :seon.agent.run/claim-epoch]]])
 (schema/register! ::running-turns
   [:vector
    [:map
@@ -310,11 +311,12 @@
    [::running-turns ::running-turns]])
 
 (def ^:private current-runs-query
-  '[:find ?agent-id ?run-id
+  '[:find ?agent-id ?run-id ?claim-epoch
     :where
     [?agent :seon.agent/id ?agent-id]
     [?agent :seon.agent/run ?run]
     [?run :seon.agent.run/id ?run-id]
+    [?run :seon.agent.run/claim-epoch ?claim-epoch]
     [?run :seon.agent.run/status :open]])
 
 (def ^:private running-turns-query
@@ -358,9 +360,10 @@
             {::db/db database
        ::current-runs
        (->> current-runs
-            (map (fn [[agent-id run-id]]
+            (map (fn [[agent-id run-id claim-epoch]]
                    {:seon.agent/id agent-id
-                    :seon.agent.run/id run-id}))
+                    :seon.agent.run/id run-id
+                    :seon.agent.run/claim-epoch claim-epoch}))
             (sort-by (juxt :seon.agent/id :seon.agent.run/id))
             vec)
        ::running-turns
