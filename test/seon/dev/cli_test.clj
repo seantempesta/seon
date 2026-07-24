@@ -890,6 +890,42 @@
                        [:seon.dev.config/environment "SEON_CONFIG"]))))
       (finally (fs/delete-tree root {:force true})))))
 
+(deftest up-and-status-use-the-same-resolved-configuration
+  (let [base {:seon.dev.config/root "/repo"}
+        resolved (assoc base
+                        :seon.dev.config/resolved-configuration
+                        {:seon.config.operator/pod-boot-stall-timeout-ms
+                         300000})
+        selected (atom [])
+        observed (atom [])]
+    (with-redefs-fn
+      {#'cli/select-config
+       (fn [configuration path]
+         (swap! selected conj [configuration path])
+         resolved)
+       #'state/with-lock
+       (fn [configuration _owner _timeout transition]
+         (swap! observed conj [:up-lock configuration])
+         (transition))
+       #'cli/resume-retained-restore! (constantly nil)
+       #'cli/reconcile-development!
+       (fn [configuration]
+         (swap! observed conj [:up configuration])
+         {:seon.dev.target/status :seon.dev.target.status/ready})
+       #'cli/print-ready! (fn [& _] nil)
+       #'cli/status-value
+       (fn [configuration]
+         (swap! observed conj [:status configuration])
+         {:seon.dev.target/status :seon.dev.target.status/ready})}
+      (fn []
+        (#'cli/up! base [])
+        (with-out-str (#'cli/status! base []))))
+    (is (= [[base nil] [base nil]] @selected))
+    (is (= [[:up-lock resolved]
+            [:up resolved]
+            [:status resolved]]
+           @observed))))
+
 (deftest explicit-config-apply-uses-the-ready-pod-operation
   (let [configuration {:seon.dev.config/root "/repo"
                        :seon.dev.config/environment {}}

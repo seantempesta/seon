@@ -1,6 +1,6 @@
 ---
 type: issue
-status: active
+status: resolved
 tags: [issue, runtime, operator]
 ---
 
@@ -31,3 +31,23 @@ manifest by the SAME mechanism.
 - status succeeds after a green reset with no extra environment.
 - One resolution path; a regression proving status and up read identical
   resolved configuration.
+
+## Resolution
+
+`status` passed the unresolved result of `seon.dev.config/load!` directly to
+the process status derivation. `up` and `cluster reset` first called
+`seon.dev.config/select-manifest`, which selects the retained applied manifest
+for an existing database and attaches its resolved configuration and launch
+envelope. The retained manifest contained the operator stall fact; status
+simply never read it.
+
+`seon.dev.cli/status!` now enters the same `select-config` path as `up`, with
+the same implicit manifest selection. The
+`up-and-status-use-the-same-resolved-configuration` regression proves both
+commands pass the identical resolved configuration to their downstream
+operations.
+
+The focused operator gate passed 44 tests and 122 assertions. Immediately
+afterward, `bin/seon status` read the default cluster successfully with exit
+zero. The retained transcript is
+`tmp/orchestrator/statusfix-gate.log`.

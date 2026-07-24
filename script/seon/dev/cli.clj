@@ -549,7 +549,8 @@
     (when (and (seq arguments) (not edn?))
       (throw (ex-info "`status` accepts only `--edn`."
                       {:seon.dev.cli/arguments (vec arguments)})))
-    (let [status (status-value configuration)]
+    (let [configuration (select-config configuration nil)
+          status (status-value configuration)]
       (if edn?
         (prn status)
         (do
