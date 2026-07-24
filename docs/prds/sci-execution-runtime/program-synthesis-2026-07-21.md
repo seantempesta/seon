@@ -1028,6 +1028,16 @@ COMPLETELY before dispatching anything.
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- BREAK #5 FIXED — CHAIN EXHAUSTED (7a1c5de68 + 647613f97,
+  accepted): acquisition paged by canonical row (one identity = the
+  exact expansion unit since result-weight charges string contents);
+  breaker untouched; synthetic over-cap regression green; LIVE PROOF
+  = fresh acqpage reset to FULL STACK READINESS (watcher/writer/
+  host/pod/web-render, exit 0, 294s incl. build; 927 schema + 2,948
+  fn identities paged; no breaker fired). Five serial breaks found
+  and fixed by the gate: test arity → client arity → devtools
+  socket → inventory membership → acquisition weight. CHECKPOINT
+  RESUMES: default reset + suites.
 - BREAK #4 FIXED (f8358abec, accepted: both inventories immutable-
   runtime members with exact digests, ENOENT boundary passed,
   128/722 green). BREAK #5 (the chain reaches the read side):
