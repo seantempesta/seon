@@ -21,8 +21,6 @@
     [seon.db.restore :as restore]
     [seon.derive :as derive]
     [seon.error :as error]
-    [seon.execution :as execution]
-    [seon.execution.host :as execution-host]
     [seon.reactive :as reactive]
     [seon.render.value :as render.value]
     [seon.render.system :as system]
@@ -71,17 +69,15 @@
     (doseq [path accepted]
       (let [query (str "eval=e-1&path=" (js/encodeURIComponent path))
             request (parse (frame (value-ring-request "a" query)) value-limits)
-            segments (:seon.render.value/path request)
-            wire (execution/decode-message
-                   (execution/encode-message {:seon.web.serve/path segments}))]
+            segments (:seon.render.value/path request)]
         (is (not (:seon.error/message request)) path)
         (is (= path (pr-str segments)) path)
-        (is (= segments (:seon.web.serve/path wire)) path)
         (doseq [segment segments]
           (is (= :found
                  (get {segment :found}
-                      (first (filter #(= segment %) (:seon.web.serve/path wire)))))
-              (str "Transit retains lookup equality for " (pr-str segment))))))
+                      (first (filter #(= segment %) segments))))
+              (str "The strict reader retains lookup equality for "
+                   (pr-str segment))))))
     (doseq [path refused]
       (let [query (str "eval=e-1&path=" (js/encodeURIComponent path))
             request (parse (frame (value-ring-request "a" query)) value-limits)]
@@ -145,11 +141,9 @@
     (let [original-db db/db
           original-entity db/entity
           original-query db/query
-          original-sample execution-host/sample-value!
           acquisitions (atom 0)
           policy-acquisitions (atom 0)
-          domain-work (atom 0)
-          samples (atom 0)]
+          domain-work (atom 0)]
       (set! db/db (fn ([] (swap! acquisitions inc) (js/Promise.resolve database))
                     ([_] (swap! acquisitions inc) (js/Promise.resolve database))))
       (set! db/entity
@@ -164,8 +158,6 @@
                  (do (swap! domain-work inc) (js/Promise.resolve nil))))))
       (set! db/query
             (fn [_] (swap! domain-work inc) (js/Promise.resolve nil)))
-      (set! execution-host/sample-value!
-            (fn [_ _ _] (swap! samples inc) (js/Promise.resolve nil)))
       (-> (serve/value!
             (value-ring-request "a" "eval=e-1&path=%5B:a%20:b%5D"))
           (.then
@@ -173,24 +165,20 @@
               (is (= 400 (.-status response)))
               (is (= 1 @acquisitions))
               (is (= 1 @policy-acquisitions))
-              (is (zero? @domain-work))
-              (is (zero? @samples))))
+              (is (zero? @domain-work))))
           (.catch (fn [error] (is false (str error))))
           (.finally
             (fn []
               (set! db/db original-db)
               (set! db/entity original-entity)
               (set! db/query original-query)
-              (set! execution-host/sample-value! original-sample)
               (done)))))))
 
 (deftest missing-and-cross-agent-evals-are-uniform-and-send-zero
   (async done
     (let [original-db db/db
           original-entity db/entity
-          original-query db/query
-          original-sample execution-host/sample-value!
-          samples (atom 0)]
+          original-query db/query]
       (set! db/db (fn ([] (js/Promise.resolve database))
                     ([_] (js/Promise.resolve database))))
       (set! db/entity
@@ -201,8 +189,6 @@
                  (js/Promise.resolve {:seon.config/id "cluster"})
                  (js/Promise.resolve nil)))))
       (set! db/query (fn [_] (js/Promise.resolve nil)))
-      (set! execution-host/sample-value!
-            (fn [_ _ _] (swap! samples inc) (js/Promise.resolve nil)))
       (-> (js/Promise.all
             #js [(serve/value! (value-ring-request "a" "eval=missing"))
                  (serve/value! (value-ring-request "b" "eval=owned-by-a"))])
@@ -211,63 +197,26 @@
               (let [[missing cross] (array-seq responses)]
                 (is (= [404 404] [(.-status missing) (.-status cross)]))
                 (is (= "no-store" (.get (.-headers missing) "cache-control")))
-              (is (nil? (.get (.-headers missing) "access-control-allow-origin")))
+                (is (nil? (.get (.-headers missing)
+                                "access-control-allow-origin")))
                 (-> (js/Promise.all #js [(.text missing) (.text cross)])
                     (.then (fn [bodies]
-                             (is (= (aget bodies 0) (aget bodies 1)))
-                             (is (zero? @samples))))))))
+                             (is (= (aget bodies 0)
+                                    (aget bodies 1)))))))))
           (.catch (fn [error] (is false (str error))))
           (.finally
             (fn []
               (set! db/db original-db)
               (set! db/entity original-entity)
               (set! db/query original-query)
-              (set! execution-host/sample-value! original-sample)
               (done)))))))
 
-(deftest eval-value-statuses-and-admitted-sampler-request-are-exact
+(deftest authorized-eval-value-drilling-refuses-without-a-result-registry
   (async done
     (let [original-db db/db
           original-entity db/entity
           original-query db/query
-          original-sample execution-host/sample-value!
-          authorization-requests (atom [])
-          sampler-calls (atom [])
-          projection {:seon.render.value/path []
-                      :seon.render.value/offset 0
-                      :seon.render.value/page-size 8
-                      :seon.render.value/summary "vector 8 items"
-                      :seon.render.value/truncated? true
-                      :seon.render.value/more? true
-                      :seon.render.value/tree
-                      {:seon.render.value/kind :vector
-                       :seon.render.value/shown (vec (range 8))
-                       :seon.render.value/elided :more}
-                      :seon.render.value/schemas []}
-          result-for
-          (fn [eval-id request]
-            (cond
-              (= 16 (:seon.render.value/offset request))
-              {:seon.render.value/ok? true
-               :seon.render.value/availability :unavailable
-               :seon.render.value/projection projection
-               :seon.render.value/recompute? true}
-
-              (= eval-id "available")
-              {:seon.render.value/ok? true
-               :seon.render.value/availability :available
-               :seon.render.value/projection projection}
-
-              (= eval-id "policy")
-              {:seon.render.value/ok? false
-               :seon/error {:seon.error/message
-                            render.value/sampling-policy-refusal-message
-                            :seon.error/kind :agent}}
-
-              :else
-              {:seon.render.value/ok? false
-               :seon/error {:seon.error/message "transport failed"
-                            :seon.error/kind :core-bug}}))]
+          authorization-requests (atom [])]
       (set! db/db (fn ([] (js/Promise.resolve database))
                     ([_] (js/Promise.resolve database))))
       (set! db/entity
@@ -275,88 +224,36 @@
               ([ref] (js/Promise.resolve nil))
               ([_ ref]
                (js/Promise.resolve
-                 (when (= [:seon.config/id "cluster"] ref)
-                   {:seon.config/id "cluster"})))))
+                (when (= [:seon.config/id "cluster"] ref)
+                  {:seon.config/id "cluster"})))))
       (set! db/query
             (fn [request]
               (swap! authorization-requests conj request)
               (js/Promise.resolve 101)))
-      (set! execution-host/sample-value!
-            (fn [agent-id eval-id request]
-              (swap! sampler-calls conj [agent-id eval-id request])
-              (js/Promise.resolve (result-for eval-id request))))
-      (let [requests
-            [(assoc (value-ring-request "a" "eval=available")
-                    :seon.http/request
-                    (js/Request. "http://127.0.0.1/agent/a/value?eval=available"
-                                  #js {:headers #js {"Origin" "https://evil.test"}}))
-             (value-ring-request "a" "eval=available&offset=16")
-             (value-ring-request "a" "eval=available")
-             (value-ring-request "a" "eval=available&offset=8")
-             (value-ring-request "a" "eval=core")
-             (value-ring-request "a" "eval=policy")]]
-        (-> (js/Promise.all (clj->js (mapv serve/value! requests)))
-            (.then
-              (fn [responses]
-                (let [[hostile-available unavailable absent-available page-two
-                       core policy]
-                      (array-seq responses)]
-                  (is (= [200 200 200 200 503 400]
-                         (mapv #(.-status %)
-                               [hostile-available unavailable absent-available
-                                page-two core policy])))
-                  (doseq [response [hostile-available unavailable
-                                    absent-available page-two core policy]]
-                    (is (= "no-store"
-                           (.get (.-headers response) "cache-control")))
-                    (is (nil? (.get (.-headers response)
-                                    "access-control-allow-origin"))))
-                  (is (= 6 (count @sampler-calls)))
-                  (is (= 6 (count @authorization-requests)))
-                  (is (= [["available" "a"] ["available" "a"]
-                          ["available" "a"] ["available" "a"]
-                          ["core" "a"] ["policy" "a"]]
-                         (mapv ::db/args @authorization-requests)))
-                  (is (every? #(= "a" (first %)) @sampler-calls))
-                  (is (every? #(= []
-                                  (get-in % [2 :seon.render.value/path]))
-                              @sampler-calls))
-                  (is (= "application/edn; charset=utf-8"
-                         (.get (.-headers core) "content-type")))
-                  (is (= "application/edn; charset=utf-8"
-                         (.get (.-headers policy) "content-type")))
-                  (-> (js/Promise.all
-                        #js [(.text hostile-available)
-                             (.text unavailable)
-                             (.text absent-available)
-                             (.text page-two)])
-                      (.then (fn [bodies]
-                               (let [root-id
-                                     (fn [body]
-                                       (second
-                                         (re-find #"id=\"(seon-value-[^\"]+)\""
-                                                  body)))]
-                                 (is (= (aget bodies 0) (aget bodies 2)))
-                                 (is (every? string?
-                                             (map root-id (array-seq bodies))))
-                                 (is (apply =
-                                            (map root-id
-                                                 (array-seq bodies)))))))))))
-            (.catch (fn [error] (is false (str error))))
-            (.finally
-              (fn []
-                (set! db/db original-db)
-                (set! db/entity original-entity)
-                (set! db/query original-query)
-                (set! execution-host/sample-value! original-sample)
-                (done))))))))
+      (-> (serve/value! (value-ring-request "a" "eval=available"))
+          (.then
+           (fn [response]
+             (is (= 503 (.-status response)))
+             (is (= "no-store" (.get (.-headers response) "cache-control")))
+             (is (= [["available" "a"]]
+                    (mapv ::db/args @authorization-requests)))
+             (.text response)))
+          (.then
+           (fn [body]
+             (is (= :core-bug
+                    (:seon.error/kind (reader/read-string body))))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! db/db original-db)
+             (set! db/entity original-entity)
+             (set! db/query original-query)
+             (done)))))))
 
 (deftest entity-absence-is-uniform-and-never-sends-to-execution
   (async done
     (let [original-db db/db
-          original-entity db/entity
-          original-sample execution-host/sample-value!
-          samples (atom 0)]
+          original-entity db/entity]
       (set! db/db (fn ([] (js/Promise.resolve database))
                     ([_] (js/Promise.resolve database))))
       (set! db/entity
@@ -366,8 +263,6 @@
                (js/Promise.resolve
                  (when (= [:seon.config/id "cluster"] ref)
                    {:seon.config/id "cluster"})))))
-      (set! execution-host/sample-value!
-            (fn [_ _ _] (swap! samples inc) (js/Promise.resolve nil)))
       (-> (js/Promise.all
             #js [(serve/value! (value-ring-request "a" "entity=42"))
                  (serve/value! (value-ring-request "root" "entity=42"))])
@@ -375,7 +270,6 @@
             (fn [responses]
               (let [[non-root missing] (array-seq responses)]
                 (is (= [404 404] [(.-status non-root) (.-status missing)]))
-                (is (zero? @samples))
                 (-> (js/Promise.all #js [(.text non-root) (.text missing)])
                     (.then (fn [bodies]
                              (is (= (aget bodies 0) (aget bodies 1)))))))))
@@ -384,7 +278,6 @@
             (fn []
               (set! db/db original-db)
               (set! db/entity original-entity)
-              (set! execution-host/sample-value! original-sample)
               (done)))))))
 
 (deftest domain-read-failures-are-bounded-503-not-absence
@@ -392,8 +285,6 @@
     (let [original-db db/db
           original-entity db/entity
           original-query db/query
-          original-sample execution-host/sample-value!
-          samples (atom 0)
           failure {:seon.error/message "large internal database failure"
                    :seon.error/kind :core-bug}]
       (set! db/db (fn ([] (js/Promise.resolve database))
@@ -407,8 +298,6 @@
                    {:seon.config/id "cluster"}
                    failure)))))
       (set! db/query (fn [_] (js/Promise.resolve failure)))
-      (set! execution-host/sample-value!
-            (fn [_ _ _] (swap! samples inc) (js/Promise.resolve nil)))
       (-> (js/Promise.all
             #js [(serve/value! (value-ring-request "a" "eval=e"))
                  (serve/value! (value-ring-request "root" "entity=42"))])
@@ -417,7 +306,6 @@
               (let [[auth-failure entity-failure] (array-seq responses)]
                 (is (= [503 503]
                        [(.-status auth-failure) (.-status entity-failure)]))
-                (is (zero? @samples))
                 (-> (js/Promise.all
                       #js [(.text auth-failure) (.text entity-failure)])
                     (.then
@@ -433,7 +321,6 @@
               (set! db/db original-db)
               (set! db/entity original-entity)
               (set! db/query original-query)
-              (set! execution-host/sample-value! original-sample)
               (done)))))))
 
 (deftest root-entity-value-uses-one-database-value-and-zero-host-sends
@@ -441,11 +328,9 @@
     (let [original-db db/db
           original-entity db/entity
           original-query db/query
-          original-sample execution-host/sample-value!
           original-current schema/current-projection
           seen-databases (atom [])
-          seen-queries (atom [])
-          samples (atom 0)]
+          seen-queries (atom [])]
       (set! db/db (fn ([] (js/Promise.resolve database))
                     ([_] (js/Promise.resolve database))))
       (set! db/entity
@@ -462,8 +347,6 @@
               (swap! seen-databases conj database-value)
               (swap! seen-queries conj query)
               (js/Promise.resolve #{})))
-      (set! execution-host/sample-value!
-            (fn [_ _ _] (swap! samples inc) (js/Promise.resolve nil)))
       (set! schema/current-projection
             (fn [] (throw (js/Error. "ambient projection forbidden"))))
       (-> (serve/value! (value-ring-request "root" "entity=42"))
@@ -474,7 +357,6 @@
                      (.get (.-headers response) "content-type")))
               (is (= "no-store" (.get (.-headers response) "cache-control")))
               (is (nil? (.get (.-headers response) "access-control-allow-origin")))
-              (is (zero? @samples))
               (is (every? #(identical? database %) @seen-databases))
               (is (= 2 (count @seen-queries)))
               (is (some #(some #{:seon.schema/key} (flatten %)) @seen-queries))
@@ -490,7 +372,6 @@
               (set! db/db original-db)
               (set! db/entity original-entity)
               (set! db/query original-query)
-              (set! execution-host/sample-value! original-sample)
               (set! schema/current-projection original-current)
               (done)))))))
 
@@ -700,11 +581,9 @@
           original-entity db/entity
           original-query db/query
           original-fleet system/acquire-fleet-summary
-          original-sample execution-host/sample-value!
           request (atom nil)
           entity-reads (atom [])
-          query-reads (atom [])
-          child-sends (atom 0)]
+          query-reads (atom [])]
       (set! db/index-page
             (fn index-page-stub
               ([value]
@@ -735,11 +614,6 @@
             (fn [query-request]
               (swap! query-reads conj query-request)
               (js/Promise.resolve [])))
-      (set! execution-host/sample-value!
-            (fn [& _]
-              (swap! child-sends inc)
-              (js/Promise.reject
-               (js/Error. "entity values must remain parent-owned"))))
       (set! system/acquire-fleet-summary
             (fn [value]
               (is (identical? database value))
@@ -763,7 +637,6 @@
              (is (= 2 (count @query-reads)))
              (is (every? #(identical? database (::db/db %)) @query-reads)
                  "schema projection uses the feed-supplied immutable db")
-             (is (zero? @child-sends))
              (let [markup (pr-str element)
                    root-ids
                    (mapv #(get-in % [3 1 :id])
@@ -787,15 +660,13 @@
                       (is (= root-ids
                              (mapv #(get-in % [3 1 :id])
                                    (drop 2 (last rerendered))))
-                          "logical request roots survive feed rerenders")
-                      (is (zero? @child-sends))))))))
+                          "logical request roots survive feed rerenders")))))))
           (.catch (fn [error] (is false (str error))))
           (.finally
            (fn []
              (set! db/index-page original)
              (set! db/entity original-entity)
              (set! db/query original-query)
-             (set! execution-host/sample-value! original-sample)
              (set! system/acquire-fleet-summary original-fleet)
              (done)))))))
 
@@ -1481,31 +1352,19 @@
                       (set! db/query original-query)
                       (done)))))))
 
-(deftest operator-processes-reads-the-parent-host-on-demand
+(deftest operator-processes-contains-no-retired-child-state
   (async done
-    (let [original-processes execution-host/processes
-          handler (deref #'serve/handle-operator-processes!)]
-      (set! execution-host/processes
-            (fn [] [{:seon.execution/agent-id "root"
-                     :seon.execution.host/pid 41001
-                     :seon.execution.host/artifact-digest
-                     (apply str (repeat 64 "a"))
-                     :seon.execution.host/ready? true
-                     :seon.execution.host/retiring? false
-                     :seon.execution.host/stdout-tail ""
-                     :seon.execution.host/stderr-tail ""}]))
+    (let [handler (deref #'serve/handle-operator-processes!)]
       (-> (js/Promise.resolve (handler nil nil))
           (.then (fn [response]
                    (is (= 200 (.-status response)))
                    (.json response)))
           (.then (fn [body]
-                   (is (= 41001
-                          (aget body "seon.execution.host/processes" 0
-                                "seon.execution.host/pid")))))
+                   (is (= 0
+                          (.-length
+                           (aget body "seon.host.session/processes"))))))
           (.catch (fn [error] (is false (str error))))
-          (.finally (fn []
-                      (set! execution-host/processes original-processes)
-                      (done)))))))
+          (.finally done)))))
 
 (deftest restore-readiness-serves-only-the-exact-closed-completion-head
   (async done

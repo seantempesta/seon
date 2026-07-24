@@ -958,7 +958,7 @@
                 "seon.db/error" (or (.-message error) (str error))}))))))
 
 (defn- handle-operator-processes!
-  "Return one demanded snapshot of the parent-owned execution children."
+  "Return the pod's empty execution-process projection."
   [_req res]
   (write-status!
    res 200 "application/json; charset=utf-8"
