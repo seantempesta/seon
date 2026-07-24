@@ -18,6 +18,7 @@
             [seon.host.instrument :as instrument]
             [seon.host.invoke :as invoke]
             [seon.host.session :as session]
+            [seon.program.edge :as edge]
             [seon.program.plan :as plan]
             [seon.repl.parse :as repl.parse])
   (:import [java.nio.file Files Path]
@@ -312,6 +313,26 @@
                :seon.agent.driver/eval-batch batch
                :seon.agent.driver/program program}))))))
 
+(defn- no-dispatch-reply?
+  [program]
+  (and (empty? (:seon.repl/errors program))
+       (not-any? #(contains? #{:form :read} (:seon.repl/kind %))
+                 (:seon.repl/eval-entries program))))
+
+(defn- installed-binding-namespaces
+  [tier-inventory]
+  (into #{}
+        (keep (fn [binding]
+                (some-> binding symbol namespace symbol)))
+        (:seon.execution.inventory/bindings tier-inventory)))
+
+(defn- planning-root-resolution
+  [tier-inventory retained-ctx agent-ns]
+  (update (host.eval/namespace-resolution retained-ctx agent-ns)
+          ::edge/known-namespaces
+          into
+          (installed-binding-namespaces tier-inventory)))
+
 (defn- parsed-reply-plan
   [host database agent-id program]
   (let [planning-projection
@@ -329,8 +350,8 @@
                         (:seon.repl/eval-entries program))
             retained-ctx (ensure-context! host agent-id)
             root-resolution
-            (host.eval/namespace-resolution
-             retained-ctx (host.eval/agent-home-ns agent-id))
+            (planning-root-resolution
+             tier-inventory retained-ctx (host.eval/agent-home-ns agent-id))
             execution-plan
             (plan/plan-execution
              {:seon.execution/db-value database
@@ -366,49 +387,61 @@
                              :seon.agent.turn/id])
         fence (run.core/run-fence agent-id run-id claim-epoch)
         program (reply-program storage-view
-                               (:seon.agent.run/current-turn run) agent-id)
-        invocation-configuration (invocation-configuration! database)]
+                               (:seon.agent.run/current-turn run) agent-id)]
     (cond
       (:my.blob/error program)
       {:seon.error/message (:my.blob/error program)
        :seon.error/kind :core-bug}
 
-      (:seon.error/message invocation-configuration)
-      invocation-configuration
+      (no-dispatch-reply? program)
+      (let [phase-report
+            (db/transact!
+             {::db/db database
+              ::db/tx-data
+              (turn.core/advance-phase-tx-data
+               fence turn-id :reply-ready :evaled [])})]
+        (if (:seon.error/message phase-report)
+          phase-report
+          {:seon.db/db (:db-after phase-report)
+           :seon.agent.driver/no-dispatch? true
+           :seon.agent.driver/program program}))
 
       :else
-      (let [planned (parsed-reply-plan host database agent-id program)]
-        (if (:seon.error/message planned)
-          planned
-          (let [disposition (:seon.agent.driver/disposition planned)
-                execution-plan (:seon.execution/plan planned)]
-            (case (:seon.agent.driver/disposition disposition)
-              :steering (:seon.agent.driver/error disposition)
-              :core-fault (:seon.agent.driver/error disposition)
-              :release
-              (let [report
-                    (driver/release!
-                     {:seon.agent.driver/run run
-                      :seon.agent.run/claim-epoch claim-epoch
-                      :seon.db/db database})]
-                (if (:seon.error/message report)
-                  report
-                  {:seon.db/db (:db-after report)
-                   :seon.agent.driver/released? true
-                   :seon.execution/selected-tier
-                   (:seon.execution/selected-tier disposition)}))
-              :execute
-              (let [phase-report
-                    (db/transact!
-                     {::db/db database
-                      ::db/tx-data
-                      (turn.core/advance-phase-tx-data
-                       fence turn-id :reply-ready :evaling [])})]
-                (if (:seon.error/message phase-report)
-                  phase-report
-                  (run-eval-batch!
-                   host run claim-epoch (:db-after phase-report) program
-                   invocation-configuration execution-plan))))))))))
+      (let [invocation-configuration (invocation-configuration! database)]
+        (if (:seon.error/message invocation-configuration)
+          invocation-configuration
+          (let [planned (parsed-reply-plan host database agent-id program)]
+            (if (:seon.error/message planned)
+              planned
+              (let [disposition (:seon.agent.driver/disposition planned)
+                    execution-plan (:seon.execution/plan planned)]
+                (case (:seon.agent.driver/disposition disposition)
+                  :steering (:seon.agent.driver/error disposition)
+                  :core-fault (:seon.agent.driver/error disposition)
+                  :release
+                  (let [report
+                        (driver/release!
+                         {:seon.agent.driver/run run
+                          :seon.agent.run/claim-epoch claim-epoch
+                          :seon.db/db database})]
+                    (if (:seon.error/message report)
+                      report
+                      {:seon.db/db (:db-after report)
+                       :seon.agent.driver/released? true
+                       :seon.execution/selected-tier
+                       (:seon.execution/selected-tier disposition)}))
+                  :execute
+                  (let [phase-report
+                        (db/transact!
+                         {::db/db database
+                          ::db/tx-data
+                          (turn.core/advance-phase-tx-data
+                           fence turn-id :reply-ready :evaling [])})]
+                    (if (:seon.error/message phase-report)
+                      phase-report
+                      (run-eval-batch!
+                       host run claim-epoch (:db-after phase-report) program
+                       invocation-configuration execution-plan))))))))))))
 
 (defn- settle-eval-step!
   [host storage-view

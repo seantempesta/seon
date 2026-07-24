@@ -15,7 +15,8 @@
             [seon.error :as error]
             [seon.db.leaf :as db.leaf]
             [seon.host.context :as context]
-            [seon.host.eval :as host.eval])
+            [seon.host.eval :as host.eval]
+            [seon.program.edge :as edge])
   (:import [java.io File]))
 
 (def ^:private ^:dynamic *writer-session* nil)
@@ -246,6 +247,73 @@
         (is (= steering (#'driver.host/eval-step! {} nil claim)))))
     (is (empty? @transactions)
         "planning steering precedes phase and receipt transactions")))
+
+(deftest reply-with-no-dispatchable-work-advances-directly-to-publication
+  (let [transactions (atom [])
+        forbidden (fn [& _] (throw (ex-info "dispatch was not expected" {})))
+        claim
+        {:seon.db/db {:t 7}
+         :seon.agent.run/claim-epoch 2
+         :seon.agent.driver/run
+         {:seon.agent/id "agent"
+          :seon.agent.run/id "run"
+          :seon.agent.run/current-turn
+          {:seon.agent.turn/id "turn"}}}]
+    (with-redefs-fn
+      {#'driver.host/reply-program
+       (fn [& _]
+         {:seon.repl/eval-entries []
+          :seon.repl/errors []})
+       #'driver.host/invocation-configuration! forbidden
+       #'driver.host/parsed-reply-plan forbidden
+       #'driver.host/run-eval-batch! forbidden
+       #'db/transact!
+       (fn [request]
+         (swap! transactions conj request)
+         {:db-after {:t 8}})}
+      (fn []
+        (is (= {:seon.db/db {:t 8}
+                :seon.agent.driver/no-dispatch? true
+                :seon.agent.driver/program
+                {:seon.repl/eval-entries []
+                 :seon.repl/errors []}}
+               (#'driver.host/eval-step! {} nil claim)))))
+    (is (= [[[:db.fn/cas [:seon.agent/id "agent"]
+              :seon.agent/run
+              [:seon.agent.run/id "run"]
+              [:seon.agent.run/id "run"]]
+             [:db.fn/cas [:seon.agent.run/id "run"]
+              :seon.agent.run/claim-epoch 2 2]
+             [:db.fn/cas [:seon.agent.turn/id "turn"]
+              :seon.agent.turn/phase :reply-ready :evaled]]]
+           (mapv ::db/tx-data @transactions)))
+    (is (= [{::db/db {:t 7}
+             ::db/tx-data (-> @transactions first ::db/tx-data)}]
+           @transactions))))
+
+(deftest installed-lazy-capability-namespaces-enter-root-resolution
+  (let [tier-inventory
+        {:seon.execution.inventory/tier :jvm
+         :seon.execution.inventory/bindings
+         #{"seon.agent.lifecycle/complete" "seon.db/query"}
+         :seon.execution.inventory/remote-bindings #{}
+         :seon.execution.inventory/pure-bindings #{}
+         :seon.execution.inventory/digest "inventory"}]
+    (with-redefs
+      [host.eval/namespace-resolution
+       (fn [_ _]
+         {::edge/namespace 'my.agent.fixture
+          ::edge/aliases {}
+          ::edge/refers {}
+          ::edge/current-vars #{}
+          ::edge/core-vars #{}
+          ::edge/known-namespaces #{'my.agent.fixture}
+          ::edge/macro-symbols #{}
+          ::edge/effects {}})]
+      (is (= #{'my.agent.fixture 'seon.agent.lifecycle 'seon.db}
+             (::edge/known-namespaces
+              (#'driver.host/planning-root-resolution
+               tier-inventory ::retained 'my.agent.fixture)))))))
 
 (defn- phase-error-case!
   [attempt-open?]
