@@ -267,6 +267,27 @@
        :seon.error/data {:seon.config/key missing}}
       configuration)))
 
+(defn- installed-binding-namespaces
+  [tier-inventory]
+  (into #{}
+        (keep (fn [binding]
+                (some-> binding symbol namespace symbol)))
+        (:seon.execution.inventory/bindings tier-inventory)))
+
+(defn- provision-plan-bindings!
+  [host host-session execution-plan]
+  (doseq [lib
+          (installed-binding-namespaces
+           {:seon.execution.inventory/bindings
+            (get-in execution-plan
+                    [:seon.execution/capability-manifest
+                     :seon.execution/required-bindings])})]
+    (context/install-registered-wrappers!
+     {::context/registry (get-in host [:seon.host/base ::context/registry])
+      ::context/ctx (::session/ctx host-session)
+      ::context/lib lib}))
+  nil)
+
 (defn- run-eval-batch!
   [host run claim-epoch database program invocation-configuration
    execution-plan]
@@ -276,6 +297,7 @@
         turn-id (:seon.agent.turn/id turn)
         fence (run.core/run-fence agent-id run-id claim-epoch)]
     (let [host-session (driver-session host agent-id)
+            _ (provision-plan-bindings! host host-session execution-plan)
             task
             (.submit
              ^ExecutorService (:seon.host/eval-pool host)
@@ -318,13 +340,6 @@
   (and (empty? (:seon.repl/errors program))
        (not-any? #(contains? #{:form :read} (:seon.repl/kind %))
                  (:seon.repl/eval-entries program))))
-
-(defn- installed-binding-namespaces
-  [tier-inventory]
-  (into #{}
-        (keep (fn [binding]
-                (some-> binding symbol namespace symbol)))
-        (:seon.execution.inventory/bindings tier-inventory)))
 
 (defn- planning-root-resolution
   [tier-inventory retained-ctx agent-ns]

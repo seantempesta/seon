@@ -16,6 +16,7 @@
             [seon.db.leaf :as db.leaf]
             [seon.host.context :as context]
             [seon.host.eval :as host.eval]
+            [seon.host.session :as session]
             [seon.program.edge :as edge])
   (:import [java.io File]))
 
@@ -314,6 +315,27 @@
              (::edge/known-namespaces
               (#'driver.host/planning-root-resolution
                tier-inventory ::retained 'my.agent.fixture)))))))
+
+(deftest exact-plan-provisions-required-registered-namespaces
+  (let [installed (atom [])
+        host {:seon.host/base {::context/registry ::registry}}
+        host-session {::session/ctx ::retained}
+        execution-plan
+        {:seon.execution/capability-manifest
+         {:seon.execution/required-bindings
+          #{"seon.agent.lifecycle/complete" "seon.db/query"}}}]
+    (with-redefs
+      [context/install-registered-wrappers!
+       (fn [request] (swap! installed conj request))]
+      (is (nil? (#'driver.host/provision-plan-bindings!
+                 host host-session execution-plan))))
+    (is (= #{{::context/registry ::registry
+              ::context/ctx ::retained
+              ::context/lib 'seon.agent.lifecycle}
+             {::context/registry ::registry
+              ::context/ctx ::retained
+              ::context/lib 'seon.db}}
+           (set @installed)))))
 
 (defn- phase-error-case!
   [attempt-open?]
