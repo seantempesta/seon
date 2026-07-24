@@ -858,7 +858,7 @@
                     (artifact/current-manifest selected))
                   watcher-stop
                   (when (and (nil? current)
-                             (live-managed-process?
+                             (process/read-process
                               selected process/watcher-id))
                     (stop-processes!
                      selected :seon.dev.process.operation/reset
