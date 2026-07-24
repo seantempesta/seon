@@ -1095,6 +1095,13 @@ MORNING ITEMS (accumulating):
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- BN-5/10/6 CLOSED (accepted): BN-5 = REAL production defects fixed
+  (run-limit + historical consumers now read reply-policy-from-rows)
+  · BN-6 = three web limits gained their missing runtime readers
+  (fail-loud on absent facts) · BN-10 tests assert current
+  descriptor contracts. ALL 11 BN GROUPS CLOSED. FULL CLJS:
+  1,592 tests / 7,865 assertions / ONE failure (a fixture without
+  bootstrap rows — fixseed session dispatched for the final green).
 - HOMESCHEMA FIXED structurally (b8aa50788: the one :seon.ns/name
   declaration moved to its owner, referencers require it, cold-load
   regression; archived — 118 OPEN). Two small flags for the settle:
