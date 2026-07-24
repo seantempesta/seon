@@ -36,6 +36,7 @@
 
 (def writer-aot-class-dir "target/seon-writer-aot-classes")
 (def jvm-aot-class-dir "target/seon-jvm-aot-classes")
+(def writer-aot-cds-file "target/seon-database-server-aot.jsa")
 
 (defn- checked-process!
   [params message]
@@ -82,26 +83,51 @@
                          distinct)]
     (vec (reverse (keep munged-namespaces class-names)))))
 
-(defn- compile-aot!
-  "Compile a measured JVM main closure into one reusable class cache."
-  [basis class-dir roots]
-  (b/delete {:path class-dir})
-  (doseq [root roots]
-    (let [ns-compile (aot-load-order basis root)]
-      (when-not (seq ns-compile)
-        (throw (ex-info "AOT namespace discovery produced no source namespaces."
-                        {:root root})))
-      (b/compile-clj {:basis basis
-                      :class-dir class-dir
-                      :ns-compile ns-compile
-                      :java-cmd writer-java-command
-                      :java-opts writer-jvm-options}))))
+(def writer-aot-namespaces
+  (edn/read-string (slurp "resources/seon/dev/writer-aot-namespaces.edn")))
+
+(def writer-aot-excluded-namespaces
+  ;; `compile-clj` creates a DynamicClassLoader while compiling this closure.
+  ;; AOTing core.async then makes its timer entry visible from both loaders,
+  ;; which fails its Comparable cast during superv.async initialization. Keep
+  ;; those namespaces source-loaded; the measured Datahike/server closure is
+  ;; still cacheable and the exclusion is explicit rather than accidental.
+  #{'clojure.core.async
+    'clojure.core.async.impl.buffers
+    'clojure.core.async.impl.channels
+    'clojure.core.async.impl.dispatch
+    'clojure.core.async.impl.exec.threadpool
+    'clojure.core.async.impl.ioc-macros
+    'clojure.core.async.impl.mutex
+    'clojure.core.async.impl.protocols
+    'clojure.core.async.impl.timers})
 
 (defn- writer-aot!
   "Build writer and shared JVM class caches from their measured closures."
   [writer-basis]
-  (compile-aot! writer-basis writer-aot-class-dir
-                ['seon.db.server 'seon.embed.preflight])
+  (let [observed (aot-load-order writer-basis 'seon.db.server)]
+    (when-not (= (set writer-aot-namespaces) (set observed))
+      (throw (ex-info "The explicit writer AOT closure is stale."
+                      {:expected writer-aot-namespaces
+                       :observed observed}))))
+  (b/delete {:path writer-aot-class-dir})
+  ;; Isolate the compiler itself: the build task's loader otherwise coexists
+  ;; with AOTed core classes from the writer closure. The child still uses the
+  ;; maintained tools.build `compile-clj` idiom and the pinned JDK.
+  (checked-process!
+   {:command-args
+    ["clojure"
+     "-Sdeps" "{:deps {io.github.clojure/tools.build {:mvn/version \"0.10.5\"}}}"
+     "-M" "-e"
+     (str "(require '[clojure.tools.build.api :as b]) "
+          "(b/compile-clj {:basis (b/create-basis {:project \"deps.edn\" :aliases [:writer]}) "
+          ":class-dir " (pr-str writer-aot-class-dir) " "
+          ":ns-compile " (pr-str (vec (remove writer-aot-excluded-namespaces
+                                                   writer-aot-namespaces))) " "
+          ":java-cmd " (pr-str writer-java-command) " "
+          ":java-opts " (pr-str writer-jvm-options) "})")]
+    :out :capture :err :capture}
+   "Isolated writer AOT compilation failed")
   ;; SCI's host closure is not AOT-admissible yet (`copy-vars` asserts during
   ;; compilation). Keep this experiment to the measured writer closure.
   (b/delete {:path jvm-aot-class-dir})
@@ -143,16 +169,35 @@
 ;; LOCAL bindings (own basis + own class-dir), NOT the file-level globals — so
 ;; this artifact's build cannot race/clobber the source `jar` target (C19).
 
+(defn- write-writer-cds!
+  [server-uber-file]
+  (b/delete {:path writer-aot-cds-file})
+  ;; AppCDS records class metadata against this exact jar and JDK. It is a
+  ;; build output, never a mutable runtime cache.
+  (checked-process!
+   {:command-args (into [writer-java-command
+                         (str "-XX:ArchiveClassesAtExit=" writer-aot-cds-file)]
+                        (concat writer-jvm-options
+                                ["-cp" server-uber-file "clojure.main" "-e"
+                                 "(do (require 'seon.db.server) (shutdown-agents))"]))
+    :out :capture :err :capture}
+   "Writer AppCDS archive generation failed")
+  writer-aot-cds-file)
+
 (defn- writer-uber!
-  [aot?]
+  [aot? cds?]
   (let [writer-basis (b/create-basis {:project "deps.edn"
                                       :aliases writer-aliases})
-        server-class-dir "target/database-server-classes"
+        server-class-dir (if aot?
+                           jvm-aot-class-dir
+                           "target/database-server-classes")
         server-uber-file (if aot?
                            "target/seon-database-server-aot.jar"
                            "target/seon-database-server-standalone.jar")]
     (b/delete {:path server-class-dir})
     (b/delete {:path server-uber-file})
+    (when aot?
+      (writer-aot! writer-basis))
     ;; Seon src → class-dir → jar. Datahike's `src-secondary` arrives through
     ;; the writer dependency basis. Konserve's real version resource comes
     ;; from its pinned dependency and is included by the uber dependency basis.
@@ -162,20 +207,27 @@
               :src-dirs ["java"]
               :class-dir server-class-dir
               :javac-opts ["--release" "11"]})
-    (when aot?
-      ;; Source stays in the jar for dynamic `requiring-resolve` fallbacks.
-      ;; `javac` owns its class directory, so install the Clojure cache after it.
-      (writer-aot! writer-basis)
-      (b/copy-dir {:src-dirs [jvm-aot-class-dir]
-                   :target-dir server-class-dir}))
+    ;; Source always ships for `requiring-resolve`; AOT classes coexist only
+    ;; in the explicit experimental artifact.
     (b/uber {:class-dir server-class-dir
              :uber-file server-uber-file
              :basis writer-basis
              :main 'seon.DatabaseServerMain})
+    (when cds?
+      (write-writer-cds! server-uber-file))
     (println "writer-uber → " server-uber-file)))
 
-(defn writer-uber [_]
-  (writer-uber! false))
+(defn writer-uber
+  "Build the canonical source-only writer artifact."
+  [_]
+  (writer-uber! false false))
 
-(defn writer-uber-aot [_]
-  (writer-uber! true))
+(defn writer-uber-aot
+  "Explicit writer AOT experiment; never invoked by the development operator."
+  [_]
+  (writer-uber! true false))
+
+(defn writer-uber-aot-cds
+  "Explicit writer AOT plus AppCDS experiment; never invoked by the operator."
+  [_]
+  (writer-uber! true true))
