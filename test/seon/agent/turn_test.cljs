@@ -7,8 +7,8 @@
    [seon.db :as db]
    [seon.db.id :as db.id]
    [seon.db.protocol :as protocol]
-   [seon.execution :as execution]
-   [seon.execution.host :as execution.host]
+   [seon.host.session :as host.session]
+   [seon.host.session.leaf :as host.session.leaf]
    [seon.render :as render]
    [seon.schema :as schema]))
 
@@ -108,20 +108,14 @@
 
 (deftest authored-prompt-render-uses-the-guarded-single-call-door
   (async done
-    (let [original-prepare execution/prepare-invocations!
-          original-invoke execution.host/invoke!
-          observed (atom nil)
-          invocation {::execution/invocation-id "authored-render"}]
-      (set! execution/prepare-invocations!
+    (let [original-invoke host.session.leaf/invoke-authored!
+          observed (atom nil)]
+      (set! host.session.leaf/invoke-authored!
             (fn [request]
               (reset! observed request)
-              (js/Promise.resolve [invocation])))
-      (set! execution.host/invoke!
-            (fn [selected]
-              (is (= invocation selected))
               (js/Promise.resolve
-               {::execution/ok? true
-                ::execution/value "authored block"})))
+               {:seon.execution/message host.session/result-message
+                :seon.execution/result "authored block"})))
       (-> (js/Promise.resolve
            (@#'turn/invoke-authored-render!
             database "agent-1"
@@ -131,14 +125,11 @@
            (fn [value]
              (is (= "authored block" value))
              (is (= 'my.prompt/block
-                    (get-in @observed
-                            [::execution/invocation-plans 0
-                             ::execution/function-symbol])))))
+                    (::host.session.leaf/function-symbol @observed)))))
           (.catch (fn [exception] (is false (str exception))))
           (.finally
            (fn []
-             (set! execution/prepare-invocations! original-prepare)
-             (set! execution.host/invoke! original-invoke)
+             (set! host.session.leaf/invoke-authored! original-invoke)
              (done)))))))
 
 (deftest authored-guard-steering-value-remains-the-render-slot
@@ -151,15 +142,15 @@
           door
           {::render/invoke-authored!
            (fn [_] (js/Promise.resolve steering))}
-          call {::execution/function-symbol 'my.hostile/render
-                ::execution/arguments [{}]}]
+          call {:seon.execution/function-symbol 'my.hostile/render
+                :seon.execution/arguments [{}]}]
       (-> (js/Promise.resolve
            (@#'turn/invoke-prompt-calls!
             database "agent-1" door [call]))
           (.then
            (fn [results]
-             (is (true? (::execution/ok? (first results))))
-             (is (= steering (::execution/value (first results))))))
+             (is (true? (:seon.execution/ok? (first results))))
+             (is (= steering (:seon.execution/value (first results))))))
           (.catch (fn [exception] (is false (str exception))))
           (.finally done)))))
 

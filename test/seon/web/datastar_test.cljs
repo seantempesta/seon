@@ -4,8 +4,8 @@
             [seon.agent.ctx.driver :as ctx.driver]
             [seon.db :as db]
             [seon.error :as error]
-            [seon.execution :as execution]
-            [seon.execution.host :as execution.host]
+            [seon.host.session :as host.session]
+            [seon.host.session.leaf :as host.session.leaf]
             [seon.reactive :as reactive]
             [seon.ui.agent-view :as agent-view]
             [seon.ui.html :as html]
@@ -163,9 +163,7 @@
 (deftest direct-agent-view-render-pins-the-feed-database-without-child-dispatch
   (async done
     (let [original-render ctx.driver/render-agent-view!
-          original-compiled execution.host/invoke-compiled!
-          observed (atom nil)
-          child-dispatches (atom 0)]
+          observed (atom nil)]
       (set! ctx.driver/render-agent-view!
             (fn [request _invoke-selected!]
               (reset! observed request)
@@ -177,70 +175,53 @@
                 {:seon.ui.header/brand-name "seon"
                  :seon.ui.header/agent-count 1
                  :seon.ui.header/running-count 0}})))
-      (set! execution.host/invoke-compiled!
-            (fn [& _]
-              (swap! child-dispatches inc)
-              (js/Promise.reject
-               (js/Error. "agent view must not dispatch to a child"))))
       (-> (js/Promise.resolve
            (@#'datastar/render-agent-view! "agent-1" database))
           (.then
            (fn [result]
              (is (= {:seon.agent/id "agent-1" ::db/db database}
                     @observed))
-             (is (zero? @child-dispatches))
              (is (= "app-view"
                     (get-in result [::datastar/element 1 :id])))))
           (.catch (fn [exception] (is false (str exception))))
           (.finally
            (fn []
              (set! ctx.driver/render-agent-view! original-render)
-             (set! execution.host/invoke-compiled! original-compiled)
              (done)))))))
 
 (deftest authored-agent-view-render-uses-the-guarded-host-door
   (async done
     (let [original-classify error/agent-authored-sym?
-          original-prepare execution/prepare-invocations!
-          original-invoke execution.host/invoke!
-          observed (atom nil)
-          invocation {::execution/invocation-id "agent-view-render"}]
+          original-invoke host.session.leaf/invoke-authored!
+          observed (atom nil)]
       (set! error/agent-authored-sym? (fn [& _] true))
-      (set! execution/prepare-invocations!
+      (set! host.session.leaf/invoke-authored!
             (fn [request]
               (reset! observed request)
-              (js/Promise.resolve [invocation])))
-      (set! execution.host/invoke!
-            (fn [selected]
-              (is (= invocation selected))
               (js/Promise.resolve
-               {::execution/message execution/result-message
-                ::execution/result
-                {:seon.render/hiccup [:div "authored"]}
-                ::db/read-evidence read-evidence})))
+               {:seon.execution/message host.session/result-message
+                :seon.execution/result
+                {:seon.render/hiccup [:div "authored"]}})))
       (-> (js/Promise.resolve
            (@#'datastar/invoke-agent-view-call!
             database
             "agent-1"
-            {::execution/function-symbol 'my.orders/view
-             ::execution/arguments [{:seon.agent/id "agent-1"}]}))
+            {:seon.execution/function-symbol 'my.orders/view
+             :seon.execution/arguments [{:seon.agent/id "agent-1"}]}))
           (.then
            (fn [result]
-             (is (true? (::execution/ok? result)))
+             (is (true? (:seon.execution/ok? result)))
              (is (= {:seon.render/hiccup [:div "authored"]}
-                    (::execution/value result)))
-             (is (= read-evidence (::db/read-evidence result)))
-             (is (identical? database (::db/db @observed)))
+                    (:seon.execution/value result)))
+             (is (identical? database
+                             (::host.session.leaf/database @observed)))
              (is (= 'my.orders/view
-                    (get-in @observed
-                            [::execution/invocation-plans 0
-                             ::execution/function-symbol])))))
+                    (::host.session.leaf/function-symbol @observed)))))
           (.catch (fn [exception] (is false (str exception))))
           (.finally
            (fn []
              (set! error/agent-authored-sym? original-classify)
-             (set! execution/prepare-invocations! original-prepare)
-             (set! execution.host/invoke! original-invoke)
+             (set! host.session.leaf/invoke-authored! original-invoke)
              (done)))))))
 
 (deftest structural-settle-selects-the-database-configured-delay

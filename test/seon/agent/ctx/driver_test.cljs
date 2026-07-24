@@ -10,7 +10,6 @@
    [seon.db :as db]
    [seon.db.branch :as branch]
    [seon.db.protocol :as protocol]
-   [seon.execution :as execution]
    [seon.render.canvas :as canvas]))
 
 (def point
@@ -65,8 +64,8 @@
         block {:seon.render.surface/selection "canvas"
                :seon.render/html renderer}
         result
-        {::execution/ok? false
-         ::execution/error
+        {:seon.execution/ok? false
+         :seon.execution/error
          {:seon.error/message
           "The selected function is absent from the current database program."
           :seon.error/kind :agent}}
@@ -113,18 +112,18 @@
            (fn [selected]
              (reset! calls selected)
              (js/Promise.resolve
-              [{::execution/ok? true
-                ::execution/value
+              [{:seon.execution/ok? true
+                :seon.execution/value
                 {:seon.render/hiccup
                  [:div "authored"
                   [:button {:on-click 'save-authored!}]]}}])))
           (.then
            (fn [projection]
              (is (= ['my.orders/view]
-                    (mapv ::execution/function-symbol @calls)))
+                    (mapv :seon.execution/function-symbol @calls)))
              (is (= database
                     (get-in (first @calls)
-                            [::execution/arguments 0 ::db/db]))
+                            [:seon.execution/arguments 0 ::db/db]))
                  "every selected HTML renderer receives the page database")
              (is (= #{"literal" "authored" "canvas"}
                     (into #{}
@@ -227,13 +226,13 @@
            (fn [selected]
              (reset! calls selected)
              (js/Promise.resolve
-              [{::execution/ok? true
-                ::execution/value
+              [{:seon.execution/ok? true
+                :seon.execution/value
                 {:seon.render/hiccup [:div "welcome"]}}])))
           (.then
            (fn [projection]
              (is (= [canvas/welcome-sym]
-                    (mapv ::execution/function-symbol @calls))
+                    (mapv :seon.execution/function-symbol @calls))
                  "absence follows the shared canvas resolution to welcome")
              (is (= 2 @acquisitions)
                  "page acquisition and one bounded derived-candidate read")
@@ -243,12 +242,12 @@
                  "recent messages use that same database value")
              (is (= "latest reply"
                     (get-in (first @calls)
-                            [::execution/arguments 0
+                            [:seon.execution/arguments 0
                              :seon.render.chat/last-reply]))
                  "welcome receives the newest agent-to-user reply as ordinary data")
              (is (= "agent-1"
                     (get-in (first @calls)
-                            [::execution/arguments 0
+                            [:seon.execution/arguments 0
                              :seon.agent/entity :seon.agent/id]))
                  "welcome receives the agent entity under the system-input key")
              (is (= [:div "welcome"]
