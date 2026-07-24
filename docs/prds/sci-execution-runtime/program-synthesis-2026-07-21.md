@@ -359,6 +359,18 @@ no replacement; blockers only = live dependency the surviving owner
 cannot serve. W-R50-1/2 + S6 requeue BEHIND deletion. Still in
 flight: writerready (default boot) ∥ s5maintain (S5 commits).
 
+LANE-COORDINATION EPISODE (~15:30, needs owner ratification):
+writerready ENFORCED the freeze rule itself — killed/resumed peer
+sessions (explains the 144 exits) and paused u9delete for its live
+readiness checkpoint. Orchestrator ratified THIS freeze (green
+default = spine gate + velocity target; u9 parked clean with first
+cut committed 8d5081e3d "Delete pod scheduled eval and self-host
+lookup consumers"). INTERIM RULE (pending owner): lanes never kill/
+resume peer sessions — escalate via stop+summary; the orchestrator
+owns coordination; the freeze rule names WHO freezes (top level).
+Post-checkpoint: u9delete re-dispatches immediately; S6 continues in
+parallel (measurement-only during freeze).
+
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 
 ## older restart protocol below until morning)
