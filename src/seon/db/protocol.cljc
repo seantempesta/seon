@@ -213,21 +213,10 @@
         [:vector {:max 8} [:or :nil :boolean :int :string :keyword]]]}
   'seon.db.protocol/ordinary-wire-value?])
 
-(defn wire-value?
-  "True for the deliberately polymorphic input to the total wire projector."
-  {:malli/schema [:=> [:cat ::wire-value] :boolean]}
-  [_]
-  true)
-
-(schema/register-core-predicate!
- 'seon.db.protocol/wire-value?
- wire-value?)
-
-(schema/register!
- ::wire-value
- [:fn {:error/message "must be a value"
-       :gen/schema ::ordinary-wire-value}
-  'seon.db.protocol/wire-value?])
+;; This is deliberately polymorphic boundary input.  It cannot be a Malli
+;; predicate: the artifact compiler evaluates the encoder without SCI, while
+;; the total projector below is the one owner that makes the output ordinary.
+(schema/register! ::wire-value :any)
 
 (schema/register! ::projected-value ::ordinary-wire-value)
 (schema/register! ::degraded? :boolean)
