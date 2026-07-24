@@ -1890,3 +1890,9 @@ the variable-weight values they select.
   Malli validation may decode an EDN slot only as a local logical projection,
   including through component children, but it never skips a child schema or
   changes the bytes sent to the writer.
+- **A logical component child is never decoded twice.** Build the complete
+  logical validation tree once, then recurse through refs in validation-only
+  mode. Re-reading a semicolon-prefixed logical string as EDN turns the whole
+  value into a comment and returns nil; the strict no-stored-nil refusal then
+  correctly exposes the validator bug rather than a config omission
+  (`seon.db.internal/validate-entity-values!`).

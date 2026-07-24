@@ -549,6 +549,27 @@ probe · AOT canonical wiring · socket ownership · exec build ·
 applied-identity staleness · EDN encode order — each a committed
 class fix.
 
+ROOTSLOTNIL CLOSED (~18:50): the resolver preserved the exact manifest
+text; e35e2344's nested validation decoded the complete component tree and
+then decoded each already-logical child again. The root-role string begins
+with `;`, so the second EDN read treated it as a comment and produced nil.
+The one transaction validator now decodes once and recursively validates
+logical children; CLJ 3/69 and CLJS 1/62 portable proofs plus the dual-tier
+1/3 resolver contract are green. Fresh apply SUCCEEDED in **37.41s**, created
+root, and stamped basis transaction 536871012. R45 live scoreboard remains
+honestly RED beyond apply: reset failed in **74.15s** because ordinary
+admission queried initialization identity before schema installation; the
+immediate up failed in **26.71s** because apply retained its writer; after
+supervisor cleanup, two source-unchanged ups changed release digest
+119f1314→74d00961→2da2a569 and refused at **73.84s/73.80s**. Three blocker
+issues own those independent layers. Earliest unsettled integrated contract
+is stable artifact publication plus apply-owned process cleanup; proof is
+reset → apply → five-ready with one unchanged release digest. Dependency-ready
+parallel portfolio remains S5 write-through/artifact determinism and operator
+reset/apply lifecycle. Next refill is the release-digest owner first because
+it blocks every startup; final graduation remains the live claimant
+interaction outcome through the page/feed after reset.
+
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 
 ## older restart protocol below until morning)

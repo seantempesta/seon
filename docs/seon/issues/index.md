@@ -10,7 +10,7 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (49)
+## Blocker (51)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -34,10 +34,11 @@ See `README.md` for the convention.
 | [Keep database control entry independent of occupied handlers](uds-codec-capacity-can-delay-control-entry.md) | blocker | Core |
 | [Keep pod republication's reusable projection inside its contract](pod-republication-passes-nil-reusable-projection.md) | blocker | agent |
 | [Keep restore publication closed through completion](restore-completion-cannot-precede-admission.md) | blocker | Core |
+| [Keep the release digest stable across source-unchanged startup](source-unchanged-up-publishes-new-release-digest.md) | blocker | Core |
 | [Let the common Inspect pod solver address an existing agent](inspect-pod-solver-cannot-address-existing-agent.md) | blocker | agent |
+| [Make cluster reset stop before explicit apply](cluster-reset-starts-admission-before-initialization-schema.md) | blocker | Core |
 | [Make the downstream runtime package self-contained](downstream-runtime-package-is-not-self-contained.md) | blocker | Core |
 | [Make writer drain proof consumable by the operator](planned-restart-cannot-observe-writer-drain-result.md) | blocker | Core |
-| [Page-plan config digest drift blocks fresh default apply](page-plan-config-digest-drift-blocks-fresh-default-apply.md) | blocker | general |
 | [Plan a visible JVM claimant reply on an inspected tier](jvm-claimant-rejects-visible-reply-without-exact-execution-plan.md) | blocker | agent |
 | [Pod remains ready after losing its web listener](pod-remains-ready-after-web-listener-loss.md) | blocker | UI |
 | [Preserve context identity in the in-pod agent view](in-pod-agent-view-omits-context-name.md) | blocker | UI |
@@ -48,6 +49,7 @@ See `README.md` for the convention.
 | [Read-side attribute admission fails open (silent empty results, :all fallback)](read-side-attribute-admission-fails-open.md) | blocker | Core |
 | [Reconcile the JVM claimant for named clusters](named-cluster-open-does-not-reconcile-jvm-host.md) | blocker | agent |
 | [Reduce retained memory in each execution child](execution-children-retain-hundreds-of-megabytes.md) | blocker | agent |
+| [Release the apply writer before returning success](cluster-apply-retains-writer-generation.md) | blocker | Core |
 | [Restore writer admin transition is unimplemented](restore-writer-admin-transition-is-unimplemented.md) | blocker | Core |
 | [Retain complete model transport evidence in Inspect logs](inspect-model-transport-evidence-is-incomplete.md) | blocker | agent |
 | [Retain live eval values in the owning JVM host](retain-live-eval-values-in-the-owning-jvm-host.md) | blocker | agent |
