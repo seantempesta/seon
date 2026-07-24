@@ -10,6 +10,21 @@
     [seon.render.canvas :as canvas]
     [seon.schema :as schema]))
 
+(def ^:private test-projection
+  (schema/build-projection
+    {:seon.test/sym [:string {:seon.db/identity true}]
+     :seon.test/source :string
+     :seon.test
+     [:map {:seon.db/entity true
+            :seon.render/ai 'seon.render.handlers.test/render-ai
+            :seon.render/html 'seon.render.handlers.test/render-html}
+      [:seon.test/sym :seon.test/sym]
+      [:seon.test/source {:optional true} :seon.test/source]]}
+    {}
+    {:seon.schema/artifact-exports
+     #{'seon.render.handlers.test/render-ai
+       'seon.render.handlers.test/render-html}}))
+
 ;; ---------------------------------------------------------------------------
 ;; The kind exists — synchronous, no conn needed.
 ;; ---------------------------------------------------------------------------
@@ -18,7 +33,7 @@
   (is (schema/registered? :seon.test)
       ":seon.test is registered as an entity-shape :map schema")
   (let [row (some #(when (= :seon.test (:seon.schema.catalog/key %)) %)
-                  (schema/entity-catalog))]
+                  (:seon.schema.projection/catalog test-projection))]
     (is (some? row) ":seon.test appears in the derived catalog")
     (is (= #{:seon.test/sym}
            (:seon.schema.catalog/required-attrs row))
@@ -107,8 +122,12 @@
   (let [ent  {:seon.test/sym "demo.ns/t-attached"
               :seon.test/source "(deftest t-attached (is (= 4 (+ 2 2))))"
               :seon.test/last-passed-at (js/Date.)}
-        ai   (render/render-entity-ai {:seon.render/entity ent})
-        html (render/render-entity-html {:seon.render/entity ent})]
+        ai   (render/render-entity-ai
+               {:seon.render/entity ent
+                :seon.schema/projection test-projection})
+        html (render/render-entity-html
+               {:seon.render/entity ent
+                :seon.schema/projection test-projection})]
     (is (string? ai) "render-entity-ai resolves the :seon.test shape")
     (is (str/includes? ai "demo.ns/t-attached") "ai shows the sym")
     (is (vector? html) "render-entity-html resolves the :seon.test shape")

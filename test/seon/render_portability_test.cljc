@@ -26,7 +26,11 @@
          (render/render
           :seon.render/ai
           {:seon.db/db pinned-database-value
-           :seon.config/configuration {}}
+           :seon.config/configuration {}
+           :seon.schema/projection
+           {:seon.schema.projection/function-source-admissions {}
+            :seon.schema.projection/artifact-exports
+            #{'seon.render.handlers.fn/render-ai}}}
           core-function-block))))
 
 (deftest eval-seam-helpers-are-portable

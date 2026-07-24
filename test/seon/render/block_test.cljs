@@ -45,6 +45,13 @@
 (defn throwing-custom [_]
   (throw (js/Error. "custom exploded")))
 
+(defn- compiled-renderer-projection
+  [forms exports]
+  (schema/build-projection
+    forms
+    {}
+    {:seon.schema/artifact-exports (set exports)}))
+
 (defn- drilled-projection
   ([tree] (drilled-projection [] 0 false tree))
   ([path offset more? tree]
@@ -331,14 +338,18 @@
         "only the retained ordinary key exposes a drill control")))
 
 (deftest explicit-projection-dispatch-is-late-and-preserves-tagged-precedence
-  (let [projection (schema/build-projection
-                     {:demo/person
-                      [:map {:seon.render/html 'seon.render.block-test/custom-html
-                             :seon.render/ai 'seon.render.block-test/custom-ai}
-                       [:demo/name :string]]
-                      :demo/message
-                      [:map {:seon.render/html 'seon.render.block-test/throwing-custom}
-                       [:seon.render/markdown :string]]})
+  (let [projection
+        (compiled-renderer-projection
+          {:demo/person
+           [:map {:seon.render/html 'seon.render.block-test/custom-html
+                  :seon.render/ai 'seon.render.block-test/custom-ai}
+            [:demo/name :string]]
+           :demo/message
+           [:map {:seon.render/html 'seon.render.block-test/throwing-custom}
+            [:seon.render/markdown :string]]}
+          #{'seon.render.block-test/custom-html
+            'seon.render.block-test/custom-ai
+            'seon.render.block-test/throwing-custom})
         request {:seon.agent/id "agent-a"
                  :seon.schema/projection projection}
         value {:demo/name "Ada"}]
@@ -376,7 +387,11 @@
                   (fn [& _] (throw (js/Error. "matcher must not run")))]
       (is (str/includes?
             (s (render/block :html configuration
-                             {:seon.schema/projection {}} value))
+                             {:seon.schema/projection
+                              (compiled-renderer-projection
+                                {}
+                                #{'seon.render.block-test/custom-html})}
+                             value))
             "Ada")))))
 
 (deftest incomplete-explicit-overrides-never-run-custom-code
@@ -581,10 +596,14 @@
   (doseq [[sym expected]
           [['seon.render.block-test/missing-custom "Missing custom renderer"]
            ['seon.render.block-test/throwing-custom "custom exploded"]]]
-    (let [projection (schema/build-projection
-                       {:demo/custom
-                        [:map {:seon.render/html sym}
-                         [:demo/name :string]]})
+    (let [projection
+          (compiled-renderer-projection
+            {:demo/custom
+             [:map {:seon.render/html sym}
+              [:demo/name :string]]}
+            (if (= sym 'seon.render.block-test/throwing-custom)
+              #{sym}
+              #{}))
           out (error/expecting-core-fault!
                 #(render/block :html configuration
                                {:seon.schema/projection projection}
