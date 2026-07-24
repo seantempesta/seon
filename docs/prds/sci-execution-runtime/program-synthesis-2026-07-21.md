@@ -74,7 +74,23 @@ usage). Remaining night work switches to FABLE subagents (owner
 authorized, expensive) + orchestrator-run gates. Already-running
 codex processes may complete; no new codex turns possible.
 
+CONTAINMENT AUDIT LANDED (dee9b392e — the night's biggest find;
+4 issues filed 737eb2668): CRITICAL = graduated corpus source
+compiles with host clojure.core/eval (native JVM reach, invisible
+to step accounting — the graduation escape); HIGH = Malli builds
+its own unguarded SCI contexts for schema code; ctx file reads
+bypass the fs grant; R32 result handles unimplemented on JVM
+(folds into P6); break-8 data-to-code residue in fixtures. Bun
+child natively-JS confirmed (dies at U9 — urgency reinforced).
+Mechanical fixes queue post-rerun; design items → MORNING.
+
 MORNING ITEMS (accumulating):
+- GRADUATION SEMANTICS (from the containment audit): graduated fns
+  currently escape the door via host eval. Recommendation: graduation
+  = proven-pure compilation — native compile ONLY after P4/R33
+  pure-call-graph admission proves door-equivalence; the door's exit
+  exam. Decide (a) stay-interpreted / (b) recommended / (c) ruled
+  status quo.
 - CODEX CREDITS: Sol is the cheap implementation fleet and is dry
   until Jul 28 — decide whether to purchase credits (the night
   continued on Fable lanes).
