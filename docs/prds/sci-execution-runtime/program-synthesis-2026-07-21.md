@@ -1086,6 +1086,18 @@ MORNING ITEMS (accumulating):
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- BN-1/9 LANDED (546718cb4 + 4 more, accepted): claim-epoch
+  threaded through every current-run acquisition/mutation
+  (production CAS fence now satisfiable from web/client paths);
+  fenced test shapes; PLUS real finds — retry.cljc Promise-as-value
+  defect (13 reds), .cljc ns-doc reader-conditional parser fix,
+  internal-require boundary rename. CLJS 64F+2E → 30F+1E with EXACT
+  attribution. FINAL CLOSERS DISPATCHED: cljsreds session → BN-5 +
+  BN-10 + BN-6 (files freed by BN-1; expected remainder after =
+  only the render cluster); r43 session → the 16F+1E provenance-
+  render consumers (block/handlers/value/portability). When both
+  land: the settle rerun (all three suites) and the live-proof
+  ledger.
 - ENSUREPATH FIXED+ARCHIVED (d0a73db8e +2, accepted; 37/224 green):
   bare file-backed ensures return not-found — never create stores/
   directories; known names reject mismatched paths; creation
