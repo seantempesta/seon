@@ -355,6 +355,35 @@ Total: **≈5–9s** per process, processes in parallel under the operator.
 The stall breaker (R42) stays the only clock; the 10s figure gates design
 acceptance, not runtime.
 
+**S4 measured checkpoint (2026-07-24, release
+`ee5015ecdf715ad553f498973d4ed2de2d2179b3d2f2ba3912199beeb5074ff5`,
+isolated `s4startgate`):**
+
+| Process / interval | Measured | Result |
+|---|---:|---|
+| Bun leaf, containment owner start → `auto-boot ready`, empty divergence | 2.03s | PASS |
+| Bun leaf, containment owner start → `auto-boot ready`, one agent schema + one durable function in the divergence overlay | 2.46s | PASS |
+| Bun `cluster open`, complete operator wall including immutable-package verification | 9.21s | PASS |
+| Writer JVM, containment owner start → writer `ready` | 13.88s | **FAIL** |
+| Writer JVM, post-class-load `booting` → `ready` | 0.07s | diagnostic only |
+| Claimant JVM | not measured | target process is not owned by the current release package |
+| Web-render JVM | not measured | target process is not owned by the current release package |
+
+The Bun result closes S4's population-work hypothesis: its divergent restart
+contains zero committed-acquisition, indexing, config-reconcile, initial-agent,
+or monolithic-projection log lines. Session attach took 0.98s; config and
+resumable-agent reads took 0.04s and 0.09s; compose + materialize took 0.40s;
+instrumentation took 0.46s. The cache carried one schema and one function
+delta, and its composed canonical data string was byte-equal to the cold
+monolithic projection at fingerprint `1769298305`.
+
+The overall ≤10s target is therefore **not yet graduated**. S4 removed the
+population-scale work and proves the current per-cluster Bun START below the
+budget, but the first honest writer measurement falsifies phase 1's 2–4s
+estimate, and the two target JVM consumers are still unmeasured. S6 now owns
+the remaining writer/class-load investigation plus claimant/web-render
+measurements; no S4 result may relabel the 13.88s writer start as a pass.
+
 What made this possible is subtraction, not optimization: phases that no
 longer exist at start are index-core!/index-schemas (release file),
 build-projection ×3 (proof + pure-data cached; registry compile is the only
@@ -584,6 +613,10 @@ S1 is the already-dispatched bootfast lane, restated for completeness.
    (boot old artifact against newer applied cluster ⇒ exact refusal);
    ≤10s measured per process on the target topology, budget table filled
    with measured numbers.
+   **S4 checkpoint:** implementation, Bun live proof, divergence equivalence,
+   and old/new mismatch refusal are complete. Graduation remains open because
+   the writer measured 13.88s and the claimant/web-render JVM processes remain
+   unmeasured; see §4.
 5. **S5 maintain:** agent registration/durable-defn tx carries the row-5
    divergence-cache delta in the same transaction; hot-reload publication
    recomposes; kill-between-any-two-operations restart proof (restart at
