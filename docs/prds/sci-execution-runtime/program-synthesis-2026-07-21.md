@@ -1086,6 +1086,23 @@ MORNING ITEMS (accumulating):
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- SEAM SWEEP ACCEPTED + BATCH WAVE DISPATCHED (research/
+  integration-seam-sweep-2026-07-23.md: 11 breaks-now + 2 suspicious
+  + 2 breaks-on-growth beyond the chain's 7; four consumer groups
+  explain 18 of the unmasked reds). WAVE (all session-resumes with
+  owned files + protected maps): cljsreds session → BN-1 claim-epoch
+  production callers (4 sites silently failing the CAS fence — the
+  sweep's most serious find) + BN-9 fenced test shapes + unowned red
+  clusters; S2 session → BN-2 release inventory paths + BN-3
+  standalone test-writer artifact dependence + BN-4 ACME 12s timer
+  in derivation; fixseed session → BN-7 computed population drops
+  persisted attributes (complete the computed rule, never a list;
+  strengthen the parity regression that should have caught it); r43
+  session → BN-11 transcript direct-call classification + BN-8
+  benchmark fuel residue. QUEUED behind live lanes: BN-5+BN-10
+  (reply-policy/provider consumers — after break9 frees driver
+  files), BN-6 (web limits readers — after BN-1 frees serve.cljs).
+  Breaks-on-growth + suspicious rows → issue notes via triage lane.
 - BREAK #8 FIXED (32e7b75eb, accepted — the containment-correct
   answer): the fixture spliced canonical tx data into an evaluated
   SCI form (symbol VALUES analyzed as code); fix keeps host schema
