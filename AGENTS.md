@@ -514,6 +514,16 @@ code-block comment above a form, and `;;;` is runtime-structure demarcation.
 
 ## Runtime contracts
 
+- Timeouts and magic numbers are design smells until proven backstops
+  (owner ruling 2026-07-24). A deadline may only guard genuinely
+  unobservable external state (a remote HTTP call, a foreign process).
+  For anything the process or database can observe — a thread
+  completing/dying, a datom committing, a child exiting, a phase
+  settling — detection must be event-driven (supervision, completion
+  callbacks, `listen!`), with the clock kept only as a loud last-resort
+  backstop whose firing is itself a bug report, never the primary
+  failure path. When you meet a tuned constant, first ask what
+  observable event it is standing in for.
 - Nothing throws into the agent loop. Every failure is a `:seon/error` value;
   catch sites record the fault as database data. Agent mistakes never crash the
   pod. Core faults follow the one `:seon.config/on-core-error` dial.
