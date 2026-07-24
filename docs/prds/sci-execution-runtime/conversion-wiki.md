@@ -1881,3 +1881,12 @@ the variable-weight values they select.
   `seon.dev.config/config-manifest-digest` owner at both operator selection and
   Shadow flush publication, bind the sidecar to that digest, and keep apply's
   mismatch refusal strict.
+
+## R45 transaction storage projection scar (2026-07-24)
+
+- **Transaction validation and storage share one encoded projection.** Normalize
+  absence and identities, encode every EDN slot once in `seon.db/transact!`,
+  then validate and submit that same value; submission never encodes again.
+  Malli validation may decode an EDN slot only as a local logical projection,
+  including through component children, but it never skips a child schema or
+  changes the bytes sent to the writer.

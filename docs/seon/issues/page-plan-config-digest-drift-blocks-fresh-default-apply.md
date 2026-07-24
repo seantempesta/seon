@@ -61,9 +61,11 @@ The strict apply verification remains unchanged.
   named `adc1e407f04100f1412700f33c482d21a2f017eb340dcecfa37ec5bc64908630`.
 - Fresh apply passed page-plan admission and began applying its 95
   initialization pages. It no longer produced the digest refusal.
-- Apply stopped after 35.35 seconds at the independent
-  [[transaction-validation-precedes-edn-slot-encoding-blocks-fresh-config-reconcile]]
-  defect, before this issue's full apply/boot acceptance could be recorded.
+- After the transaction-boundary fix, fresh apply also passed the former
+  `:seon.eval/home-requires` storage-schema failure. Its next refusal is the
+  independently invalid root-context component recorded in
+  [[transaction-validation-precedes-edn-slot-encoding-blocks-fresh-config-reconcile]].
+  Full apply/boot acceptance remains pending that owner repair.
 
 ## Owner
 
