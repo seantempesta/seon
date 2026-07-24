@@ -72,7 +72,9 @@ case "$command" in
     name=$1; shift
     # codex prints "session id: <uuid>" in every run header; the last
     # one in the lane's log is the session to continue.
-    sid=${LANE_SID:-$(grep -o 'session id: [0-9a-f-]*' \
+    # require a real uuid after the colon — killed sessions can leave a
+    # truncated "session id: " header with no value
+    sid=${LANE_SID:-$(grep -o 'session id: [0-9a-f][0-9a-f-]\{7,\}' \
       "$dir/$name-stdout.log" 2>/dev/null | tail -1 | cut -d' ' -f3)}
     [ -n "$sid" ] || {
       echo "bin/codex-agent: no session id in $dir/$name-stdout.log;" \
