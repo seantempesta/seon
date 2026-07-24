@@ -38,6 +38,39 @@ PROVISIONAL: `no-dispatch-reply?` bypasses the planner instead of
 plan-execution returning a trivial empty plan — candidate class fix,
 awaiting the fix-quality audit verdict before re-opening.
 
+OWNER RULINGS (2026-07-24 ~08:40, recorded same-turn):
+- R47 pod-LLM removal RATIFIED (e21c85417 stands).
+- R48 GRADUATION = PROVEN-PURE COMPILE: native compile ONLY after
+  P4/R33 pure-call-graph admission proves door-equivalence; the
+  differential test stays as sanity; the invocation deadline stays
+  the runaway backstop. Until P4 lands, `graduate!` must refuse
+  loudly (no silent nursery downgrade) — no fn may reach host eval
+  through the tests-pass gate.
+- R49 MALLI [:fn] PREDICATES THROUGH THE DOOR: schema-predicate
+  sci compilation/execution uses the one guarded door; delete the
+  private unguarded contexts.
+- Owner-reserved queue RELEASED: C1 codec totality + db-call
+  deadlines (WHEN: S3 returns — shares protocol.cljc), graduation
+  drills (WHEN: graduation gate), P6 (WHEN: after P3/P4).
+- Owner wants active participation in big design decisions —
+  batch design forks to him with recommendations; don't auto-rule.
+
+FIX-QUALITY AUDIT ACCEPTED (research/overnight-fix-quality-audit-
+2026-07-24.md): 7 CLASS / 6 INSTANCE / 2 docs; no weakened tests.
+Weakness queue (owner package + WHEN):
+- W-serve-fault-door: ONE terminal-catch fault door in serve.cljs
+  replacing ~10 open-coded 500 catches (WHEN: web-UI lane after
+  u9s0a returns; check U9 route-death first).
+- W-no-roots-arm: add `:no-roots → :no-dispatch` disposition arm in
+  the planner; DELETE `no-dispatch-reply?` (WHEN: after lifecycle
+  re-drive returns — same mechanism under live proof now).
+- W-attempt-timeout-config: `SEON_LLM_ATTEMPT_TIMEOUT_MS`
+  System/getenv at claim time → config fact through manifest apply
+  (WHEN: with W-no-roots-arm, same driver/host.clj owner).
+- W-claimant-acquisition-contract: no single claimant acquisition
+  contract exists (per-fact-family choke points only) — fold into
+  S4 startgate's acquisition work, verify there.
+
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 
 ## older restart protocol below until morning)
