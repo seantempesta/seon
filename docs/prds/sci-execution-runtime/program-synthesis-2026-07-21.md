@@ -1095,6 +1095,12 @@ MORNING ITEMS (accumulating):
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- HOMESCHEMA FIXED structurally (b8aa50788: the one :seon.ns/name
+  declaration moved to its owner, referencers require it, cold-load
+  regression; archived — 118 OPEN). Two small flags for the settle:
+  a dirty reference-code/datahike state refused a restart (inspect
+  at settle), and three archived notes have invalid frontmatter
+  blocking issues-index regen (fold into next cleanup slot).
 - R43 RENDER CLUSTER CLOSED (a675ab8ed, accepted): all four
   namespaces green (107/608), TEST-ONLY — fixtures model provenance
   with exact artifact exports, fail-closed unknowns, parity
