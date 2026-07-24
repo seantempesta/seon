@@ -1896,3 +1896,22 @@ the variable-weight values they select.
   value into a comment and returns nil; the strict no-stored-nil refusal then
   correctly exposes the validator bug rather than a config omission
   (`seon.db.internal/validate-entity-values!`).
+
+## R45 operator publication and admission scars (2026-07-24)
+
+- **Reset prepares a release; it does not admit the application.** The reset
+  owner drains every managed generation, deletes the database and applied
+  manifest, and publishes or verifies the current source artifact. Explicit
+  apply then owns initialization and its completion receipt; only a later
+  `up` may admit writer, host, claimant, pod, and web-render processes.
+- **Watcher liveness is not release identity.** A stopped watcher does not
+  invalidate byte-verified published outputs. Re-entering Shadow's fresh
+  compiler process for unchanged source can assign different compiler-local
+  symbols and therefore different client bytes, so startup first consumes
+  `artifact/current-manifest`; watcher readiness remains bound to that
+  manifest's client digest.
+- **Apply releases only the writer generation it acquired.** Startup ownership
+  records whether explicit apply had to start the directly owned writer. On
+  success, apply drains that exact managed generation before publishing the
+  applied manifest; a writer that was already converged remains under its
+  existing owner.

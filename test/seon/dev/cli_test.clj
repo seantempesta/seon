@@ -468,12 +468,13 @@
           (is (= [] (:seon.dev.target/stop-results target))))))
     (is (= [process/writer-id process/watcher-id process/pod-id] @ensured))))
 
-(deftest reconcile-republishes-after-the-manifest-watcher-stopped
+(deftest source-unchanged-reconcile-reuses-one-release-without-a-watcher
   (let [configuration {:seon.dev.config/cluster-dir "/cluster"}
         manifest {:seon.dev.artifact/application-digest
                   (apply str (repeat 64 "a"))
                   :seon.dev.artifact/changed #{}}
-        built? (atom false)]
+        observed-digests (atom [])
+        ensured (atom [])]
     (with-redefs-fn
       {#'cli/assert-current-database-layout! identity
        #'cli/recover-dead-processes! (constantly nil)
@@ -485,21 +486,31 @@
        (fn [{:seon.dev.process/keys [operation targets]}]
          (stop-result operation targets))
        #'artifact/current-manifest
-       (fn [& _] (throw (ex-info "stopped watcher reused manifest" {})))
-       #'artifact/build!
-       (fn [_ prepare-client!]
-         (reset! built? true)
-         (prepare-client!)
+       (fn [& _]
+         (swap! observed-digests conj
+                (:seon.dev.artifact/application-digest manifest))
          manifest)
-       #'process/prepare-watcher! (fn [& _] nil)
-       #'process/admit-watcher-artifact! (fn [& _] nil)
-       #'process/specs (fn [& _] {})
-       #'process/start-order (fn [_] [])
+       #'artifact/build!
+       (fn [& _]
+         (throw (ex-info "source-unchanged release was republished" {})))
+       #'process/specs
+       (fn [& _]
+         {process/watcher-id {:seon.dev.process/id process/watcher-id}})
+       #'process/start-order (constantly [process/watcher-id])
+       #'process/ensure!
+       (fn [_ spec _]
+         (swap! ensured conj (:seon.dev.process/id spec)))
        #'process/status
        (fn [& _]
          {:seon.dev.target/status :seon.dev.target.status/ready})}
-      (fn [] (#'cli/reconcile-development! configuration)))
-    (is (true? @built?))))
+      (fn []
+        (#'cli/reconcile-development! configuration)
+        (#'cli/reconcile-development! configuration)))
+    (is (= [(:seon.dev.artifact/application-digest manifest)
+            (:seon.dev.artifact/application-digest manifest)]
+           @observed-digests)
+        "two unchanged startups consume byte-identical release identities")
+    (is (= [process/watcher-id process/watcher-id] @ensured))))
 
 (deftest reconcile-recovers-only-definitely-dead-managed-processes
   (let [configuration {:seon.dev.config/cluster-dir "/cluster"}
@@ -1098,7 +1109,7 @@
              (#'cli/assert-current-database-layout! configuration)))
       (finally (fs/delete-tree root {:force true})))))
 
-(deftest cluster-reset-rebuilds-before-reconciling
+(deftest cluster-reset-stops-before-explicit-apply
   (let [root (fs/create-temp-dir {:prefix "seon-cli-reset-"})
         cluster (fs/path root "data/clusters/default")
         database (fs/path cluster "db")
@@ -1112,7 +1123,9 @@
         applied-manifest (fs/path cluster "config/applied.edn")
         requests (atom [])
         reset-packages (atom [])
-        reconciled (atom [])]
+        reconciled? (atom false)
+        manifest {:seon.dev.artifact/application-digest
+                  (apply str (repeat 64 "a"))}]
     (try
       (fs/create-dirs database)
       (spit (str (fs/path database "old.ksv")) "old database")
@@ -1129,38 +1142,42 @@
          #'process/target-process-ids
          (constantly process/all-process-ids)
          #'cli/select-config (fn [selected _path] selected)
+         #'artifact/current-manifest (constantly manifest)
+         #'process/with-startup-ownership
+         (fn [_ transition]
+           (transition (fn [_ acquire!] (acquire!))))
          #'cluster/reset-package-skeleton!
          (fn [descriptor]
            (swap! reset-packages conj descriptor)
            (:seon.launch/packages-dir descriptor))
          #'cli/reconcile-development!
-         (fn [selected stop-results]
-           (is (not (fs/exists? database)))
-           (is (not (fs/exists? applied-manifest)))
-           (swap! reconciled conj [selected stop-results])
-           {:seon.dev.target/status :seon.dev.target.status/ready
-            :seon.dev.target/stop-results stop-results})}
+         (fn [& _]
+           (reset! reconciled? true)
+           (throw
+            (ex-info "reset raced ordinary admission before apply" {})))}
         (fn []
           (is (= (str "  reset: forced\n"
                       "    web-render: forced\n"
                       "    pod: forced\n"
                       "    host: forced\n"
                       "    writer: forced\n"
-                      "● cluster default reset and ready\n")
+                      "    watcher: forced\n"
+                      "● cluster default reset\n"
+                      "  release: "
+                      (:seon.dev.artifact/application-digest manifest) "\n"
+                      "  next: bin/seon cluster apply default\n")
                  (with-out-str
                    (#'cli/reset-cluster! configuration ["default"]))))))
       (is (= [{:seon.dev.process/configuration configuration
                :seon.dev.process/operation :seon.dev.process.operation/reset
                :seon.dev.process/targets
-               #{process/pod-id process/web-render-id process/host-id
-                 process/writer-id}}]
+               (set process/all-process-ids)}]
              @requests))
-      (is (= configuration (ffirst @reconciled)))
       (is (= [(:seon.dev.config/launch-descriptor configuration)]
              @reset-packages))
-      (is (= :seon.dev.process.operation/reset
-             (-> @reconciled first second first
-                 :seon.dev.process/operation)))
+      (is (false? @reconciled?))
+      (is (not (fs/exists? database)))
+      (is (not (fs/exists? applied-manifest)))
       (finally (fs/delete-tree root {:force true})))))
 
 (deftest cluster-reset-uncertainty-preserves-the-database

@@ -117,8 +117,11 @@
   [target-configuration manifest pod]
   (let [status (process/status target-configuration manifest)
         writer
-        (get-in status
-                [:seon.dev.target/external-dependencies process/writer-id])
+        (or (get-in status
+                    [:seon.dev.target/processes process/writer-id])
+            (get-in status
+                    [:seon.dev.target/external-dependencies
+                     process/writer-id]))
         retained-pod (process/read-process target-configuration process/pod-id)]
     (when-not (:seon.dev.process/ready? writer)
       (throw
@@ -248,6 +251,7 @@
         (let [manifest (current-manifest! configuration)
               writer (get (process/specs target-configuration manifest)
                           process/writer-id)
+              started-writer (atom nil)
               direct-writer?
               (= (:seon.dev.config/process-dir configuration)
                  (:seon.dev.config/process-dir target-configuration))
@@ -255,8 +259,14 @@
                   (process/ensure!
                    target-configuration writer
                    (fn [id acquire!]
-                     (acquire-owned! id acquire!
-                                     #(process/stop! target-configuration id)))))
+                     (acquire-owned!
+                      id
+                      #(let [record (acquire!)]
+                         (reset! started-writer record)
+                         record)
+                      #(if-let [record @started-writer]
+                         (process/stop! target-configuration id record)
+                         (process/stop! target-configuration id))))))
            pod (get (process/specs target-configuration manifest)
                     process/pod-id)
            _ (require-apply-readiness! target-configuration manifest pod)
@@ -280,6 +290,8 @@
                       :err :string
                       :cmd argv})
            result (read-apply-result! result-path process-result)]
+       (when-let [record @started-writer]
+         (process/stop! target-configuration process/writer-id record))
        (config/publish-applied-manifest! target-configuration)
        result))))))
 

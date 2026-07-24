@@ -86,9 +86,15 @@
         request (cluster/request {::cluster/configuration configuration
                                   ::cluster/name name})]
     (is (= name (::cluster/name request)))
-    (is (= (:seon.dev.config/launch-descriptor configuration)
-           (:seon.dev.config/launch-descriptor
-            (::cluster/target-configuration request))))))
+    (let [source (:seon.dev.config/launch-descriptor configuration)
+          target (:seon.dev.config/launch-descriptor
+                  (::cluster/target-configuration request))]
+      (is (= (::launch/writer-owner source)
+             (::launch/writer-owner target)))
+      (is (= (::launch/database source)
+             (::launch/database target)))
+      (is (= (::launch/process source)
+             (::launch/process target))))))
 
 (deftest package-clusters-live-in-operator-state-not-the-immutable-release
   (let [source (::cluster/configuration (target-request))
@@ -199,6 +205,7 @@
         request (assoc request ::cluster/target-configuration
                        target-configuration)
         manifest {:seon.dev.artifact/application-digest "application"}
+        writer {:seon.dev.process/id process/writer-id}
         pod {:seon.dev.process/id process/pod-id
              :seon.dev.process/argv ["/runtime/bun" "/runtime/client.js"]
              :seon.dev.process/environment {"EXISTING" "pod"}}
@@ -215,7 +222,12 @@
         (fn [selected selected-manifest]
           (is (= target-configuration selected))
           (is (= manifest selected-manifest))
-          {process/pod-id pod})
+          {process/writer-id writer
+           process/pod-id pod})
+        process/ensure!
+        (fn [selected spec _start-owned!]
+          (is (= target-configuration selected))
+          (is (= writer spec)))
         process/status
         (fn [selected selected-manifest]
           (is (= target-configuration selected))
@@ -261,10 +273,14 @@
 (deftest apply-requires-a-ready-writer-and-an-absent-pod
   (let [{::cluster/keys [target-configuration] :as request} (target-request)
         manifest {:seon.dev.artifact/application-digest "application"}
+        writer {:seon.dev.process/id process/writer-id}
         pod {:seon.dev.process/id process/pod-id}
         ran? (atom false)]
     (with-redefs [artifact/current-manifest (constantly manifest)
-                  process/specs (fn [_ _] {process/pod-id pod})
+                  process/specs (fn [_ _]
+                                  {process/writer-id writer
+                                   process/pod-id pod})
+                  process/ensure! (fn [_ spec _] (is (= writer spec)))
                   state/with-lock (fn [_ _ _ transition] (transition))
                   shell/sh (fn [_] (reset! ran? true))]
       (with-redefs [process/status
@@ -293,15 +309,110 @@
              (cluster/apply! request)))))
     (is (false? @ran?))))
 
+(deftest apply-readiness-accepts-a-directly-owned-writer
+  (let [{::cluster/keys [target-configuration]} (target-request)
+        manifest {:seon.dev.artifact/application-digest "application"}
+        pod {:seon.dev.process/id process/pod-id}
+        status
+        {:seon.dev.target/processes
+         {process/writer-id
+          {:seon.dev.process/status :seon.dev.process.status/alive
+           :seon.dev.process/ready? true}}
+         :seon.dev.target/external-dependencies {}}]
+    (with-redefs [process/status (fn [_ _] status)
+                  process/read-process (constantly nil)]
+      (is (= status
+             (#'cluster/require-apply-readiness!
+              target-configuration manifest pod))))))
+
+(deftest default-apply-cleans-only-the-writer-generation-it-starts
+  (let [{::cluster/keys [configuration target-configuration] :as request}
+        (target-request)
+        process-dir (str (fs/path (:seon.dev.config/root configuration)
+                                  "tmp/apply-process"))
+        target-configuration
+        (-> target-configuration
+            (assoc :seon.dev.config/process-dir
+                   (:seon.dev.config/process-dir configuration))
+            (assoc-in [:seon.dev.config/launch-descriptor
+                       ::launch/process ::launch/process-dir]
+                      process-dir))
+        request (assoc request ::cluster/target-configuration
+                       target-configuration)
+        manifest {:seon.dev.artifact/application-digest "application"}
+        writer {:seon.dev.process/id process/writer-id}
+        writer-record
+        {:seon.dev.process/id process/writer-id
+         :seon.dev.process.containment/generation (random-uuid)}
+        pod {:seon.dev.process/id process/pod-id
+             :seon.dev.process/argv ["/runtime/bun" "/runtime/client.js"]
+             :seon.dev.process/environment {}}
+        result {:seon.cluster.apply/ok? true}
+        effects (atom [])]
+    (with-redefs
+     [artifact/current-manifest (constantly manifest)
+      process/specs (fn [_ _]
+                      {process/writer-id writer
+                       process/pod-id pod})
+      process/with-startup-ownership
+      (fn [_ transition]
+        (transition
+         (fn [id acquire! release!]
+           (swap! effects conj [:own id release!])
+           (acquire!))))
+      process/ensure!
+      (fn [_ spec start-owned!]
+        (is (= writer spec))
+        (start-owned! process/writer-id
+                      #(do
+                         (swap! effects conj :writer-start)
+                         writer-record)))
+      process/status
+      (fn [_ _]
+        {:seon.dev.target/processes
+         {process/writer-id {:seon.dev.process/ready? true}}})
+      process/read-process (constantly nil)
+      cluster/ensure-package-skeleton! (constantly nil)
+      state/with-lock (fn [_ _ _ transition] (transition))
+      shell/sh
+      (fn [{:keys [env]}]
+        (swap! effects conj :apply)
+        (spit (get env "SEON_CLUSTER_APPLY_RESULT")
+              (str (pr-str result) "\n"))
+        {:exit 0 :out "" :err ""})
+      process/stop!
+      (fn [selected id expected-record]
+        (is (= target-configuration selected))
+        (swap! effects conj [:stop id expected-record])
+        {:seon.dev.process/id id
+         :seon.dev.process/classification
+         :seon.dev.process.classification/clean})
+      config/publish-applied-manifest!
+      (fn [selected]
+        (swap! effects conj :publish)
+        selected)]
+     (is (= result (cluster/apply! request))))
+    (is (= [[:own process/writer-id] :writer-start :apply
+            [:stop process/writer-id writer-record]
+            :publish]
+           (mapv #(if (and (vector? %) (= :own (first %)))
+                    (subvec % 0 2)
+                    %)
+                 @effects)))))
+
 (deftest apply-never-publishes-the-selected-manifest-after-client-failure
   (let [{::cluster/keys [target-configuration] :as request} (target-request)
         manifest {:seon.dev.artifact/application-digest "application"}
+        writer {:seon.dev.process/id process/writer-id}
         pod {:seon.dev.process/id process/pod-id
              :seon.dev.process/argv ["/runtime/bun" "/runtime/client.js"]
              :seon.dev.process/environment {}}
         published? (atom false)]
     (with-redefs [artifact/current-manifest (constantly manifest)
-                  process/specs (fn [_ _] {process/pod-id pod})
+                  process/specs (fn [_ _]
+                                  {process/writer-id writer
+                                   process/pod-id pod})
+                  process/ensure! (fn [_ spec _] (is (= writer spec)))
                   process/status
                   (fn [_ _]
                     {:seon.dev.target/external-dependencies

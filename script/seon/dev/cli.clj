@@ -128,6 +128,15 @@
     (release/read-manifest!
      (:seon.dev.config/artifact-manifest configuration))))
 
+(defn- publish-source-artifact!
+  [configuration start-owned!]
+  (let [manifest
+        (artifact/build!
+         configuration
+         #(process/prepare-watcher! configuration start-owned!))]
+    (process/admit-watcher-artifact! configuration manifest)
+    manifest))
+
 (defn- reconcile-development!
   ([configuration] (reconcile-development! configuration []))
   ([configuration prior-stop-results]
@@ -146,9 +155,7 @@
         (ensure-development-processes!
          configuration (selected-manifest configuration) start-owned!
          prior-stop-results)
-        (if-let [manifest (when (live-managed-process?
-                              configuration process/watcher-id)
-                          (artifact/current-manifest configuration))]
+        (if-let [manifest (artifact/current-manifest configuration)]
         (let [late-recovery (recover-dead-processes! configuration)
               stop-results (cond-> prior-stop-results
                              late-recovery (conj late-recovery))]
@@ -167,10 +174,7 @@
                  readers-to-stop))
               stop-results (cond-> prior-stop-results
                              reader-stop (conj reader-stop))
-              manifest (artifact/build!
-                        configuration
-                        #(process/prepare-watcher! configuration start-owned!))
-              _ (process/admit-watcher-artifact! configuration manifest)
+              manifest (publish-source-artifact! configuration start-owned!)
               changed (:seon.dev.artifact/changed manifest)
               stopped-after-readers (stopped-targets stop-results)
               writer-stop
@@ -829,7 +833,7 @@
                       {:seon.dev.cluster/requested cluster-name
                        :seon.dev.cluster/configured
                        (:seon.dev.config/cluster-name configuration)})))
-    (let [target
+    (let [{:keys [stopped manifest]}
           (state/with-lock
            configuration :stack 1800000
            #(let [_ (assert-current-database-layout! configuration)
@@ -840,17 +844,28 @@
                   (stop-processes!
                    configuration
                    :seon.dev.process.operation/reset
-                   (disj (set (process/target-process-ids configuration))
-                         process/watcher-id))]
-              (when (fs/exists? database) (fs/delete-tree database))
-              (config/delete-applied-manifest! configuration)
-              (cluster/reset-package-skeleton!
-               (:seon.dev.config/launch-descriptor configuration))
-              (reconcile-development! (select-config configuration nil)
-                                      [stopped])))]
-      (doseq [result (:seon.dev.target/stop-results target)]
-        (print-stop-evidence! "  " result))
-      (println (str "● cluster " cluster-name " reset and ready")))))
+                   (set (process/target-process-ids configuration)))
+                  _ (when (fs/exists? database) (fs/delete-tree database))
+                  _ (config/delete-applied-manifest! configuration)
+                  _ (cluster/reset-package-skeleton!
+                     (:seon.dev.config/launch-descriptor configuration))
+                  selected (select-config configuration nil)
+                  manifest
+                  (if (= false
+                         (:seon.dev.config/source-checkout? selected))
+                    (selected-manifest selected)
+                    (process/with-startup-ownership
+                     selected
+                     (fn [start-owned!]
+                       (or (artifact/current-manifest selected)
+                           (publish-source-artifact!
+                            selected start-owned!)))))]
+              {:stopped stopped :manifest manifest}))]
+      (print-stop-evidence! "  " stopped)
+      (println (str "● cluster " cluster-name " reset"))
+      (println (str "  release: "
+                    (:seon.dev.artifact/application-digest manifest)))
+      (println (str "  next: bin/seon cluster apply " cluster-name)))))
 
 (def ^:private restore-plan-byte-limit 1048576)
 
