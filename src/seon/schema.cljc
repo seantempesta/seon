@@ -1259,6 +1259,68 @@
       (:seon.schema.projection/pure-predicate-symbols composed)}
      keyed)))
 
+(def ^:private projection-delta-identities
+  {:seon.schema.projection/forms :schema
+   :seon.schema.projection/schema-admissions :schema
+   :seon.schema.projection/schema-dependencies :schema
+   :seon.schema.projection/shape-rows :schema
+   :seon.schema.projection/function-admissions :function
+   :seon.schema.projection/function-source-admissions :function
+   :seon.schema.projection/function-contracts :function
+   :seon.schema.projection/function-dependencies :function})
+
+(defn maintain-projection-delta
+  "Update one complete divergence delta by the identities changed in a commit.
+
+   Unlike [[projection-delta]], this function never walks either projection
+   population. Each changed identity performs a fixed number of keyed lookups;
+   serialization cost is therefore bounded by the complete divergence value,
+   not by the verified release population."
+  {:malli/schema
+   [:=> [:catn [::base :map]
+                [::divergence-delta :map]
+                [::projection :map]
+                [:seon.schema/changed-schema-keys [:set :keyword]]
+                [:seon.schema/changed-function-symbols [:set :symbol]]]
+    :map]}
+  [base divergence composed changed-schema-keys changed-function-symbols]
+  (let [base (projection-pure-data base)
+        composed (projection-pure-data composed)
+        update-identity
+        (fn [delta projection-key identity]
+          (let [base-values (get base projection-key {})
+                composed-values (get composed projection-key {})
+                changed? (and (contains? composed-values identity)
+                              (not= (get composed-values identity)
+                                    (get base-values identity)))
+                next-values
+                (cond-> (get delta projection-key (sorted-map))
+                  changed?
+                  (assoc identity (get composed-values identity))
+
+                  (not changed?)
+                  (dissoc identity))]
+            (if (seq next-values)
+              (assoc delta projection-key next-values)
+              (dissoc delta projection-key))))
+        maintained
+        (reduce-kv
+         (fn [delta projection-key identity-class]
+           (reduce
+            (fn [result identity]
+              (update-identity result projection-key identity))
+            delta
+            (case identity-class
+              :schema changed-schema-keys
+              :function changed-function-symbols)))
+         divergence
+         projection-delta-identities)]
+    (assoc maintained
+           :seon.schema.projection/artifact-exports
+           (:seon.schema.projection/artifact-exports composed)
+           :seon.schema.projection/pure-predicate-symbols
+           (:seon.schema.projection/pure-predicate-symbols composed))))
+
 (defn materialize-projection
   "Rematerialize registry/options over preproved pure projection data."
   {:malli/schema

@@ -510,6 +510,8 @@
                       (true? (::context/projection-changed? recorded))
                       recorded-function-rows
                       (::context/function-rows recorded)
+                      committed-projection
+                      (::context/committed-projection recorded)
                       projection-refresh
                       (when (and ok? recorded (:seon.db/ok? recorded)
                                  (or (seq recorded-function-rows)
@@ -521,9 +523,10 @@
                              (install-recorded-function!
                               session function-row live-value))
                            (when projection-change?
-                             (instrument/refresh-and-reconcile!
-                              (::instrument/state session) writer
-                              (get-in recorded [:db-after :t]))))))
+                             (instrument/publish-maintained-and-reconcile!
+                              (::instrument/state session)
+                              (:db-after recorded)
+                              committed-projection)))))
                       _ (when (:seon/error projection-refresh)
                           (throw
                             (ex-info

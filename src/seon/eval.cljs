@@ -3389,6 +3389,14 @@
   [{::keys [function-symbols ending-ns source]
     database ::db/db}]
   (let [database (or database (await (db/db)))
+        divergence-cache
+        (await (db/entity database admission/divergence-cache-ref))
+        _ (when (database-error? divergence-cache)
+            (throw
+             (ex-info
+              "Eval divergence-cache acquisition failed."
+              {:seon.error/data divergence-cache
+               :seon.error/kind :core-bug})))
         require? (seq (require-form-specs
                        (first (or (try (read-all-forms source)
                                        (catch :default _ nil))
@@ -3408,6 +3416,7 @@
                                              [namespace])]))]
     (if (empty? requests)
       {::db/db database
+       ::divergence-cache divergence-cache
        ::core-boot-function-symbols #{}}
       (let [response (await
                        (db/execute-many
@@ -3420,6 +3429,7 @@
             [stored-source source-process]
             (first (::namespace-source results))]
         {::db/db database
+         ::divergence-cache divergence-cache
          ::core-boot-function-symbols
          (set (::core-boot-function-symbols results))
          ::stored-source stored-source
@@ -3467,13 +3477,65 @@
         contract-transition
         (function-contract-transition old-projection tee-entities)
         changed-function-syms (::changed-syms contract-transition)
+        admission-source
+        {:seon.schema.admission/source :agent
+         :seon.schema.admission/process-id :seon.db.process/repl
+         :seon.schema.admission/user
+         (cond-> {}
+           (db/current-agent-id)
+           (assoc :seon.agent/id (db/current-agent-id)))}
+        changed-function-source-syms
+        (into #{}
+              (keep
+               (fn [row]
+                 (some-> (and (map? row) (:seon.fn/sym row)) symbol)))
+              tee-entities)
         candidate-outcome
         (when (or (seq changed-schemas) (seq changed-function-syms))
           (try
-            {::candidate-projection
-             (schema/build-projection
-              schemas-after
-              (::function-contracts contract-transition))}
+            (let [function-contracts
+                  (::function-contracts contract-transition)
+                  schema-admissions
+                  (reduce #(assoc %1 %2 admission-source)
+                          (:seon.schema.projection/schema-admissions
+                           old-projection)
+                          changed-schemas)
+                  function-admissions
+                  (reduce
+                   (fn [admissions function-symbol]
+                     (if (contains? function-contracts function-symbol)
+                       (assoc admissions function-symbol admission-source)
+                       (dissoc admissions function-symbol)))
+                   (:seon.schema.projection/function-admissions old-projection)
+                   changed-function-syms)
+                  function-source-admissions
+                  (reduce #(assoc %1 %2 admission-source)
+                          (:seon.schema.projection/function-source-admissions
+                           old-projection)
+                          changed-function-source-syms)
+                  candidate
+                  (schema/build-projection
+                   schemas-after
+                   function-contracts
+                   {:seon.schema/schema-admissions schema-admissions
+                    :seon.schema/function-admissions function-admissions
+                    :seon.schema/function-source-admissions
+                    function-source-admissions
+                    :seon.schema/artifact-exports
+                    (:seon.schema.projection/artifact-exports old-projection)
+                    :seon.schema/pure-predicate-symbols
+                    (:seon.schema.projection/pure-predicate-symbols
+                     old-projection)})
+                  cache-row
+                  (admission/maintain-divergence-cache-row
+                   (::divergence-cache acquired)
+                   candidate
+                   (set changed-schemas)
+                   (into changed-function-syms
+                         changed-function-source-syms)
+                   (inc (get-in acquired [::db/db :t])))]
+              {::candidate-projection candidate
+               ::divergence-cache-row cache-row})
             (catch :default candidate-error
               {::candidate-error candidate-error})))
         candidate-error (::candidate-error candidate-outcome)
@@ -3524,8 +3586,11 @@
           (require-decl-tx namespace source
                            (::stored-source acquired)
                            (::source-process acquired)))]
-    {::tee (vec (concat tee-entities require-edge-tx
-                        require-declaration-tx edge-tx read-attribute-tx))
+    {::tee (cond-> (vec (concat tee-entities require-edge-tx
+                                require-declaration-tx edge-tx
+                                read-attribute-tx))
+             (::divergence-cache-row candidate-outcome)
+             (conj (::divergence-cache-row candidate-outcome)))
      ::result result
      ::pending? pending?
      ::candidate-outcome candidate-outcome

@@ -282,6 +282,7 @@
          (:seon.startgate/base-projection-path request)
          (:seon.startgate/base-projection-digest request))
         base-projection (:seon.dev.artifact/base-projection base-artifact)
+        _ (reset! (::context/base-projection writer) base-projection)
         database (context/resolve-head! writer)
         expected-identity
         {:seon.db.initialization/fingerprint

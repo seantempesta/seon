@@ -226,3 +226,17 @@
          (do (apply-projection! instrument-state
                                 (::context/projection refreshed))
              refreshed))))))
+
+(defn publish-maintained-and-reconcile!
+  "Publish the projection written with the program transaction and reconcile."
+  [instrument-state database committed-projection]
+  (call-with-write-admission
+   instrument-state
+   (fn []
+     (let [published
+           (context/publish-maintained-projection!
+            (::projection-state instrument-state)
+            database
+            committed-projection)]
+       (apply-projection! instrument-state (::context/projection published))
+       published))))

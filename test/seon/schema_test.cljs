@@ -469,6 +469,47 @@
     (is (some? (:seon.schema.projection/registry composed)))
     (is (some? (:seon.schema.projection/compile-options composed)))))
 
+(deftest maintained-divergence-is-delta-only-and-byte-equal
+  (let [base
+        (schema/build-projection
+         {:startgate.maintain/id [:string {:seon.db/identity true}]
+          :startgate.maintain/base :string})
+        first-cold
+        (schema/build-projection
+         (assoc (:seon.schema.projection/forms base)
+                :startgate.maintain/first :int))
+        second-cold
+        (schema/build-projection
+         (assoc (:seon.schema.projection/forms first-cold)
+                :startgate.maintain/second :boolean))
+        first-delta (schema/projection-delta base first-cold)
+        maintained
+        (with-redefs [schema/projection-delta
+                      (fn [& _]
+                        (throw
+                         (js/Error.
+                          "maintenance called the population-wide builder")))
+                      schema/compose-projection-data
+                      (fn [& _]
+                        (throw
+                         (js/Error.
+                          "maintenance called the population-wide composer")))]
+          (schema/maintain-projection-delta
+           base first-delta second-cold
+           #{:startgate.maintain/second} #{}))
+        composed
+        (schema/compose-projection-data
+         (schema/projection-pure-data base) maintained)]
+    (is (= #{:startgate.maintain/first :startgate.maintain/second}
+           (set
+            (keys
+             (:seon.schema.projection/forms maintained)))))
+    (is (= (schema/canonical-data-string
+            (schema/projection-pure-data second-cold))
+           (schema/canonical-data-string composed)))
+    (is (= (:seon.schema.projection/fingerprint second-cold)
+           (:seon.schema.projection/fingerprint composed)))))
+
 (deftest verified-release-registration-is-collect-only
   (let [before (schema/snapshot-state)
         validations (atom [])]

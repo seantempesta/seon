@@ -14,6 +14,7 @@
     [seon.db.protocol :as protocol]
     [seon.error :as error]
     [seon.instrument :as instrument]
+    [seon.log :as log]
     [seon.runtime.admission :as admission]
     [seon.schema :as schema]))
 
@@ -90,6 +91,87 @@
          true?
          (map #(get-in facets [% :db/noHistory])
               (rest attributes))))))
+
+(deftest stale-basis-repairs-from-history-delta-and-publishes-that-generation
+  (async done
+    (let [original-db db/db
+          original-entity db/entity
+          original-query db/query
+          original-transact db/transact!
+          original-log log/error-console!
+          !queries (atom [])
+          !transactions (atom [])
+          !logs (atom [])
+          base
+          (schema/build-projection
+           {:startgate.repair/id [:string {:seon.db/identity true}]})
+          stale-cache
+          (admission/divergence-cache-row base {} 42)
+          head (assoc acquisition-database :t 43)
+          repaired-head (assoc acquisition-database :t 44)]
+      (reset! @#'admission/!base-projection base)
+      (set! db/db (fn [& _] (js/Promise.resolve head)))
+      (set! db/entity
+            (fn [& _] (js/Promise.resolve stale-cache)))
+      (set! db/query
+            (fn [request]
+              (swap! !queries conj request)
+              (js/Promise.resolve
+               (let [query (::db/query request)
+                     args (::db/args request)]
+                 (cond
+                   (= query @#'admission/changed-program-entity-query)
+                   #{[101 :seon.schema/form]}
+
+                   (= query @#'admission/changed-program-identity-query)
+                   #{[101 :startgate.repair/value]}
+
+                   (= (nth args 1 nil) :seon.schema/key)
+                   [[:startgate.repair/value
+                     ":int"
+                     {:seon.db/user {:seon.agent/id "root"}
+                      :seon.db/process
+                      {:seon.db.process/id :seon.db.process/repl}}]]
+
+                   :else
+                   (throw
+                    (js/Error.
+                     (str "unexpected repair query " (pr-str request)))))))))
+      (set! db/transact!
+            (fn [request]
+              (swap! !transactions conj request)
+              (js/Promise.resolve
+               {:db-before head :db-after repaired-head :tx-data []})))
+      (set! log/error-console!
+            (fn [& values] (swap! !logs conj values)))
+      (-> ((deref #'admission/acquire-preprocessed-projection!) base #{})
+          (.then
+           (fn [acquired]
+             (let [row (first (:seon.db/tx-data (first @!transactions)))]
+               (is (= repaired-head (::db/db acquired)))
+               (is (= :int
+                      (get-in acquired
+                              [::admission/projection
+                               :seon.schema.projection/forms
+                               :startgate.repair/value])))
+               (is (= 1 (count @!transactions)))
+               (is (= head (::db/expected-db (first @!transactions))))
+               (is (= 44
+                      (:seon.runtime.admission.cache/basis-t row)))
+               (is (= 3 (count @!queries))
+                   "repair reads history identities and only the changed row")
+               (is (= 1 (count @!logs)))
+               (is (re-find #"delta-only repair"
+                            (str (second (first @!logs))))))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! db/db original-db)
+             (set! db/entity original-entity)
+             (set! db/query original-query)
+             (set! db/transact! original-transact)
+             (set! log/error-console! original-log)
+             (done)))))))
 
 (deftest publication-state-has-one-owner-and-one-fault
   (let [!recorded (atom [])]

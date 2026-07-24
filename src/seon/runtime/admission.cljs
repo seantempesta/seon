@@ -8,6 +8,7 @@
   (:require
     [cljs.reader :as reader]
     [seon.db :as db]
+    [seon.db.protocol :as db.protocol]
     [seon.error :as error]
     [seon.instrument :as instrument]
     [seon.log :as log]
@@ -357,37 +358,271 @@
 
 (defn divergence-cache-row
   "Return the one no-history cache row for a composed projection delta."
-  {:malli/schema [:=> [:cat :map :map :int] :map]}
-  [base delta basis-t]
-  (let [base-fingerprint
-        (:seon.schema.projection/fingerprint base)
-        composed (schema/compose-projection-data base delta)]
-    {:seon.runtime.admission.cache/id "committed-projection"
-     :seon.runtime.admission.cache/base-fingerprint base-fingerprint
-     :seon.runtime.admission.cache/divergence-fingerprint
-     (schema/canonical-data-fingerprint delta)
-     :seon.runtime.admission.cache/composed-fingerprint
-     (:seon.schema.projection/fingerprint composed)
-     :seon.runtime.admission.cache/basis-t basis-t
-     :seon.runtime.admission.cache/delta (pr-str delta)}))
+  {:malli/schema
+   [:function
+    [:=> [:cat :map :map :int] :map]
+    [:=> [:cat :map :map :int :int] :map]]}
+  ([base delta basis-t]
+   (divergence-cache-row
+    base delta
+    (:seon.schema.projection/fingerprint
+     (schema/compose-projection-data base delta))
+    basis-t))
+  ([base delta composed-fingerprint basis-t]
+   {:seon.runtime.admission.cache/id "committed-projection"
+    :seon.runtime.admission.cache/base-fingerprint
+    (:seon.schema.projection/fingerprint base)
+    :seon.runtime.admission.cache/divergence-fingerprint
+    (schema/canonical-data-fingerprint delta)
+    :seon.runtime.admission.cache/composed-fingerprint composed-fingerprint
+    :seon.runtime.admission.cache/basis-t basis-t
+    :seon.runtime.admission.cache/delta (pr-str delta)}))
+
+(defn cache-delta
+  "Read and verify the complete ordinary divergence value in one cache row."
+  [cache]
+  (let [encoded (:seon.runtime.admission.cache/delta cache)
+        delta (when (string? encoded) (reader/read-string encoded))]
+    (when (and
+           (map? delta)
+           (= (schema/canonical-data-fingerprint delta)
+              (:seon.runtime.admission.cache/divergence-fingerprint cache)))
+      delta)))
+
+(defn maintain-divergence-cache-row
+  "Update the complete overlay only at the identities admitted by this tx."
+  [cache candidate changed-schema-keys changed-function-symbols basis-t]
+  (let [base @!base-projection
+        delta (cache-delta cache)]
+    (when-not
+     (and base delta
+          (= (:seon.schema.projection/fingerprint base)
+             (:seon.runtime.admission.cache/base-fingerprint cache)))
+      (throw
+       (ex-info
+        "The divergence cache cannot be maintained from an invalid base key."
+        {:seon.runtime.admission/cache cache
+         :seon.error/kind :core-bug})))
+    (let [maintained
+          (schema/maintain-projection-delta
+           base delta candidate changed-schema-keys changed-function-symbols)]
+      (divergence-cache-row
+       base maintained
+       (:seon.schema.projection/fingerprint candidate)
+       basis-t))))
 
 (defn- verified-cache-composition
-  [base cache database]
-  (let [delta-string (:seon.runtime.admission.cache/delta cache)
-        delta (when (string? delta-string)
-                (reader/read-string delta-string))
+  [base cache _database]
+  (let [delta (cache-delta cache)
         composed (when (map? delta)
                    (schema/compose-projection-data base delta))]
     (when (and
            (= (:seon.schema.projection/fingerprint base)
               (:seon.runtime.admission.cache/base-fingerprint cache))
-           (= (:t database)
-              (:seon.runtime.admission.cache/basis-t cache))
-           (= (schema/canonical-data-fingerprint delta)
-              (:seon.runtime.admission.cache/divergence-fingerprint cache))
            (= (:seon.schema.projection/fingerprint composed)
               (:seon.runtime.admission.cache/composed-fingerprint cache)))
       composed)))
+
+(def ^:private changed-program-entity-query
+  '[:find ?e ?attribute
+    :in $ [?attribute ...]
+    :where
+    [?e ?attribute _ _ _]])
+
+(def ^:private changed-program-identity-query
+  '[:find ?e ?identity
+    :in $ [?e ...] ?identity-attribute
+    :where
+    [?e ?identity-attribute ?identity _ true]])
+
+(defn- stale-database-failure?
+  [value]
+  (= db.protocol/stale-database-value-error
+     (get-in value
+             [:seon.error/data ::db.protocol/error-kind])))
+
+(defn- row-map
+  [rows identity-fn value-fn]
+  (into {}
+        (map
+         (fn [[raw-identity raw-value asserting-transaction]]
+           [(identity-fn raw-identity)
+            {:seon.runtime.admission/value (value-fn raw-value)
+             :seon.runtime.admission/admission
+             (schema/admission-from-asserting-transaction
+              asserting-transaction)}]))
+        rows))
+
+(defn- repair-candidate
+  [composed schema-identities function-identities acquired]
+  (let [schemas (row-map (::schema-rows acquired) identity keyword
+                         reader/read-string)
+        contracts (row-map (::function-contract-rows acquired) symbol
+                           reader/read-string)
+        sources (row-map (::function-source-rows acquired) symbol identity)
+        replace-identities
+        (fn [values identities rows value-key]
+          (reduce
+           (fn [result identity]
+             (if-let [row (get rows identity)]
+               (assoc result identity (get row value-key))
+               (dissoc result identity)))
+           values
+           identities))
+        replace-admissions
+        (fn [admissions identities rows]
+          (reduce
+           (fn [result identity]
+             (if-let [row (get rows identity)]
+               (assoc result identity
+                      (:seon.runtime.admission/admission row))
+               (dissoc result identity)))
+           admissions
+           identities))
+        forms
+        (replace-identities
+         (:seon.schema.projection/forms composed)
+         schema-identities schemas :seon.runtime.admission/value)
+        function-contracts
+        (replace-identities
+         (:seon.schema.projection/function-contracts composed)
+         function-identities contracts :seon.runtime.admission/value)]
+    (schema/build-projection
+     forms function-contracts
+     {:seon.schema/schema-admissions
+      (replace-admissions
+       (:seon.schema.projection/schema-admissions composed)
+       schema-identities schemas)
+      :seon.schema/function-admissions
+      (replace-admissions
+       (:seon.schema.projection/function-admissions composed)
+       function-identities contracts)
+      :seon.schema/function-source-admissions
+      (replace-admissions
+       (:seon.schema.projection/function-source-admissions composed)
+       function-identities sources)
+      :seon.schema/artifact-exports
+      (:seon.schema.projection/artifact-exports composed)
+      :seon.schema/pure-predicate-symbols
+      (:seon.schema.projection/pure-predicate-symbols composed)})))
+
+(defn- ^:async repair-identities-for!
+  [database entity-ids identity-attribute]
+  (if (seq entity-ids)
+    (await
+     (db/query
+      {::db/db (db/history database)
+       ::db/query changed-program-identity-query
+       ::db/args [entity-ids identity-attribute]
+       ::db/max-result-weight acquisition-page-max-result-weight}))
+    []))
+
+(defn- ^:async changed-identities!
+  [database basis-t]
+  (let [changed
+        (await
+         (db/query
+          {::db/db (db/history (db/since database basis-t))
+           ::db/query changed-program-entity-query
+           ::db/args
+           [[:seon.schema/form :seon.fn/spec :seon.fn/source]]
+           ::db/max-result-weight acquisition-page-max-result-weight}))
+        _ (when (failed-read? changed)
+            (acquisition-error! :divergence-history changed))
+        schema-ids
+        (into [] (comp (filter #(= :seon.schema/form (second %)))
+                       (map first) distinct)
+              changed)
+        function-ids
+        (into [] (comp (filter #(contains? #{:seon.fn/spec :seon.fn/source}
+                                            (second %)))
+                         (map first) distinct)
+              changed)
+        schema-identities
+        (into #{}
+              (map (comp keyword second))
+              (await
+               (repair-identities-for!
+                database schema-ids :seon.schema/key)))
+        function-identities
+        (into #{}
+              (map (comp symbol second))
+              (await
+               (repair-identities-for!
+                database function-ids :seon.fn/sym)))
+        acquired
+        {::schema-rows
+         (await (acquire-row-pages!
+                 database schema-ids :seon.schema/key :seon.schema/form))
+         ::function-contract-rows
+         (await (acquire-row-pages!
+                 database function-ids :seon.fn/sym :seon.fn/spec))
+         ::function-source-rows
+         (await (acquire-row-pages!
+                 database function-ids :seon.fn/sym :seon.fn/source))}]
+    {::schema-identities schema-identities
+     ::function-identities function-identities
+     ::acquired acquired
+     ::changed-row-count (count changed)}))
+
+(defn- ^:async repair-divergence-cache!
+  [base cache]
+  (loop []
+    (let [database (await (db/db))
+          current-cache (await (db/entity database divergence-cache-ref))
+          delta (cache-delta current-cache)
+          basis-t (:seon.runtime.admission.cache/basis-t current-cache)
+          composed
+          (when (and delta
+                     (= (:seon.schema.projection/fingerprint base)
+                        (:seon.runtime.admission.cache/base-fingerprint
+                         current-cache)))
+            (schema/compose-projection-data base delta))]
+      (when-not (and composed (int? basis-t) (< basis-t (:t database)))
+        (throw
+         (ex-info
+          "Only a valid cache whose basis lags the head can be delta-repaired."
+          {:seon.runtime.admission/cache current-cache
+           :seon.runtime.admission/database-basis (:t database)
+           :seon.error/kind :core-bug})))
+      (let [{::keys [schema-identities function-identities acquired
+                     changed-row-count]}
+            (await (changed-identities! database basis-t))
+            candidate
+            (if (or (seq schema-identities) (seq function-identities))
+              (repair-candidate
+               composed schema-identities function-identities acquired)
+              (schema/materialize-projection composed))
+            maintained
+            (schema/maintain-projection-delta
+             base delta candidate schema-identities function-identities)
+            next-basis (inc (:t database))
+            row
+            (divergence-cache-row
+             base maintained
+             (:seon.schema.projection/fingerprint candidate)
+             next-basis)
+            _ (log/error-console!
+               "seon.runtime.admission"
+               "SEON-CORE-FAULT divergence cache delta-only repair"
+               {:seon.runtime.admission/cached-basis basis-t
+                :seon.runtime.admission/head-basis (:t database)
+                :seon.runtime.admission/changed-row-count changed-row-count})
+            report
+            (await
+             (db/transact!
+              {::db/db database
+               ::db/expected-db database
+               ::db/tx-data [row]}))]
+        (if (stale-database-failure? report)
+          (recur)
+          (do
+            (when (failed-read? report)
+              (acquisition-error! :divergence-repair report))
+            {::db/db (:db-after report)
+             ::projection candidate
+             ::repaired? true
+             ::changed-row-count changed-row-count}))))))
 
 (defn- ^:async acquire-preprocessed-projection!
   "Verify all three cache keys and rematerialize one admitted projection."
@@ -399,7 +634,20 @@
         _ (when (failed-read? cache)
             (acquisition-error! :divergence-cache cache))
         composed (verified-cache-composition base cache database)
-        _ (when-not composed
+        valid-content?
+        (some? composed)
+        current?
+        (and valid-content?
+             (= (:t database)
+                (:seon.runtime.admission.cache/basis-t cache)))
+        repaired
+        (when (and valid-content?
+                   (< (:seon.runtime.admission.cache/basis-t cache)
+                      (:t database)))
+          (await (repair-divergence-cache! base cache)))
+        composed (or (::projection repaired) composed)
+        database (or (::db/db repaired) database)
+        _ (when-not (or current? repaired)
             (throw
              (ex-info
               (str "The committed projection divergence cache does not match "

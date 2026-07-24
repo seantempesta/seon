@@ -11,7 +11,8 @@
     [seon.error :as error]
     [seon.eval :as seval]
     [seon.eval.receipt :as receipt]
-    [seon.runtime.admission :as admission]))
+    [seon.runtime.admission :as admission]
+    [seon.schema :as schema]))
 
 (def configuration (config/resolve-config-singleton {}))
 
@@ -354,6 +355,60 @@
            (fn []
              (set! db/transact! original-transact)
              (set! db/pull original-pull)
+             (done)))))))
+
+(deftest program-row-and-maintained-cache-share-the-receipt-transaction
+  (async done
+    (let [original-transact db/transact!
+          original-base (deref @#'admission/!base-projection)
+          observed (atom nil)
+          schema-key :my.agent.receipt/maintained
+          base (schema/build-projection
+                {:my.agent.receipt/id
+                 [:string {:seon.db/identity true}]})
+          cache (admission/divergence-cache-row base {} (:t database))
+          schema-row {:seon.schema/key schema-key
+                      :seon.schema/form ":string"}
+          compiled
+          (do
+            (reset! @#'admission/!base-projection base)
+            ((deref #'seval/compile-eval-tee)
+             {::seval/tee-entities [schema-row]
+              ::seval/schemas-after
+              (assoc (:seon.schema.projection/forms base) schema-key :string)
+              ::seval/old-projection base
+              ::seval/changed-schemas #{schema-key}
+              ::seval/source "(schema/register! :my.agent.receipt/maintained :string)"
+              ::seval/ending-ns 'my.agent.receipt
+              ::seval/require-edges []
+              ::seval/analysis-resolution {}
+              ::seval/result {::seval/ok? true ::seval/value schema-key}
+              ::seval/pending? false}
+             {::db/db database
+              ::seval/divergence-cache cache
+              ::seval/core-boot-function-symbols #{}}))]
+      (set! db/transact!
+            (fn [& [request]]
+              (reset! observed request)
+              (js/Promise.resolve transaction-report)))
+      (-> (seval/record-eval!
+           (assoc record-request ::seval/tee (::seval/tee compiled)))
+          (.then
+           (fn [_]
+             (let [tx-data (:seon.db/tx-data @observed)
+                   cache-rows
+                   (filter :seon.runtime.admission.cache/id tx-data)]
+               (is (= database (::db/expected-db @observed)))
+               (is (= schema-row (some #(when (:seon.schema/key %) %) tx-data)))
+               (is (= 1 (count cache-rows)))
+               (is (= 43
+                      (:seon.runtime.admission.cache/basis-t
+                       (first cache-rows)))))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (reset! @#'admission/!base-projection original-base)
+             (set! db/transact! original-transact)
              (done)))))))
 
 (deftest stale-publication-rebuilds-from-the-frozen-result

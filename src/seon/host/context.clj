@@ -236,6 +236,7 @@
             ::pool-condition (::db.host/pool-condition host-writer)
             ::call-executor (::db.host/call-executor host-writer)
             ::eval-generator (atom nil)
+            ::base-projection (atom nil)
             ::projection-state (atom nil)}
            (when backend {::backend backend})
            (when database-path {::database-path database-path}))))
@@ -1498,7 +1499,8 @@
   [writer {::keys [tx-data candidates database]}]
   (let [transact! (get (bound-database-functions writer) 'transact!)
         request (cond-> {:seon.db/tx-data (vec tx-data)}
-                  database (assoc :seon.db/db database)
+                  database (assoc :seon.db/db database
+                                  :seon.db/expected-db database)
                   (seq candidates)
                   (assoc :seon.db.id/generated-candidates (vec candidates)))
         report (transact! request)]
@@ -1765,6 +1767,26 @@
                acquired
                current)))))
 
+(defn publish-maintained-projection!
+  "Publish an atomically maintained cache projection at its committed basis."
+  [projection-state database committed-projection]
+  (let [artifact-exports
+        (or (::artifact-exports @projection-state)
+            (get-in @projection-state
+                    [::projection
+                     :seon.schema.projection/artifact-exports])
+            #{})
+        process-projection
+        (schema/materialize-projection
+         (schema/compose-projection-data
+          committed-projection
+          {:seon.schema.projection/artifact-exports artifact-exports}))]
+    (publish-committed-projection!
+     projection-state
+     {::database database
+      ::artifact-exports artifact-exports
+      ::projection process-projection})))
+
 (defn current-committed-projection
   "Return the complete retained projection or its newer-generation fault."
   {:malli/schema [:=> [:catn [::projection-state ::projection-state]] :map]}
@@ -1858,6 +1880,146 @@
    (record-transact! writer {::tx-data tx-data}))
   ([writer database tx-data]
    (record-transact! writer {::database database ::tx-data tx-data})))
+
+(defn- host-cache-row
+  [base delta composed-fingerprint basis-t]
+  {:seon.runtime.admission.cache/id "committed-projection"
+   :seon.runtime.admission.cache/base-fingerprint
+   (:seon.schema.projection/fingerprint base)
+   :seon.runtime.admission.cache/divergence-fingerprint
+   (schema/canonical-data-fingerprint delta)
+   :seon.runtime.admission.cache/composed-fingerprint composed-fingerprint
+   :seon.runtime.admission.cache/basis-t basis-t
+   :seon.runtime.admission.cache/delta (pr-str delta)})
+
+(defn- changed-lookup-identities
+  [tx-data identity-attribute identity-fn]
+  (into #{}
+        (keep
+         (fn [operation]
+           (cond
+             (and (map? operation) (contains? operation identity-attribute))
+             (identity-fn (get operation identity-attribute))
+
+             (and (vector? operation)
+                  (vector? (second operation))
+                  (= identity-attribute (first (second operation))))
+             (identity-fn (second (second operation)))
+
+             :else nil)))
+        tx-data))
+
+(defn- replace-admission-identities
+  [current identities present? admission]
+  (reduce
+   (fn [result identity]
+     (if (present? identity)
+       (assoc result identity admission)
+       (dissoc result identity)))
+   current
+   identities))
+
+(defn- maintain-host-divergence-cache
+  [writer database program-tx-data]
+  (let [base @(::base-projection writer)
+        entity-fn (get (bound-database-functions writer) 'entity)
+        cache
+        (entity-fn database
+                   [:seon.runtime.admission.cache/id "committed-projection"])
+        encoded (:seon.runtime.admission.cache/delta cache)
+        delta (when (string? encoded) (edn/read-string encoded))
+        _ (when-not
+           (and base (map? delta)
+                (= (:seon.schema.projection/fingerprint base)
+                   (:seon.runtime.admission.cache/base-fingerprint cache))
+                (= (schema/canonical-data-fingerprint delta)
+                   (:seon.runtime.admission.cache/divergence-fingerprint cache)))
+            (throw
+             (ex-info
+              "The JVM claimant cannot maintain an invalid divergence cache."
+              {:seon.runtime.admission/cache cache
+               :seon.error/kind :core-bug})))
+        composed (schema/compose-projection-data base delta)
+        schema-identities
+        (changed-lookup-identities
+         program-tx-data :seon.schema/key
+         #(if (keyword? %) % (keyword %)))
+        function-identities
+        (changed-lookup-identities
+         program-tx-data :seon.fn/sym
+         #(if (symbol? %) % (symbol %)))
+        schema-rows
+        (into {}
+              (keep
+               (fn [row]
+                 (when-let [schema-key
+                            (and (map? row) (:seon.schema/key row))]
+                   [(if (keyword? schema-key)
+                      schema-key
+                      (keyword schema-key))
+                    (edn/read-string (:seon.schema/form row))])))
+              program-tx-data)
+        function-rows
+        (into {}
+              (keep
+               (fn [row]
+                 (when-let [function-symbol
+                            (and (map? row) (:seon.fn/sym row))]
+                   [(if (symbol? function-symbol)
+                      function-symbol
+                      (symbol function-symbol))
+                    row])))
+              program-tx-data)
+        admission
+        {:seon.schema.admission/source :agent
+         :seon.schema.admission/process-id :seon.db.process/repl
+         :seon.schema.admission/user
+         (cond-> {}
+           *agent-id* (assoc :seon.agent/id *agent-id*))}
+        forms
+        (reduce
+         (fn [result schema-key]
+           (if-let [form (get schema-rows schema-key)]
+             (assoc result schema-key form)
+             (dissoc result schema-key)))
+         (:seon.schema.projection/forms composed)
+         schema-identities)
+        function-contracts
+        (reduce
+         (fn [result function-symbol]
+           (if-let [spec (get-in function-rows [function-symbol :seon.fn/spec])]
+             (assoc result function-symbol (edn/read-string spec))
+             (dissoc result function-symbol)))
+         (:seon.schema.projection/function-contracts composed)
+         function-identities)
+        candidate
+        (schema/build-projection
+         forms function-contracts
+         {:seon.schema/schema-admissions
+          (replace-admission-identities
+           (:seon.schema.projection/schema-admissions composed)
+           schema-identities #(contains? schema-rows %) admission)
+          :seon.schema/function-admissions
+          (replace-admission-identities
+           (:seon.schema.projection/function-admissions composed)
+           function-identities
+           #(contains? function-contracts %) admission)
+          :seon.schema/function-source-admissions
+          (replace-admission-identities
+           (:seon.schema.projection/function-source-admissions composed)
+           function-identities #(contains? function-rows %) admission)
+          :seon.schema/artifact-exports
+          (:seon.schema.projection/artifact-exports composed)
+          :seon.schema/pure-predicate-symbols
+          (:seon.schema.projection/pure-predicate-symbols composed)})
+        maintained
+        (schema/maintain-projection-delta
+         base delta candidate schema-identities function-identities)]
+    {::cache-row
+     (host-cache-row base maintained
+                     (:seon.schema.projection/fingerprint candidate)
+                     (inc (:t database)))
+     ::projection candidate}))
 
 (def ^:private eval-allocation-key ::eval-allocation)
 (def ^:private max-allocation-attempts 16)
@@ -1964,7 +2126,7 @@
                             (contains? % :seon.fn/sym)
                             (contains? % :seon.fn/source)))
               program-tx-data)
-        tx-data
+        terminal-tx-data
         (into (record/terminal-tx-data
                {:seon.eval/id eval-id
                 ::record/envelope envelope
@@ -1977,18 +2139,39 @@
                 ::record/output output
                 ::record/database-edn-cap database-edn-cap})
               program-tx-data)]
-    (let [result (record-transact! writer {::tx-data tx-data})
+    (loop []
+      (let [database (resolve-head! writer)
+            cache-maintenance
+            (when (and (:seon.eval/ok? envelope) (seq program-tx-data))
+              (maintain-host-divergence-cache
+               writer database program-tx-data))
+            tx-data
+            (cond-> terminal-tx-data
+              cache-maintenance
+              (conj (::cache-row cache-maintenance)))
+            result (record-transact!
+                    writer {::database database ::tx-data tx-data})
+            stale?
+            (= protocol/stale-database-value-error
+               (get-in result [:seon/error :seon.error/data
+                               ::protocol/error-kind]))
           projection-change?
           (boolean
             (some (fn [operation]
                     (or (and (map? operation)
                              (or (contains? operation :seon.schema/form)
-                                 (contains? operation :seon.fn/spec)))
+                                 (contains? operation :seon.fn/spec)
+                                 (contains? operation :seon.fn/source)))
                         (and (vector? operation)
-                             (contains? #{:seon.schema/form :seon.fn/spec}
+                             (contains? #{:seon.schema/form :seon.fn/spec
+                                          :seon.fn/source}
                                         (nth operation 2 nil)))))
                   tx-data))]
-      (cond-> result
-        (:seon.db/ok? result)
-        (assoc ::projection-changed? projection-change?
-               ::function-rows function-rows)))))
+        (if stale?
+          (recur)
+          (cond-> result
+            (:seon.db/ok? result)
+            (assoc ::projection-changed? projection-change?
+                   ::function-rows function-rows
+                   ::committed-projection
+                   (::projection cache-maintenance))))))))
