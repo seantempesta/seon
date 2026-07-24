@@ -34,6 +34,17 @@
 
 (defonce ^:private !schema-state-before (atom nil))
 
+(def ^:private acquisition-database
+  {:db-name "admission-test"
+   :store-id [#uuid "00000000-0000-0000-0000-000000000041"
+              :db
+              :seon.db.id.writer/serialized]
+   :t 42
+   :as-of nil
+   :since nil
+   :history false
+   :datahike/commit-id #uuid "00000000-0000-0000-0000-000000000042"})
+
 (defn committed-core-predicate-probe
   ([value] value)
   ([_ value] value))
@@ -243,17 +254,6 @@
       "a repeated caller cannot acquire a second lifecycle transition")
   (is (false? (admission/begin-publication!))
       "publication cannot steal a quiescing runtime"))
-
-(def ^:private acquisition-database
-  {:db-name "admission-test"
-   :store-id [#uuid "00000000-0000-0000-0000-000000000041"
-              :db
-              :seon.db.id.writer/serialized]
-   :t 42
-   :as-of nil
-   :since nil
-   :history false
-   :datahike/commit-id #uuid "00000000-0000-0000-0000-000000000042"})
 
 (defn- with-publication-seams
   [{::keys [committed-projection current-projection activate-projection!

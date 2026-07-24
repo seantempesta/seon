@@ -455,7 +455,7 @@
 
 (defn- repair-candidate
   [composed schema-identities function-identities acquired]
-  (let [schemas (row-map (::schema-rows acquired) identity keyword
+  (let [schemas (row-map (::schema-rows acquired) keyword
                          reader/read-string)
         contracts (row-map (::function-contract-rows acquired) symbol
                            reader/read-string)
