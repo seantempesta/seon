@@ -480,7 +480,10 @@
             retry-configuration
             (select-keys
              context
-             [:seon.config.llm-retry/maximum-wait-ms
+             [:seon.config.llm-retry/base-wait-ms
+              :seon.config.llm-retry/growth-factor
+              :seon.config.llm-retry/jitter-fraction
+              :seon.config.llm-retry/maximum-wait-ms
               :seon.config.llm-retry/maximum-total-wait-ms
               :seon.config.llm-retry/default-retries])
             stream? (:seon.ai/wire-stream? context)

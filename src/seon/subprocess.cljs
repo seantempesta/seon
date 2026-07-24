@@ -2,16 +2,10 @@
   "The single Bun-native subprocess boundary for the JavaScript runtime.
 
    Callers keep authorization and domain result interpretation. This owner
-   alone constructs Bun subprocesses, drains their Web streams, enforces the
-   capture and time bounds, closes stdin, and samples post-exit resources."
-  (:refer-clojure :exclude [run!]))
-
-(def default-kill-grace-ms
-  "Default grace period between cooperative and forced subprocess termination.
-
-  W1 owner for the subprocess kill-grace limit; the aero-to-fact sweep should
-  relocate this named value rather than introduce another default."
-  1000)
+  alone constructs Bun subprocesses, drains their Web streams, enforces the
+  capture and time bounds, closes stdin, and samples post-exit resources."
+  (:refer-clojure :exclude [run!])
+  (:require [seon.db :as db]))
 
 (defonce ^:private text-encoder (js/TextEncoder.))
 
@@ -136,12 +130,23 @@
   [{::keys [cmd cwd env stdin timeout-ms max-output-bytes abort-signal
             kill-grace-ms capture-output? on-out on-err ipc spawn!]
     :or {max-output-bytes js/Number.MAX_SAFE_INTEGER
-         capture-output? true
-         kill-grace-ms default-kill-grace-ms}}]
+         capture-output? true}}]
   (let [injected-spawn? (some? spawn!)
         spawn! (or spawn! native-spawn!)]
     (try
-      (let [id (str (random-uuid))
+      (let [kill-grace-ms
+            (or kill-grace-ms
+                (get-in
+                 (db/current-tx-context)
+                 [:seon.config/configuration
+                  :seon.config.shell/kill-grace-ms]))
+            _ (when-not (and (int? kill-grace-ms) (pos? kill-grace-ms))
+                (throw
+                 (ex-info
+                  "The subprocess kill-grace policy is unavailable."
+                  {:seon.config/key :seon.config.shell/kill-grace-ms
+                   :seon.error/kind :core-bug})))
+            id (str (random-uuid))
             options #js {:cmd (clj->js cmd)
                          :detached true
                          :stdin (if (string? stdin)

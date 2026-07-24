@@ -3,10 +3,6 @@
   (:require [seon.repl.parse :as repl.parse]
             [seon.retry :as retry]))
 
-(def llm-retry-base-ms 500)
-(def llm-retry-factor 2)
-(def llm-retry-jitter 0.5)
-
 (def phases
   [:rendered :attempt-open :reply-ready :evaling :evaled :published])
 
@@ -266,8 +262,11 @@
   ([resolution retry-configuration]
    (llm-retry-strategy resolution retry-configuration 0))
   ([resolution retry-configuration retry-reduction]
-   (-> (retry/multiplicative-strategy llm-retry-base-ms llm-retry-factor)
-       (retry/randomize-strategy llm-retry-jitter)
+   (-> (retry/multiplicative-strategy
+        (:seon.config.llm-retry/base-wait-ms retry-configuration)
+        (:seon.config.llm-retry/growth-factor retry-configuration))
+       (retry/randomize-strategy
+        (:seon.config.llm-retry/jitter-fraction retry-configuration))
        (retry/clamp-delay
         (:seon.config.llm-retry/maximum-wait-ms retry-configuration))
        (retry/max-retries

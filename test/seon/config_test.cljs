@@ -1654,6 +1654,12 @@
                         (is (= #{'my.kb 'seon.agent.message 'seon.db}
                                (:seon.config/always decoded))
                             "the full acquisition also restores registered set values")
+                        (is (every?
+                             #(contains? decoded %)
+                             (concat resolve/llm-retry-attributes
+                                     resolve/shell-attributes
+                                     resolve/search-attributes))
+                            "the acquired singleton contains every lifted retry, shell, and search fact")
                         (is (schema/valid-candidate-value?
                              :seon.config/singleton decoded)
                             "the decoded raw singleton validates before any accessor runs")

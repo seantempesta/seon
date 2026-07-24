@@ -99,7 +99,9 @@
    [:seon.agent.shell/cmd   :seon.agent.shell/cmd]
    [:seon.agent.shell/args  {:optional true} :seon.agent.shell/args]
    [:seon.agent.shell/cwd   {:optional true} :seon.agent.shell/cwd]
-   [:seon.agent.shell/stdin {:optional true} :seon.agent.shell/stdin]])
+   [:seon.agent.shell/stdin {:optional true} :seon.agent.shell/stdin]
+   [:seon.config/configuration
+    {:optional true} :seon.config/singleton]])
 
 ;; the ok?-false half — shared across every background function (gate/unknown-job).
 (schema/register! :seon.agent.shell/job-fail
@@ -359,9 +361,16 @@
                                 :seon.agent.shell/cwd  \"/Users/me/work-repo\"})
      ; ⟹ «map: ::ok? true, ::job-id \"job-1a2b3c4d\", ::state :running, ::cmd \"pytest\"»"
   {:malli/schema [:=> [:cat :seon.agent.shell/run-bg-request] :seon.agent.shell/run-bg-response]}
-  [{:seon.agent.shell/keys [cmd args cwd stdin]}]
+  [{:seon.agent.shell/keys [cmd args cwd stdin]
+    configuration :seon.config/configuration}]
   (try
     (cond
+      (not (pos-int?
+            (:seon.config.shell/kill-grace-ms configuration)))
+      (in/fail
+       "The shell subprocess policy is unavailable; apply the governing config."
+       {:seon.config/key :seon.config.shell/kill-grace-ms})
+
       (not (in/granted?))
       (in/ungranted)
 
@@ -371,7 +380,9 @@
       :else
       (if-let [denied (when cwd (in/gate-cwd cwd))]
         denied
-        (let [id (in/start-job! cmd (vec (or args [])) cwd stdin)]
+        (let [id (in/start-job!
+                  cmd (vec (or args [])) cwd stdin
+                  (:seon.config.shell/kill-grace-ms configuration))]
           {:seon.agent.shell/ok?     true
            :seon.agent.shell/job-id  id
            :seon.agent.shell/state   :running

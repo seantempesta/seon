@@ -107,7 +107,9 @@
    [:seon.agent.search/targets           {:optional true} :seon.agent.search/targets]
    [:seon.agent.search/max-results       {:optional true} :seon.agent.search/max-results]
    [:seon.agent.search/full?             {:optional true} :seon.agent.search/full?]
-   [:seon.agent.search/case-insensitive? {:optional true} :seon.agent.search/case-insensitive?]])
+   [:seon.agent.search/case-insensitive? {:optional true} :seon.agent.search/case-insensitive?]
+   [:seon.config/configuration
+    {:optional true} :seon.config/singleton]])
 
 (schema/register! :seon.agent.search/grep-graph-response
   [:map
@@ -131,7 +133,9 @@
    [:seon.agent.search/full?             {:optional true} :seon.agent.search/full?]
    [:seon.agent.search/context-lines     {:optional true} :seon.agent.search/context-lines]
    [:seon.agent.search/multiline?        {:optional true} :seon.agent.search/multiline?]
-   [:seon.agent.search/case-insensitive? {:optional true} :seon.agent.search/case-insensitive?]])
+   [:seon.agent.search/case-insensitive? {:optional true} :seon.agent.search/case-insensitive?]
+   [:seon.config/configuration
+    {:optional true} :seon.config/singleton]])
 
 (schema/register! :seon.agent.search/grep-response
   [:map
@@ -157,7 +161,7 @@
    :seon.agent.search/grep-response envelope (never rejects; errors are values).
 
    CONCISE by default: hits are GROUPED BY FILE, ranked by hit-count, and
-   the top :seon.agent.search/max-results (default 12) file rows are
+   the top :seon.agent.search/max-results (configured default) file rows are
    returned under :seon.agent.search/by-file — each a {path, count, the
    first matching line-number + a preview-capped line-text}. The HONEST
    totals (:match-count = all hits, :file-count = all files) are always
@@ -172,7 +176,7 @@
                                     DEFAULT = the seon.agent.fs allowed roots
      :seon.agent.search/glob              optional — filename filter, e.g. \"*.cljs\"
      :seon.agent.search/max-results       optional — max FILE ROWS returned
-                                    (default 12); :truncated? true when clipped
+                                    (configured default); :truncated? true when clipped
      :seon.agent.search/full?             optional — when true, return the FLAT
                                     :seon.agent.search/matches list (every line,
                                     capped at max-results) instead of by-file
@@ -208,12 +212,19 @@
                   :seon.agent.search/grep-response]}
   [{:seon.agent.search/keys [pattern paths glob max-results full?
                              context-lines multiline? case-insensitive?]
-    :or {max-results in/default-max-results}}]
+    configuration :seon.config/configuration}]
   (try
-    (let [roots (if (seq paths) (vec paths) (in/default-roots))
+    (let [configuration-error (in/configuration-error configuration)
+          max-results
+          (or max-results
+              (:seon.config.search/default-maximum-results configuration))
+          roots (if (seq paths) (vec paths) (in/default-roots))
           ctx   (or context-lines 0)
           bin   (in/rg-path)]
       (cond
+        configuration-error
+        configuration-error
+
         (or (nil? pattern) (str/blank? pattern))
         (in/fail (str ":seon.agent.search/pattern is required and must be non-blank "
                       "— it is a regex over file contents."))
@@ -239,14 +250,16 @@
                                  multiline?        (conj "-U" "--multiline-dotall"))
                          (conj "--regexp" pattern "--")
                          (into roots))
-                r       (await (in/exec-rg bin args))
+                r       (await (in/exec-rg configuration bin args))
                 exit    (:seon.subprocess/exit r)
                 stdout  (:seon.subprocess/out r)
                 stderr  (:seon.subprocess/err r)
                 spawn-error (:seon.subprocess/spawn-error r)]
             (cond
               (:seon.subprocess/timed-out? r)
-              (in/fail (str "search timed out after " in/timeout-ms "ms — "
+              (in/fail (str "search timed out after "
+                            (:seon.config.search/timeout-ms configuration)
+                            "ms — "
                             "narrow :seon.agent.search/paths, add a "
                             ":seon.agent.search/glob, or use a more specific "
                             "pattern.")
@@ -260,7 +273,8 @@
 
               ;; Output cap — partial stdout is still parseable.
               (:seon.subprocess/output-truncated? r)
-              (assoc (in/success-from stdout paths glob max-results full? ctx)
+              (assoc (in/success-from
+                      configuration stdout paths glob max-results full? ctx)
                      :seon.agent.search/truncated? true)
 
               ;; rg exit 1 = searched fine, found nothing. NOT an error.
@@ -280,7 +294,8 @@
                          stderr))
 
               :else
-              (in/success-from stdout paths glob max-results full? ctx))))))
+              (in/success-from
+               configuration stdout paths glob max-results full? ctx))))))
     (catch :default e
       (in/fail (str "unexpected error in seon.agent.search/grep: "
                     (or (some-> e .-message) (str e)))))))
@@ -305,7 +320,7 @@
 
    SAME concise contract as `grep`: matching members are GROUPED BY
    NAMESPACE, ranked by hit-count, top :seon.agent.search/max-results
-   (default 12) namespace rows under :seon.agent.search/by-ns — each a {ns,
+   (configured default) namespace rows under :seon.agent.search/by-ns — each a {ns,
    count, the first matching member + its target + a preview line}. Honest
    totals (:match-count = matching members, :ns-count = namespaces) always
    reported; :seon.agent.search/hint when rows were clipped.
@@ -317,7 +332,7 @@
                                     search; DEFAULT [:seon.fn :seon.schema
                                     :seon.ns]. Add :seon.eval to include the
                                     high-volume eval LOG (off by default).
-     :seon.agent.search/max-results       optional — max NS ROWS (default 12)
+     :seon.agent.search/max-results       optional — max NS ROWS (configured default)
      :seon.agent.search/full?             optional — when true, return the FLAT
                                     :seon.agent.search/matches list (every
                                     matching member, capped) instead of by-ns
@@ -333,10 +348,19 @@
   {:malli/schema [:=> [:cat :seon.agent.search/grep-graph-request]
                   :seon.agent.search/grep-graph-response]}
   [{:seon.agent.search/keys [pattern targets max-results full? case-insensitive?]
-    :or {max-results in/default-max-results
-         targets     in/default-graph-targets}}]
-  (if (or (nil? pattern) (str/blank? pattern))
-    (in/fail (str ":seon.agent.search/pattern is required and must be non-blank "
-                  "— it is a regex over the program graph (fn/schema/ns code)."))
-    (await (in/graph-search pattern targets max-results full?
-                            case-insensitive?))))
+    configuration :seon.config/configuration
+    :or {targets in/default-graph-targets}}]
+  (let [configuration-error (in/configuration-error configuration)
+        max-results
+        (or max-results
+            (:seon.config.search/default-maximum-results configuration))]
+    (cond
+      configuration-error configuration-error
+      (or (nil? pattern) (str/blank? pattern))
+      (in/fail
+       (str ":seon.agent.search/pattern is required and must be non-blank "
+            "— it is a regex over the program graph (fn/schema/ns code)."))
+      :else
+      (await (in/graph-search
+              configuration pattern targets max-results full?
+              case-insensitive?)))))

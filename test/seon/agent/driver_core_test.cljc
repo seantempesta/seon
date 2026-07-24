@@ -301,7 +301,10 @@
 
 (deftest retry-bounds-come-from-the-acquired-config-projection
   (let [configuration
-        {:seon.config.llm-retry/maximum-wait-ms 7
+        {:seon.config.llm-retry/base-wait-ms 1
+         :seon.config.llm-retry/growth-factor 2.0
+         :seon.config.llm-retry/jitter-fraction 0.0
+         :seon.config.llm-retry/maximum-wait-ms 7
          :seon.config.llm-retry/maximum-total-wait-ms 28
          :seon.config.llm-retry/default-retries 4}
         waits (vec (turn.core/llm-retry-strategy {} configuration))]

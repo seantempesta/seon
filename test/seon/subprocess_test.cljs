@@ -5,6 +5,15 @@
 
 (defonce ^:private encoder (js/TextEncoder.))
 
+(defn- start!
+  [request]
+  (subprocess/start!
+   (assoc request ::subprocess/kill-grace-ms 1000)))
+
+(defn- subprocess-run!
+  [request]
+  (::subprocess/exited (start! request)))
+
 (defn- stream
   ([chunks] (stream chunks 0))
   ([chunks delay-ms]
@@ -69,7 +78,7 @@
           fake (fake-process {:out ["hello " "world"] :err ["warning"]})]
       (settle!
        done
-       (subprocess/run!
+       (subprocess-run!
         {::subprocess/cmd ["tool" "arg"]
          ::subprocess/stdin "input"
          ::subprocess/spawn! (fn [options]
@@ -95,7 +104,7 @@
           fake (fake-process {:out chunks})]
       (settle!
        done
-       (subprocess/run!
+       (subprocess-run!
         {::subprocess/cmd ["utf8"]
          ::subprocess/on-out (fn [_] (throw (js/Error. "observer failed")))
          ::subprocess/spawn! (constantly (:process fake))})
@@ -108,7 +117,7 @@
   (let [received (atom nil)
         options (atom nil)
         fake (fake-process {})
-        started (subprocess/start!
+        started (start!
                  {::subprocess/cmd ["ipc-child"]
                   ::subprocess/ipc #(reset! received [%1 %2])
                   ::subprocess/spawn! (fn [value]
@@ -123,7 +132,7 @@
     (let [fake (fake-process {:out ["abcdefghij"] :exit-delay-ms nil})]
       (settle!
        done
-       (subprocess/run!
+       (subprocess-run!
         {::subprocess/cmd ["firehose"]
          ::subprocess/max-output-bytes 4
          ::subprocess/kill-grace-ms 5
@@ -142,7 +151,7 @@
     (let [fake (fake-process {:exit-delay-ms nil})]
       (settle!
        done
-       (subprocess/run!
+       (subprocess-run!
         {::subprocess/cmd ["sleep"]
          ::subprocess/timeout-ms 2
          ::subprocess/kill-grace-ms 3
@@ -158,7 +167,7 @@
     (let [started (.now js/Date)]
       (settle!
        done
-       (subprocess/run!
+       (subprocess-run!
         {::subprocess/cmd
          ["sh" "-c" "printf before-descendant; sleep 3"]
          ::subprocess/timeout-ms 30
@@ -192,7 +201,7 @@
       (aset process "resourceUsage" (fn [] nil))
       (settle!
        done
-       (subprocess/run! {::subprocess/cmd ["fast"]
+       (subprocess-run! {::subprocess/cmd ["fast"]
                          ::subprocess/spawn! (constantly process)})
        (fn [result]
          (is (true? @drained?))
@@ -205,7 +214,7 @@
           fake (fake-process {:out ["first" "second"] :err ["warning"]})]
       (settle!
        done
-       (subprocess/run!
+       (subprocess-run!
         {::subprocess/cmd ["long-lived"]
          ::subprocess/capture-output? false
          ::subprocess/on-out #(swap! out conj %)
@@ -222,7 +231,7 @@
   (async done
     (settle!
      done
-     (subprocess/run!
+     (subprocess-run!
       {::subprocess/cmd ["missing"]
        ::subprocess/spawn! (fn [_]
                              (let [error (js/Error. "not found")]
@@ -251,7 +260,7 @@
           fake (fake-process {:resource-usage usage})]
       (settle!
        done
-       (subprocess/run! {::subprocess/cmd ["measure"]
+       (subprocess-run! {::subprocess/cmd ["measure"]
                          ::subprocess/spawn! (constantly (:process fake))})
        (fn [result]
          (let [resources (::subprocess/resource-usage result)]
@@ -272,7 +281,7 @@
                   :maxRSS 8192}
         fake (fake-process {:exit-delay-ms nil
                             :live-resource-usage live})
-        control (subprocess/start!
+        control (start!
                  {::subprocess/cmd ["busy"]
                   ::subprocess/spawn! (constantly (:process fake))})]
     (is (= {::subprocess/cpu-time

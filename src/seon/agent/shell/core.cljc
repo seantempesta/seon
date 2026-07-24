@@ -25,20 +25,27 @@
         {:seon.config/key :seon.config/shell-enabled?}))
 
 (defn run-request
-  "Normalize a child run using an acquired millisecond timeout config fact."
+  "Normalize a child run using acquired subprocess policy facts."
   [{:seon.agent.shell/keys [cmd args cwd stdin timeout-ms]}
    configuration
    max-output-bytes]
-  (if-let [default-timeout-ms
-           (:seon.config.shell/default-timeout-ms configuration)]
+  (if-let [missing-key
+           (some (fn [attribute]
+                   (when-not (contains? configuration attribute) attribute))
+                 [:seon.config.shell/default-timeout-ms
+                  :seon.config.shell/kill-grace-ms])]
+    (fail
+     "The shell subprocess policy is unavailable; apply the governing config."
+     {:seon.config/key missing-key})
     (cond-> {:seon.subprocess/cmd (into [cmd] (or args []))
-             :seon.subprocess/timeout-ms (or timeout-ms default-timeout-ms)
+             :seon.subprocess/timeout-ms
+             (or timeout-ms
+                 (:seon.config.shell/default-timeout-ms configuration))
+             :seon.subprocess/kill-grace-ms
+             (:seon.config.shell/kill-grace-ms configuration)
              :seon.subprocess/max-output-bytes max-output-bytes}
       cwd (assoc :seon.subprocess/cwd cwd)
-      (some? stdin) (assoc :seon.subprocess/stdin stdin))
-    (fail
-     "The shell timeout policy is unavailable; apply the governing config."
-     {:seon.config/key :seon.config.shell/default-timeout-ms})))
+      (some? stdin) (assoc :seon.subprocess/stdin stdin))))
 
 (defn py-request
   "Specialize a frozen Python request into the ordinary run call shape."

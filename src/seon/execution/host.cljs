@@ -29,6 +29,7 @@
 
 (def ^:private default-ready-timeout-ms 10000)
 (def ^:private default-idle-timeout-ms 300000)
+(def ^:private legacy-cancel-grace-ms 1000)
 (def ^:private ensure-host-timeout-ms 240000)
 (def ^:private ensure-host-output-limit-bytes (* 64 1024))
 (def ^:private maximum-tail-characters (* 16 1024))
@@ -521,6 +522,7 @@
              [(:seon.execution.host/javascript-runtime config)
               (::launch/execution-output runtime)
               (execution/encode-message startup)]
+             ::subprocess/kill-grace-ms (::cancel-grace-ms config)
              ::subprocess/ipc
              (fn [message child-id]
                (receive! child-lane agent-id generation child-id message))
@@ -707,7 +709,7 @@
                        :seon.error/kind :core-bug})))
     (let [previous @!host
           grace-ms (or (get-in previous [::configuration ::cancel-grace-ms])
-                       subprocess/default-kill-grace-ms)]
+                       legacy-cancel-grace-ms)]
       (doseq [current (concat (vals (::children previous))
                               (vals (::host-sessions previous)))]
         (retire-child! current grace-ms)))
@@ -721,7 +723,7 @@
                                       default-ready-timeout-ms)
                ::idle-timeout-ms (or idle-timeout-ms default-idle-timeout-ms)
                ::cancel-grace-ms (or cancel-grace-ms
-                                     subprocess/default-kill-grace-ms)
+                                     legacy-cancel-grace-ms)
                ::spawn! spawn!
                ::run-fence-current? (or run-fence-current? (constantly true))
                ::eval-host-coordinate! eval-host-coordinate!
@@ -915,10 +917,12 @@
 
 (defn- default-ensure-host!
   []
-  (subprocess/run!
-   {::subprocess/cmd ["bin/seon" "ensure" "host"]
-    ::subprocess/timeout-ms ensure-host-timeout-ms
-    ::subprocess/max-output-bytes ensure-host-output-limit-bytes}))
+  (let [configuration (host-configuration)]
+    (subprocess/run!
+     {::subprocess/cmd ["bin/seon" "ensure" "host"]
+      ::subprocess/timeout-ms ensure-host-timeout-ms
+      ::subprocess/kill-grace-ms (::cancel-grace-ms configuration)
+      ::subprocess/max-output-bytes ensure-host-output-limit-bytes})))
 
 (defn- trigger-host-reconcile!
   []

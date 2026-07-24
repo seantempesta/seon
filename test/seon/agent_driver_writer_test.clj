@@ -148,7 +148,13 @@
   (let [agent-row (atom {})
         requests (atom [])
         config-row
-        {:seon.config.claim-driver/llm-attempt-timeout-ms 32100}
+        {:seon.config.claim-driver/llm-attempt-timeout-ms 32100
+         :seon.config.llm-retry/base-wait-ms 500
+         :seon.config.llm-retry/growth-factor 2.0
+         :seon.config.llm-retry/jitter-fraction 0.5
+         :seon.config.llm-retry/maximum-wait-ms 20000
+         :seon.config.llm-retry/maximum-total-wait-ms 60000
+         :seon.config.llm-retry/default-retries 4}
         resolve-context
         (fn []
           (with-redefs
@@ -163,6 +169,10 @@
            (get-in (resolve-context)
                    [:seon.ai/config-resolution
                     :seon.ai/agent-attempt-timeout-ms])))
+    (is (= (config.resolve/llm-retry-configuration config-row)
+           (select-keys
+            (resolve-context)
+            config.resolve/llm-retry-attributes)))
     (is (some
          #(and (= config.resolve/cluster-config-lookup-ref (::db/ref %))
                (some #{:seon.config.claim-driver/llm-attempt-timeout-ms}
@@ -201,9 +211,12 @@
 (deftest invocation-limits-come-from-the-config-singleton-entity
   (let [request (atom nil)
         configuration
-        {:seon.config.claim-driver/invocation-deadline-ms 120000
+        {:seon.config/id config.resolve/cluster-config-id
+         :seon.config.claim-driver/invocation-deadline-ms 120000
          :seon.config.claim-driver/invocation-result-maximum-bytes 1048576
-         :seon.config.claim-driver/llm-attempt-timeout-ms 120000}]
+         :seon.config.claim-driver/llm-attempt-timeout-ms 120000
+         :seon.config.shell/default-timeout-ms 30000
+         :seon.config.shell/kill-grace-ms 1000}]
     (with-redefs [db/pull
                   (fn [value]
                     (reset! request value)
@@ -212,7 +225,8 @@
              (#'driver.host/invocation-configuration! ::database))))
     (is (= config.resolve/cluster-config-lookup-ref (::db/ref @request)))
     (is (= (into [:seon.config/id]
-                 config.resolve/claim-driver-attributes)
+                 (concat config.resolve/claim-driver-attributes
+                         config.resolve/shell-attributes))
            (::db/pull-pattern @request)))))
 
 (deftest unplannable-reply-does-not-open-the-eval-phase

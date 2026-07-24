@@ -92,7 +92,7 @@
       (.flush writer))))
 
 (defn- execute
-  [{:seon.subprocess/keys [stdin timeout-ms] :as request}]
+  [{:seon.subprocess/keys [stdin timeout-ms kill-grace-ms] :as request}]
   (let [process (.start (process-builder request))
         out-task (capture-task (.getInputStream process))
         err-task (capture-task (.getErrorStream process))]
@@ -103,7 +103,8 @@
             timed-out? (not finished?)]
         (when timed-out?
           (.destroy process)
-          (when-not (.waitFor process 250 TimeUnit/MILLISECONDS)
+          (when-not (.waitFor process (long kill-grace-ms)
+                              TimeUnit/MILLISECONDS)
             (.destroyForcibly process)
             (.waitFor process)))
         (let [out (finish-capture out-task)

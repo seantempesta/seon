@@ -10,6 +10,7 @@
   (testing "run preserves every frozen child option"
     (is (= {:seon.subprocess/cmd ["git" "status"]
             :seon.subprocess/timeout-ms 99
+            :seon.subprocess/kill-grace-ms 1000
             :seon.subprocess/max-output-bytes 200
             :seon.subprocess/cwd "/repo"
             :seon.subprocess/stdin "input"}
@@ -18,7 +19,8 @@
                               :seon.agent.shell/cwd "/repo"
                               :seon.agent.shell/stdin "input"
                               :seon.agent.shell/timeout-ms 99}
-                             {:seon.config.shell/default-timeout-ms 30000}
+                             {:seon.config.shell/default-timeout-ms 30000
+                              :seon.config.shell/kill-grace-ms 1000}
                              200))))
   (testing "a missing portable default is a loud flat config error"
     (is (= :seon.config.shell/default-timeout-ms

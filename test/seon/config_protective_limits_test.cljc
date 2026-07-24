@@ -13,10 +13,18 @@
    :seon.hardware/fd-soft-limit 2048})
 
 (def expected-defaults
-  {:seon.config.llm-retry/maximum-wait-ms 20000
+  {:seon.config.llm-retry/base-wait-ms 500
+   :seon.config.llm-retry/growth-factor 2.0
+   :seon.config.llm-retry/jitter-fraction 0.5
+   :seon.config.llm-retry/maximum-wait-ms 20000
    :seon.config.llm-retry/maximum-total-wait-ms 60000
    :seon.config.llm-retry/default-retries 4
    :seon.config.shell/default-timeout-ms 30000
+   :seon.config.shell/kill-grace-ms 1000
+   :seon.config.search/timeout-ms 10000
+   :seon.config.search/maximum-output-bytes 8388608
+   :seon.config.search/maximum-preview-tokens 32
+   :seon.config.search/default-maximum-results 12
    :seon.config.web/default-timeout-ms 30000
    :seon.config.web/maximum-response-bytes 2000000
    :seon.config.web/default-preview-tokens 2000
@@ -38,6 +46,8 @@
            (resolve/llm-retry-configuration singleton)))
     (is (= (select-keys expected-defaults resolve/shell-attributes)
            (resolve/shell-configuration singleton)))
+    (is (= (select-keys expected-defaults resolve/search-attributes)
+           (resolve/search-configuration singleton)))
     (is (= (select-keys expected-defaults resolve/web-capability-attributes)
            (resolve/web-capability-configuration singleton)))
     (is (= 120000
@@ -73,11 +83,20 @@
 (deftest explicit-sections-override-without-hidden-call-site-fallbacks
   (let [manifest
         {:seon.config/llm-retry
-         {:seon.config.llm-retry/maximum-wait-ms 11
+         {:seon.config.llm-retry/base-wait-ms 5
+          :seon.config.llm-retry/growth-factor 1.5
+          :seon.config.llm-retry/jitter-fraction 0.25
+          :seon.config.llm-retry/maximum-wait-ms 11
           :seon.config.llm-retry/maximum-total-wait-ms 22
           :seon.config.llm-retry/default-retries 2}
          :seon.config/shell
-         {:seon.config.shell/default-timeout-ms 33}
+         {:seon.config.shell/default-timeout-ms 33
+          :seon.config.shell/kill-grace-ms 34}
+         :seon.config/search
+         {:seon.config.search/timeout-ms 35
+          :seon.config.search/maximum-output-bytes 36
+          :seon.config.search/maximum-preview-tokens 37
+          :seon.config.search/default-maximum-results 38}
          :seon.config/web
          {:seon.config.web/default-timeout-ms 44
           :seon.config.web/maximum-response-bytes 55
@@ -95,8 +114,10 @@
         singleton
         (resolve/resolve-config-singleton manifest {} fixed-hardware)]
     (is (m/validate :seon.config/manifest manifest))
+    (is (= 1.5 (:seon.config.llm-retry/growth-factor singleton)))
     (is (= 11 (:seon.config.llm-retry/maximum-wait-ms singleton)))
-    (is (= 33 (:seon.config.shell/default-timeout-ms singleton)))
+    (is (= 34 (:seon.config.shell/kill-grace-ms singleton)))
+    (is (= 38 (:seon.config.search/default-maximum-results singleton)))
     (is (= 55 (:seon.config.web/maximum-response-bytes singleton)))
     (is (= 111
            (:seon.config.claim-driver/invocation-result-maximum-bytes
@@ -108,6 +129,7 @@
   (doseq [[attribute schema]
           (merge resolve/llm-retry-dial-schemas
                  resolve/shell-dial-schemas
+                 resolve/search-dial-schemas
                  resolve/web-capability-dial-schemas
                  (select-keys
                   resolve/claim-driver-dial-schemas

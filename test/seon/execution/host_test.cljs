@@ -45,12 +45,12 @@
 (deftest default-idle-retention-covers-ordinary-interactive-work
   (is (= 300000 @#'host/default-idle-timeout-ms)))
 
-(deftest default-cancel-grace-comes-from-the-subprocess-owner
+(deftest legacy-execution-cancel-grace-preserves-its-retirement-policy
   (host/configure!
    {::host/launch-descriptor (descriptor)
     ::host/javascript-runtime "bun"
     ::host/spawn! (constantly nil)})
-  (is (= subprocess/default-kill-grace-ms
+  (is (= 1000
          (get-in (deref (deref #'host/!host))
                  [::host/configuration ::host/cancel-grace-ms]))))
 

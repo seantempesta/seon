@@ -202,12 +202,22 @@
  ;; Consumers fail loudly with the missing/fired key; they do not carry numeric
  ;; runtime fallbacks.
  :seon.config/llm-retry
- {:seon.config.llm-retry/maximum-wait-ms 20000
+ {:seon.config.llm-retry/base-wait-ms 500
+  :seon.config.llm-retry/growth-factor 2.0
+  :seon.config.llm-retry/jitter-fraction 0.5
+  :seon.config.llm-retry/maximum-wait-ms 20000
   :seon.config.llm-retry/maximum-total-wait-ms 60000
   :seon.config.llm-retry/default-retries 4}
 
  :seon.config/shell
- {:seon.config.shell/default-timeout-ms 30000}
+ {:seon.config.shell/default-timeout-ms 30000
+  :seon.config.shell/kill-grace-ms 1000}
+
+ :seon.config/search
+ {:seon.config.search/timeout-ms 10000
+  :seon.config.search/maximum-output-bytes 8388608
+  :seon.config.search/maximum-preview-tokens 32
+  :seon.config.search/default-maximum-results 12}
 
  ;; ── RENDER BOUNDS — the GLOBAL, process-wide value/eval/message DISPLAY caps
  ;; (#46). A proper config (not scattered env reads): each cap is a plain literal

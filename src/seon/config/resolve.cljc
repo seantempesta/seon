@@ -124,7 +124,19 @@
 
 (def llm-retry-dial-schemas
   "Portable LLM retry ceilings, with units and retained-policy provenance."
-  {:seon.config.llm-retry/maximum-wait-ms
+  {:seon.config.llm-retry/base-wait-ms
+   [:int {:min 1
+          :description
+          "Initial retry delay in milliseconds. Default 500 preserves the 2026-07-23 exponential retry shape under :seon.config.llm-retry/base-wait-ms."}]
+   :seon.config.llm-retry/growth-factor
+   [:double {:min 0.0
+             :description
+             "Multiplier applied after each retry delay. Default 2.0 preserves the 2026-07-23 exponential retry shape under :seon.config.llm-retry/growth-factor."}]
+   :seon.config.llm-retry/jitter-fraction
+   [:double {:min 0.0 :max 1.0
+             :description
+             "Symmetric fractional jitter applied to each retry delay. Default 0.5 preserves the 2026-07-23 retry distribution under :seon.config.llm-retry/jitter-fraction."}]
+   :seon.config.llm-retry/maximum-wait-ms
    [:int {:min 1
           :description
           "Maximum milliseconds before one retry. Default 20000 preserves the bounded 2026-07-23 retry policy; firing clamps the wait and names :seon.config.llm-retry/maximum-wait-ms in retry evidence."}]
@@ -142,7 +154,30 @@
   {:seon.config.shell/default-timeout-ms
    [:int {:min 1
           :description
-          "Default subprocess wall-clock timeout in milliseconds. Default 30000 preserves the 2026-07-23 portable shell policy; firing returns a flat timeout value naming :seon.config.shell/default-timeout-ms."}]})
+          "Default subprocess wall-clock timeout in milliseconds. Default 30000 preserves the 2026-07-23 portable shell policy; firing returns a flat timeout value naming :seon.config.shell/default-timeout-ms."}]
+   :seon.config.shell/kill-grace-ms
+   [:int {:min 1
+          :description
+          "Milliseconds between cooperative and forced subprocess termination. Default 1000 preserves the Bun leaf policy for both platform leaves under :seon.config.shell/kill-grace-ms."}]})
+
+(def search-dial-schemas
+  "Literal-search subprocess and result caps with retained-policy provenance."
+  {:seon.config.search/timeout-ms
+   [:int {:min 1
+          :description
+          "Ripgrep wall-clock timeout in milliseconds. Default 10000 preserves the 2026-07-24 external-command backstop under :seon.config.search/timeout-ms."}]
+   :seon.config.search/maximum-output-bytes
+   [:int {:min 1
+          :description
+          "Maximum ripgrep stdout bytes retained for parsing. Default 8388608 preserves the 2026-07-24 search capture ceiling under :seon.config.search/maximum-output-bytes."}]
+   :seon.config.search/maximum-preview-tokens
+   [:int {:min 1
+          :description
+          "Maximum estimated tokens retained in one search preview. Default 32 preserves the 2026-07-24 preview policy under :seon.config.search/maximum-preview-tokens."}]
+   :seon.config.search/default-maximum-results
+   [:int {:min 1
+          :description
+          "Default grouped search rows returned per call. Default 12 preserves the 2026-07-24 search result policy under :seon.config.search/default-maximum-results."}]})
 
 (def web-capability-dial-schemas
   "Portable web defaults and ceilings, with units and retained-policy provenance."
@@ -167,6 +202,7 @@
 
 (doseq [[attribute shape] (merge llm-retry-dial-schemas
                                   shell-dial-schemas
+                                  search-dial-schemas
                                   web-capability-dial-schemas)]
   (schema/register! attribute shape))
 
@@ -179,6 +215,11 @@
   (into [:map {:closed true}]
         (map (fn [attribute] [attribute {:optional true} attribute]))
         (keys shell-dial-schemas)))
+
+(schema/register! :seon.config/search
+  (into [:map {:closed true}]
+        (map (fn [attribute] [attribute {:optional true} attribute]))
+        (keys search-dial-schemas)))
 
 (schema/register! :seon.config/guard
   (into [:map {:closed true}]
@@ -328,6 +369,7 @@
 
 (def llm-retry-attributes (vec (keys llm-retry-dial-schemas)))
 (def shell-attributes (vec (keys shell-dial-schemas)))
+(def search-attributes (vec (keys search-dial-schemas)))
 (def web-capability-attributes (vec (keys web-capability-dial-schemas)))
 (def claim-driver-attributes (vec (keys claim-driver-dial-schemas)))
 
@@ -340,6 +382,11 @@
   "Project portable shell defaults from one acquired config singleton."
   [singleton]
   (select-keys singleton shell-attributes))
+
+(defn search-configuration
+  "Project literal-search policy from one acquired config singleton."
+  [singleton]
+  (select-keys singleton search-attributes))
 
 (defn web-capability-configuration
   "Project portable web defaults and ceilings from one acquired singleton."
@@ -1040,8 +1087,24 @@
     {:optional true} :seon.config.llm-retry/maximum-total-wait-ms]
    [:seon.config.llm-retry/default-retries
     {:optional true} :seon.config.llm-retry/default-retries]
+   [:seon.config.llm-retry/base-wait-ms
+    {:optional true} :seon.config.llm-retry/base-wait-ms]
+   [:seon.config.llm-retry/growth-factor
+    {:optional true} :seon.config.llm-retry/growth-factor]
+   [:seon.config.llm-retry/jitter-fraction
+    {:optional true} :seon.config.llm-retry/jitter-fraction]
    [:seon.config.shell/default-timeout-ms
     {:optional true} :seon.config.shell/default-timeout-ms]
+   [:seon.config.shell/kill-grace-ms
+    {:optional true} :seon.config.shell/kill-grace-ms]
+   [:seon.config.search/timeout-ms
+    {:optional true} :seon.config.search/timeout-ms]
+   [:seon.config.search/maximum-output-bytes
+    {:optional true} :seon.config.search/maximum-output-bytes]
+   [:seon.config.search/maximum-preview-tokens
+    {:optional true} :seon.config.search/maximum-preview-tokens]
+   [:seon.config.search/default-maximum-results
+    {:optional true} :seon.config.search/default-maximum-results]
    [:seon.config.model-transport/response-identity-cap
     {:optional true} :seon.config.model-transport/response-identity-cap]
    [:seon.config.model-transport/endpoint-cap
@@ -1189,6 +1252,7 @@
    [:seon.config/guard         {:optional true} :seon.config/guard]
    [:seon.config/llm-retry     {:optional true} :seon.config/llm-retry]
    [:seon.config/shell         {:optional true} :seon.config/shell]
+   [:seon.config/search        {:optional true} :seon.config/search]
    [:seon.config/model-transport {:optional true} :seon.config/model-transport]
    [:seon.config/web-render      {:optional true} :seon.config/web-render]
    [:seon.config/claim-driver    {:optional true} :seon.config/claim-driver]
@@ -1870,6 +1934,7 @@
         llm-retry (get manifest :seon.config/llm-retry {})
         model-stream (get manifest :seon.config/model-stream {})
         shell (get manifest :seon.config/shell {})
+        search (get manifest :seon.config/search {})
         database (get manifest :seon.config/database {})
         contexts (resolve-context-entities manifest)
         attempt-timeout-ms
@@ -1939,8 +2004,26 @@
                   60000)
              :seon.config.llm-retry/default-retries
              (get llm-retry :seon.config.llm-retry/default-retries 4)
+             :seon.config.llm-retry/base-wait-ms
+             (get llm-retry :seon.config.llm-retry/base-wait-ms 500)
+             :seon.config.llm-retry/growth-factor
+             (double
+              (get llm-retry :seon.config.llm-retry/growth-factor 2.0))
+             :seon.config.llm-retry/jitter-fraction
+             (double
+              (get llm-retry :seon.config.llm-retry/jitter-fraction 0.5))
              :seon.config.shell/default-timeout-ms
              (get shell :seon.config.shell/default-timeout-ms 30000)
+             :seon.config.shell/kill-grace-ms
+             (get shell :seon.config.shell/kill-grace-ms 1000)
+             :seon.config.search/timeout-ms
+             (get search :seon.config.search/timeout-ms 10000)
+             :seon.config.search/maximum-output-bytes
+             (get search :seon.config.search/maximum-output-bytes 8388608)
+             :seon.config.search/maximum-preview-tokens
+             (get search :seon.config.search/maximum-preview-tokens 32)
+             :seon.config.search/default-maximum-results
+             (get search :seon.config.search/default-maximum-results 12)
              :seon.config.web-render/heartbeat-interval-ms
              (get web-render :seon.config.web-render/heartbeat-interval-ms 15000)
              :seon.config.web-render/mailbox-depth

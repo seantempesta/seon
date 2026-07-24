@@ -32,6 +32,7 @@
     [seon.agent.fs :as fs]
     [seon.agent.fs.internal :as fs-int]
     [seon.agent.search :as search]
+    [seon.config :as config]
     [seon.db :as db]
     [seon.db.protocol :as protocol]
     [seon.test.async :refer [settle!]]))
@@ -51,6 +52,17 @@
 (def ^:private alpha-path (.join npath fixture-dir "alpha.md"))
 (def ^:private beta-path  (.join npath fixture-dir "beta.cljs"))
 (def ^:private many-path  (.join npath fixture-dir "many.txt"))
+(def ^:private configuration (config/resolve-config-singleton {}))
+
+(defn- grep
+  [request]
+  (search/grep
+   (assoc request :seon.config/configuration configuration)))
+
+(defn- grep-graph
+  [request]
+  (search/grep-graph
+   (assoc request :seon.config/configuration configuration)))
 
 ;; Lane-sibling fixtures: a paused `.clj` + its active `.cljs` (same base,
 ;; same dir) reproduce the #86 trap — file grep must surface the canonical
@@ -108,7 +120,7 @@
 
 (deftest match-found-with-path-line-text
   (async done
-    (-> (resolves! (search/grep {:seon.agent.search/pattern "needle-alpha"}))
+    (-> (resolves! (grep {:seon.agent.search/pattern "needle-alpha"}))
         (.then (fn [{ok?     :seon.agent.search/ok?
                      by-file :seon.agent.search/by-file
                      n       :seon.agent.search/match-count
@@ -141,7 +153,7 @@
 
 (deftest no-match-is-ok-and-empty
   (async done
-    (-> (resolves! (search/grep {:seon.agent.search/pattern "zzz-never-present"}))
+    (-> (resolves! (grep {:seon.agent.search/pattern "zzz-never-present"}))
         (.then (fn [{ok?     :seon.agent.search/ok?
                      by-file :seon.agent.search/by-file
                      n       :seon.agent.search/match-count
@@ -161,7 +173,7 @@
 (deftest denied-path-outside-allowlist
   (async done
     (let [outside (.resolve npath "src")]
-      (-> (resolves! (search/grep {:seon.agent.search/pattern "needle"
+      (-> (resolves! (grep {:seon.agent.search/pattern "needle"
                                    :seon.agent.search/paths   [outside]}))
           (.then (fn [{ok?   :seon.agent.search/ok?
                        error :seon.agent.search/error}]
@@ -176,7 +188,7 @@
   (async done
     ;; Empty the allowlist (fixture :after restores the live config).
     (fs/configure! {:seon.agent.fs/allowed-roots []})
-    (-> (resolves! (search/grep {:seon.agent.search/pattern "needle"}))
+    (-> (resolves! (grep {:seon.agent.search/pattern "needle"}))
         (.then (fn [{ok?   :seon.agent.search/ok?
                      error :seon.agent.search/error}]
                  (is (false? ok?))
@@ -191,7 +203,7 @@
 
 (deftest hits-group-into-one-file-row-with-honest-count
   (async done
-    (-> (resolves! (search/grep {:seon.agent.search/pattern "dup-needle"}))
+    (-> (resolves! (grep {:seon.agent.search/pattern "dup-needle"}))
         (.then (fn [{ok?     :seon.agent.search/ok?
                      by-file :seon.agent.search/by-file
                      n       :seon.agent.search/match-count
@@ -213,7 +225,7 @@
 (deftest max-results-clips-file-rows-and-hints
   (async done
     ;; needle-(alpha|beta) hits 2 files; cap to 1 file row.
-    (-> (resolves! (search/grep {:seon.agent.search/pattern     "needle-(alpha|beta)"
+    (-> (resolves! (grep {:seon.agent.search/pattern     "needle-(alpha|beta)"
                                  :seon.agent.search/max-results 1}))
         (.then (fn [{ok?      :seon.agent.search/ok?
                      by-file  :seon.agent.search/by-file
@@ -238,7 +250,7 @@
 
 (deftest full-returns-flat-matches
   (async done
-    (-> (resolves! (search/grep {:seon.agent.search/pattern     "dup-needle"
+    (-> (resolves! (grep {:seon.agent.search/pattern     "dup-needle"
                                  :seon.agent.search/full?       true
                                  :seon.agent.search/max-results 50}))
         (.then (fn [{ok?     :seon.agent.search/ok?
@@ -258,7 +270,7 @@
 
 (deftest bad-regex-envelope
   (async done
-    (-> (resolves! (search/grep {:seon.agent.search/pattern "(unclosed"}))
+    (-> (resolves! (grep {:seon.agent.search/pattern "(unclosed"}))
         (.then (fn [{ok?       :seon.agent.search/ok?
                      error     :seon.agent.search/error
                      raw-error :seon.agent.search/raw-error}]
@@ -276,11 +288,11 @@
 (deftest glob-filters-filenames
   (async done
     ;; needle-(alpha|beta) hits alpha.md AND beta.cljs without a glob…
-    (-> (resolves! (search/grep {:seon.agent.search/pattern "needle-(alpha|beta)"}))
+    (-> (resolves! (grep {:seon.agent.search/pattern "needle-(alpha|beta)"}))
         (.then (fn [{n :seon.agent.search/match-count}]
                  (is (= 2 n) "sanity: pattern is in two files")
                  ;; …and only alpha.md with *.md.
-                 (resolves! (search/grep {:seon.agent.search/pattern "needle-(alpha|beta)"
+                 (resolves! (grep {:seon.agent.search/pattern "needle-(alpha|beta)"
                                           :seon.agent.search/glob    "*.md"}))))
         (.then (fn [{ok?     :seon.agent.search/ok?
                      by-file :seon.agent.search/by-file
@@ -297,11 +309,11 @@
 
 (deftest case-insensitive-flag
   (async done
-    (-> (resolves! (search/grep {:seon.agent.search/pattern "NEEDLE-ALPHA"}))
+    (-> (resolves! (grep {:seon.agent.search/pattern "NEEDLE-ALPHA"}))
         (.then (fn [{n :seon.agent.search/match-count}]
                  (is (= 0 n) "case-sensitive by default")
                  (resolves!
-                   (search/grep {:seon.agent.search/pattern           "NEEDLE-ALPHA"
+                   (grep {:seon.agent.search/pattern           "NEEDLE-ALPHA"
                                  :seon.agent.search/case-insensitive? true}))))
         (.then (fn [{ok? :seon.agent.search/ok?
                      n   :seon.agent.search/match-count}]
@@ -315,7 +327,7 @@
 
 (deftest blank-pattern-envelope
   (async done
-    (-> (resolves! (search/grep {:seon.agent.search/pattern "  "}))
+    (-> (resolves! (grep {:seon.agent.search/pattern "  "}))
         (.then (fn [{ok?   :seon.agent.search/ok?
                      error :seon.agent.search/error}]
                  (is (false? ok?))
@@ -329,7 +341,7 @@
 (deftest context-lines-full-mode-interleaves-flagged-context
   (async done
     ;; alpha.md: "# Title\n\nthe needle-alpha is here\n" — hit on line 3.
-    (-> (resolves! (search/grep {:seon.agent.search/pattern       "needle-alpha"
+    (-> (resolves! (grep {:seon.agent.search/pattern       "needle-alpha"
                                  :seon.agent.search/context-lines 1
                                  :seon.agent.search/full?         true}))
         (.then (fn [{ok?     :seon.agent.search/ok?
@@ -348,7 +360,7 @@
 
 (deftest context-lines-by-file-widens-the-sample
   (async done
-    (-> (resolves! (search/grep {:seon.agent.search/pattern       "needle-alpha"
+    (-> (resolves! (grep {:seon.agent.search/pattern       "needle-alpha"
                                  :seon.agent.search/context-lines 1}))
         (.then (fn [{ok?     :seon.agent.search/ok?
                      by-file :seon.agent.search/by-file}]
@@ -367,7 +379,7 @@
   (async done
     ;; beta.cljs: "(ns beta)\n\n(defn hello [] :needle-beta)\n" — the pattern
     ;; spans the ns form to the defn across a blank line.
-    (-> (resolves! (search/grep {:seon.agent.search/pattern    "ns beta.*defn hello"
+    (-> (resolves! (grep {:seon.agent.search/pattern    "ns beta.*defn hello"
                                  :seon.agent.search/multiline? true}))
         (.then (fn [{ok? :seon.agent.search/ok?
                      n   :seon.agent.search/match-count
@@ -379,7 +391,7 @@
 
 (deftest multiline-off-by-default-no-cross-line-match
   (async done
-    (-> (resolves! (search/grep {:seon.agent.search/pattern "ns beta.*defn hello"}))
+    (-> (resolves! (grep {:seon.agent.search/pattern "ns beta.*defn hello"}))
         (.then (fn [{n :seon.agent.search/match-count}]
                  (is (= 0 n) "without multiline?, . does not cross newlines")))
         (settle! done))))
@@ -393,7 +405,7 @@
 (deftest default-paths-are-the-allowed-roots
   (testing "omitting :seon.agent.search/paths searches the seon.agent.fs roots"
     (async done
-      (-> (resolves! (search/grep {:seon.agent.search/pattern "needle-beta"}))
+      (-> (resolves! (grep {:seon.agent.search/pattern "needle-beta"}))
           (.then (fn [{ok?     :seon.agent.search/ok?
                        by-file :seon.agent.search/by-file}]
                    (is (true? ok?))
@@ -410,7 +422,7 @@
   ;; (a) foo.clj + foo.cljs in the same dir, pattern in BOTH → only the
   ;; canonical .cljs survives; the paused .clj is dropped.
   (async done
-    (-> (resolves! (search/grep {:seon.agent.search/pattern "siblingtoken"}))
+    (-> (resolves! (grep {:seon.agent.search/pattern "siblingtoken"}))
         (.then (fn [{ok?     :seon.agent.search/ok?
                      by-file :seon.agent.search/by-file}]
                  (is (true? ok?))
@@ -424,7 +436,7 @@
 (deftest standalone-clj-still-shown
   ;; (b) a .clj with NO .cljs sibling is untouched.
   (async done
-    (-> (resolves! (search/grep {:seon.agent.search/pattern "solotoken"}))
+    (-> (resolves! (grep {:seon.agent.search/pattern "solotoken"}))
         (.then (fn [{ok?     :seon.agent.search/ok?
                      by-file :seon.agent.search/by-file}]
                  (is (true? ok?))
@@ -435,7 +447,7 @@
 (deftest explicit-clj-path-reaches-it
   ;; (c) explicitly naming the .clj via :paths bypasses suppression.
   (async done
-    (-> (resolves! (search/grep {:seon.agent.search/pattern "siblingtoken"
+    (-> (resolves! (grep {:seon.agent.search/pattern "siblingtoken"
                                  :seon.agent.search/paths   [lane-clj-path]}))
         (.then (fn [{ok?     :seon.agent.search/ok?
                      by-file :seon.agent.search/by-file}]
@@ -447,7 +459,7 @@
 (deftest explicit-clj-glob-reaches-it
   ;; (c') a `*.clj` glob restricts to clj-only → explicit, so not suppressed.
   (async done
-    (-> (resolves! (search/grep {:seon.agent.search/pattern "siblingtoken"
+    (-> (resolves! (grep {:seon.agent.search/pattern "siblingtoken"
                                  :seon.agent.search/glob    "*.clj"}))
         (.then (fn [{ok?     :seon.agent.search/ok?
                      by-file :seon.agent.search/by-file}]
@@ -461,7 +473,7 @@
   ;; cljs is `defn ^:async shared-fn`). The fix must NOT hand the agent the
   ;; dead .clj. With a regex matching BOTH, the canonical .cljs surfaces.
   (async done
-    (-> (resolves! (search/grep {:seon.agent.search/pattern "defn shared-fn"}))
+    (-> (resolves! (grep {:seon.agent.search/pattern "defn shared-fn"}))
         (.then (fn [{ok?     :seon.agent.search/ok?
                      by-file :seon.agent.search/by-file}]
                  (is (true? ok?))
@@ -469,7 +481,7 @@
                                 (mapv :seon.agent.search/path by-file)))
                      "the paused .clj is no longer handed to the agent")
                  ;; a pattern matching BOTH siblings surfaces the canonical .cljs:
-                 (resolves! (search/grep {:seon.agent.search/pattern "shared-fn"}))))
+                 (resolves! (grep {:seon.agent.search/pattern "shared-fn"}))))
         (.then (fn [{by-file :seon.agent.search/by-file}]
                  (let [paths (mapv :seon.agent.search/path by-file)]
                    (is (some #{lane-cljs-path} paths)
@@ -520,7 +532,7 @@
                       {::protocol/success? true
                        :datahike.query/result (graph-rows target)})
                     targets)})))
-    (-> (search/grep-graph request)
+    (-> (grep-graph request)
         (.then verify)
         (.finally (fn []
                     (set! db/db original-db)

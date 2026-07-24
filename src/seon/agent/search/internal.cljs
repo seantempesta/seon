@@ -9,37 +9,29 @@
     [seon.agent.fs :as fs]
     [seon.agent.search :as-alias search]
     [seon.ai.tokens :as tokens]
+    [seon.config.resolve :as config.resolve]
     [seon.db :as db]
     [seon.db.protocol :as protocol]
     [seon.subprocess :as subprocess]))
 
 ;; ============================================================
-;; Hard caps.
+;; Acquired configuration.
 ;; ============================================================
 
-(def timeout-ms
-  "Kill the rg subprocess after this long."
-  10000)
+(declare fail)
 
-(def max-output-bytes
-  "The rg stdout capture ceiling; later bytes are dropped, while partial
-   output IS still parsed and returned with ::search/truncated? true."
-  (* 8 1024 1024))
-
-(def max-preview-tokens
-  "Per-match line-text cap, in TOKENS (seon.ai.tokens/estimate). A long
-   matched line (minified JS, a giant data literal) is trimmed to this and
-   marked with an ellipsis — the preview only has to let the agent confirm
-   the hit is relevant, not show the whole line."
-  32)
-
-(def default-max-results
-  "DEFAULT cap on FILE ROWS returned by a grouped grep (`:by-file`). Low on
-   purpose: a broad pattern hits many files, and the 12 densest count-ranked
-   file rows are enough to orient + drill (a row is ~50 tok — mostly the
-   namespaced keys + abs path). The honest TOTAL (`:match-count` /
-   `:file-count`) is always reported; a `:hint` fires when rows are clipped."
-  12)
+(defn configuration-error
+  "A flat error when one acquired search/subprocess fact is absent."
+  [configuration]
+  (when-let [missing-key
+             (some
+              (fn [attribute]
+                (when-not (contains? configuration attribute) attribute))
+              (conj config.resolve/search-attributes
+                    :seon.config.shell/kill-grace-ms))]
+    (fail
+     "The literal-search policy is unavailable; apply the governing config."
+     (str missing-key))))
 
 ;; ============================================================
 ;; Envelope helpers.
@@ -80,10 +72,14 @@
 (defn exec-rg
   "Run rg with `args` (vector of argv strings — never a shell string).
    Always resolves to the ordinary shared subprocess result."
-  [bin args]
+  [configuration bin args]
   (subprocess/run! {::subprocess/cmd (into [bin] args)
-                    ::subprocess/timeout-ms timeout-ms
-                    ::subprocess/max-output-bytes max-output-bytes}))
+                    ::subprocess/timeout-ms
+                    (:seon.config.search/timeout-ms configuration)
+                    ::subprocess/max-output-bytes
+                    (:seon.config.search/maximum-output-bytes configuration)
+                    ::subprocess/kill-grace-ms
+                    (:seon.config.shell/kill-grace-ms configuration)}))
 
 ;; ============================================================
 ;; Allowlist gate — delegate to seon.agent.fs, never reimplement.
@@ -117,7 +113,7 @@
   "Trim a matched line to `max-preview-tokens` (TOKENS, not chars), marking
    a cut with an ellipsis. Keeps one long minified-JS hit from blowing the
    eval row."
-  [s]
+  [max-preview-tokens s]
   (let [t (str/trim (str/trim-newline s))]
     (if (> (tokens/estimate t) max-preview-tokens)
       (str (subs t 0 (tokens/estimate-chars max-preview-tokens)) "…")
@@ -132,7 +128,7 @@
    appear under `-C`/`::context-lines`); a context line carries
    `::context? true` so callers can count real matches honestly while still
    showing surrounding lines. The line-text is already preview-capped."
-  [line]
+  [max-preview-tokens line]
   (when-not (str/blank? line)
     (try
       (let [o    (js/JSON.parse line)
@@ -144,7 +140,8 @@
             (when (and path-text line-text)
               (cond-> {::search/path        path-text
                        ::search/line-number (.-line_number d)
-                       ::search/line-text   (preview-line line-text)}
+                       ::search/line-text
+                       (preview-line max-preview-tokens line-text)}
                 (= "context" type) (assoc ::search/context? true))))))
       (catch :default _ nil))))
 
@@ -337,9 +334,13 @@
    numbered window and, under `full?`, returns the flat match+context
    stream; real matches are always counted honestly (context lines are not
    matches)."
-  [stdout paths glob cap full? context-lines]
+  [configuration stdout paths glob cap full? context-lines]
   (let [ctx? (pos? (or context-lines 0))
-        all  (-> (into [] (keep parse-event-line) (str/split-lines stdout))
+        max-preview-tokens
+        (:seon.config.search/maximum-preview-tokens configuration)
+        all  (-> (into []
+                       (keep #(parse-event-line max-preview-tokens %))
+                       (str/split-lines stdout))
                  (suppress-paused-clj-siblings paths glob))
         matches (into [] (remove ::search/context?) all)]
     (cond
@@ -383,9 +384,9 @@
   "First line of `src` matching `re`, preview-capped; falls back to the first
    non-blank line, then \"\". The graph analog of rg's matched line — keeps
    the per-member sample to a single trimmed line, not a whole defn."
-  [re src]
+  [max-preview-tokens re src]
   (let [lines (str/split-lines (str src))]
-    (preview-line
+    (preview-line max-preview-tokens
       (or (some (fn [l] (when (.test re l) l)) lines)
           (first (remove str/blank? lines))
           ""))))
@@ -394,11 +395,12 @@
   "One matching graph entity → a flat hit map (the graph analog of a file
    match line): which target matched, the owning namespace (container), the
    member identifier, and a preview of the matching source line."
-  [target ns-str member src re]
+  [max-preview-tokens target ns-str member src re]
   {::search/target    target
    ::search/ns        ns-str
    ::search/member    member
-   ::search/line-text (first-matching-line re src)})
+   ::search/line-text
+   (first-matching-line max-preview-tokens re src)})
 
 (def ^:private graph-queries
   {:seon.fn
@@ -416,39 +418,43 @@
      :where [?e :seon.eval/id ?id] [?e :seon.eval/source ?src]
             [(get-else $ ?e :seon.eval/ns :seon.eval/unknown) ?ns]]})
 
-(defn- fn-hits [re rows]
+(defn- fn-hits [max-preview-tokens re rows]
   (->> rows
        (keep (fn [[sym src doc]]
                (when (.test re (str sym "\n" doc "\n" src))
-                 (hit :seon.fn (or (namespace (symbol sym)) sym) sym src re))))))
+                 (hit max-preview-tokens :seon.fn
+                      (or (namespace (symbol sym)) sym) sym src re))))))
 
-(defn- schema-hits [re rows]
+(defn- schema-hits [max-preview-tokens re rows]
   (->> rows
        (keep (fn [[k src]]
                (when (.test re (str k "\n" src))
-                 (hit :seon.schema (or (namespace k) (name k)) (str k) src re))))))
+                 (hit max-preview-tokens :seon.schema
+                      (or (namespace k) (name k)) (str k) src re))))))
 
-(defn- ns-hits [re rows]
+(defn- ns-hits [max-preview-tokens re rows]
   (->> rows
        (keep (fn [[nm src]]
                (when (.test re (str (name nm) "\n" src))
-                 (hit :seon.ns (name nm) (str nm) src re))))))
+                 (hit max-preview-tokens :seon.ns
+                      (name nm) (str nm) src re))))))
 
-(defn- eval-hits [re rows]
+(defn- eval-hits [max-preview-tokens re rows]
   (->> rows
        (keep (fn [[id src ns]]
                (when (.test re (str src))
-                 (hit :seon.eval (name ns) (str id) src re))))))
+                 (hit max-preview-tokens :seon.eval
+                      (name ns) (str id) src re))))))
 
 (defn graph-hits
   "Flat hits from query `results`, preserving requested target order."
-  [targets results re]
+  [max-preview-tokens targets results re]
   (vec (mapcat (fn [target rows]
                  (case target
-                         :seon.fn     (fn-hits re rows)
-                         :seon.schema (schema-hits re rows)
-                         :seon.ns     (ns-hits re rows)
-                         :seon.eval   (eval-hits re rows)
+                         :seon.fn     (fn-hits max-preview-tokens re rows)
+                         :seon.schema (schema-hits max-preview-tokens re rows)
+                         :seon.ns     (ns-hits max-preview-tokens re rows)
+                         :seon.eval   (eval-hits max-preview-tokens re rows)
                          nil))
                targets results)))
 
@@ -488,7 +494,7 @@
   "Backend for seon.agent.search/grep-graph: text-search the program graph,
    grouped BY NAMESPACE, via the SAME [[grouped-envelope]] as the file grep.
    Errors as values (invalid regex / unexpected → ok?-false envelope)."
-  [pattern targets cap full? ci?]
+  [configuration pattern targets cap full? ci?]
   (try
     (let [compiled (compile-pattern pattern ci?)]
       (if-let [re (::search/re compiled)]
@@ -511,7 +517,9 @@
 
                 :else
                 (grouped-envelope
-                 (graph-hits targets (mapv graph-query-result members) re)
+                 (graph-hits
+                  (:seon.config.search/maximum-preview-tokens configuration)
+                  targets (mapv graph-query-result members) re)
                  ::search/ns ns-row
                  {:rows ::search/by-ns :group-count ::search/ns-count
                   :hint graph-hint}

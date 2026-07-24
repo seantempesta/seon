@@ -97,14 +97,9 @@
        {:seon.ai/config-resolution
         (ai.core/resolved-config-from-rows
          ai.core/shipped-defaults config-row agent-row attempt-timeout-ms)
-        :seon.config.llm-retry/maximum-wait-ms
-        (:seon.config.llm-retry/maximum-wait-ms config-row)
-        :seon.config.llm-retry/maximum-total-wait-ms
-        (:seon.config.llm-retry/maximum-total-wait-ms config-row)
-        :seon.config.llm-retry/default-retries
-        (:seon.config.llm-retry/default-retries config-row)
         :seon.config.model-stream/partial-publish-settle-ms
         (:seon.config.model-stream/partial-publish-settle-ms config-row)}
+       (config.resolve/llm-retry-configuration config-row)
        (ai.core/reply-policy-from-rows config-row agent-row)))))
 
 (defn- bounded-llm-transport!
@@ -257,7 +252,8 @@
    (:seon.config.claim-driver/invocation-result-maximum-bytes configuration)
    :seon.execution/run-fence
    {:seon.agent.run/id run-id
-    :seon.agent.run/claim-epoch claim-epoch}}
+    :seon.agent.run/claim-epoch claim-epoch
+    :seon.config/configuration configuration}}
    (select-keys execution-plan
                 [:seon.execution/selected-tier
                  :seon.execution/schema-manifest
@@ -268,14 +264,21 @@
         (db/pull
          {::db/db database
           ::db/pull-pattern
-          (into [:seon.config/id] config.resolve/claim-driver-attributes)
+          (into [:seon.config/id]
+                (concat config.resolve/claim-driver-attributes
+                        config.resolve/shell-attributes))
           ::db/ref config.resolve/cluster-config-lookup-ref})
         configuration
-        (config.resolve/claim-driver-configuration singleton)
+        (merge
+         (select-keys singleton [:seon.config/id])
+         (config.resolve/claim-driver-configuration singleton)
+         (config.resolve/shell-configuration singleton))
         missing
         (some #(when-not (pos-int? (get configuration %)) %)
               [:seon.config.claim-driver/invocation-deadline-ms
-               :seon.config.claim-driver/invocation-result-maximum-bytes])]
+               :seon.config.claim-driver/invocation-result-maximum-bytes
+               :seon.config.shell/default-timeout-ms
+               :seon.config.shell/kill-grace-ms])]
     (if missing
       {:seon.error/message
        (str "The JVM claimant limit " missing

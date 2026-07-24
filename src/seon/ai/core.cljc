@@ -233,6 +233,9 @@
          :seon.ai/wire-stream?
          :seon.ai/reply-evaluation
          :seon.config.model-stream/partial-publish-settle-ms
+         :seon.config.llm-retry/base-wait-ms
+         :seon.config.llm-retry/growth-factor
+         :seon.config.llm-retry/jitter-fraction
          :seon.config.llm-retry/maximum-wait-ms
          :seon.config.llm-retry/maximum-total-wait-ms
          :seon.config.llm-retry/default-retries

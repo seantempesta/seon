@@ -55,6 +55,11 @@
   [request]
   (shell/py-run (assoc request :seon.config/configuration configuration)))
 
+(defn- run-bg!
+  [request]
+  (shell/run-bg!
+   (assoc request :seon.config/configuration configuration)))
+
 (deftest foreground-and-background-streams-share-one-byte-ceiling
   (is (= shell.internal/max-output-bytes
          shell.internal/bg-max-stream-bytes)))
@@ -350,7 +355,7 @@
     (let [{ok?   :seon.agent.shell/ok?
            id    :seon.agent.shell/job-id
            state :seon.agent.shell/state}
-          (shell/run-bg! {:seon.agent.shell/cmd  "bash"
+          (run-bg! {:seon.agent.shell/cmd  "bash"
                           :seon.agent.shell/args ["-c" "echo l1; sleep 1; echo l2"]})]
       (is (true? ok?) "launch ok")
       (is (string? id))
@@ -375,7 +380,7 @@
 (deftest job-stop-sigterms-a-running-job
   (async done
     (let [{id :seon.agent.shell/job-id}
-          (shell/run-bg! {:seon.agent.shell/cmd  "bash"
+          (run-bg! {:seon.agent.shell/cmd  "bash"
                           :seon.agent.shell/args ["-c" "sleep 30"]})
           r  (shell/job-stop! {:seon.agent.shell/job-id id})]
       (is (true? (:seon.agent.shell/ok? r)))
@@ -405,7 +410,7 @@
           B     "shelltestB0001"
           bg    (fn [aid] (db/with-agent aid
                             (fn [] (:seon.agent.shell/job-id
-                                    (shell/run-bg! {:seon.agent.shell/cmd  "bash"
+                                    (run-bg! {:seon.agent.shell/cmd  "bash"
                                                     :seon.agent.shell/args ["-c" "sleep 30"]})))))
           a-id  (bg A)
           b-id  (bg B)
@@ -465,7 +470,7 @@
   (async done
     (let [pytest (write-fake-pytest!)
           {id :seon.agent.shell/job-id}
-          (shell/run-bg! {:seon.agent.shell/cmd  pytest
+          (run-bg! {:seon.agent.shell/cmd  pytest
                           :seon.agent.shell/args ["red"]
                           :seon.agent.shell/cwd  fixture-dir})]
       (-> (poll-until id #(= :exited (:seon.agent.shell/state %)))

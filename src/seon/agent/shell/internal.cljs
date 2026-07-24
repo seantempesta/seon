@@ -228,7 +228,7 @@
 
 (defn start-job!
   "Spawn `cmd`/`args` in the background and register a job; return its id."
-  [cmd args cwd stdin]
+  [cmd args cwd stdin kill-grace-ms]
   (let [id       (str "job-" (subs (str (random-uuid)) 0 8))
         ;; Captured DURING the agent's turn (run-bg! runs in agent scope) so
         ;; the exit-time testrun persist can scope to the spawning agent —
@@ -236,6 +236,7 @@
         agent-id (db/current-agent-id)
         started  (subprocess/start!
                   (cond-> {::subprocess/cmd (into [cmd] args)
+                           ::subprocess/kill-grace-ms kill-grace-ms
                            ::subprocess/max-output-bytes bg-max-stream-bytes
                            ::subprocess/on-out
                            #(append-capped id ::shell/out ::shell/out-truncated? %)
