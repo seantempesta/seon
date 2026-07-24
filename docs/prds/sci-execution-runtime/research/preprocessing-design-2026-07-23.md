@@ -109,9 +109,8 @@ the running cluster is MAINTAINED write-through.
 - **Owner:** the operator (`bin/seon`), as the release-wide extension of
   the config explicit-apply precedent (`bin/seon config apply <path>` — the
   one manifest-reconcile surface, per the src/seon ownership table).
-  Suggested surface: `bin/seon cluster apply <name> [--release <digest>]`;
-  fresh `bin/seon up` on an unapplied cluster performs apply implicitly
-  exactly as it selects `config/system.edn` today (owner option §8.3).
+  Surface: `bin/seon cluster apply <name>`. File-backed clusters require this
+  explicit operation before `up`; startup never changes their population.
 - **Input:** the preprocessed release directory + the selected config
   manifest + the target cluster.
 - **Work (all of it — this is where derivation-adjacent cost lives):**

@@ -507,9 +507,12 @@
    measurement and is rechecked against a ten-times synthetic corpus."
   64)
 
+(schema/register! :seon.config/on-core-error [:enum :crash :gate :log])
+
 (def operational-keys
   "Boot-critical configuration attributes carried by every launch."
-  [:seon.config.database.writer/jvm-heap-mb
+  [:seon.config/on-core-error
+   :seon.config.database.writer/jvm-heap-mb
    :seon.config.database.initialization/page-rows
    :seon.config.database.read/max-work
    :seon.config.database.read/max-results
@@ -547,13 +550,16 @@
    :seon.config.database.transport/codec-worker-queue-capacity])
 
 (doseq [attribute
-        (remove (merge mutation-admission-schemas initialization-page-schemas)
+        (remove (merge mutation-admission-schemas
+                       initialization-page-schemas
+                       {:seon.config/on-core-error true})
                 operational-keys)]
   (schema/register! attribute :seon.config/cap))
 
 (def enforced-keys
   "Operational attributes enforced by launch constructor surfaces."
-  #{:seon.config.database.writer/jvm-heap-mb
+  #{:seon.config/on-core-error
+    :seon.config.database.writer/jvm-heap-mb
     :seon.config.database.initialization/page-rows
     :seon.config.database.read/max-work
     :seon.config.database.read/max-results
@@ -602,9 +608,11 @@
 (schema/register! :seon.launch.envelope/disposition [:enum :enforced :carried])
 (schema/register! :seon.launch.envelope/dispositions
   [:map-of :keyword :seon.launch.envelope/disposition])
+(def ^:private database-operational-keys
+  (remove #{:seon.config/on-core-error} operational-keys))
 (def ^:private operational-manifest-entries
   (mapv (fn [attribute] [attribute {:optional true} attribute])
-        operational-keys))
+        database-operational-keys))
 
 (schema/register! :seon.config/database
   (into [:map {:closed true}
@@ -822,8 +830,9 @@
 ;; after the catch-site sweep); `:gate` = pod stays alive, the CI-shaped
 ;; wrappers (bin/test-cljs, dev hook) fail any run that accumulated one
 ;; (the SHIPPED default); `:log` = datom + derived section only
-;; (prod/demo). `:agent` faults never escalate in ANY mode.
-(schema/register! :seon.config/on-core-error [:enum :crash :gate :log])
+;; (prod/demo). `:agent` faults never escalate in ANY mode. Its schema is
+;; registered beside the operational launch keys because the writer transport
+;; consumes the same resolved value before the database singleton is acquired.
 
 ;;; WEB-ACCESS POLICY — the host-owned reachability policy for
 ;;; `seon.agent.web/fetch` (UNIFIES the old private-range SSRF guard + domain
@@ -1576,6 +1585,12 @@
   [v allowed fallback]
   (if (contains? allowed v) v fallback))
 
+(defn- resolve-on-core-error
+  [manifest]
+  (coerce-enum (get manifest :seon.config/on-core-error :gate)
+               #{:crash :gate :log}
+               :gate))
+
 (defn- default-repl-mode
   "The per-model REPL default from explicit environment data."
   [environment]
@@ -1775,7 +1790,8 @@
                        :seon.config/steering
                        "Set :seon.config.database.transport/maximum-frame-bytes to at least 65536."})))
     (let [resolved
-          {:seon.config.database.writer/jvm-heap-mb heap-mb
+          {:seon.config/on-core-error (resolve-on-core-error manifest)
+           :seon.config.database.writer/jvm-heap-mb heap-mb
            :seon.config.database.initialization/page-rows
            (get database :seon.config.database.initialization/page-rows
                 default-initialization-page-rows)
@@ -2089,7 +2105,7 @@
                    false))
              :seon.config/always     (:seon.config/always nsp)
              :seon.config/on-core-error
-             (coerce-enum (get manifest :seon.config/on-core-error :gate) #{:crash :gate :log} :gate)
+             (resolve-on-core-error manifest)
              :seon.config/spawn-depth-cap
              (let [v (get manifest :seon.config/spawn-depth-cap 1)] (if (and (int? v) (>= v 0)) v 1))
              :seon.config.render/database-edn-cap   (get r :seon.config.render/database-edn-cap 16384)

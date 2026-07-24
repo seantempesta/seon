@@ -93,7 +93,11 @@
 
 (deftest every-operational-key-is-manifest-declarable
   (let [operational (resolve/resolve-operational-values {} fixed-hardware)
-        manifest {:seon.config/database operational}]
+        manifest
+        {:seon.config/on-core-error
+         (:seon.config/on-core-error operational)
+         :seon.config/database
+         (dissoc operational :seon.config/on-core-error)}]
     (is (= (set resolve/operational-keys) (set (keys operational))))
     (is (m/validate :seon.config/manifest manifest))
     (is (= operational

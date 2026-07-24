@@ -52,7 +52,7 @@
     :seon.config.resolve/hardware-observations]
    [:seon.launch.envelope/dispositions
     :seon.launch.envelope/dispositions]]
-  (map (fn [attribute] [attribute :seon.config/cap]))
+  (map (fn [attribute] [attribute attribute]))
   config.resolve/operational-keys))
 
 (schema/register! ::config-apply-generation :seon.launch.envelope/generation)
