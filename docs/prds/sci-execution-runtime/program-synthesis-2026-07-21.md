@@ -1028,6 +1028,18 @@ COMPLETELY before dispatching anything.
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- BREAKS #7 FIXED + STATUSFIX ACCEPTED (ff30d1162: analyzer
+  confined to its leaf, pure classification extracted to
+  seon.dev.program-inventory, test moved to operator discovery, NO
+  clojurescript on the writer — the design-correct fix; 8953b45e3:
+  status shares select-manifest with up, 44/122 green + live exit
+  0). BREAK #8 surfaced by the writer gate: sci analysis 'Unable to
+  resolve symbol: seon.host.context' in the authored-invocation
+  writer test — the r43 resolution seam leaking a host-namespace
+  symbol into a SCI env; r43 session resumed (containment rule:
+  never bind host namespaces into agent SCI — fix the resolution
+  mechanism). Its acceptance = the FULL writer gate with honest
+  counts.
 - PARALLEL FIX POSTURE (owner, 2026-07-23 late): FOUR lanes on the
   break chain — cljshang (#6) + writercp (#7) fixing; SEAMSWEEP
   audit (read-only) batch-predicting remaining breaks from the day's
