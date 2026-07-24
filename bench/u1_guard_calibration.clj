@@ -25,14 +25,17 @@
     "(let [render (fn [rows] (mapv (fn [row] [:li {:data-id (:id row)} (:label row)]) rows))] (render (mapv (fn [n] {:id n :label (str \"row-\" n)}) (range 250))))"}])
 
 (defn- policy [invocation-class]
-  {::guard/fuel 0
+  {::guard/interpreter-step-budget 0
    ::guard/mode :count
    ::guard/invocation-class invocation-class
-   ::guard/fuel-config-key
+   ::guard/interpreter-step-budget-config-key
    (case invocation-class
-     :agent-eval :seon.config.guard/agent-eval-fuel
-     :authored-render :seon.config.guard/authored-render-fuel
-     :plan :seon.config.guard/plan-fuel)
+     :agent-eval
+     :seon.config.guard/agent-eval-interpreter-step-budget
+     :authored-render
+     :seon.config.guard/authored-render-interpreter-step-budget
+     :plan
+     :seon.config.guard/plan-interpreter-step-budget)
    ::guard/deadline-config-key :seon.config.guard/deadline-ms
    ::guard/output-config-key :seon.config.guard/output-cap})
 
@@ -56,6 +59,7 @@
               :calibration/iteration iteration
               :calibration/class class
               :calibration/label label
-              :calibration/steps (guard/steps-used holder)
+              :calibration/interpreter-steps
+              (guard/interpreter-steps-used holder)
               :calibration/elapsed-ns elapsed
               :calibration/output-chars (count (pr-str value))})))))

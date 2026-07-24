@@ -646,6 +646,12 @@
             {:seon.agent/id "agent"
              :seon.agent/entity {:db/id 1 :seon.agent/id "agent"}
              :seon.render/node {:seon.agent.ctx.transcript/readline? false}
+             :seon.schema/projection
+             {:seon.schema.projection/function-source-admissions {}
+              :seon.schema.projection/artifact-exports
+              #{'seon.agent.ctx.transcript/message->renderable
+                'seon.agent.ctx.transcript/eval->renderable
+                'seon.agent.ctx.transcript/coalesced->renderable}}
              ::db/db database}
             nil)
           (.then

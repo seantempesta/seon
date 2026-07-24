@@ -1300,8 +1300,13 @@
         ;; is no injected handle — fall back to a local ai render so the
         ;; same code path produces the same String.
         configuration (:seon.config/configuration input)
+        projection (or (:seon.schema/projection input)
+                       (schema/current-projection)
+                       {})
         render-input
-        (assoc input ::render/compiled-renderers
+        (assoc input
+               :seon.schema/projection projection
+               ::render/compiled-renderers
                (merge render.core/renderer-functions transcript-renderers))
         render* #(render/render :seon.render/ai render-input %)
         events   (ordered-events input)
