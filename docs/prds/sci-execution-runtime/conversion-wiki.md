@@ -1618,6 +1618,17 @@ the variable-weight values they select.
 
 ## Database completion-delivery scars (2026-07-24)
 
+- **Readiness is typed boundary evidence, never a boolean guess.** A writer
+  log line cannot prove its request server exists: the composition root must
+  reject a writer start error value before advertising ready, and the operator
+  probe must preserve the exact missing path, connect exception, session-open
+  rejection or validation mismatch, and response shape. Carry every
+  boot-critical dependency (including `:seon.config/on-core-error`) through
+  the typed launch envelope; present-`nil` is not an absent optional value.
+  Session-open proves transport admission only. Applied release/config
+  identity is a later database attach gate with the explicit
+  `bin/seon cluster apply <name>` remedy
+  (`seon.db.server/start!`, `seon.dev.process/writer-readiness-observation`).
 - **A Unix socket pathname is listener ownership, not disposable startup
   debris.** A second writer must never unlink before it has proved the
   endpoint stale: doing so leaves the first live listener unnameable, so its
@@ -1708,3 +1719,22 @@ the variable-weight values they select.
   Cross-tier subprocess policy is one fact consumed by both leaves; its
   recurring acquisition proof is one presence assertion over the singleton,
   not a separate value suite for every consumer.
+
+## Preprocessing maintenance scars (2026-07-24)
+
+- **A divergence cache basis must be written in the same transaction as its
+  program rows.** Predict the next Datahike basis only behind the exact
+  expected-database fence; a post-commit cache write makes crash-between-row
+  and cache observable. The maintenance transition changes only the affected
+  row identities and carries the already-validated composed fingerprint, so it
+  never invokes the population-wide `projection-delta` builder
+  (`seon.eval/compile-eval-tee`,
+  `seon.host.context/record-eval-terminal!`,
+  `seon.schema/maintain-projection-delta`).
+- **A stale cache needs history-first repair.** A `since` database contains
+  only newly asserted datoms, so joining its old identity assertion to a new
+  form silently misses redefinitions. Discover changed entity IDs in
+  `history(since db basis)`, then query only their current rows and replace
+  only those overlay identities. Emit one loud marker without a follow-up
+  fault transaction: that transaction would advance the basis again and cause
+  a repair loop (`seon.runtime.admission`).
