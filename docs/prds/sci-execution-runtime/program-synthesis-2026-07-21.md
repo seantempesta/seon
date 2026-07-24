@@ -1028,6 +1028,16 @@ COMPLETELY before dispatching anything.
   in code/schema/wiki — its artifact is pre-parsed transaction data
   for initialization pages, named in the producers'/consumers' own
   vocabulary.
+- BREAK #4 FIXED (f8358abec, accepted: both inventories immutable-
+  runtime members with exact digests, ENOENT boundary passed,
+  128/722 green). BREAK #5 (the chain reaches the read side):
+  committed-program acquisition result weight 63,344 > 60,000 —
+  corpus growth crossing the R27 read breaker, the exact mirror of
+  the morning's write-side frame. RULED by the R40-amended law: PAGE
+  the acquisition reads at one basis (page weight <= cap by
+  construction, derived not a second knob); the breaker stays.
+  Schema-admission session resumed; acceptance = FULL POD READINESS
+  on cluster acqpage.
 - BREAK #3 FIXED (73d41179d, accepted): derivation runs with
   Shadow's disabled-devtools config + devtools client entry removed;
   live proof = watcher first flush publishes the v11 manifest,
