@@ -52,7 +52,11 @@
   [basis root]
   (let [trace-dir "target/seon-jvm-aot-traces"
         trace-file (str trace-dir "/" (munge (str root)) ".log")
-        classpath (str/join java.io.File/pathSeparator (:classpath-roots basis))
+        classpath (str/join
+                   java.io.File/pathSeparator
+                   (remove #(contains? #{writer-aot-class-dir jvm-aot-class-dir}
+                                       (str %))
+                           (:classpath-roots basis)))
         expression
         (str "(do (require '" root ") "
              "(prn (into {} (map (juxt #(munge (str %)) identity) "
@@ -70,10 +74,11 @@
         munged-namespaces
         (edn/read-string (last (str/split-lines (:out result))))
         class-names (->> (str/split-lines (slurp trace-file))
-                         (keep #(second
-                                 (re-find
-                                  #"\[class,load ?\] ([A-Za-z0-9_.$-]+)\$eval\d+\$loading__.*source: __JVM_DefineClass__"
-                                  %)))
+                         (keep (fn [line]
+                                 (second
+                                  (re-find
+                                   #"\[class,load ?\] ([A-Za-z0-9_.$-]+)\$eval\d+\$loading__.*source: __JVM_DefineClass__"
+                                   line))))
                          distinct)]
     (vec (reverse (keep munged-namespaces class-names)))))
 
@@ -97,21 +102,11 @@
   [writer-basis]
   (compile-aot! writer-basis writer-aot-class-dir
                 ['seon.db.server 'seon.embed.preflight])
-  (let [host-basis (b/create-basis {:project "deps.edn"
-                                    :aliases [:writer :host]})]
-    (b/delete {:path jvm-aot-class-dir})
-    (b/copy-dir {:src-dirs [writer-aot-class-dir]
-                 :target-dir jvm-aot-class-dir})
-    (doseq [root ['seon.host 'seon.web.server]]
-      (let [ns-compile (aot-load-order host-basis root)]
-        (when-not (seq ns-compile)
-          (throw (ex-info "AOT namespace discovery produced no source namespaces."
-                          {:root root})))
-        (b/compile-clj {:basis host-basis
-                        :class-dir jvm-aot-class-dir
-                        :ns-compile ns-compile
-                        :java-cmd writer-java-command
-                        :java-opts writer-jvm-options}))))
+  ;; SCI's host closure is not AOT-admissible yet (`copy-vars` asserts during
+  ;; compilation). Keep this experiment to the measured writer closure.
+  (b/delete {:path jvm-aot-class-dir})
+  (b/copy-dir {:src-dirs [writer-aot-class-dir]
+               :target-dir jvm-aot-class-dir})
   writer-aot-class-dir)
 
 (defn clean [_]
@@ -148,11 +143,14 @@
 ;; LOCAL bindings (own basis + own class-dir), NOT the file-level globals — so
 ;; this artifact's build cannot race/clobber the source `jar` target (C19).
 
-(defn writer-uber [_]
+(defn- writer-uber!
+  [aot?]
   (let [writer-basis (b/create-basis {:project "deps.edn"
                                       :aliases writer-aliases})
         server-class-dir "target/database-server-classes"
-        server-uber-file "target/seon-database-server-standalone.jar"]
+        server-uber-file (if aot?
+                           "target/seon-database-server-aot.jar"
+                           "target/seon-database-server-standalone.jar")]
     (b/delete {:path server-class-dir})
     (b/delete {:path server-uber-file})
     ;; Seon src → class-dir → jar. Datahike's `src-secondary` arrives through
@@ -164,8 +162,20 @@
               :src-dirs ["java"]
               :class-dir server-class-dir
               :javac-opts ["--release" "11"]})
+    (when aot?
+      ;; Source stays in the jar for dynamic `requiring-resolve` fallbacks.
+      ;; `javac` owns its class directory, so install the Clojure cache after it.
+      (writer-aot! writer-basis)
+      (b/copy-dir {:src-dirs [jvm-aot-class-dir]
+                   :target-dir server-class-dir}))
     (b/uber {:class-dir server-class-dir
              :uber-file server-uber-file
              :basis writer-basis
              :main 'seon.DatabaseServerMain})
     (println "writer-uber → " server-uber-file)))
+
+(defn writer-uber [_]
+  (writer-uber! false))
+
+(defn writer-uber-aot [_]
+  (writer-uber! true))
