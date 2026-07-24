@@ -375,20 +375,6 @@
   [value]
   (tokens/bounded-pr-str value 25))
 
-(declare validate-entity-values!)
-
-(defn- validate-ref! [attr value]
-  (cond
-    (map? value) (validate-entity-values! value)
-    (valid-value? :seon.db/ref value) nil
-    :else (throw (ex-info
-                   (str "A ref attribute contains an invalid reference. Use an "
-                        "entity id or lookup ref, for example "
-                        (transaction-form
-                          [{attr [:seon.agent/id "agent-id"]}]) ".")
-                          {::db/attr attr ::db/actual-value value
-                           :seon.error/kind :user-input}))))
-
 (declare validation-entity)
 
 (defn- validation-tree
@@ -416,12 +402,26 @@
              {}
              entity))
 
-(defn validate-entity-values!
-  "Validate one transaction entity using registered Malli forms."
+(declare validate-logical-entity-values!)
+
+(defn- validate-ref!
+  [attr value]
+  (cond
+    (map? value) (validate-logical-entity-values! value)
+    (valid-value? :seon.db/ref value) nil
+    :else (throw (ex-info
+                   (str "A ref attribute contains an invalid reference. Use an "
+                        "entity id or lookup ref, for example "
+                        (transaction-form
+                          [{attr [:seon.agent/id "agent-id"]}]) ".")
+                          {::db/attr attr ::db/actual-value value
+                           :seon.error/kind :user-input}))))
+
+(defn- validate-logical-entity-values!
   [entity]
   (doseq [[attr value] entity
           :when (and (not (system-attr? attr)) (registered? attr))]
-    (let [logical-value (validation-value attr value)]
+    (let [logical-value value]
       (when (and (acquired-component-schema? attr)
                  (not (valid-value? attr logical-value)))
         (throw (ex-info
@@ -451,6 +451,11 @@
                    ::db/expected-schema (schema-definition attr)
                    :seon.error/kind :user-input}))))))
   nil)
+
+(defn validate-entity-values!
+  "Decode and validate one transaction entity using registered Malli forms."
+  [entity]
+  (validate-logical-entity-values! (validation-entity entity)))
 
 (defn validate-values!
   "Validate every entity map in transaction data."
