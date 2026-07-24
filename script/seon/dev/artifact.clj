@@ -371,6 +371,9 @@
    "guest-cljs"
    "java"
    "resources"
+   "script/seon/dev/config_manifest.clj"
+   "script/seon/dev/program_artifact.clj"
+   "script/seon/dev/program_inventory.clj"
    "src"])
 
 (defn source-input-digest

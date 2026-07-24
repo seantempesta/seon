@@ -116,13 +116,22 @@
                 :seon.dev.config/client-build-id "client"}]
     (try
       (fs/create-dirs (fs/path directory "src"))
+      (fs/create-dirs (fs/path directory "script/seon/dev"))
       (fs/create-dirs (fs/path directory "docs"))
       (spit (str (fs/path directory "src/example.cljs")) "(ns example)")
+      (spit (str (fs/path directory "script/seon/dev/program_artifact.clj"))
+            "(ns seon.dev.program-artifact)")
       (spit (str (fs/path directory "docs/note.md")) "outside the build")
       (let [digest (artifact/source-input-digest config)]
         (spit (str (fs/path directory "docs/note.md")) "changed documentation")
         (is (= digest (artifact/source-input-digest config))
             "unselected checkout files do not force a rebuild")
+        (spit (str (fs/path directory "script/seon/dev/program_artifact.clj"))
+              "(ns seon.dev.program-artifact)\n(def changed true)")
+        (is (not= digest (artifact/source-input-digest config))
+            "a Shadow build-hook change invalidates the application artifact")
+        (spit (str (fs/path directory "script/seon/dev/program_artifact.clj"))
+              "(ns seon.dev.program-artifact)")
         (spit (str (fs/path directory "src/example.cljs"))
               "(ns example)\n(def changed true)")
         (is (not= digest (artifact/source-input-digest config))))
