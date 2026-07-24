@@ -1607,11 +1607,11 @@ the variable-weight values they select.
   analysis. Resolution keeps an absent target as nil and adds the existing
   `:unresolved-symbol` uncertainty; `plan-execution` then returns ordinary
   fail-closed steering data. Do not regex-filter prose or call `namespace` on
-  an absent target.
+  an absent target (`7f49d4674`).
 - **The claimed-phase call itself is inside the settlement door.** A phase
   leaf can violate its value contract by throwing before it returns. Catch the
   throw at the portable `execute-step!` invocation, project it to the flat
   core-bug value, and feed that value through the same
   `terminal-or-displaced-result` → `settle-phase-error!` path as every returned
   phase error. A virtual-thread outer `finally` that only removes the handle
-  cannot release database custody.
+  cannot release database custody (`7f49d4674`).

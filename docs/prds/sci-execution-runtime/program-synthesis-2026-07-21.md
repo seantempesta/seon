@@ -183,7 +183,8 @@ the flat core-bug value through the one terminal-or-displaced + fenced
 phase-error settlement path. Focused proof is green: edge/planner 17/82 and
 serialized claimant writer 11/56; the throw regression observes
 `:published/:error`, closed run, released custody, and a core fault before the
-same drive call returns. `bin/test-writer` itself exposed a stale fixture
+same drive call returns (`7f49d4674`). `bin/test-writer` itself exposed a stale
+fixture
 literal (valid artifact v12 rejected because writer test support requires
 v11), recorded in the existing full-writer-gate issue; proof used an otherwise
 identical temporary manifest and did not touch the default cluster. Re-drive-3

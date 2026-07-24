@@ -115,8 +115,9 @@ custody absent, and one core fault datom.
 
 Focused JVM proof is green: portable edge/planner coverage is 17 tests and 82
 assertions; the claimant writer namespace is 11 tests and 56 assertions. The
-default cluster was not touched. The source-frozen live re-drive remains the
-acceptance gate for the two registered lifecycle forms.
+correction is commit `7f49d4674`; the default cluster was not touched. The
+source-frozen live re-drive remains the acceptance gate for the two registered
+lifecycle forms.
 
 ## Acceptance
 
