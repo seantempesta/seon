@@ -1140,6 +1140,22 @@ MORNING ITEMS (accumulating):
   (settleclose 1a47c1062 + 5cc3b32e1: break-8 fixture class swept
   suite-wide, program-source digest selection fixed). A REAL
   MILESTONE — but NOT graduation: the goal's bar is PROVABLY ALIVE.
+- ★ ROOT CAUSE CORRECTED + FIXED (2026-07-24, ~2:30am): my
+  "long-lived claimant transport" diagnosis was WRONG (lane caught
+  it) — the failing PID 35849 was the BUN POD, not the JVM claimant
+  (35766). The pod retained LLM capability and never handed attempts
+  to java.net.http; the pod's LLM path was the broken one. FIX
+  (e21c85417 + de1458b24 + dbc283252): removed the pod LLM dispatch
+  path so attempts route to the JVM claimant (topology-aligned — pod
+  is retiring), restored flat transport diagnostics, fixed the
+  config-pull component-selector contract, separated adapter/claimant
+  timeouts; ai suite 19/116 green. /agents/run fault-datom persist
+  also landed (762424f91). MORNING FLAG: removing pod LLM is an
+  interim-topology change (defensible bug fix + topology direction,
+  but owner should confirm). New operator blocker filed (named-
+  cluster-open-does-not-reconcile-jvm-host) — why the isolated proof
+  couldn't run; the DEFAULT re-drive is the proof. Rebuild+FINAL
+  re-drive running.
 - ★ RE-DRIVE VERDICT (2026-07-24): NOT-ALIVE, but 2 of 3 original
   live blockers DEAD — turns now OPEN and advance (:rendered →
   :attempt-open → :published; render-prompt fix worked) and
