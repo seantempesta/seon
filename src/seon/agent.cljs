@@ -15,7 +15,7 @@
        default-turn-limit/default-deadline-ms/schedules/ctx + the entity
        map), plus the rendered `:seon.eval` entity and the `:seon.ns/*`,
        `:seon.fn/*`, `:seon.schema/*` corpus schemas (`:seon.eval/*` attrs
-       live behind [[seon.eval]], `:seon.agent.message/*` lives in
+       live behind [[seon.eval.receipt]], `:seon.agent.message/*` lives in
        [[seon.agent.message]], `:seon.agent.turn/*` in [[seon.agent.turn]],
        `:seon.agent.run/*` in [[seon.agent.run]], `:seon.agent.ctx/*` in [[seon.agent.ctx]])
      - `armable-agent-ids` — the wakeable agent ids (a `:seon.db/db` map-in
@@ -54,7 +54,7 @@
    `:seon.agent/ctx` at creation; render reads that one
    complete collection priority-sorted — no merge, no separate default set.
    Each block's `:seon.render/ai` slot is a verbatim string or a fn symbol
-   resolved late via `seon.eval/lookup-value`.
+   selected late by the compiled-or-guarded render door.
 
    The agent customizes by `seon.agent.ctx/install!` / `remove!` on its
    `:seon.agent/ctx` blocks, or by transacting a completely different symbol
@@ -118,8 +118,8 @@
                   [:vector {:seon.db/component true} :seon.db/ref])
 ;; ============================================================
 ;; Aliases — the context machinery lives in `seon.agent.ctx`. These keep (a) the
-;; agent-TAUGHT read surface (`seon.agent/messages` …) resolving via
-;; seon.eval/lookup-value, and (b) stored `:seon.render/ai` slots pointing at
+;; agent-TAUGHT read surface (`seon.agent/messages` …) resolving in the JVM
+;; host context, and (b) stored `:seon.render/ai` slots pointing at
 ;; 'seon.agent/assemble-context working. An alias captures the fn value at
 ;; load time (pre-instrumentation) — call `seon.agent.ctx/*` directly when you
 ;; want the validated entry point.
@@ -183,13 +183,11 @@
 
 ;; Required attrs reflect what every writer of the kind populates
 ;; unconditionally — derived from the write sites:
-;;   :seon.eval   — `record-eval!` (eval.cljs)
+;;   :seon.eval   — `seon.host.record` receipt terminal data
 ;;   :seon.agent.message — `message!` (the single write entry point,
 ;;                         seon.agent.message — its entity-kind :map
 ;;                         schema lives there too)
-;;   :seon.fn     — `build-tee-entities` (eval.cljs)
-;;   :seon.schema — `build-tee-entities` (eval.cljs)
-;;   :seon.ns     — `build-tee-entities` (eval.cljs)
+;;   :seon.fn / :seon.schema / :seon.ns — `seon.host.record/tee-tx-data`
 ;;
 ;; Anything written conditionally (errors only on failure, result only
 ;; on success, projections that may be nil) is `{:optional true}` per

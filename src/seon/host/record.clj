@@ -4,14 +4,10 @@
    Host-tier turns record through the ONE program corpus: the same
    `:seon.eval` receipt rows, `:seon.agent.turn/evals` connections,
    `:seon.fn`/`:seon.ns`/`:seon.schema` rows, `:seon.fn/read-attrs`
-   ops, and `:seon.ns/require-edges` rows the Bun child's detect-and-tee
-   writes today. The child's owners (`seon.eval/internal` start/terminal
-   tx data, `seon.eval` build-tee-entities, fn-read-attrs-tx,
-   schema-tee-row, omitted-fn-projection-retractions, and the strict
-   single-defn persistence gate) remain authoritative for the Bun tier;
-   these builders produce the SAME DATA from a sci context's facts (the
-   read form plus the returned sci var's metadata) instead of the
-   self-host analyzer's snapshot diff.
+   ops, and `:seon.ns/require-edges` rows. These builders are the surviving
+   owner: they produce transaction data from a sci context's facts (the read
+   form plus the returned sci var's metadata), with no pod analyzer snapshot
+   or detect-and-tee path.
 
    Everything here is pure: forms and row maps in, transaction data out.
    `seon.host.context` owns the writer round-trips that commit them."
