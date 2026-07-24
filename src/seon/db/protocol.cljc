@@ -16,6 +16,7 @@
                        [goog.object :as gobj]
                        [cljs.reader :as reader]]
                 :default [[clojure.edn :as edn]])
+            [seon.content-hash]
             [seon.db.branch :as branch]
             [seon.db.restore.schema]
             [seon.schema :as schema]
@@ -275,16 +276,9 @@
 (schema/register! :seon.db/attributes [:vector :qualified-keyword])
 (schema/register! :seon.db/initial-data
                   [:vector [:map-of :qualified-keyword :any]])
+(schema/register! :seon.execution/artifact-digest
+                  :seon.content-hash/digest)
 (schema/register! :seon.db.initialization/page-rows [:int {:min 1}])
-(schema/register!
- :seon.db/initialization
- [:map {:closed true}
-  [:seon.execution/artifact-digest [:re "^[0-9a-f]{64}$"]]
-  [:seon.db.initialization/page-rows
-   :seon.db.initialization/page-rows]
-  [:seon.db/attributes :seon.db/attributes]
-  [:seon.db/program :seon.db/program]
-  [:seon.db/initial-data :seon.db/initial-data]])
 (schema/register! :seon.db.initialization/fingerprint
                   [:string {:min 1}])
 (schema/register! :seon.db.initialization/page-fingerprint
@@ -317,6 +311,32 @@
   [:seon.db/initial-data {:optional true} :seon.db/initial-data]])
 (schema/register! :seon.db/initialization-pages
                   [:vector {:min 2} :seon.db/initialization-page])
+(schema/register! :seon.db.initialization/release-digest
+                  :seon.content-hash/digest)
+(schema/register! :seon.db.initialization/config-manifest-digest
+                  :seon.content-hash/digest)
+(schema/register!
+ :seon.db/raw-initialization
+ [:map {:closed true}
+  [:seon.execution/artifact-digest :seon.content-hash/digest]
+  [:seon.db.initialization/config-manifest-digest
+   :seon.content-hash/digest]
+  [:seon.db.initialization/page-rows
+   :seon.db.initialization/page-rows]
+  [:seon.db/attributes :seon.db/attributes]
+  [:seon.db/program :seon.db/program]
+  [:seon.db/initial-data :seon.db/initial-data]])
+(schema/register!
+ :seon.db/precomputed-initialization
+ [:map {:closed true}
+  [:seon.execution/artifact-digest :seon.content-hash/digest]
+  [:seon.db.initialization/config-manifest-digest
+   :seon.content-hash/digest]
+  [:seon.db/initialization-pages :seon.db/initialization-pages]])
+(schema/register!
+ :seon.db/initialization
+ [:or :seon.db/raw-initialization
+  :seon.db/precomputed-initialization])
 (schema/register! :seon.db.initialization/id
                   [:string {:seon.db/identity true}])
 (schema/register! :seon.db.initialization/status
@@ -330,7 +350,11 @@
    :seon.db.initialization/fingerprint]
   [:seon.db.initialization/page-count
    :seon.db.initialization/page-count]
-  [:seon.db.initialization/status :seon.db.initialization/status]])
+  [:seon.db.initialization/status :seon.db.initialization/status]
+  [:seon.db.initialization/release-digest
+   {:optional true} :seon.content-hash/digest]
+  [:seon.db.initialization/config-manifest-digest
+   {:optional true} :seon.content-hash/digest]])
 (schema/register! ::branch-head ::branch/head)
 (schema/register!
  ::containing-branch-head
@@ -1621,10 +1645,7 @@
                    (when (qualified-keyword? attribute) attribute)))))
         schema-rows))
 
-(defn initialization-pages
-  "Split one desired database population into ordered bounded row pages."
-  {:malli/schema [:=> [:cat :seon.db/initialization]
-                  :seon.db/initialization-pages]}
+(defn- derive-initialization-pages
   [initialization]
   #?(:bb
      (throw
@@ -1685,6 +1706,15 @@
                  :seon.db.initialization/page-rows page-rows))
         (range)
         payloads))))
+
+(defn initialization-pages
+  "Return the precomputed pages or derive them from raw initialization."
+  {:malli/schema [:=> [:cat :seon.db/initialization]
+                  :seon.db/initialization-pages]}
+  [initialization]
+  (if (contains? initialization :seon.db/initialization-pages)
+    (:seon.db/initialization-pages initialization)
+    (derive-initialization-pages initialization)))
 
 (defn ensure-database-request
   "Construct one idempotent database-open request."

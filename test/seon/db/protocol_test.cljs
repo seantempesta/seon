@@ -2,7 +2,8 @@
   "Cross-host ordinary database-value protocol proofs."
   (:require [cljs.test :refer [deftest is testing]]
             [cognitect.transit :as transit]
-            [seon.db.protocol :as protocol]))
+            [seon.db.protocol :as protocol]
+            [seon.schema :as schema]))
 
 (def ^:private db
   {:db-name "default"
@@ -22,6 +23,77 @@
          #uuid "b6d0f53b-3044-5f0a-95d8-5ea3218248f5"))
 
 (defrecord HostOwner [value])
+
+(deftest initialization-pages-preserve-a-precomputed-vector-exactly
+  (let [artifact-digest (apply str (repeat 64 "a"))
+        config-manifest-digest (apply str (repeat 64 "b"))
+        fingerprint "precomputed-initialization"
+        pages
+        [{:seon.db.initialization/fingerprint fingerprint
+          :seon.db.initialization/page-index 0
+          :seon.db.initialization/page-count 2
+          :seon.db.initialization/page-rows 256
+          :seon.db.initialization/phase
+          :seon.db.initialization.phase/schema
+          :seon.db/program []}
+         {:seon.db.initialization/fingerprint fingerprint
+          :seon.db.initialization/page-index 1
+          :seon.db.initialization/page-count 2
+          :seon.db.initialization/page-rows 256
+          :seon.db.initialization/phase
+          :seon.db.initialization.phase/completion}]
+        precomputed
+        {:seon.execution/artifact-digest artifact-digest
+         :seon.db.initialization/config-manifest-digest
+         config-manifest-digest
+         :seon.db/initialization-pages pages}
+        raw
+        {:seon.execution/artifact-digest artifact-digest
+         :seon.db.initialization/config-manifest-digest
+         config-manifest-digest
+         :seon.db.initialization/page-rows 256
+         :seon.db/attributes []
+         :seon.db/program []
+         :seon.db/initial-data []}]
+    (is (schema/valid-candidate-value?
+         :seon.db/precomputed-initialization precomputed))
+    (is (schema/valid-candidate-value? :seon.db/raw-initialization raw))
+    (is (every? #(schema/valid-candidate-value?
+                  :seon.db/initialization %)
+                [raw precomputed]))
+    (is (identical? pages (protocol/initialization-pages precomputed))
+        "precomputed pages cross the protocol boundary without reconstruction")))
+
+(deftest initialization-state-shape-carries-optional-applied-identity
+  (let [release-digest (apply str (repeat 64 "c"))
+        config-manifest-digest (apply str (repeat 64 "d"))
+        initialization-state
+        {:seon.db.initialization/id "database"
+         :seon.db.initialization/fingerprint "initialization-fingerprint"
+         :seon.db.initialization/page-count 12
+         :seon.db.initialization/status
+         :seon.db.initialization.status/complete}
+        applied-state
+        (assoc initialization-state
+               :seon.db.initialization/release-digest release-digest
+               :seon.db.initialization/config-manifest-digest
+               config-manifest-digest)]
+    (is (schema/valid-candidate-value?
+         :seon.db.initialization/entity initialization-state)
+        "an in-progress or legacy receipt does not claim applied identity")
+    (is (schema/valid-candidate-value?
+         :seon.db.initialization/entity applied-state))
+    (is (false?
+         (schema/valid-candidate-value?
+          :seon.db.initialization/entity
+          (assoc applied-state
+                 :seon.db.initialization/release-digest "not-a-digest"))))
+    (is (false?
+         (schema/valid-candidate-value?
+          :seon.db.initialization/entity
+          (assoc applied-state
+                 :seon.db.initialization/config-manifest-digest
+                 "not-a-digest"))))))
 
 (deftest tempid-receipts-name-string-and-integer-alternatives
   (let [[string-receipt int-receipt]

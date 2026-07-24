@@ -101,6 +101,8 @@
 (def initialization
   {:seon.execution/artifact-digest
    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+   :seon.db.initialization/config-manifest-digest
+   "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
    :seon.db.initialization/page-rows 4
    :seon.db/attributes
    [:seon.agent/id :seon.db/user :seon.db/process :seon.db.process/id
@@ -171,6 +173,18 @@
   (when (.exists ^File root)
     (run! (fn [^File file] (.delete file))
           (reverse (file-seq root)))))
+
+(deftest config-manifest-digest-participates-in-page-fingerprint
+  (let [changed
+        (assoc initialization
+               :seon.db.initialization/config-manifest-digest
+               "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210")
+        fingerprint
+        (comp :seon.db.initialization/fingerprint
+              first
+              protocol/initialization-pages)]
+    (is (not= (fingerprint initialization)
+              (fingerprint changed)))))
 
 (deftest bare-file-ensure-refuses-an-absent-store
   (let [database-name (str "writer-existing-" (random-uuid))
