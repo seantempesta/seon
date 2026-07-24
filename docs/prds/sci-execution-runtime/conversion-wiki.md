@@ -1695,3 +1695,16 @@ the variable-weight values they select.
   manifest, then translate `base-projection.edn` and `page-plan.edn` to raw-byte
   SHA-256 values at process-spec construction. Passing the member digest across
   that boundary makes an intact package look poisoned.
+
+## Config-fact authority scars (2026-07-24)
+
+- **A configured value becomes authoritative only when every consumer receives
+  the acquired singleton projection.** Adding a manifest row and a
+  `resolve-config-singleton` default is incomplete when a pull pattern, prompt
+  context, claimant invocation, or platform leaf can still omit the fact and
+  fall back locally. Register the attribute with units and provenance, reconcile
+  it through `config/system.edn`, project it at the existing acquisition
+  boundary, and fail with the missing key instead of retaining a leaf default.
+  Cross-tier subprocess policy is one fact consumed by both leaves; its
+  recurring acquisition proof is one presence assertion over the singleton,
+  not a separate value suite for every consumer.

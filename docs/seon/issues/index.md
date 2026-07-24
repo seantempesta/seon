@@ -63,7 +63,7 @@ See `README.md` for the convention.
 | [Writer run-readiness! busy-spins when a ready source has no runtime](writer-run-readiness-busy-spins-without-runtime.md) | blocker | Core |
 | [seon.agent.ctx file reads bypass the filesystem grant](agent-ctx-file-reads-bypass-fs-grant.md) | blocker | agent |
 
-## Friction (70)
+## Friction (71)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -103,6 +103,7 @@ See `README.md` for the convention.
 | [Make dependency preparation deterministic under concurrent development](dependency-preparation-can-crash-inside-clojure-hashmap.md) | friction | Core |
 | [Make multi-form eval order a durable database fact](multi-form-eval-order-is-not-durable.md) | friction | agent |
 | [Make program indexing independent of the active schema projection](program-indexer-drops-valid-specs-outside-active-schema-projection.md) | friction | agent |
+| [Make transaction retry policy available during first config reconcile](transaction-retry-policy-cannot-be-database-owned-during-first-config-reconcile.md) | friction | Core |
 | [Operator trial processes leak across days](operator-trial-processes-leak-across-days.md) | friction | docs |
 | [Persisted program error prevents agent repair](persisted-program-error-prevents-agent-repair.md) | friction | agent |
 | [Pin the backward-compatibility writer below the maintained Konserve version](datahike-backward-compat-gate-writes-newer-konserve.md) | friction | Core |
