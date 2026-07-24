@@ -189,6 +189,19 @@ s4startgate. Tooling: bin/codex-agent is the one lane launcher
 (tracked/watchable/stop+resume, AGENTS.md rule). Next: lanes land →
 re-drive-3 → S5/C1/web-UI refills.
 
+U9 S0a CONTEXT IDENTITY CORRECTED (~10:49): `721528ee2` attaches the
+synthetic canvas block's `:seon.agent.ctx/name :canvas` before the one
+`surface/materialized` derivation. Source archaeology proved there was no
+child-only enrichment: the pre-S0a child constructor omitted the name too,
+but its function lacked the output contract that now correctly exposed the
+invalid value. Focused CLJS proof is 5 tests / 32 assertions, including the
+complete `:seon.ui.agent-view/projection` schema and exact
+`#{:literal :authored :canvas}` surface identities. No cluster was operated
+for this focused follow-up. The issue remains open only for the next
+source-frozen root + non-root feed re-drive; the obsolete child-readiness
+failure was already absent. This does not displace the program spine or U12
+graduation gate.
+
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 
 ## older restart protocol below until morning)

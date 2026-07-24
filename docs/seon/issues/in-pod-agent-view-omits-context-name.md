@@ -32,6 +32,21 @@ The former `execution child did not become ready` text is absent, so the
 in-pod cutover is active. The agent page is still not healthy because its
 derived projection violates the existing output schema.
 
+Source archaeology at `6f46032b1` found no child-only identity enrichment.
+`seon.render.surface/materialized` has always copied
+`:seon.agent.ctx/name` from its input block. The former child renderer built
+the synthetic canvas block without that name, but had no Malli function-output
+contract, so the latent invalid value escaped. S0a moved the same constructor
+into the pod and added the instrumented projection contract, exposing the
+defect.
+
+Commit `721528ee2` restores `:seon.agent.ctx/name :canvas` on the synthetic
+block before the shared materializer runs. The focused
+`seon.agent.ctx.driver-test` gate validates the complete
+`:seon.ui.agent-view/projection` and the exact surface-name set
+`#{:literal :authored :canvas}`: 5 tests, 32 assertions, zero failures/errors.
+Proof log: `tmp/test-cljs-20260724-104804-71188.log`.
+
 ## Owner
 
 `seon.agent.ctx.driver/render-agent-view!` and the one surface derivation it
@@ -41,10 +56,13 @@ add a fallback renderer.
 
 ## Acceptance
 
-- Every surface emitted by `render-agent-view!` has its required
+- [x] Every surface emitted by `render-agent-view!` has its required
   `:seon.agent.ctx/name`.
-- A real `/agent/{id}/feed` emits the ordinary agent view without a render
+- [ ] A real `/agent/{id}/feed` emits the ordinary agent view without a render
   error or `SEON-CORE-FAULT`.
-- The root page and a fresh non-root agent page both pass the same live feed
+- [ ] The root page and a fresh non-root agent page both pass the same live feed
   check.
-- The obsolete execution-child readiness error remains absent.
+- [x] The obsolete execution-child readiness error remains absent.
+
+The live feed checks remain pending for the next source-frozen integrated
+re-drive; this focused follow-up did not operate the default cluster.
