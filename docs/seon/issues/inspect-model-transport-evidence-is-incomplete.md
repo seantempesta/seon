@@ -64,13 +64,27 @@ Native logs retained under `src-inspect-ai/logs/` prove the progression:
 The complete live audit is
 [[../../prds/archive/runtime-reliability/research/live-inspect-contract-audit-2026-07-19]].
 
+The 2026-07-24 default-cluster drive7 exposed a live projection regression
+outside the optional local-model gate. Eleven DeepSeek attempts were complete
+current database rows with provider `:deepseek`, adapter `:openai-compat`,
+requested and response model `deepseek-v4-pro`, response status `200`,
+outcome `:success`, non-empty reply blobs, request IDs, usage, timeout values,
+and one shared config digest. Nevertheless, `POST /agents/run` projected
+`attempt_rows_valid=false` and `historical_config_valid=false` for every row.
+The underlying provider calls and persisted rows succeeded; the malformed
+transport-evidence verdict was derived by the web projection. Exact attempt
+IDs and database evidence are retained in
+`tmp/orchestrator/drive7-gate.log`.
+
 ## Remaining owner
 
-The issue remains open only for a controlled local-model comparison that
-starts an immutable model server, supplies its validated artifact identity,
-completes a real task, finalizes the native `.eval`, and reopens it to prove the
-source, server, transport attempts, and response identity survived unchanged.
-Remote-provider capability runs do not wait for that optional comparison gate.
+First restore valid historical-configuration projection for complete live
+remote-provider rows and retain a focused regression using a real persisted
+attempt shape. Then the remaining optional gate is a controlled local-model
+comparison that starts an immutable model server, supplies its validated
+artifact identity, completes a real task, finalizes the native `.eval`, and
+reopens it to prove the source, server, transport attempts, and response
+identity survived unchanged.
 
 ## Acceptance
 
