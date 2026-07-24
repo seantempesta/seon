@@ -1771,3 +1771,10 @@ the variable-weight values they select.
   endpoints, while `seon.host.session.leaf` owns JVM channels, locks, and
   bounded evaluation. Requiring both on the JVM proves the core has no hidden
   platform residue.
+
+## U9 S1 completion scar (2026-07-24)
+
+- **A retired transport has no compatibility namespace.** Once the portable
+  host-session core owns the wire values, deleting both mixed execution
+  namespaces exposes every remaining caller as a concrete migration task;
+  preserving an alias would keep the retired child topology alive in source.
