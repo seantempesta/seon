@@ -12,7 +12,8 @@
             [taoensso.timbre :as log])
   (:import [java.io ByteArrayInputStream ByteArrayOutputStream
             DataInputStream DataOutputStream InputStream OutputStream]
-           [java.net StandardProtocolFamily UnixDomainSocketAddress]
+           [java.net BindException ConnectException StandardProtocolFamily
+            UnixDomainSocketAddress]
            [java.nio ByteBuffer]
            [java.nio.channels Channels ServerSocketChannel SocketChannel
             #?@(:bb [] :clj [Selector SelectionKey])]
@@ -1435,6 +1436,32 @@
       (command)
       (recur))))
 
+(defn- active-socket-listener?
+  [^UnixDomainSocketAddress address]
+  (try
+    (with-open [channel (SocketChannel/open StandardProtocolFamily/UNIX)]
+      (.connect channel address)
+      true)
+    (catch ConnectException _ false)))
+
+(defn- bind-request-server!
+  [^ServerSocketChannel server ^UnixDomainSocketAddress address socket-path]
+  (try
+    (.bind server address)
+    (catch BindException bind-error
+      (if (active-socket-listener? address)
+        (throw
+         (ex-info "The database request socket already has a live owner."
+                  {::socket-path socket-path}
+                  bind-error))
+        (let [socket-file (java.io.File. ^String socket-path)]
+          (when-not (.delete socket-file)
+            (throw
+             (ex-info "The stale database request socket could not be removed."
+                      {::socket-path socket-path}
+                      bind-error)))
+          (.bind server address))))))
+
 (defn- begin-shutdown!
   [^ServerSocketChannel server connections workers close-connection!
    shutting-down? rejecting-session]
@@ -1506,7 +1533,6 @@
          maximum-frame-bytes protocol/maximum-frame-bytes
          on-core-error :gate
          worker-queue-capacity default-codec-worker-queue-capacity}}]
-  (try (.delete (java.io.File. ^String socket-path)) (catch Throwable _))
   (let [^UnixDomainSocketAddress address
         (UnixDomainSocketAddress/of ^String socket-path)
         ^ServerSocketChannel server
@@ -1516,6 +1542,7 @@
         workers (codec-workers codec-worker-count worker-queue-capacity)
         cleanup-pool (cleanup-workers maximum-connections)
         connections (atom {})
+        bound? (atom false)
         closed? (AtomicReference. false)
         shutting-down? (atom false)
         server-capacity
@@ -1535,7 +1562,8 @@
          ::rejecting-session (atom nil)
          ::cleanup-workers cleanup-pool}]
     (try
-      (.bind server address)
+      (bind-request-server! server address socket-path)
+      (reset! bound? true)
       (.configureBlocking server false)
       (.register server selector op-accept)
       (let [selector-worker
@@ -1586,7 +1614,8 @@
         (try (.close selector) (catch Throwable _))
         (.shutdownNow workers)
         (.shutdownNow cleanup-pool)
-        (try (.delete (java.io.File. ^String socket-path)) (catch Throwable _))
+        (when @bound?
+          (try (.delete (java.io.File. ^String socket-path)) (catch Throwable _)))
         (throw throwable)))))
 
 (defn close-request-server!

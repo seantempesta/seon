@@ -125,7 +125,8 @@
   [::uds/maximum-output-bytes ::uds/maximum-output-bytes]
   [::uds/maximum-session-output-bytes ::uds/maximum-session-output-bytes]
   [::uds/codec-workers ::uds/codec-workers]
-  [::uds/codec-worker-queue-capacity ::uds/codec-worker-queue-capacity]])
+  [::uds/codec-worker-queue-capacity ::uds/codec-worker-queue-capacity]
+  [::uds/on-core-error {:optional true} ::uds/on-core-error]])
 (schema/register!
  ::start-request
  [:map
@@ -767,71 +768,6 @@
      :history false
      :datahike/commit-id (d/commit-id db-value)}))
 
-(def ^:private byte-array-class (Class/forName "[B"))
-
-(defn- forbidden-host-value?
-  [value]
-  (or (datahike.db/db? value)
-      (datahike.connector/connection? value)
-      (datahike.datom/datom? value)
-      (datahike.entity/entity? value)
-      (fn? value)
-      (instance? clojure.lang.IDeref value)
-      (instance? java.lang.Thread value)
-      (instance? java.util.concurrent.Future value)
-      (instance? Throwable value)))
-
-(defn- ordinary-data?
-  [allow-list? value]
-  (cond
-    (or (forbidden-host-value? value) (record? value)) false
-    (map? value) (and (every? #(ordinary-data? allow-list? %) (keys value))
-                      (every? #(ordinary-data? allow-list? %) (vals value)))
-    (vector? value) (every? #(ordinary-data? allow-list? %) value)
-    (set? value) (every? #(ordinary-data? allow-list? %) value)
-    (list? value) (and allow-list?
-                       (every? #(ordinary-data? allow-list? %) value))
-    (sequential? value) false
-    :else
-    (or (nil? value) (boolean? value) (number? value) (string? value)
-        (keyword? value) (symbol? value) (uuid? value) (inst? value)
-        (instance? java.net.URI value)
-        (instance? byte-array-class value))))
-
-(defn- materialize-result
-  "Validate an eager database result without copying its persistent shape."
-  [value]
-  (when-not (ordinary-data? false value)
-    (throw
-     (ex-info "A database result contained a host-owned or lazy value."
-              {::failure-kind protocol/protocol-error
-               ::host-value-class (some-> value class str)})))
-  value)
-
-(defn- validate-read-input!
-  [request]
-  (let [values
-        (case (::protocol/operation request)
-          :seon.db.protocol.operation/query
-          [(::protocol/query-form request) (::protocol/arguments request)]
-
-          :seon.db.protocol.operation/pull
-          [(::protocol/selector request) (::protocol/entity-id request)]
-
-          :seon.db.protocol.operation/pull-many
-          [(::protocol/selector request) (::protocol/entity-ids request)]
-
-          :seon.db.protocol.operation/schema
-          []
-
-          :seon.db.protocol.operation/index-page
-          [(::protocol/prefix request) (::protocol/cursor request)])]
-    (when-not (every? #(ordinary-data? true %) values)
-      (throw
-       (ex-info "A database read request contained a host-owned or lazy value."
-                {::failure-kind protocol/protocol-error})))
-    request))
-
 (defn- query-plan
   "Align query inputs and identify only Datahike source argument positions."
   [request]
@@ -1093,7 +1029,7 @@
                      :eid (::protocol/entity-id request)}
                     options))]
         {::protocol/result
-         (materialize-result (:datahike.pull/result evidence))
+         (:datahike.pull/result evidence)
          :datahike.read/dependency-plan
          (:datahike.read/dependency-plan evidence)})
 
@@ -1105,12 +1041,12 @@
                      :eids (::protocol/entity-ids request)}
                     options))]
         {::protocol/result
-         (materialize-result (:datahike.pull-many/result evidence))
+         (:datahike.pull-many/result evidence)
          :datahike.read/dependency-plan
          (:datahike.read/dependency-plan evidence)})
 
       :seon.db.protocol.operation/schema
-      (let [result (materialize-result (d/schema db-value))
+      (let [result (d/schema db-value)
             allowed (:datahike.resource/max-result-weight request)]
         (when-not (d/shallow-weight-within result allowed)
           (throw
@@ -1123,7 +1059,7 @@
          :datahike.read/dependency-plan :all})
 
       :seon.db.protocol.operation/index-page
-      (assoc (materialize-result (index-page db-value request))
+      (assoc (index-page db-value request)
              :datahike.read/dependency-plan :all))))
 
 (defn- query-arguments
@@ -1141,7 +1077,7 @@
   (if (= :ok status)
     (merge (read-response-base request)
            (protocol/success
-            (update value :datahike.query/result materialize-result)))
+            value))
     (request-failure-response throwable)))
 
 (declare acquire-query-call!
@@ -3013,6 +2949,8 @@
       ::protocol/target-request-id (::protocol/target-request-id request)
       ::protocol/listening? false})))
 
+(def ^:private byte-array-class (Class/forName "[B"))
+
 (defn- bytes-value=
   [left right]
   (if (and (instance? byte-array-class left)
@@ -4184,10 +4122,7 @@
                          (bounded-execute-many-member-result
                           member
                           (if (= :ok (:status completion))
-                            (protocol/success
-                             (update (:value completion)
-                                     :datahike.query/result
-                                     materialize-result))
+                            (protocol/success (:value completion))
                             (member-failure (:throwable completion)))))
                         current)
                       (accept-contiguous-execute-many-results))))))))
@@ -4348,7 +4283,6 @@
 
 (defn- start-read-request!
   [runtime transport-connection request request-id owner]
-  (validate-read-input! request)
   (let [query? (= protocol/query-operation (::protocol/operation request))
         plan (if query?
                (query-plan request)
@@ -4382,7 +4316,6 @@
 
 (defn- start-execute-many-request!
   [runtime transport-connection request request-id owner]
-  (run! validate-read-input! (::protocol/members request))
   (if-let [result-state (execute-many-result-state request)]
     (let [{::keys [database-name scope scopes] :as plan}
           (query-admission transport-connection (execute-many-plan request))

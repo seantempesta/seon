@@ -214,28 +214,6 @@
         (.delete (File. request-path))
         nil))))
 
-(deftest database-result-validation-rejects-host-owners-and-lazy-values
-  (is (thrown? clojure.lang.ExceptionInfo
-               (#'writer/materialize-result (future :host))))
-  (is (thrown? clojure.lang.ExceptionInfo
-               (#'writer/materialize-result (map identity [1 2]))))
-  (let [value [{:bare-key "preserved"}]]
-    (is (identical? value (#'writer/materialize-result value))))
-  (is (thrown?
-       clojure.lang.ExceptionInfo
-       (#'writer/validate-read-input!
-        {::protocol/operation protocol/query-operation
-         ::protocol/query-form [:find '?value :in '$ '?input
-                                :where ['?entity :value '?value]]
-         ::protocol/arguments [(future :host)]})))
-  (is (= [:find '?value :where ['?entity :value '?value]]
-         (::protocol/query-form
-          (#'writer/validate-read-input!
-           {::protocol/operation protocol/query-operation
-            ::protocol/query-form
-            [:find '?value :where ['?entity :value '?value]]
-           ::protocol/arguments []})))))
-
 (deftest execute-many-result-weight-is-position-deterministic
   (let [point {::branch/store-id (random-uuid)
                ::branch/name :main

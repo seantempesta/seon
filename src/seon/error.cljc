@@ -660,7 +660,23 @@
            (if (and persist-promise (fn? (.-then persist-promise)))
              (.then persist-promise exit! exit!)
              (exit!)))))
-     :clj nil))
+     :clj
+     (let [expected? (expecting-a-core-fault?)
+           configuration (:seon.error.scope/configuration (current-scope))
+           policy (get configuration :seon.config/on-core-error :gate)]
+       (.println
+        System/err
+        (str (if expected? "SEON-EXPECTED-CORE-FAULT" "SEON-CORE-FAULT") " "
+             (:seon.error/message projection)
+             (when-let [data-edn (:seon.error/data-edn projection)]
+               (str " " data-edn))
+             (when-let [basis-t (::basis-t projection)]
+               (str " @basis-t=" basis-t))))
+       (when (and (not expected?) (= :crash policy))
+         (.println
+          System/err
+          "seon.error/record!: on-core-error :crash — exiting after persisting the fault datom")
+         (System/exit 1)))))
 
 #?(:clj
    (defonce ^:private recorded-errors

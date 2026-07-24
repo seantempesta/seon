@@ -1618,6 +1618,12 @@ the variable-weight values they select.
 
 ## Database completion-delivery scars (2026-07-24)
 
+- **A Unix socket pathname is listener ownership, not disposable startup
+  debris.** A second writer must never unlink before it has proved the
+  endpoint stale: doing so leaves the first live listener unnameable, so its
+  process logs ready while every client sees no socket. Bind first; on address
+  conflict, probe the endpoint, reject a live owner, and only then remove a
+  refused stale pathname (`seon.db.transport.uds/start-request-server!`).
 - **A deadline index is not a completion mechanism.** Correlated requests
   settle from their response, socket error, EOF, or owner shutdown. If a wall
   backstop remains, arm one one-shot timer for the nearest pending deadline,

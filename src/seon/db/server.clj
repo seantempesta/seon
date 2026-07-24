@@ -88,7 +88,9 @@
    :seon.config.database.transport/codec-workers
    ::uds/codec-workers
    :seon.config.database.transport/codec-worker-queue-capacity
-   ::uds/codec-worker-queue-capacity})
+   ::uds/codec-worker-queue-capacity
+   :seon.config/on-core-error
+   ::uds/on-core-error})
 
 (def ^:private read-default-attributes
   {:seon.config.database.read/max-work :datahike.resource/max-work

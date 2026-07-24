@@ -97,6 +97,24 @@
   (let [session (uds/open-session! path)]
     (::uds/channel session)))
 
+(deftest second-request-server-cannot-unlink-a-live-listener
+  (let [path (socket-path "live-listener-owner")
+        server (request-server! path (fn [_ _ _ _] nil) (constantly nil))]
+    (try
+      (let [failure
+            (try
+              (request-server! path (fn [_ _ _ _] nil) (constantly nil))
+              nil
+              (catch clojure.lang.ExceptionInfo exception exception))]
+        (is (instance? clojure.lang.ExceptionInfo failure))
+        (is (re-find #"already has a live owner" (.getMessage failure))))
+      (let [session (uds/open-session! path)]
+        (is (instance? SocketChannel (::uds/channel session)))
+        (uds/close-session! session))
+      (finally
+        (uds/close-request-server! server)
+        (.delete (File. path))))))
+
 (deftest at-capacity-session-open-delivery-is-bounded-and-restores-admission
   (let [path (socket-path "session-open-capacity")
         maximum-connections 1
