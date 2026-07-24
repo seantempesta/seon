@@ -234,18 +234,25 @@
 
 (deftest malformed-population-refuses-host-before-readiness
   (let [closed? (atom false)]
-    (with-redefs [context/writer-session (fn [_] ::writer)
+    (with-redefs [context/writer-session
+                  (fn [_] {::context/base-projection (atom nil)})
                   context/close-session! (fn [_] (reset! closed? true))
+                  context/load-base-projection!
+                  (fn [_ _]
+                    {:seon.dev.artifact/base-projection
+                     (schema/build-projection {})})
+                  context/resolve-head! (fn [_] {:db-name "unused" :t 1})
+                  context/verify-applied-identity! (fn [& _] nil)
                   context/build-base!
-                  (fn [_]
+                  (fn [& _]
                     {::context/tier-inventory
                      {:seon.execution.inventory/tier :jvm
                       :seon.execution.inventory/bindings #{}
                       :seon.execution.inventory/remote-bindings #{}
                       :seon.execution.inventory/pure-bindings #{}
                       :seon.execution.inventory/digest "empty"}})
-                  context/acquire-committed-projection!
-                  (fn [_ _] {:seon/error
+                  context/acquire-preprocessed-projection!
+                  (fn [& _] {:seon/error
                              {:seon.error/message "unresolved committed form"
                               :seon.error/kind :core-bug}})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
@@ -274,8 +281,18 @@
     (try
       (schema/register! :projection.test/new :int)
       (with-redefs-fn
-        {#'context/record-transact!
-         (fn [_ _] {:seon.db/ok? true :db-after {:t 7}})}
+        {#'context/resolve-head! (fn [_] {:db-name "projection-test" :t 6})
+         #'context/maintain-host-divergence-cache
+         (fn [_ _ _]
+           {::context/cache-row
+            {:seon.runtime.admission.cache/id "committed-projection"}
+            ::context/projection (projection :projection.test/new :int)})
+         #'context/record-transact!
+         (fn [_ request]
+           (is (= 1 (count (filter :seon.runtime.admission.cache/id
+                                   (::context/tx-data request))))
+               "program and cache rows are one transaction")
+           {:seon.db/ok? true :db-after {:t 7}})}
         (fn []
           (is (true? (::context/projection-changed?
                        (context/record-eval-terminal! {} request))))))
