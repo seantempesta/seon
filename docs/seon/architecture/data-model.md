@@ -545,7 +545,13 @@ Provider attempt rows are component evidence owned by the turn:
 | `:seon.ai.attempt/provider` / `adapter` | keywords | keyword / one | selected transport path |
 | `:seon.ai.attempt/outer-timeout-ms` / `adapter-timeout-ms` | positive int | long / one | applied timeout layers |
 | `:seon.ai.attempt/stream?` | boolean | boolean / one | frozen request mode |
-| response identity, usage, and error attrs | bounded native values | scalar / one | present only when observed; secrets and raw headers stay absent |
+| `:seon.ai.attempt/response-status` | HTTP status | long / one | optional exact successful provider status |
+| response model, request ID, fingerprint, finish reason, and usage attrs | bounded native values | scalar / one | optional response identity and accounting observed from a successful provider response |
+| `:seon.ai.attempt/error-message` | bounded string | string / one | optional normalized failure headline |
+| `:seon.ai.attempt/exception-class` / `exception-message` | bounded strings | string / one | optional native exception identity and message; no throwable object crosses the leaf |
+| `:seon.ai.attempt/transport?` / `timeout?` | booleans | boolean / one | optional failure classifications supplied by the transport |
+| `:seon.ai.attempt/error-status` / `retry-after-ms` | ints | long / one | optional HTTP failure status and provider retry delay |
+| `:seon.ai.attempt/error-body` | bounded string | string / one | optional provider response evidence; secrets and raw headers stay absent |
 
 An attempt receipt never stores the whole mutable configuration or secret
 material. The parent turn's rendered transaction reconstructs intent; the

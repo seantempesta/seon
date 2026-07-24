@@ -1152,6 +1152,39 @@ MORNING ITEMS (accumulating):
   (restore diagnostics → root-cause long-lived-vs-fresh → fix) +
   agentsrun (config pull-pattern output contract + persist the
   dropped /agents/run fault datom). After: rebuild + FINAL re-drive.
+- ★ CLAIMANT LLM ATTRIBUTION CORRECTED + SOURCE FIXED
+  (2026-07-24): historical claim datoms identify workload PID 35849,
+  the Bun pod, for every failing run whose claimant was retained; the
+  JVM host was PID 35766. The 11 failures therefore never exercised
+  `java.net.http`. The structural cause was the pod retaining
+  `:seon.agent.driver.capability/llm` after the JVM leaf landed, so the
+  one driver kept its render claim through both attempt phases. The
+  pod's superseded capability/dispatch arms are removed; the existing
+  eligibility mechanism now hands LLM/eval custody to the JVM and
+  publication back to the pod. Diagnostics also retain bounded flat
+  message, exception class/message, transport/timeout classification,
+  HTTP status/body, and exact success status on the attempt receipt.
+  Focused proof is green: JVM HTTP/receipt 11 tests / 63 assertions;
+  JVM portable receipt 5/22; CLJS pod capability 2/4; CLJS portable
+  receipt 3/16; all 0F/0E.
+- ★ CLAIMANTLLM LIVE GATE STOPPED BEFORE PROVIDER CALL
+  (2026-07-24): the rebuilt default source artifact is ready, but the
+  supported named-cluster path reconciles only the target pod.
+  `cluster status claimantllm` was degraded and joined the default
+  host record as `current-spec? false`; no target host record existed.
+  The isolated pod was stopped cleanly. Earliest unsettled contract:
+  [[../../seon/issues/named-cluster-open-does-not-reconcile-jvm-host]].
+  Integrated closure proof: target-specific host/pod/web-render ready
+  without changing source-cluster generations, then claim history
+  pod-render → target-JVM LLM/eval → pod-publish, real DeepSeek HTTP
+  200, successful attempt receipt, reply blob, eval receipts, and
+  completed run. Dependency-ready portfolio: the operator cluster
+  lifecycle owner only; no provider transport change is justified.
+  Next refill after that owner lands is the one-attempt
+  `claimantllm` runbook. Final graduation gate remains the full
+  provably-alive real-work re-drive. Evidence:
+  `tmp/orchestrator/claimantllm-gate.log` and the three dated claimant
+  LLM research reports.
 - ★ RENDER-PROMPT REPLY-POLICY BLOCKER SOURCE-FIXED (`a88e11505`,
   2026-07-24): the public output contract now requires the registered
   `:seon.ai/wire-stream?` and `:seon.ai/reply-evaluation` projections

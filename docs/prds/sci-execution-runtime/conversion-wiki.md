@@ -726,6 +726,16 @@ the anchor stays the state ledger.
 
 ## U6b JVM LLM HTTP leaf scars (2026-07-23)
 
+- **A claimant label is not a process tier.** Join the persisted
+  `:seon.agent.run/claimant` PID/start instant to the operator's exact workload
+  record before attributing a provider receipt to Bun or the JVM. The claim
+  driver retains an epoch while its leaf remains eligible, so leaving
+  `:seon.agent.driver.capability/llm` on the pod after the JVM leaf landed made
+  the pod structurally keep render → attempt custody. Retire the superseded
+  capability and its dispatch arms; the existing eligibility check then
+  releases the run for JVM acquisition without a routing table
+  (`src/seon/agent/driver{,/pod}.clj*`,
+  [[research/claimant-llm-transport-path-audit-2026-07-24]]).
 - **An interrupt can surface while consuming the response body.** JDK
   `HttpClient.send` declares `InterruptedException`, but an SSE
   `InputStream.read` may instead surface `IOException` while retaining the
