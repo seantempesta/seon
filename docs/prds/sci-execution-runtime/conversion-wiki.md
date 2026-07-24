@@ -1823,6 +1823,16 @@ the variable-weight values they select.
   `seon.repl`, analyzer-state snapshot, and their engine tests are deleted
   whole. The only retained `cljs.js` compiler is the isolated diffusion worker
   leaf, never a pod execution fallback.
+- **A host socket is launch identity, not agent data.** The surviving client
+  reads the supervised UDS path from the closed launch descriptor. Deleting the
+  per-agent `:seon.execution.host/eval-socket-path` attribute also deletes its
+  config reconciliation and prompt-tier presence query; every authored symbol
+  now has the same JVM execution owner.
+- **A narrow invocation client does not imply a result registry.** Entity
+  value drilling remains a pure database projection. Eval-value drilling
+  refuses as unavailable after authorization until a surviving owner exposes
+  durable result data; the pod does not regain child sampling frames or live
+  value retention to keep that endpoint green.
 
 ## R52 interaction handoff scar (2026-07-24)
 
