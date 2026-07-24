@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, runtime, database]
 ---
@@ -38,8 +38,20 @@ Commits `62cd2348b` and `356519dd0` landed after that source-frozen drive.
 They route JVM database-value allocation through the portable `seon.db`
 facade, retain the local-connection path for the writer, add a focused remote
 allocation regression, and keep the facade require off the Babashka operator
-path. This issue remains open because no rebuilt claimant has yet opened an
-attempt through those commits.
+path.
+
+## Resolution
+
+Commits `62cd2348b` and `356519dd0` route database-value allocation through
+the `seon.db` facade while retaining the local Datahike connection path inside
+the writer and keeping that facade off the Babashka operator path. Focused CLJ
+proof is 14 tests / 83 assertions and focused CLJS proof is 11 / 56.
+
+In the source-frozen claimant2 gate, JVM host workload PID `50645` allocated
+attempt identity `sj29e811vgsg`, transitioned it `:open → :success`, and
+persisted the provider response and reply blob. No null Future or allocation
+fault exists on the run. Evidence:
+`tmp/orchestrator/claimant2-gate.log`.
 
 ## Owner
 

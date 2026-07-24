@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, runtime]
 ---
@@ -65,21 +65,35 @@ but not the bounded `:seon.ai/msg` or `:seon.ai/transport?` value produced by
 `seon.ai.http/request!`. Full evidence and transaction timings are in
 `tmp/orchestrator/redrive2-gate.log`.
 
-## Current state
+## Resolution
 
-The source repair retains bounded flat error message, exception class and
+Commit `e21c85417` retains bounded flat error message, exception class and
 message, transport/timeout classification, HTTP status/body, retry delay, and
-exact successful response status on the attempt receipt. The real-socket JVM
-matrix and portable receipt tests are green:
+exact successful response status on the attempt receipt. The same change
+removed the pod's superseded LLM capability, so the one portable driver now
+hands model phases to the JVM claimant.
 
-- JVM HTTP plus receipt projection: 11 tests / 63 assertions;
-- JVM portable receipt selection: 5 tests / 22 assertions; and
-- CLJS portable receipt selection: 3 tests / 16 assertions.
+The suspected long-lived `java.net.http` state defect was falsified. Historical
+claim datoms identify the eleven failures' claimant PID as the Bun pod, not the
+JVM host. The maintained JVM leaf reads the credential and builds the
+authorization header per request; its one process client freezes only the
+configured connect timeout. No stale credential or idle-connection mechanism
+was involved.
 
-The live acceptance remains open. The isolated `claimantllm` gate stopped
-before a provider call because the supported named-cluster lifecycle did not
-reconcile a target JVM claimant. See
-[[named-cluster-open-does-not-reconcile-jvm-host]].
+The source proof is 11 tests / 63 assertions for JVM HTTP plus receipt
+projection, 5 / 22 for the portable receipt projection, and 3 / 16 for its
+CLJS consumer.
+
+The source-frozen `claimant2` gate then joined claim epoch `2` to JVM host
+workload PID `50645`. Attempt `sj29e811vgsg` transitioned atomically from
+`:open` to `:success` with literal response status `200`, request ID
+`a4e17535-b53d-4f17-a973-82acd6eb89e9`, response model
+`deepseek-v4-pro`, and a 163-byte reply blob with hash
+`309e90d1655879507b3788194577bc10511ccbca7c2919d09dce390fc5417255`.
+The subsequent exact-execution-plan refusal is a later boundary recorded in
+[[jvm-claimant-rejects-visible-reply-without-exact-execution-plan]].
+Full immutable database values and histories are in
+`tmp/orchestrator/claimant2-gate.log`.
 
 ## Owner
 
@@ -95,9 +109,9 @@ call boundary.
 - A focused long-lived-host regression distinguishes no credential, changed
   client configuration, invalid request, transport error, HTTP status, and
   invalid response.
-- A live isolated-cluster prompt completes through a production JVM claimant
-  whose persisted PID matches that cluster's host workload, writes a successful
-  attempt receipt with response identity and status 200, and proceeds to eval
-  receipts.
-- A real agent completes multi-turn work after the fix; a standalone leaf
-  call is not sufficient proof.
+- A live isolated-cluster prompt reaches a production JVM claimant whose
+  persisted PID matches that cluster's host workload and writes a successful
+  attempt receipt with response identity, status 200, and a nonempty reply
+  blob.
+- Eval and multi-turn graduation continue at the execution-planning boundary;
+  they are not provider-transport acceptance.

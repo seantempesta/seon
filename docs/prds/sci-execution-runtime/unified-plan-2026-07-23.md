@@ -108,11 +108,22 @@ acquisition split and the direct-phase-error lease wedge in this owner.
 Focused writer proof is 22 tests/137 assertions; portable driver and config
 proof is 16 tests/110 assertions. The isolated `claimantpath` drive proves an
 epoch-2 JVM phase error now persists a fault and atomically closes/releases the
-run instead of heartbeating forever. The next dependency-ready U2 exit is the
-new [[../../seon/issues/jvm-claimant-id-allocation-future-is-null]] blocker:
-commits `62cd2348b` + `356519dd0` have landed the database-value allocation
-path and its Babashka boundary, so rebuild that source and open a durable
-attempt, then reach provider success/reply or another visible terminal fault.
+run instead of heartbeating forever. Commits `62cd2348b` + `356519dd0` then
+fixed database-value identity allocation, and source-frozen claimant2 live
+proof crossed the complete model boundary: host workload PID `50645`, DeepSeek
+HTTP 200, durable `:success` attempt, and a 163-byte reply blob. Commit
+`fdba88aad` also aligns reply-text and config-singleton acquisition.
+
+The earliest unsettled U2 contract is now
+[[../../seon/issues/jvm-claimant-rejects-visible-reply-without-exact-execution-plan]]:
+the same valid reply is rejected before eval because no inspected tier yields
+an exact execution plan. Its integrated proof is two terminal successful eval
+receipts plus a completed run from the retained reply. The dependency-ready
+parallel portfolio is
+[[../../seon/issues/pod-republication-passes-nil-reusable-projection]] and
+[[../../seon/issues/named-cluster-open-does-not-reconcile-jvm-host]]. The next
+U2 refill is the execution-plan acquisition/enforcement owner; final graduation
+remains the rebuilt default-cluster real-work and database-memory redrive.
 
 ### U3 — Writer admission fix (M) — READY, parallel with U2
 

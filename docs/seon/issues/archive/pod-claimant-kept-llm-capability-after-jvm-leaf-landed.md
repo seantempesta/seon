@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, runtime]
 ---
@@ -35,18 +35,19 @@ JVM leaf, but the live run never exercised that leaf.
 `seon.agent.driver` already releases a held claim when the current leaf cannot
 execute the next phase; no new routing mechanism is needed.
 
-## Current state
+## Resolution
 
-The pod LLM capability and both attempt dispatch arms are removed in source.
+Commit `e21c85417` removes the pod LLM capability and both attempt dispatch
+arms.
 Focused CLJS proof shows the pod leaf advertises exactly render and publish:
 2 tests / 4 assertions / 0 failures / 0 errors. The JVM transport/receipt
 matrix is also green: 11 tests / 63 assertions.
 
-Live acceptance remains open. The isolated `claimantllm` gate stopped before a
-provider call because `cluster open` did not reconcile a target JVM claimant;
-the target pod was stopped cleanly. See
-[[named-cluster-open-does-not-reconcile-jvm-host]] and
-`tmp/orchestrator/claimantllm-gate.log`.
+The source-frozen claimant2 history proves the tier handoff: pod workload PID
+`48530` rendered run `dwvphar4i9yf` at epoch `1`, then JVM host workload PID
+`50645` acquired epoch `2`, opened attempt `sj29e811vgsg`, and settled it
+`:success` with HTTP 200 and a nonempty reply blob. The later planner refusal
+closed and released the run without returning model I/O to the pod.
 
 ## Acceptance
 

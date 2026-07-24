@@ -754,6 +754,23 @@ the anchor stays the state ledger.
   the process-shared client only once. If a later request presents a different
   connect timeout, fail loudly and require claimant restart rather than
   silently creating a second client authority.
+- **A long-lived client is not evidence of stale credentials.** Before blaming
+  connection reuse or construction-time state, join the persisted claimant to
+  its exact process and trace which values the leaf actually freezes. The JVM
+  HTTP leaf freezes only its connect timeout; credential resolution and the
+  authorization header occur per request. The eleven apparent JVM failures
+  were pod-owned, while the rebuilt long-lived JVM claimant returned literal
+  HTTP 200 with the same provider configuration.
+- **Persist the adapter's namespaced response keys.** The OpenAI-compatible
+  core returns `:seon.ai/text`; reading a bare `:text` silently turned a real
+  status-200 completion into the zero-byte reply blob. The durable settlement
+  consumes the producer's exact key and a regression observes the blob request,
+  not only the attempt outcome.
+- **A schema name is not an entity identity.** The configuration shape is
+  `:seon.config/singleton`, while the one entity is identified by
+  `[:seon.config/id "cluster"]`. Pulling the schema keyword as the lookup value
+  made every post-LLM eval report absent limits. Reuse the established lookup
+  ref at every config acquisition.
 - **A named cluster still consumes shared build prerequisites.** The first
   `u6bleaf` open found a stale canonical watcher and absent writer; prerequisite
   reconciliation then stopped on an unrelated in-flight

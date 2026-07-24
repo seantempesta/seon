@@ -144,7 +144,7 @@ under the one `bin/seon` operator (ruling 26):
   renders execute behind the guarded eval door on a bounded platform
   pool; one virtual thread per claimed run;
 - the **Bun leaf host** is a disposable js-package runtime (the pod
-  interim also drives render/LLM phases as a phase-limited claimant
+  interim drives render/publish phases as a phase-limited claimant
   until its remaining surfaces retire);
 - the **browser** receives static assets and morphed HTML only.
 

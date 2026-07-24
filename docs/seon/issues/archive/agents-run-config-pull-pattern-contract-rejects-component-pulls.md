@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, web, schema]
 ---
@@ -45,6 +45,19 @@ stale. `src/seon/ai/core.cljc` owns both the function and its schema.
 `seon.ai.core/config-pull-pattern` owns the typed Datahike pull pattern.
 Consumers must continue to use that one pattern; do not copy or weaken it at
 `seon.web.serve`.
+
+## Resolution
+
+Commit `de1458b24` registers the closed component selector shape once and
+declares the output as a vector whose members are either qualified attributes
+or one-key descriptor/model-variant component pulls. Its focused regression
+instruments the real function, invokes it, and validates both component
+members. The later claimant2 drive acquired the resulting provider/model
+configuration and persisted a DeepSeek status-200 receipt, independently
+confirming the real producer value crosses the model boundary.
+
+The final `/agents/run` graduation remains downstream of the separate
+execution-planning issue; it no longer fails at this contract.
 
 ## Acceptance
 

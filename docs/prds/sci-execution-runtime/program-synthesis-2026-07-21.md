@@ -1215,6 +1215,27 @@ MORNING ITEMS (accumulating):
   attempt through those commits, not more allocation diagnosis. Final
   graduation remains the orchestrator's rebuilt default-cluster DeepSeek
   redrive plus database-backed memory turn.
+- ★ CLAIMANT2 MODEL BOUNDARY ALIVE (2026-07-24): the source-frozen
+  `claimant2` reset at `fdba88aad` proves the requested transport gate.
+  Pod workload PID `48530` rendered at epoch 1; JVM host workload PID
+  `50645` acquired epoch 2. Attempt `sj29e811vgsg` atomically changed
+  `:open → :success` with literal DeepSeek HTTP 200, request ID
+  `a4e17535-b53d-4f17-a973-82acd6eb89e9`, and a nonempty 163-byte reply
+  blob. The historical “long-lived JVM transport state” diagnosis is
+  falsified: the eleven failures were pod-owned; credentials and auth
+  headers are per request, while only connect timeout is process-client
+  construction state. Diagnostics, pod LLM removal, component-pull
+  contract, remote allocation, response-key, and config-identity fixes
+  are closed. Earliest unsettled contract:
+  [[../../seon/issues/jvm-claimant-rejects-visible-reply-without-exact-execution-plan]];
+  integrated closure proof = two successful eval receipts + completed
+  run from the retained reply. Dependency-ready portfolio:
+  [[../../seon/issues/pod-republication-passes-nil-reusable-projection]]
+  and [[../../seon/issues/named-cluster-open-does-not-reconcile-jvm-host]].
+  Next refill is the derived execution-plan acquisition/enforcement
+  owner. Final graduation remains the orchestrator's rebuilt default
+  real-work and database-memory redrive. Evidence:
+  `tmp/orchestrator/claimant2-gate.log`.
 - ★ ROOT CAUSE CORRECTED + FIXED (2026-07-24, ~2:30am): my
   "long-lived claimant transport" diagnosis was WRONG (lane caught
   it) — the failing PID 35849 was the BUN POD, not the JVM claimant
