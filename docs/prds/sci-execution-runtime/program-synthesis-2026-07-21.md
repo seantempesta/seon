@@ -71,6 +71,18 @@ Weakness queue (owner package + WHEN):
   contract exists (per-fact-family choke points only) — fold into
   S4 startgate's acquisition work, verify there.
 
+LIFECYCLE RE-DRIVE VERDICT (~08:50): NOT CAVEAT-CLEARED, two causes:
+(1) infra — u9s0a source edits hit the default watcher mid-drive,
+/agents/run 503, pod drained (freeze-rule violation; STANDING: live
+proofs on default WAIT for source lanes to land); (2) substantive —
+formless final replies close :done with NO transcript message entity
+(issue formless-claimant-reply-is-not-delivered-to-the-transcript,
+fd2fc35a8). Same class as the no-dispatch bypass → noroots lane
+dispatched (planner :no-roots arm + one-delivery-path + timeout
+config fact; deletes no-dispatch-reply?). Alive caveat now needs:
+noroots + u9s0a landed → rebuild default → ONE re-drive. Lanes live:
+r45s3 ∥ u9s0a ∥ containment ∥ noroots.
+
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 
 ## older restart protocol below until morning)
