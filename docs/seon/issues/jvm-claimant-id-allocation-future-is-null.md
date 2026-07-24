@@ -34,6 +34,13 @@ to data. The run and turn then settled visibly and released custody as
 designed. Exact database values, claim history, and process generations are in
 `tmp/orchestrator/claimantpath-gate.log`.
 
+Commits `62cd2348b` and `356519dd0` landed after that source-frozen drive.
+They route JVM database-value allocation through the portable `seon.db`
+facade, retain the local-connection path for the writer, add a focused remote
+allocation regression, and keep the facade require off the Babashka operator
+path. This issue remains open because no rebuilt claimant has yet opened an
+attempt through those commits.
+
 ## Owner
 
 `seon.db.id/allocate!` and the JVM claimant's configured serialized-writer

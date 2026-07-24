@@ -1170,11 +1170,14 @@ MORNING ITEMS (accumulating):
   held. Earliest unsettled contract is now
   [[../../seon/issues/jvm-claimant-id-allocation-future-is-null]];
   its integrated proof is a durable attempt receipt followed by
-  provider success/reply or the next visible terminal fault. Next
-  dependency-ready refill: diagnose the serialized-writer allocation
-  Future at `seon.db.id/allocate!`; final graduation gate remains the
-  orchestrator's rebuilt default-cluster DeepSeek redrive plus
-  database-backed memory turn.
+  provider success/reply or the next visible terminal fault. Shared-tree
+  follow-up commits `62cd2348b` + `356519dd0` now route JVM
+  database-value identity allocation through `seon.db`, add its focused
+  regression, and preserve the Babashka operator boundary. The next
+  dependency-ready refill is therefore a source-frozen rebuild and live
+  attempt through those commits, not more allocation diagnosis. Final
+  graduation remains the orchestrator's rebuilt default-cluster DeepSeek
+  redrive plus database-backed memory turn.
 - ★ ROOT CAUSE CORRECTED + FIXED (2026-07-24, ~2:30am): my
   "long-lived claimant transport" diagnosis was WRONG (lane caught
   it) — the failing PID 35849 was the BUN POD, not the JVM claimant

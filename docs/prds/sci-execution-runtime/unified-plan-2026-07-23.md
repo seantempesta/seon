@@ -110,8 +110,9 @@ proof is 16 tests/110 assertions. The isolated `claimantpath` drive proves an
 epoch-2 JVM phase error now persists a fault and atomically closes/releases the
 run instead of heartbeating forever. The next dependency-ready U2 exit is the
 new [[../../seon/issues/jvm-claimant-id-allocation-future-is-null]] blocker:
-open a durable attempt after fixing the serialized-writer identity allocation
-leaf, then reach provider success/reply or another visible terminal fault.
+commits `62cd2348b` + `356519dd0` have landed the database-value allocation
+path and its Babashka boundary, so rebuild that source and open a durable
+attempt, then reach provider success/reply or another visible terminal fault.
 
 ### U3 — Writer admission fix (M) — READY, parallel with U2
 
