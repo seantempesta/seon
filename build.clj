@@ -160,12 +160,6 @@
     ;; from its pinned dependency and is included by the uber dependency basis.
     (b/copy-dir {:src-dirs ["src"]
                  :target-dir server-class-dir})
-    ;; AOT is a release-scoped class cache, never a second implementation.
-    ;; Keep sources beside it: `requiring-resolve` owners still retain their
-    ;; ordinary source fallback, while the measured startup closure finds its
-    ;; generated `__init` classes first.
-    (b/copy-dir {:src-dirs [(writer-aot! writer-basis)]
-                 :target-dir server-class-dir})
     (b/javac {:basis writer-basis
               :src-dirs ["java"]
               :class-dir server-class-dir
