@@ -19,7 +19,6 @@
 (def ^:private manifest-resolver-timeout-ms 30000)
 (def ^:private prepared-program-rows ::prepared-program-rows)
 (def ^:private prepared-program-sources ::prepared-program-sources)
-(def ^:private prepared-page-plans ::prepared-page-plans)
 (def ^:private shadow-node-devtools-client
   'shadow.cljs.devtools.client.node)
 
@@ -450,7 +449,7 @@
 
 (defn ^{:shadow.build/stage :optimize-prepare} prepare-program-rows!
   "Prepare exact compiled boot rows before release optimization rewrites code."
-  [state program-source-relative-path relative-path page-plan-relative-path]
+  [state program-source-relative-path relative-path _page-plan-relative-path]
   (let [program-source-text (artifact-text state)
         prepared
         (assoc (derive-program-rows
@@ -459,7 +458,6 @@
                (digest program-source-text))]
     (-> state
         (assoc-in [prepared-program-rows relative-path] prepared)
-        (assoc-in [prepared-page-plans page-plan-relative-path] prepared)
         (assoc-in [prepared-program-sources program-source-relative-path]
                   program-source-text))))
 
@@ -503,7 +501,7 @@
     (atomic-spit!
      target
      (str "{:seon.dev.artifact/program-rows " compiled-row-text "}\n"))
-    state))
+    (assoc-in state [prepared-program-rows relative-path] prepared)))
 
 (defn ^{:shadow.build/stage :flush} publish-page-plan!
   "Publish the precomputed initialization pages for one exact row artifact."
@@ -514,7 +512,8 @@
              (ex-info "The program-row artifact must publish before its page plan."
                       {:seon.dev.artifact/path program-row-relative-path})))
         program-row-digest (digest (slurp program-row-file))
-        prepared (get-in state [prepared-page-plans relative-path])
+        prepared (get-in state
+                         [prepared-program-rows program-row-relative-path])
         page-plan (:seon.dev.artifact/page-plan prepared)
         page-plan-text (:seon.dev.artifact/page-plan-text prepared)]
     (when-not prepared

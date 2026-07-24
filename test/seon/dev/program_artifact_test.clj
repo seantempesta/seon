@@ -186,28 +186,21 @@
             (program-artifact/digest row-artifact-text)
             :seon.dev.artifact/page-plan page-plan
             :seon.dev.artifact/page-plan-text page-plan-text})}
-        #(let [prepared
-               (program-artifact/prepare-program-rows!
-                state
-                "out/client/program-sources.edn"
-                "out/client/program-rows.edn"
-                "out/client/page-plan.edn")
-               changed
-               (assoc prepared :sources {})]
+        #(let [changed state]
            (program-artifact/publish!
             changed "out/client/program-sources.edn")
-           (is (identical?
-                changed
-                (program-artifact/publish-rows!
-                 changed
-                 "out/client/program-sources.edn"
-                 "out/client/program-rows.edn")))
-           (is (identical?
-                changed
-                (program-artifact/publish-page-plan!
-                 changed
-                 "out/client/program-rows.edn"
-                 "out/client/page-plan.edn")))))
+           (let [row-state
+                 (program-artifact/publish-rows!
+                  changed
+                  "out/client/program-sources.edn"
+                  "out/client/program-rows.edn")]
+             (is (not (identical? changed row-state)))
+             (is (identical?
+                  row-state
+                  (program-artifact/publish-page-plan!
+                   row-state
+                   "out/client/program-rows.edn"
+                   "out/client/page-plan.edn"))))))
       (is (= (program-artifact/artifact-text state)
              (slurp (str (fs/path project
                                   "out/client/program-sources.edn")))))
