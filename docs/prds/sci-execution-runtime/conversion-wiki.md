@@ -1615,3 +1615,43 @@ the variable-weight values they select.
   `terminal-or-displaced-result` → `settle-phase-error!` path as every returned
   phase error. A virtual-thread outer `finally` that only removes the handle
   cannot release database custody (`7f49d4674`).
+
+## Database completion-delivery scars (2026-07-24)
+
+- **A deadline index is not a completion mechanism.** Correlated requests
+  settle from their response, socket error, EOF, or owner shutdown. If a wall
+  backstop remains, arm one one-shot timer for the nearest pending deadline,
+  reschedule it only when ownership changes, and record the governing config
+  key as a core fault when it fires. Periodically scanning every pending
+  request makes the scan cadence an accidental delivery delay and lets a
+  missing terminal path hide behind the clock
+  (`seon.db.transport.uds/connect!`).
+- **An identical ambiguous write waits on the writer's original receipt.**
+  The writer's active-request owner already attaches identical transaction
+  requests as waiters and delivers the one terminal response to all of them.
+  A reconnecting client redelivers the frozen request once and awaits that
+  response; exponential retry and request-conflict polling duplicate receipt
+  ownership and can outlive the transaction they are trying to observe
+  (`seon.db.session/transaction-call!`, `seon.db.host/call!`).
+- **Reconnect delay rate-limits failed respawn; it never detects EOF.** A
+  successfully opened interest socket closing is the reconnect event and
+  starts replacement immediately. Apply the configured delay only after the
+  replacement connection itself fails. Shutdown must deliver a terminal value
+  to pending interest responses and listener-readiness waiters before
+  interrupting the reader (`seon.db.host/interest-reader-loop!`).
+
+## Preprocessing start-gate scars (2026-07-24)
+
+- **Canonical equality requires deterministic derived collection order.**
+  Projection fingerprints intentionally ignore derived catalogs, so equal
+  fingerprints did not expose a catalog vector whose order depended on hash-map
+  insertion history. Both monolithic construction and divergence composition
+  must sort shape rows by schema key before deriving the catalog; the standing
+  oracle is byte equality of `canonical-data-string`, not fingerprint equality
+  alone (`seon.schema/build-projection`, `compose-projection-data`).
+- **A release member digest is not the raw file digest.** The immutable release
+  manifest hashes a member with its filesystem entry-type tag; runtime sidecar
+  admission hashes the exact file bytes. Verify the package with its own
+  manifest, then translate `base-projection.edn` and `page-plan.edn` to raw-byte
+  SHA-256 values at process-spec construction. Passing the member digest across
+  that boundary makes an intact package look poisoned.
