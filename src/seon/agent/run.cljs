@@ -9,6 +9,7 @@
     [seon.agent.ctx :as ctx]
     [seon.agent.message :as msg]
     [seon.agent.run.core :as run.core]
+    [seon.ai :as ai]
     [seon.ai.tokens :as tokens]
     [seon.config :as config]
     [seon.db :as db]
@@ -190,10 +191,18 @@
    :seon.error/data member})
 
 (def ^:private config-selector
-  [:seon.config/repl-mode
-   :seon.config.run/batch-turn-limit
-   :seon.config.run/stream-form-limit
-   :seon.config.run/deadline-ms])
+  (into
+   [:seon.config.run/batch-turn-limit
+    :seon.config.run/stream-form-limit
+    :seon.config.run/deadline-ms]
+   (ai/config-pull-pattern)))
+
+(def ^:private agent-run-policy-selector
+  (into
+   [:db/id
+    :seon.agent/default-turn-limit
+    :seon.agent/default-deadline-ms]
+   (ai/agent-config-pull-pattern)))
 
 (defn- policy-from [stored]
   (merge (config/default-run-policy) stored))
@@ -468,9 +477,7 @@
               {::db/db database
                ::db/members
                [(pull-member database
-                             [:db/id
-                              :seon.agent/default-turn-limit
-                              :seon.agent/default-deadline-ms]
+                             agent-run-policy-selector
                              [:seon.agent/id id])
                 (pull-member database config-selector
                              [:seon.config/id config/cluster-config-id])]}))
@@ -490,14 +497,14 @@
                     " — create the agent first."))
               (let [now        (js/Date.)
             policy     (policy-from stored-policy)
+            reply-policy (ai/reply-policy-from-rows stored-policy a)
             ;; Run-bound SEED (config-driven agent-init, move 9): the new
             ;; Agent-level datoms are explicit overrides. Cluster defaults are
             ;; the frozen config singleton policy above.
             turn-limit (or tl
                            (:seon.agent/default-turn-limit a)
-                           ;; mode-denominated const fallback: forms under
-                           ;; :stream, turns under :batch (repl-milestone rung-0 verdict).
-                           (if (= :stream (:seon.config/repl-mode stored-policy))
+                           (if (= :first-form
+                                  (:seon.ai/reply-evaluation reply-policy))
                              (:seon.config.run/stream-form-limit policy)
                              (:seon.config.run/batch-turn-limit policy)))
             deadline   (or dl (js/Date. (+ (.getTime now)

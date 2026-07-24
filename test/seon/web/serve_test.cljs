@@ -1065,7 +1065,11 @@
              (done)))))))
 
 (defn- model-attempt [ordinal]
-  {:seon.ai.attempt/ordinal ordinal
+  {:seon.ai.attempt/id (str "a0000000000" ordinal)
+   :seon.ai.attempt/ordinal ordinal
+   :seon.ai.attempt/config-digest
+   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   :seon.ai.attempt/deadline-at (js/Date. 45000)
    :seon.ai.attempt/provider :deepseek
    :seon.ai.attempt/adapter :openai-compat
    :seon.ai.attempt/requested-model "small-model"
@@ -1076,6 +1080,7 @@
    :seon.ai.attempt/adapter-timeout-ms 30000
    :seon.ai.attempt/outer-timeout-ms 45000
    :seon.ai.attempt/stream? false
+   :seon.ai.attempt/reply-evaluation :batch
    :seon.ai.attempt/credential-class :configured-env
    :seon.ai.attempt/outcome
    (if (zero? ordinal) :provider-error :success)})
@@ -1098,8 +1103,16 @@
               ([request]
                (swap! requests conj request)
                (js/Promise.resolve
-                (if (= [:seon.config/id "cluster"] (:seon.db/ref request))
-                  {:seon.config/repl-mode :batch}
+                (case (:seon.db/ref request)
+                  [:seon.config/id "cluster"]
+                  {:seon.config/repl-mode :stream
+                   :seon.ai/wire-stream? true
+                   :seon.ai/reply-evaluation :first-form}
+
+                  [:seon.agent/id "agent-1"]
+                  {:seon.ai/wire-stream? false
+                   :seon.ai/reply-evaluation :batch}
+
                   {})))
               ([_selector _entity-id]
                (js/Promise.reject
@@ -1161,6 +1174,12 @@
          :seon.ai.attempt/endpoint
          "http://127.0.0.1:8080/v1/chat/completions"
          :seon.ai.attempt/adapter-timeout-ms 30000}]
+    (is (every?
+         #(schema/valid-candidate-value? :seon.ai.attempt/entity %)
+         (vals attempts))
+        (pr-str
+         (mapv #(schema/explain-candidate-value :seon.ai.attempt/entity %)
+               (vals attempts))))
     (is (= "inline" (:status proof)))
     (is (= [0 1] (mapv :ordinal projected)))
     (is (= 0.0 (:temperature (first projected))))
@@ -1244,8 +1263,7 @@
 (deftest final-agent-evidence-pulls-a-valid-config-singleton
   (is (= (into [:seon.config/id] (ai/model-transport-pull-pattern))
          @#'serve/final-cluster-pull-pattern))
-  (is (= (into [:seon.config/id :seon.config/repl-mode]
-               (ai/model-transport-pull-pattern))
+  (is (= (into [:seon.config/id] (ai/config-pull-pattern))
          @#'serve/historical-cluster-pull-pattern)))
 
 (defn- req-with-origin

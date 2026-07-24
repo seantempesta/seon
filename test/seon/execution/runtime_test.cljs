@@ -137,7 +137,9 @@
     (let [observed (atom nil)
           entity {:db/id 1
                   :seon.agent/id "agent-1"
-                  :seon.config/repl-mode :stream
+                  :seon.config/repl-mode :batch
+                  :seon.ai/wire-stream? true
+                  :seon.ai/reply-evaluation :first-form
                   :seon.render/ai (pr-str "literal whole prompt")}]
       (-> (call-with-acquired-agent
            entity {:seon.agent/id "agent-1"} observed)
@@ -145,8 +147,9 @@
            (fn [rendered]
              (is (= "literal whole prompt" (:seon.render/text rendered)))
              (is (= "frozen system" (:seon.ai/system-prompt rendered)))
-             (is (= :stream (:seon.config/repl-mode rendered))
-                 "the agent's launch grammar overrides the cluster singleton")
+             (is (= true (:seon.ai/wire-stream? rendered)))
+             (is (= :first-form (:seon.ai/reply-evaluation rendered))
+                 "the agent's explicit reply policy overrides legacy mode")
              (is (= :deepseek
                     (get-in rendered [:seon.ai/config-resolution
                                       :seon.ai/resolved-config
@@ -172,10 +175,12 @@
                        (get-in @observed
                                [:seon.execution.runtime-test/request ::db/members
                                 0 ::protocol/selector])))
-             (is (some #{:seon.config/repl-mode}
-                       (get-in @observed
-                               [:seon.execution.runtime-test/request ::db/members
-                                0 ::protocol/selector])))
+             (is (every?
+                  (set
+                   (get-in @observed
+                           [:seon.execution.runtime-test/request ::db/members
+                            0 ::protocol/selector]))
+                  [:seon.ai/wire-stream? :seon.ai/reply-evaluation]))
              (is (= [:seon.config/id "cluster"]
                     (get-in @observed
                             [:seon.execution.runtime-test/request ::db/members
@@ -401,7 +406,9 @@
                          {:seon.render/text ""
                           :seon.agent.ctx/rendered-blocks []
                           :seon.ai/system-prompt "frozen system"
-                          :seon.config/repl-mode :batch
+                          :seon.ai/reply-evaluation :batch
+                          :seon.ai/wire-stream? false
+                          :seon.config.model-stream/partial-publish-settle-ms nil
                           :seon.eval/ns (symbol (str "my.agent." id))})]
       (-> (call-with-acquired-agent
            {} {:seon.agent/id "empty"} observed)

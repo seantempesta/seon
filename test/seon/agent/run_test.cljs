@@ -127,7 +127,8 @@
               (js/Promise.resolve
                {::db/results
                 [(pull-result {:db/id 7})
-                 (pull-result {:seon.config/repl-mode :batch
+                 (pull-result {:seon.config/repl-mode :stream
+                               :seon.ai/reply-evaluation :batch
                                :seon.config.run/batch-turn-limit 100
                                :seon.config.run/stream-form-limit 300
                                :seon.config.run/deadline-ms 60000})]})))
@@ -151,11 +152,14 @@
                cas (second (:seon.db/tx-data @built))]
            (is (= "run-a" (:seon.agent.run/id result)))
            (is (= 100 (:seon.agent.run/turn-limit result)))
-           (is (= [:db/id
-                   :seon.agent/default-turn-limit
-                   :seon.agent/default-deadline-ms]
-                  (get-in @acquisition-request
-                          [::db/members 0 ::db.protocol/selector])))
+           (is (every?
+                (set (get-in @acquisition-request
+                             [::db/members 0 ::db.protocol/selector]))
+                [:db/id
+                 :seon.agent/default-turn-limit
+                 :seon.agent/default-deadline-ms
+                 :seon.ai/reply-evaluation
+                 :seon.ai/wire-stream?]))
            (is (identical? database (::db/db @allocation-request)))
            (is (= :db.fn/cas (first cas)))
            (is (nil? (nth cas 3)))))))))

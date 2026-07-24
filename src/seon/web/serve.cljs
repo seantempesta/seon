@@ -1140,8 +1140,7 @@
           expected)))
 
 (def ^:private historical-cluster-pull-pattern
-  (into [:seon.config/id :seon.config/repl-mode]
-        (ai/model-transport-pull-pattern)))
+  (into [:seon.config/id] (ai/config-pull-pattern)))
 
 (defn- ^:async historical-turn-valid?
   [database agent-id rendered-tx attempts]
@@ -1171,10 +1170,13 @@
                        (assoc cluster-row
                               :seon.config/id config/cluster-config-id))
                 agent-row))
-              stream? (= :stream (:seon.config/repl-mode cluster-row))]
+              reply-policy (ai/reply-policy-from-rows cluster-row agent-row)]
           (every?
            (fn [attempt]
-             (and (= stream? (:seon.ai.attempt/stream? attempt))
+             (and (= (:seon.ai/wire-stream? reply-policy)
+                     (:seon.ai.attempt/stream? attempt))
+                  (= (:seon.ai/reply-evaluation reply-policy)
+                     (:seon.ai.attempt/reply-evaluation attempt))
                   (response-identity-valid? attempt resolved)
                   (= (:seon.ai.attempt/adapter attempt)
                      (ai/resolved-adapter resolved))
