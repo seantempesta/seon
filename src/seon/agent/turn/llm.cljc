@@ -201,6 +201,13 @@
                     (ai.core/openai-request-endpoint endpoint-cap))))
         response-identity-cap
         (:seon.config.model-transport/response-identity-cap config)
+        error-cap (or response-identity-cap
+                      (:seon.config.model-transport/endpoint-cap config))
+        error (:seon.ai/error response)
+        bounded-error
+        (fn [value]
+          (when (and error-cap (string? value))
+            (ai.core/bounded-evidence-error value error-cap)))
         evidence-error
         (when response-identity-cap
           (some-> (or (when (map? endpoint-result)
@@ -211,7 +218,8 @@
                   (ai.core/bounded-evidence-error response-identity-cap)))
         adapter (or (:seon.ai/adapter response)
                     (ai.core/resolved-adapter config))
-        status (get-in response [:seon.ai/error :seon.ai/status])
+        status (:seon.ai/status error)
+        response-status (when-not error (:seon.ai/status response))
         finish-reason (:seon.ai.openai-compat/finish-reason raw)
         usage (:seon.ai/usage raw)]
     (cond->
@@ -253,6 +261,27 @@
              (:seon.ai/credential-class credential))
       status
       (assoc :seon.ai.attempt/error-status status)
+      response-status
+      (assoc :seon.ai.attempt/response-status response-status)
+      (bounded-error (:seon.ai/msg error))
+      (assoc :seon.ai.attempt/error-message
+             (bounded-error (:seon.ai/msg error)))
+      (bounded-error (:seon.ai/exception-class error))
+      (assoc :seon.ai.attempt/exception-class
+             (bounded-error (:seon.ai/exception-class error)))
+      (bounded-error (:seon.ai/exception-message error))
+      (assoc :seon.ai.attempt/exception-message
+             (bounded-error (:seon.ai/exception-message error)))
+      (true? (:seon.ai/transport? error))
+      (assoc :seon.ai.attempt/transport? true)
+      (true? (:seon.ai/timeout? error))
+      (assoc :seon.ai.attempt/timeout? true)
+      (bounded-error (:seon.ai/raw-body error))
+      (assoc :seon.ai.attempt/error-body
+             (bounded-error (:seon.ai/raw-body error)))
+      (int? (:seon.ai/retry-after-ms error))
+      (assoc :seon.ai.attempt/retry-after-ms
+             (:seon.ai/retry-after-ms error))
       (:seon.ai/response-model raw)
       (assoc :seon.ai.attempt/response-model (:seon.ai/response-model raw))
       (:seon.ai/system-fingerprint raw)
@@ -392,11 +421,6 @@
                    (blob/put! {:my.blob/content (or (:text response) "")
                                :my.blob/media :reply})))
                 reply-blob (blob-ref reply-result)
-                retry-after
-                (get-in response [:seon.ai/error :seon.ai/retry-after-ms])
-                terminal (cond-> terminal
-                           (int? retry-after)
-                           (assoc :seon.ai.attempt/retry-after-ms retry-after))
                 publication-failed?
                 (and (= :success (:seon.ai.attempt/outcome terminal))
                      (nil? reply-blob))]

@@ -14,7 +14,8 @@
    {:seon.ai/provider :openai-compat
     :seon.ai/model "portable"
     :seon.ai/base-url "https://user:secret@example.test/v1"
-    :seon.config.model-transport/endpoint-cap 256}
+    :seon.config.model-transport/endpoint-cap 256
+    :seon.config.model-transport/response-identity-cap 128}
    :seon.ai/agent-attempt-timeout-ms 1000})
 
 (deftest persisted-prompt-is-the-phase-recovery-authority
@@ -29,13 +30,41 @@
         timeout (llm/attempt-row
                  1 nil resolution 1000 false :first-form
                  {:seon.ai/error {:seon.ai/timeout? true
-                                  :seon.ai/outer-timeout? true}})]
+                                  :seon.ai/outer-timeout? true}})
+        successful-status
+        (llm/attempt-row 2 nil resolution 1000 false :batch
+                         {:text "(+ 1 2)" :seon.ai/status 200})
+        cause (apply str (repeat 40 "diagnostic-"))
+        failed
+        (llm/attempt-row
+         3 nil resolution 1000 false :batch
+         {:seon.ai/error
+          {:seon.ai/msg cause
+           :seon.ai/status 503
+           :seon.ai/transport? true
+           :seon.ai/timeout? true
+           :seon.ai/retry-after-ms 25
+           :seon.ai/raw-body cause
+           :seon.ai/exception-class "java.io.IOException"
+           :seon.ai/exception-message cause}})]
     (testing "terminal vocabulary is shared by both claimants"
       (is (= :success (:seon.ai.attempt/outcome success)))
       (is (= :outer-timeout (:seon.ai.attempt/outcome timeout))))
     (testing "normalized endpoint evidence never carries URL credentials"
       (is (= "https://example.test/v1/chat/completions"
-             (:seon.ai.attempt/endpoint success))))))
+             (:seon.ai.attempt/endpoint success))))
+    (testing "provider causes remain flat, classified, and bounded"
+      (is (= 200 (:seon.ai.attempt/response-status successful-status)))
+      (is (= :adapter-timeout (:seon.ai.attempt/outcome failed)))
+      (is (= 503 (:seon.ai.attempt/error-status failed)))
+      (is (true? (:seon.ai.attempt/transport? failed)))
+      (is (true? (:seon.ai.attempt/timeout? failed)))
+      (is (= 25 (:seon.ai.attempt/retry-after-ms failed)))
+      (is (= "java.io.IOException"
+             (:seon.ai.attempt/exception-class failed)))
+      (is (= 128 (count (:seon.ai.attempt/error-message failed))))
+      (is (= 128 (count (:seon.ai.attempt/exception-message failed))))
+      (is (= 128 (count (:seon.ai.attempt/error-body failed)))))))
 
 (deftest run-deadline-shortens-the-frozen-attempt-bound
   (let [now #?(:clj (java.util.Date. 1000) :cljs (js/Date. 1000))

@@ -10,7 +10,6 @@
     [seon.agent.run.core :as run.core]
     [seon.agent.home :as home]
     [seon.agent.turn.core :as turn.core]
-    [seon.agent.turn.llm :as turn.llm]
     [my.blob :as blob]
     [seon.db :as db]
     [seon.db.id :as db.id]
@@ -191,6 +190,13 @@
 (schema/register! :seon.ai.attempt/deadline-at :inst)
 (schema/register! :seon.ai.attempt/retry-after-ms [:int {:min 0}])
 (schema/register! :seon.ai.attempt/error-status :seon.ai/status)
+(schema/register! :seon.ai.attempt/response-status :seon.ai/status)
+(schema/register! :seon.ai.attempt/error-message [:string {:min 1}])
+(schema/register! :seon.ai.attempt/exception-class [:string {:min 1}])
+(schema/register! :seon.ai.attempt/exception-message [:string {:min 1}])
+(schema/register! :seon.ai.attempt/transport? :boolean)
+(schema/register! :seon.ai.attempt/timeout? :boolean)
+(schema/register! :seon.ai.attempt/error-body [:string {:min 1}])
 (schema/register! :seon.ai.attempt/response-model :seon.ai/response-model)
 (schema/register! :seon.ai.attempt/system-fingerprint :seon.ai/system-fingerprint)
 (schema/register! :seon.ai.attempt/request-id :seon.ai/request-id)
@@ -228,6 +234,17 @@
    [:seon.ai.attempt/credential-class {:optional true} :seon.ai.attempt/credential-class]
    [:seon.ai.attempt/outcome :seon.ai.attempt/outcome]
    [:seon.ai.attempt/error-status {:optional true} :seon.ai.attempt/error-status]
+   [:seon.ai.attempt/response-status
+    {:optional true} :seon.ai.attempt/response-status]
+   [:seon.ai.attempt/error-message
+    {:optional true} :seon.ai.attempt/error-message]
+   [:seon.ai.attempt/exception-class
+    {:optional true} :seon.ai.attempt/exception-class]
+   [:seon.ai.attempt/exception-message
+    {:optional true} :seon.ai.attempt/exception-message]
+   [:seon.ai.attempt/transport? {:optional true} :seon.ai.attempt/transport?]
+   [:seon.ai.attempt/timeout? {:optional true} :seon.ai.attempt/timeout?]
+   [:seon.ai.attempt/error-body {:optional true} :seon.ai.attempt/error-body]
    [:seon.ai.attempt/response-model {:optional true} :seon.ai.attempt/response-model]
    [:seon.ai.attempt/system-fingerprint {:optional true} :seon.ai.attempt/system-fingerprint]
    [:seon.ai.attempt/request-id {:optional true} :seon.ai.attempt/request-id]
@@ -732,60 +749,6 @@
                             :seon.error/data child-evidence))
                    e))))))
 
-(defn ^:async ^:private pod-transport!
-  "ONE adapter attempt under the per-attempt wall-clock cap.
-
-   Races one signal-bearing request against
-   the resolution's frozen `:seon.ai/agent-attempt-timeout-ms` (resolved once
-   at the turn's acquisition,
-   via the ONE racer
-   ([[seon.eval/race-timeout]]) — the inner bound that keeps a single attempt
-   from parking the turn when the adapter's own `:seon.ai/timeout-ms` is
-   unset/huge. A timed-out attempt resolves to a `:seon.ai/error` VALUE
-   (`:seon.ai/timeout? true` — never a throw), so [[llm-retryable?]]
-   classifies it exactly like an adapter-side timeout. When the cap wins it
-   aborts the attempt's provider signal; the run's in-tx CAS work-fence remains
-   the final publication backstop for any late settler.
-
-   `stream?` (repl-mode `:stream`) hands the llm-fn the WIDENED map arg
-   canonical request map. In repl-mode `:stream`, `:seon.ai/stream? true` asks
-   the adapter to consume the SDK stream and stop it at the first complete
-   form. Every retry gets a fresh controller."
-  [{resolution :seon.ai/config-resolution
-    prompt-text :seon.ai/ctx
-    system-prompt :seon.ai/system-prompt
-    stream? :seon.ai/stream?
-    reply-evaluation :seon.ai/reply-evaluation
-    progress! :seon.ai/progress!
-    ms :seon.ai/request-timeout-ms
-    llm-fn :seon.agent/llm-fn}]
-  (let [
-        controller (js/AbortController.)
-        signal     (.-signal controller)
-        arg        (cond-> {:seon.ai/ctx          prompt-text
-                            :seon.ai/abort-signal signal
-                            :seon.ai/config-resolution resolution
-                            :seon.ai/reply-evaluation reply-evaluation
-                            :seon.ai/progress! progress!}
-                     (string? system-prompt)
-                     (assoc :seon.ai/system-prompt system-prompt)
-                     stream? (assoc :seon.ai/stream? true))
-        v          (await (seval/race-timeout
-                            (llm-fn arg)
-                            ms
-                            (fn [] (.abort controller))))]
-    (let [outer-timeout? (seval/timed-out? v)
-          response
-          (if outer-timeout?
-            {:seon.ai/error
-             {:seon.ai/msg      (str "LLM attempt exceeded the per-attempt "
-                                     "cap (" ms "ms) — provider request cancelled")
-              :seon.ai/timeout? true}}
-            v)]
-      (cond-> response
-        outer-timeout?
-        (assoc-in [:seon.ai/error :seon.ai/outer-timeout?] true)))))
-
 ;;; CLAIM-NATIVE POD PHASE LEAF
 
 (defn ^:async render-phase!
@@ -832,31 +795,6 @@
           {:seon.db/db (:db-after allocation)
            :seon.agent.turn/id
            (get-in allocation [::db.id/ids ::claim-turn])})))))
-
-(defn ^:async llm-phase!
-  "Pod leaf over the one portable durable LLM phase."
-  [{:seon.agent.driver/keys [run] :as request}]
-  (let [llm-fn (:seon.agent/llm-fn request)]
-    (await
-     (turn.llm/llm-phase!
-      (assoc request
-             :seon.agent.turn/now! #(js/Date.)
-             :seon.agent.turn/resolve-context!
-             (fn [agent-id database run-id]
-               (-> (render-prompt agent-id database [] run-id)
-                   (.then
-                    (fn [rendered]
-                      (-> (db/pull
-                           {::db/db database
-                            ::db/pull-pattern
-                            [:seon.config.llm-retry/maximum-wait-ms
-                             :seon.config.llm-retry/maximum-total-wait-ms
-                             :seon.config.llm-retry/default-retries]
-                            ::db/ref
-                            [:seon.config/id "cluster"]})
-                          (.then #(merge rendered %)))))))
-             :seon.agent.turn/transport!
-             #(pod-transport! (assoc % :seon.agent/llm-fn llm-fn)))))))
 
 (defn ^:async publish-phase!
   "Publish the evaled program and close its turn under the held epoch."

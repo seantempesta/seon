@@ -161,7 +161,8 @@
                 {:content [{:type "text" :text text}]
                  :usage (:seon.ai.http/usage result)
                  :stop_reason (:seon.ai.http/stop-reason result)})
-               (select-keys result [:seon.ai/config-evidence]))]
+               (select-keys result [:seon.ai/config-evidence
+                                    :seon.ai/status]))]
           (cond-> response
             (or (:seon.ai.http/aborted? result)
                 (nil? (:seon.ai.http/usage result)))
@@ -169,4 +170,4 @@
                    :seon.ai/estimated? true)))
         (merge
          (parse-completion (:seon.ai.http/body result))
-         (select-keys result [:seon.ai/config-evidence]))))))
+         (select-keys result [:seon.ai/config-evidence :seon.ai/status]))))))

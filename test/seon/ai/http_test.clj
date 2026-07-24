@@ -8,7 +8,7 @@
             [seon.ai.http :as http]
             [seon.config.resolve :as config.resolve])
   (:import [com.sun.net.httpserver HttpHandler HttpServer]
-           [java.net InetSocketAddress]
+           [java.net InetSocketAddress ServerSocket]
            [java.nio.charset StandardCharsets]
            [java.util.concurrent CountDownLatch Executors TimeUnit]))
 
@@ -43,6 +43,10 @@
     (.createContext instance "/v1/chat/completions" handler)
     (.start instance)
     instance))
+
+(defn- reset-client!
+  []
+  (reset! (var-get (ns-resolve 'seon.ai.http 'client-state)) nil))
 
 (defn- write-response!
   [exchange content-type body]
@@ -104,12 +108,130 @@
         (let [result (http/complete
                       (request (.getPort (.getAddress instance)) false 2000))]
           (is (= "(+ 1 2)" (:seon.ai/text result)))
+          (is (= 200 (:seon.ai/status result)))
           (is (= 9 (get-in result [:seon.ai/usage :total_tokens])))
           (is (= "Bearer not-a-real-secret"
                  (:authorization (deref observed 1000 nil))))
           (is (not (true? (get-in @observed [:body :stream]))))))
       (finally
         (.stop instance 0)))))
+
+(deftest long-lived-claimant-failures-retain-flat-causes
+  (let [bounded (deref #'driver.host/bounded-llm-transport!)
+        watchdog (Executors/newScheduledThreadPool 1)
+        host {:seon.host/watchdog watchdog
+              :seon.agent.driver/llm-transport! http/complete}]
+    (try
+      (reset-client!)
+      (binding [http/*environment-value* (constantly nil)]
+        (let [result (bounded host (request 1 false 1000))]
+          (is (str/includes?
+               (get-in result [:seon.ai/error :seon.ai/msg])
+               "No LLM API key"))
+          (is (nil? (get-in result [:seon.ai/error
+                                    :seon.ai/transport?])))))
+
+      (reset! (var-get (ns-resolve 'seon.ai.http 'client-state))
+              {:connect-timeout-ms 1 :client ::not-used})
+      (binding [http/*environment-value* (constantly "stub-key")]
+        (let [result (bounded host (request 1 false 1000))]
+          (is (str/includes?
+               (get-in result [:seon.ai/error :seon.ai/msg])
+               "connect timeout changed"))
+          (is (true? (get-in result [:seon.ai/error
+                                     :seon.ai/transport?])))))
+
+      (reset-client!)
+      (let [invalid-request!
+            (var-get (ns-resolve 'seon.ai.http 'request!))]
+        (binding [http/*environment-value* (constantly "stub-key")]
+          (let [result
+                (invalid-request!
+                 {:seon.ai.http/endpoint "://invalid"
+                  :seon.ai.http/credential-candidates
+                  [["DEEPSEEK_API_KEY" :configured]]
+                  :seon.ai.http/config-resolution
+                  (:seon.ai/config-resolution (request 1 false 1000))
+                  :seon.ai.http/credential-header "Authorization"
+                  :seon.ai.http/credential-prefix "Bearer "
+                  :seon.ai.http/headers {"Content-Type" "application/json"}
+                  :seon.ai.http/body {}
+                  :seon.ai.http/request-timeout-ms 1000
+                  :seon.ai.http/connect-timeout-ms 300000
+                  :seon.ai.http/maximum-response-bytes 1024
+                  :seon.ai.http/stream? false})]
+            (is (= "java.lang.IllegalArgumentException"
+                   (get-in result [:seon.ai/error
+                                   :seon.ai/exception-class])))
+            (is (string? (get-in result [:seon.ai/error
+                                         :seon.ai/exception-message]))))))
+
+      (reset-client!)
+      (let [closed-port
+            (with-open [socket (ServerSocket. 0)]
+              (.getLocalPort socket))]
+        (binding [http/*environment-value* (constantly "stub-key")]
+          (let [result (bounded host (request closed-port false 1000))]
+            (is (true? (get-in result [:seon.ai/error
+                                       :seon.ai/transport?])))
+            (is (string? (get-in result [:seon.ai/error
+                                         :seon.ai/exception-class])))
+            (is (string? (get-in result [:seon.ai/error
+                                         :seon.ai/exception-message])))
+            (is (nil? (get-in result [:seon.ai/error
+                                      :seon.ai/status]))))))
+
+      (reset-client!)
+      (let [status-server
+            (server
+             (reify HttpHandler
+               (handle [_ exchange]
+                 (.add (.getResponseHeaders exchange) "Retry-After" "1")
+                 (let [body "{\"error\":\"diagnostic\"}"
+                       bytes (.getBytes body StandardCharsets/UTF_8)]
+                   (.sendResponseHeaders exchange 503 (count bytes))
+                   (with-open [output (.getResponseBody exchange)]
+                     (.write output bytes))))))]
+        (try
+          (binding [http/*environment-value* (constantly "stub-key")]
+            (let [result
+                  (bounded host
+                           (request (.getPort (.getAddress status-server))
+                                    false 1000))]
+              (is (= 503 (get-in result [:seon.ai/error :seon.ai/status])))
+              (is (= "{\"error\":\"diagnostic\"}"
+                     (get-in result [:seon.ai/error :seon.ai/raw-body])))
+              (is (int? (get-in result
+                                [:seon.ai/error
+                                 :seon.ai/retry-after-ms])))))
+          (finally
+            (.stop status-server 0))))
+
+      (reset-client!)
+      (let [invalid-json-server
+            (server
+             (reify HttpHandler
+               (handle [_ exchange]
+                 (write-response! exchange "application/json" "not-json"))))]
+        (try
+          (binding [http/*environment-value* (constantly "stub-key")]
+            (let [result
+                  (bounded host
+                           (request (.getPort (.getAddress invalid-json-server))
+                                    false 1000))]
+              (is (= "not-json"
+                     (get-in result [:seon.ai/error :seon.ai/raw-body])))
+              (is (= 200 (get-in result [:seon.ai/error
+                                         :seon.ai/status])))
+              (is (string? (get-in result [:seon.ai/error
+                                           :seon.ai/exception-class])))
+              (is (string? (get-in result [:seon.ai/error
+                                           :seon.ai/exception-message])))))
+          (finally
+            (.stop invalid-json-server 0))))
+      (finally
+        (reset-client!)
+        (.shutdownNow watchdog)))))
 
 (deftest stream-aborts-after-the-portable-first-form-predicate
   (let [instance
@@ -206,6 +328,11 @@
                (request (.getPort (.getAddress instance)) true 100))]
           (is (.await entered 1 TimeUnit/SECONDS))
           (is (true? (get-in result [:seon.ai/error :seon.ai/timeout?])))
+          (is (true? (get-in result [:seon.ai/error
+                                     :seon.ai/outer-timeout?])))
+          (is (str/includes? (get-in result [:seon.ai/error
+                                             :seon.ai/msg])
+                             "claimant deadline"))
           (is (map? result))))
       (finally
         (.countDown release)

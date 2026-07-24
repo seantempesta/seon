@@ -3,6 +3,11 @@
             [seon.agent.driver :as driver]
             [seon.agent.driver.pod :as driver.pod]))
 
+(deftest pod-claimant-releases-model-io-to-the-jvm
+  (is (= #{:seon.agent.driver.capability/render
+           :seon.agent.driver.capability/publish}
+         (:seon.agent.driver/capabilities driver.pod/leaf))))
+
 (deftest dispatch-run-coalesces-process-local-fibers
   (async done
     (let [calls (atom 0)

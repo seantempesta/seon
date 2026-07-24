@@ -2,7 +2,6 @@
   "Pod external leaves for the portable claim driver."
   (:require [seon.agent.driver :as driver]
             [seon.agent.turn :as turn]
-            [seon.ai.dispatch :as ai.dispatch]
             [seon.db :as db]))
 
 (declare leaf)
@@ -36,20 +35,6 @@
     :render
     (await (turn/render-phase! claim))
 
-    :open-attempt
-    (let [result
-          (await
-           (turn/llm-phase!
-            (assoc claim :seon.agent/llm-fn (ai.dispatch/llm-fn))))]
-      (or (:seon.retry/result result) result))
-
-    :settle-attempt
-    (let [result
-          (await
-           (turn/llm-phase!
-            (assoc claim :seon.agent/llm-fn (ai.dispatch/llm-fn))))]
-      (or (:seon.retry/result result) result))
-
     :publish
     (await (turn/publish-phase! claim))
 
@@ -60,7 +45,6 @@
 (def leaf
   {:seon.agent.driver/capabilities
    #{:seon.agent.driver.capability/render
-     :seon.agent.driver.capability/llm
      :seon.agent.driver.capability/publish}
    :seon.agent.driver/now #(js/Date.)
    :seon.agent.driver/dispatch-run! dispatch-run!

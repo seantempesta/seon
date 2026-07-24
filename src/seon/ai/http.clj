@@ -30,6 +30,12 @@
   ([message fields]
    {:seon.ai/error (merge {:seon.ai/msg message} fields)}))
 
+(defn- exception-evidence
+  [^Throwable exception]
+  (cond-> {:seon.ai/exception-class (.getName (class exception))}
+    (some? (ex-message exception))
+    (assoc :seon.ai/exception-message (ex-message exception))))
+
 (defn- process-client
   [connect-timeout-ms]
   (if-let [{configured-ms :connect-timeout-ms client :client} @client-state]
@@ -88,9 +94,15 @@
        (some? retry-after-ms)
        (assoc :seon.ai/retry-after-ms retry-after-ms)))))
 
-(defn- read-json
+(defn- read-json-result
   [body]
-  (json/read-value body json-mapper))
+  (try
+    {:seon.ai.http/body (json/read-value body json-mapper)}
+    (catch Throwable exception
+      (failure
+       "The LLM provider returned an invalid JSON response."
+       (merge {:seon.ai/raw-body body}
+              (exception-evidence exception))))))
 
 (defn- send-batch
   [^HttpClient client ^HttpRequest request maximum-response-bytes]
@@ -100,7 +112,11 @@
         response (.send client request handler)
         body (.body response)]
     (if (<= 200 (.statusCode response) 299)
-      {:seon.ai.http/body (read-json body)}
+      (let [parsed (read-json-result body)]
+        (if (:seon.ai/error parsed)
+          (assoc-in parsed [:seon.ai/error :seon.ai/status]
+                    (.statusCode response))
+          (assoc parsed :seon.ai/status (.statusCode response))))
       (status-failure response body))))
 
 (defn- sse-data
@@ -130,22 +146,28 @@
                 (recur state)
 
                 (= "[DONE]" data)
-                state
+                (assoc state :seon.ai/status (.statusCode response))
 
                 :else
-                (let [next-state (step state (read-json data))
-                      prior-text (:seon.ai.http/text state)
-                      next-text (:seon.ai.http/text next-state)]
-                  (when (and progress!
-                             (string? next-text)
-                             (not= prior-text next-text))
-                    (try
-                      (progress! next-text)
-                      (catch Throwable _ nil)))
-                  (if (abort? next-state)
-                    (assoc next-state :seon.ai.http/aborted? true)
-                    (recur next-state)))))
-            state))))))
+                (let [parsed (read-json-result data)]
+                  (if (:seon.ai/error parsed)
+                    (assoc-in parsed [:seon.ai/error :seon.ai/status]
+                              (.statusCode response))
+                    (let [next-state (step state (:seon.ai.http/body parsed))
+                          prior-text (:seon.ai.http/text state)
+                          next-text (:seon.ai.http/text next-state)]
+                      (when (and progress!
+                                 (string? next-text)
+                                 (not= prior-text next-text))
+                        (try
+                          (progress! next-text)
+                          (catch Throwable _ nil)))
+                      (if (abort? next-state)
+                        (assoc next-state
+                               :seon.ai.http/aborted? true
+                               :seon.ai/status (.statusCode response))
+                        (recur next-state)))))))
+            (assoc state :seon.ai/status (.statusCode response))))))))
 
 (defn request!
   "Execute one prepared provider request on the invocation worker thread."
@@ -185,32 +207,40 @@
                :seon.ai/config-evidence evidence)))
           (catch InterruptedException interrupted
             (throw interrupted))
-          (catch HttpTimeoutException _
+          (catch HttpTimeoutException exception
             (assoc
              (failure "The LLM HTTP request timed out."
-                      {:seon.ai/timeout? true
-                       :seon.ai/transport? true})
+                      (merge
+                       {:seon.ai/timeout? true
+                        :seon.ai/transport? true}
+                       (exception-evidence exception)))
              :seon.ai/config-evidence evidence))
-          (catch ConnectException _
+          (catch ConnectException exception
             (assoc
              (failure "The LLM provider connection failed."
-                      {:seon.ai/transport? true})
+                      (merge
+                       {:seon.ai/transport? true}
+                       (exception-evidence exception)))
              :seon.ai/config-evidence evidence))
-          (catch IOException _
+          (catch IOException exception
             (if (.isInterrupted (Thread/currentThread))
               (throw (InterruptedException.
                       "LLM response consumption interrupted"))
               (assoc
                (failure "The LLM HTTP transport failed."
-                        {:seon.ai/transport? true})
+                        (merge
+                         {:seon.ai/transport? true}
+                         (exception-evidence exception)))
                :seon.ai/config-evidence evidence)))
-          (catch IllegalArgumentException _
+          (catch IllegalArgumentException exception
             (assoc
-             (failure "The resolved LLM HTTP request is invalid.")
+             (failure "The resolved LLM HTTP request is invalid."
+                      (exception-evidence exception))
              :seon.ai/config-evidence evidence))
-          (catch Throwable _
+          (catch Throwable exception
             (assoc
-             (failure "The LLM provider returned an invalid response.")
+             (failure "The LLM provider returned an invalid response."
+                      (exception-evidence exception))
              :seon.ai/config-evidence evidence))))
       (assoc
        (failure

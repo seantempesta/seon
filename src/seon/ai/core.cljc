@@ -17,10 +17,13 @@
 (schema/register! :seon.ai/msg :string)
 (schema/register! :seon.ai/status :int)
 (schema/register! :seon.ai/timeout? :boolean)
+(schema/register! :seon.ai/outer-timeout? :boolean)
 (schema/register! :seon.ai/transport? :boolean)
 (schema/register! :seon.ai/retry-after-ms :int)
 (schema/register! :seon.ai/evidence-error [:string {:min 1}])
 (schema/register! :seon.ai/raw-body :string)
+(schema/register! :seon.ai/exception-class [:string {:min 1}])
+(schema/register! :seon.ai/exception-message [:string {:min 1}])
 (schema/register! :seon.ai/agent-provider :seon.ai/provider)
 (schema/register! :seon.ai/agent-model [:string {:min 1}])
 (schema/register! :seon.ai/agent-temperature :double)
@@ -42,10 +45,13 @@
   [:seon.ai/msg :seon.ai/msg]
   [:seon.ai/status {:optional true} :seon.ai/status]
   [:seon.ai/timeout? {:optional true} :seon.ai/timeout?]
+  [:seon.ai/outer-timeout? {:optional true} :seon.ai/outer-timeout?]
   [:seon.ai/transport? {:optional true} :seon.ai/transport?]
   [:seon.ai/retry-after-ms {:optional true} :seon.ai/retry-after-ms]
   [:seon.ai/evidence-error {:optional true} :seon.ai/evidence-error]
-  [:seon.ai/raw-body {:optional true} :seon.ai/raw-body]])
+  [:seon.ai/raw-body {:optional true} :seon.ai/raw-body]
+  [:seon.ai/exception-class {:optional true} :seon.ai/exception-class]
+  [:seon.ai/exception-message {:optional true} :seon.ai/exception-message]])
 
 (def shipped-defaults
   "Per-provider shipped defaults for resolved model configuration."
