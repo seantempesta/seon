@@ -3,9 +3,12 @@
 
    Datahike materializes `:db.cardinality/many` as a vector on pull, so a
    `[:vector X]` schema LOOKS like it round-trips — the shape returns, the
-   order does not. Order survives only while entity ids ascend with
-   insertion, which holds for COMPONENT refs (minted fresh with their parent,
-   never interned) and fails for everything else.
+   order does not. Scalars pull in value order and refs pull in target
+   entity-id order. Component refs are NOT an exception: `:seon.error/frames`
+   is safe only because its renderers sort by an explicit frame index.
+
+   So order is never a property of the collection type. Where it matters,
+   store the position.
 
    These tests lock both halves: the empirical reason, and the invariant that
    makes the whole class unrepresentable."
