@@ -589,6 +589,16 @@ The R45 program is LIVE. Next: re-drive-3 (alive caveat) on this
 system, then S6 AOT cutover checkpoint, then the remaining U9 S4
 census-flip residue + graduation drills queue.
 
+AGENT BIRTH LIVE (~21:00): agentbirth ACCEPTED (ceac85812..3b1d1bf43)
+— root cause = stale program sidecars from a failing Shadow hook (not
+projection drift); config artifacts on Shadow classpath; hooks fenced
+into artifact identity; POST /agents 200 (open-fans-wish),
+/agent/{id} renders header+canvas via in-pod Datastar; strict schemas
+intact; 11/150 + 6/99 + 59/220 green. Residue committed dd2dc0f17 +
+5f10e3d7f (tree clean, HEAD=artifact). ALIVEGATE lane now running the
+final staged proof (plan/memory/read/formless-:done, datom-verified,
+proof-only, no source edits).
+
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 
 ## older restart protocol below until morning)
