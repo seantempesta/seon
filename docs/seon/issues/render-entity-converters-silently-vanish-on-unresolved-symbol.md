@@ -44,3 +44,16 @@ Closure additionally requires the canvas-only unresolved warning to be
 replaced by one derived, self-healing `:unresolved-symbol` family over final
 context slots, canvas, activated schema properties, and Stage-4 route rows,
 with the focused and frozen live proofs named by the boundary report.
+
+## Fresh-agent live evidence — 2026-07-24
+
+After coherent source artifact publication restored fresh birth, agent
+`open-fans-wish` returned HTTP 200 and its feed emitted a complete canvas.
+The same frame rendered the `interaction-outcome` context surface as
+`The authored function identity could not be acquired.` This is independent
+of agent creation and does not displace that blocker repair.
+
+Closure now also requires a current source apply followed by a fresh agent
+feed in which `interaction-outcome` omits itself before terminal interaction
+facts and renders the derived outcome after those facts exist; no unresolved
+function error card may remain.

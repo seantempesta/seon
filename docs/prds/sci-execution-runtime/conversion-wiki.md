@@ -1906,12 +1906,20 @@ the variable-weight values they select.
   owner when verification fails. Explicit apply then owns initialization and
   its completion receipt; only a later `up` may admit writer, host, claimant,
   pod, and web-render processes.
-- **Watcher liveness is not release identity.** A stopped watcher does not
-  invalidate byte-verified published outputs. Re-entering Shadow's fresh
-  compiler process for unchanged source can assign different compiler-local
-  symbols and therefore different client bytes, so startup first consumes
-  `artifact/current-manifest`; watcher readiness remains bound to that
-  manifest's client digest.
+- **A source release is admitted with its producing watcher.** Re-entering
+  Shadow's compiler for unchanged source can assign different compiler-local
+  symbols and therefore different client bytes. Source apply selects the
+  resolved manifest before the first flush, publishes the client and program
+  sidecars under that configuration, admits their one manifest, and retains
+  that exact watcher. Startup may reuse the release only while the producer is
+  alive and converged with it; otherwise it republishes before apply.
+- **Build-hook code participates in artifact identity and stays on Shadow's
+  classpath.** A hook load failure can leave a new `main.js` beside stale
+  program rows even when Shadow later prints a completed JavaScript build.
+  Keep pure shared helpers free of operator-only dependencies, hash the hook
+  dependency closure as source input, and refuse publication unless the first
+  watcher flush produced every coherent sidecar. The shortest falsifier is
+  sidecar/JavaScript modification times plus the affected schema row.
 - **Apply releases only the writer generation it acquired.** Startup ownership
   records whether explicit apply had to start the directly owned writer. On
   success, apply drains that exact managed generation before publishing the
