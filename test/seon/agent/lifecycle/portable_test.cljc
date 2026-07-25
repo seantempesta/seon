@@ -24,12 +24,3 @@
                :seon.agent.run/claimant]
               [:db/retract [:seon.agent/id "a"] :seon.agent/run]]
              (core/close-tx-data "a" "r" 3 :waited at))))))
-
-(deftest complete-is-a-portable-terminal-value
-  (let [value (lifecycle/complete "terminal synthesis")]
-    (is (= {:seon.agent.lifecycle/terminal :completed
-            :seon.agent.lifecycle/result "terminal synthesis"}
-           value))
-    (is (lifecycle/terminal-value? value))
-    (is (not (lifecycle/terminal-value?
-              {:seon.agent.lifecycle/terminal :completed})))))

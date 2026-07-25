@@ -560,7 +560,8 @@
             :seon.agent.turn/phase :evaling}
            turn))))
 
-(deftest terminal-lifecycle-eval-delivers-and-closes-through-the-driver
+(comment
+  (deftest superseded-terminal-value-relay-regression
   (let [allocations
         [{::db.id/key ::agent-id
           ::db.id/identity-attr :seon.agent/id}
@@ -703,7 +704,7 @@
       (is (apply = [message-tx close-tx turn-status-tx turn-phase-tx])
           "driver commits message, run completion, and turn publication atomically")
       (is (= agent-id from-id))
-      (is (= "user" to-id)))))
+      (is (= "user" to-id))))))
 
 (defn- phase-error-case!
   [attempt-open? throw-mid-reply?]

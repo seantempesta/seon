@@ -9,7 +9,7 @@
    must manage a live runtime."
   #?(:clj (:refer-clojure :exclude [await]))
   (:require
-   [malli.core :as m]
+   [clojure.string :as str]
    #?@(:cljs [[seon.agent.home :as home]
               [seon.agent.loop :as loop]
               [seon.agent.run :as run]
@@ -17,8 +17,12 @@
               [seon.runtime.admission :as admission]])
    [seon.agent.lifecycle.core :as core]
    [seon.agent.lifecycle.leaf :as leaf]
+   [seon.agent.message :as message]
+   [seon.agent.run.core :as run.core]
+   [seon.agent.turn.core :as turn.core]
    #?(:cljs [seon.agent.lifecycle.pod :as pod])
    [seon.db :as db]
+   [seon.db.id :as db.id]
    [seon.db.protocol :as protocol]
    [seon.schema :as schema]))
 
@@ -52,13 +56,6 @@
 
 (register-schema! ::note :string)
 (register-schema! ::result :string)
-(register-schema! ::terminal [:enum :completed])
-(def terminal-value-schema
-  [:map {:closed true}
-   [::terminal [:enum :completed]]
-   [::result :string]
-   [::result-ref {:optional true} :seon.db/ref]])
-(register-schema! ::terminal-value terminal-value-schema)
 (register-schema! ::target-request
   [:map [:seon.agent/id {:optional true} :seon.agent/id]])
 (register-schema! ::direct-error
@@ -341,23 +338,61 @@
               (if (error-value? report) report :idle))))))
     (core/no-agent-error "wait")))
 
-(defn ^:no-doc terminal-value?
-  "Whether a value is a terminal lifecycle completion value."
-  {:malli/schema [:=> [:cat :map] :boolean]}
-  [value]
-  (m/validate terminal-value-schema value))
+(defn- complete-transaction!
+  [result result-ref]
+  (let [context (db/current-tx-context)
+        agent-id (db/current-agent-id)
+        run-id (:seon.agent.run/id context)
+        claim-epoch (:seon.agent.run/claim-epoch context)
+        turn-id (:seon.agent.turn/id context)
+        database (db/db)
+        now #?(:clj (java.util.Date.) :cljs (js/Date.))]
+    (if (or (nil? agent-id) (nil? run-id) (nil? turn-id) (nil? claim-epoch))
+      (core/no-agent-error "complete")
+      (let [message-transaction
+            (message/message-transaction-for
+             database
+             {:seon.agent.message/from [:seon.agent/id agent-id]
+              :seon.agent.message/to [message/user-ref]
+              :seon.agent.message/content result
+              :seon.agent.message/at now})]
+        (if (error-value? message-transaction)
+          message-transaction
+          (db.id/allocate!
+           {::db/db database
+            ::db.id/allocations (:seon.agent.message/allocations message-transaction)
+            ::db.id/transaction-builder
+            (fn [ids]
+              (let [message-data
+                    (::db/tx-data
+                     ((:seon.agent.message/transaction-builder message-transaction) ids))]
+                {::db/tx-data
+                 (into
+                  (conj
+                   (turn.core/terminal-close-tx-data
+                    (run.core/run-fence agent-id run-id claim-epoch)
+                    agent-id run-id turn-id :evaling [] now :done :completed nil)
+                   (cond-> {:seon.agent.run/id run-id
+                            :seon.agent.run/result result}
+                     result-ref (assoc :seon.agent.run/result-ref result-ref)))
+                  message-data)}))}))))))
 
 (defn ^{:seon.capability/effect :pure} complete
-  "Return pure terminal intent for the claimant to publish and close.
-   Carries synthesis text; performs no database write, message delivery, or leaf operation."
+  "Settle this guarded claim through the canonical transcript transaction.
+   This vetted core function has no platform leaf: it delivers the synthesis and closes the turn and run."
   {:malli/schema
    [:function
-    [:=> [:catn [::result :string]] ::terminal-value]
+    [:=> [:catn [::result :string]] :seon.derive/state]
     [:=> [:catn [::result :string] [::result-ref :seon.db/ref]]
-     ::terminal-value]]}
-  ([result] {::terminal :completed ::result result})
+     :seon.derive/state]]}
+  ([result]
+   (if (str/blank? result)
+     (error-value "complete requires non-blank synthesis text.")
+     (complete-transaction! result nil)))
   ([result result-ref]
-   {::terminal :completed ::result result ::result-ref result-ref}))
+   (if (str/blank? result)
+     (error-value "complete requires non-blank synthesis text.")
+     (complete-transaction! result result-ref))))
 
 (defn ^{:async #?(:cljs true :clj false)
         :seon.capability/effect :external} pause

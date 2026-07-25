@@ -389,7 +389,7 @@
 
 (defn ^:async ^:no-doc message-transaction-for
   "Acquire and build one message transaction at an immutable database value."
-  [database {:seon.agent.message/keys [content from to origin]}]
+  [database {:seon.agent.message/keys [content from to origin at]}]
   (let [to (normalize-recipients to)
         send-data (await (internal/acquire-send-data database from to))]
     (if (failed-read? send-data)
@@ -399,7 +399,7 @@
         :seon.agent.message/from from
         :seon.agent.message/to to
         :seon.agent.message/origin origin
-        :seon.agent.message/at ((leaf-fn ::leaf/now))
+        :seon.agent.message/at (or at ((leaf-fn ::leaf/now)))
         :seon.agent.message/send-data send-data}))))
 
 (defn ^:async ^:no-doc initial-agent-transaction

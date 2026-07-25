@@ -151,19 +151,6 @@
         [#(set! run/resume! %) resume!]
         [#(set! admission/available? %) available?]]))))
 
-(deftest complete-returns-a-terminal-value-without-database-or-leaves
-  (let [first-value (lifecycle/complete "done")
-        second-value (lifecycle/complete "done" 99)]
-    (is (= {:seon.agent.lifecycle/terminal :completed
-            :seon.agent.lifecycle/result "done"}
-           first-value))
-    (is (= {:seon.agent.lifecycle/terminal :completed
-            :seon.agent.lifecycle/result "done"
-            :seon.agent.lifecycle/result-ref 99}
-           second-value))
-    (is (lifecycle/terminal-value? first-value))
-    (is (lifecycle/terminal-value? second-value))
-    (is (not (lifecycle/terminal-value? :idle)))))
 
 (deftest terminate-closes-the-observed-run-in-the-termination-transaction
   (async done

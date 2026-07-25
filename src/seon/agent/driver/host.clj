@@ -7,7 +7,6 @@
             [seon.ai.core :as ai.core]
             [seon.agent.driver :as driver]
             [seon.agent.interaction :as interaction]
-            [seon.agent.lifecycle :as lifecycle]
             [seon.agent.message :as message]
             [seon.agent.message.leaf :as message.leaf]
             [seon.agent.run.core :as run.core]
@@ -255,6 +254,7 @@
    :seon.execution/run-fence
    {:seon.agent.run/id run-id
     :seon.agent.run/claim-epoch claim-epoch
+    :seon.agent.turn/id turn-id
     :seon.config/configuration configuration}}
    (select-keys execution-plan
                 [:seon.execution/selected-tier
@@ -473,42 +473,6 @@
       ::context/lib lib}))
   nil)
 
-(defn- terminal-lifecycle-value
-  "Return the terminal lifecycle value emitted by one successful eval."
-  [batch]
-  (some
-   (fn [result]
-     (let [value (:seon.eval/value result)]
-       (when (and (:seon.eval/ok? result)
-                  (lifecycle/terminal-value? value))
-         value)))
-   (:seon.host/results batch)))
-
-(defn- open-attempt-ids
-  [turn]
-  (into []
-        (comp
-         (filter #(= :open (:seon.ai.attempt/outcome %)))
-         (map :seon.ai.attempt/id))
-        (:seon.agent.turn/llm-attempts turn)))
-
-(defn- terminal-lifecycle-tx-data
-  [agent-id run-id claim-epoch turn-id turn terminal-value]
-  (let [closed-at (java.util.Date.)]
-    (conj
-     (turn.core/terminal-close-tx-data
-      (run.core/run-fence agent-id run-id claim-epoch)
-      agent-id run-id turn-id :evaling (open-attempt-ids turn)
-      closed-at :done :completed nil)
-     (cond->
-      {:seon.agent.run/id run-id
-       :seon.agent.run/result (:seon.agent.lifecycle/result terminal-value)}
-       (:seon.agent.lifecycle/result-ref terminal-value)
-       (assoc :seon.agent.run/result-ref
-              (:seon.agent.lifecycle/result-ref terminal-value))))))
-
-(declare deliver-reply!)
-
 (defn- run-eval-batch!
   [host run claim-epoch database program invocation-configuration
    execution-plan]
@@ -543,18 +507,14 @@
            {:seon.agent/id agent-id
             :seon.agent.turn/id turn-id
             :seon.eval/executable-count executable-count}}
-          (let [terminal-value (terminal-lifecycle-value batch)
-                head (context/resolve-head! (:seon.host/writer host))]
-            (if terminal-value
-              (deliver-reply!
-               head agent-id run-id claim-epoch turn-id
-               (:seon.agent.lifecycle/result terminal-value)
-               (terminal-lifecycle-tx-data
-                agent-id run-id claim-epoch turn-id turn terminal-value)
-               {:seon.agent.driver/eval-batch batch
-                :seon.agent.driver/program program
-                :seon.agent.driver/closed? true
-                :seon.agent.run/closed-reason :completed})
+          (let [head (context/resolve-head! (:seon.host/writer host))
+                settled-turn (current-turn! head turn-id)]
+            (if (= :done (:seon.agent.turn/status settled-turn))
+              {:seon.db/db head
+               :seon.agent.driver/eval-batch batch
+               :seon.agent.driver/program program
+               :seon.agent.driver/closed? true
+               :seon.agent.run/closed-reason :completed}
               (let [terminal
                     (db/transact!
                      {::db/db head
