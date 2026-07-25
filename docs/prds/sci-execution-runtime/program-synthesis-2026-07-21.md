@@ -617,6 +617,18 @@ its nested `message/message-transaction-for` call requires an unbound
 capability binding and real completion drive. Evidence:
 `tmp/orchestrator/alivegate2-gate.log`.
 
+MEMORY LAYER PROVEN LIVE (~22:20, alivegate2): plan persisted +
+three memory entities written + LATER-TURN READ verified from datoms
+(t=536871259/337/352); 10/10 attempts :success; every turn
+:published/:done; zero wedge. Sole remaining gap: lifecycle/complete
+on the claimant lacks the message/*leaf* binding (host-base surface
+PARITY class — issue filed) → messageleaf lane fixing the class
+(audit all leaf families, one binding mechanism) + final synthesis
+proof = CAVEAT-CLEARED on success. dispositioncase earlier ACCEPTED
+(a8555f257: both dispositions :done live). The runtime beneath the
+gate is clean — every failure tonight settled terminal with custody
+released.
+
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 
 ## older restart protocol below until morning)
