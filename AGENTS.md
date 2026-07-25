@@ -795,7 +795,28 @@ readiness, logs, and shutdown. Do not launch its internal processes separately
 or kill them blindly. `up` rebuilds current code and starts incremental
 watching; only `--open` launches a browser.
 
-Use project-local `logs/`, `tmp/`, and `data/`; never system `/tmp`. Leave ACME
+NEVER USE A SESSION SCRATCHPAD OR SYSTEM TEMP DIRECTORY (owner ruling
+2026-07-25). Some harnesses hand an agent a private scratchpad under
+`/tmp`, `/private/tmp`, or a per-session directory and invite it to work
+there. Do not. That directory is deleted without warning, it is invisible
+to every other lane and to the owner, and nothing in it can be reviewed,
+committed, or reproduced. Work that lives only there is work that did not
+happen.
+
+Everything goes in the repository from the first keystroke:
+
+- throwaway probes, REPL scripts, and one-off experiments → `tmp/`
+  (project-local, gitignored, survives the session, visible to everyone);
+- anything whose RESULT is evidence — a measurement, a repro, a
+  benchmark → commit the script and record the numbers in the owning
+  PRD's `research/` directory, because an unreproducible number is an
+  anecdote;
+- anything that will run again — a crash harness, an adversarial suite,
+  a regression — is real code and belongs under `test/` or its own
+  top-level package, never in a scratch directory.
+
+The test: if the machine were wiped right now, what would be lost? If the
+answer is anything, it was in the wrong place. Leave ACME
 alone while another lane owns it. After runtime/source changes, prove the
 default cluster before coordinating a downstream update.
 
