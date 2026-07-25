@@ -650,6 +650,36 @@ context, direct transact, no relays, no leaves. Agents cannot wedge
 because the only coordination writes reachable from agent context
 are these vetted fns — that is the whole isolation story.
 
+## WIND-DOWN 2026-07-24 ~23:50 (owner-ordered pause — READ FIRST TOMORROW)
+
+OWNER DECISION PENDING (the morning's first item, owner handles
+personally): the fresh-eyes WTF review
+(research/wtf-review-2026-07-24.md) — 12 hops/turn, 7 WTFs; minimal
+design = one claimant kind owns the whole turn (no mid-turn pod
+handoffs, no second IPC), six phases → three checkpoints, plan layer
+→ binding-presence check + background indexer. Owner explicitly NOT
+ratifying yet (even full-adoption felt wrong); design session when
+fresh. Also queued for owner: R52 ratification (interactions=
+transactions), R53-final review (landed 8b23cdd4c), two lane-
+governance interim rules, execution-digest rename, and the reviewer-
+filed bug settle-eval-replay-arity-mismatch (crash-replay arm is
+broken — real, small, fix regardless of design outcome).
+
+STATE AT PAUSE: cluster DOWN clean (data preserved; bin/seon up
+restores ~40s). ALIVE CAVEAT: one datom run from cleared — plan/
+memory proven (alivegate2 t=536871259/337/352); R53-final complete
+landed (8b23cdd4c); only the single synthesis run on a green cluster
+remains. Lanes STOPPED mid-work with sessions preserved
+(bin/codex-agent resume <name>): cutwave (census D-list, partial —
+uncommitted edits in diffusion/*, conversion-wiki) and clusterops10
+(S6 cutover + apply transport, partial — uncommitted edits in
+build.clj, bin/test-writer, script/seon/dev/{artifact,config,
+process}.clj). DO NOT discard those working-tree hunks — they are
+the two lanes' in-progress work; resume the lanes or adjudicate
+before any build/boot. Day ledger: R45 S1-S6 live (300s→9s boots),
+U9 56 files/20,353 lines deleted, ~15 class fixes from live drives,
+rulings R47-R53 + census + WTF review durable in research/.
+
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 
 ## older restart protocol below until morning)
