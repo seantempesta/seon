@@ -107,6 +107,25 @@
                 {:seon.dev.cluster/artifact-manifest
                  (:seon.dev.config/artifact-manifest configuration)}))))
 
+(defn- apply-manifest!
+  [configuration acquire-owned!]
+  (if (= false (:seon.dev.config/source-checkout? configuration))
+    (current-manifest! configuration)
+    (or
+     (process/current-watcher-manifest configuration)
+     (let [manifest
+           (artifact/build!
+            configuration
+            (fn []
+              (process/prepare-watcher!
+               configuration
+               (fn [id acquire!]
+                 (acquire-owned!
+                  id acquire!
+                  (fn [] (process/stop! configuration id)))))))]
+       (process/admit-watcher-artifact! configuration manifest)
+       manifest))))
+
 (defn- bounded-diagnostic
   [value]
   (let [value (str/trim (or value ""))]
@@ -248,7 +267,7 @@
      (state/with-lock
       configuration :cluster 600000
       (fn []
-        (let [manifest (current-manifest! configuration)
+        (let [manifest (apply-manifest! configuration acquire-owned!)
               writer (get (process/specs target-configuration manifest)
                           process/writer-id)
               started-writer (atom nil)

@@ -218,6 +218,7 @@
         (fn [selected]
           (is (= configuration selected))
           manifest)
+        process/current-watcher-manifest (constantly manifest)
         process/specs
         (fn [selected selected-manifest]
           (is (= target-configuration selected))
@@ -270,6 +271,44 @@
         (is (= [:publish target-configuration] publish)))
       (finally (fs/delete-tree root {:force true})))))
 
+(deftest source-apply-publishes-with-the-watcher-it-retains
+  (let [configuration {:seon.dev.config/source-checkout? true}
+        manifest {:seon.dev.artifact/application-digest "application"}
+        effects (atom [])
+        acquire-owned!
+        (fn [id acquire! release!]
+          (swap! effects conj [:own id release!])
+          (acquire!))]
+    (with-redefs
+     [process/current-watcher-manifest (constantly nil)
+      artifact/build!
+      (fn [selected prepare-client!]
+        (is (= configuration selected))
+        (swap! effects conj :build)
+        (prepare-client!)
+        manifest)
+      process/prepare-watcher!
+      (fn [selected start-owned!]
+        (is (= configuration selected))
+        (start-owned!
+         process/watcher-id
+         (fn []
+           (swap! effects conj :watcher-start)
+           {:seon.dev.process/id process/watcher-id})))
+      process/admit-watcher-artifact!
+      (fn [selected selected-manifest]
+        (swap! effects conj [:admit selected selected-manifest]))]
+     (is (= manifest
+            (#'cluster/apply-manifest! configuration acquire-owned!))))
+    (is (= [:build
+            [:own process/watcher-id]
+            :watcher-start
+            [:admit configuration manifest]]
+           (mapv #(if (and (vector? %) (= :own (first %)))
+                    (subvec % 0 2)
+                    %)
+                 @effects)))))
+
 (deftest apply-requires-a-ready-writer-and-an-absent-pod
   (let [{::cluster/keys [target-configuration] :as request} (target-request)
         manifest {:seon.dev.artifact/application-digest "application"}
@@ -277,6 +316,7 @@
         pod {:seon.dev.process/id process/pod-id}
         ran? (atom false)]
     (with-redefs [artifact/current-manifest (constantly manifest)
+                  process/current-watcher-manifest (constantly manifest)
                   process/specs (fn [_ _]
                                   {process/writer-id writer
                                    process/pod-id pod})
@@ -351,6 +391,7 @@
         effects (atom [])]
     (with-redefs
      [artifact/current-manifest (constantly manifest)
+      process/current-watcher-manifest (constantly manifest)
       process/specs (fn [_ _]
                       {process/writer-id writer
                        process/pod-id pod})
@@ -409,6 +450,7 @@
              :seon.dev.process/environment {}}
         published? (atom false)]
     (with-redefs [artifact/current-manifest (constantly manifest)
+                  process/current-watcher-manifest (constantly manifest)
                   process/specs (fn [_ _]
                                   {process/writer-id writer
                                    process/pod-id pod})

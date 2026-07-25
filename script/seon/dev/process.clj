@@ -1522,6 +1522,17 @@
           (same-process-spec? spec record)
           (ready? config spec record)))))
 
+(defn current-watcher-manifest
+  "Return the current source manifest only while its producer remains.
+
+   The watcher must remain converged with that exact application identity."
+  {:malli/schema [:=> [:cat map?] [:or nil? map?]]}
+  [configuration]
+  (when-let [manifest (artifact/current-manifest configuration)]
+    (let [watcher-spec (get (specs configuration manifest) watcher-id)]
+      (when (converged? configuration watcher-spec)
+        manifest))))
+
 (defn- external-dependency-ready?
   [config dependency]
   (let [owner-config
