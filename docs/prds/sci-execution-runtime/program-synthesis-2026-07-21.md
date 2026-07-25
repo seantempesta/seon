@@ -638,6 +638,18 @@ already-proven plan/memory/later-read evidence it clears the caveat. Next
 dependency-ready refill is the claimant terminal-value implementation; final
 graduation remains U12's 100-agent kill/restart demonstration.
 
+R53-FINAL (owner, ~23:30, supersedes the value-relay form): the sci
+door is the ONLY containment; complete is CORE code that transacts
+settlement DIRECTLY on the claimant using ambient claim context
+(agent/run/epoch/turn bound by the door, like ambient db), through
+the one terminal-close + message mechanism; claim-epoch CAS = plain
+concurrency control, NOT a boundary concept. Post-terminal reply
+forms = steering no-ops. Same shape applies to the census C-list
+(suspend/resume/terminate): vetted core fns with ambient claim
+context, direct transact, no relays, no leaves. Agents cannot wedge
+because the only coordination writes reachable from agent context
+are these vetted fns — that is the whole isolation story.
+
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 
 ## older restart protocol below until morning)
