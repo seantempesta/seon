@@ -194,6 +194,52 @@
           (.catch (fn [error] (is false (str error))))
           (.finally (fn [] (restore!) (done)))))))
 
+(deftest reconcile-submits-the-whole-diff-as-one-atomic-transaction
+  (async done
+    (let [original-execute db/execute-many
+          original-transact db/transact!
+          desired
+          (mapv (fn [index]
+                  {:seon.runtime.state.scratch.a/id (str "row-" index)
+                   :seon.runtime.state.scratch.a/label "declared"})
+                (range 600))
+          transactions (atom [])
+          restore! (fn []
+                     (set! db/execute-many original-execute)
+                     (set! db/transact! original-transact))]
+      (set! db/execute-many
+            (fn [_]
+              (js/Promise.resolve
+               (authority-acquisition
+                {:seon.runtime.state.scratch.a/id
+                 {:db/unique :db.unique/identity}
+                 :seon.runtime.state.scratch.a/label {}}
+                [] [] []))))
+      (set! db/transact!
+            (fn [& [transaction]]
+              (swap! transactions conj transaction)
+              (js/Promise.resolve
+               (assoc authority-transaction-report
+                      :tx-data (::db/tx-data transaction)))))
+      (-> (state/reconcile!
+           {:seon.runtime.state/desired desired
+            :seon.db/managed-scope #{:seon.db.process/config}
+            :seon.db/managed-identity-attrs
+            #{:seon.runtime.state.scratch.a/id}
+            ::db/db authority-database})
+          (.then
+           (fn [result]
+             (is (= 600 (::state/operations result)))
+             (is (= 1 (count @transactions))
+                 "reconcile has one wire submission, never one per desired row")
+             (is (= (set desired)
+                    (set (::db/tx-data (first @transactions))))
+                 "the expected-database fence covers the complete exact diff")
+             (is (identical? authority-database
+                             (::db/expected-db (first @transactions))))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally (fn [] (restore!) (done)))))))
+
 (deftest explicit-database-convergence-performs-no-read-or-write
   (async done
     (let [original-db db/db
