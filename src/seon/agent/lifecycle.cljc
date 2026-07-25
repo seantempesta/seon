@@ -136,10 +136,9 @@
   "Reconstruct one existing, nonterminated agent in this process.
 
    The database entity must already exist. The function replaces any stale
-   loop listener/input. The supervised execution child reconstructs the
-   agent's compiler and authored program lazily. No cluster seed, program
-   replay, global instrumentation, identity allocation, or duplicate
-   membership bookkeeping occurs here."
+   loop listener/input. No cluster seed, program replay, global
+   instrumentation, identity allocation, or duplicate membership bookkeeping
+   occurs here."
   {:malli/schema [:=> [:cat ::resume-request] ::resume-response]}
   [{:seon.agent/keys [id] ::keys [llm-fn]}]
   (if-not (admission/available?)

@@ -819,8 +819,7 @@
     :seon.render/full?
     {:seon.runtime.recovery/_eval
      [:seon.runtime.recovery/id
-      :seon.runtime.recovery/detail
-      {:seon.runtime.recovery/diagnostic-blob [:my.blob/hash]}]}])
+      :seon.runtime.recovery/detail]}])
 
 (def ^:private html-eval-selector
   '[:db/id :seon.eval/id :seon.eval/at

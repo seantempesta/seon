@@ -305,7 +305,7 @@
             shared-system-text
             (or (:seon.config/system-text cluster-config-row)
                 ctx/system-text-shared)
-            system-prompt (ctx/render-system-text true shared-system-text)
+            system-prompt (ctx/render-system-text shared-system-text)
             config-resolution (ai/resolved-config-from-rows config-row entity)
             whole-prompt (when-not (seq profile)
                            (some->> (:seon.render/ai entity)

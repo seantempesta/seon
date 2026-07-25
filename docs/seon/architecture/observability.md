@@ -286,11 +286,12 @@ Claim recovery retains two database values rather than inventing a rollback
 point: the value pinned for the interrupted phase and the current value at which
 takeover terminalizes or advances it. Their basis transactions and commit IDs
 show what the old claimant saw and what committed before replacement. Process
-diagnostics may retain claimant identity, PID, signal or exit code, deadline
-classification, bounded output tails, and available resource usage. The next
-turn may state that replacement loaded the current database program and that
-transient tier-local values were lost. It never claims committed effects were
-undone or silently retries an effect contrary to its class.
+diagnostics stay in operator logs. Database forensics retain the claimant,
+epoch, phase cursor, attempt/eval receipts, and the thin claimant-session-loss
+recovery fact. The next turn may state that replacement loaded the current
+database program and that transient tier-local values were lost. It never
+claims committed effects were undone or silently retries an effect contrary
+to its class.
 
 ## The forensic agent
 

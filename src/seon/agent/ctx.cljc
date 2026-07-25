@@ -3,8 +3,8 @@
 
    This namespace owns block schemas, selection, installation, ordering, and
    shared formatting for the prompt's stable context structure. Individual
-   block families own their queries and presentation; execution children
-   acquire ordinary values, and `seon.render` guards their rendering."
+   block families own their queries and presentation; claimant JVMs acquire
+   ordinary values, and `seon.render` guards their rendering."
   (:require
     [clojure.string :as str]
     [#?(:clj clojure.edn :cljs cljs.reader) :as edn]
@@ -609,8 +609,8 @@
          ;; `:seon.eval/ok?` is optional while an eval row is being assembled
          ;; and on historical malformed rows.  `cap-result`'s public contract
          ;; is a boolean, so keep the derived flag boolean too; allowing
-         ;; `(and nil ...)` through instrumentation used to retire the whole
-         ;; execution child while merely rendering prior context.
+         ;; `(and nil ...)` through instrumentation used to fail the whole
+         ;; context render while merely formatting prior context.
          small-full? (boolean (and ok? (or full? escape?)))
          ;; Echoed source + stdout + error/guidance bodies cap at the
          ;; smaller `eval-render-cap` (1500); only the citable result
@@ -641,21 +641,16 @@
 
            (= :interrupted status)
            (let [{recovery-id :seon.runtime.recovery/id
-                  detail :seon.runtime.recovery/detail
-                  diagnostic-blob :seon.runtime.recovery/diagnostic-blob}
-                 (first recoveries)
-                 blob-hash (:my.blob/hash diagnostic-blob)]
+                  detail :seon.runtime.recovery/detail}
+                 (first recoveries)]
              (str result-marker
-                  " ✗ The execution child stopped while this form was running. "
+                  " ✗ The claimant session was lost while this form was running. "
                   (when detail (str detail ". "))
-                  "Runtime-local result vars and scratch definitions were "
-                  "discarded; their dead result handles are omitted. Committed "
-                  "database facts and program definitions remain. The fresh "
-                  "child reloads the current functions, schemas, and tests. "
-                  "Automatic recovery runs once and stops if the same form "
-                  "crashes again"
+                  "Process-local values and scratch definitions are unavailable. "
+                  "Committed database facts, program definitions, and receipts "
+                  "remain. A replacement claimant rebuilds from the current "
+                  "database program; an admitted form is not blindly replayed"
                   (when recovery-id (str "; recovery " recovery-id))
-                  (when blob-hash (str "; evidence blob " blob-hash))
                   "."))
 
            ok?
@@ -752,57 +747,27 @@
           (str/join "\n"))))
 
 ;; ------------------------------------------------------------
-;; Byte-stable system instructions. Context acquisition and child invocation
-;; are owned by seon.execution.runtime; this namespace formats their values.
+;; Byte-stable system instructions. The claimant owns guarded agent eval;
+;; this namespace formats the contract it teaches.
 ;; ------------------------------------------------------------
 
-(defn- child-platform-contract-section []
-  (str "; ── platform contract: child ──\n"
-       "; It is ClojureScript in a long-running Bun process: you have full js/\n"
-       "; interop (js/fetch, js/Date, (js/require \"node:fs\") and any installed\n"
-       "; npm package) but NO JVM — no java.*, no Java class. Reach for an npm\n"
-       "; package or a js/ builtin, never a java.* import.\n"
-       ";\n"
-       "; STATE ACROSS TURNS. A (defn ...) and an atom def like (def !x (atom\n"
-       "; 0)) persist in your namespace — define a helper now, call it next\n"
-       "; turn. A bare (def x 42) does NOT survive being read back on a later\n"
-       "; turn (a self-host limitation); hold mutable values in an atom, not a\n"
-       "; bare def.\n"
-       ";\n"
-       "; ASYNC FORMS. The runtime awaits a Promise returned by the WHOLE\n"
-       "; top-level form, so one top-level (db/query …) or (plan/tree …) returns\n"
-       "; DATA on the next turn. It does NOT make nested calls synchronous:\n"
-       "; (let [x (plan/tree {})] …) binds x to a Promise. Put dependent calls\n"
-       "; in separate top-level forms and reuse result/<id>, or define a ^:async\n"
-       "; function and (await …) each dependency inside it. A bare top-level\n"
-       "; (await x) throws because await is valid only inside an ^:async fn.\n"
-       "; ── end system ──"))
-
-(defn- host-platform-contract-section []
-  (str "; ── platform contract: host ──\n"
-       "; This host tier runs Clojure on the JVM. Calls are synchronous: write\n"
-       "; plain straight-line forms; no ^:async or await ceremony is needed.\n"
-       "; Definitions remain available across turns in this context; durable\n"
-       "; state that must survive host reconstruction belongs in the database.\n"
+(defn- platform-contract-section []
+  (str "; ── platform contract: JVM claimant ──\n"
+       "; Agent code runs as guarded Clojure on a claimant JVM. Calls are\n"
+       "; synchronous: write plain straight-line forms; no ^:async or await\n"
+       "; ceremony is needed.\n"
+       "; Recorded definitions remain available across turns; durable state\n"
+       "; that must survive claimant reconstruction belongs in the database.\n"
        "; JVM interop such as java.util.Date works. Prefer portable CLJC forms\n"
        "; such as inst-ms, and reach platform capabilities through my.* functions\n"
-       "; so ordinary data crosses runtime boundaries. Values that cannot cross\n"
-       "; are handles: act on them through their channel functions and prefer\n"
-       "; extracting ordinary data over retaining handles.\n"
+       "; so ordinary data crosses runtime boundaries.\n"
        "; ── end system ──"))
 
-(defn- platform-contract-section [host-tier?]
-  (if host-tier?
-    (host-platform-contract-section)
-    (child-platform-contract-section)))
-
 (defn render-system-text
-  "Compose shared system teaching with one tier-derived platform contract."
-  {:malli/schema [:=> [:catn [::host-tier? :boolean]
-                       [::shared-text :string]]
-                  :string]}
-  [host-tier? shared-text]
-  (str shared-text "\n;\n" (platform-contract-section host-tier?)))
+  "Compose shared system teaching with the claimant platform contract."
+  {:malli/schema [:=> [:catn [::shared-text :string]] :string]}
+  [shared-text]
+  (str shared-text "\n;\n" (platform-contract-section)))
 
 (def system-text-shared
   "The ONE always-on instruction floor — the concept paragraphs, the
@@ -814,8 +779,8 @@
    the skill bodies, reachable by (my.skills/load :name). This block is the
    floor, not the depth — a skill only DEEPENS a floor rule.
 
-   Shared by every agent and every turn. The tier-derived platform contract
-   is composed by [[render-system-text]] from the agent's database facts.
+   Shared by every agent and every turn. The claimant platform contract is
+   composed by [[render-system-text]].
    CACHE-PREFIX invariant: no timestamps, ids, or counts. PROVIDER-NEUTRAL:
    no model or vendor words, ever."
   (str
@@ -1148,8 +1113,8 @@
     ";   cannot read your certainty from your phrasing."))
 
 (def system-text
-  "The shipped child-tier system text used when no agent facts are available."
-  (render-system-text false system-text-shared))
+  "The shipped system text used when no agent facts are available."
+  (render-system-text system-text-shared))
 
 
 ;; ============================================================

@@ -655,30 +655,18 @@ agent fact, does not identify an entity class, and cannot retune an existing
 namespace resident. A stale write reacquires configuration and resolves the
 name again before retrying.
 
-### 4.5 optional process diagnostics — `:seon.runtime.recovery/*`
+### 4.5 claimant-session recovery — `:seon.runtime.recovery/*`
 
 Claim recovery is already represented by claim epochs, the turn phase, and
-attempt/eval receipts. An exceptional process diagnostic may add one small
-anchor without becoming a second recovery state machine. Queryable terminal
-facts remain datoms; the full diagnostic report is a content-addressed blob:
+attempt/eval receipts. Recovery adds one small claimant-session-loss anchor
+without becoming a second recovery state machine:
 
 | attribute | malli | datahike facet | notes |
 |---|---|---|---|
 | `:seon.runtime.recovery/id` | `[:and {:seon.db/identity true :seon.db.id/generator :seon.db.id.generator/compact} :seon.db.id/compact-value]` | string / one / identity | frozen operation identity; retry upserts the same anchor |
-| `:seon.runtime.recovery/reason` | `[:enum :unexpected-exit]` | keyword / one | the observed durable cause |
+| `:seon.runtime.recovery/reason` | `[:enum :claimant-session-loss]` | keyword / one | the observed durable cause |
 | `:seon.runtime.recovery/detail` | `[:string {:max 2048}]` | string / one | optional bounded diagnostic only when it is not derivable from transaction facts |
-| `:seon.runtime.recovery/diagnostic-blob` | `[:ref :my.blob/hash]` | ref / one | full process, invocation, sampled-stack, and output report |
-| `:seon.runtime.recovery/pid` | `:int` | long / one | failed execution process ID |
-| `:seon.runtime.recovery/exit-code` | `:int` | long / one | process exit code when observed |
-| `:seon.runtime.recovery/signal` | `:string` | string / one | terminating signal when observed |
-| `:seon.runtime.recovery/cpu-user-microseconds` | `:int` | long / one | optional terminal claimant-process sample |
-| `:seon.runtime.recovery/cpu-system-microseconds` | `:int` | long / one | optional terminal claimant-process sample |
-| `:seon.runtime.recovery/cpu-total-microseconds` | `:int` | long / one | optional derived total |
-| `:seon.runtime.recovery/rss-bytes` | `:int` | long / one | optional claimant-process sample |
-| `:seon.runtime.recovery/max-rss-bytes` | `:int` | long / one | optional maximum when available |
-| `:seon.runtime.recovery/elapsed-ms` | `:int` | long / one | parent-observed invocation duration |
-| `:seon.runtime.recovery/stdout-tail` | `[:string {:max 2048}]` | string / one | clipped execution stdout tail |
-| `:seon.runtime.recovery/stderr-tail` | `[:string {:max 2048}]` | string / one | clipped execution stderr tail |
+| `:seon.runtime.recovery/eval` | `:seon.db/ref` | ref / one | optional interrupted eval receipt connected to the anchor |
 
 The anchor does **not** copy agent/run/turn refs, timestamps, prior/current
 database values, acknowledgement state, or a rendered notice. Query the
@@ -688,9 +676,9 @@ metadata supplies user/process/time, and the commit graph supplies prior/current
 database values. Root's recovery notice and “still needs a decision” prominence are
 projections of that join and whether each affected agent has opened a later run.
 A running eval receipt becomes `:interrupted` with a concise crash error; takeover
-does not invent an eval row when no receipt committed. The diagnostic blob owns
-sample history, raw frames, complete output, and the full invocation report so
-large forensic evidence never becomes datom text.
+does not invent an eval row when no receipt committed. Process PID, exit, signal,
+resource, and output artifacts stay in operator logs rather than becoming a
+second database recovery model.
 
 ### 4.6 blob projection — `:my.blob/*`
 

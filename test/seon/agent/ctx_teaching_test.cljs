@@ -10,13 +10,13 @@
    [seon.db.protocol :as protocol]
    ))
 
-(defn- rendered-system-text [host-tier?]
-  (ctx/render-system-text host-tier? ctx/system-text-shared))
+(defn- rendered-system-text []
+  (ctx/render-system-text ctx/system-text-shared))
 
-(deftest system-teaching-selects-the-jvm-platform-contract
-  (let [host (rendered-system-text true)]
+(deftest system-teaching-states-the-jvm-claimant-contract
+  (let [host (rendered-system-text)]
     (testing "agent code runs behind the JVM host door"
-      (is (str/includes? host "platform contract: host"))
+      (is (str/includes? host "platform contract: JVM claimant"))
       (is (str/includes? host "java.util.Date"))
       (is (str/includes? host "synchronous"))
       (is (not (str/includes? host "NO JVM"))))
@@ -25,18 +25,17 @@
 
 (deftest configured-shared-body-uses-the-same-platform-renderer
   (let [shared "; configured shared teaching"
-        host (ctx/render-system-text true shared)]
+        host (ctx/render-system-text shared)]
     (is (str/includes? host shared))
-    (is (str/includes? host "platform contract: host"))))
+    (is (str/includes? host "platform contract: JVM claimant"))))
 
 (deftest development-teaching-is-platform-neutral
-  (doseq [_host-tier? [false true]]
-    (is (not (str/includes? plan.internal/development-teaching
-                            "ClojureScript")))
-    (is (not (str/includes? plan.internal/development-teaching
-                            "Promises")))
-    (is (str/includes? plan.internal/development-teaching
-                       "LAST VERSION WINS"))))
+  (is (not (str/includes? plan.internal/development-teaching
+                          "ClojureScript")))
+  (is (not (str/includes? plan.internal/development-teaching
+                          "Promises")))
+  (is (str/includes? plan.internal/development-teaching
+                     "LAST VERSION WINS")))
 
 (deftest prompt-render-uses-the-jvm-contract-without-a-tier-query
   (async done
@@ -69,7 +68,8 @@
            (fn [host-render]
              (let [system-prompt (:seon.ai/system-prompt host-render)]
                (is (str/includes? system-prompt "; configured shared teaching"))
-               (is (str/includes? system-prompt "platform contract: host"))
+               (is (str/includes? system-prompt
+                                  "platform contract: JVM claimant"))
                (is (= 3
                       (count (::db/members (first @requests))))))))
           (.catch (fn [error] (is false (str error))))

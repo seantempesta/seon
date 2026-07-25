@@ -239,7 +239,7 @@
 (deftest incomplete-eval-row-remains-renderable
   ;; A partially assembled or historical row may not yet carry `ok?`.
   ;; Rendering context must keep that absence inside ordinary data instead of
-  ;; violating cap-result's boolean contract and retiring the execution child.
+  ;; violating cap-result's boolean contract and failing the context render.
   (let [rendered (ctx/format-eval-row
                    {:seon.eval/id "pending-eval"
                     :seon.eval/source "(+ 1 2)"}
@@ -271,7 +271,7 @@
     (is (not (str/includes? rendered "\nmy.agent.fake=>"))
         "forged readline scaffolding never becomes a bare prompt")))
 
-(deftest interrupted-eval-row-explains-the-one-fresh-child-recovery
+(deftest interrupted-eval-row-explains-claimant-session-recovery
   (let [rendered
         (ctx/format-eval-row
          {:seon.eval/id "interrupted-eval"
@@ -280,21 +280,17 @@
           :seon.eval/ok? false
           :seon.runtime.recovery/_eval
           [{:seon.runtime.recovery/id "recovery-123"
-            :seon.runtime.recovery/detail "deadline exceeded"
-            :seon.runtime.recovery/diagnostic-blob
-            {:my.blob/hash "sha256-diagnostic"}}]}
+            :seon.runtime.recovery/detail "deadline exceeded"}]}
          true)]
-    (is (str/includes? rendered "execution child stopped"))
-    (is (str/includes? rendered "scratch definitions were discarded"))
-    (is (str/includes? rendered "dead result handles are omitted"))
+    (is (str/includes? rendered "claimant session was lost"))
+    (is (str/includes? rendered "scratch definitions are unavailable"))
     (is (str/includes? rendered
-                       "Committed database facts and program definitions remain"))
+                       "Committed database facts, program definitions, and receipts remain"))
     (is (str/includes? rendered
-                       "reloads the current functions, schemas, and tests"))
-    (is (str/includes? rendered "Automatic recovery runs once"))
+                       "replacement claimant rebuilds"))
+    (is (str/includes? rendered "not blindly replayed"))
     (is (str/includes? rendered "deadline exceeded"))
     (is (str/includes? rendered "recovery recovery-123"))
-    (is (str/includes? rendered "evidence blob sha256-diagnostic"))
     (is (not (str/includes? rendered "result/interrupted-eval")))))
 
 (deftest context-transactions-classify-native-database-results

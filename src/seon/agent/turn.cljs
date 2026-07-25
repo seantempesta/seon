@@ -39,8 +39,8 @@
                   [:inst {:seon.db/index true}])
 ;; A turn is running/done/error/interrupted — DISTINCT from the agent FSM state
 ;; (idle/running/…): a turn is a single completion, the agent is the actor.
-;; `:interrupted` is asserted only by unexpected-exit recovery when no runtime
-;; remains to close the committed turn normally.
+;; `:interrupted` is asserted only by claimant-session recovery when no
+;; claimant remains to close the committed turn normally.
 (schema/register! :seon.agent.turn/status
                   [:enum :running :done :error :interrupted])
 (schema/register! :seon.agent.turn/phase
@@ -371,22 +371,6 @@
    [:seon.agent.ctx/rendered-blocks {:optional true} [:vector :map]]])
 (schema/register! ::prompt-result [:or ::rendered-prompt ::prompt-error])
 
-(defn- execution-child-retired?
-  [value]
-  (or (true? (:seon.execution/child-retired? value))
-      (true? (get-in value [:seon.error/data
-                            :seon.execution/child-retired?]))))
-
-(defn- execution-child-evidence [value]
-  (when (execution-child-retired? value)
-    (let [data (:seon.error/data value)
-          nested (when (map? data) (:seon.error/data data))]
-      (cond
-        (and (map? nested)
-             (true? (:seon.execution/child-retired? nested))) nested
-        (map? data) data
-        :else value))))
-
 (declare invoke-prompt-calls!)
 
 (defn- supports-arity?
@@ -671,27 +655,19 @@
       ;; Mark the turn :error best-effort, then preserve the pre-allocation
       ;; propagation contract. Scheduled/direct callers still observe a
       ;; rejected Promise; the committed id travels with that rejection.
-      (let [message (turn-error-str e)
-            failure-data (ex-data e)
-            child-retired? (execution-child-retired? failure-data)
-            child-evidence (execution-child-evidence failure-data)]
-        (when-not child-retired?
-          (try
-            (await (db/transact!
-                    {:seon.db/tx-data
-                     [{:seon.agent.turn/id     id-of-turn
-                       :seon.agent.turn/status :error
-                       :seon.agent.turn/error  message}]}))
-            (catch :default _ nil)))
+      (let [message (turn-error-str e)]
+        (try
+          (await (db/transact!
+                  {:seon.db/tx-data
+                   [{:seon.agent.turn/id     id-of-turn
+                     :seon.agent.turn/status :error
+                     :seon.agent.turn/error  message}]}))
+          (catch :default _ nil))
         (throw
           (ex-info message
-                   (cond->
-                    {:seon.agent.turn/id     id-of-turn
-                     :seon.agent.turn/status :error
-                     :seon.error/data        message}
-                     child-retired?
-                     (assoc :seon.execution/child-retired? true
-                            :seon.error/data child-evidence))
+                   {:seon.agent.turn/id     id-of-turn
+                    :seon.agent.turn/status :error
+                    :seon.error/data        message}
                    e))))))
 
 ;;; CLAIM-NATIVE POD PHASE LEAF
