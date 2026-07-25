@@ -576,7 +576,7 @@
 ;; deadline watchdog, the heartbeat watchdog, boot crash-recovery all call it),
 ;; so the parent notice lives HERE, once — never sprinkled across the close
 ;; sites. Notices go out only for the OUTCOME reasons below; `:completed` is
-;; excluded (`seon.agent.lifecycle/complete` sends the result itself),
+;; excluded (the claimant driver delivers its terminal result itself),
 ;; `:waited`/`:terminated`/`:superseded` are not outcomes. A notice is an
 ;; `:agent`-origin message `from` the child — the loop/watchdog sends ON THE
 ;; CHILD'S BEHALF (same authorship model as `complete`), so it WAKES the parent
@@ -590,7 +590,7 @@
 
 (def ^:private outcome-reasons
   "The `closed-reason`s that message the PARENT (Piece 2b). `:completed` is
-   NOT here — `complete` owns the result message; `:waited`/`:terminated`/
+   NOT here — claimant settlement owns the result message; `:waited`/`:terminated`/
    `:superseded` are not task outcomes."
   #{:turn-limit :deadline-exceeded :error :no-forms :crashed})
 
@@ -778,7 +778,7 @@
                                   closed-at))}))]
         ;; Piece 2b — route the parent/root OUTCOME notice through this one
         ;; choke point (only after the close committed; only for an outcome
-        ;; reason; never for :completed, which `complete` messages itself).
+        ;; reason; never for :completed, which claimant settlement delivers).
         (when-not (error-value? report)
           (await (notify-outcome! (:db-after report) reason run-id)))
         report))))))
