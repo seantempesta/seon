@@ -232,7 +232,8 @@
    ["seon.agent.fs/walk-dir" {::unit :w5-0g}]
    ["seon.agent.fs/write-file" {::unit :w5-0g}]
 
-   ;; W5-0d lifecycle capability family.
+   ;; W5-0d lifecycle surface: `complete` is a pure terminal value; the rest
+   ;; are operational capabilities.
    ["seon.agent.lifecycle/complete" {::disposition :host/resolved}]
    ["seon.agent.lifecycle/pause" {::disposition :host/resolved}]
    ["seon.agent.lifecycle/resume" {::disposition :host/resolved}]

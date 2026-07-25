@@ -348,7 +348,8 @@
   (m/validate terminal-value-schema value))
 
 (defn ^{:seon.capability/effect :pure} complete
-  "Return a terminal lifecycle value for the claimant to publish and close."
+  "Return pure terminal intent for the claimant to publish and close.
+   Carries synthesis text; performs no database write, message delivery, or leaf operation."
   {:malli/schema
    [:function
     [:=> [:catn [::result :string]] ::terminal-value]
