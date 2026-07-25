@@ -629,6 +629,16 @@ proof = CAVEAT-CLEARED on success. dispositioncase earlier ACCEPTED
 gate is clean — every failure tonight settled terminal with custody
 released.
 
+R53 RULED (~22:50, owner): LIFECYCLE COMPLETION IS NOT A CAPABILITY.
+seon.agent.lifecycle/complete = a PURE function returning a terminal
+lifecycle VALUE; the claimant driver interprets it and performs
+settlement + message delivery through its existing canonical path
+(terminal-close + the formless-reply delivery mechanism). No leaves,
+no bindings, admissible on every tier by construction — the
+leaf-parity bug class for lifecycle DISSOLVES rather than being
+patched. messageleaf lane redirected mid-fix; leaf-binding wiring
+for lifecycle reverted in favor of R53.
+
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 
 ## older restart protocol below until morning)
