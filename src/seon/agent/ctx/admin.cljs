@@ -16,7 +16,7 @@
 (defn- upsert-ctx-tx [id blocks]
   (into [[:db.fn/retractAttribute [:seon.agent/id id] :seon.agent/ctx]]
         (when (seq blocks)
-          [{:seon.agent/id id :seon.agent/ctx (vec blocks)}])))
+          [{:seon.agent/id id :seon.agent/ctx (set blocks)}])))
 
 (defn ^:async ^:private acquire-context-blocks [id]
   (let [entity (await

@@ -460,7 +460,7 @@
                 [:seon.agent/id agent-id] :seon.agent/ctx]]
               (when (seq blocks)
                 [{:seon.agent/id agent-id
-                  :seon.agent/ctx (vec blocks)}]))
+                  :seon.agent/ctx (set blocks)}]))
         result ((get database-functions 'transact!)
                 {:seon.db/tx-data transaction-data})]
     (if-let [message (:seon.error/message result)]

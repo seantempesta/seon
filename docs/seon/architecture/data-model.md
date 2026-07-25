@@ -20,7 +20,7 @@ agent calls over them.
 ## 1. TL;DR — the entity graph in one paragraph
 
 The **agent** (`:seon.agent/id`, identity) is the root. It OWNS, by
-cascade-retract component vectors, its **blocks** (`:seon.agent/ctx` →
+cascade-retract component relationships, its **blocks** (`:seon.agent/ctx` →
 `:seon.agent.ctx/block` children — the context units, each up to two renders)
 and its **schedules** (`:seon.agent/schedules` → `:seon.agent.schedule` cron
 maps). It POINTS (plain ref) at its current **run** (`:seon.agent/run`) and at
@@ -75,9 +75,9 @@ A **plain ref** is a single pointer (`:db.cardinality/one :db.type/ref`):
 the referent's lifecycle — a fn does not own its ns; a turn does not own its run;
 a plan step does not own its parent.
 
-A **component ref vector** `[:vector {:seon.db/component true} :seon.db/ref]` is
-an OWNED-children list: `{:seon.db/component true}` → `:db/isComponent true` and
-the vector wrapper → `:db.cardinality/many`. Datahike requires a component attr
+A **component ref set** `[:set {:seon.db/component true} :seon.db/ref]` is an
+OWNED-children relationship: `{:seon.db/component true}` →
+`:db/isComponent true` and the set wrapper → `:db.cardinality/many`. Datahike requires a component attr
 to also be `:db.type/ref`, which `:seon.db/ref` provides. **Component = cascade
 retract:** on `[:db.fn/retractEntity parent]`, datahike's `retract-components`
 (in `db/transaction.cljc`) maps every component-attr datom to a child
@@ -88,7 +88,7 @@ and retracting a turn retracts its evals. The owned-children attrs:
 and our bridge `src/seon/db/internal.cljs:344-350` (the component/identity facet) —
 [[library-grounding]]. (Contrast `:my.plan/parent`, a PLAIN ref: no cascade.)
 
-To REPLACE a whole component vector (reconcile, `install!`/`remove!`) so its owned
+To REPLACE a whole component relationship (reconcile, `install!`/`remove!`) so its owned
 children match a desired set, retract the attribute with **`:db.fn/retractAttribute`**
 — only `retractAttribute` and `retractEntity` run `retract-components`; a plain
 `:db/retract` on the attribute severs the parent→child edges but leaves the child
@@ -432,7 +432,7 @@ bridge-storable. See [[library-grounding]].
 | `:seon.agent.runtime/wake?` | `:boolean` | boolean / one | optional; false suppresses the process-local inbound listener while preserving manual hosting; absence means true |
 | `:seon.eval/home-requires` | serialized require-spec vector | string (EDN) / one | optional; exact per-agent home namespace declaration selected at birth and read during runtime reconstruction |
 | `:seon.agent/schedules` | `[:vector {:seon.db/component true} :seon.db/ref]` | ref / many / **component** | owned cron maps (cascade-retract) |
-| `:seon.agent/ctx` | `[:vector {:seon.db/component true} :seon.db/ref]` | ref / many / **component** | owned **blocks** (cascade-retract), seeded at creation, sorted by `:seon.agent.ctx/priority` at render |
+| `:seon.agent/ctx` | `[:set {:seon.db/component true} :seon.db/ref]` | ref / many / **component** | owned **blocks** (cascade-retract), seeded at creation, sorted by `:seon.agent.ctx/priority` at render |
 | `:seon.render/ai` | `:seon.render/ai` | string (EDN) / one | optional; the agent record's own ai render (absent by default) |
 | `:seon.render/html` | `:seon.render/html` | string (EDN) / one | optional; generic entity-render override, not the focal canvas pin |
 | `:seon.render.canvas/content` | `:seon.render.canvas/content` | string (EDN) / one | optional; literal hiccup or qualified renderer symbol explicitly pinning the focal canvas; absence derives focus |
@@ -646,8 +646,8 @@ proves the compatible surface insufficient. Local workers remain compiled
 local dispatch by explicit contract; descriptors describe hosted wires only.
 
 The configuration singleton may hold
-`:seon.config/model-variants`, a cardinality-one EDN map from a role keyword to
-a closed sparse map of those same agent attributes. Agent-birth calls accept
+`:seon.config/model-variants`, a component set of rows identified by role
+keyword and carrying a closed sparse map of those same agent attributes. Agent-birth calls accept
 the request-only `:seon.config/model-variant` selector. They resolve it from the
 configuration acquired at that immutable database value and copy the selected
 attributes onto the new agent in the birth transaction. The selector is not an
@@ -1138,6 +1138,11 @@ Each key resolves onto the flat `:seon.config/singleton` entity (`config.cljs`,
 every knob `{:optional true}`, `:seon.config/id` the only required key), so the
 render caps, the reply facts, `system-text`, `on-core-error`, and the multi-agent
 dials are all datoms acquired with the agent turn's other database inputs.
+The singleton owns `:seon.config/agent-context` and
+`:seon.config/root-context` through cardinality-one component refs. Its
+context profiles, provider descriptors, model variants, and render-context
+file fingerprints are component sets whose child identities—not pull order—
+select their values.
 `resolve-routes`
 produces canonical desired maps reconciled exactly when selected; absence from the
 final route population means removal. The optional skills section is an
@@ -1224,7 +1229,7 @@ the presence of `:seon.error/fault` and carrying only EDN-safe projections:
 | `:seon.error/kind` | `:keyword` | keyword / one | optional diagnostic value enum |
 | `:seon.error/db` | `:seon.db/database-value` | ordinary encoded map / one | complete catch-site database value |
 | `:seon.error/stack` | `:string` | string / one | optional bounded raw stack |
-| `:seon.error/frames` | `[:vector {:seon.db/component true} :seon.db/ref]` | ref / many / component | optional parsed frames |
+| `:seon.error/frames` | `[:set {:seon.db/component true} :seon.db/ref]` | ref / many / component | optional parsed frames; `:seon.error.frame/index` restores stack order |
 | `:seon.error/args-edn` | `:string` | string / one | optional bounded arguments |
 | `:seon.error/data-edn` | `:string` | string / one | optional bounded structured data |
 

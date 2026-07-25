@@ -532,15 +532,21 @@
          (first (db/malli->datahike-schema [:seon.config/skills-dir])))
       "the optional skill corpus input stores one ordinary string")
   (doseq [attribute [:seon.config/agent-context
-                     :seon.config/root-context
-                     :seon.config/context-profiles
+                     :seon.config/root-context]]
+    (is (= {:db/ident attribute
+            :db/valueType :db.type/ref
+            :db/cardinality :db.cardinality/one
+            :db/isComponent true}
+           (first (db/malli->datahike-schema [attribute])))
+        (str attribute " stores one native component ref")))
+  (doseq [attribute [:seon.config/context-profiles
                      :seon.agent/ctx]]
     (is (= {:db/ident attribute
             :db/valueType :db.type/ref
             :db/cardinality :db.cardinality/many
             :db/isComponent true}
            (first (db/malli->datahike-schema [attribute])))
-        (str attribute " stores one native component relation")))
+        (str attribute " stores one native component set")))
   (doseq [attribute [:seon.config/context
                      :seon.config/context-profile]]
     (is (= {:db/ident attribute
@@ -857,16 +863,16 @@
         configuration (config/resolve-config-singleton manifest)
         selected (get (config/model-variants configuration) :planning)
         resolved (config/resolve-agent-context "planner" selected configuration)]
-    (is (= [{:seon.config/model-variant :planning
-             :seon.ai/agent-provider :openai-compat
-             :seon.config/repl-mode :batch
-             :seon.ai/agent-model "kimi-k3"
-             :seon.ai/agent-max-tokens 16384
-             :seon.ai/agent-completion-limit-field :max-completion-tokens
-             :seon.ai/agent-timeout-ms 180000
-             :seon.ai/agent-attempt-timeout-ms 240000
-             :seon.ai/agent-base-url "https://api.moonshot.ai/v1"
-             :seon.ai/agent-api-key-env "MOONSHOT_API_KEY"}]
+    (is (= #{{:seon.config/model-variant :planning
+              :seon.ai/agent-provider :openai-compat
+              :seon.config/repl-mode :batch
+              :seon.ai/agent-model "kimi-k3"
+              :seon.ai/agent-max-tokens 16384
+              :seon.ai/agent-completion-limit-field :max-completion-tokens
+              :seon.ai/agent-timeout-ms 180000
+              :seon.ai/agent-attempt-timeout-ms 240000
+              :seon.ai/agent-base-url "https://api.moonshot.ai/v1"
+              :seon.ai/agent-api-key-env "MOONSHOT_API_KEY"}}
            (:seon.config/model-variants configuration))
         "resolution emits identified component children")
     (is (= {:planning planning} (config/model-variants configuration)))
@@ -1300,7 +1306,7 @@
       (is (not-any? #(contains? s %)
                     (vals resolve/repair-class-attributes))
           "absent repair switches remain absent native facts")
-      (is (= []        (:seon.agent.web/allowed-domains s)))
+      (is (= #{}       (:seon.agent.web/allowed-domains s)))
       (is (not (contains? s :seon.config/current-ns))
           "namespace render selection belongs to the namespaces block")
       ;; system-text has NO default — absent from a bare manifest
@@ -1313,9 +1319,9 @@
                          {:seon.config/namespaces
                           {:seon.config/current-ns :off}}))
         "the removed duplicate render switch fails instead of being ignored"))
-  (testing "an absent cardinality-many allowlist reads as an empty vector"
+  (testing "an absent cardinality-many allowlist reads as an empty set"
     (is (= {:seon.agent.web/policy :public-only
-            :seon.agent.web/allowed-domains []}
+            :seon.agent.web/allowed-domains #{}}
            (config/web-policy {}))))
   (testing "a manifest value overrides the resolved knob"
     (let [agent-context {:seon.agent/ctx
@@ -1356,8 +1362,9 @@
       (is (= :log (:seon.config/on-core-error s)))
       (is (= "you are a helpful agent" (:seon.config/system-text s)))
       (is (= skills-dir (:seon.config/skills-dir s)))
-      (is (= [(assoc agent-context
-                     :seon.config/context :seon.config.context/agent)]
+      (is (= (-> agent-context
+                 (assoc :seon.config/context :seon.config.context/agent)
+                 (update :seon.agent/ctx set))
              (:seon.config/agent-context s)))
       (is (= [:canvas :transcript]
              (mapv :seon.agent.ctx/name
@@ -1416,13 +1423,13 @@
   (let [pulled
         {:seon.config/id "cluster"
          :seon.config/agent-context
-         [{:db/id 40
-           :seon.config/context :seon.config.context/agent
-           :seon.agent/ctx
-           [{:db/id 42 :seon.agent.ctx/name :transcript
-             :seon.agent.ctx/priority 100}
-            {:db/id 41 :seon.agent.ctx/name :plan
-             :seon.agent.ctx/priority 45}]}]
+         {:db/id 40
+          :seon.config/context :seon.config.context/agent
+          :seon.agent/ctx
+          [{:db/id 42 :seon.agent.ctx/name :transcript
+            :seon.agent.ctx/priority 100}
+           {:db/id 41 :seon.agent.ctx/name :plan
+            :seon.agent.ctx/priority 45}]}
          :seon.config/context-profiles
          [{:db/id 43
            :seon.config/context-profile :autocomplete
@@ -1485,25 +1492,27 @@
 
 (deftest reconcile-replaces-context-component-trees-exactly
   (let [identity [:seon.config/id config/cluster-config-id]
-        component-schema {:db/valueType :db.type/ref
-                          :db/cardinality :db.cardinality/many
-                          :db/isComponent true}
-        installed (zipmap [:seon.config/agent-context
-                           :seon.config/root-context
-                           :seon.config/context-profiles]
-                          (repeat component-schema))
+        component-set-schema {:db/valueType :db.type/ref
+                              :db/cardinality :db.cardinality/many
+                              :db/isComponent true}
+        component-ref-schema {:db/valueType :db.type/ref
+                              :db/cardinality :db.cardinality/one
+                              :db/isComponent true}
+        installed {:seon.config/agent-context component-ref-schema
+                   :seon.config/root-context component-ref-schema
+                   :seon.config/context-profiles component-set-schema}
         current
         {:seon.config/id config/cluster-config-id
          :seon.config/agent-context
-         [{:db/id 40 :seon.config/context :seon.config.context/agent
-           :seon.agent/ctx
-           [{:db/id 41 :seon.agent.ctx/name :transcript
-             :seon.agent.ctx/priority 90}]}]
+         {:db/id 40 :seon.config/context :seon.config.context/agent
+          :seon.agent/ctx
+          [{:db/id 41 :seon.agent.ctx/name :transcript
+            :seon.agent.ctx/priority 90}]}
          :seon.config/root-context
-         [{:db/id 42 :seon.config/context :seon.config.context/root
-           :seon.agent/ctx
-           [{:db/id 43 :seon.agent.ctx/name :canvas
-             :seon.agent.ctx/priority 35}]}]
+         {:db/id 42 :seon.config/context :seon.config.context/root
+          :seon.agent/ctx
+          [{:db/id 43 :seon.agent.ctx/name :canvas
+            :seon.agent.ctx/priority 35}]}
          :seon.config/context-profiles
          [{:db/id 44 :seon.config/context-profile :autocomplete
            :seon.agent/ctx
@@ -1512,17 +1521,17 @@
         desired
         {:seon.config/id config/cluster-config-id
          :seon.config/agent-context
-         [{:seon.config/context :seon.config.context/agent
-           :seon.agent/ctx
-           [{:seon.agent.ctx/name :transcript
-             :seon.agent.ctx/priority 100}]}]
+         {:seon.config/context :seon.config.context/agent
+          :seon.agent/ctx
+          [{:seon.agent.ctx/name :transcript
+            :seon.agent.ctx/priority 100}]}
          :seon.config/root-context
-         [{:seon.config/context :seon.config.context/root
-           :seon.agent/ctx
-           [{:seon.agent.ctx/name :canvas
-             :seon.agent.ctx/priority 35}
-            {:seon.agent.ctx/name :transcript
-             :seon.agent.ctx/priority 100}]}]}
+         {:seon.config/context :seon.config.context/root
+          :seon.agent/ctx
+          [{:seon.agent.ctx/name :canvas
+            :seon.agent.ctx/priority 35}
+           {:seon.agent.ctx/name :transcript
+            :seon.agent.ctx/priority 100}]}}
         tx-data (#'state/entity-exact-tx
                  {} {} installed identity desired current)]
     (is (= [[:db.fn/retractAttribute identity :seon.config/agent-context]
@@ -1626,11 +1635,14 @@
                           raw-children
                           (:seon.config/model-variants acquired)
                           raw-agent
-                          (first (:seon.config/agent-context acquired))
+                          (:seon.config/agent-context acquired)
                           raw-root
-                          (first (:seon.config/root-context acquired))
+                          (:seon.config/root-context acquired)
                           raw-profile
-                          (first (:seon.config/context-profiles acquired))]
+                          (some #(when (= :autocomplete
+                                          (:seon.config/context-profile %))
+                                   %)
+                                (:seon.config/context-profiles acquired))]
                       (is (vector? raw-children)
                           "wildcard pull materializes cardinality-many refs as a vector")
                       (is (= 3 (count raw-children)))
@@ -1730,9 +1742,8 @@
                                    (is (= config-block-ids
                                           (into #{} (map :db/id)
                                                 (:seon.agent/ctx
-                                                 (first
-                                                  (:seon.config/agent-context
-                                                   acquired-again)))))
+                                                 (:seon.config/agent-context
+                                                  acquired-again))))
                                        "seed copy never rekeys the config-owned tree")))))))))))))
           (.finally
            (fn []
@@ -1761,19 +1772,19 @@
 (deftest agent-context-is-derived-from-explicit-config-data
   (let [stored {:seon.config/id config/cluster-config-id
                 :seon.config/agent-context
-                [{:db/id 40
-                  :seon.config/context :seon.config.context/agent
-                  :seon.agent/ctx
-                  [{:db/id 41 :seon.agent.ctx/name :transcript
-                    :seon.agent.ctx/priority 100}]}]
+                {:db/id 40
+                 :seon.config/context :seon.config.context/agent
+                 :seon.agent/ctx
+                 [{:db/id 41 :seon.agent.ctx/name :transcript
+                   :seon.agent.ctx/priority 100}]}
                 :seon.config/root-context
-                [{:db/id 42
-                  :seon.config/context :seon.config.context/root
-                  :seon.agent/ctx
-                  [{:db/id 44 :seon.agent.ctx/name :transcript
-                    :seon.agent.ctx/priority 100}
-                   {:db/id 43 :seon.agent.ctx/name :canvas
-                    :seon.agent.ctx/priority 35}]}]}]
+                {:db/id 42
+                 :seon.config/context :seon.config.context/root
+                 :seon.agent/ctx
+                 [{:db/id 44 :seon.agent.ctx/name :transcript
+                   :seon.agent.ctx/priority 100}
+                  {:db/id 43 :seon.agent.ctx/name :canvas
+                   :seon.agent.ctx/priority 35}]}}]
     (with-redefs [config/load-manifest
                   (fn [] (throw (js/Error. "external config must not be read")))]
       (let [ordinary (config/resolve-agent-context "worker-x" nil stored)

@@ -74,7 +74,7 @@
    :seon.db/ref
    :seon.config.render-context/file-fingerprint])
 (schema/register! :seon.config.render-context/file-fingerprints
-  [:vector {:seon.db/component true}
+  [:set {:seon.db/component true}
    :seon.config.render-context/file-fingerprint-ref])
 (schema/register! :seon.config.render-context/file-contents
   [:map-of [:string {:min 1}] :string])
@@ -991,7 +991,10 @@
    :symbol])
 ;; The web allowlist hosts (meaningful only under `:allowlist`). This established
 ;; cardinality-many string attribute is already installed in durable databases.
-(schema/register! :seon.agent.web/allowed-domains [:vector :string])
+;; An allowlist is a SET: order is not meaningful, and a scalar
+;; cardinality-many attribute cannot preserve it in any case (values sort
+;; by value, so a `[:vector :string]` round-trips alphabetized).
+(schema/register! :seon.agent.web/allowed-domains [:set :string])
 ;; The cluster system-prompt TEXT — OPTIONAL, no default (absent ⇒ not seeded
 ;; ⇒ `seon.ai/effective-system-prompt` falls through to the shipped
 ;; `seon.agent.ctx/system-text`, preserving the pre-datom behavior). The
@@ -1009,6 +1012,10 @@
 (schema/register! :seon.config/context-entity
   (into [:map {:seon.db/entity true}
          [:seon.config/context :seon.config/context]]
+        (map (fn [[attribute options _ :as entry]]
+               (if (= :seon.agent/ctx attribute)
+                 [attribute options [:set :seon.config/context-block-spec]]
+                 entry)))
         agent-context-entries))
 (schema/register! :seon.config/context-ref
   [:or
@@ -1016,9 +1023,9 @@
    :seon.db/ref
    :seon.config/context-entity])
 (schema/register! :seon.config/agent-context
-  [:vector {:max 1 :seon.db/component true} :seon.config/context-ref])
+  [:and {:seon.db/component true} :seon.config/context-ref])
 (schema/register! :seon.config/root-context
-  [:vector {:max 1 :seon.db/component true} :seon.config/context-ref])
+  [:and {:seon.db/component true} :seon.config/context-ref])
 
 ;; Named context render profiles are identified component entities. Each owns
 ;; its ordered block patches through the existing `:seon.agent/ctx` connection;
@@ -1030,14 +1037,14 @@
    [:seon.config/context-profile :seon.config/context-profile]
    [:seon.agent/ctx
     {:optional true}
-    [:vector :seon.config/context-block-spec]]])
+    [:set :seon.config/context-block-spec]]])
 (schema/register! :seon.config/context-profile-ref
   [:or
    {:seon.db/value-type :db.type/ref}
    :seon.db/ref
    :seon.config/context-profile-entity])
 (schema/register! :seon.config/context-profiles
-  [:vector
+  [:set
    {:seon.db/component true}
    :seon.config/context-profile-ref])
 ;; Named launch-time model configurations. Each child is identified by its
@@ -1045,14 +1052,14 @@
 ;; one registered value shape admits transaction refs and acquired child maps;
 ;; the explicit storage facet keeps both database bridges on :db.type/ref.
 (schema/register! :seon.config/model-variants
-  [:vector
+  [:set
    {:seon.db/component true}
    [:or
     {:seon.db/value-type :db.type/ref}
     :seon.db/ref
     :seon.config/model-variant-entity]])
 (schema/register! :seon.config/provider-descriptors
-  [:vector
+  [:set
    {:seon.db/component true}
    [:or
     {:seon.db/value-type :db.type/ref}
@@ -1316,7 +1323,7 @@
 
 (defn- file-fingerprints
   [manifest file-contents]
-  (into []
+  (into #{}
         (keep (fn [path]
                 (when-let [content (get file-contents path)]
                   {:seon.config.render-context/file-path path
@@ -1551,22 +1558,25 @@
                  :seon.config/context :seon.config.context/agent))]
     (cond-> {}
       agent-context
-      (assoc :seon.config/agent-context [agent-context])
+      (assoc :seon.config/agent-context
+             (update agent-context :seon.agent/ctx set))
 
       (contains? manifest :seon.config/root-context)
       (assoc :seon.config/root-context
-             [(assoc (resolve-root-context-entity agent-context root-declaration)
-                     :seon.config/context :seon.config.context/root)])
+             (-> (resolve-root-context-entity agent-context root-declaration)
+                 (assoc :seon.config/context :seon.config.context/root)
+                 (update :seon.agent/ctx set)))
 
       (seq (:seon.config/context-profiles manifest))
       (assoc :seon.config/context-profiles
-             (into []
+             (into #{}
                    (map (fn [[profile blocks]]
                           {:seon.config/context-profile profile
                            :seon.agent/ctx
-                           (:seon.agent/ctx
-                            (order-context-blocks
-                             {:seon.agent/ctx blocks}))}))
+                           (set
+                            (:seon.agent/ctx
+                             (order-context-blocks
+                              {:seon.agent/ctx blocks})))}))
                    (sort-by (comp str key)
                             (:seon.config/context-profiles manifest)))))))
 
@@ -1988,7 +1998,7 @@
                   :seon.config.model-stream/partial-publish-settle-ms
                   400)
              :seon.config/provider-descriptors
-             (vec
+             (set
               (or (:seon.config/provider-descriptors manifest)
                   (vals provider/hosted-provider-descriptors)))
              :seon.config.run/batch-turn-limit
@@ -2143,7 +2153,7 @@
              (coerce-enum (get web :seon.agent.web/search-backend :gemini-grounding)
                           #{:gemini-grounding :serper} :gemini-grounding)
              :seon.agent.web/search-model    (get web :seon.agent.web/search-model "gemini-3.1-flash-lite")
-             :seon.agent.web/allowed-domains (vec (get web :seon.agent.web/allowed-domains []))
+             :seon.agent.web/allowed-domains (set (get web :seon.agent.web/allowed-domains []))
              :seon.config.web/default-timeout-ms
              (get web :seon.config.web/default-timeout-ms 30000)
              :seon.config.web/maximum-response-bytes
@@ -2213,7 +2223,7 @@
              (:seon.config.model-transport/maximum-response-bytes transport))
       (seq (:seon.config/model-variants manifest))
       (assoc :seon.config/model-variants
-             (into []
+             (into #{}
                    (map (fn [[variant configuration]]
                           (assoc configuration
                                  :seon.config/model-variant variant)))

@@ -76,7 +76,7 @@
    [:seon.render/html  {:optional true} :seon.render/html]])
 
 (schema/register! :seon.agent/ctx
-                  [:vector {:seon.db/component true}
+                  [:set {:seon.db/component true}
                    [:or {:seon.db/value-type :db.type/ref}
                     :seon.db/ref
                     :seon.agent.ctx/block]])

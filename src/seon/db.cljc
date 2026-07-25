@@ -915,6 +915,9 @@
     (and (string? value) (internal/edn-encoded-attr? attr))
     (reader/read-string value)
 
+    (and (map? value) (internal/component-scalar-attr? attr))
+    (decode-edn-values value)
+
     (and (sequential? value) (internal/component-children-attr? attr))
     (let [children (mapv #(if (map? %) (decode-edn-values %) %) value)]
       (if (internal/set-valued-attr? attr)

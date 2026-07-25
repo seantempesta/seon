@@ -61,7 +61,7 @@
                     :seon.config/configuration
                     (assoc protective-limits
                            :seon.agent.web/policy :open
-                           :seon.agent.web/allowed-domains [])})]
+                           :seon.agent.web/allowed-domains #{})})]
         (is (:seon.agent.web/ok? result))
         (is (= 200 (:seon.agent.web/status result)))
         (is (= "u8 web leaf\n" (:seon.agent.web/preview result)))
@@ -81,6 +81,6 @@
                 :seon.config/configuration
                 (assoc protective-limits
                        :seon.agent.web/policy :public-only
-                       :seon.agent.web/allowed-domains [])})]
+                       :seon.agent.web/allowed-domains #{})})]
     (is (false? (:seon.agent.web/ok? result)))
     (is (re-find #"policy refused" (:seon.error/message result)))))

@@ -92,7 +92,7 @@
 ;; decides which TARGETS are reachable once it is. It lives in the cluster
 ;; manifest (`config/system.edn`'s `:seon.config/web`), read via seon.config,
 ;; and resolves to
-;;   {:seon.agent.web/policy <mode> :seon.agent.web/allowed-domains [<host>…]}
+;;   {:seon.agent.web/policy <mode> :seon.agent.web/allowed-domains #{<host>…}}
 ;; where <mode> is one of:
 ;;   :open        — no restriction (public AND private/loopback reachable);
 ;;   :public-only — refuse internal targets (loopback/RFC-1918/link-local/ULA)
@@ -109,7 +109,7 @@
   [configuration]
   (let [p (config/web-policy configuration)]
     {::web/policy          (::web/policy p)
-     ::web/allowed-domains (vec (::web/allowed-domains p))}))
+     ::web/allowed-domains (set (::web/allowed-domains p))}))
 
 (defn domain-allowed?
   "True iff `hostname` matches the `allow` list — its exact host or any

@@ -919,21 +919,22 @@
 (defn web-policy
   "The resolved web-access policy for `seon.agent.web/fetch`.
 
-   `{:seon.agent.web/policy <mode> :seon.agent.web/allowed-domains [host…]}`
+   `{:seon.agent.web/policy <mode> :seon.agent.web/allowed-domains #{host…}}`
    from the ordinary config singleton (the mode is coerced fail-closed in
    [[resolve-config-singleton]]). Mode default `:public-only` (the SSRF-safe
    fallback — a downstream inheritor with NO config is never open by accident);
-   `allowed-domains` `[]` (only meaningful under `:allowlist`). Host-owned:
+   `allowed-domains` `#{}` (only meaningful under `:allowlist`). Host-owned:
    `seon.agent.web` reads it but nothing in the pod can widen it."
   {:malli/schema [:=> [:cat :seon.config/singleton]
                   [:map
                    [:seon.agent.web/policy :keyword]
-                   [:seon.agent.web/allowed-domains [:vector :string]]]]}
+                   [:seon.agent.web/allowed-domains
+                    :seon.agent.web/allowed-domains]]]}
   [configuration]
   {:seon.agent.web/policy
    (or (:seon.agent.web/policy configuration) :public-only)
    :seon.agent.web/allowed-domains
-   (vec (or (:seon.agent.web/allowed-domains configuration) []))})
+   (set (or (:seon.agent.web/allowed-domains configuration) #{}))})
 
 (defn web-search-config
   "The resolved web-SEARCH backend config for `seon.agent.web/search`.
@@ -1121,7 +1122,7 @@
 (defn- context-value
   "Return one acquired context component as independent seed data."
   [configuration attribute]
-  (some-> (first (get configuration attribute))
+  (some-> (get configuration attribute)
           (dissoc :db/id :seon.config/context)
           (update :seon.agent/ctx
                   (fn [blocks]

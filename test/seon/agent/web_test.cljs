@@ -72,7 +72,7 @@
 (def ^:private allowlist-configuration
   (assoc public-only-configuration
          :seon.agent.web/policy :allowlist
-         :seon.agent.web/allowed-domains ["example.com"]))
+         :seon.agent.web/allowed-domains #{"example.com"}))
 
 (def ^:private instrumented-web-targets
   [{::instrument/sym 'seon.agent.web/fetch
@@ -301,7 +301,7 @@
           #(-> (web/fetch {:seon.agent.web/url "https://docs.example.com/page"})
                (.then (fn [{ok? :seon.agent.web/ok?}]
                         (is (true? ok?) "a subdomain of a listed domain is reachable")
-                        (is (= ["example.com"]
+                        (is (= #{"example.com"}
                                (:seon.agent.web/allowed-domains (web/grants {})))
                             "grants surfaces the allowlist")))
                (.then (fn [_]

@@ -401,12 +401,13 @@
         namespace-ref (if namespace-exists?
                         [:seon.ns/name namespace-name]
                         namespace-tempid)
-        context       (ctx.admin/initial-agent-context
-                       (cond->
-                        {:seon.agent/id id
-                         :seon.config/configuration configuration}
-                         (seq model-overrides)
-                         (assoc :seon.agent.ctx/override model-overrides)))
+        context       (-> (ctx.admin/initial-agent-context
+                           (cond->
+                            {:seon.agent/id id
+                             :seon.config/configuration configuration}
+                             (seq model-overrides)
+                             (assoc :seon.agent.ctx/override model-overrides)))
+                          (update :seon.agent/ctx set))
         home-requires (or (:seon.eval/home-requires existing)
                           (:seon.eval/home-requires context)
                           home/home-ns-require-specs)

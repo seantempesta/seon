@@ -270,7 +270,7 @@
             :seon.ns/require-edges]]
     (seq edges)
     (conj {:seon.ns/name ns-sym
-           :seon.ns/require-edges (vec (sort-by pr-str edges))})))
+           :seon.ns/require-edges (set edges)})))
 
 ;;; ---------------------------------------------------------------------------
 ;;; :seon.schema rows — registrations detected by registry diff

@@ -52,13 +52,13 @@
 (deftest portable-policy-and-response-interpretation
   (is (nil? (internal/host-policy-decision
              {:seon.agent.web/policy :public-only
-              :seon.agent.web/allowed-domains []}
+              :seon.agent.web/allowed-domains #{}}
              "example.com"
              ["93.184.216.34"])))
   (is (str/includes?
        (internal/host-policy-decision
         {:seon.agent.web/policy :public-only
-         :seon.agent.web/allowed-domains []}
+         :seon.agent.web/allowed-domains #{}}
         "localhost"
         ["127.0.0.1"])
        "blocked"))

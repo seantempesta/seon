@@ -95,7 +95,7 @@
    [:seon.error.frame/line   {:optional true} :seon.error.frame/line]
    [:seon.error.frame/column {:optional true} :seon.error.frame/column]])
 (schema/register! ::frames
-  [:vector {:seon.db/component true} :seon.db/ref]) ; of ::frame entities
+  [:set {:seon.db/component true} :seon.db/ref]) ; of ::frame entities
 
 (defn- throwable-message [e]
   #?(:cljs (when (some? e) (.-message e))
@@ -542,7 +542,7 @@
       commit-id      (assoc ::commit-id commit-id)
       basis-t        (assoc ::basis-t basis-t)
       stack          (assoc :seon.error/stack stack)
-      (seq frames)   (assoc :seon.error/frames frames)
+      (seq frames)   (assoc :seon.error/frames (set frames))
       args-edn       (assoc :seon.error/args-edn args-edn)
       data-edn       (assoc :seon.error/data-edn data-edn))))
 

@@ -277,6 +277,9 @@
                                   (map? value) (encode-entity value)
                                   (and (vector? value) (some map? value))
                                   (mapv #(if (map? %) (encode-entity %) %) value)
+                                  (and (set? value) (some map? value))
+                                  (into #{} (map #(if (map? %) (encode-entity %) %))
+                                        value)
                                   :else value)))
                        {} entity))]
     (mapv (fn [item]
@@ -325,6 +328,15 @@
            (some-> resolved form-children first ref-value-form?)) :many
       :else nil)))
 
+(defn component-scalar-attr?
+  "True when a registered attribute owns one acquired component child map."
+  [attr]
+  (when (and (keyword? attr) (registered? attr))
+    (let [form (resolve-malli-form (schema-definition attr))
+          props (schema.form/attr-form-properties form)]
+      (and (= :one (ref-attr-arity form))
+           (:seon.db/component props)))))
+
 (defn ref-slot?
   "True when `attr` names a registered ref attribute."
   [attr]
@@ -341,7 +353,8 @@
                          (cond-> (conj result attr)
                            (and (ref-slot? attr) (map? value))
                            (entity-attrs value)
-                           (and (ref-slot? attr) (sequential? value))
+                           (and (ref-slot? attr)
+                                (or (sequential? value) (set? value)))
                            (into (mapcat #(when (map? %) (entity-attrs #{} %)) value))))
                        attrs entity))]
     (reduce (fn [attrs item]

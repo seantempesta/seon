@@ -344,7 +344,9 @@
                       [:seon.config/id config/cluster-config-id]]
                      (::db/refs @pull-request)))
               (is (= 4096 (::db/max-results @pull-request)))
-              (is (= stored-configured-singleton @received-configuration)
+              (is (= (update stored-configured-singleton
+                             :seon.config/model-variants set)
+                     @received-configuration)
                   "creation receives the decoded pulled singleton")
               (is (= configured-model @received-override)
                   "the selected variant is the birth-context override")

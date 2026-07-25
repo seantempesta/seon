@@ -424,9 +424,12 @@
     :seon.fn/spec :string
     :seon.fn/schema-error :string
     :seon.fn/created-at :inst
-    :seon.fn/read-attrs [:vector :qualified-keyword]
+    ;; A read-SET: order is not meaningful and cardinality-many cannot
+    ;; preserve it for scalars anyway (values sort by value, so a
+    ;; `[:vector :qualified-keyword]` round-trips alphabetized).
+    :seon.fn/read-attrs [:set :qualified-keyword]
     :seon.ns/require-edges
-    [:vector {:seon.db/component true} :seon.db/ref]}))
+    [:set {:seon.db/component true} :seon.db/ref]}))
 
 (defonce ^:private _program-graph-entities
   (update-candidate-forms!

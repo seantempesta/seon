@@ -28,7 +28,6 @@
         root-role
         (->> singleton
              :seon.config/root-context
-             first
              :seon.agent/ctx
              (filter #(= :root-role (:seon.agent.ctx/name %)))
              first)]
