@@ -193,32 +193,33 @@
     (is (= {:seon.agent.driver/disposition :no-dispatch}
            disposition))))
 
-(deftest installed-lifecycle-completion-form-selects-the-local-jvm-tier
+(deftest pure-lifecycle-completion-form-needs-no-capability-binding
   (let [target "seon.agent.lifecycle/complete"
         jvm-tier
         (capability/installed-leaf-inventory
          :jvm
-         [{:seon.capability/binding target
-           :seon.capability/effect :idempotent
-           :seon.capability/remote? false}])
+         [])
         resolution
         (-> invocation-resolution
             (update ::edge/known-namespaces conj 'seon.agent.lifecycle)
             (assoc-in [::edge/effects 'seon.agent.lifecycle/complete]
-                      :idempotent))
+                      :pure))
         result
         (plan/plan-execution
          (-> (request ['(seon.agent.lifecycle/complete "FINAL_SYNTHESIS")]
                       [])
              (assoc :seon.execution/root-resolution resolution)
              (assoc :seon.execution/tier-inventories {:jvm jvm-tier})))]
-    (is (= :constrained (:seon.execution/placement result)))
+    (is (= :anywhere (:seon.execution/placement result)))
     (is (= #{:jvm} (:seon.execution/eligible-tiers result)))
     (is (= :jvm (:seon.execution/selected-tier result)))
     (is (empty? (:seon.execution/unresolved result)))
-    (is (= #{target}
+    (is (= #{}
            (get-in result [:seon.execution/capability-manifest
-                           :seon.execution/required-bindings])))))
+                           :seon.execution/required-bindings])))
+    (is (= {target :pure}
+           (get-in result [:seon.execution/capability-manifest
+                           :seon.execution/effects])))))
 
 (deftest installed-leaf-enumerator-round-trips-through-the-planner
   (let [leaves

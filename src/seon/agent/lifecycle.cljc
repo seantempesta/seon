@@ -9,7 +9,7 @@
    must manage a live runtime."
   #?(:clj (:refer-clojure :exclude [await]))
   (:require
-   [clojure.string :as str]
+   [malli.core :as m]
    #?@(:cljs [[seon.agent.home :as home]
               [seon.agent.loop :as loop]
               [seon.agent.run :as run]
@@ -18,9 +18,7 @@
    [seon.agent.lifecycle.core :as core]
    [seon.agent.lifecycle.leaf :as leaf]
    #?(:cljs [seon.agent.lifecycle.pod :as pod])
-   [seon.agent.message :as message]
    [seon.db :as db]
-   [seon.db.id :as db.id]
    [seon.db.protocol :as protocol]
    [seon.schema :as schema]))
 
@@ -37,14 +35,14 @@
   "Return agent-facing lifecycle functions bound to one platform leaf."
   ([platform-leaf] (bind-leaf platform-leaf nil))
   ([platform-leaf database-leaf]
-  (into {}
-        (map (fn [v]
-               [(:name (meta v))
-                (fn [& args]
-                  (binding [*leaf* platform-leaf
-                            db/*leaf* (or database-leaf db/*leaf*)]
-                    (apply @v args)))])
-             [#'wait #'complete #'pause #'resume #'terminate]))))
+   (into {}
+         (map (fn [v]
+                [(:name (meta v))
+                 (fn [& args]
+                   (binding [*leaf* platform-leaf
+                             db/*leaf* (or database-leaf db/*leaf*)]
+                     (apply @v args)))])
+              [#'wait #'pause #'resume #'terminate]))))
 
 (defn- platform-leaf [] (or *leaf* #?(:cljs (pod/services) :clj nil)))
 (defn- leaf-fn [key]
@@ -54,6 +52,13 @@
 
 (register-schema! ::note :string)
 (register-schema! ::result :string)
+(register-schema! ::terminal [:enum :completed])
+(def terminal-value-schema
+  [:map {:closed true}
+   [::terminal [:enum :completed]]
+   [::result :string]
+   [::result-ref {:optional true} :seon.db/ref]])
+(register-schema! ::terminal-value terminal-value-schema)
 (register-schema! ::target-request
   [:map [:seon.agent/id {:optional true} :seon.agent/id]])
 (register-schema! ::direct-error
@@ -306,21 +311,6 @@
         (recur (inc attempt))
         result))))
 
-(defn- completed-test-error
-  [test-runs]
-  (when-let [{:seon.agent.testrun/keys [passed failed errors]}
-             (when (seq test-runs)
-               (apply max-key :db/id test-runs))]
-    (when (or (pos? (or failed 0)) (pos? (or errors 0)))
-      (error-value
-       (str "complete refused — your latest test run is RED ("
-            (or failed 0) " failed, " (or passed 0) " passed"
-            (when (pos? (or errors 0))
-              (str ", " errors " error" (when (not= errors 1) "s")))
-            "). Run the tests and SEE a green result render before completing; "
-            "to stop without claiming success, pause or report the honest status "
-            "with message/user.")))))
-
 (defn- close-transaction-data
   [agent-id run-id claim-epoch reason closed-at]
   (core/close-tx-data agent-id run-id claim-epoch reason closed-at))
@@ -351,162 +341,22 @@
               (if (error-value? report) report :idle))))))
     (core/no-agent-error "wait")))
 
-(def ^:private completion-agent-selector
-  '[:db/id :seon.agent/id
-    {:seon.agent/parent [:db/id :seon.agent/id]}
-    {:seon.agent.testrun/_agent
-     [:db/id :seon.agent.testrun/passed :seon.agent.testrun/failed
-      :seon.agent.testrun/errors]}])
+(defn ^:no-doc terminal-value?
+  "Whether a value is a terminal lifecycle completion value."
+  {:malli/schema [:=> [:cat :map] :boolean]}
+  [value]
+  (m/validate terminal-value-schema value))
 
-(defn ^:async ^:private completion-data
-  [database agent-id current]
-  (let [agent
-        (await
-         (db/pull
-          {::db/db database
-           ::db/pull-pattern completion-agent-selector
-           ::db/ref [:seon.agent/id agent-id]}))]
-    (if (error-value? agent)
-      agent
-      (let [parent (:seon.agent/parent agent)
-            recipient-ref
-            (if parent
-              [:seon.agent/id (:seon.agent/id parent)]
-              message/user-ref)
-            recipient
-            (if parent
-              parent
-              (await
-               (db/pull
-                {::db/db database
-                 ::db/pull-pattern [:db/id :seon.user/id]
-                 ::db/ref message/user-ref})))]
-        (if (error-value? recipient)
-          recipient
-          (let [messages
-                (await
-                 (db/query
-                  {::db/db database
-                   ::db/query
-                   '[:find ?message ?at
-                     :in $ ?from ?to
-                     :where
-                     [?message :seon.agent.message/from ?from]
-                     [?message :seon.agent.message/to ?to]
-                     [?message :seon.agent.message/at ?at]]
-                   ::db/args [(:db/id agent) (:db/id recipient)]
-                   ::db/max-results 10000
-                   ::db/max-result-weight 524288}))]
-            (if (error-value? messages)
-              messages
-              {:seon.agent.lifecycle/agent agent
-               :seon.agent.lifecycle/recipient recipient-ref
-               :seon.agent.lifecycle/already-messaged?
-               (boolean
-                (some
-                 (fn [[_ at]]
-                   (>= (inst-ms at)
-                       (inst-ms (:seon.agent.run/started-at current))))
-                 messages))})))))))
-
-(defn- completion-transaction-data
-  [agent-id run-id claim-epoch result result-ref message-data ids now]
-  (let [close-data
-        (close-transaction-data agent-id run-id claim-epoch :completed now)
-        fence (subvec (vec close-data) 0 2)
-        close-and-release (subvec (vec close-data) 2)
-        result-row
-        (cond-> {:seon.agent.run/id run-id}
-          (not (str/blank? result)) (assoc :seon.agent.run/result result)
-          (some? result-ref) (assoc :seon.agent.run/result-ref result-ref))
-        message-rows
-        (if message-data
-          (:seon.db/tx-data
-           ((:seon.agent.message/transaction-builder message-data) ids))
-          [])]
-    (into fence
-          (concat
-           (when (> (count result-row) 1) [result-row])
-           message-rows
-           close-and-release))))
-
-(defn ^:async ^:private complete-once
-  [result result-ref op-id]
-  (if-let [agent-id (db/current-agent-id)]
-    (let [database (await (db/db))]
-      (if (error-value? database)
-        database
-        (let [current (await (current-run database agent-id))]
-          (cond
-            (error-value? current) current
-            (nil? current) (no-open-run-error "complete" agent-id)
-            :else
-            (let [acquired (await (completion-data database agent-id current))]
-              (if (error-value? acquired)
-                acquired
-                (or
-                 (completed-test-error
-                  (:seon.agent.testrun/_agent
-                   (:seon.agent.lifecycle/agent acquired)))
-                 (let [send?
-                       (and (not (str/blank? result))
-                            (not (:seon.agent.lifecycle/already-messaged?
-                                  acquired)))
-                       message-data
-                       (when send?
-                         (await
-                          (message/message-transaction-for
-                           database
-                           {:seon.agent.message/content result
-                            :seon.agent.message/from
-                            [:seon.agent/id agent-id]
-                            :seon.agent.message/to
-                            [(:seon.agent.lifecycle/recipient acquired)]})))
-                       run-id (:seon.agent.run/id current)]
-                   (if (error-value? message-data)
-                     message-data
-                     (if message-data
-                       (await
-                        (db.id/allocate!
-                         {::db/db database
-                          ::db.id/allocations
-                          (:seon.agent.message/allocations message-data)
-                          ::db.id/transaction-builder
-                          (fn [ids]
-                            {:seon.capability/op-id op-id
-                             ::db/tx-data
-                             (completion-transaction-data
-                              agent-id run-id (held-claim-epoch current)
-                              result result-ref message-data ids
-                              ((leaf-fn ::leaf/now)))})}))
-                       (await
-                        (db/transact!
-                         {::db/db database
-                          :seon.capability/op-id op-id
-                          ::db/tx-data
-                          (completion-transaction-data
-                           agent-id run-id (held-claim-epoch current)
-                           result result-ref nil nil
-                           ((leaf-fn ::leaf/now)))}))))))))))))
-    (core/no-agent-error "complete")))
-
-(defn ^:async ^:private complete*
-  [result result-ref]
-  (let [op-id ((leaf-fn ::leaf/uuid))
-        final-result
-        (await (retry-stale! #(complete-once result result-ref op-id)))]
-    (if (error-value? final-result) final-result :idle)))
-
-(defn ^{:async #?(:cljs true :clj false)
-        :seon.capability/effect :idempotent} complete
-  "Complete the current run atomically with its result and optional message."
+(defn ^{:seon.capability/effect :pure} complete
+  "Return a terminal lifecycle value for the claimant to publish and close."
   {:malli/schema
    [:function
-    [:=> [:catn [::result :string]] ::lifecycle-result]
+    [:=> [:catn [::result :string]] ::terminal-value]
     [:=> [:catn [::result :string] [::result-ref :seon.db/ref]]
-     ::lifecycle-result]]}
-  ([result] (await (complete* result nil)))
-  ([result result-ref] (await (complete* result result-ref))))
+     ::terminal-value]]}
+  ([result] {::terminal :completed ::result result})
+  ([result result-ref]
+   {::terminal :completed ::result result ::result-ref result-ref}))
 
 (defn ^{:async #?(:cljs true :clj false)
         :seon.capability/effect :external} pause

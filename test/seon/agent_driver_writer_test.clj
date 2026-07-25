@@ -2,6 +2,7 @@
   "JVM claim-driver reply-policy regressions."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [seon.agent.driver :as driver]
+            [seon.agent.lifecycle :as lifecycle]
             [seon.agent.run.core :as run.core]
             [seon.db :as db]
             [seon.db.host :as db.host]
@@ -16,6 +17,7 @@
             [seon.db.leaf :as db.leaf]
             [seon.host.context :as context]
             [seon.host.eval :as host.eval]
+            [seon.host.invoke :as invoke]
             [seon.host.session.leaf :as session]
             [seon.program.edge :as edge])
   (:import [java.io File]))
@@ -557,6 +559,151 @@
     (is (= {:seon.agent.turn/status :running
             :seon.agent.turn/phase :evaling}
            turn))))
+
+(deftest terminal-lifecycle-eval-delivers-and-closes-through-the-driver
+  (let [allocations
+        [{::db.id/key ::agent-id
+          ::db.id/identity-attr :seon.agent/id}
+         {::db.id/key ::run-id
+          ::db.id/identity-attr :seon.agent.run/id}
+         {::db.id/key ::turn-id
+          ::db.id/identity-attr :seon.agent.turn/id}]
+        candidates
+        (db.id/candidate-manifest
+         {:seon.agent/id :seon.db.id.generator/human-readable
+          :seon.agent.run/id :seon.db.id.generator/compact
+          :seon.agent.turn/id :seon.db.id.generator/compact}
+         allocations)
+        ids (into {} (map (juxt ::db.id/key ::db.id/value)) candidates)
+        agent-id (::agent-id ids)
+        run-id (::run-id ids)
+        turn-id (::turn-id ids)
+        now (java.util.Date.)
+        content (str "ALIVE_GATE_TERMINAL_" run-id)
+        terminal-value (lifecycle/complete content)
+        seeded
+        (transact-generated!
+         [{:db/id "agent"
+           :seon.agent/id agent-id
+           :seon.agent/run "run"}
+          {:db/id "run"
+           :seon.agent.run/id run-id
+           :seon.agent.run/agent "agent"
+           :seon.agent.run/status :open
+           :seon.agent.run/started-at now
+           :seon.agent.run/claimant driver/claimant
+           :seon.agent.run/claim-epoch 1
+           :seon.agent.run/last-beat-at now}
+          {:db/id "turn"
+           :seon.agent.turn/id turn-id
+           :seon.agent.turn/run "run"
+           :seon.agent.turn/status :running
+           :seon.agent.turn/phase :evaling}]
+         candidates)
+        executor (java.util.concurrent.Executors/newSingleThreadExecutor)
+        bindings (atom [])
+        invocation (atom nil)
+        completed
+        (try
+          (binding [db/*leaf* (database-leaf)]
+            (with-redefs-fn
+              {#'driver.host/driver-session (constantly {})
+               #'driver.host/provision-plan-bindings!
+               (fn [_host _session plan]
+                 (swap! bindings conj
+                        (get-in plan
+                                [:seon.execution/capability-manifest
+                                 :seon.execution/required-bindings])))
+               #'invoke/execute-invocation!
+               (fn [_session request]
+                 (reset! invocation request)
+                 {:seon.eval/n-ok 1
+                  :seon.eval/n-fail 0
+                  :seon.host/results
+                  [{:seon.eval/ok? true
+                    :seon.eval/value terminal-value}]})}
+              (fn []
+                (#'driver.host/run-eval-batch!
+                 {:seon.host/writer *writer-session*
+                  :seon.host/eval-pool executor}
+                 {:seon.agent/id agent-id
+                  :seon.agent.run/id run-id
+                  :seon.agent.run/current-turn
+                  {:seon.agent.turn/id turn-id}}
+                 1 (context/resolve-head! *writer-session*)
+                 {:seon.repl/eval-entries
+                  [{:seon.repl/kind :form
+                    :seon.repl/source
+                    (str "(seon.agent.lifecycle/complete "
+                         (pr-str content) ")")}]
+                  :seon.repl/errors []}
+                 {:seon.config.claim-driver/invocation-deadline-ms 60000
+                  :seon.config.claim-driver/invocation-result-maximum-bytes
+                  65536}
+                 {:seon.execution/capability-manifest
+                  {:seon.execution/required-bindings #{}}}))))
+          (finally
+            (.shutdownNow executor)))
+        database (context/resolve-head! *writer-session*)
+        run
+        (binding [db/*leaf* (database-leaf)]
+          (db/pull
+           {::db/db database
+            ::db/pull-pattern
+            [:seon.agent.run/status :seon.agent.run/closed-reason
+             :seon.agent.run/result :seon.agent.run/claimant]
+            ::db/ref [:seon.agent.run/id run-id]}))
+        agent
+        (pull! [:seon.agent/id :seon.agent/run]
+               [:seon.agent/id agent-id])
+        turn
+        (pull! [:seon.agent.turn/status :seon.agent.turn/phase]
+               [:seon.agent.turn/id turn-id])
+        completion-txs
+        (binding [db/*leaf* (database-leaf)]
+          (db/query
+           {::db/db (db/history database)
+            ::db/query
+            '[:find ?message-tx ?close-tx ?turn-status-tx ?turn-phase-tx
+              ?from-id ?to-id
+              :in $ ?content ?run-id ?turn-id
+              :where
+              [?message :seon.agent.message/content ?content ?message-tx true]
+              [?message :seon.agent.message/from ?from]
+              [?from :seon.agent/id ?from-id]
+              [?message :seon.agent.message/to ?to]
+              [?to :seon.user/id ?to-id]
+              [?run :seon.agent.run/id ?run-id]
+              [?run :seon.agent.run/status :closed ?close-tx true]
+              [?run :seon.agent.run/closed-reason :completed ?close-tx true]
+              [?run :seon.agent.run/result ?content ?close-tx true]
+              [?turn :seon.agent.turn/id ?turn-id]
+              [?turn :seon.agent.turn/status :done ?turn-status-tx true]
+              [?turn :seon.agent.turn/phase :published ?turn-phase-tx true]]
+            ::db/args [content run-id turn-id]}))]
+    (is (true? (::protocol/success? seeded)) (pr-str seeded))
+    (is (lifecycle/terminal-value? terminal-value))
+    (is (= :completed (:seon.agent.lifecycle/terminal terminal-value)))
+    (is (= #{#{}} (set @bindings))
+        "terminal eval needs no capability bindings")
+    (is (= :completed (:seon.agent.run/closed-reason completed)))
+    (is (= agent-id (:seon.execution/agent-id @invocation)))
+    (is (= {:seon.agent.run/status :closed
+            :seon.agent.run/closed-reason :completed
+            :seon.agent.run/result content}
+           run))
+    (is (= {:seon.agent/id agent-id} agent))
+    (is (= {:seon.agent.turn/status :done
+            :seon.agent.turn/phase :published}
+           turn))
+    (is (= 1 (count completion-txs))
+        (pr-str completion-txs))
+    (let [[message-tx close-tx turn-status-tx turn-phase-tx from-id to-id]
+          (first completion-txs)]
+      (is (apply = [message-tx close-tx turn-status-tx turn-phase-tx])
+          "driver commits message, run completion, and turn publication atomically")
+      (is (= agent-id from-id))
+      (is (= "user" to-id)))))
 
 (defn- phase-error-case!
   [attempt-open? throw-mid-reply?]

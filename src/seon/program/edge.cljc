@@ -148,7 +148,9 @@
         effect (get effects target :external)
         base {::terminal-symbol target-string
               ::effect effect
-              ::required-bindings #{target-string}}]
+              ::required-bindings (if (= :pure effect)
+                                    #{}
+                                    #{target-string})}]
     (assoc base ::terminal-generation
            (content-hash/sha-256
             (pr-str [target-string effect [target-string]])))))

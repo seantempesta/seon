@@ -685,7 +685,8 @@
             [['seon.agent.message
               (message/bind-leaf (host-message-leaf) database-leaf)]
              ['seon.agent.lifecycle
-              (lifecycle/bind-leaf (host-lifecycle-leaf) database-leaf)]]]
+              (assoc (lifecycle/bind-leaf (host-lifecycle-leaf) database-leaf)
+                     'complete lifecycle/complete)]]]
       (install!
        {::registry registry
         ::lib lib

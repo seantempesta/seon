@@ -483,6 +483,10 @@
                                    (terminal-tiers tier-inventories terminal
                                                    artifacts)
                                    bindings (::edge/required-bindings terminal)
+                                   capability-bindings
+                                   (if (= :pure (::edge/effect terminal))
+                                     #{}
+                                     bindings)
                                    remote
                                    (into #{}
                                          (filter
@@ -498,7 +502,8 @@
                                  true (update :eligible #(set
                                                          (filter tiers %)))
                                  restriction? (assoc :restriction? true)
-                                 true (update :required-bindings into bindings)
+                                 true (update :required-bindings
+                                              into capability-bindings)
                                  true (update :remote-bindings into remote)
                                  true (assoc-in [:effects
                                                  (::edge/terminal-symbol terminal)]
