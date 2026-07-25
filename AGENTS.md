@@ -28,7 +28,23 @@ in the same commit; the tests that replace them assert the SURVIVING
 mechanism, written from the lessons learned, never green-washed. Do not
 port old code into new homes: design the replacement fresh from the
 architecture target, and prefer NO replacement when the JVM path
-already owns the behavior. A deletion slice is blocked ONLY by a real
+already owns the behavior.
+
+THE CONVERSION TEST IS SIMPLIFICATION, not relocation (owner ruling
+2026-07-24 night, after the R52/R53 pattern): a function that "runs on
+the new tier" but keeps its old-model shape is NOT converted — it is a
+ported defect. Under the stateless claim-native model the agent-facing
+surface reduces to three shapes: pure code returning VALUES the driver
+interprets (lifecycle, dispositions, plans); genuine capability
+requests through the one guarded door (fs, web, llm, db); and durable
+FACTS the driver commits (memory, messages, receipts). Anything
+agent-facing that performs runtime semantics effectfully from inside
+an eval — leaf-bound lifecycle calls, in-eval turn/run mutation,
+side-channel delivery — is old-engine residue: redesign it into one of
+the three shapes and DELETE the old form, never bind it into the new
+tier. When reviewing any surviving surface, ask first: "is this
+simpler than it was?" If it is equally complex, the model was ported,
+not applied. A deletion slice is blocked ONLY by a real
 implementation dependency — something live still calls the path and the
 surviving owner genuinely cannot serve it yet. Name that dependency,
 fix it at the surviving owner, resume deleting. Let it crash: breakage
