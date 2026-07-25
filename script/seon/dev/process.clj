@@ -1529,7 +1529,11 @@
   {:malli/schema [:=> [:cat map?] [:or nil? map?]]}
   [configuration]
   (when-let [manifest (artifact/current-manifest configuration)]
-    (let [watcher-spec (get (specs configuration manifest) watcher-id)]
+    (let [watcher-spec
+          (watcher-spec
+           configuration
+           (:seon.dev.artifact/application-digest manifest)
+           manifest)]
       (when (converged? configuration watcher-spec)
         manifest))))
 

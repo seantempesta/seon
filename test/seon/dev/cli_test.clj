@@ -448,13 +448,12 @@
        #'process/with-startup-ownership
        (fn [_ transition]
          (transition (fn [_ acquire!] (acquire!))))
-       #'artifact/current-manifest (constantly manifest)
+       #'process/current-watcher-manifest (constantly manifest)
        #'artifact/build!
        (fn [& _] (throw (ex-info "current artifacts were rebuilt" {})))
        #'process/clean-or-force!
        (fn [& _] (throw (ex-info "healthy processes were stopped" {})))
        #'process/specs (fn [& _] spec-map)
-       #'process/converged? (constantly true)
        #'process/start-order
        (fn [_] [process/writer-id process/watcher-id process/pod-id])
        #'process/ensure!
@@ -490,11 +489,11 @@
        (fn [{:seon.dev.process/keys [operation targets]}]
          (swap! stops inc)
          (stop-result operation targets))
-       #'artifact/current-manifest
+       #'process/current-watcher-manifest
        (fn [& _]
          (swap! observed-digests conj
                 (:seon.dev.artifact/application-digest manifest))
-         manifest)
+         (when @watcher-current? manifest))
        #'artifact/build!
        (fn [& _]
          (swap! builds inc)
@@ -504,7 +503,6 @@
        #'process/specs
        (fn [& _]
          {process/watcher-id {:seon.dev.process/id process/watcher-id}})
-       #'process/converged? (fn [& _] @watcher-current?)
        #'process/start-order (constantly [process/watcher-id])
        #'process/ensure!
        (fn [_ spec _]
