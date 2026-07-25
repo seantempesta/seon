@@ -599,6 +599,24 @@ intact; 11/150 + 6/99 + 59/220 green. Residue committed dd2dc0f17 +
 final staged proof (plan/memory/read/formless-:done, datom-verified,
 proof-only, no source edits).
 
+ALIVEGATE2 VERDICT (~21:00): **NOT CAVEAT-CLEARED**, with the runtime
+otherwise healthy and released. Fresh agent `young-peaches-rescue`, run
+`t7kpxag6nt8x`, persisted plan root `wb51uk2ayolc`, wrote three
+`:my.alivegate2.memory/*` rows at transaction `536871337`, and read all three
+from the database in later turn `j271p5ey23ky` via successful eval
+`r2c5z56nuuty` at transaction `536871352`. All ten DeepSeek attempts are HTTP
+200 `:success`; all ten turns are `:published/:done`. The exact requested
+`seon.agent.lifecycle/complete` form derived a JVM execution plan but failed
+three times with `The message platform leaf is not installed.` No synthesis
+message entity exists. Run closure at transaction `536871403` is
+`:closed/:no-forms`; claimant and agent current-run custody are absent. Root
+cause: the host lifecycle wrapper binds lifecycle and database leaves, while
+its nested `message/message-transaction-for` call requires an unbound
+`message/*leaf*`. The existing
+[[../../seon/issues/host-base-agent-surface-parity]] blocker owns the nested
+capability binding and real completion drive. Evidence:
+`tmp/orchestrator/alivegate2-gate.log`.
+
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 
 ## older restart protocol below until morning)

@@ -73,3 +73,51 @@ documentation for the database family but not that metadata.
 Acceptance therefore includes exact source-to-installed effect parity for every
 callable wrapper. Missing source metadata remains conservatively external;
 metadata present at the source must not disappear during installation.
+
+## 2026-07-24 staged gate: lifecycle resolves but loses its message leaf
+
+The source-frozen default cluster at HEAD `e147c4217` proved the remaining
+failure is now nested platform binding rather than top-level symbol resolution.
+Fresh agent `young-peaches-rescue` persisted plan root `wb51uk2ayolc`, wrote
+three `:my.alivegate2.memory/*` entities in transaction `536871337`, and read
+all three rows from the database in later turn `j271p5ey23ky` through successful
+eval `r2c5z56nuuty` at transaction `536871352`.
+
+The exact requested completion form then derived an executable JVM plan, ran,
+and failed:
+
+```clojure
+(seon.agent.lifecycle/complete
+ "ALIVE-CAVEAT SYNTHESIS: the later database read returned ...")
+```
+
+Eval `tzawq2zlmldj` is `:error`, `:seon.eval/ok? false`, with
+`The message platform leaf is not installed.` The agent repeated the same form
+in evals `r17ti5foq0rr` and `ih0h3v06ngto`; both failed identically. All ten
+DeepSeek attempts are `:success` with response status `200`, so this is neither
+provider failure nor model drift.
+
+The source boundary explains the exact missing dependency:
+
+- `seon.host.context/register-host-capabilities!` installs the lifecycle
+  wrappers with `(lifecycle/bind-leaf (host-lifecycle-leaf) database-leaf)`;
+- `seon.agent.lifecycle/bind-leaf` binds `lifecycle/*leaf*` and `db/*leaf*`,
+  but not `message/*leaf*`; and
+- `complete-once` calls `message/message-transaction-for`, whose `leaf-fn`
+  requires `message/*leaf*`. The JVM branch has no pod-services fallback.
+
+The registered lifecycle wrapper therefore resolves and enters its owning
+function, but its nested message dependency is unbound. This is the same
+host-surface parity class at a deeper call edge; do not add a special-case
+completion path.
+
+The runtime contained the failure: run `t7kpxag6nt8x` closed `:no-forms` at
+transaction `536871403`, claimant and agent current-run refs are absent, and
+all ten turns are `:published/:done`. No synthesis message entity exists, so
+the alive-caveat gate is honestly NOT cleared. Full evidence is in
+`tmp/orchestrator/alivegate2-gate.log`.
+
+Acceptance additionally requires the host capability census to prove nested
+platform-leaf dependencies, not merely that each public symbol resolves.
+`seon.agent.lifecycle/complete` must atomically persist its result and message
+through the one registered message/database leaves in a real claimant drive.
