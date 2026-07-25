@@ -454,6 +454,7 @@
        #'process/clean-or-force!
        (fn [& _] (throw (ex-info "healthy processes were stopped" {})))
        #'process/specs (fn [& _] spec-map)
+       #'process/converged? (constantly true)
        #'process/start-order
        (fn [_] [process/writer-id process/watcher-id process/pod-id])
        #'process/ensure!
@@ -468,12 +469,15 @@
           (is (= [] (:seon.dev.target/stop-results target))))))
     (is (= [process/writer-id process/watcher-id process/pod-id] @ensured))))
 
-(deftest source-unchanged-reconcile-reuses-one-release-without-a-watcher
+(deftest source-unchanged-reconcile-republishes-once-for-a-new-watcher
   (let [configuration {:seon.dev.config/cluster-dir "/cluster"}
         manifest {:seon.dev.artifact/application-digest
                   (apply str (repeat 64 "a"))
                   :seon.dev.artifact/changed #{}}
         observed-digests (atom [])
+        watcher-current? (atom false)
+        builds (atom 0)
+        stops (atom 0)
         ensured (atom [])]
     (with-redefs-fn
       {#'cli/assert-current-database-layout! identity
@@ -484,6 +488,7 @@
          (transition (fn [_ acquire!] (acquire!))))
        #'process/clean-or-force!
        (fn [{:seon.dev.process/keys [operation targets]}]
+         (swap! stops inc)
          (stop-result operation targets))
        #'artifact/current-manifest
        (fn [& _]
@@ -492,10 +497,14 @@
          manifest)
        #'artifact/build!
        (fn [& _]
-         (throw (ex-info "source-unchanged release was republished" {})))
+         (swap! builds inc)
+         manifest)
+       #'process/admit-watcher-artifact!
+       (fn [& _] (reset! watcher-current? true))
        #'process/specs
        (fn [& _]
          {process/watcher-id {:seon.dev.process/id process/watcher-id}})
+       #'process/converged? (fn [& _] @watcher-current?)
        #'process/start-order (constantly [process/watcher-id])
        #'process/ensure!
        (fn [_ spec _]
@@ -509,7 +518,11 @@
     (is (= [(:seon.dev.artifact/application-digest manifest)
             (:seon.dev.artifact/application-digest manifest)]
            @observed-digests)
-        "two unchanged startups consume byte-identical release identities")
+        "both startups inspect the same source artifact identity")
+    (is (= 1 @builds)
+        "the absent watcher republishes once from its new process coordinates")
+    (is (= 1 @stops)
+        "the converged producing watcher is reused on the second startup")
     (is (= [process/watcher-id process/watcher-id] @ensured))))
 
 (deftest reconcile-recovers-only-definitely-dead-managed-processes

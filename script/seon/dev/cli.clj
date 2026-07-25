@@ -137,6 +137,16 @@
     (process/admit-watcher-artifact! configuration manifest)
     manifest))
 
+(defn- current-watcher-manifest
+  "Return the current source manifest only while its producing watcher remains
+   converged with that exact application identity."
+  [configuration]
+  (when-let [manifest (artifact/current-manifest configuration)]
+    (let [watcher-spec
+          (get (process/specs configuration manifest) process/watcher-id)]
+      (when (process/converged? configuration watcher-spec)
+        manifest))))
+
 (defn- reconcile-development!
   ([configuration] (reconcile-development! configuration []))
   ([configuration prior-stop-results]
@@ -155,7 +165,7 @@
         (ensure-development-processes!
          configuration (selected-manifest configuration) start-owned!
          prior-stop-results)
-        (if-let [manifest (artifact/current-manifest configuration)]
+        (if-let [manifest (current-watcher-manifest configuration)]
         (let [late-recovery (recover-dead-processes! configuration)
               stop-results (cond-> prior-stop-results
                              late-recovery (conj late-recovery))]
