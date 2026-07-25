@@ -1584,6 +1584,15 @@ the variable-weight values they select.
   run-fenced transaction as `:reply-ready → :evaled`. Ordinary publication
   then closes `:done`, while unresolved executable roots retain the steering
   path.
+- **A planner disposition is a map until the case extracts its keyword.**
+  `execution-plan-disposition` returns the keyword together with selected-tier
+  or error evidence. `parsed-reply-plan` preserves that complete map under its
+  plan envelope, so `eval-step!` must case on
+  `(:seon.agent.driver/disposition disposition-map)` and continue reading
+  branch evidence from the same map. A consumer test that substitutes either a
+  bare keyword or a hand-built nested value cannot prove this boundary;
+  strengthen the existing writer test to drive real `parsed-reply-plan` output
+  through the case and into the eval batch (`a8555f257`).
 - **A phase error is a fenced durable terminal transition, never a returned
   thread-local value.** Under the held run epoch and observed turn phase, one
   transaction crashes every open attempt, clears partial presentation text,

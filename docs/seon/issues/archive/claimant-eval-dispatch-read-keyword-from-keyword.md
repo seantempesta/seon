@@ -1,6 +1,6 @@
 ---
 type: issue
-status: resolved
+status: superseded
 severity: blocker
 tags: [issue, agent, runtime]
 ---
@@ -41,3 +41,17 @@ transaction provenance, and the database-derived render.
   failures/errors.
 - Focused claimant and reactive-call CLJS gate: 22 tests, 103 assertions, zero
   failures/errors.
+
+## Supersession
+
+The proof above loaded the claimant namespace but did not exercise
+`parsed-reply-plan → eval-step!`. The inferred bare-keyword contract was
+incorrect: live execution later showed that `parsed-reply-plan` carries the
+complete disposition map so branch-specific selected-tier and error evidence
+survives. The direct-keyword change therefore caused the inverse failure,
+`No matching clause` on the map.
+
+Commit `a8555f257` restores the map contract and strengthens the existing
+claimant writer test across the real producer/consumer boundary. Current
+source and live datoms are recorded in
+[[../jvm-claimant-rejects-visible-reply-without-exact-execution-plan]].
