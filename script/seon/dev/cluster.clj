@@ -111,20 +111,21 @@
   [configuration acquire-owned!]
   (if (= false (:seon.dev.config/source-checkout? configuration))
     (current-manifest! configuration)
-    (or
-     (process/current-watcher-manifest configuration)
-     (let [manifest
-           (artifact/build!
-            configuration
-            (fn []
-              (process/prepare-watcher!
-               configuration
-               (fn [id acquire!]
-                 (acquire-owned!
-                  id acquire!
-                  (fn [] (process/stop! configuration id)))))))]
-       (process/admit-watcher-artifact! configuration manifest)
-       manifest))))
+    (let [selected (config/select-manifest configuration nil)]
+      (or
+       (process/current-watcher-manifest selected)
+       (let [manifest
+             (artifact/build!
+              selected
+              (fn []
+                (process/prepare-watcher!
+                 selected
+                 (fn [id acquire!]
+                   (acquire-owned!
+                    id acquire!
+                    (fn [] (process/stop! selected id)))))))]
+         (process/admit-watcher-artifact! selected manifest)
+         manifest)))))
 
 (defn- bounded-diagnostic
   [value]
@@ -262,7 +263,7 @@
   [{::keys [configuration target-configuration] :as request}]
   (validate! ::request request "The cluster apply request is invalid.")
   (process/with-startup-ownership
-   target-configuration
+   configuration
    (fn [acquire-owned!]
      (state/with-lock
       configuration :cluster 600000

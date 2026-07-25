@@ -273,6 +273,10 @@
 
 (deftest source-apply-publishes-with-the-watcher-it-retains
   (let [configuration {:seon.dev.config/source-checkout? true}
+        selected
+        (assoc configuration
+               :seon.dev.config/environment
+               {"SEON_RESOLVED_MANIFEST_PATH" "/resolved.edn"})
         manifest {:seon.dev.artifact/application-digest "application"}
         effects (atom [])
         acquire-owned!
@@ -280,30 +284,38 @@
           (swap! effects conj [:own id release!])
           (acquire!))]
     (with-redefs
-     [process/current-watcher-manifest (constantly nil)
+     [config/select-manifest
+      (fn [source path]
+        (is (= configuration source))
+        (is (nil? path))
+        selected)
+      process/current-watcher-manifest
+      (fn [source]
+        (is (= selected source))
+        nil)
       artifact/build!
-      (fn [selected prepare-client!]
-        (is (= configuration selected))
+      (fn [source prepare-client!]
+        (is (= selected source))
         (swap! effects conj :build)
         (prepare-client!)
         manifest)
       process/prepare-watcher!
-      (fn [selected start-owned!]
-        (is (= configuration selected))
+      (fn [source start-owned!]
+        (is (= selected source))
         (start-owned!
          process/watcher-id
          (fn []
            (swap! effects conj :watcher-start)
            {:seon.dev.process/id process/watcher-id})))
       process/admit-watcher-artifact!
-      (fn [selected selected-manifest]
-        (swap! effects conj [:admit selected selected-manifest]))]
+      (fn [source selected-manifest]
+        (swap! effects conj [:admit source selected-manifest]))]
      (is (= manifest
             (#'cluster/apply-manifest! configuration acquire-owned!))))
     (is (= [:build
             [:own process/watcher-id]
             :watcher-start
-            [:admit configuration manifest]]
+            [:admit selected manifest]]
            (mapv #(if (and (vector? %) (= :own (first %)))
                     (subvec % 0 2)
                     %)
