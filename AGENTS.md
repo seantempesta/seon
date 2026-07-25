@@ -44,7 +44,15 @@ side-channel delivery — is old-engine residue: redesign it into one of
 the three shapes and DELETE the old form, never bind it into the new
 tier. When reviewing any surviving surface, ask first: "is this
 simpler than it was?" If it is equally complex, the model was ported,
-not applied. A deletion slice is blocked ONLY by a real
+not applied.
+
+CUT FIRST, SEAM-FIX SECOND (owner ruling 2026-07-24 night): when a
+deletion/conversion list exists, land the ENTIRE wave of cuts before
+polishing any individual seam. A discovered seam defect during a cut
+wave gets a one-line issue and the cutting continues; seam repair is
+its own later wave over the finished wreckage. Never let one seam's
+perfection gate the next cut — that sequencing inverts the refactor
+and is how old shapes survive. A deletion slice is blocked ONLY by a real
 implementation dependency — something live still calls the path and the
 surviving owner genuinely cannot serve it yet. Name that dependency,
 fix it at the surviving owner, resume deleting. Let it crash: breakage
