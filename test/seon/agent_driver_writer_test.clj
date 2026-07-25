@@ -16,7 +16,7 @@
             [seon.db.leaf :as db.leaf]
             [seon.host.context :as context]
             [seon.host.eval :as host.eval]
-            [seon.host.session :as session]
+            [seon.host.session.leaf :as session]
             [seon.program.edge :as edge])
   (:import [java.io File]))
 
@@ -423,7 +423,7 @@
               (#'driver.host/planning-root-resolution
                tier-inventory ::retained 'my.agent.fixture)))))))
 
-(deftest exact-plan-provisions-required-registered-namespaces
+(deftest exact-plan-disposition-drives-eval-batch-and-provisions-bindings
   (let [installed (atom [])
         host {:seon.host/base {::context/registry ::registry}}
         host-session {::session/ctx ::retained}
@@ -442,7 +442,121 @@
              {::context/registry ::registry
               ::context/ctx ::retained
               ::context/lib 'seon.db}}
-           (set @installed)))))
+           (set @installed))))
+  (let [allocations
+        [{::db.id/key ::agent-id
+          ::db.id/identity-attr :seon.agent/id}
+         {::db.id/key ::run-id
+          ::db.id/identity-attr :seon.agent.run/id}
+         {::db.id/key ::turn-id
+          ::db.id/identity-attr :seon.agent.turn/id}]
+        candidates
+        (db.id/candidate-manifest
+         {:seon.agent/id :seon.db.id.generator/human-readable
+          :seon.agent.run/id :seon.db.id.generator/compact
+          :seon.agent.turn/id :seon.db.id.generator/compact}
+         allocations)
+        ids (into {} (map (juxt ::db.id/key ::db.id/value)) candidates)
+        agent-id (::agent-id ids)
+        run-id (::run-id ids)
+        turn-id (::turn-id ids)
+        seeded
+        (transact-generated!
+         [{:db/id "agent"
+           :seon.agent/id agent-id
+           :seon.agent/run "run"}
+          {:db/id "run"
+           :seon.agent.run/id run-id
+           :seon.agent.run/agent "agent"
+           :seon.agent.run/status :open
+           :seon.agent.run/claimant driver/claimant
+           :seon.agent.run/claim-epoch 2
+           :seon.agent.run/last-beat-at (java.util.Date.)}
+          {:db/id "turn"
+           :seon.agent.turn/id turn-id
+           :seon.agent.turn/run "run"
+           :seon.agent.turn/status :running
+           :seon.agent.turn/phase :reply-ready}]
+         candidates)
+        database (context/resolve-head! *writer-session*)
+        tier-inventory
+        {:seon.execution.inventory/tier :jvm
+         :seon.execution.inventory/bindings #{}
+         :seon.execution.inventory/remote-bindings #{}
+         :seon.execution.inventory/pure-bindings #{}
+         :seon.execution.inventory/digest "exact-plan-jvm"}
+        host
+        {:seon.execution/artifact-inventories
+         {:seon.execution.inventory/availability :available
+          :seon.execution.inventory/exports-by-tier {:jvm #{}}
+          :seon.execution.inventory/digest "exact-plan-artifacts"}
+         :seon.host/base {::context/tier-inventory tier-inventory}}
+        claim
+        {:seon.db/db database
+         :seon.agent.run/claim-epoch 2
+         :seon.agent.driver/run
+         {:seon.agent/id agent-id
+          :seon.agent.run/id run-id
+          :seon.agent.run/current-turn
+          {:seon.agent.turn/id turn-id}}}
+        eval-batches (atom [])
+        result
+        (binding [db/*leaf* (database-leaf)]
+          (with-redefs-fn
+            {#'driver.host/reply-program
+             (fn [& _]
+               {:seon.repl/eval-entries
+                [{:seon.repl/kind :form
+                  :seon.repl/form 42}]
+                :seon.repl/errors []
+                :seon.agent.driver/reply-content "42"})
+             #'driver.host/ensure-context! (constantly ::retained)
+             #'host.eval/agent-home-ns (constantly 'my.agent)
+             #'host.eval/namespace-resolution
+             (fn [& _]
+               {::edge/namespace 'my.agent
+                ::edge/aliases {}
+                ::edge/refers {}
+                ::edge/current-vars #{}
+                ::edge/core-vars #{}
+                ::edge/known-namespaces #{'my.agent}
+                ::edge/macro-symbols #{}
+                ::edge/effects {}})
+             #'driver.host/invocation-configuration!
+             (constantly ::configuration)
+             #'driver.host/run-eval-batch!
+             (fn [_host _run _claim-epoch eval-database program
+                  configuration exact-plan]
+               (swap! eval-batches conj
+                      {:seon.db/db eval-database
+                       :seon.agent.driver/program program
+                       :seon.config/configuration configuration
+                       :seon.execution/plan exact-plan})
+               {:seon.db/db eval-database
+                :seon.agent.driver/eval-batch
+                {:seon.eval/n-ok 1
+                 :seon.eval/n-fail 0}})}
+            (fn []
+              (#'driver.host/eval-step! host nil claim))))
+        turn
+        (pull!
+         [:seon.agent.turn/status
+          :seon.agent.turn/phase]
+         [:seon.agent.turn/id turn-id])]
+    (is (true? (::protocol/success? seeded)) (pr-str seeded))
+    (is (= {:seon.eval/n-ok 1
+            :seon.eval/n-fail 0}
+           (:seon.agent.driver/eval-batch result)))
+    (is (= 1 (count @eval-batches)))
+    (is (= :jvm
+           (get-in (first @eval-batches)
+                   [:seon.execution/plan
+                    :seon.execution/selected-tier])))
+    (is (= ::configuration
+           (:seon.config/configuration (first @eval-batches))))
+    (is (= {:seon.agent.turn/status :running
+            :seon.agent.turn/phase :evaling}
+           turn))))
 
 (defn- phase-error-case!
   [attempt-open? throw-mid-reply?]

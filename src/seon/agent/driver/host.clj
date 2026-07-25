@@ -626,15 +626,15 @@
       (let [planned (parsed-reply-plan host database agent-id program)]
         (if (:seon.error/message planned)
           planned
-          (let [disposition (:seon.agent.driver/disposition planned)
+          (let [disposition-map (:seon.agent.driver/disposition planned)
                 execution-plan (:seon.execution/plan planned)]
-            (case disposition
+            (case (:seon.agent.driver/disposition disposition-map)
               :no-dispatch
               (deliver-no-dispatch-reply!
                database agent-id run-id claim-epoch turn-id
                (:seon.agent.driver/reply-content program))
-              :steering (:seon.agent.driver/error disposition)
-              :core-fault (:seon.agent.driver/error disposition)
+              :steering (:seon.agent.driver/error disposition-map)
+              :core-fault (:seon.agent.driver/error disposition-map)
               :release
               (let [report
                     (driver/release!
@@ -646,7 +646,7 @@
                   {:seon.db/db (:db-after report)
                    :seon.agent.driver/released? true
                    :seon.execution/selected-tier
-                   (:seon.execution/selected-tier disposition)}))
+                   (:seon.execution/selected-tier disposition-map)}))
               :execute
               (let [invocation-configuration
                     (invocation-configuration! database)]
