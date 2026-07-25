@@ -605,39 +605,38 @@ otherwise healthy and released. Fresh agent `young-peaches-rescue`, run
 `:my.alivegate2.memory/*` rows at transaction `536871337`, and read all three
 from the database in later turn `j271p5ey23ky` via successful eval
 `r2c5z56nuuty` at transaction `536871352`. All ten DeepSeek attempts are HTTP
-200 `:success`; all ten turns are `:published/:done`. The exact requested
+200 `:success`; all ten turns are `:published/:done`. The then-effectful exact
 `seon.agent.lifecycle/complete` form derived a JVM execution plan but failed
 three times with `The message platform leaf is not installed.` No synthesis
 message entity exists. Run closure at transaction `536871403` is
-`:closed/:no-forms`; claimant and agent current-run custody are absent. Root
-cause: the host lifecycle wrapper binds lifecycle and database leaves, while
-its nested `message/message-transaction-for` call requires an unbound
-`message/*leaf*`. The existing
-[[../../seon/issues/host-base-agent-surface-parity]] blocker owns the nested
-capability binding and real completion drive. Evidence:
-`tmp/orchestrator/alivegate2-gate.log`.
+`:closed/:no-forms`; claimant and agent current-run custody are absent.
+Evidence: `tmp/orchestrator/alivegate2-gate.log`.
 
-MEMORY LAYER PROVEN LIVE (~22:20, alivegate2): plan persisted +
-three memory entities written + LATER-TURN READ verified from datoms
-(t=536871259/337/352); 10/10 attempts :success; every turn
-:published/:done; zero wedge. Sole remaining gap: lifecycle/complete
-on the claimant lacks the message/*leaf* binding (host-base surface
-PARITY class — issue filed) → messageleaf lane fixing the class
-(audit all leaf families, one binding mechanism) + final synthesis
-proof = CAVEAT-CLEARED on success. dispositioncase earlier ACCEPTED
-(a8555f257: both dispositions :done live). The runtime beneath the
-gate is clean — every failure tonight settled terminal with custody
-released.
+MEMORY LAYER PROVEN LIVE (~22:20, alivegate2): plan persisted + three memory
+entities written + LATER-TURN READ verified from datoms (t=536871259/337/352);
+10/10 attempts :success; every turn :published/:done; zero wedge.
+dispositioncase earlier ACCEPTED (a8555f257: both dispositions :done live).
+The runtime beneath the gate is clean — every failure tonight settled terminal
+with custody released.
 
 R53 RULED (~22:50, owner): LIFECYCLE COMPLETION IS NOT A CAPABILITY.
-seon.agent.lifecycle/complete = a PURE function returning a terminal
-lifecycle VALUE; the claimant driver interprets it and performs
-settlement + message delivery through its existing canonical path
-(terminal-close + the formless-reply delivery mechanism). No leaves,
-no bindings, admissible on every tier by construction — the
-leaf-parity bug class for lifecycle DISSOLVES rather than being
-patched. messageleaf lane redirected mid-fix; leaf-binding wiring
-for lifecycle reverted in favor of R53.
+`seon.agent.lifecycle/complete` is a PURE function returning a schema'd
+terminal lifecycle VALUE. Guarded eval has no lifecycle/message/database
+leaves or writes. The claimant driver interprets that value and performs
+settlement through its existing canonical formless-reply delivery path plus
+terminal-close transaction data. The leaf-parity patch is dissolved and its
+wiring must be reverted, not extended.
+
+EARLIEST UNSETTLED CONTRACT: an eval returning the terminal lifecycle value is
+recognized by the claimant and yields, in the driver's settlement, a transcript
+message plus closed result/custody facts and a `:published/:done` turn. The
+integrated proof is the real-driver writer regression with zero capability
+bindings in the eval context, followed by one fresh default-cluster run ending
+in `(seon.agent.lifecycle/complete "ALIVE_GATE_FINAL: ...")`. That one run
+must yield the message entity and `:done` datoms; combined with alivegate2's
+already-proven plan/memory/later-read evidence it clears the caveat. Next
+dependency-ready refill is the claimant terminal-value implementation; final
+graduation remains U12's 100-agent kill/restart demonstration.
 
 ## OVERNIGHT PROGRAM (owner-ruled, 2026-07-23 night — supersedes the
 

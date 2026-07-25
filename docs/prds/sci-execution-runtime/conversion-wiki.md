@@ -1940,3 +1940,16 @@ the variable-weight values they select.
   the same projection to the launch descriptor in managed environment
   identity. A material envelope change still requires coordinated replacement;
   selecting the same manifest for a second `up` reuses the ready generation.
+
+## R53 terminal lifecycle-value scar (2026-07-24)
+
+- **A terminal request from authored code is data, not a platform capability.**
+  `seon.agent.lifecycle/complete` returns one flat schema'd terminal value from
+  guarded eval; it neither binds leaves nor writes a message on any tier. The
+  claimant recognizes that value and reuses the canonical formless-reply
+  delivery plus terminal-close transaction path, so message/result/turn
+  settlement remains in the driver. Do not repair a nested
+  `message/*leaf*` binding for a function whose effectful implementation must
+  be deleted (`src/seon/agent/lifecycle.cljc`,
+  `src/seon/agent/driver/host.clj`,
+  `docs/seon/issues/host-base-agent-surface-parity.md`).
