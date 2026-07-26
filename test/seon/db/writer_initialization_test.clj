@@ -3,6 +3,7 @@
             [clojure.test :refer [deftest is]]
             [cognitect.transit :as transit]
             [datahike.api :as d]
+            [datahike.db :as datahike-db]
             [seon.db.branch :as branch]
             [seon.db.executor :as executor]
             [seon.db.program :as program]
@@ -24,6 +25,18 @@
    ::writer/revalidate-embedding-assertions (fn [_db-value _assertions] [])
    ::writer/query-vec (fn [_] {:seon.embed/vector [0.0]})
    ::writer/knn (fn [_db-value _vector _k _eids] [])})
+
+(deftest dependency-implicit-schema-facets-are-admitted-but-not-installed
+  (let [db-value
+        (datahike-db/empty-db {} {:schema-flexibility :write})
+        transaction-data
+        [{:seon.schema/key :db.secondary/only
+          :seon.schema/form ":boolean"}]]
+    (is (empty?
+         (#'writer/compile-schema-declarations
+          db-value transaction-data #{:db.secondary/only}))
+        "a canonical form admits the facet, while Datahike's implicit schema
+         prevents an invalid attempt to install its dependency-owned ident")))
 
 (deftest start-rejects-missing-read-defaults-before-executor-allocation
   (let [executor-starts (atom 0)

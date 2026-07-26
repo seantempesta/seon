@@ -19,6 +19,7 @@
             [datahike.db.utils :as datahike.db]
             [datahike.impl.entity :as datahike.entity]
             [datahike.lru :as lru]
+            [datahike.schema :as datahike-schema]
             [hasch.core :as hasch]
             [seon.db.branch :as branch]
             [seon.db.datahike.schema :as datahike.schema]
@@ -431,7 +432,11 @@
                  (ex-info "A transaction attribute has no canonical schema form."
                           {::attributes unresolved
                            :seon.error/kind :user-input})))
-            affected (sort-by str candidates)
+            affected
+            (sort-by str
+                     (remove
+                      #(contains? datahike-schema/implicit-schema-spec %)
+                      candidates))
             declarations
             (mapv
              (fn [attribute]
