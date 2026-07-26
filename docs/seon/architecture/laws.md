@@ -114,6 +114,15 @@ The full decision record is [[011-tests-find-design-issues]].
 - **Assertions target facts, transitions, envelopes, and CAS outcomes.** Never
   exact prose.
 
+- **No datom string-size limit exists; amplification is the real cost.** Datahike
+  validates `:db.type/string` with `string?` alone; a 10 MB value transacts in
+  ~62 ms on a file store and reopens byte-exact. The measured tax is ~2.2×
+  storage across the paired EAVT/AEVT indexes plus retained trees, on every
+  query touching the attribute. Bulk content therefore belongs in the
+  content-addressed blob store with a small ref fact; the folkloric 65k limit
+  is Fressian's chunk buffer, not a bound
+  (`prds/sci-execution-runtime/research/datom-size-limits-2026-07-26.md`).
+
 ## Process
 
 - **Live behavior falsifies inspection.** Context, web UI, and function changes
