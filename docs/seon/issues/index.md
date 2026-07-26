@@ -10,14 +10,16 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (53)
+## Blocker (57)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [A deps-ecosystem package install cannot reach an active cluster JVM](deps-package-install-cannot-reach-a-running-claimant.md) | blocker | general |
 | [Arbitrary database results collide with the error shape](arbitrary-database-results-collide-with-error-shape.md) | blocker | Core |
 | [Arbitrary eval allocation lacks hard process memory containment](eval-process-isolation-memory-containment.md) | blocker | agent |
+| [Bound http-kit streaming writes for slow SSE consumers](http-kit-streaming-writes-have-an-unbounded-socket-queue.md) | blocker | UI |
 | [Capture dependencies when a lazy view unit activates](lazy-view-unit-activation-drops-read-observations.md) | blocker | UI |
+| [Commit authored corpus facts with the terminal receipt](driver-terminal-transactions-do-not-commit-authored-corpus-facts.md) | blocker | agent |
 | [Compiled program contains nilable value schemas](compiled-program-contains-nilable-value-schemas.md) | blocker | Core |
 | [Content-pin the Inspect source dependency](inspect-source-dependency-is-not-content-pinned.md) | blocker | agent |
 | [Contract predicate transitive purity awaits execution planner](contract-predicate-transitive-purity-awaits-execution-planner.md) | blocker | Core |
@@ -30,6 +32,7 @@ See `README.md` for the convention.
 | [Full writer gate fails during runtime lane integration](full-writer-gate-fails-during-runtime-lane-integration.md) | blocker | Core |
 | [Give each named cluster its own writer process](named-clusters-share-one-writer-process.md) | blocker | Core |
 | [Implement browser-session navigation provenance](web-session-navigation-provenance-is-missing.md) | blocker | UI |
+| [Install durable corpus functions into the shared SCI base](cluster-jvm-boot-does-not-install-durable-corpus-functions.md) | blocker | agent |
 | [Invalidate a cached failed Datastar render after its owner reloads](datastar-feed-retains-failed-render-after-hot-reload.md) | blocker | UI |
 | [JVM result surface does not implement R32 result-symbol handles](jvm-result-symbols-not-bound-r32.md) | blocker | Core |
 | [Keep a running target's bootstrap artifact immutable](shared-bootstrap-output-mutates-running-artifact.md) | blocker | Core |
@@ -48,8 +51,9 @@ See `README.md` for the convention.
 | [Pull cluster JVM limits from the cluster config identity](jvm-claimant-pulls-config-with-wrong-identity.md) | blocker | agent |
 | [Read-side attribute admission fails open (silent empty results, :all fallback)](read-side-attribute-admission-fails-open.md) | blocker | Core |
 | [Reduce retained memory in each execution child](execution-children-retain-hundreds-of-megabytes.md) | blocker | agent |
-| [Refuse execution when the run plan is not durable](jvm-driver-ignores-plan-transaction-errors.md) | blocker | agent |
+| [Refuse model dispatch when turn allocation fails](jvm-driver-continues-after-turn-allocation-error.md) | blocker | agent |
 | [Restore writer admin transition is unimplemented](restore-writer-admin-transition-is-unimplemented.md) | blocker | Core |
+| [Resume JVM execution from the committed run plan](jvm-driver-does-not-resume-committed-plan.md) | blocker | agent |
 | [Retain complete model transport evidence in Inspect logs](inspect-model-transport-evidence-is-incomplete.md) | blocker | agent |
 | [Retain live eval values in the owning JVM host](retain-live-eval-values-in-the-owning-jvm-host.md) | blocker | agent |
 | [Retained per-agent SCI contexts are never evicted, and each shares one guard holder](retained-agent-contexts-are-never-evicted-and-share-one-holder.md) | blocker | general |
@@ -68,7 +72,7 @@ See `README.md` for the convention.
 | [seon.agent.ctx file reads bypass the filesystem grant](agent-ctx-file-reads-bypass-fs-grant.md) | blocker | agent |
 | [tools.reader executes agent source at read time, outside SCI entirely](tools-reader-evaluates-agent-source-at-read-time.md) | blocker | general |
 
-## Friction (76)
+## Friction (77)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -127,6 +131,7 @@ See `README.md` for the convention.
 | [Reconcile issue frontmatter with the maintained lifecycle](issue-authority-frontmatter-drift-blocks-index.md) | friction | general |
 | [Remove local Datahike ownership from execution children](execution-artifact-packages-local-datahike.md) | friction | agent |
 | [Remove the Node module-register deprecation from CSS builds](tailwind-node-module-register-deprecation.md) | friction | UI |
+| [Remove the deleted session error constructor from the writer suite](full-writer-suite-references-deleted-session-error-value.md) | friction | Core |
 | [Remove undeclared-var warnings from the self-host bootstrap build](bootstrap-analyzer-api-emits-undeclared-var-warnings.md) | friction | agent |
 | [Render entity converters silently vanish on unresolved symbols](render-entity-converters-silently-vanish-on-unresolved-symbol.md) | friction | UI |
 | [Restore focused agent edge-case coverage](removed-embedded-multiagent-coverage-needs-owner.md) | friction | agent |
@@ -149,12 +154,13 @@ See `README.md` for the convention.
 | [test-cljs compile failure retains a live lock owner](test-cljs-compile-failure-retains-live-lock-owner.md) | friction | general |
 | [try in expression position inside a compiled ^:async fn auto-awaits](async-try-expression-iife-auto-awaits.md) | friction | agent |
 
-## Cleanup (9)
+## Cleanup (10)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Address resident agents by namespace](namespace-addressed-resident-agents.md) | cleanup | agent |
 | [Bun 1.3.14 segfaults on AsyncLocalStorage.enterWith in ESM top-level continuations](bun-enterwith-toplevel-segfault.md) | cleanup | Core |
+| [Delete pod consumers of the unregistered attempt ordinal](pod-attempt-ordinal-consumers-reference-an-unregistered-attribute.md) | cleanup | UI |
 | [Inspect concurrent attributed agent messages](inspect-concurrent-agent-messages.md) | cleanup | agent |
 | [Move product routes out of the static router supplement](static-routes-bypass-database-route-authority.md) | cleanup | UI |
 | [Partially-Stale Reference Docs Need Updates](stale-reference-docs.md) | cleanup | docs |
