@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, runtime, database, schema]
 ---
@@ -51,8 +51,32 @@ driver's registered attributes available in a fresh database.
 - A fresh reset installs the run-plan and run-form schema before the driver can
   accept work.
 - The driver evaluates no form unless the complete ordered plan transaction
-  returns `:seon.db/ok? true`.
+  returns a native transaction report rather than a flat `:seon/error`.
 - A forced plan-transaction rejection terminalizes the turn/run as a flat
   visible error, publishes no success reply, and leaves no open run.
 - A successful real turn has durable plan digest/form rows and the expected
   transaction boundary.
+
+## Resolution
+
+Resolved by `c03ff91eb`.
+
+The plan and run-form schemas now live in portable `seon.agent.run.core`, so
+fresh initialization pages install them before the JVM driver accepts work.
+`process-message!` interprets the plan transaction result: a flat error closes
+the turn/run, returns that error, and never calls SCI. The regression forces
+the exact rejected-plan case and proves zero evaluations plus the returned
+flat error.
+
+The corrected falsifier ran before the production fix and failed in the
+expected direction: the evaluation counter advanced and the returned value was
+the eval result instead of the writer's flat plan error. The same focused test
+passes after `c03ff91eb`.
+
+Focused proof is green: the driver/cold-schema/HTTP checkpoint passed 18 tests
+and 86 assertions; the cold CLJS bootstrap proof passed 1 test and 2
+assertions. Fresh `turnmeasure0726a` then installed every plan/timing
+attribute, committed plan transaction `536870936`, evaluated its one durable
+form, and closed `:completed` without turn or eval errors. The corrected
+conditioned waterfall is recorded in
+[[../../../prds/sci-execution-runtime/research/measurements-2026-07-25#18-corrected-self-attributing-turn]].

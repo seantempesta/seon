@@ -22,13 +22,18 @@ The proof is a transcript and committed datoms, not a passing test.
 **Load-tested, by us, on purpose.** We drive it until something breaks, and we
 know which thing broke and why. Not "it seems fine" — a number, a ceiling, and
 the name of the resource that hit it. We already know the shape of the answer:
-the commit path is one core, SCI is ~5% of a turn, and the model dwarfs both.
-Find the real wall.
+the commit path is one core, SCI's share is measured rather than assumed, and
+the model dwarfs both. Find the real wall.
 
 **Kick-ass fast, measured.** Boot in seconds, agent start in milliseconds, a
 turn dominated by the model call and nothing else. Every performance claim
 carries the conditions it was measured under — this program has already been
 misled twice by a number without its context.
+
+**Speed-clause status — SATISFIED 2026-07-26.** The invalid broken-turn
+waterfall remains visible, and §18 supplies the corrected fresh-cluster
+measurement, durable component reconciliation, conditions, exclusions, and
+target-only reset proof.
 
 **Every weird smell chased to its cause.** A coercion, an inconsistency, a
 duplicate mechanism, a silently-wrong default: each one is a bug until proven
@@ -174,16 +179,28 @@ run-open CAS attempts, growing to 62 at `N=25`; one CAS won each time, so the
 ceiling is 25/25 successful with the first break already named, not a capacity
 claim of 25.
 
-One minimal real turn measured 2,409 ms inside the HTTP task: a 1,398 ms model
-envelope, 3 ms SCI eval (**0.1245%**, not the historical ~5%), and 1,008 ms of
-commit-adjacent scheduling/protocol/response work. Full target context
-derivation is absent on this path and publish shares the terminal transaction,
-so their standalone costs remain unobservable. The load clause now has a
-conditioned first break; the speed clause is measured but **not graduated**
-because the expected model-dominates shape was only 58% at best and the
-non-SCI remainder is too large. Complete conditioned evidence and explicit
-non-measurements:
-[[research/measurements-2026-07-25#17-named-cluster-real-agent-load-and-turn-waterfall]].
+The first `N=1` waterfall is retained as an invalidated measurement: its run
+plan transaction failed because the fresh database lacked the plan schema, and
+the driver ignored the flat error before evaluating. Commit `c03ff91eb` moves
+the plan schema into the cold portable authority, refuses eval after a failed
+plan transaction, and persists a nanosecond waterfall as turn-owned component
+facts.
+
+One replacement paid turn on fresh `turnmeasure0726a` completed with a durable
+plan and no error facts. Its JVM-driver interval was 2,586.479 ms:
+2,030.633 ms provider request/response, 513.149 ms across five successful
+transaction calls before timing settlement, 31.905 ms current context
+derivation, 4.898 ms reply derivation, 3.948 ms eval, 0.976 ms model-envelope
+overhead, and 0.970 ms derived unexplained wall. Components sum to
+2,585.509 ms; the 0.970 ms remainder is 0.0375%, below the predeclared
+`max(5 ms, 1%)` tolerance of 25.865 ms. SCI is 0.1527% of this conditioned
+driver interval, not the historical ~5%. Full HTTP wall was 3,214.469 ms and
+the endpoint's own envelope was 3,021 ms; both remain explicitly separate
+boundary measurements rather than being mixed into the JVM monotonic total.
+The load clause has a conditioned first break and the speed clause is now
+**graduated**. Complete conditions, disagreement, transaction refs, reset
+proof, and explicit non-measurements:
+[[research/measurements-2026-07-25#18-corrected-self-attributing-turn]].
 
 The 2026-07-24 reset-boundary checkpoint fixed claimant-host committed
 acquisition in `c2c5faeff`: one frozen database value, AEVT identity pages,

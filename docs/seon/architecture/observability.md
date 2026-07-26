@@ -57,15 +57,19 @@ flag:
   the run opener because a run can absorb later messages.
 - The existing projections: prompt size (tokens at display), `llm-usage` /
   `llm-meta`, the `:seon.eval` component refs, status, retries.
-- **Optional bounded turn measurements** — selected database configuration
-  chooses `:off`, `:aggregate`, or bounded diagnostic `:trace` capture, with a
-  launch-time environment override resolved into that configuration. Aggregate
-  capture attributes context construction, typed database operations,
-  Datahike cache/resource evidence, model calls, eval, and reactive publication
-  to the exact turn. `:off` performs no clock, counter, IPC expansion, or
-  measurement write. Detailed spans belong in one bounded diagnostic blob;
-  ordinary turn datoms retain only the compact aggregate. Missing evidence is
-  rendered as unmeasured, never as zero.
+- **Compact turn measurements** —
+  `:seon.agent.turn/duration-ns` records one monotonic driver interval and
+  `:seon.agent.turn/timings` owns its measured component rows. Each row names
+  the boundary, ordinal, nanosecond duration, and optional exact transaction
+  ref. The component sum is checked against the total; any difference is
+  derived at read time and never stored as a remainder row. Context
+  construction, provider request/response, response-envelope work, reply
+  derivation, every transaction call, eval, and final publication remain
+  distinct. The later transaction that writes these measurements is outside
+  the interval and is reported as an explicit artifact. Missing evidence is
+  absent and rendered as unmeasured, never as zero. Optional detailed spans and
+  database resource evidence belong in one bounded diagnostic blob rather than
+  expanding ordinary turn datoms.
 - **Provider attempts as facts** — every retry attempt connects to the turn
   with its ordinal, resolved non-secret
   transport projection, adapter and outer timeout layers, outcome, and present

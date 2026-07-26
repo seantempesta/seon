@@ -557,6 +557,25 @@ attributes exist.
 | `:seon.agent.turn/usage-estimated?` | `:boolean` | boolean / one | usage came from the canonical token estimator |
 | `:seon.agent.turn/llm-attempts` | `[:vector {:seon.db/component true} :seon.db/ref]` | ref / many / **component** | ordered bounded provider-attempt evidence; absence means no attempt |
 | `:seon.agent.turn/evals` | `[:vector {:seon.db/component true} :seon.db/ref]` | ref / many / **component** | owned evals (cascade-retract) |
+| `:seon.agent.turn/duration-ns` | `[:int {:min 0}]` | long / one | monotonic driver entry through final publish transaction return; timing-settlement transaction excluded |
+| `:seon.agent.turn/timings` | `[:vector {:seon.db/component true} :seon.db/ref]` | ref / many / **component** | compact measured component rows; absence is unmeasured, never zero |
+
+Turn timing rows are identity-free components written once with the completed
+turn:
+
+| attribute | malli | datahike facet | notes |
+|---|---|---|---|
+| `:seon.agent.turn.timing/name` | closed enum | keyword / one | concrete measured boundary such as context derivation, provider request/response, eval, or one transaction call |
+| `:seon.agent.turn.timing/ordinal` | `[:int {:min 0}]` | long / one | joins repeated eval and transaction rows without inventing child identity |
+| `:seon.agent.turn.timing/duration-ns` | `[:int {:min 0}]` | long / one | monotonic measured duration; missing evidence omits the row |
+| `:seon.agent.turn.timing/transaction` | `:seon.db/ref` | ref / one | optional exact committed transaction returned by that transaction call |
+
+The sum of timing rows is compared with `:seon.agent.turn/duration-ns`.
+Unexplained wall is derived by subtraction and never stored. Only the final
+terminal transaction is named publication; earlier terminal receipt
+transactions retain that narrower name. The transaction that persists timing
+rows cannot include its own completed duration and is an explicit
+measurement-settlement artifact.
 
 Provider attempt rows are component evidence owned by the turn:
 

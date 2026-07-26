@@ -85,6 +85,7 @@ it survived into none.
 ```bash
 time java -version                                  # 0.022 s total
 time clojure -M:writer -e '(println "core up")'     # 0.235 s total
+
 ```
 
 | step | ms | share of a 9,647 ms source boot |
@@ -123,12 +124,14 @@ Run **A**, source classpath:
 java --add-modules jdk.incubator.vector --enable-native-access=ALL-UNNAMED \
      --sun-misc-unsafe-memory-access=allow -XX:+UseG1GC -Xmx2g \
      -cp "$(clojure -Spath -M:writer:host)" clojure.main tmp/boot_breakdown.clj
+
 ```
 
 Run **B**, AOT jar with the archive disabled — same flags, plus:
 
 ```bash
      -Xshare:off -cp tmp/seon-jvm-artifacts/<digest>/seon-jvm-aot.jar
+
 ```
 
 Run **C**, AOT jar plus the AppCDS archive — same flags, plus:
@@ -137,6 +140,7 @@ Run **C**, AOT jar plus the AppCDS archive — same flags, plus:
      -Xshare:on \
      -XX:SharedArchiveFile=tmp/seon-jvm-artifacts/<digest>/seon-jvm-aot.jsa \
      -cp tmp/seon-jvm-artifacts/<digest>/seon-jvm-aot.jar
+
 ```
 
 | step | A source | B AOT only | C AOT + AppCDS |
@@ -216,6 +220,7 @@ remaining 3,886 ms and is unexplained.
 [error][cds] Mismatched values for property jdk.module.addmods:
   jdk.incubator.vector specified during runtime but not during dump time
 ... Disabling optimized module handling
+
 ```
 
 `-Xshare:on` did **not** abort, so the archive **is** in use and the 21.9x on
@@ -506,6 +511,7 @@ but not `clojure-string`. Carry D16 forward only as an invariant the new
 (alength (byte-array 200000000))
 ;; => 200,033,752 bytes allocated, 1 ms, 0 fn entries, outcome :ok
 ;; under BOTH a 500 ms time-limit AND a 64 MB allocation cap
+
 ```
 
 `(alength (byte-array 100000000))` likewise charges 0 entries. **No interrupt-fn
@@ -539,6 +545,7 @@ only `Exception` resolves. The marker contract is stated verbatim in
 ```clojure
 (let [b (loop [v 2N i 0] (if (< i 18) (recur (* v v) (inc i)) v))]
   (mod (apply * (repeat 300 b)) 7))
+
 ```
 
 | | prototype | my reproduction |
@@ -625,6 +632,7 @@ a resource event.
 ;; spit EXECUTED, file written on disk
 ;; returns (defn f [] nil 1)
 ;; 0 fn entries, no ctx, no :classes allowlist, no receipt
+
 ```
 
 The mechanism is **`clojure.tools.reader`'s OWN `*read-eval*`** — a *different var*
@@ -1233,6 +1241,7 @@ clojure -J-Xmx4g -J-XX:NativeMemoryTracking=summary \
   -M:writer:host:writer-test \
   -i bench/writer_throughput.clj \
   -e '(bench.writer-throughput/-main)'
+
 ```
 
 ### 16.1 The curve, knee, and ceiling
@@ -1482,6 +1491,7 @@ eval      ["m5bng2aq847g" 0 1]
 source    (seon.agent.lifecycle/complete "RUNG1_OK")
 status    :done, :seon.eval/ok? true, :seon.eval/duration-ms 3
 reply     RUNG1_OK at 2026-07-26T05:53:08.902Z
+
 ```
 
 A history query showed
@@ -1529,6 +1539,11 @@ first scaling defect already present at 5**. This is a load-to-first-break
 result, not a claim that capacity is 25.
 
 ### 17.4 One-turn end-to-end waterfall
+
+**Historical broken-turn measurement — do not use as the corrected
+baseline.** Section 18 proves that this turn's plan transaction failed and the
+driver ignored the error. The numbers remain here to preserve the
+disagreement.
 
 The `N=1` turn has enough transaction timestamps to bound the real wall.
 The handler timer began at the inbound message's logical time
@@ -1659,6 +1674,7 @@ bin/seon cluster reset agentload0726
   pod: clean generation=c6bd57e8-b664-458e-b9fc-6e06591aa007
   host: clean generation=68f17a74-290a-4f7e-ad8b-9c93c92af42e
 ● cluster agentload0726 reset
+
 ```
 
 The target host/pod/web-render records were absent afterward and
@@ -1686,3 +1702,201 @@ real-agent evidence. The load clause has a first break and named resource.
 The speed clause has a conditioned end-to-end waterfall, but the expected
 result did not pass: SCI is ~0.12%, the model envelope is at most 58%, and the
 non-SCI remainder is too large and too coarsely attributed to graduate.
+
+## 18. Corrected self-attributing turn
+
+Section 17 is retained because deleting a misleading number would delete the
+lesson. Its `N=1` waterfall is **invalidated as a performance baseline**: the
+plan transaction failed schema admission, its flat error was ignored, and eval
+continued. The 1,398 ms “model envelope” therefore includes a failed
+transaction and never timestamps the provider boundary. Its 2,409 ms total and
+3 ms eval remain historical observations of that broken turn, not comparable
+phase measurements.
+
+Commit `c03ff91eb` closes both causes:
+
+- plan and form schemas load from the portable run authority and are present
+  in fresh initialization pages;
+- a plan transaction that returns a flat `:seon/error` closes the turn/run and
+  refuses eval;
+- the JVM HTTP leaf measures request send through response-body consumption
+  and JSON parsing, and both hosted wire cores retain that value;
+- completed turns store one monotonic nanosecond total plus identity-free
+  component rows for context derivation, provider request/response,
+  model-envelope overhead, reply derivation, every transaction call, eval, and
+  final publication; and
+- the timing-settlement transaction is explicitly outside the measured total.
+
+### 18.1 Conditions and cost
+
+Every number in §18 has these conditions:
+
+| condition | value |
+|---|---|
+| captured | 2026-07-26 03:18–03:19 EDT |
+| machine | MacBook Pro `Mac17,6`, 18 cores, 128 GiB RAM |
+| operating system | macOS 26.5.2, build `25F84` |
+| code | commit `c03ff91ebbf9685fb4a13b197797fc07e45bc910`; application release `4c42148511c3b74fd869c0b9377de0a9a9589d9ebef8d0eb190ee682aaeb55f2`; writer digest `b186ef04b8d877a444313d8ea4e1c1b10f743ec25b0e2f2ae72703509edc62c6` |
+| JVM | OpenJDK 26.0.1, G1, `-Xmx4096m`, `-Xshare:on`, AppCDS; host workload PID `90168`, shared writer workload PID `88807` |
+| material JVM flags | `--add-modules jdk.incubator.vector`, `--enable-native-access=ALL-UNNAMED`, `--sun-misc-unsafe-memory-access=allow`, `-Xshare:on`, AppCDS archive, `InitialHeapSize=8 MiB`, `MaxHeapSize=4096 MiB`, `SoftMaxHeapSize=4096 MiB`, `UseG1GC`, `UseCompressedOops`, `UseCondCardMark`, 12 compiler threads, 4 concurrent-GC threads |
+| cluster | fresh apply/open of `turnmeasure0726a`; file database `/Users/sean/src/seon/data/clusters/turnmeasure0726a/db`; host/pod/web-render workload PIDs `90168` / `90208` / `90240`; shared writer PID `88807`; watcher workload PID `89279` |
+| database before request | basis transaction `536870932`, commit ID `6a65b394-d7f0-5f87-b04a-8d44ac11aa3a`; all seven required plan/timing attributes proven installed from database facts |
+| model | DeepSeek `deepseek-v4-pro`, temperature `0.7`, `max_tokens=4096`, thinking disabled; driver forced non-streaming batch mode |
+| request | one raw instruction asking for exactly `(seon.agent.lifecycle/complete "clean-turn")`; HTTP request bound 120 s; model-attempt bound 60 s |
+| concurrency | one agent, one request, no launch spread |
+| other work | shared writer and watcher, named host/pod/web-render, the Codex task, desktop applications, and unrelated checkout artifacts; not sole tenant; no test suite overlapped the paid request |
+| cost | exactly one completed paid benchmark request was bought after local/focused proofs; no repeat ladder; token usage, cache use, retry-attempt count, and dollar cost were not persisted and are unmeasured |
+
+`bench/agent_turn_load.sh` made the one request.
+`bench/jvm_memory_snapshot.sh` captured the JVM, flags, heap, RSS, and thread
+conditions immediately afterward. Its forced-GC snapshots are measurement
+conditions, not per-turn resource claims: the host reported 62,467 KiB used /
+260,096 KiB committed heap, 989,808 KiB RSS, and 78 OS thread rows excluding
+the header; the shared writer reported 37,723 KiB used / 178,176 KiB committed
+heap, 1,395,280 KiB RSS, and 93 thread rows.
+
+The reconciliation tolerance was declared before the paid call:
+
+```text
+remainder-ns >= 0
+remainder-ns <= max(5,000,000 ns, floor(total-ns / 100))
+
+```
+
+No remainder row is stored. It is derived from the total and measured
+components.
+
+### 18.2 Durable driver waterfall
+
+The turn `ngbg2wjsud7g`, run `r1k04yr6rhqe`, and eval
+`["r1k04yr6rhqe" 0 1]` completed `:done` / `:completed`. The run stored plan
+digest
+`3aa9dd30fb3bdd365906b3dc0c8fa62f79dbbe682d095b20450217dc220cd76e`
+and the exact ordinal-zero source
+`(seon.agent.lifecycle/complete "clean-turn")`.
+
+The durable JVM-driver total is entry after the inbound message is observed
+through return of the final publish transaction call:
+
+| component fact | duration | share of driver total | classification |
+|---|---:|---:|---|
+| run-admission transaction call | 106.287167 ms | 4.1093% | measured; allocation, protocol, scheduling, and commit through returned report |
+| turn transaction call | 109.814375 ms | 4.2457% | measured transaction-call envelope |
+| current context derivation | 31.904666 ms | 1.2335% | measured; two pulls, config resolution, raw request content, static instruction; not full target context |
+| provider request/response | 2,030.632542 ms | 78.5095% | measured at the HTTP leaf from send through complete body receipt and JSON parse |
+| model-envelope overhead | 0.975958 ms | 0.0377% | measured outer transport envelope minus the nested provider interval |
+| reply derivation | 4.898334 ms | 0.1894% | measured parse of the provider text into executable forms |
+| plan transaction call | 94.078000 ms | 3.6373% | measured transaction-call envelope |
+| eval-admission transaction call | 90.847791 ms | 3.5124% | measured transaction-call envelope |
+| eval | 3.948458 ms | 0.1527% | measured complete JVM `evaluate!` call; nanoseconds avoid the old millisecond false zero |
+| publish transaction call | 112.121458 ms | 4.3349% | measured final eval receipt + lifecycle close + reply publication through returned report |
+| **persisted component sum** | **2,585.508749 ms** | **99.9625%** | measured |
+| **derived unexplained wall** | **0.970334 ms** | **0.0375%** | derived, not stored |
+| **persisted driver total** | **2,586.479083 ms** | **100%** | measured monotonic interval |
+
+The allowed tolerance was 25.864790 ms (1% dominated the 5 ms absolute
+floor). The 0.970334 ms remainder passes by 24.894456 ms. The component sum
+does not equal the total by construction; the small positive difference is
+the actual driver overhead between timestamped intervals.
+
+The provider is the dominant driver component at 78.5095%. SCI is 0.1527%,
+not the historical ~5%. This does not establish a universal provider or SCI
+ratio: it is one minimal, one-form, non-streaming DeepSeek turn under the
+conditions above.
+
+### 18.3 Transaction and end-to-end proof
+
+Every intended transaction in the measured driver sequence returned a native
+transaction report and is joined from the timing facts to its exact committed
+transaction:
+
+| transaction | basis transaction | committed at UTC |
+|---|---:|---|
+| run admission | `536870934` | 2026-07-26 07:18:32.243 |
+| turn open | `536870935` | 2026-07-26 07:18:32.343 |
+| durable plan | `536870936` | 2026-07-26 07:18:34.512 |
+| eval admission | `536870937` | 2026-07-26 07:18:34.604 |
+| final publish | `536870938` | 2026-07-26 07:18:34.712 |
+
+The next database value was basis transaction `536870939`, commit ID
+`6a65b4ca-2986-5342-b32e-aff99a271868`; that is the timing-settlement
+transaction and no timing row points to it. The turn has no
+`:seon.agent.turn/error`, the eval has no `:seon.eval/error`, the plan facts
+exist, and the run closed `:completed`. Unlike §17, no failed transaction is
+inside this measured sequence.
+
+Three nested wall boundaries remain deliberately distinct:
+
+| boundary | duration | classification |
+|---|---:|---|
+| durable JVM-driver interval | 2,586.479083 ms | measured, self-attributed by turn facts |
+| `/agents/run` endpoint envelope | 3,021 ms | measured integer-millisecond artifact returned by the endpoint |
+| full `curl` HTTP wall | 3,214.469 ms | measured client wall |
+
+The endpoint-minus-driver difference is 434.520917 ms. The
+client-minus-driver difference is 627.989917 ms. Those differences include
+the inbound-message transaction, wake delivery, final database acquisition
+and response projection, HTTP request/response work, scheduling, and the
+endpoint timer's millisecond truncation. They are **boundary artifacts**, not
+durable driver components, because they cross clocks/processes whose owners
+do not yet publish compatible timing facts. The provider interval is 67.2172%
+of the endpoint envelope and 63.1716% of full HTTP wall. No part of either
+difference is relabeled as provider, context, transaction service, or
+publication.
+
+### 18.4 What this correction did not measure
+
+- Full target context derivation is still absent on this driver path. The
+  31.904666 ms row measures only the current two-pull request derivation.
+- The transaction-call rows are not pure Datahike commit durations; they
+  include allocation/request construction where applicable, protocol,
+  scheduling, writer work, commit, and report receipt.
+- The timing-settlement transaction cannot record its own completed duration
+  and remains an explicit unmeasured artifact.
+- Token usage, cache hits, retry attempts, exact dollar cost, streaming,
+  capability calls, browser/SSE repaint, and sole-tenant behavior were not
+  measured.
+- No concurrency or capacity claim is derived from this `N=1` correction.
+- The named cluster used the shared writer, so it does not prove O9
+  one-writer-per-store process isolation.
+
+### 18.5 Fresh-cluster and reset falsifiers
+
+Before the provider call, a cluster-qualified database probe at basis
+transaction `536870932` proved the plan digest/forms and all turn timing
+attributes installed. Focused recurring proof was green before the live
+drive:
+
+- JVM: 18 tests / 86 assertions for the driver, cold runtime schema, and real
+  local HTTP boundary;
+- CLJS cold bootstrap: 1 test / 2 assertions;
+- portable hosted-provider wire cores: 28 tests / 108 assertions.
+
+The full writer runner did not reach tests because the pre-existing
+`seon.host-eval-wire-safety-writer-test` still references deleted
+`seon.db.session/error-value`; that independent compile blocker is recorded in
+[[../../../seon/issues/full-writer-suite-references-deleted-session-error-value]].
+
+Before reset, canonical paths were proven unequal:
+
+```text
+/Users/sean/src/seon/data/clusters/default/db
+/Users/sean/src/seon/data/clusters/turnmeasure0726a/db
+
+```
+
+`bin/seon cluster reset turnmeasure0726a` removed only target generations
+`438438ab-ecf7-4d7e-8405-3542bca060a9` (host),
+`93ddbe2a-fa0a-4694-afee-35673223e2b5` (pod), and
+`c6ec1fad-c38a-4353-9208-f9e2463c27ee` (web-render), plus the target database.
+The target was freshly applied from current initialization pages and reset;
+no migration command or data-migration path ran.
+The default database remained present. Default watcher owner PID `89276`,
+generation `8c5311fb-039f-480b-9334-a70ac532dd68`, and writer owner PID
+`88800`, generation `52166984-3ec0-4395-9cd5-b2d254bd35bb`, were exact before
+and after the named reset. The shared processes were then shut down normally.
+
+The corrected turn satisfies the performance clause: its facts answer where
+the defined driver interval went, the components reconcile within a
+predeclared tolerance, and the turn contains a successful durable plan rather
+than a failed transaction hidden inside an envelope.

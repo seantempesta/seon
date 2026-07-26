@@ -28,23 +28,26 @@ transcript reply to its host PID, and completed the requested DeepSeek
 
 The earliest new unsettled contract exposed by load is same-process run
 admission: duplicate interest scans began submitting losing run-open CAS
-transactions at `N=5` and reached 62 losses at `N=25`. A second correctness
-blocker is the ignored execution-plan transaction error: fresh schema lacks
-the driver plan attributes, but eval continues without durable plan rows. The
-integrated measurement proof is the named run history + transcript + rung
-responses + final target-only reset; the reset removed the target records and
-database while default watcher/writer generations remained exact. The
-dependency-ready portfolio is run-scan coalescing, plan-schema/error
-settlement, and O9's remaining one-writer-per-store topology (named clusters
-still share the default writer). The next refill is run-scan coalescing
-because it is the first measured break. Final graduation remains U12's
-100-agent real-work kill/restart demonstration.
+transactions at `N=5` and reached 62 losses at `N=25`. The ignored
+execution-plan transaction error is closed by `c03ff91eb`: cold initialization
+installs the plan schema, a flat transaction error refuses eval, and completed
+turns own compact nanosecond timing facts. The integrated measurement proof is
+the named run history + transcript + rung responses + corrected single-turn
+waterfall + final target-only resets. The dependency-ready portfolio is
+run-scan coalescing and O9's remaining one-writer-per-store topology (named
+clusters still share the default writer). The next refill is run-scan
+coalescing because it is the first measured break. Final graduation remains
+U12's 100-agent real-work kill/restart demonstration.
 
-The speed clause is measured but not graduated: one real minimal turn took
-2,409 ms inside the task, of which the model envelope was at most 1,398 ms and
-SCI was 3 ms (0.1245%); the remaining 1,008 ms is too large and too coarsely
-attributed. Full evidence:
-[[research/measurements-2026-07-25#17-named-cluster-real-agent-load-and-turn-waterfall]].
+The speed clause is graduated on one replacement paid turn in fresh
+`turnmeasure0726a`. The old 2,409 ms waterfall is retained but invalidated
+because its plan transaction failed silently. The corrected turn has a
+2,586.479 ms JVM-driver interval, 2,585.509 ms of durable components, and a
+0.970 ms (0.0375%) unexplained remainder under a predeclared 25.865 ms
+tolerance. Exact provider request/response was 2,030.633 ms; SCI was
+3.948 ms (0.1527%). The 3,021 ms endpoint envelope and 3,214.469 ms full HTTP
+wall remain separate measured boundary artifacts. Full evidence:
+[[research/measurements-2026-07-25#18-corrected-self-attributing-turn]].
 
 ## MORNING 2026-07-24 (owner awake — supersedes the overnight block)
 

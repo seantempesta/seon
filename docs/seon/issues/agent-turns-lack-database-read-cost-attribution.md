@@ -84,6 +84,21 @@ facts. Any subtraction that called the remainder “model”, “context”, or
 work records this as the first observability resource to fail and makes no such
 claim.
 
+## Turn-wall correction — 2026-07-26
+
+Commit `c03ff91eb` closes the coarse turn-wall half of this issue. Completed
+JVM-driver turns now own `:seon.agent.turn/duration-ns` plus compact timing
+components for the exact provider HTTP interval, current context derivation,
+model-envelope overhead, reply derivation, each transaction call, eval, and
+final publication. A fresh real turn reconciled 2,585.509 ms of components to
+a 2,586.479 ms total with 0.970 ms unexplained wall.
+
+This issue remains open for its original database-read contract. The current
+context row gives wall time but not operation counts, query/pull split,
+Datahike resource/cache evidence, or the bounded diagnostic projection named
+below. The endpoint and full HTTP boundary artifacts also remain outside the
+turn's JVM monotonic interval.
+
 Host-context reads carry per-agent identity since U4 (2026-07-20):
 `seon.host.context/*agent-id*` is bound around every host invocation
 (`seon.host/run-invocation!` eval-batch branch and startup restore), and the
