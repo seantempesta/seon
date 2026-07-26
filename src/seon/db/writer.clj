@@ -539,6 +539,25 @@
                 {::failure-kind protocol/protocol-error
                  ::reserved-attributes reserved})))))
 
+(defn transact-closed!
+  "Transact through canonical writer admission on an exclusively closed store."
+  [connection transaction-data transaction-meta]
+  (let [db-value (d/db connection)
+        schema-declarations
+        (derive-transaction-schema db-value transaction-data)
+        effective-schema
+        (merge (into {}
+                     (map (juxt :db/ident identity))
+                     schema-declarations)
+               (:schema db-value))
+        coerced-data
+        (coerce-transaction-data effective-schema transaction-data)]
+    (assert-protocol-attributes-free! coerced-data transaction-meta)
+    (d/transact
+     connection
+     {:tx-data (into (vec schema-declarations) coerced-data)
+      :tx-meta transaction-meta})))
+
 (defn- internal-tempid?
   [value]
   (and (string? value)

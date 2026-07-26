@@ -523,22 +523,56 @@
             {:seon.db.program/expected-initialization expected
              :seon.db.program/actual-initialization actual
              :seon.error/kind :core-bug})))
-        (let [transaction-data
+        (let [rows
               (into
                [(assoc configuration :seon.config/id "cluster")]
-               (concat
-                ai-rows
-                [(merge
-                  {:seon.db.initialization/id "database"}
-                  applied-identity)
-                 {:db/id :db/current-tx
-                  :seon.db/user [:seon.agent/id "root"]
-                  :seon.db/process
-                  [:seon.db.process/id :seon.db.process/config]}]))
+               (concat ai-rows
+                       [(merge
+                         {:seon.db.initialization/id "database"}
+                         applied-identity)]))
+              referenced-attributes
+              (into #{}
+                    (comp
+                     (mapcat
+                      (fn walk [value]
+                        (cond
+                          (map? value)
+                          (concat (keys value) (mapcat walk (vals value)))
+
+                          (coll? value)
+                          (mapcat walk value)
+
+                          :else
+                          [])))
+                     (filter qualified-keyword?)
+                     (remove #(= "db" (namespace %))))
+                    rows)
+              _ (doseq [owner (->> referenced-attributes
+                                    (keep namespace)
+                                    distinct
+                                    sort)]
+                  (try
+                    (require (symbol owner))
+                    (catch java.io.FileNotFoundException _)))
+              canonical-schema-rows
+              (into []
+                    (keep
+                     (fn [attribute]
+                       (when-let [form (schema/form-string attribute)]
+                         {:seon.schema/key attribute
+                          :seon.schema/form form})))
+                    (sort-by str referenced-attributes))
+              transaction-data
+              (into canonical-schema-rows rows)
+              transaction-meta
+              {:seon.db/user [:seon.agent/id "root"]
+               :seon.db/process
+               [:seon.db.process/id :seon.db.process/config]}
               report
-              (d/transact!
+              ((requiring-resolve 'seon.db.writer/transact-closed!)
                connection
-               (db.internal/encode-edn-slot-values transaction-data))]
+               (db.internal/encode-edn-slot-values transaction-data)
+               transaction-meta)]
           {:seon.db.program/changed? true
            :seon.db.program/basis-t (get-in report [:db-after :t])
            :seon.db.program/commit-id
