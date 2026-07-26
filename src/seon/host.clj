@@ -4,6 +4,7 @@
             [seon.ai.http :as ai.http]
             [seon.agent.driver :as driver]
             [seon.db.host :as db.host]
+            [seon.db.protocol :as db.protocol]
             [seon.sci.eval :as sci.eval]))
 
 (set! *warn-on-reflection* true)
@@ -18,11 +19,13 @@
   (let [writer
         (db.host/writer-session
          (select-keys request
-                      [::db.host/writer-socket-path
-                       ::db.host/database-name
-                       ::db.host/backend
-                       ::db.host/database-path
-                       ::db.host/pool-wait-timeout-ms]))]
+                      (concat
+                       [::db.host/writer-socket-path
+                        ::db.host/database-name
+                        ::db.host/backend
+                        ::db.host/database-path
+                        ::db.host/pool-wait-timeout-ms]
+                       db.protocol/writer-connection-keys)))]
     (try
       (let [database (db.host/resolve-db! writer nil false)]
         (when (:seon.error/message database)

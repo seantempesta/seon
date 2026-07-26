@@ -131,6 +131,13 @@
   :seon.config.database.pull/max-result-weight
   #long #or [#env SEON_DB_PULL_MAX_RESULT_WEIGHT 3000000]
 
+  ;; DATAHIKE WRITER CONSTRUCTION — optional and per cluster. Uncomment and
+  ;; assign workload-specific integers when measurement justifies them:
+  ;; :seon.config.database.writer/transaction-queue-size <positive integer>
+  ;; :seon.config.database.writer/commit-queue-size <positive integer>
+  ;; :seon.config.database.writer/commit-wait-time-ms <non-negative integer>
+  ;; Unset delegates all three defaults to Datahike; Seon does not copy them.
+
   ;; MUTATION ADMISSION CIRCUIT BREAKERS. Units are accepted requests. These
   ;; protect writer heap and Datahike's 120000-entry LocalWriter queue; firing
   ;; rejects loudly with the governing key and never throttles normal work.

@@ -52,8 +52,12 @@
     :seon.config.resolve/hardware-observations]
    [:seon.launch.envelope/dispositions
     :seon.launch.envelope/dispositions]]
-  (map (fn [attribute] [attribute attribute]))
-  config.resolve/operational-keys))
+  (concat
+   (map (fn [attribute] [attribute attribute])
+        config.resolve/operational-keys)
+   (map (fn [[key value-schema]]
+          [key {:optional true} value-schema])
+        config.resolve/writer-connection-key-schemas))))
 
 (schema/register! ::config-apply-generation :seon.launch.envelope/generation)
 (schema/register!

@@ -27,6 +27,7 @@
    (`data/clusters/`)."
   (:require [clojure.string :as str]
             [seon.db.branch :as branch]
+            [seon.db.protocol :as protocol]
             [seon.schema :as schema])
   (:import [java.io File]
            [java.util UUID]))
@@ -39,13 +40,17 @@
 (schema/register! ::initial-tx [:vector :map])
 
 (schema/register! ::datahike-config-request
-                  [:map
-                   [::database-name ::database-name]
-                   [::backend ::backend]
-                   [::path {:optional true} ::path]
-                   [::branch/connection-id {:optional true}
-                    ::branch/connection-id]
-                   [::initial-tx {:optional true} ::initial-tx]])
+                  (into
+                   [:map
+                    [::database-name ::database-name]
+                    [::backend ::backend]
+                    [::path {:optional true} ::path]
+                    [::branch/connection-id {:optional true}
+                     ::branch/connection-id]
+                    [::initial-tx {:optional true} ::initial-tx]]
+                   (map (fn [[key value-schema]]
+                          [key {:optional true} value-schema]))
+                   protocol/writer-connection-key-schemas))
 
 ;; The returned cfg is an opaque datahike config map. We don't constrain
 ;; its shape here — datahike's own schema validates it at connect time.
@@ -135,7 +140,30 @@
 
    Optional:
      ::path                  — override the on-disk path; ignored for :memory.
-     ::branch/connection-id — explicit physical database and native branch."
+     ::branch/connection-id — explicit physical database and native branch.
+
+   This is the one translation site from Seon's writer-construction keys to
+   Datahike's `:transaction-queue-size`, `:commit-queue-size`, and
+   `:commit-wait-time` (milliseconds). With no supplied values, this function
+   emits no `:writer` map, leaving Datahike's defaults authoritative.
+
+   Datahike's `:self` writer serially transforms `db-before` to `db-after` into
+   a commit queue. Its commit thread drains the offered queue as one batch,
+   commits it, then waits `commit-wait-time` ms before the next drain. Offered
+   load therefore grows batches; a nonzero wait trades transaction latency for
+   larger batches rather than acting as a throughput knob.
+
+   On a non-sole-tenant MacBook Pro M5 Max (18 cores, 128 GB, macOS 26.5.2),
+   OpenJDK 26.0.1/G1 `-Xmx4g`, Datahike caf52685, and local APFS, 65,536
+   concurrent callers over 131,072 fixed transactions reached 4,336.40 tx/s
+   in nine commits. Doubling callers was 16.48% worse; 131,072 callers over
+   262,144 transactions failed with `OutOfMemoryError` while the 120,000-entry
+   transaction queue exceeded 90% (117,553 observed) and the commit queue
+   exceeded 50% (60,006). At moderate concurrency the wall was APFS metadata
+   fsync: 38,580 `jdk.FileForce` events in one 60 s JFR interval, p50 8.14 ms,
+   with JVM CPU at 1.01% user / 5.20% system and zero
+   `jdk.VirtualThreadPinned` events. Queue sizes are OOM guards;
+   `commit-wait-time` is only the latency/batch trade."
   {:malli/schema [:=> [:cat ::datahike-config-request]
                   ::datahike-config-response]}
   [{::keys [database-name backend initial-tx] :as request}]
@@ -146,11 +174,26 @@
                   :memory {:backend :memory :id store-id}
                   :file   {:backend :file
                            :path path
-                           :id store-id})]
+                           :id store-id})
+        writer
+        (cond-> {}
+          (contains? request
+                     :seon.config.database.writer/transaction-queue-size)
+          (assoc :transaction-queue-size
+                 (:seon.config.database.writer/transaction-queue-size request))
+          (contains? request
+                     :seon.config.database.writer/commit-queue-size)
+          (assoc :commit-queue-size
+                 (:seon.config.database.writer/commit-queue-size request))
+          (contains? request
+                     :seon.config.database.writer/commit-wait-time-ms)
+          (assoc :commit-wait-time
+                 (:seon.config.database.writer/commit-wait-time-ms request)))]
     (cond-> (assoc base-cfg
                    :store options
                    :branch branch
                    :name (str database-name))
+      (seq writer) (assoc :writer writer)
       (seq initial-tx) (assoc :initial-tx initial-tx))))
 
 (defn ensure-parent-dir!

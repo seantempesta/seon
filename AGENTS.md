@@ -198,11 +198,14 @@ invalidates that fact, update the localized authority in the same commit.
 Seon is one application. Each cluster is a **store** — its own
 `data/clusters/<name>/`, its own process directory, its own ports — and
 that store is the isolation boundary: clusters share no mutable state, so
-one crashing or being reset cannot touch another. Datahike ships only a
-`:self` writer, so there is exactly **one writer process per store**,
-which makes one JVM per cluster the structural consequence rather than a
-choice. Scale by adding clusters, never by adding processes to one
-(owner rulings O1/O9, 2026-07-25).
+one crashing or being reset cannot touch another. Datahike supplies `:self`
+and `:datahike-server` writer backends; a `:self` writer belongs to one
+connection. The invariant is exactly **one live write connection per store**;
+one process may host many. It is required because two JVMs writing one store
+both won the same epoch CAS, then 40 of 40 successfully returned parent commits
+vanished with zero transaction errors and a pristine reopen. One writer per
+store is structural; one store per process is not (owner rulings O1/O9,
+2026-07-25).
 
 Processes under the one `bin/seon` operator:
 

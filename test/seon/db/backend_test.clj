@@ -65,6 +65,8 @@
       (is (true? (:fuse-index-roots? config))
           "every newly created Seon database uses the measured root layout")
       (is (= initial-tx (:initial-tx config)))
+      (is (not (contains? config :writer))
+          "absent levers leave Datahike's writer defaults authoritative")
       (is (not (.exists (File. root)))
           "constructing configuration performs no filesystem writes")
       (is (true? (::backend/created?
@@ -73,6 +75,19 @@
                    (backend/ensure-parent-dir! {::backend/path path}))))
       (finally
         (delete-tree! root)))))
+
+(deftest writer-construction-values-translate-only-at-the-datahike-boundary
+  (let [config
+        (backend/datahike-config
+         {::backend/database-name :test/writer-configuration
+          ::backend/backend :memory
+          :seon.config.database.writer/transaction-queue-size 4096
+          :seon.config.database.writer/commit-queue-size 2048
+          :seon.config.database.writer/commit-wait-time-ms 7})]
+    (is (= {:transaction-queue-size 4096
+            :commit-queue-size 2048
+            :commit-wait-time 7}
+           (:writer config)))))
 
 (deftest distinct-database-names-have-distinct-identities
   (testing "backend identity follows the database fact, not its path"

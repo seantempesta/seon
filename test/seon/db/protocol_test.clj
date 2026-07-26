@@ -326,6 +326,22 @@
     (is (= connection-id (::branch/connection-id request)))
     (is (= request (transit-roundtrip request)))))
 
+(deftest ensure-database-carries-writer-construction-values
+  (let [request
+        (protocol/ensure-database-request
+         {::protocol/request-id "ensure/writer-values"
+          ::protocol/database-name "writer-values"
+          ::protocol/backend :memory
+          :seon.config.database.writer/transaction-queue-size 8192
+          :seon.config.database.writer/commit-queue-size 4096
+          :seon.config.database.writer/commit-wait-time-ms 12})]
+    (is (protocol/valid-request? request))
+    (is (= request (transit-roundtrip request)))
+    (is (= {:seon.config.database.writer/transaction-queue-size 8192
+            :seon.config.database.writer/commit-queue-size 4096
+            :seon.config.database.writer/commit-wait-time-ms 12}
+           (select-keys request protocol/writer-connection-keys)))))
+
 (deftest index-pages-use-datahikes-native-eager-shape
   (let [request (protocol/index-page-request
                  {::protocol/request-id "index/page"

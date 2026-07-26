@@ -6,6 +6,7 @@
             [seon.db.branch :as branch]
             [seon.db.datahike.schema :as datahike.schema]
             [seon.db.id :as id]
+            [seon.db.protocol :as protocol]
             [seon.db.registry :as registry]
             [seon.db.restore :as db.restore]))
 
@@ -66,7 +67,32 @@
                    {::registry/database-name database-name}))))
       (is (false? (::registry/released?
                    (registry/release-database!
-                   {::registry/database-name database-name})))))))
+                     {::registry/database-name database-name})))))))
+
+(deftest writer-construction-values-survive-entry-reconnect-config
+  (let [database-name :registry/writer-values
+        values
+        {:seon.config.database.writer/transaction-queue-size 8192
+         :seon.config.database.writer/commit-queue-size 4096
+         :seon.config.database.writer/commit-wait-time-ms 12}
+        _ (ensure-database!
+           (merge {::registry/database-name database-name
+                   ::registry/backend :memory}
+                  values))
+        entry
+        (get-in (registry/snapshot-registry {})
+                [::registry/snapshot ::registry/registry database-name])
+        reconnect-config (#'registry/entry-config database-name entry)]
+    (is (= values (select-keys entry protocol/writer-connection-keys))
+        "the live entry retains every per-connection value")
+    (is (= {:transaction-queue-size 8192
+            :commit-queue-size 4096
+            :commit-wait-time 12}
+           (select-keys (:writer reconnect-config)
+                        [:transaction-queue-size
+                         :commit-queue-size
+                         :commit-wait-time]))
+        "entry-config rebuilds the same Datahike writer values on reconnect")))
 
 (deftest old-unfused-database-fails-loudly-at-the-one-creation-contract
   (let [database-name (keyword "registry" (str "unfused-" (random-uuid)))

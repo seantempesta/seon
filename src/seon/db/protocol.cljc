@@ -527,6 +527,21 @@
 (schema/register! :datahike.query/resource-evidence :map)
 (schema/register! ::database-name [:string {:min 1}])
 (schema/register! ::database-path [:string {:min 1}])
+(schema/register! ::writer-queue-size [:int {:min 1}])
+(schema/register! ::writer-commit-wait-time-ms [:int {:min 0}])
+
+;; These are boot-only because `d/connect` creates the writer before the
+;; database exists; facts in that database cannot configure its own connection.
+(def writer-connection-key-schemas
+  "Seon writer-construction keys and their protocol value schemas."
+  {:seon.config.database.writer/transaction-queue-size ::writer-queue-size
+   :seon.config.database.writer/commit-queue-size ::writer-queue-size
+   :seon.config.database.writer/commit-wait-time-ms
+   ::writer-commit-wait-time-ms})
+
+(def writer-connection-keys
+  "Seon writer-construction keys carried by a database-open request."
+  (vec (keys writer-connection-key-schemas)))
 (schema/register! ::backend [:enum :memory :file])
 (schema/register! :seon.db/program
                   [:vector [:map-of :qualified-keyword ::wire-value]])
@@ -1033,15 +1048,19 @@
   [::target-request-id ::target-request-id]])
 (schema/register!
  ::ensure-database-request
- [:map {:closed true}
-  [::operation [:= ensure-database-operation]]
-  [::request-id ::request-id]
-  [::database-name ::database-name]
-  [::backend ::backend]
-  [::database-path {:optional true} ::database-path]
-  [::branch/connection-id {:optional true} ::branch/connection-id]
-  [:seon.db/initialization-page
-   {:optional true} :seon.db/initialization-page]])
+ (into
+  [:map {:closed true}
+   [::operation [:= ensure-database-operation]]
+   [::request-id ::request-id]
+   [::database-name ::database-name]
+   [::backend ::backend]
+   [::database-path {:optional true} ::database-path]
+   [::branch/connection-id {:optional true} ::branch/connection-id]
+   [:seon.db/initialization-page
+    {:optional true} :seon.db/initialization-page]]
+  (map (fn [[key value-schema]]
+         [key {:optional true} value-schema]))
+  writer-connection-key-schemas))
 (schema/register!
  ::acquire-database-request
  [:map {:closed true}
@@ -1481,14 +1500,18 @@
   [::maximum-frame-bytes ::maximum-frame-bytes]])
 (schema/register!
  ::ensure-request-input
- [:map {:closed true}
-  [::request-id ::request-id]
-  [::database-name ::database-name]
-  [::backend ::backend]
-  [::database-path {:optional true} ::database-path]
-  [::branch/connection-id {:optional true} ::branch/connection-id]
-  [:seon.db/initialization-page
-   {:optional true} :seon.db/initialization-page]])
+ (into
+  [:map {:closed true}
+   [::request-id ::request-id]
+   [::database-name ::database-name]
+   [::backend ::backend]
+   [::database-path {:optional true} ::database-path]
+   [::branch/connection-id {:optional true} ::branch/connection-id]
+   [:seon.db/initialization-page
+    {:optional true} :seon.db/initialization-page]]
+  (map (fn [[key value-schema]]
+         [key {:optional true} value-schema]))
+  writer-connection-key-schemas))
 (schema/register!
  ::acquire-database-request-input
  [:map {:closed true}
@@ -2017,6 +2040,8 @@
            ::request-id request-id
            ::database-name database-name
            ::backend backend}
+    (seq (select-keys input writer-connection-keys))
+    (merge (select-keys input writer-connection-keys))
     database-path (assoc ::database-path database-path)
     (::branch/connection-id input)
     (assoc ::branch/connection-id (::branch/connection-id input))

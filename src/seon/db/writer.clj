@@ -2072,22 +2072,22 @@
 ;;; Canonical operation handlers
 
 (defn- registry-request
-  ([database-name backend-kind database-path connection-id
-    connection-initializer create-database?]
-   (registry-request database-name backend-kind database-path connection-id
-                     connection-initializer create-database? nil))
-  ([database-name backend-kind database-path connection-id
-    connection-initializer create-database? transport-connection]
+  [{::protocol/keys [database-name backend database-path]
+    connection-id ::branch/connection-id
+    :as request}
+   connection-initializer create-database? transport-connection]
+  (merge
    (cond->
     {::registry/database-name (keyword database-name)
-     ::registry/backend backend-kind
+     ::registry/backend backend
      ::registry/initial-tx protocol-native-schema
      ::registry/create-database? create-database?
      ::registry/initialize-connection! connection-initializer}
      connection-id (assoc ::registry/connection-id connection-id)
      database-path (assoc ::registry/path database-path)
      transport-connection
-     (assoc ::registry/transport-connection transport-connection))))
+     (assoc ::registry/transport-connection transport-connection))
+   (select-keys request protocol/writer-connection-keys)))
 
 (defn- connection-initializer
   [runtime initialization initialized-db]
@@ -2115,10 +2115,7 @@
         (try
           (registry/ensure-database!
            (registry-request
-            database-name
-            (::protocol/backend request)
-            (::protocol/database-path request)
-            (::branch/connection-id request)
+            request
             (connection-initializer runtime initialization initialized-db)
             create-database?
             transport-connection))

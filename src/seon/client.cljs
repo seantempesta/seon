@@ -700,10 +700,13 @@
   [descriptor initialization]
   (let [writer-owner (::launch/writer-owner descriptor)
         database (::launch/database descriptor)
-        branch-head (::db.branch/head database)]
-    (cond-> {::db/socket-path (::launch/request-socket-path writer-owner)
-             ::db/database-name (::db.protocol/database-name database)
-             ::db/backend (::db.protocol/backend database)}
+        branch-head (::db.branch/head database)
+        envelope (::launch/operational-envelope descriptor)]
+    (cond-> (merge
+             {::db/socket-path (::launch/request-socket-path writer-owner)
+              ::db/database-name (::db.protocol/database-name database)
+              ::db/backend (::db.protocol/backend database)}
+             (select-keys envelope db.protocol/writer-connection-keys))
       (::db.protocol/database-path database)
       (assoc ::db/database-path (::db.protocol/database-path database))
       initialization

@@ -35,3 +35,31 @@
     (is (string? (:seon.render/ai root-role)))
     (is (not-any? nil? (vals root-role))
         "a resolved block carries values or omits keys; never present nil")))
+
+(deftest clusters-resolve-independent-boot-only-writer-values
+  (let [alpha-values
+        {:seon.config.database.writer/transaction-queue-size 4096
+         :seon.config.database.writer/commit-queue-size 2048
+         :seon.config.database.writer/commit-wait-time-ms 2}
+        beta-values
+        {:seon.config.database.writer/transaction-queue-size 16384
+         :seon.config.database.writer/commit-queue-size 8192
+         :seon.config.database.writer/commit-wait-time-ms 9}
+        alpha-manifest {:seon.config/database alpha-values}
+        beta-manifest {:seon.config/database beta-values}
+        alpha-envelope
+        (resolve/resolve-envelope alpha-manifest fixed-hardware 1)
+        beta-envelope
+        (resolve/resolve-envelope beta-manifest fixed-hardware 2)]
+    (is (= alpha-values
+           (select-keys alpha-envelope (keys alpha-values))))
+    (is (= beta-values
+           (select-keys beta-envelope (keys beta-values))))
+    (is (not= (select-keys alpha-envelope (keys alpha-values))
+              (select-keys beta-envelope (keys beta-values))))
+    (is (empty?
+         (select-keys
+          (resolve/resolve-config-singleton
+           alpha-manifest {} fixed-hardware)
+          (keys alpha-values)))
+        "writer construction is never persisted into the database singleton")))

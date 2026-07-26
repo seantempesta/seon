@@ -530,6 +530,9 @@
         descriptor-database (::launch/database descriptor)
         descriptor-writer (::launch/writer-owner descriptor)
         descriptor-process (::launch/process descriptor)
+        writer-connection-values
+        (select-keys (::launch/operational-envelope descriptor)
+                     db.protocol/writer-connection-keys)
         autonomous?
         (true? (get-in descriptor
                        [::launch/runtime :seon.client/launch-capability
@@ -714,16 +717,19 @@
             config manifest jvm-publication
             (str (config/claim-driver-heap-mb config) "m")
             "seon.host"
-            [(pr-str {:seon.db.host/writer-socket-path
-                     (::launch/request-socket-path descriptor-writer)
-                     :seon.db.host/database-name
-                     (::db.protocol/database-name descriptor-database)
-                     :seon.db.host/backend
-                     (::db.protocol/backend descriptor-database)
-                     :seon.db.host/database-path
-                     (::db.protocol/database-path descriptor-database)
-                     :seon.db.host/pool-wait-timeout-ms
-                     (config/claim-driver-pool-wait-timeout-ms config)})])
+            [(pr-str
+              (merge
+               {:seon.db.host/writer-socket-path
+                (::launch/request-socket-path descriptor-writer)
+                :seon.db.host/database-name
+                (::db.protocol/database-name descriptor-database)
+                :seon.db.host/backend
+                (::db.protocol/backend descriptor-database)
+                :seon.db.host/database-path
+                (::db.protocol/database-path descriptor-database)
+                :seon.db.host/pool-wait-timeout-ms
+                (config/claim-driver-pool-wait-timeout-ms config)}
+               writer-connection-values))])
            :seon.dev.process/environment jvm-environment
            :seon.dev.process/dependencies
            (get process-graph host-id)

@@ -41,6 +41,7 @@
             [konserve.core :as k]
             [seon.db.branch :as branch]
             [seon.db.id :as id]
+            [seon.db.protocol :as protocol]
             [seon.db.restore :as db.restore]
             [seon.schema :as schema]
             [seon.db.backend :as backend]
@@ -119,30 +120,38 @@
 (schema/register! ::conn 'some?)
 
 (schema/register! ::entry
-                  [:map
-                   [::conn ::conn]
-                   [::connection-id ::connection-id]
-                   [::backend ::backend]
-                   [::path {:optional true} ::path]
-                   [::ensured? ::ensured?]
-                   [::transport-connections ::transport-connections]
-                   [::release-completion {:optional true}
-                    ::release-completion]
-                   [::release-error {:optional true} ::release-error]
-                   [::initialization-error {:optional true}
-                    ::initialization-error]])
+                  (into
+                   [:map
+                    [::conn ::conn]
+                    [::connection-id ::connection-id]
+                    [::backend ::backend]
+                    [::path {:optional true} ::path]
+                    [::ensured? ::ensured?]
+                    [::transport-connections ::transport-connections]
+                    [::release-completion {:optional true}
+                     ::release-completion]
+                    [::release-error {:optional true} ::release-error]
+                    [::initialization-error {:optional true}
+                     ::initialization-error]]
+                   (map (fn [[key value-schema]]
+                          [key {:optional true} value-schema]))
+                   protocol/writer-connection-key-schemas))
 
 (schema/register! ::ensure-database!-request
-                  [:map
-                   [::database-name ::database-name]
-                   [::backend {:optional true} ::backend]
-                   [::path {:optional true} ::path]
-                   [::connection-id {:optional true} ::connection-id]
-                   [::initial-tx {:optional true} ::initial-tx]
-                   [::create-database? {:optional true} ::create-database?]
-                   [::transport-connection {:optional true}
-                    ::transport-connection]
-                   [::initialize-connection! 'fn?]])
+                  (into
+                   [:map
+                    [::database-name ::database-name]
+                    [::backend {:optional true} ::backend]
+                    [::path {:optional true} ::path]
+                    [::connection-id {:optional true} ::connection-id]
+                    [::initial-tx {:optional true} ::initial-tx]
+                    [::create-database? {:optional true} ::create-database?]
+                    [::transport-connection {:optional true}
+                     ::transport-connection]
+                    [::initialize-connection! 'fn?]]
+                   (map (fn [[key value-schema]]
+                          [key {:optional true} value-schema]))
+                   protocol/writer-connection-key-schemas))
 
 (schema/register! ::initialize-connection-request
                   [:map
@@ -414,22 +423,26 @@
     initialization-error (assoc ::initialization-error initialization-error)))
 
 (defn- backend-request
-  [{::keys [database-name backend path connection-id initial-tx]}]
-  (cond-> {::backend/database-name database-name
-           ::backend/backend backend}
-    path (assoc ::backend/path path)
-    connection-id (assoc ::branch/connection-id connection-id)
-    (seq initial-tx) (assoc ::backend/initial-tx initial-tx)))
+  [{::keys [database-name backend path connection-id initial-tx] :as request}]
+  (merge
+   (cond-> {::backend/database-name database-name
+            ::backend/backend backend}
+     path (assoc ::backend/path path)
+     connection-id (assoc ::branch/connection-id connection-id)
+     (seq initial-tx) (assoc ::backend/initial-tx initial-tx))
+   (select-keys request protocol/writer-connection-keys)))
 
 (defn- entry-config
-  [database-name {::keys [connection-id backend path]}]
+  [database-name {::keys [connection-id backend path] :as entry}]
   (id/allocation-connect-config
    (backend/datahike-config
     (backend-request
-     {::database-name database-name
-      ::backend backend
-      ::path path
-      ::connection-id connection-id}))))
+     (merge
+      {::database-name database-name
+       ::backend backend
+       ::path path
+       ::connection-id connection-id}
+      (select-keys entry protocol/writer-connection-keys))))))
 
 (defn- fail-connection-id!
   [message data]
@@ -482,18 +495,31 @@
           ::existing-connection-id registered-connection-id})))))
 
 (defn- validate-existing-route!
-  [database-name entry connection-id backend-kind path]
-  (when-not (= [connection-id backend-kind path]
-               [(::connection-id entry) (::backend entry) (::path entry)])
-    (fail-connection-id!
-     "A logical database name cannot change its registered connection-id."
-     {::database-name database-name
-      ::connection-id connection-id
-      ::backend backend-kind
-      ::path path
-      ::existing-connection-id (::connection-id entry)
-      ::existing-backend (::backend entry)
-      ::existing-path (::path entry)}))
+  [database-name entry connection-id backend-kind path
+   writer-connection-values]
+  (let [requested-writer-values
+        (select-keys writer-connection-values protocol/writer-connection-keys)
+        existing-writer-values
+        (select-keys entry protocol/writer-connection-keys)]
+    (when-not (= [connection-id backend-kind path]
+                 [(::connection-id entry) (::backend entry) (::path entry)])
+      (fail-connection-id!
+       "A logical database name cannot change its registered connection-id."
+       {::database-name database-name
+        ::connection-id connection-id
+        ::backend backend-kind
+        ::path path
+        ::existing-connection-id (::connection-id entry)
+        ::existing-backend (::backend entry)
+        ::existing-path (::path entry)}))
+    (when-not (= requested-writer-values existing-writer-values)
+      (fail-connection-id!
+       "A logical database name cannot change its registered writer configuration."
+       (merge
+        {::database-name database-name
+         ::connection-id connection-id
+         ::existing-writer-connection-values existing-writer-values}
+        requested-writer-values))))
   (cond
     (cleanup-required? entry)
     (throw
@@ -525,9 +551,11 @@
           registry)))
 
 (defn- ensure-existing-reference!
-  [database-name entry connection-id backend-kind path]
+  [database-name entry connection-id backend-kind path
+   writer-connection-values]
   (validate-existing-route!
-   database-name entry connection-id backend-kind path)
+   database-name entry connection-id backend-kind path
+   writer-connection-values)
   (if (get entry ::ensured? true)
     (entry-view database-name entry)
     (let [acquired (d/connect (entry-config database-name entry))]
@@ -548,13 +576,16 @@
 (defn- open-entry!
   "Open and validate one exact Datahike connection-id."
   [registry database-name backend-kind path connection-id initial-tx
-   create-database?]
+   create-database? writer-connection-values]
   (let [request (backend-request
-                 {::database-name database-name
-                  ::backend backend-kind
-                  ::path path
-                  ::connection-id connection-id
-                  ::initial-tx initial-tx})
+                 (merge
+                  {::database-name database-name
+                   ::backend backend-kind
+                   ::path path
+                   ::connection-id connection-id
+                   ::initial-tx initial-tx}
+                  (select-keys writer-connection-values
+                               protocol/writer-connection-keys)))
         cfg (backend/datahike-config request)
         branch (second connection-id)]
     (if (= :db branch)
@@ -585,12 +616,15 @@
             ::connection-id connection-id
             ::available-branches (d/branches source)}))))
     (let [conn (d/connect (id/allocation-connect-config cfg))
-          entry (cond-> {::conn conn
-                         ::connection-id connection-id
-                         ::backend backend-kind
-                         ::ensured? true
-                         ::transport-connections #{}}
-                  path (assoc ::path path))]
+          entry (merge
+                 (cond-> {::conn conn
+                          ::connection-id connection-id
+                          ::backend backend-kind
+                          ::ensured? true
+                          ::transport-connections #{}}
+                   path (assoc ::path path))
+                 (select-keys writer-connection-values
+                              protocol/writer-connection-keys))]
       (try
         (id/assert-allocation-writer! conn)
         (let [actual (branch/connection-id (branch/head (d/db conn)))]
@@ -647,14 +681,18 @@
             create-database?
             transport-connection
             initialize-connection!]
+    :as ensure-request
     :or {backend :file
          create-database? true}}]
   (let [request (backend-request
-                 {::database-name database-name
-                  ::backend backend
-                  ::path path
-                  ::connection-id connection-id
-                  ::initial-tx initial-tx})
+                 (merge
+                  {::database-name database-name
+                   ::backend backend
+                   ::path path
+                   ::connection-id connection-id
+                   ::initial-tx initial-tx}
+                  (select-keys ensure-request
+                               protocol/writer-connection-keys)))
         facts (backend/backend-facts request)
         connection-id* (::branch/connection-id facts)
         backend-path (::backend/path facts)]
@@ -664,31 +702,35 @@
                    (some #(identical? transport-connection %)
                          (::transport-connections entry #{}))))
         (validate-existing-route!
-         database-name entry connection-id* backend backend-path)
+         database-name entry connection-id* backend backend-path ensure-request)
         (locking !registry
           (let [entry (get @!registry database-name)]
             (if (and transport-connection
                      (some #(identical? transport-connection %)
                            (::transport-connections entry #{})))
               (validate-existing-route!
-               database-name entry connection-id* backend backend-path)
+               database-name entry connection-id* backend backend-path
+               ensure-request)
               (ensure-existing-reference!
-               database-name entry connection-id* backend backend-path)))))
+               database-name entry connection-id* backend backend-path
+               ensure-request)))))
       (locking !registry
         (if-let [entry (get @!registry database-name)]
           (if (and transport-connection
                    (some #(identical? transport-connection %)
                          (::transport-connections entry #{})))
             (validate-existing-route!
-             database-name entry connection-id* backend backend-path)
+             database-name entry connection-id* backend backend-path
+             ensure-request)
             (ensure-existing-reference!
-             database-name entry connection-id* backend backend-path))
+             database-name entry connection-id* backend backend-path
+             ensure-request))
           (let [registry @!registry]
             (validate-route-bijection!
              registry database-name connection-id* backend backend-path)
             (let [entry (open-entry! registry database-name backend backend-path
                                      connection-id* initial-tx
-                                     create-database?)
+                                     create-database? ensure-request)
                   conn (::conn entry)
                   branch (second connection-id*)
                   open-intent (if (= :db branch)

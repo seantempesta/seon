@@ -250,12 +250,14 @@
         database-path (::db/database-path selection)
         connection-id (::db.branch/connection-id selection)]
     (protocol/ensure-database-request
-     (cond-> {::protocol/request-id
-              (if initialization-page
-                (initialization-page-request-id initialization-page)
-                (mint-id))
-              ::protocol/database-name database-name
-              ::protocol/backend backend}
+     (cond-> (merge
+              {::protocol/request-id
+               (if initialization-page
+                 (initialization-page-request-id initialization-page)
+                 (mint-id))
+               ::protocol/database-name database-name
+               ::protocol/backend backend}
+              (select-keys selection protocol/writer-connection-keys))
        database-path (assoc ::protocol/database-path database-path)
        connection-id (assoc ::db.branch/connection-id connection-id)
        initialization-page

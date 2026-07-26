@@ -70,10 +70,12 @@
        backend (assoc ::backend backend)
        database-path (assoc ::database-path database-path))
      (select-keys options
-                  [::pool-wait-timeout-ms
-                   ::call-deadline-ms
-                   ::interest-call-timeout-ms
-                   ::interest-reconnect-backoff-ms]))))
+                  (concat
+                   [::pool-wait-timeout-ms
+                    ::call-deadline-ms
+                    ::interest-call-timeout-ms
+                    ::interest-reconnect-backoff-ms]
+                   protocol/writer-connection-keys)))))
 
 (defn- record-backstop!
   [writer config-key message data]
@@ -534,9 +536,12 @@
               (handshake-request!
                connected
                (protocol/ensure-database-request
-                (cond-> {::protocol/request-id (str (random-uuid))
-                         ::protocol/database-name database-name
-                         ::protocol/backend backend}
+                (cond-> (merge
+                         {::protocol/request-id (str (random-uuid))
+                          ::protocol/database-name database-name
+                          ::protocol/backend backend}
+                         (select-keys writer
+                                      protocol/writer-connection-keys))
                   database-path
                   (assoc ::protocol/database-path database-path)))))
             ensure-error
@@ -848,9 +853,11 @@
      (call!
       writer
       (protocol/ensure-database-request
-       (cond-> {::protocol/request-id (str (random-uuid))
-                ::protocol/database-name database-name
-                ::protocol/backend backend}
+       (cond-> (merge
+                {::protocol/request-id (str (random-uuid))
+                 ::protocol/database-name database-name
+                 ::protocol/backend backend}
+                (select-keys writer protocol/writer-connection-keys))
          database-path (assoc ::protocol/database-path database-path))))
      {:seon.error/message
       "The host database leaf has no configured backend to ensure."

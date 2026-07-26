@@ -613,6 +613,9 @@
 (def ^:private operational-manifest-entries
   (mapv (fn [attribute] [attribute {:optional true} attribute])
         database-operational-keys))
+(def writer-connection-key-schemas
+  "Boot-only per-connection Datahike writer fields accepted by manifests."
+  protocol/writer-connection-key-schemas)
 
 (schema/register! :seon.config/database
   (into [:map {:closed true}
@@ -628,7 +631,11 @@
     {:optional true} :seon.config.database.pull/max-results]
    [:seon.config.database.pull/max-result-weight
     {:optional true} :seon.config.database.pull/max-result-weight]]
-   operational-manifest-entries))
+   (concat
+    operational-manifest-entries
+    (map (fn [[key value-schema]]
+           [key {:optional true} value-schema])
+         writer-connection-key-schemas))))
 
 ;;; RENDER BOUNDS — the GLOBAL, cluster-wide render/value display caps (#46).
 ;;; These are NOT per-agent: they bound the value/eval/message renderers for
@@ -2268,17 +2275,23 @@
 (defn resolve-envelope
   "Resolve the complete boot envelope and each key's disposition."
   [manifest hardware generation]
-  (merge
-   (resolve-operational-values manifest hardware)
-   {:seon.launch.envelope/generation generation
-    :seon.launch.envelope/hardware-observations hardware
-    :seon.launch.envelope/dispositions
-    (into {}
-          (map (fn [attribute]
-                 [attribute (if (contains? enforced-keys attribute)
-                              :enforced
-                              :carried)]))
-          operational-keys)}))
+  (let [writer-values
+        (select-keys (get manifest :seon.config/database {})
+                     protocol/writer-connection-keys)]
+    (merge
+     (resolve-operational-values manifest hardware)
+     writer-values
+     {:seon.launch.envelope/generation generation
+      :seon.launch.envelope/hardware-observations hardware
+      :seon.launch.envelope/dispositions
+      (into
+       {}
+       (map (fn [attribute]
+              [attribute (if (or (contains? enforced-keys attribute)
+                                 (contains? writer-values attribute))
+                           :enforced
+                           :carried)]))
+       (concat operational-keys (keys writer-values)))})))
 
 (defn envelope-divergences
   "Operational keys whose launch and committed values differ."
