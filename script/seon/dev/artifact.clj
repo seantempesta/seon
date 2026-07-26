@@ -400,7 +400,8 @@
    "script/seon/dev/program_artifact.clj"
    "script/seon/dev/program_indexer.clj"
    "script/seon/dev/program_inventory.clj"
-   "src"])
+   "src"
+   "test"])
 
 (defn source-input-digest
   "Hash the source and build inputs selected by an artifact flavor."
