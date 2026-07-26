@@ -344,3 +344,6 @@
 [submodule "reference-code/http-kit"]
 	path = reference-code/http-kit
 	url = https://github.com/http-kit/http-kit.git
+[submodule "reference-code/core.async.flow-monitor"]
+	path = reference-code/core.async.flow-monitor
+	url = https://github.com/clojure/core.async.flow-monitor.git
