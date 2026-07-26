@@ -685,6 +685,14 @@ centre.
 **measured.** One turn of 7 steps end to end: **~104 ms/step, of which SCI eval is
 0–5 ms**, across **12 transactions per turn**.
 
+**Scope correction, verified 2026-07-25.** That row measures the prototype path,
+not the surviving JVM driver's current one-form HTTP path. Source tracing of
+`POST /agents/run` finds six transaction boundaries inside the request wall
+clock: message, run, turn, execution plan, running eval, and terminal eval plus
+lifecycle/reply. The current path has not been measured end to end, so neither
+12 transactions nor SCI's ~5% share may be quoted as a current-runtime result.
+See §16.4.
+
 **The commit path, not SCI, is the cost centre.** SCI is ~5% of a turn — *before* an
 LLM call that dwarfs everything. Every "make the interpreter faster" proposal (JIT,
 accretion-as-speed, compiled tiers) optimizes that 5%.
@@ -1137,7 +1145,9 @@ Be suspicious of anything not above. Specifically:
 - **R-8a was not falsified.** `seon.host.instrument`'s global fair
   `ReentrantReadWriteLock` was not exercised.
 - **`sci/fork` against Seon's real base** (§3.2).
-- **The concurrency ceiling.** The curve was still improving at n=200 (§7.1).
+- **The real-agent concurrency ceiling.** The direct transaction ceiling is now
+  measured in §16, but disposable-cluster lifecycle breaks before a real agent
+  turn can start.
 - **Token-economics reproduction** (§12).
 
 ## 15. Unverified
@@ -1168,3 +1178,208 @@ Marked here so nothing lifts them as settled.
   are name, source, doc, summary, require-edges (`src/seon/ns/source.cljc:17,
   :19-37, :45, :46`). Any design naming it is proposing a **new** attribute, not a
   repoint.
+
+---
+
+## 16. Load and saturation
+
+### 16.0 Conditions and method
+
+**Measured, 2026-07-26 00:10–00:29 EDT, during the 2026-07-25 work period.**
+These conditions travel with every figure in §16:
+
+| condition | value |
+|---|---|
+| machine | MacBook Pro `Mac17,6`, Apple M5 Max, 18 cores, 128 GB RAM |
+| operating system | macOS 26.5.2, build `25F84` |
+| local store | APFS `/dev/disk3s5`, 1.8 TiB total, 838 GiB free |
+| JVM | Homebrew OpenJDK 26.0.1, G1, `-Xmx4g`, NMT summary, no AOT/AppCDS |
+| Clojure | 1.12.5 |
+| Datahike | `caf526850084a9d5846ccd9ea34251fe411e0d6b` |
+| SCI | `8fac6e88f32d53a5fd82ebe80640881e317b84fd` |
+| Seon starting revision | `742a11f73ca5bef7d0754c55be9409e6400ea0fd` |
+| other work | default and lifecycle Seon processes, watchers, desktop apps; the machine was not a sole-tenant benchmark host |
+
+The committed `bench/writer_throughput.clj` `saturation` mode drives direct
+Datahike `d/transact!` calls. Each point creates a fresh file database with
+`:schema-flexibility :write`, `:keep-history? true`, and
+`:fuse-index-roots? true`; installs one cardinality-one long attribute; starts
+the stated number of virtual-thread workers behind one latch; and assigns a
+fixed total number of single-datom transactions from an atomic ordinal. It
+records wall time, individual promise latency, transaction-report commit IDs,
+process CPU, heap delta, GC, and platform-thread counts. A 64-worker,
+256-transaction warm-up precedes each process.
+
+The fixed-work property matters: curves with different transaction totals are
+reported separately below and **must not be spliced**. This is a direct
+Datahike file-store benchmark, not a `seon.db` protocol benchmark and not an
+agent turn.
+
+The reportable invocations were:
+
+```bash
+U3_BENCH_MODE=saturation \
+U3_BENCH_CONCURRENCIES=200,400,800,1600,3200,6400,8192,12800,16384 \
+U3_BENCH_TRANSACTIONS=16384 \
+clojure -J-Xmx4g -J-XX:NativeMemoryTracking=summary \
+  -M:writer:host:writer-test \
+  -i bench/writer_throughput.clj \
+  -e '(bench.writer-throughput/-main)'
+
+U3_BENCH_MODE=saturation \
+U3_BENCH_CONCURRENCIES=65536,131072 \
+U3_BENCH_TRANSACTIONS=131072 \
+clojure -J-Xmx4g -J-XX:NativeMemoryTracking=summary \
+  -M:writer:host:writer-test \
+  -i bench/writer_throughput.clj \
+  -e '(bench.writer-throughput/-main)'
+```
+
+### 16.1 The curve, knee, and ceiling
+
+**Measured, fixed work = 16,384 transactions per fresh store:**
+
+| concurrent callers | wall ms | tx/s | p50 ms | p95 ms | commits |
+|---:|---:|---:|---:|---:|---:|
+| 200 | 84,579.18 | 193.71 | 906.87 | 2,211.52 | 161 |
+| 400 | 46,880.58 | 349.48 | 1,070.15 | 2,286.48 | 79 |
+| 800 | 25,516.27 | 642.10 | 1,048.71 | 2,418.68 | 40 |
+| 1,600 | 13,065.78 | 1,253.96 | 1,015.80 | 2,359.11 | 21 |
+| 3,200 | 7,541.25 | 2,172.58 | 858.02 | 2,358.07 | 11 |
+| 6,400 | 3,823.84 | 4,284.70 | 754.24 | 2,532.48 | 6 |
+| 8,192 | 2,908.19 | 5,633.75 | 933.84 | 2,300.62 | 5 |
+| 12,800 | 3,182.00 | 5,148.97 | 1,819.77 | 2,658.63 | 5 |
+| 16,384 | 1,938.93 | 8,450.04 | 1,891.57 | 1,894.69 | 4 |
+
+The non-monotonic 12,800/16,384 pair is real run noise plus a batch-boundary
+change, not a defensible knee. At 16,384 callers the curve was still improving
+and the entire workload had collapsed into four commits.
+
+The high-concurrency extension used more fixed work so each caller remained
+meaningful:
+
+| fixed transactions | concurrent callers | wall ms | tx/s | p50 ms | p95 ms | commits | peak platform threads | GC ms |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 131,072 | 65,536 | 30,225.99 | **4,336.40** | 10,439.55 | 19,663.02 | 9 | 1,995 | 1,073 |
+| 131,072 | 131,072 | 36,190.02 | **3,621.77** | 17,673.50 | 35,365.91 | 6 | 2,598 | 1,063 |
+
+**The measured knee is 65,536 concurrent callers under this 131,072-transaction
+workload.** Doubling concurrency to 131,072 made throughput **16.48% worse**,
+wall time **19.73% worse**, and p50 latency **69.29% worse**, even though
+coalescing reduced nine commits to six. The last successful point was 131,072
+callers; it is a degraded point, not a recommended operating capacity.
+
+The terminal escalation held concurrency at 131,072 and doubled fixed work to
+262,144 transactions. It did not finish within the harness's 120-second
+backstop and then failed with `OutOfMemoryError: Java heap space`. Immediately
+before failure Datahike reported its 120,000-entry transaction queue above 90%
+(observed count 117,553) and its commit queue above 50% (observed count
+60,006). Therefore concurrency alone is not a sufficient capacity coordinate:
+131,072 callers completed 131,072 transactions, but the same concurrency could
+not sustain 262,144 transactions on `-Xmx4g`.
+
+### 16.2 The named resources
+
+There are two walls at different offered-load regimes.
+
+**Measured — moderate concurrency is durable-file synchronization bound.**
+A 60-second JFR interval during the 200-caller fixed-work escalation recorded
+38,580 `jdk.FileForce` events, all metadata forces in Konserve's file-store
+path. Their aggregate duration was 347.32 seconds because eight
+`async-dispatch` threads overlapped them; per force, p50 was 8.14 ms, p95
+17.95 ms, and mean 9.00 ms. JVM CPU averaged 1.01% user and 5.20% system while
+machine CPU averaged 26.78%. Eight collections had a longest pause of
+15.4 ms. No `jdk.VirtualThreadPinned` event occurred.
+
+The resource is **local APFS metadata synchronization (`FileChannel.force` /
+fsync through Konserve)**. It is not the one-core Datahike processing loop,
+heap, GC, or carrier threads at this part of the curve. Higher offered
+concurrency improves throughput by amortizing those forces across ever-larger
+commit batches.
+
+**Measured — the terminal wall is queued transaction state in the Java heap.**
+Datahike fixes both queue capacities at 120,000
+(`reference-code/datahike/src/datahike/writer.cljc:78`) and emits pressure at
+90% of the transaction queue (`:104`) and 50% of the commit queue (`:174`).
+During the failed 131,072-caller/262,144-transaction run:
+
+- the `-Xmx4g` heap reached 4.0 GiB and stayed there;
+- JFR measured peak RSS at **5.391 GB / 5.021 GiB**;
+- 699 GC events were recorded, including 323 full collections; their event
+  durations sum to 209.48 seconds but overlap, so that sum is **not** a
+  wall-clock share;
+- the longest recorded GC event was 2,028.98 ms;
+- Java thread count peaked at 3,399;
+- JVM CPU averaged 24.39% user plus 15.14% system, while the non-isolated
+  machine averaged 57.40% total; and
+- no virtual-thread pinning event occurred.
+
+The named failure is **heap exhaustion from retained transaction/commit-queue
+state**, with GC thrash as the terminal symptom. The evidence falsifies
+commit-loop CPU and carrier-thread saturation as the first cause. Disk forces
+remain the ordinary cost centre below the queue/heap wall.
+
+### 16.3 Real-agent load: the infrastructure broke first
+
+**Measured blocker, not an agent-throughput number.** The supported
+disposable-cluster path broke before `N=1`: `bin/seon cluster open <name>`
+reconciles only the target pod, not a target JVM driver or web-render process
+(`script/seon/dev/cluster.clj:233-258,318-333`). A provider request in that
+state would exercise the default cluster's process, not the throwaway cluster
+the measurement was required to isolate.
+
+The safely exercised real-agent count was therefore **zero**. This is not a
+claim that the system's agent capacity is zero; it is the ceiling reached
+before the first required runtime resource existed. The resource that broke
+first was **named-cluster lifecycle composition**. No paid model call was made,
+which obeys cheapest-probe-first rather than spending money on invalid
+topology. The blocker and acceptance are recorded in
+`docs/seon/issues/named-cluster-open-does-not-reconcile-jvm-host.md`.
+
+### 16.4 End-to-end turn attribution
+
+**Unmeasured.** There is no honest current-runtime end-to-end turn breakdown.
+The disposable JVM driver did not start (§16.3), and the surviving driver
+persists only `:seon.eval/duration-ms`. It does not persist model-call duration,
+per-transaction duration, context-derivation duration, or publish duration.
+The current HTTP path passes the request message directly as eval context and
+combines completion with reply publication in the terminal transaction, so
+“context” and “publish” are not separately observable phases there.
+
+Source tracing verifies six transaction boundaries for one current form, but
+it does not measure their duration. Subtracting SCI time from request wall
+would mix model, queue wait, transactions, and unobserved driver work. Thus the
+§7.2 historical statement “SCI is ~5% of a turn” remains a prototype lower
+bound and is **not confirmed for the new runtime**. The missing waterfall is
+owned by
+`docs/seon/issues/agent-turns-lack-database-read-cost-attribution.md`.
+
+### 16.5 Memory and idle agents
+
+**Real-agent RSS and heap curves are unmeasured** for the same disposable-driver
+blocker. Source inspection verifies that an idle agent is database facts: agent
+creation allocates no per-agent thread, and the surviving one-message path uses
+transient virtual threads and transient SCI forks. It does not retain the
+target architecture's one context per agent. Therefore “idle agents cost zero
+threads” is source-verified for the current implementation, but no RSS/heap
+number is claimed and the current implementation cannot prove the target
+retained-context memory model.
+
+The transaction-load memory figures in §16.1–16.2 are not substitutes for
+agent memory. In particular, per-point heap deltas moved in both directions
+with G1 timing and are not retained-footprint measurements.
+
+### 16.6 What this section did not measure
+
+- No real agent turn, model call, paid token, capability call, streaming reply,
+  context derivation, or publish phase.
+- No agent-count RSS/heap curve and no retained SCI context per agent.
+- No isolated sole-tenant disk bandwidth or alternate disk/filesystem.
+- No `seon.db` protocol, replica, reactive feed, or browser path.
+- No heap ceiling other than `-Xmx4g`.
+- No safe operating limit below the knee; the run found a failure envelope,
+  not a production capacity policy.
+
+The direct transaction load clause now has a number, a knee, a degraded point,
+and named resources. The real-agent and end-to-end performance clauses remain
+open on the two explicit blockers above.

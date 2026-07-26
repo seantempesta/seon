@@ -67,7 +67,7 @@ See `README.md` for the convention.
 | [seon.agent.ctx file reads bypass the filesystem grant](agent-ctx-file-reads-bypass-fs-grant.md) | blocker | agent |
 | [tools.reader executes agent source at read time, outside SCI entirely](tools-reader-evaluates-agent-source-at-read-time.md) | blocker | general |
 
-## Friction (73)
+## Friction (74)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -91,6 +91,7 @@ See `README.md` for the convention.
 | [D13 repair merge broke the bare-babashka loadability the candidates half had](d13-merge-broke-bare-babashka-loading.md) | friction | agent |
 | [Database query tuple results are hard for agents to read](database-query-tuple-shape-legibility.md) | friction | agent |
 | [Datahike execute-many predicate query fails](datahike-execute-many-predicate-query-fails.md) | friction | Core |
+| [Datahike queue-pressure warnings obscure the load failure](datahike-queue-pressure-warning-storm-obscures-load-failure.md) | friction | Core |
 | [Dev-eval fault scope misses MCP funnels; a REPL typo crashes the pod](dev-eval-fault-scope-misses-mcp-funnels.md) | friction | general |
 | [Edit-hook feedback can target a different checkout](worktree-edit-hook-checkout-drift.md) | friction | general |
 | [Execution child program load omitted instrumentation](execution-child-program-load-omitted-instrumentation.md) | friction | agent |

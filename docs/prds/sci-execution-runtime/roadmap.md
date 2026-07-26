@@ -156,6 +156,18 @@ checkpoint makes the suite a stable instrument; it does not satisfy the live
 load, performance, or end-to-end final system gates. Full evidence:
 [[research/codec-test-instrument-repair-2026-07-25]].
 
+The 2026-07-25/26 saturation pass now closes the direct transaction-wall
+unknown, but not the real-agent or end-to-end gates. Under OpenJDK 26.0.1,
+Clojure 1.12.5, G1, and `-Xmx4g`, fixed work degraded from 4,336.40 tx/s at
+65,536 concurrent callers to 3,621.77 tx/s at 131,072. At that same concurrency,
+doubling sustained work filled Datahike's 120,000-entry queues and exhausted
+the 4 GiB heap; moderate load was instead dominated by Konserve/APFS metadata
+forces. The first real-agent resource still fails before `N=1`: named-cluster
+open does not reconcile a target JVM driver. Current turn facts also cannot
+attribute model, transaction, context, and publish time, so no end-to-end
+waterfall or current SCI share is claimed. Complete conditioned evidence:
+[[research/measurements-2026-07-25#16-load-and-saturation]].
+
 The 2026-07-24 reset-boundary checkpoint fixed claimant-host committed
 acquisition in `c2c5faeff`: one frozen database value, AEVT identity pages,
 and one bounded query per variable-size form row. Fresh isolated start →

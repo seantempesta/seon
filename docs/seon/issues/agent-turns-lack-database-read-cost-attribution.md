@@ -66,6 +66,24 @@ Remaining for full acceptance below: pull-path resource evidence (the fork's
 `pull_api.cljc/pull-spec`), turn-level aggregation onto the durable turn, the
 `:off`/`:aggregate`/`:trace` dial, and the debug-page waterfall.
 
+## Load-measurement reconfirmation — 2026-07-25
+
+The surviving JVM driver makes the missing attribution concrete. A current
+one-form `/agents/run` request performs six source-derived transaction
+boundaries inside its wall clock: message, run, turn, execution plan, running
+eval, and terminal eval plus lifecycle/reply. It persists
+`:seon.eval/duration-ms`, but not model-call duration, individual transaction
+duration, context-derivation duration, or publish duration. The driver passes
+the request message directly as eval context, and the terminal transaction
+combines completion with the reply, so there is no separate context or publish
+phase to time in this path.
+
+An exact end-to-end waterfall therefore cannot be reconstructed from current
+facts. Any subtraction that called the remainder “model”, “context”, or
+“publish” would turn unmeasured work into a number. The 2026-07-25 saturation
+work records this as the first observability resource to fail and makes no such
+claim.
+
 Host-context reads carry per-agent identity since U4 (2026-07-20):
 `seon.host.context/*agent-id*` is bound around every host invocation
 (`seon.host/run-invocation!` eval-batch branch and startup restore), and the

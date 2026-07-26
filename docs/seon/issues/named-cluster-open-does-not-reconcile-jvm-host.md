@@ -51,6 +51,23 @@ The complete transcript is
 `tmp/orchestrator/claimantllm-gate.log`. The target pod was stopped cleanly
 before any DeepSeek request.
 
+## Reconfirmation — 2026-07-25
+
+The load-and-saturation measurement attempted the supported disposable-cluster
+path before making any paid provider call. The blocker is unchanged:
+
+- `seon.dev.cluster/ensure-under-lock!` still selects only the pod spec
+  (`script/seon/dev/cluster.clj:233-258`);
+- `seon.dev.cluster/close!` still stops only that pod
+  (`script/seon/dev/cluster.clj:318-333`); and
+- the HTTP route comment still advertises the nonexistent
+  `bin/seon cluster create` command (`src/seon/web/serve.cljs:722`).
+
+Consequently the safe real-agent concurrency ceiling measured in a disposable
+cluster was zero: the first required resource to fail was cluster lifecycle
+composition, before a target JVM driver existed. No provider request was sent.
+This is a measurement blocker, not evidence about agent throughput.
+
 ## Owner
 
 `seon.dev.cluster` owns named-cluster lifecycle composition.

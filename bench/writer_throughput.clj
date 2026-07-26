@@ -16,6 +16,7 @@
        clojure -M:writer:host:writer-test
        -i bench/writer_throughput.clj -e '(bench.writer-throughput/-main)'"
   (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [datahike.api :as d]
             [seon.db.executor :as executor]
             [seon.db.protocol :as protocol]
@@ -23,6 +24,7 @@
             [seon.db.writer :as writer]
             [seon.db.writer-test-support :as writer-test])
   (:import [java.io File]
+           [java.lang.management ManagementFactory]
            [java.util.concurrent ConcurrentLinkedQueue CountDownLatch
             Executors TimeUnit]))
 
@@ -263,6 +265,165 @@
     :db/valueType :db.type/long
     :db/cardinality :db.cardinality/one}])
 
+(defn- resource-snapshot []
+  (let [runtime (Runtime/getRuntime)
+        operating-system
+        ^com.sun.management.OperatingSystemMXBean
+        (ManagementFactory/getOperatingSystemMXBean)
+        garbage-collectors (ManagementFactory/getGarbageCollectorMXBeans)
+        threads (ManagementFactory/getThreadMXBean)]
+    {:bench.load/process-cpu-ns (.getProcessCpuTime operating-system)
+     :bench.load/heap-used-bytes (- (.totalMemory runtime)
+                                    (.freeMemory runtime))
+     :bench.load/gc-count
+     (reduce + (keep #(let [n (.getCollectionCount %)]
+                        (when-not (neg? n) n))
+                     garbage-collectors))
+     :bench.load/gc-ms
+     (reduce + (keep #(let [n (.getCollectionTime %)]
+                        (when-not (neg? n) n))
+                     garbage-collectors))
+     :bench.load/platform-thread-count (.getThreadCount threads)}))
+
+(defn- snapshot-delta [before after key]
+  (- (get after key) (get before key)))
+
+(defn- median-long [values]
+  (let [values (vec (sort values))]
+    (nth values (quot (count values) 2))))
+
+(defn- latency-percentiles [latencies]
+  (let [values (vec (sort latencies))
+        at (fn [fraction]
+             (/ (nth values
+                     (min (dec (count values))
+                          (long (Math/floor
+                                 (* fraction (dec (count values)))))))
+                1.0e6))]
+    {:bench.load/p50-ms (at 0.50)
+     :bench.load/p95-ms (at 0.95)
+     :bench.load/p99-ms (at 0.99)
+     :bench.load/max-ms (/ (peek values) 1.0e6)}))
+
+(defn- run-aprime-saturation-point!
+  [concurrency transaction-count]
+  (let [root (doto (io/file "tmp" (str "writer-saturation-" (random-uuid)))
+               .mkdirs)
+        store-path (.getAbsolutePath (io/file root "database"))
+        config
+        {:store {:backend :file
+                 :path store-path
+                 :id (random-uuid)}
+         :schema-flexibility :write
+         :keep-history? true
+         :fuse-index-roots? true}]
+    (try
+      (d/create-database config)
+      (let [connection (d/connect config)
+            _ @(d/transact! connection {:tx-data aprime-schema})
+            ready (CountDownLatch. concurrency)
+            start (CountDownLatch. 1)
+            done (CountDownLatch. concurrency)
+            next-ordinal (java.util.concurrent.atomic.AtomicLong.)
+            commit-ids (ConcurrentLinkedQueue.)
+            latencies (ConcurrentLinkedQueue.)
+            errors (ConcurrentLinkedQueue.)
+            executor-service (Executors/newVirtualThreadPerTaskExecutor)
+            thread-bean (ManagementFactory/getThreadMXBean)]
+        (.resetPeakThreadCount thread-bean)
+        (doseq [ordinal (range concurrency)]
+          (.submit
+           executor-service
+           ^Runnable
+           (fn []
+             (try
+               (.countDown ready)
+               (.await start)
+               (loop []
+                 (let [ordinal (.getAndIncrement next-ordinal)]
+                   (when (< ordinal transaction-count)
+                     (let [started-at (System/nanoTime)
+                           report
+                           @(d/transact!
+                             connection
+                             {:tx-data
+                              [{:writer.aprime/value (long ordinal)}]})]
+                       (.add latencies (- (System/nanoTime) started-at))
+                       (.add commit-ids
+                             (get-in report [:tx-meta :db/commitId]))
+                       (recur)))))
+               (catch Throwable error
+                 (.add errors error))
+               (finally
+                 (.countDown done))))))
+        (when-not (.await ready 30 TimeUnit/SECONDS)
+          (throw
+           (ex-info "The saturation workers did not become ready."
+                    {:bench.load/concurrency concurrency})))
+        (let [before (resource-snapshot)
+              started-at (System/nanoTime)]
+          (.countDown start)
+          (when-not (.await done 120 TimeUnit/SECONDS)
+            (throw
+             (ex-info "The saturation workers did not finish."
+                      {:bench.load/concurrency concurrency})))
+          (let [finished-at (System/nanoTime)
+                after (resource-snapshot)
+                elapsed-ns (- finished-at started-at)
+                commit-sizes
+                (->> commit-ids
+                     frequencies
+                     vals
+                     sort
+                     vec)]
+            (.shutdown executor-service)
+            (.awaitTermination executor-service 30 TimeUnit/SECONDS)
+            (d/release connection)
+            (merge
+             {:bench.load/concurrency concurrency
+              :bench.load/transactions transaction-count
+              :bench.load/completed (count commit-ids)
+              :bench.load/errors (count errors)
+              :bench.load/wall-ms (/ elapsed-ns 1.0e6)
+              :bench.load/ms-per-transaction
+              (/ elapsed-ns 1.0e6 transaction-count)
+              :bench.load/transactions-per-second
+              (/ transaction-count (/ elapsed-ns 1.0e9))
+              :bench.load/process-cpu-ms
+              (/ (snapshot-delta before after
+                                 :bench.load/process-cpu-ns)
+                 1.0e6)
+              :bench.load/average-process-cores
+              (/ (snapshot-delta before after
+                                 :bench.load/process-cpu-ns)
+                 (double elapsed-ns))
+              :bench.load/gc-count
+              (snapshot-delta before after :bench.load/gc-count)
+              :bench.load/gc-ms
+              (snapshot-delta before after :bench.load/gc-ms)
+              :bench.load/heap-used-delta-bytes
+              (snapshot-delta before after :bench.load/heap-used-bytes)
+              :bench.load/platform-threads-before
+              (:bench.load/platform-thread-count before)
+              :bench.load/platform-threads-after
+              (:bench.load/platform-thread-count after)
+              :bench.load/platform-threads-peak
+              (.getPeakThreadCount thread-bean)
+              :bench.load/commit-count (count commit-sizes)
+              :bench.load/commit-batch-min (first commit-sizes)
+              :bench.load/commit-batch-median (median-long commit-sizes)
+              :bench.load/commit-batch-max (peek commit-sizes)}
+             (latency-percentiles latencies)))))
+      (finally
+        (delete-tree! root)))))
+
+(defn- saturation-concurrencies []
+  (mapv parse-long
+        (str/split
+         (or (System/getenv "U3_BENCH_CONCURRENCIES")
+             "1,10,50,200,400,800,1600,3200")
+         #",")))
+
 (defn run-aprime!
   "Measure direct Datahike batching at queue depths 1, 8, and 64."
   [transaction-count]
@@ -311,6 +472,26 @@
         (case mode
           :aprime (run-aprime! (environment-long
                                 "U3_BENCH_TRANSACTIONS" 1024))
+          :saturation
+          (let [transaction-count
+                (environment-long "U3_BENCH_TRANSACTIONS" 65536)]
+            {:bench.load/conditions
+             {:bench.load/jdk (System/getProperty "java.version")
+              :bench.load/clojure (clojure-version)
+              :bench.load/max-heap-bytes (.maxMemory (Runtime/getRuntime))
+              :bench.load/available-processors
+              (.availableProcessors (Runtime/getRuntime))
+              :bench.load/transactions-per-point transaction-count
+              :bench.load/concurrencies (saturation-concurrencies)}
+             :bench.load/warmup
+             (run-aprime-saturation-point! 64 256)
+             :bench.load/curve
+             (mapv #(let [point
+                          (run-aprime-saturation-point!
+                           % transaction-count)]
+                      (println (pr-str {:bench.load/point point}))
+                      point)
+                   (saturation-concurrencies))})
           :a (run-writer-probe! 1 shape concurrency seconds)
           :c (run-writer-probe! 4 shape concurrency seconds))]
     (println (pr-str result))
