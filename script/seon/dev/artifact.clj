@@ -876,7 +876,7 @@
      "-Sdeps"
      (pr-str
       {:aliases
-       {'program-indexer {:extra-paths ["script"]}}})
+       {:program-indexer {:extra-paths ["script"]}}})
      "-M:writer:host:program-indexer"
      "-m" "seon.dev.program-indexer"
      (:seon.dev.config/root config)
@@ -1268,12 +1268,16 @@
     #(let [prepared (prepare-dependencies-unlocked! config aliases)]
        (when (and (:seon.dev.config/source-checkout? config)
                   (= [:writer] aliases))
-         (ensure-writer! config)
-         (publish-program-artifacts! config)
-         (let [bun (bun-identity! config)
-               manifest (output-manifest config bun)]
-           (atomic-spit! (:seon.dev.config/artifact-manifest config)
-                         manifest)))
+         (let [selected
+               (if (:seon.dev.config/resolved-configuration config)
+                 config
+                 (config/select-manifest config nil))]
+           (ensure-writer! selected)
+           (publish-program-artifacts! selected)
+           (let [bun (bun-identity! selected)
+                 manifest (output-manifest selected bun)]
+             (atomic-spit! (:seon.dev.config/artifact-manifest selected)
+                           manifest))))
        prepared)))
 
 (def ^:private runtime-root-links ["src" "test" "guest-cljs" "resources"])

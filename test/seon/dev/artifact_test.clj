@@ -2,7 +2,8 @@
   (:require [babashka.fs :as fs]
             [clojure.edn :as edn]
             [clojure.test :refer [deftest is]]
-            [seon.dev.artifact :as artifact])
+            [seon.dev.artifact :as artifact]
+            [seon.dev.config :as config])
   (:import [java.io FileOutputStream]
            [java.util.jar JarEntry JarOutputStream]))
 
@@ -628,6 +629,45 @@
                 nil
                 (catch clojure.lang.ExceptionInfo error
                   (:seon.dev.artifact/failure (ex-data error)))))))))
+
+(deftest standalone-writer-preparation-selects-and-freezes-program-pages
+  (let [events (atom [])
+        base {:seon.dev.config/root "/checkout"
+              :seon.dev.config/environment {}
+              :seon.dev.config/source-checkout? true
+              :seon.dev.config/artifact-manifest "/checkout/artifact.edn"}
+        selected (assoc base :seon.dev.config/resolved-configuration
+                        {:seon.config.database.initialization/page-rows 64})]
+    (with-redefs-fn
+      {#'artifact/with-build-lock (fn [_ build] (build))
+       #'artifact/prepare-dependencies-unlocked!
+       (fn [_ aliases]
+         (swap! events conj [:dependencies aliases])
+         {:seon.dev.artifact/prepared-aliases aliases})
+       #'config/select-manifest
+       (fn [configuration config-path]
+         (swap! events conj [:manifest configuration config-path])
+         selected)
+       #'artifact/ensure-writer!
+       (fn [configuration] (swap! events conj [:writer configuration]))
+       #'artifact/publish-program-artifacts!
+       (fn [configuration] (swap! events conj [:pages configuration]))
+       #'artifact/bun-identity! (constantly :bun)
+       #'artifact/output-manifest
+       (fn [configuration bun]
+         (swap! events conj [:freeze configuration bun])
+         :artifact)
+       #'artifact/atomic-spit!
+       (fn [path value] (swap! events conj [:publish path value]))}
+      #(is (= {:seon.dev.artifact/prepared-aliases [:writer]}
+              (artifact/prepare-dependencies! base [:writer]))))
+    (is (= [[:dependencies [:writer]]
+            [:manifest base nil]
+            [:writer selected]
+            [:pages selected]
+            [:freeze selected :bun]
+            [:publish "/checkout/artifact.edn" :artifact]]
+           @events))))
 
 (deftest source-publication-replaces-an-obsolete-manifest
   (let [published {:seon.dev.artifact/writer-digest "writer-new"

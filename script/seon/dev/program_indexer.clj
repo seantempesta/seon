@@ -114,7 +114,13 @@
                      (conj selected namespace)))))
         selected))))
 
-(defn- read-forms [namespace source]
+(defn- reduce-forms
+  "Reduce source one reader form at a time.
+
+   `read+string` consumes exactly one form and its source slice from the
+   pushback reader. Keeping only the reduction value avoids retaining a second
+   vector containing every parsed form beside the source artifact."
+  [namespace source reducing-fn initial]
   (let [reader-namespace
         (or (find-ns namespace) (create-ns namespace))
         require-edges (ns.source/require-edges-from-source source)]
@@ -132,18 +138,22 @@
                  (StringReader. source))]
       (binding [*read-eval* false
                 *ns* reader-namespace]
-      (loop [forms []]
+      (loop [result initial]
         (let [[form form-source]
               (read+string {:eof eof
                             :read-cond :allow
                             :features #{:clj}}
                            reader)]
           (if (identical? eof form)
-            forms
-            (recur (conj forms
-                         {:seon.dev.program-indexer/form form
-                          :seon.dev.program-indexer/source
-                          form-source})))))))))
+            result
+            (let [next-result
+                  (reducing-fn
+                   result
+                   {:seon.dev.program-indexer/form form
+                    :seon.dev.program-indexer/source form-source})]
+              (if (reduced? next-result)
+                @next-result
+                (recur next-result))))))))))
 
 (defn- function-form? [form]
   (and (seq? form)
@@ -200,17 +210,20 @@
   (into []
         (mapcat
          (fn [{:seon.dev.program-indexer/keys [namespace source]}]
-           (into []
-                 (comp
-                  (filter (comp function-form?
-                                :seon.dev.program-indexer/form))
-                  (map (fn [described-form]
-                         {:seon.dev.program-indexer/namespace namespace
-                          :seon.dev.program-indexer/form
-                          (:seon.dev.program-indexer/form described-form)
-                          :seon.dev.program-indexer/row
-                          (function-row namespace described-form)})))
-                 (read-forms namespace source))))
+           (reduce-forms
+            namespace source
+            (fn [functions described-form]
+              (if (function-form?
+                   (:seon.dev.program-indexer/form described-form))
+                (conj
+                 functions
+                 {:seon.dev.program-indexer/namespace namespace
+                  :seon.dev.program-indexer/form
+                  (:seon.dev.program-indexer/form described-form)
+                  :seon.dev.program-indexer/row
+                  (function-row namespace described-form)})
+                functions))
+            [])))
         descriptions))
 
 (defn- aliases [namespace-info]
@@ -342,32 +355,28 @@
                         (mapv terminal-row (::edge/terminals bundle)))))))
           functions)))
 
-(defn- test-rows [root]
+(defn- test-rows [descriptions]
   (into []
         (mapcat
-         (fn [^File file]
-           (let [source (slurp file)
-                 namespace (second (first-ns-form source))]
-             (into []
-                   (comp
-                    (filter (comp test-form?
-                                  :seon.dev.program-indexer/form))
-                    (map
-                     (fn [{:seon.dev.program-indexer/keys [form source]}]
-                       {:seon.test/sym
-                        (str (symbol (str namespace) (str (second form))))
-                        :seon.test/ns [:seon.ns/name namespace]
-                        :seon.test/source source})))
-                   (read-forms namespace source))))
-        (test-roots/writer-test-files root))))
+         (fn [{:seon.dev.program-indexer/keys [namespace source]}]
+           (reduce-forms
+            namespace source
+            (fn [tests
+                 {form :seon.dev.program-indexer/form
+                  form-source :seon.dev.program-indexer/source}]
+              (if (test-form? form)
+                (conj tests
+                      {:seon.test/sym
+                       (str (symbol (str namespace) (str (second form))))
+                       :seon.test/ns [:seon.ns/name namespace]
+                       :seon.test/source form-source})
+                tests))
+            [])))
+        descriptions))
 
 (defn- test-source-descriptions [root]
-  (mapv
-   (fn [^File file]
-     {:seon.dev.program-indexer/resource
-      (relative-path root file)
-      :seon.dev.program-indexer/source (slurp file)})
-   (test-roots/writer-test-files root)))
+  (mapv #(source-description root %)
+        (test-roots/writer-test-files root)))
 
 (defn- base-projection [rows]
   (let [core-transaction
@@ -429,12 +438,14 @@
              (sort-by (comp str
                             :seon.dev.program-indexer/namespace))
              vec)
-        namespace-rows (mapv namespace-row selected)
+        test-descriptions (test-source-descriptions root)
+        all-descriptions (into selected test-descriptions)
+        namespace-rows (mapv namespace-row all-descriptions)
         function-rows (indexed-function-rows selected)
         schema-rows
         (schema/canonical-schema-rows
          (java.util.Date/from java.time.Instant/EPOCH))
-        test-rows (test-rows root)
+        test-rows (test-rows test-descriptions)
         desired (into namespace-rows
                       (concat function-rows schema-rows test-rows))
         rows
@@ -453,14 +464,12 @@
          :seon.db/program rows
          :seon.db/initial-data []}
         pages (program/compile-initialization-pages initialization)
-        source-descriptions
-        (into selected (test-source-descriptions root))
         source-artifact
         {:seon.dev.artifact/program-sources
          (into (sorted-map)
                (map (juxt :seon.dev.program-indexer/resource
                           :seon.dev.program-indexer/source))
-               source-descriptions)}]
+               all-descriptions)}]
     {:seon.dev.artifact/program-sources source-artifact
      :seon.dev.artifact/program-rows row-artifact
      :seon.dev.artifact/base-projection
@@ -498,6 +507,7 @@
     (:seon.dev.program-indexer/inventory artifacts)))
 
 (defn -main
+  "Publish program artifacts from command-line build coordinates."
   [& [root program-source-path program-row-path base-projection-path
        page-plan-path config-manifest-digest page-rows]]
   (when-not (and root program-source-path program-row-path
