@@ -10,7 +10,7 @@
     [cljs.test :as t :refer [deftest is testing]]
     [clojure.string :as str]
     [seon.agent.ctx.render-fns]
-    [seon.agent.run]
+    [seon.agent.run.core]
     [seon.config :as config]
     [seon.db :as db]
     [seon.error :as error]

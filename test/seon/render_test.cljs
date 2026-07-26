@@ -4,7 +4,7 @@
    [clojure.string :as str]
    [cljs.test :refer [deftest is testing]]
    [seon.agent.ctx.render-fns]
-   [seon.agent.run]
+   [seon.agent.run.core]
    [seon.config :as config]
    [seon.error :as error]
    [seon.render :as render]
