@@ -106,6 +106,13 @@ sample sizes, and acceptance evidence belong in PRD research and roadmaps.
 
 The full decision record is [[011-tests-find-design-issues]].
 
+- **Edge-case count is a design verdict.** Old code is studied, never
+  re-derived from scratch: each problem it already met becomes one specific
+  unit test at the surviving owner, and each rule becomes a generative
+  property. When a mechanism keeps demanding new edge-case tests instead of
+  one property, the implementation shape is wrong — stop fencing and
+  re-plan; too many edge cases means the design, not the test suite, needs
+  work (owner ruling 2026-07-26).
 - **Tests find design issues; structure retains them.** A recurring failure
   class is dissolved by moving its invariant to one choke point, then keeping
   exactly one regression per class. Fencing a symptom with many point tests is
