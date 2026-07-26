@@ -26,7 +26,7 @@
 (schema/register! :seon.agent.run/result :string)
 (schema/register! :seon.agent.run/plan-digest :string)
 (schema/register! :seon.agent.run/forms
-                  [:vector {:seon.db/component true} :seon.db/ref])
+                  [:set {:seon.db/component true} :seon.db/ref])
 (schema/register! :seon.agent.run.form/id
                   [:string {:seon.db/identity true}])
 (schema/register! :seon.agent.run.form/run :seon.db/ref)

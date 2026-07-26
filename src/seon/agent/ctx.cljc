@@ -99,7 +99,7 @@
 ;; ============================================================
 
 (schema/register! ::capability   [:enum :grep :exec :http])          ; PARKED — register-once enum
-(schema/register! ::capabilities [:vector {:default [:grep]} ::capability]) ; PARKED (phase-2 enforcement)
+(schema/register! ::capabilities [:set {:default #{:grep}} ::capability]) ; PARKED (phase-2 enforcement)
 (schema/register! ::escape-clipping? [:boolean {:default true}])     ; #43 — successful authored small components
 (schema/register! ::cache-breakpoint [:int {:default 20 :min 0}])    ; WIRED — priority ≤ this = cached prefix
 

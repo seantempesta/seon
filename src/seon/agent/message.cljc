@@ -56,7 +56,7 @@
    ::db.id/compact-value])
 (register-schema! :seon.agent.message/content :string)
 (register-schema! :seon.agent.message/from    :seon.db/ref)
-(register-schema! :seon.agent.message/to      [:vector :seon.db/ref])
+(register-schema! :seon.agent.message/to      [:set :seon.db/ref])
 (register-schema! :seon.agent.message/at      :inst)
 ;; Ping-pong guard: 0 from the user; an agent send carries the SAME
 ;; {me,peer}-pair's prior depth + 1 (per-peer, reset at each human
@@ -254,7 +254,7 @@
    ;; ref explicitly.
    [:seon.agent.message/from {:optional true} ::participant-ref]
    ;; to accepts ONE ref or a vector of refs (fan-out); ABSENT defaults
-   ;; to THE user. Storage is always the normalized vector.
+   ;; to THE user. Storage is always the normalized set.
    [:seon.agent.message/to {:optional true}
     [:or ::participant-ref [:vector ::participant-ref]]]
    ;; Provenance override. Absent ⇒ DERIVED from `from` (user ⇒ :human,
@@ -367,7 +367,7 @@
              message-row
              {:seon.agent.message/id message-id
               :seon.agent.message/from from
-              :seon.agent.message/to recipients
+              :seon.agent.message/to (set recipients)
               :seon.agent.message/content content
               :seon.agent.message/at at
               :seon.agent.message/hops hops

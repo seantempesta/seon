@@ -555,7 +555,7 @@
        ::from-label (ctx/message-label from own-id)
        ::to-labels  (->> (:seon.agent.message/to m)
                          (map #(ctx/message-label % own-id))
-                         distinct vec)
+                         distinct sort vec)
        :seon.render/ai
        'seon.agent.ctx.transcript/message->renderable})))
 
@@ -568,6 +568,13 @@
      ::entity       (into {} e)
      :seon.render/ai 'seon.agent.ctx.transcript/eval->renderable}
     (some? turn-idx) (assoc ::turn-idx turn-idx)))
+
+(defn- eval-order-key
+  "Order one turn's eval rows by their durable ordinal."
+  [eval-row]
+  (let [at-ms (instant/epoch-millis (:seon.eval/at eval-row))
+        eid (or (:db/id eval-row) 0)]
+    [(:seon.eval/ordinal eval-row) at-ms eid]))
 
 (defn- with-ns-markers
   "Thread a `; in <ns>` marker into each EVAL event whose ns differs from
@@ -729,7 +736,7 @@
                                    (turn-index-at turn-ats (::at event)))))))
         evs  (vec
                (for [{turn-idx ::turn-idx :as turn} turns
-                     e (sort-by (juxt :seon.eval/at :db/id)
+                     e (sort-by eval-order-key
                                 (:seon.agent.turn/evals turn))]
                  (eval->event turn-idx e)))
         kind-rank {:message 0 :eval 1}
@@ -811,6 +818,7 @@
 
 (def ^:private ai-eval-selector
   '[:db/id :seon.eval/id :seon.eval/at
+    :seon.eval/ordinal
     :seon.eval/status
     :seon.eval/source :seon.eval/narration
     :seon.eval/output :seon.eval/ok? :seon.eval/duration-ms
@@ -823,6 +831,7 @@
 
 (def ^:private html-eval-selector
   '[:db/id :seon.eval/id :seon.eval/at
+    :seon.eval/ordinal
     :seon.eval/status
     :seon.eval/narration
     :seon.eval/ok? :seon.eval/duration-ms :seon.eval/ns])
@@ -1211,7 +1220,7 @@
                               (assoc turn :seon.agent.turn/evals
                                      (->> (get evals-by-turn (:db/id turn))
                                           (map second)
-                                          (sort-by (juxt :seon.eval/at :db/id))
+                                          (sort-by eval-order-key)
                                           vec)))
                             turns)
                 previous-ns (ffirst (query-result previous-ns-member))
@@ -1471,6 +1480,7 @@
         to-labels (->> (:seon.agent.message/to message)
                        (map #(ctx/message-label % agent-id))
                        distinct
+                       sort
                        (str/join ", "))
         user? (= "user" from-label)
         body (or (:seon.agent.message/content message) "")]

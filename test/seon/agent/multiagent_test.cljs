@@ -429,7 +429,7 @@
                    [{:seon.agent.message/id
                      (get ids :seon.agent.message/id)
                      :seon.agent.message/from [:seon.agent/id "parent"]
-                     :seon.agent.message/to [child-ref]
+                     :seon.agent.message/to #{child-ref}
                      :seon.agent.message/content "investigate"
                      :seon.agent.message/hops 1
                      :seon.agent.message/origin :agent}]})})))
@@ -477,7 +477,7 @@
                 (is (identical? database (::db/expected-db built)))
                 (is (< child-index message-index)
                     "the child identity precedes its task lookup ref")
-                (is (= [[:seon.agent/id "child"]]
+                (is (= #{[:seon.agent/id "child"]}
                        (:seon.agent.message/to (nth tx message-index))))
                 (is (= [:seon.ns/name 'my.tax]
                        (:seon.agent/namespace (nth tx child-index))))

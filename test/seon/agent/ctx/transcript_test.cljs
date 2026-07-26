@@ -35,6 +35,20 @@
                         :seon.agent.ctx.transcript/result-live?))
         "process-local result membership is absent from stored render data")))
 
+(deftest turn-evals-derive-order-from-the-durable-ordinal
+  (let [rows [{:db/id 1
+               :seon.eval/ordinal 2
+               :seon.eval/at (js/Date. 1)}
+              {:db/id 3
+               :seon.eval/ordinal 0
+               :seon.eval/at (js/Date. 3)}
+              {:db/id 2
+               :seon.eval/ordinal 1
+               :seon.eval/at (js/Date. 2)}]]
+    (is (= [0 1 2]
+           (mapv :seon.eval/ordinal
+                 (sort-by @#'transcript/eval-order-key rows))))))
+
 (deftest live-readline-is-confined-to-the-root-tail
   (is (= "" (transcript/readline-block
               (assoc acquired-empty :seon.agent/id "worker"))))

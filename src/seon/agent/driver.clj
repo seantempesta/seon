@@ -91,7 +91,7 @@
          :seon.agent.run/result result}
         {:seon.agent.message/id "seon.agent.driver/message"
          :seon.agent.message/from [:seon.agent/id agent-id]
-         :seon.agent.message/to [message/user-ref]
+         :seon.agent.message/to #{message/user-ref}
          :seon.agent.message/content result
          :seon.agent.message/at at
          :seon.agent.message/hops 0
@@ -126,13 +126,14 @@
      [[:db.fn/cas run-ref :seon.agent.run/plan-digest nil plan-digest]
       {:seon.agent.run/id run-id
        :seon.agent.run/forms
-       (mapv
-        (fn [ordinal source]
-          {:seon.agent.run.form/id (form-id run-id ordinal)
-           :seon.agent.run.form/run run-ref
-           :seon.agent.run.form/ordinal ordinal
-           :seon.agent.run.form/source source})
-        (range)
+       (into
+        #{}
+        (map-indexed
+         (fn [ordinal source]
+           {:seon.agent.run.form/id (form-id run-id ordinal)
+            :seon.agent.run.form/run run-ref
+            :seon.agent.run.form/ordinal ordinal
+            :seon.agent.run.form/source source}))
         sources)}])))
 
 (defn ordered-forms
@@ -628,7 +629,7 @@
    #(transact! database-functions %)
    [{:seon.agent.turn/id turn-id
      :seon.agent.turn/duration-ns total-duration-ns
-     :seon.agent.turn/timings (vec timings)}]))
+     :seon.agent.turn/timings (set timings)}]))
 
 (defn- drive-sources!
   [allocate! database-functions agent-id run-id claim-epoch turn-id

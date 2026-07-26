@@ -79,6 +79,7 @@
         tos    (->> (:seon.agent.message/to entity)
                     (map #(ctx-format/message-label % id))
                     distinct
+                    sort
                     vec)
         body   (or (:seon.agent.message/content entity) "")
         at     (:seon.agent.message/at entity)

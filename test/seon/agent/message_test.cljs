@@ -107,7 +107,7 @@
                      child-ref)
                     [row] (:seon.db/tx-data built)]
                 (is (= "message-a" (:seon.agent.message/id row)))
-                (is (= [child-ref] (:seon.agent.message/to row)))
+                (is (= #{child-ref} (:seon.agent.message/to row)))
                 (is (= 1 (:seon.agent.message/hops row)))
                 (is (= :agent (:seon.agent.message/origin row))))))
            (.finally
@@ -210,7 +210,7 @@
             (fn [result]
               (is (= "message-id" (:seon.agent.message/id result)))
               (let [[message-row] (:seon.db/tx-data @built)]
-                (is (= [[:seon.agent/id "peer"]]
+                (is (= #{[:seon.agent/id "peer"]}
                        (:seon.agent.message/to message-row))
                     "the stored to is the identity lookup ref, verbatim")
                 (is (= [:seon.agent/id "sender"]
@@ -520,7 +520,7 @@
                      result))
               (let [[message-row plan-row] (:seon.db/tx-data @built)]
                 (is (= :human (:seon.agent.message/origin message-row)))
-                (is (= [[:seon.agent/id "peer"]]
+                (is (= #{[:seon.agent/id "peer"]}
                        (:seon.agent.message/to message-row)))
                 (is (= [:seon.agent.message/id "message-id"]
                        (:my.plan/message plan-row))))))

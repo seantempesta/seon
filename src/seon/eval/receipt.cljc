@@ -114,18 +114,18 @@
   (let [eval-id (receipt-id run-id ordinal claim-epoch)]
     [{:seon.agent.turn/id turn-id
       :seon.agent.turn/evals
-      [(cond->
+      #{(cond->
         {:seon.eval/id eval-id
-        :seon.eval/status :running
-        :seon.eval/at at
-        :seon.eval/run [:seon.agent.run/id run-id]
-        :seon.eval/ordinal ordinal
-        :seon.eval/total total
-        :seon.eval/claim-epoch claim-epoch
-        :seon.eval/source source
-        :seon.eval/narration narration
-        :seon.eval/ns eval-ns}
-        agent (assoc :seon.eval/agent agent))]}]))
+         :seon.eval/status :running
+         :seon.eval/at at
+         :seon.eval/run [:seon.agent.run/id run-id]
+         :seon.eval/ordinal ordinal
+         :seon.eval/total total
+         :seon.eval/claim-epoch claim-epoch
+         :seon.eval/source source
+         :seon.eval/narration narration
+         :seon.eval/ns eval-ns}
+        agent (assoc :seon.eval/agent agent))}}]))
 
 (defn terminal-tx-data
   "Build the CAS-fenced terminal transition for one running eval receipt."

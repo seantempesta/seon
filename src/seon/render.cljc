@@ -178,7 +178,7 @@
    [:seon.schema/projection {:optional true} :seon.schema/projection]])
 
 (schema/register! :seon.render/children
-  [:vector {:seon.db/component true} :seon.db/ref])      ;; OPTIONAL authored nesting; derived sections query instead
+  [:set {:seon.db/component true} :seon.db/ref])         ;; OPTIONAL authored nesting; derived sections query instead
 
 ;; The `:seon.render/ai-response` envelope returned by AI-side renderers.
 ;; The old `:seon.render/text` second arm was

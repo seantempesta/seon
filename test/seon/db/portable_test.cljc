@@ -43,7 +43,7 @@
   (schema/register! child-edn-attr [:or :keyword :map])
   (schema/register! child-render-attr [:or :string :symbol])
   (schema/register! component-attr
-                    [:vector {:seon.db/component true}
+                    [:set {:seon.db/component true}
                      [:map {:closed true}
                       [child-edn-attr child-edn-attr]
                       [child-render-attr child-render-attr]]])
@@ -206,6 +206,8 @@
 
 (defn ^{:async #?(:cljs true :clj false)} exercise-contract! [fixture]
   (register-contract-schema!)
+  (is (= :set (first (schema/schema-definition component-attr)))
+      "component membership is stored as a set")
   (let [{requests :requests} fixture
         fns (into {} (map (fn [v] [(symbol (name (:name (meta v)))) @v]))
                   public-functions)
@@ -235,8 +237,8 @@
       (let [tx [{id-attr "one" set-attr #{:red :blue}
                  edn-attr {:portable.value/n 2}
                  component-attr
-                 [{child-edn-attr {:portable.child/n 3}
-                   child-render-attr "; literal render text"}]}]
+                 #{{child-edn-attr {:portable.child/n 3}
+                    child-render-attr "; literal render text"}}}]
             first-report
             (await (transact! {::db/tx-data tx
                                ::db/db database
@@ -259,12 +261,18 @@
         (is (= (pr-str {:portable.value/n 2})
                (get-in (::protocol/transaction-data wire) [0 edn-attr])))
         (is (= (pr-str {:portable.child/n 3})
-               (get-in (::protocol/transaction-data wire)
-                       [0 component-attr 0 child-edn-attr]))
+               (get
+                (first
+                 (get-in (::protocol/transaction-data wire)
+                         [0 component-attr]))
+                child-edn-attr))
             "component validation sees the encoded transaction projection")
         (is (= (pr-str "; literal render text")
-               (get-in (::protocol/transaction-data wire)
-                       [0 component-attr 0 child-render-attr]))
+               (get
+                (first
+                 (get-in (::protocol/transaction-data wire)
+                         [0 component-attr]))
+                child-render-attr))
             "a semicolon-prefixed literal survives one logical decode")
         (is (set? (get-in (::protocol/transaction-data wire) [0 set-attr])))
         (let [request-count (count @requests)

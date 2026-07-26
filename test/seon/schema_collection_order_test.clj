@@ -38,9 +38,12 @@
 ;;; keep, and the fix is never a different collection type: it is either a
 ;;; `[:set X]` declaration or an explicit ordinal attribute.
 ;;;
-;;; `:db.type/tuple` is NOT an escape hatch: measured, homogeneous tuples cap
-;;; at 8 values ("Cannot store more than 8 values for homogeneous tuple") and
-;;; element-level datalog queries against them return nothing.
+;;; `:db.type/tuple` is NOT an escape hatch. It stores one vector value rather
+;;; than a queryable many-value relationship. Heterogeneous tuples have the
+;;; fixed size declared by `:db/tupleTypes`; homogeneous tuples are variable
+;;; length and their transaction validator caps them at 8. The current fork
+;;; does not enforce its documented 8-value upper bound for heterogeneous
+;;; tuples, which is another reason not to treat tuple as a general collection.
 
 ;;; The one exemption is COMPUTED, never a name list: a `:db.secondary/only`
 ;;; attribute stores a content hash in the primary index while the ordered
@@ -69,13 +72,21 @@
                "  - order IS meaningful -> keep `[:set X]` and store the "
                "position explicitly on the child, the way "
                "`:seon.error/frames` renderers sort by frame ordinal.\n\n"
-               "Do NOT reach for `:db.type/tuple`: it caps at 8 values and "
-               "kills element-level queries.\n\n"
+               "Do NOT reach for `:db.type/tuple`: it stores the whole vector "
+               "as one value, and tuple members are not cardinality-many "
+               "facts queryable through the ordinary relationship.\n\n"
                "Offenders: " (pr-str offenders))))))
 
 (deftest corrected-set-attributes-stay-sets
   (testing "attributes that are semantically sets are declared as sets"
-    (doseq [attr [:seon.fn/read-attrs :seon.agent.web/allowed-domains]]
+    (doseq [attr [:seon.fn/read-attrs
+                  :seon.agent.web/allowed-domains
+                  :seon.agent.ctx/capabilities
+                  :seon.agent.message/to
+                  :seon.agent.run/forms
+                  :seon.agent.turn/evals
+                  :seon.agent.turn/timings
+                  :seon.render/children]]
       (is (= :set (first (stored-form attr)))
           (str attr " is a set, not an ordered collection. A scalar "
                "cardinality-many attribute round-trips sorted by value, so "

@@ -27,13 +27,13 @@
 (schema/register! ::usage-estimated? :boolean)
 (schema/register!
   ::evals
-  [:vector {:seon.db/component true} :seon.db/ref])
+  [:set {:seon.db/component true} :seon.db/ref])
 (schema/register! ::llm-attempts
                   [:set {:seon.db/component true} :seon.db/ref])
 (schema/register! ::duration-ns [:int {:min 0}])
 (schema/register!
   ::timings
-  [:vector {:seon.db/component true} :seon.db/ref])
+  [:set {:seon.db/component true} :seon.db/ref])
 
 ;; Process-local turn coordinates share the owning vocabulary but are not
 ;; database attributes.

@@ -31,6 +31,8 @@
 (deftest running-receipt-freezes-form-three-of-seven
   (let [tx-data (receipt/start-tx-data start-request)
         eval-row (-> tx-data first :seon.agent.turn/evals first)]
+    (is (set? (-> tx-data first :seon.agent.turn/evals))
+        "the component edge stores membership; the receipt stores its ordinal")
     (testing "receipt identity is exactly run, ordinal, and claim epoch"
       (is (= (receipt/receipt-id "runorder000001" 2 4)
              (receipt/receipt-id "runorder000001" 2 4)))

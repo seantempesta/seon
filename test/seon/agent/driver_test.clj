@@ -379,17 +379,18 @@
 
 (deftest ordered-plan-is-one-cas-fenced-transaction
   (let [tx-data (driver/plan-tx-data plan-request)
-        run-row (last tx-data)]
+        run-row (last tx-data)
+        forms (driver/ordered-forms (:seon.agent.run/forms run-row))]
     (is (= [:db.fn/cas
             [:seon.agent.run/id "run-a"]
             :seon.agent.run/plan-digest nil "reply-a"]
            (nth tx-data 2)))
+    (is (set? (:seon.agent.run/forms run-row))
+        "the component edge stores membership; each child stores its ordinal")
     (is (= [0 1]
-           (mapv :seon.agent.run.form/ordinal
-                 (:seon.agent.run/forms run-row))))
+           (mapv :seon.agent.run.form/ordinal forms)))
     (is (= ["(+ 1 2)" "(clojure.string/upper-case \"x\")"]
-           (mapv :seon.agent.run.form/source
-                 (:seon.agent.run/forms run-row))))))
+           (mapv :seon.agent.run.form/source forms)))))
 
 (deftest resume-uses-first-nonterminal-ordinal
   (let [forms (:seon.agent.run/forms
