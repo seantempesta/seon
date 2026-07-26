@@ -233,9 +233,7 @@
     (try
       (with-redefs
        [artifact/current-manifest
-        (fn [selected]
-          (is (= configuration selected))
-          manifest)
+        (constantly manifest)
         process/current-watcher-manifest (constantly manifest)
         process/specs
         (fn [selected selected-manifest]
@@ -288,6 +286,28 @@
         (is (= [:publish target-configuration] publish)))
       (finally (fs/delete-tree root {:force true})))))
 
+(deftest source-apply-consumes-a-current-frozen-manifest-without-shadow
+  (let [configuration {:seon.dev.config/source-checkout? true}
+        selected (assoc configuration :seon.dev.config/resolved? true)
+        manifest {:seon.dev.artifact/application-digest "application"}]
+    (with-redefs [config/select-manifest
+                  (fn [source path]
+                    (is (= configuration source))
+                    (is (nil? path))
+                    selected)
+                  artifact/current-manifest
+                  (fn [source]
+                    (is (= selected source))
+                    manifest)
+                  process/current-watcher-manifest
+                  (fn [_] (throw (ex-info "watcher must not be consulted" {})))
+                  artifact/build!
+                  (fn [& _] (throw (ex-info "Shadow must not build" {})))]
+      (is (= manifest
+             (#'cluster/apply-manifest! configuration
+                (fn [& _]
+                  (throw (ex-info "no process ownership is needed" {})))))))))
+
 (deftest source-apply-publishes-with-the-watcher-it-retains
   (let [configuration {:seon.dev.config/source-checkout? true}
         selected
@@ -306,6 +326,7 @@
         (is (= configuration source))
         (is (nil? path))
         selected)
+      artifact/current-manifest (constantly nil)
       process/current-watcher-manifest
       (fn [source]
         (is (= selected source))

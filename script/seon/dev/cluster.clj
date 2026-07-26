@@ -121,6 +121,7 @@
     (current-manifest! configuration)
     (let [selected (config/select-manifest configuration nil)]
       (or
+       (artifact/current-manifest selected)
        (process/current-watcher-manifest selected)
        (let [manifest
              (artifact/build!
