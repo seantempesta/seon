@@ -454,6 +454,18 @@ way or the rung is not done:
    both numbers at each rung. A rung that grew the total without
    retiring old surface explains itself or is rejected.
 
+**Generative behavior properties GUIDE the design (owner, s3 close).**
+Every rung's acceptance surface is generative from the start: properties
+over the whole input domain (fixed seeds, shrunk counterexamples
+printed), with example tests kept only as teaching documentation of call
+shapes. **The edge-case tripwire is a design verdict:** the moment we
+catch ourselves writing point tests to fence individual edge cases, we
+STOP and reassess — accumulating edge cases means the design admits
+states it shouldn't, and the fix is a construction that makes the class
+unrepresentable, never another test. (Precedent: the ordered-collection
+sweep and `34a5da97c`'s edge-case-count law.) A rung whose property
+count stays flat while its example count grows is failing this test.
+
 **Expect to shed, not to port (owner, s3 close).** Tight integration
 plus resilience-by-construction should make most old machinery
 unnecessary — the port manifest's default verdict is `dead`, and a rung
