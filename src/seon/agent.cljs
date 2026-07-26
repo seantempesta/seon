@@ -2,8 +2,9 @@
   "Define agent identity, lifecycle data, and public agent capabilities.
 
    The loop that runs an agent lives in [[seon.agent.loop]], while one turn
-   lives in [[seon.agent.turn]]. This namespace owns the agent entity and the
-   capability surface that operates on it.
+   lives in [[seon.agent.turn]]. [[seon.agent.core]] owns the portable agent
+   entity schema; this namespace owns the capability surface that operates on
+   it.
 
    The agent operates as a real REPL: the guarded JVM host evaluates forms in
    a retained per-agent home namespace (`my.agent.<id>`), and durable receipts
@@ -11,13 +12,12 @@
    directly.
 
    This namespace owns:
-     - the `:seon.agent/*` schemas (id/purpose/run/terminated-at/parent/
-       default-turn-limit/default-deadline-ms/schedules/ctx + the entity
-       map), plus the rendered `:seon.eval` entity and the `:seon.ns/*`,
-       `:seon.fn/*`, `:seon.schema/*` corpus schemas (`:seon.eval/*` attrs
-       live behind [[seon.eval.receipt]], `:seon.agent.message/*` lives in
-       [[seon.agent.message]], `:seon.agent.turn/*` in [[seon.agent.turn]],
-       `:seon.agent.run/*` in [[seon.agent.run]], `:seon.agent.ctx/*` in [[seon.agent.ctx]])
+     - the rendered `:seon.eval` entity and the `:seon.ns/*`, `:seon.fn/*`,
+       `:seon.schema/*` corpus schemas (`:seon.eval/*` attrs live behind
+       [[seon.eval.receipt]], `:seon.agent/*` lives in [[seon.agent.core]],
+       `:seon.agent.message/*` in [[seon.agent.message]],
+       `:seon.agent.turn/*` in [[seon.agent.turn]], `:seon.agent.run/*` in
+       [[seon.agent.run]], `:seon.agent.ctx/*` in [[seon.agent.ctx]])
      - `armable-agent-ids` — the wakeable agent ids (a `:seon.db/db` map-in
        adapter over the one [[seon.derive]] leaf); state is a projection of the
        run/terminated-at primitives, never stored
@@ -61,6 +61,7 @@
    onto the agent's `:seon.render/ai` slot."
   (:require
     [clojure.string :as str]
+    [seon.agent.core]
     [seon.agent.home :as home]
     [seon.agent.authorization :as authorization]
     [seon.agent.message :as msg]
@@ -83,39 +84,6 @@
 ;; Schemas — every shape the agent reads or writes.
 ;; ============================================================
 
-;; `:seon.agent/id` itself is registered in `seon.render` — the
-;; FIRST-loading ns whose load-time schema references it
-;; (`:seon.render/section-request` — this ns loads after seon.render via
-;; the seon.agent.ctx require chain, and register!'s compilability guard
-;; rejects forward references; same precedent as `:seon.ns/name` living
-;; in seon.agent.ctx.render-fns).
-(schema/register! :seon.agent/purpose       :string)
-;; The resident namespace is a unique ref to the ordinary `:seon.ns/name`
-;; program entity. Datahike AVET uniqueness enforces at most one resident per
-;; namespace while every durable relationship continues to point at the
-;; stable agent entity.
-(schema/register! :seon.agent/namespace
-                  [:and {:seon.db/unique true} :seon.db/ref])
-;; Subagent → parent (optional; the atomic spawn transaction sets it and
-;; `complete` derives its delivery target through it). References the canonical
-;; ref shape; never inline.
-(schema/register! :seon.agent/parent        :seon.db/ref)
-
-;; ── DERIVED-STATE primitives (the run model) ──────────────────────────────
-;; There is NO stored state — the FSM state is a projection of these via
-;; [[seon.derive/derive-state]]. `:seon.agent/run` points at the CURRENT
-;; run (the fencing pointer + the spine of derived state — see
-;; [[seon.agent.run]] / [[seon.derive]]); `terminated-at` presence ⇒
-;; derived state :terminated; the default-* attrs seed a new run's two bounds
-;; (`default-turn-limit` is the work bound, `default-deadline-ms` the
-;; wall-clock bound); `schedules` is the self-managed cron vector
-;; ([[seon.agent.schedule]]). All reference the canonical shapes; never inline.
-(schema/register! :seon.agent/run                :seon.db/ref)
-(schema/register! :seon.agent/terminated-at      :inst)
-(schema/register! :seon.agent/default-turn-limit :int)
-(schema/register! :seon.agent/default-deadline-ms :int)
-(schema/register! :seon.agent/schedules
-                  [:vector {:seon.db/component true} :seon.db/ref])
 ;; ============================================================
 ;; Aliases — the context machinery lives in `seon.agent.ctx`. These keep (a) the
 ;; agent-TAUGHT read surface (`seon.agent/messages` …) resolving in the JVM
@@ -220,38 +188,6 @@
    [:seon.eval/error       {:optional true} :seon.eval/error]
    [:seon.eval/error-data  {:optional true} :seon.eval/error-data]
    [:seon.render/full?     {:optional true} :seon.render/full?]])
-
-;; :seon.agent — the agent's OWN entity shape. Its page/canvas operation
-;; selects the surface renderer after acquiring one immutable agent value;
-;; the schema does not install a second host-side default reader. No
-;; `:seon.render/ai` property in the props — the agent entity must NOT enter
-;; the chronological ai window. The ONLY required attr is `id` (the one thing
-;; `create!` always writes); state is DERIVED (no stored enum), and every
-;; other attr arrives lazily. `sections` keeps its own register! (still
-;; transactable/queryable) but stays out of the record shape's required set.
-(schema/register! :seon.agent
-  [:map {:seon.db/entity true}
-   [:seon.agent/id      :seon.agent/id]
-   [:seon.agent/namespace         :seon.agent/namespace]
-   [:seon.agent/purpose            {:optional true} :seon.agent/purpose]
-   [:seon.agent/parent             {:optional true} :seon.agent/parent]
-   ;; derived-state primitives + run bounds + cron
-   [:seon.agent/run                {:optional true} :seon.agent/run]
-   [:seon.agent/terminated-at      {:optional true} :seon.agent/terminated-at]
-   [:seon.agent/default-turn-limit {:optional true} :seon.agent/default-turn-limit]
-   [:seon.agent/default-deadline-ms {:optional true} :seon.agent/default-deadline-ms]
-   [:seon.agent/schedules          {:optional true} :seon.agent/schedules]
-   [:seon.agent/ctx                {:optional true} :seon.agent/ctx]
-   [:seon.agent.ctx/capabilities
-    {:optional true} :seon.agent.ctx/capabilities]
-   [:seon.agent.ctx/escape-clipping?
-    {:optional true} :seon.agent.ctx/escape-clipping?]
-   [:seon.agent.ctx/cache-breakpoint
-    {:optional true} :seon.agent.ctx/cache-breakpoint]
-   [:seon.config/repl-mode         {:optional true} :seon.config/repl-mode]
-   [:seon.eval/home-requires       {:optional true} :seon.eval/home-requires]
-   [:seon.render/ai   {:optional true} :seon.render/ai]
-   [:seon.render/html {:optional true} :seon.render/html]])
 
 ;; ============================================================
 ;; DERIVED state — there is no stored `:seon.agent/state`. The FSM state is a

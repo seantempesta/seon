@@ -10,11 +10,11 @@ tags: [issue, agent, web, schema]
 ## Problem
 
 The run and turn cuts removed three schema families while production readers
-survived. Current source uses 36 distinct unregistered attributes: 24
+survived. The post-cut source used 36 distinct unregistered attributes: 24
 `:seon.ai.attempt/*`, seven old run-policy attributes, and five old turn-stack
-attributes. Datahike reads therefore silently return empty or nil results, and
-the web evidence projection validates and sorts rows that no current writer can
-produce.
+attributes. Datahike reads therefore silently returned empty or nil results,
+and the web evidence projection validated and sorted rows that no current
+writer could produce.
 
 ## Evidence
 
@@ -48,16 +48,35 @@ Measured on 2026-07-26 after commit `42a9faf2e`:
   `src/seon/agent/run/core.cljc:11-65` deliberately owns none of the seven
   old run-policy attributes.
 
+## Schema-hygiene disposition — 2026-07-26
+
+The narrow schema-hygiene unit after this audit gives the surviving reader
+vocabulary portable owners without restoring the deleted execution stack:
+
+- `seon.ai.attempt` registers the 24 source-used names plus the historical
+  identity, config-digest, and deadline fields still present in fixtures.
+- `seon.agent.turn` registers the five surviving old-turn reader attributes
+  plus the two process-local turn-coordinate keys. Attempt connections are a
+  cardinality-many set; `:seon.ai.attempt/ordinal` owns their order.
+- No current JVM writer produces attempt, phase, prompt/reply-blob, scheduled
+  turn, or partial-text facts. Their registration prevents silent
+  unregistered reads but does not make the old consumer paths live.
+
+The seven removed run-policy readers remain unregistered and this issue stays
+open. A surviving JVM observability owner must either write each retained fact
+or delete its consumer; schema registration is not evidence that such a writer
+exists.
+
 ## Owner
 
-This is deletion residue, not authority to restore the removed schemas.
+This is deletion residue, not authority to restore the removed runtime.
 
 - O13's pod cut owns the attempt, phase, and scheduled-turn consumers.
 - The owner-keyed run cleanup owns deletion of the old pause, heartbeat,
   deadline, and turn-budget projections.
-- A later JVM observability owner may deliberately register and write new
-  prompt/reply blob or partial-presentation facts, but only in the same change
-  that makes them real database facts. A registration-only repair is forbidden.
+- A later JVM observability owner must write new prompt/reply blob or
+  partial-presentation facts in the same change that makes their readers live,
+  or delete those readers.
 
 ## Acceptance
 

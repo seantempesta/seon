@@ -1,6 +1,7 @@
 (ns seon.agent.run.core
   "Pure run acquisition, lease, and fencing shared by active drivers."
   (:require
+    [seon.agent.core]
     [seon.db.id :as db.id]
     [seon.schema :as schema]))
 
@@ -8,7 +9,6 @@
 ;; execution owner. `seon.agent.run` previously registered these only when the
 ;; CLJS pod loaded; a cold JVM therefore could not validate or install its own
 ;; run transaction data.
-(schema/register! :seon.agent/run :seon.db/ref)
 (schema/register!
   :seon.agent.run/id
   [:and {:seon.db/identity true

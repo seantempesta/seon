@@ -4,6 +4,7 @@
    [clojure.string :as str]
    #?(:clj [clojure.edn :as reader]
       :cljs [cljs.reader :as reader])
+   [seon.ai.attempt]
    [seon.ai.provider :as provider]
    [seon.content-hash :as content-hash]
    [seon.repl.parse :as repl.parse]
