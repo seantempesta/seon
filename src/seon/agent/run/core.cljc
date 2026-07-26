@@ -21,6 +21,9 @@
 (schema/register! :seon.agent.run/claim-epoch [:int {:min 1}])
 (schema/register! :seon.agent.run/lease-until :inst)
 (schema/register! :seon.agent.run/status [:enum :open :closed])
+(schema/register! :seon.agent.run/closed-reason :keyword)
+(schema/register! :seon.agent.run/closed-at :inst)
+(schema/register! :seon.agent.run/result :string)
 
 (schema/register!
   :seon.agent.run
@@ -34,7 +37,13 @@
    [:seon.agent.run/claim-epoch
     {:optional true} :seon.agent.run/claim-epoch]
    [:seon.agent.run/lease-until
-    {:optional true} :seon.agent.run/lease-until]])
+    {:optional true} :seon.agent.run/lease-until]
+   [:seon.agent.run/closed-reason
+    {:optional true} :seon.agent.run/closed-reason]
+   [:seon.agent.run/closed-at
+    {:optional true} :seon.agent.run/closed-at]
+   [:seon.agent.run/result
+    {:optional true} :seon.agent.run/result]])
 
 (defn error-value?
   "Whether `value` is a direct Seon error envelope."
@@ -177,3 +186,17 @@
   (conj (run-fence agent-id run-id claim-epoch)
         [:db/retract [:seon.agent.run/id run-id]
          :seon.agent.run/process]))
+
+(defn finish-tx-data
+  "Close one held run and detach it from the agent in the same transaction."
+  [agent-id run-id claim-epoch reason closed-at]
+  (into
+   (run-fence agent-id run-id claim-epoch)
+   [{:seon.agent.run/id run-id
+     :seon.agent.run/status :closed
+     :seon.agent.run/closed-reason reason
+     :seon.agent.run/closed-at closed-at}
+    [:db/retract [:seon.agent.run/id run-id]
+     :seon.agent.run/process]
+    [:db/retract [:seon.agent/id agent-id]
+     :seon.agent/run]]))

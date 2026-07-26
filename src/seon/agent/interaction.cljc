@@ -1,10 +1,10 @@
 (ns seon.agent.interaction
   "Database-owned authored interaction facts and receipt transactions.
 
-   One interaction entity is also one open run entity. The portable claimant
+   One interaction entity is also one open run entity. The cluster JVM
    attaches that run to its subject agent, records a durable running receipt,
-   invokes the pinned authored handler through the guarded host door, and
-   atomically records the terminal outcome with the held run fence."
+   invokes the pinned authored handler, and atomically records the terminal
+   outcome with the held run fence."
   #?(:clj (:refer-clojure :exclude [await]))
   (:require
    [#?(:clj clojure.edn :cljs cljs.reader) :as reader]
@@ -195,14 +195,13 @@
    :seon.agent.interaction/handler-source-fingerprint]
   [:seon.agent.interaction/arguments ::projected-arguments]
   [:seon.agent.interaction/subjects :seon.agent.interaction/subjects]
-  [:seon.agent.interaction/requested-at :inst]
-  [:seon.agent.run/deadline :inst]])
+  [:seon.agent.interaction/requested-at :inst]])
 
 (defn open-tx-data
   "Build one pending interaction/run fact.
 
    The run is deliberately not attached to `:seon.agent/run` here. Submission
-   always commits and acknowledges; the existing claimant claim transaction
+   always commits and acknowledges; the run acquisition transaction
    later CASes an idle agent pointer from nil to this run. Multiple
    interactions may therefore queue without a second scheduler."
   {:malli/schema [:=> [:catn [::request ::open-request]]
@@ -214,8 +213,7 @@
     fingerprint :seon.agent.interaction/handler-source-fingerprint
     arguments :seon.agent.interaction/arguments
     subjects :seon.agent.interaction/subjects
-    requested-at :seon.agent.interaction/requested-at
-    deadline :seon.agent.run/deadline}]
+    requested-at :seon.agent.interaction/requested-at}]
   [{:seon.agent.interaction/id interaction-id
     :seon.agent.interaction/handler handler
     :seon.agent.interaction/handler-source-fingerprint fingerprint
@@ -226,10 +224,7 @@
     :seon.agent.run/id run-id
     :seon.agent.run/agent [:seon.agent/id agent-id]
     :seon.agent.run/started-at requested-at
-    :seon.agent.run/trigger :interaction
-    :seon.agent.run/status :open
-    :seon.agent.run/turn-limit 1
-    :seon.agent.run/deadline deadline}])
+    :seon.agent.run/status :open}])
 
 (schema/register!
  ::receipt-request
@@ -281,7 +276,7 @@
     result :seon.agent.interaction/result
     settled-at :seon.agent.interaction/settled-at}]
   (into
-   (run.core/close-tx-data
+   (run.core/finish-tx-data
     agent-id run-id claim-epoch :completed settled-at)
    [[:db.fn/cas [:seon.agent.interaction/id interaction-id]
      :seon.agent.interaction/status :running :done]
@@ -306,7 +301,7 @@
   "Atomically record one flat interaction error and close/release its run.
 
    `:running → :interrupted` is the takeover rule: a durable admitted handler
-   is never replayed after claimant loss. `:pending → :error` is used when a
+   is never replayed after process loss. `:pending → :error` is used when a
    run bound closes queued work before SCI admission."
   {:malli/schema [:=> [:catn [::request ::error-request]]
                   :seon.db/tx-data]}
@@ -319,7 +314,7 @@
     error :seon.agent.interaction/error
     settled-at :seon.agent.interaction/settled-at}]
   (into
-   (run.core/close-tx-data agent-id run-id claim-epoch :error settled-at)
+   (run.core/finish-tx-data agent-id run-id claim-epoch :error settled-at)
    [[:db.fn/cas [:seon.agent.interaction/id interaction-id]
      :seon.agent.interaction/status observed-status terminal-status]
     [:db/add [:seon.agent.interaction/id interaction-id]
