@@ -1,6 +1,7 @@
 (ns seon.sci.eval-test
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
+            [sci.core :as sci]
             [seon.sci.eval :as eval]
             [seon.sci.interrupt :as interrupt]))
 
@@ -57,3 +58,35 @@
     (is (= 45 (::eval/value result)))
     (is (= :ok (get-in result [::eval/record :seon.eval/outcome])))
     (is (pos? (get-in result [::eval/record :seon.eval/fn-entries])))))
+
+(deftest blocked-host-call-consumes-only-its-own-capacity
+  (let [release (promise)
+        base-ctx
+        (sci/init
+         {:namespaces
+          {'user {'block (fn [] @release)}}})]
+    (eval/open! {::eval/concurrency 2})
+    (let [blocked
+          (eval/evaluate
+           {::eval/source "(user/block)"
+            ::eval/base-ctx base-ctx
+            ::interrupt/time-limit-ms 10})]
+      (is (= :time
+             (get-in blocked [::eval/record :seon.eval/outcome])))
+      (is (= 1 (eval/available))
+          "the still-running platform task keeps exactly one permit")
+      (is (= 3
+             (::eval/value
+              (eval/evaluate
+               {::eval/source "(+ 1 2)"
+                ::eval/base-ctx base-ctx
+                ::interrupt/time-limit-ms 1000})))
+          "unrelated capacity remains usable")
+      (deliver release true)
+      (loop [attempt 0]
+        (when (and (< attempt 10000)
+                   (not= 2 (eval/available)))
+          (Thread/onSpinWait)
+          (recur (inc attempt))))
+      (is (= 2 (eval/available))
+          "the permit returns only when the blocked call really exits"))))

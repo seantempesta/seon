@@ -4,7 +4,8 @@
             [seon.schema :as schema]
             [seon.sci.ctx :as ctx]
             [seon.sci.interrupt :as interrupt])
-  (:import (java.util.concurrent Callable Executors Semaphore)))
+  (:import (java.util.concurrent Callable Executors Semaphore TimeUnit
+                                 TimeoutException)))
 
 (defn evaluation-value?
   "Whether a value is a possible result from SCI evaluation."
@@ -87,42 +88,51 @@
                 {:seon.error/kind :configuration})))
     (.acquire semaphore)
     (let [semaphore-wait-ms
-          (quot (- (System/nanoTime) waiting-at) 1000000)]
+          (quot (- (System/nanoTime) waiting-at) 1000000)
+          {:keys [interrupt-fn]
+           stop! ::interrupt/stop!
+           record ::interrupt/record}
+          (interrupt/start
+           {::interrupt/time-limit-ms time-limit-ms})
+          evaluation-ctx
+          (ctx/fork
+           (cond-> {:interrupt-fn interrupt-fn}
+             base-ctx (assoc ::ctx/base-ctx base-ctx)))
+          task
+          (.submit
+           ^java.util.concurrent.ExecutorService compute-pool
+           ^Callable
+           (fn []
+             (try
+               ;; D7: parse inside the armed SCI context. `#=` is refused
+               ;; by SCI's reader and never reaches host evaluation.
+               (let [form (sci/parse-string evaluation-ctx source)
+                     value (sci/eval-form evaluation-ctx form)]
+                 {::value value
+                  ::record (record :ok)})
+               (catch Throwable throwable
+                 (let [evaluation-record
+                       (record
+                        (if (interrupt/interrupted? throwable)
+                          :time
+                          :error))]
+                   {::value (error-value throwable evaluation-record)
+                    ::record evaluation-record}))
+               (finally
+                 (stop!)
+                 ;; A blocked host call consumes exactly this one permit until
+                 ;; the platform thread actually returns. Other permits remain
+                 ;; usable, so one wedge cannot release imaginary capacity.
+                 (.release semaphore)))))]
       (try
-        (-> (.get
-             (.submit
-              ^java.util.concurrent.ExecutorService compute-pool
-              ^Callable
-              (fn []
-                (let [{:keys [interrupt-fn]
-                       stop! ::interrupt/stop!
-                       record ::interrupt/record}
-                      (interrupt/start
-                       {::interrupt/time-limit-ms time-limit-ms})
-                      evaluation-ctx
-                      (ctx/fork
-                       (cond-> {:interrupt-fn interrupt-fn}
-                         base-ctx (assoc ::ctx/base-ctx base-ctx)))]
-                  (try
-                    ;; D7: parse inside the armed SCI context. `#=` is refused
-                    ;; by SCI's reader and never reaches host evaluation.
-                    (let [form (sci/parse-string evaluation-ctx source)
-                          value (sci/eval-form evaluation-ctx form)]
-                      {::value value
-                       ::record (record :ok)})
-                    (catch Throwable throwable
-                      (let [evaluation-record
-                            (record
-                             (if (interrupt/interrupted? throwable)
-                               :time
-                               :error))]
-                        {::value (error-value throwable evaluation-record)
-                         ::record evaluation-record}))
-                    (finally
-                      (stop!)))))))
+        (-> (.get task (long time-limit-ms) TimeUnit/MILLISECONDS)
             (assoc-in [::record ::semaphore-wait-ms] semaphore-wait-ms))
-        (finally
-          (.release semaphore))))))
+        (catch TimeoutException throwable
+          (let [evaluation-record (record :time)]
+            {::value (error-value throwable evaluation-record)
+             ::record
+             (assoc evaluation-record
+                    ::semaphore-wait-ms semaphore-wait-ms)}))))))
 
 (defn error?
   "Whether a value is Seon's flat error value."
