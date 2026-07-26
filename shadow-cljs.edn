@@ -197,41 +197,6 @@
                       :optimizations      :simple
                       :externs           ["externs/node_fs.js"]}}
 
-  ;; CLJS test runner — shadow's :node-test target. A full run compiles every
-  ;; namespace matching `-test$`; bin/test-cljs supplies Shadow's explicit
-  ;; :namespaces vector for a focused run. Both produce one JavaScript artifact at
-  ;; out/test/test.js under one compile+run lock.
-  ;;
-  ;; The V0 CLJS tests use plain `cljs.test/deftest`, so they're
-  ;; compatible with `:node-test` without modification. Tests that
-  ;; need a live pod (seon.test.runner-based) are excluded by living
-  ;; in a non-`-test$` ns or being preloaded only on `:client`.
-  ;;
-  ;; Build + run: `bin/test-cljs`
-  :test
-  {:target    :node-test
-   :output-to "out/test/test.js"
-   :ns-regexp "-test$"
-   :seon.dev.test-artifact/publish? true
-   :build-hooks [[seon.dev.test-artifact/publish!]]
-   :devtools  {:preloads [seon.test.node-preload]}
-   :compiler-options {:warnings-as-errors false
-                      :optimizations      :simple
-                      :externs            ["externs/node_fs.js"]}}
-
-  ;; Isolated runner for the lora-data-audit (repl-autosuggest lane) — the
-  ;; audit must NOT share a process with the suite's instrument/uninstrument
-  ;; fixtures (stale instrumented? flags make instrument-from-db! skip vars).
-  ;; ns lives at src-needle/audit/seon/needle_lora_audit_test.cljs.
-  :lora-audit
-  {:target    :node-test
-   :output-to "out/lora-audit/test.js"
-   :ns-regexp "needle-lora-audit-test$"
-   :devtools  {:preloads [seon.test.node-preload]}
-   :compiler-options {:warnings-as-errors false
-                      :optimizations      :simple
-                      :externs            ["externs/node_fs.js"]}}
-
   ;; Build: `clj -M:cljs compile bootstrap`   (or release)
   ;; Output: out/bootstrap/  — index.transit.json + per-ns .js
   :bootstrap

@@ -297,7 +297,7 @@
            (:seon.dev.config/client-output default)))
     (is (= "artifact.edn"
            (:seon.dev.config/artifact-manifest-name default)))
-    (is (true? (:seon.dev.config/test-build? default)))
+    (is (false? (:seon.dev.config/test-build? default)))
     (is (= :acme.artifact/runtime
            (:seon.dev.config/artifact-flavor acme)))
     (is (= "acme-client" (:seon.dev.config/client-build-id acme)))

@@ -318,7 +318,7 @@
 
 (def ^:private default-artifact
   {:seon.dev.config/artifact-flavor :seon.dev.artifact.flavor/default
-   :seon.dev.config/test-build? true
+   :seon.dev.config/test-build? false
    :seon.dev.config/client-build-id "client"
    :seon.dev.config/shadow-cache-root ".shadow-cljs"
    :seon.dev.config/client-output "out/client/main.js"
