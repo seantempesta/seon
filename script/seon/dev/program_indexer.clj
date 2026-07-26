@@ -1,6 +1,8 @@
 (ns seon.dev.program-indexer
   "JVM compile-time producer for first-party program graph artifacts."
-  (:require [clojure.java.io :as io]
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
+            [clojure.walk :as walk]
             [clojure.set :as set]
             [clojure.string :as str]
             [datahike.db :as datahike-db]
@@ -378,6 +380,24 @@
   (mapv #(source-description root %)
         (test-roots/writer-test-files root)))
 
+(defn- portable-projection-form-string
+  "Normalize the one EDN number distinction JavaScript readers cannot retain.
+
+   ClojureScript reads integral EDN doubles such as `0.0` as the JavaScript
+   number `0`. The base projection is verified after that read, so normalize
+   those schema bounds before projection construction and make the frozen
+   fingerprint describe the exact cross-tier value."
+  [form-string]
+  (pr-str
+   (walk/postwalk
+    (fn [value]
+      (if (and (double? value)
+               (Double/isFinite value)
+               (== value (Math/rint value)))
+        (long value)
+        value))
+    (edn/read-string form-string))))
+
 (defn- base-projection [rows]
   (let [core-transaction
         {:seon.db/user {:seon.agent/id "root"}
@@ -387,7 +407,8 @@
         (into []
               (keep (fn [{:seon.schema/keys [key form]}]
                       (when (and key form)
-                        [key form core-transaction])))
+                        [key (portable-projection-form-string form)
+                         core-transaction])))
               rows)
         contract-rows
         (into []
