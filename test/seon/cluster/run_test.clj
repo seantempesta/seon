@@ -61,12 +61,16 @@
 (def ^:private t2 #inst "2026-07-26T12:30:00.000-00:00")
 
 (defn- open-run!
+  "Open one run under its own agent — the current-run CAS means one
+  agent holds at most one open run, so every trial gets a fresh agent."
   [connection run-id]
-  (d/transact connection [{:seon.cluster.agent/id "runner"}])
-  (d/transact connection (run/open-tx {::run/id run-id
-                                       ::run/agent [:seon.cluster.agent/id "runner"]
-                                       ::run/opened-at t0
-                                       :seon.cluster.agent/id "runner"})))
+  (let [agent-id (str "agent-" run-id)]
+    (d/transact connection [{:seon.cluster.agent/id agent-id}])
+    (d/transact connection
+                (run/open-tx {::run/id run-id
+                              ::run/agent [:seon.cluster.agent/id agent-id]
+                              ::run/opened-at t0
+                              :seon.cluster.agent/id agent-id}))))
 
 (defn- claim!
   "Attempt one claim; truthy result on commit, nil when the CAS lost."

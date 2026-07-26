@@ -100,36 +100,51 @@
                                    ::closed-at]]]
                   :boolean]}
   [run]
-  (throw (ex-info "seon.cluster.run/open? awaits its N2 implementation."
-                  {::contract :seon.cluster.run/open?})))
+  (not (contains? run ::closed-at)))
 
 (defn claimed?
   "True when a process holds the run under a live lease at `now`."
   {:malli/schema [:=> [:cat [:map] :inst] :boolean]}
   [run now]
-  (throw (ex-info "seon.cluster.run/claimed? awaits its N2 implementation."
-                  {::contract :seon.cluster.run/claimed?})))
+  (boolean
+   (and (some? (::process run))
+        (some? (::lease-until run))
+        (> (inst-ms (::lease-until run)) (inst-ms now)))))
 
 (defn expired?
   "True when the run is open and its holder's lease lapsed at `now`."
   {:malli/schema [:=> [:cat [:map] :inst] :boolean]}
   [run now]
-  (throw (ex-info "seon.cluster.run/expired? awaits its N2 implementation."
-                  {::contract :seon.cluster.run/expired?})))
+  (boolean
+   (and (open? run)
+        (some? (::process run))
+        (some? (::lease-until run))
+        (<= (inst-ms (::lease-until run)) (inst-ms now)))))
 
 (defn interrupted-warning
   "Derive the ONE interrupted warning for a run, or nil when clean.
-  Non-nil exactly when an `:interrupted` receipt exists for the run:
-  {:seon.cluster.run/id id
-   :seon.cluster.eval/ordinal first-interrupted-ordinal
-   :seon.cluster.run/missing-results count-of-later-forms}.
-  This is the whole resume presentation — never per-eval markers."
+  Non-nil exactly when an `:interrupted` receipt exists among the
+  supplied receipts:
+  {:seon.cluster.eval/ordinal first-interrupted-ordinal
+   :seon.cluster.run/missing-results count-of-forms-at-or-after-it}.
+  The caller supplies one run's forms and receipts and knows which run
+  they belong to. This is the whole resume presentation — never
+  per-eval markers."
   {:malli/schema [:=> [:cat [:sequential :map] [:sequential :map]]
                   [:maybe :map]]}
   [forms receipts]
-  (throw (ex-info
-          "seon.cluster.run/interrupted-warning awaits its N2 implementation."
-          {::contract :seon.cluster.run/interrupted-warning})))
+  (when-let [ordinal
+             (->> receipts
+                  (filter #(= :interrupted
+                              (:seon.cluster.eval/status %)))
+                  (map :seon.cluster.eval/ordinal)
+                  sort
+                  first)]
+    {:seon.cluster.eval/ordinal ordinal
+     ::missing-results
+     (count
+      (filter #(>= (:seon.cluster.run.form/ordinal %) ordinal)
+              forms))}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Pure transitions — each returns transaction data for the one writer
@@ -146,23 +161,42 @@
                              [:seon.cluster.agent/id [:string {:min 1}]]]]
                   [:vector :some]]}
   [request]
-  (throw (ex-info "seon.cluster.run/open-tx awaits its N2 implementation."
-                  {::contract :seon.cluster.run/open-tx})))
+  (let [{::keys [id agent opened-at]} request
+        agent-id (:seon.cluster.agent/id request)
+        run-ref [::id id]]
+    [{::id id
+      ::agent agent
+      ::opened-at opened-at}
+     [:db.fn/cas
+      [:seon.cluster.agent/id agent-id]
+      :seon.cluster.agent/run
+      nil
+      run-ref]]))
 
 (defn claim-tx
   "Claim an unheld run through the custody CAS.
   Process absent→holder, epoch observed→+1, lease asserted. A live
-  foreign claim is not stealable; an expired one is taken through the
-  same CAS on the observed heartbeat facts."
+  foreign claim is not stealable. Takeover of an EXPIRED claim supplies
+  the observed holder and lease: the CAS asserts those exact heartbeat
+  facts unchanged while replacing them, so a holder that renewed in the
+  meantime wins and the takeover fails loudly. Absent observed fields =
+  the fresh/reacquire case (process CAS from absent)."
   {:malli/schema [:=> [:cat [:map {:closed true}
                              [::id ::id]
                              [::process ::process]
                              [::observed-epoch [:maybe ::claim-epoch]]
+                             [::observed-process {:optional true} ::process]
+                             [::observed-lease-until {:optional true}
+                              ::lease-until]
                              [::lease-until ::lease-until]]]
                   [:vector :some]]}
   [request]
-  (throw (ex-info "seon.cluster.run/claim-tx awaits its N2 implementation."
-                  {::contract :seon.cluster.run/claim-tx})))
+  (let [{::keys [id process observed-epoch lease-until]} request
+        run-ref [::id id]]
+    [[:db.fn/cas run-ref ::claim-epoch
+      observed-epoch (inc (or observed-epoch 0))]
+     [:db.fn/cas run-ref ::process nil process]
+     [:db/add run-ref ::lease-until lease-until]]))
 
 (defn heartbeat-tx
   "Renew the holder's lease under the run fence."
@@ -173,8 +207,11 @@
                              [::lease-until ::lease-until]]]
                   [:vector :some]]}
   [request]
-  (throw (ex-info "seon.cluster.run/heartbeat-tx awaits its N2 implementation."
-                  {::contract :seon.cluster.run/heartbeat-tx})))
+  (let [{::keys [id process claim-epoch lease-until]} request
+        run-ref [::id id]]
+    [[:db.fn/cas run-ref ::claim-epoch claim-epoch claim-epoch]
+     [:db.fn/cas run-ref ::process process process]
+     [:db/add run-ref ::lease-until lease-until]]))
 
 (defn release-tx
   "Cleanly release custody: retract process + lease, keep the epoch."
@@ -184,8 +221,12 @@
                              [::claim-epoch ::claim-epoch]]]
                   [:vector :some]]}
   [request]
-  (throw (ex-info "seon.cluster.run/release-tx awaits its N2 implementation."
-                  {::contract :seon.cluster.run/release-tx})))
+  (let [{::keys [id process claim-epoch]} request
+        run-ref [::id id]]
+    [[:db.fn/cas run-ref ::claim-epoch claim-epoch claim-epoch]
+     [:db.fn/cas run-ref ::process process process]
+     [:db/retract run-ref ::process process]
+     [:db.fn/retractAttribute run-ref ::lease-until]]))
 
 (defn close-tx
   "Close the run in one fenced transaction.
@@ -199,8 +240,18 @@
                              [:seon.cluster.agent/id [:string {:min 1}]]]]
                   [:vector :some]]}
   [request]
-  (throw (ex-info "seon.cluster.run/close-tx awaits its N2 implementation."
-                  {::contract :seon.cluster.run/close-tx})))
+  (let [{::keys [id process claim-epoch closed-at]} request
+        agent-id (:seon.cluster.agent/id request)
+        run-ref [::id id]]
+    [[:db.fn/cas run-ref ::claim-epoch claim-epoch claim-epoch]
+     [:db.fn/cas run-ref ::process process process]
+     [:db/add run-ref ::closed-at closed-at]
+     [:db/retract run-ref ::process process]
+     [:db.fn/retractAttribute run-ref ::lease-until]
+     [:db/retract
+      [:seon.cluster.agent/id agent-id]
+      :seon.cluster.agent/run
+      run-ref]]))
 
 (defn plan-tx
   "Freeze one ordered form plan through the absent→digest CAS.
@@ -214,8 +265,25 @@
                              [::sources [:vector [:string {:min 1}]]]]]
                   [:vector :some]]}
   [request]
-  (throw (ex-info "seon.cluster.run/plan-tx awaits its N2 implementation."
-                  {::contract :seon.cluster.run/plan-tx})))
+  (let [{::keys [id process claim-epoch plan-digest sources]} request
+        run-ref [::id id]
+        forms (mapv (fn [ordinal source]
+                      (let [form-id (pr-str [id ordinal])]
+                        {:db/id form-id
+                         :seon.cluster.run.form/id form-id
+                         :seon.cluster.run.form/run run-ref
+                         :seon.cluster.run.form/ordinal ordinal
+                         :seon.cluster.run.form/source source}))
+                    (range)
+                    sources)]
+    (into [[:db.fn/cas run-ref ::claim-epoch claim-epoch claim-epoch]
+           [:db.fn/cas run-ref ::process process process]
+           [:db.fn/cas run-ref ::plan-digest nil plan-digest]]
+          (concat
+           forms
+           (map (fn [{form-id :seon.cluster.run.form/id}]
+                  [:db/add run-ref ::forms form-id])
+                forms)))))
 
 (defn recover-tx
   "Boot recovery for one run against dead-process facts.
@@ -228,5 +296,27 @@
                              [::live-processes [:set ::process]]]]
                   [:vector :some]]}
   [request]
-  (throw (ex-info "seon.cluster.run/recover-tx awaits its N2 implementation."
-                  {::contract :seon.cluster.run/recover-tx})))
+  (let [{::keys [run receipts live-processes]} request
+        interrupted
+        (keep (fn [receipt]
+                (when (= :running (:seon.cluster.eval/status receipt))
+                  [:db.fn/cas
+                   [:seon.cluster.eval/id
+                    (:seon.cluster.eval/id receipt)]
+                   :seon.cluster.eval/status
+                   :running
+                   :interrupted]))
+              receipts)
+        process (::process run)
+        lease-until (::lease-until run)
+        dead-holder? (and (some? process)
+                          (not (contains? live-processes process)))
+        run-ref [::id (::id run)]]
+    (into []
+          cat
+          [interrupted
+           (when dead-holder?
+             (cond-> [[:db/retract run-ref ::process process]]
+               (some? lease-until)
+               (conj [:db/retract
+                      run-ref ::lease-until lease-until])))])))
