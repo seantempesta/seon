@@ -792,6 +792,47 @@ inside one un-overridden host call.
 
 ---
 
+## CORRECTION — the "~1,160 zero-caller lines" claim is FALSE
+
+Wave 0 (2026-07-25 night) was told to verify before deleting, did, and refused.
+Every part of the claim fails:
+
+- `transition` still calls `transitions` — not dead.
+- `src/seon/client.cljs` has **six production calls** to `recovery/recover!`,
+  plus `pending-notices` calls.
+- `recovery-result!` is explicitly exercised by tests.
+- The `:published → :close-turn` arm is covered by phase assertions.
+
+**No deletions were made and none should be.** The claim entered via the
+prototype workflow's deletion ledger and was repeated into the implementation
+plan and the Wave 0 spec without anyone re-checking it. Any future "N lines
+with zero callers" row is a HYPOTHESIS until the lane greps it — the ledger is
+not a licence to delete.
+
+This is also evidence the discipline works in both directions: it caught a
+wrong row of its own before the row cost us live code.
+
+## Wave 0 measurements (landed)
+
+- `:interrupt-fn` hot path, `b1df45785`: the closure now closes directly over
+  the primitive/object arrays instead of re-destructuring the holder map per
+  entry, plus `LockSupport/parkNanos(1000)` every 65,536 entries. **In situ over
+  3,000,001 real SCI entries, median of five after three warmups: 64.182 ms →
+  41.604 ms** (~1.5x), including 45 fairness parks. The 44x/8.6x/2.4x figures
+  from microbenchmarks are NOT reproducible end to end and must not be quoted.
+- Clojure 1.12.5, `4c67e617c`: boot 10,833.5 ms (1.12.0) vs 10,744 ms (1.12.5),
+  overlapping. **No credible performance change** — hygiene only.
+- Boot is now measured at ~10.7 s, not the 9,647 ms recorded in
+  `measurements-2026-07-25.md` §2.0. Different configuration (full artifact
+  path vs source classpath); both numbers stand with their conditions.
+
+## LIVE BLOCKER found by the same lane
+
+A cluster rebuild brought watcher, writer and host to ready, then **pod
+admission failed: the default database initialization stayed `:in-progress` at
+93 pages.** This is on the path to the program goal — an agent cannot take a
+turn if the cluster cannot finish coming up. Not yet diagnosed.
+
 ## Owner rulings — 2026-07-25 night, the blocking four
 
 **O1. Co-location ACCEPTED.** Agent evals run in the database process. Reads
