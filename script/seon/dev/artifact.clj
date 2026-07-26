@@ -384,6 +384,40 @@
         (update-stream! digest stream)))
     (bytes->hex (.digest digest))))
 
+(defn- stable-shadow-entry-text
+  "Remove watcher-session coordinates from one compiled entry file."
+  [text]
+  (-> text
+      (str/replace
+       #"\"shadow\.cljs\.devtools\.client\.env\.proc_id\":\"[^\"]*\""
+       "\"shadow.cljs.devtools.client.env.proc_id\":\"<runtime>\"")
+      (str/replace
+       #"\"shadow\.cljs\.devtools\.client\.env\.server_token\":\"[^\"]*\""
+       "\"shadow.cljs.devtools.client.env.server_token\":\"<runtime>\"")
+      (str/replace
+       #"\"shadow\.cljs\.devtools\.client\.env\.worker_client_id\":[0-9]+"
+       "\"shadow.cljs.devtools.client.env.worker_client_id\":0")))
+
+(defn- digest-client-paths
+  [root entry paths]
+  (let [root (fs/absolutize (fs/path root))
+        entry (fs/absolutize (fs/path entry))
+        digest (MessageDigest/getInstance "SHA-256")
+        resolve-path
+        (fn [path]
+          (let [path (fs/path path)]
+            (if (fs/relative? path)
+              (fs/path root (str path))
+              path)))
+        files (->> paths (map resolve-path) (mapcat regular-files) distinct sort)]
+    (doseq [path files]
+      (update-text! digest (str (fs/relativize root path)))
+      (if (= entry (fs/absolutize path))
+        (update-text! digest (stable-shadow-entry-text (slurp (str path))))
+        (with-open [stream (io/input-stream (str path))]
+          (update-stream! digest stream))))
+    (bytes->hex (.digest digest))))
+
 (def ^:private common-source-input-paths
   ["build.clj"
    "deps.edn"
@@ -536,23 +570,25 @@
         (fs/path (:seon.dev.config/shadow-cache-root config)
                  "builds" (:seon.dev.config/client-build-id config)
                  "dev/out/cljs-runtime")]
-    (digest-paths root [(:seon.dev.config/client-output config)
-                        (program-source-path config)
-                        (program-row-path config)
-                        (base-projection-path config)
-                        (page-plan-path config)
-                        (program-inventory-path
-                         (:seon.dev.config/client-output config))
-                        client-runtime])))
+    (digest-client-paths
+     root
+     (:seon.dev.config/client-output config)
+     [(:seon.dev.config/client-output config)
+      (program-source-path config)
+      (program-row-path config)
+      (base-projection-path config)
+      (page-plan-path config)
+      (program-inventory-path
+       (:seon.dev.config/client-output config))
+      client-runtime])))
 
 (defn current-execution-digest
-  "Hash the exact flavor-owned client execution artifact bytes."
+  "Hash client execution semantics, excluding watcher-session coordinates."
   [config]
-  (let [digest (MessageDigest/getInstance "SHA-256")]
-    (with-open [stream (io/input-stream
-                       (:seon.dev.config/client-output config))]
-      (update-stream! digest stream))
-    (bytes->hex (.digest digest))))
+  (digest-client-paths
+   (:seon.dev.config/root config)
+   (:seon.dev.config/client-output config)
+   [(:seon.dev.config/client-output config)]))
 
 (defn- digest-jar [path]
   ;; Zip entry timestamps are packaging metadata. Hash the entry names and
