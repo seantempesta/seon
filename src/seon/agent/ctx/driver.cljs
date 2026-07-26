@@ -7,9 +7,7 @@
   (:require
    [my.blob]
    [my.canvas]
-   [my.data]
    [my.kb]
-   [my.ns]
    [my.plan]
    [my.skills]
    [my.ui]
@@ -17,10 +15,7 @@
    [seon.agent.ctx.canvas :as ctx-canvas]
    [seon.agent.message :as message]
    [seon.agent.home :as home]
-   [seon.agent.ctx.render-fns :as render-fns]
-   [seon.ai :as ai]
    [seon.config :as config]
-   [seon.config.resolve :as config.resolve]
    [seon.db :as db]
    [seon.db.protocol :as protocol]
    [seon.derive :as derive]
@@ -31,28 +26,6 @@
    [seon.schema :as schema]
    [seon.ui.agent-view]
    [seon.web.reactive.transform :as reactive-transform]))
-
-(schema/register! ::render-prompt-request
-  [:map {:closed true}
-   [:seon.agent/id :string]
-   [:seon.agent.run/id {:optional true} :seon.agent.run/id]
-   [:seon.db/db {:optional true} :seon.db/db]
-   [:seon.agent.ctx/profile
-    {:optional true}
-    :seon.agent.ctx/profile]])
-
-(schema/register! ::prompt-error
-  [:map
-   [:seon.error/message :string]
-   [:seon.error/kind :keyword]
-   [:seon.error/data {:optional true} :map]])
-
-(schema/register! ::eval-batch-request
-  [:map {:closed true}
-   [:seon.eval/parsed [:vector :map]]
-   [:seon.eval/starting-ns :symbol]
-   [:seon.agent.turn/id-of-turn :string]
-   [:seon.agent.run/id-of-run {:optional true} :string]])
 
 (schema/register! ::render-agent-view-request
   [:map {:closed true}
@@ -71,15 +44,6 @@
   [result]
   (or (get-in result [:seon.execution/error :seon.error/message])
       "selected function failed"))
-
-(defn- block-error-text
-  [block result]
-  (str "[" (name (:seon.agent.ctx/name block)) "] render failed: "
-       (selected-error-message result)))
-
-(defn- ai-value
-  [value]
-  (render/unwrap-response :seon.render/ai value))
 
 (defn interactive-hiccup
   "Rewrite handlers only for agent-authored dynamic renders and literal canvas.
@@ -128,92 +92,6 @@
        {:seon.error/message
         (selected-error-message result)}))))
 
-(defn- block-call
-  [id entity configuration database block run-id]
-  {:seon.execution/function-symbol (:seon.render/ai block)
-   :seon.execution/invoke-selected? true
-   :seon.execution/arguments
-   [(cond-> {:seon.agent/id id
-             :seon.agent/entity entity
-             :seon.config/configuration configuration
-             ::db/db database
-             :seon.render/node block}
-      run-id (assoc :seon.agent.run/id run-id))]})
-
-(defn ^:async ^:private resolve-blocks!
-  [id entity configuration database blocks run-id invoke-selected!]
-  (let [targets (->> blocks
-                     (keep-indexed
-                       (fn [index block]
-                         (when (symbol? (:seon.render/ai block))
-                           {:index index
-                            :block block
-                            :call (block-call id entity configuration database block
-                                              run-id)})))
-                     vec)]
-    (if (empty? targets)
-      {:seon.execution.runtime/blocks blocks
-       :seon.execution.runtime/values []}
-      (let [results (await (invoke-selected! (mapv :call targets)))]
-        {:seon.execution.runtime/blocks
-         (reduce
-           (fn [resolved [{:keys [index block]} result]]
-             (assoc-in resolved [index :seon.render/ai]
-                       (if (:seon.execution/ok? result)
-                         (ai-value (:seon.execution/value result))
-                         (block-error-text block result))))
-           blocks
-           (map vector targets results))
-         :seon.execution.runtime/values
-         (mapv #(when (:seon.execution/ok? %) (:seon.execution/value %)) results)}))))
-
-(defn- namespace-value [values]
-  (some #(when (and (map? %)
-                    (contains? % ::render-fns/fn-rows))
-           %)
-        values))
-
-(defn- derived-blocks
-  [stored values]
-  (when-let [namespace-value (namespace-value values)]
-    (let [stored-pins (into #{}
-                            (comp (mapcat (juxt :seon.render/ai
-                                                :seon.render/html))
-                                  (filter symbol?))
-                            stored)
-          canvas-pins (into #{} (mapcat #(if (map? %)
-                                           (or (::render-fns/pinned-syms %) #{})
-                                           #{}))
-                            values)]
-      (render-fns/derived-blocks
-        {::render-fns/current-ns (::render-fns/current-ns namespace-value)
-         ::render-fns/fn-rows (::render-fns/fn-rows namespace-value)
-         ::render-fns/pinned-syms (into stored-pins canvas-pins)}))))
-
-(defn ^:async ^:private resolve-whole-prompt!
-  [id entity configuration database value run-id invoke-selected!]
-  (if-not (symbol? value)
-    value
-    (let [block {:seon.agent.ctx/name :prompt
-                 :seon.agent.ctx/priority 0
-                 :seon.render/ai value}
-          result (first
-                   (await (invoke-selected!
-                           [(block-call id entity configuration database block
-                                        run-id)])))]
-      (if (:seon.execution/ok? result)
-        (ai-value (:seon.execution/value result))
-        (block-error-text block result)))))
-
-(def ^:private prompt-pull-pattern
-  (into
-   '[:db/id
-     :seon.agent.ctx/cache-breakpoint
-     :seon.config/repl-mode
-     :seon.render/ai
-     {:seon.agent/ctx [*]}]
-   (ai/agent-config-pull-pattern)))
-
 (def agent-entity-read-profile
   "Datahike ceilings for complete prompt and agent-view entity pulls.
 
@@ -222,23 +100,6 @@
   {:datahike.resource/max-work 5000000
    :datahike.resource/max-results 65536
    :datahike.resource/max-result-weight (* 3 1024 1024)})
-
-(def ^:private prompt-acquisition-members
-  [(merge
-    {::protocol/operation protocol/pull-operation
-     ::protocol/selector prompt-pull-pattern
-     ::protocol/entity-id nil}
-    agent-entity-read-profile)
-   (merge
-    {::protocol/operation protocol/pull-operation
-     ::protocol/selector '[*]
-     ::protocol/entity-id config/cluster-config-lookup-ref}
-    config/configuration-read-profile)
-   (merge
-    {::protocol/operation protocol/pull-operation
-     ::protocol/selector (ai/config-pull-pattern)
-     ::protocol/entity-id [:seon.ai/id "config"]}
-    ai/configuration-read-profile)])
 
 (defn acquired-member
   "Return one successful database acquisition member's value."
@@ -270,102 +131,6 @@
     (cond-> error
       (not (keyword? (:seon.error/kind error)))
       (assoc :seon.error/kind :core-bug))))
-
-(defn ^:async render-prompt!
-  "Acquire and invoke selected prompt blocks at the active database value."
-  {:malli/schema [:=> [:cat ::render-prompt-request :any]
-                  [:or :seon.agent.ctx/rendered-context ::prompt-error]]}
-  [{:seon.agent/keys [id]
-    run-id :seon.agent.run/id
-    profile :seon.agent.ctx/profile
-    database ::db/db} invoke-selected!]
-  (let [members (assoc-in prompt-acquisition-members
-                          [0 ::protocol/entity-id] [:seon.agent/id id])
-        acquired (if database
-                   (await (db/execute-many {::db/db database
-                                            ::db/members members
-                                          ::db/max-result-weight 8388608}))
-                   {:seon.error/message
-                    "Prompt rendering requires :seon.db/db."
-                    :seon.error/kind :core-bug})
-        [agent-member cluster-config-member ai-config-member]
-        (::db/results acquired)
-        required-members [agent-member cluster-config-member ai-config-member]
-        member-failure?
-        (not (every? #(true? (::protocol/success? %)) required-members))]
-    (if member-failure?
-      (assoc (prompt-acquisition-error acquired required-members)
-             :seon.db/db database)
-      (let [entity (or (acquired-member agent-member) {})
-            cluster-config-row
-            (db/decode-edn-values
-              (or (acquired-member cluster-config-member) {}))
-            config-row (merge (or (acquired-member ai-config-member) {})
-                              cluster-config-row)
-            shared-system-text
-            (or (:seon.config/system-text cluster-config-row)
-                ctx/system-text-shared)
-            system-prompt (ctx/render-system-text shared-system-text)
-            config-resolution (ai/resolved-config-from-rows config-row entity)
-            whole-prompt (when-not (seq profile)
-                           (some->> (:seon.render/ai entity)
-                                    (db/decode-edn-value :seon.render/ai)))
-            blocks (if (some? whole-prompt)
-                     []
-                     (ctx/selected-agent-blocks entity profile))
-            stored-resolution
-            (await (error/with-configuration
-                     cluster-config-row
-                     #(resolve-blocks! id entity cluster-config-row database blocks
-                                       run-id invoke-selected!)))
-            namespace-value
-            (namespace-value (:seon.execution.runtime/values
-                              stored-resolution))
-            stored-blocks (:seon.execution.runtime/blocks stored-resolution)
-            derived (when (and (not (seq profile)) (nil? whole-prompt))
-                      (derived-blocks blocks
-                                      (:seon.execution.runtime/values
-                                        stored-resolution)))
-            derived-resolution
-            (await (error/with-configuration
-                     cluster-config-row
-                     #(resolve-blocks! id entity cluster-config-row database
-                                       (vec derived) run-id invoke-selected!)))
-            resolved-blocks
-            (->> (concat stored-blocks
-                         (:seon.execution.runtime/blocks derived-resolution))
-                 (sort-by (juxt :seon.agent.ctx/priority
-                                (comp str :seon.agent.ctx/name)))
-                 vec)
-            resolved-whole-prompt
-            (when (some? whole-prompt)
-              (await (error/with-configuration
-                       cluster-config-row
-                       #(resolve-whole-prompt! id entity cluster-config-row database
-                                               whole-prompt run-id
-                                               invoke-selected!))))]
-        (error/with-configuration
-          cluster-config-row
-          #(merge
-             (assoc
-              (ctx/rendered-context-from-entity
-               (cond-> {:seon.agent/entity entity
-                        :seon.agent.ctx/selected-blocks resolved-blocks}
-                 (seq profile) (assoc :seon.agent.ctx/profile (vec profile))
-                 (some? whole-prompt)
-                 (assoc :seon.agent.ctx/whole-prompt resolved-whole-prompt)))
-             :seon.ai/system-prompt system-prompt
-             :seon.ai/config-resolution config-resolution
-             :seon.db/db database
-             :seon.config.model-stream/partial-publish-settle-ms
-             (:seon.config.model-stream/partial-publish-settle-ms
-              cluster-config-row)
-             :seon.eval/ns
-             (or (::render-fns/current-ns namespace-value)
-                 (symbol (str "my.agent." id))))
-             (config.resolve/llm-retry-configuration cluster-config-row)
-             (ai/reply-configuration-from-rows
-              cluster-config-row entity)))))))
 
 (def agent-view-members
   [(merge
