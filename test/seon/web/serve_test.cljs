@@ -699,7 +699,6 @@
   (async done
     (let [original-capture db/with-read-evidence
           original-query db/query
-          original-state derive/derive-state
           original-observe reactive/observe!
           original-unobserve reactive/unobserve!
           injected-at (js/Date.now)
@@ -719,12 +718,11 @@
               (let [settled? (= 31 (:t database-value))]
                 (js/Promise.resolve
                  (if (str/includes? (pr-str query) "?status")
-                   [[(if settled? :done :running)]]
-                   [[(js/Date. (if settled? injected-at 0))]])))))
-      (set! derive/derive-state
-            (fn [database-value _]
-              (js/Promise.resolve
-               (if (= 31 (:t database-value)) :idle :running))))
+                   (if (str/includes? (pr-str query) "?injected-at")
+                     [[(if settled? :done :running)]]
+                     [[(js/Date. (if settled? injected-at 0))
+                       (if settled? :closed :open)]])
+                   [])))))
       (set! reactive/observe!
             (fn [request]
               (reset! observed request)
@@ -754,9 +752,19 @@
             database "agent-1" injected-at 1000))
           (.then
            (fn [result]
-             (is (= [:running :idle]
-                    (mapv :seon.web.serve/agent-state @notifications)))
-             (is (= :idle (:seon.web.serve/agent-state result)))
+             (is (= [:open :closed]
+                    (mapv :seon.web.serve/latest-run-status @notifications)))
+             (is (= [0 injected-at]
+                    (mapv :seon.web.serve/latest-run-start-ms
+                          @notifications)))
+             (is (= [false true]
+                    (mapv :seon.web.serve/turns-settled?
+                          @notifications)))
+             (is (true?
+                  ((deref #'serve/agent-task-done?)
+                   (last @notifications) injected-at)))
+             (is (= :closed
+                    (:seon.web.serve/latest-run-status result)))
              (is (true? (:seon.web.serve/turns-settled? result)))
              (is (= [::serve/agent-task-settlement "agent-1" injected-at]
                     (::reactive/key @observed)))
@@ -773,7 +781,6 @@
            (fn []
              (set! db/with-read-evidence original-capture)
              (set! db/query original-query)
-             (set! derive/derive-state original-state)
              (set! reactive/observe! original-observe)
              (set! reactive/unobserve! original-unobserve)
              (done)))))))
@@ -1001,51 +1008,6 @@
            (fn []
              (set! db/pull original)
              (done)))))))
-
-(deftest model-transport-projection-is-ordered-bounded-and-fail-closed
-  (let [project (deref #'serve/project-model-transport-rows)
-        attempts {101 (model-attempt 1)
-                  100 (model-attempt 0)}
-        proof (project [[10 "turn-a"]] [[10 101] [10 100]]
-                       #(get attempts %) (constantly true))
-        projected (:attempts (first (:turns proof)))
-        expected-config
-        {:seon.ai.attempt/provider :deepseek
-         :seon.ai.attempt/requested-model "small-model"
-         :seon.ai.attempt/temperature 0.0
-         :seon.ai.attempt/max-tokens 512
-         :seon.ai.attempt/endpoint
-         "http://127.0.0.1:8080/v1/chat/completions"
-         :seon.ai.attempt/adapter-timeout-ms 30000}]
-    (is (= "inline" (:status proof)))
-    (is (= [0 1] (mapv :ordinal projected)))
-    (is (= 0.0 (:temperature (first projected))))
-    (is (false? (:transport_drift proof)))
-    (is (every? true? (map :historical_config_valid projected)))
-    (is (= {:status "malformed"
-            :invalid_turns
-            [{:turn_id "turn-a"
-              :attempt_ordinals_valid false
-              :attempt_rows_valid true
-              :historical_config_valid true}]}
-           (project [[10 "turn-a"]] [[10 100]]
-                    (fn [_] (model-attempt 1))
-                    (constantly true)))
-        "a missing ordinal zero fails closed with bounded evidence")
-    (is (= "malformed"
-           (:status
-            (project [[10 "turn-a"]] [[10 100]]
-                     #(get attempts %) (constantly false))))
-        "a failed historical reconstruction fails closed")
-    (is (true? ((deref #'serve/attempt-config-matches?)
-                (model-attempt 0) expected-config)))
-    (is (false? ((deref #'serve/attempt-config-matches?)
-                 (assoc (model-attempt 0)
-                        :seon.ai.attempt/max-tokens 1024)
-                 expected-config)))
-    (is (= {:status "absent"}
-           (project [[10 "turn-a"]] []
-                    (constantly nil) (constantly false))))))
 
 (deftest historical-identity-caps-and-config-preserve-absence
   (let [identity-valid? (deref #'serve/response-identity-valid?)

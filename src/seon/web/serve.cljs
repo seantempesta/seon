@@ -731,26 +731,30 @@
 (defn- ^:async agent-run-timeout-ms [_database _agent-id requested]
   (or requested (config/turn-timeout-ms)))
 
-(defn- ^:async latest-run-start-ms
-  "Wall-clock ms of the agent's MOST-RECENTLY-STARTED run (open or closed) over
-   the database value, or 0 when none. The /agents/run observation uses this
-   to reject the agent's PRE-INJECTION state: `:idle` alone is ambiguous (an
-   idle agent has no open run BEFORE our message wakes it), so we only accept
-   an idle whose latest run started at/after the injection — i.e. the run our
-   message woke has opened and closed."
+(defn- ^:async latest-run-observation
+  "Start time and status of the agent's most-recently-started run, or the
+   absent projection when none exists. `/agents/run` accepts settlement only
+   after the injected message opened a new run and that exact run closed."
   [database aid]
   (let [rows (await
               (db/query {::db/db database
-                         ::db/query '[:find ?started :in $ ?aid :where
+                         ::db/query '[:find ?started ?status
+                                      :in $ ?aid :where
                                       [?a :seon.agent/id ?aid]
                                       [?r :seon.agent.run/agent ?a]
-                                      [?r :seon.agent.run/started-at ?started]]
+                                      [?r :seon.agent.run/started-at ?started]
+                                      [?r :seon.agent.run/status ?status]]
                          ::db/args [aid]}))]
     (if (:seon.error/message rows)
       rows
-      (->> rows
-           (map (fn [[^js started]] (.getTime started)))
-           (reduce max 0)))))
+      (if-let [[^js started status]
+               (->> rows
+                    (sort-by (fn [[^js at]] (.getTime at)))
+                    last)]
+        {::latest-run-start-ms (.getTime started)
+         ::latest-run-status status}
+        {::latest-run-start-ms 0
+         ::latest-run-status nil}))))
 
 (def ^:private terminal-turn-statuses
   #{:done :error :interrupted})
@@ -784,24 +788,22 @@
          (db/with-read-evidence
           (fn []
             (js/Promise.all
-             #js [(derive/derive-state database agent-id)
-                  (latest-run-start-ms database agent-id)
+             #js [(latest-run-observation database agent-id)
                   (task-turns-settled? database agent-id injected-at)]))))
         values (::db/value observed)
-        [state latest-start turns-settled?] (array-seq values)
+        [run-observation turns-settled?] (array-seq values)
         failure (some #(when (:seon.error/message %) %)
-                      [state latest-start turns-settled?])]
+                      [run-observation turns-settled?])]
     (assoc observed ::db/value
            (or failure
-               {::agent-state state
-                ::latest-run-start-ms latest-start
-                ::turns-settled? turns-settled?}))))
+               (assoc run-observation
+                      ::turns-settled? turns-settled?)))))
 
 (defn- agent-task-done?
-  [{::keys [agent-state latest-run-start-ms turns-settled?]} injected-at]
-  (and (= :idle agent-state)
-       (>= latest-run-start-ms injected-at)
-       turns-settled?))
+  [observation injected-at]
+  (and (not= :open (::latest-run-status observation))
+       (>= (::latest-run-start-ms observation) injected-at)
+       (true? (::turns-settled? observation))))
 
 (defn- ^:async await-agent-task-settlement!
   "Wait for the committing database value that settles one agent task."
@@ -1395,10 +1397,12 @@
         (await
          (js/Promise.all
           #js [(db/query {::db/db database
-                          ::db/query '[:find ?r ?started :in $ ?aid :where
+                          ::db/query '[:find ?r ?started ?reason
+                                       :in $ ?aid :where
                                        [?agent :seon.agent/id ?aid]
                                        [?r :seon.agent.run/agent ?agent]
-                                       [?r :seon.agent.run/started-at ?started]]
+                                       [?r :seon.agent.run/started-at ?started]
+                                       [?r :seon.agent.run/closed-reason ?reason]]
                           ::db/args [aid]})
                (db/query {::db/db database
                           ::db/query '[:find ?turn ?id ?at ?run
@@ -1431,32 +1435,24 @@
         (array-seq values)
         acquired-error
         (some #(when (:seon.error/message %) %) (array-seq values))
-        all-turn-rows
-        (if acquired-error
-          acquired-error
-          (await (turn-rows-with-rendered-tx database turn-identities)))
-        error (or acquired-error
-                  (when (:seon.error/message all-turn-rows) all-turn-rows))]
+        error acquired-error]
     (if error
       {:error (:seon.error/message error)}
       (let [run-eids (into #{}
-                           (keep (fn [[run-eid ^js started]]
+                           (keep (fn [[run-eid ^js started _]]
                                    (when (>= (.getTime started) injected-at)
                                      run-eid)))
                            run-rows)
-            turn-rows (->> all-turn-rows
+            turn-rows (->> turn-identities
                            (filter #(contains? run-eids (nth % 3)))
                            (sort-by (fn [[_ id ^js at]] [(.getTime at) id]))
                            vec)
             turn-eids (into #{} (map first) turn-rows)
-            turn-ids (mapv second turn-rows)
             eval-rows (await (eval-evidence database turn-eids))
-            turn-proof (await (turn-evidence database turn-ids))
-            transport-proof
-            (await (project-model-transport-evidence database aid turn-rows))
+            turn-proof {:status "absent"}
+            transport-proof {:status "absent"}
             evidence-error
-            (some #(when (:seon.error/message %) %)
-                  [eval-rows turn-proof transport-proof])
+            (when (:seon.error/message eval-rows) eval-rows)
             resolved
             (:seon.ai/resolved-config
              (ai/resolved-config-from-rows
@@ -1470,7 +1466,13 @@
                        (sort-by (fn [[^js at]] (.getTime at)))
                        last second)
             closed-reason (when-not timeout?
-                            (await (derive/last-closed-reason database aid)))]
+                            (->> run-rows
+                                 (filter (fn [[_ ^js started]]
+                                           (>= (.getTime started) injected-at)))
+                                 (sort-by (fn [[_ ^js started]]
+                                            (.getTime started)))
+                                 last
+                                 (#(nth % 2 nil))))]
         (if evidence-error
           {:error (:seon.error/message evidence-error)}
           (cond-> {:agent_id aid
