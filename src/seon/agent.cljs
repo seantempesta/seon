@@ -183,11 +183,11 @@
 
 ;; Required attrs reflect what every writer of the kind populates
 ;; unconditionally — derived from the write sites:
-;;   :seon.eval   — `seon.host.record` receipt terminal data
+;;   :seon.eval   — durable receipt terminal data
 ;;   :seon.agent.message — `message!` (the single write entry point,
 ;;                         seon.agent.message — its entity-kind :map
 ;;                         schema lives there too)
-;;   :seon.fn / :seon.schema / :seon.ns — `seon.host.record/tee-tx-data`
+;;   :seon.fn / :seon.schema / :seon.ns — durable corpus facts
 ;;
 ;; Anything written conditionally (errors only on failure, result only
 ;; on success, projections that may be nil) is `{:optional true}` per

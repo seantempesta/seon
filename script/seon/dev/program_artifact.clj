@@ -15,7 +15,6 @@
 
 (def ^:private program-row-marker "SEON_PROGRAM_ROWS_EDN ")
 (def ^:private base-projection-marker "SEON_BASE_PROJECTION_EDN ")
-(def ^:private base-load-plan-marker "SEON_BASE_LOAD_PLAN_EDN ")
 (def ^:private page-plan-marker "SEON_PAGE_PLAN_EDN ")
 (def ^:private prepared-program-rows ::prepared-program-rows)
 (def ^:private prepared-program-sources ::prepared-program-sources)
@@ -258,33 +257,6 @@
     (str/blank? (System/getenv "SEON_HOST_TIMEZONE"))
     (assoc "SEON_HOST_TIMEZONE" (str (ZoneId/systemDefault)))))
 
-(defn- derive-base-load-plan
-  [state]
-  (let [root (canonical-file (io/file ".") (:project-dir state))
-        expression
-        (str "(require 'seon.host.context) "
-             "(print \"" base-load-plan-marker "\") "
-             "(prn (seon.host.context/base-load-plan))")
-        result
-        (shell/sh "clojure" "-M:writer:host" "-e" expression
-                  :dir (.getCanonicalPath ^File root)
-                  :env (build-environment))
-        output (:out result)
-        marker-index (str/last-index-of output base-load-plan-marker)]
-    (when-not (zero? (:exit result))
-      (throw
-       (ex-info "The host base-load plan derivation failed."
-                {:seon.dev.artifact/exit (:exit result)
-                 :seon.dev.artifact/error (str/trim (:err result))})))
-    (when-not marker-index
-      (throw
-       (ex-info "The host base-load plan derivation returned no plan."
-                {:seon.dev.artifact/output (str/trim output)
-                 :seon.dev.artifact/error (str/trim (:err result))})))
-    (edn/read-string
-     (str/trim
-      (subs output (+ marker-index (count base-load-plan-marker)))))))
-
 (defn- resolved-build-configuration [state]
   (let [root (canonical-file (io/file ".") (:project-dir state))
         environment (build-environment)
@@ -491,7 +463,6 @@
   [state program-source-relative-path relative-path program-source-text]
   (assoc (derive-program-rows state program-source-text
                               (output-file state relative-path))
-         :seon.dev.artifact/base-load-plan (derive-base-load-plan state)
          :seon.dev.artifact/program-source-digest
          (digest program-source-text)
          :seon.dev.artifact/program-source-relative-path
@@ -591,7 +562,6 @@
         program-row-digest (digest (slurp program-row-file))
         prepared (prepared-program state program-row-relative-path)
         projection (:seon.dev.artifact/base-projection prepared)
-        base-load-plan (:seon.dev.artifact/base-load-plan prepared)
         page-plan (:seon.dev.artifact/page-plan prepared)
         initialization-fingerprint
         (:seon.db.initialization/fingerprint
@@ -610,7 +580,6 @@
          (:seon.dev.artifact/program-row-artifact-digest prepared)
          :seon.dev.artifact/actual program-row-digest})))
     (when-not (and (map? projection)
-                   (map? base-load-plan)
                    ;; The compiled CLJS hash is an integer, but the EDN
                    ;; boundary materializes it as java.lang.Long on the JVM.
                    ;; Validate its data contract, never the reader's concrete
@@ -627,7 +596,6 @@
                  (some-> projection
                          :seon.schema.projection/fingerprint
                          type)
-                 :seon.dev.artifact/base-load-plan-type (type base-load-plan)
                  :seon.dev.artifact/initialization-fingerprint
                  initialization-fingerprint})))
     (atomic-spit!
@@ -635,7 +603,6 @@
      (str
       (pr-str
        {:seon.dev.artifact/base-projection projection
-        :seon.host.context/base-load-plan base-load-plan
         :seon.db.initialization/fingerprint initialization-fingerprint})
       "\n"))
     state))

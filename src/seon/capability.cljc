@@ -42,7 +42,7 @@
   (mapv
    (fn [[function-symbol wrapper]]
      {::binding (str (symbol (str library) (str function-symbol)))
-      ::effect (or (:seon.host.context/effect wrapper) :external)
+      ::effect (or (:seon.capability/effect (meta wrapper)) :external)
       ::remote? false})
    (sort-by (comp str key) wrappers)))
 

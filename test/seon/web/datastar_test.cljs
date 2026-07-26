@@ -3,9 +3,6 @@
             [clojure.string :as str]
             [seon.agent.ctx.driver :as ctx.driver]
             [seon.db :as db]
-            [seon.error :as error]
-            [seon.host.session :as host.session]
-            [seon.host.session.leaf :as host.session.leaf]
             [seon.reactive :as reactive]
             [seon.ui.agent-view :as agent-view]
             [seon.ui.html :as html]
@@ -187,41 +184,6 @@
           (.finally
            (fn []
              (set! ctx.driver/render-agent-view! original-render)
-             (done)))))))
-
-(deftest authored-agent-view-render-uses-the-guarded-host-door
-  (async done
-    (let [original-classify error/agent-authored-sym?
-          original-invoke host.session.leaf/invoke-authored!
-          observed (atom nil)]
-      (set! error/agent-authored-sym? (fn [& _] true))
-      (set! host.session.leaf/invoke-authored!
-            (fn [request]
-              (reset! observed request)
-              (js/Promise.resolve
-               {:seon.execution/message host.session/result-message
-                :seon.execution/result
-                {:seon.render/hiccup [:div "authored"]}})))
-      (-> (js/Promise.resolve
-           (@#'datastar/invoke-agent-view-call!
-            database
-            "agent-1"
-            {:seon.execution/function-symbol 'my.orders/view
-             :seon.execution/arguments [{:seon.agent/id "agent-1"}]}))
-          (.then
-           (fn [result]
-             (is (true? (:seon.execution/ok? result)))
-             (is (= {:seon.render/hiccup [:div "authored"]}
-                    (:seon.execution/value result)))
-             (is (identical? database
-                             (::host.session.leaf/database @observed)))
-             (is (= 'my.orders/view
-                    (::host.session.leaf/function-symbol @observed)))))
-          (.catch (fn [exception] (is false (str exception))))
-          (.finally
-           (fn []
-             (set! error/agent-authored-sym? original-classify)
-             (set! host.session.leaf/invoke-authored! original-invoke)
              (done)))))))
 
 (deftest structural-settle-selects-the-database-configured-delay

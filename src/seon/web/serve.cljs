@@ -933,9 +933,7 @@
   (write-status!
    res 200 "application/json; charset=utf-8"
    (js/JSON.stringify
-    (clj->js
-     (product-evidence-json-value
-      {:seon.host.session/processes []})))))
+    (clj->js (product-evidence-json-value [])))))
 
 (defn- turn-evidence-row
   "Stable external projection of captured turn prompts and raw replies."

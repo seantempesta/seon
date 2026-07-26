@@ -208,11 +208,6 @@
        (get-in descriptor [::launch/watcher-owner ::launch/process-dir]
                writer-process-dir))))
 
-(defn- host-eval-socket [config]
-  (or (get-in config [:seon.dev.config/launch-descriptor
-                      ::launch/host-owner ::launch/eval-socket-path])
-      (:seon.dev.config/host-eval-socket config)))
-
 (defn- web-render-port-file
   [config]
   (str (fs/path (or (get-in config
@@ -719,33 +714,16 @@
             config manifest jvm-publication
             (str (config/claim-driver-heap-mb config) "m")
             "seon.host"
-            [(pr-str {:seon.host/socket-path
-                     (host-eval-socket config)
-                     :seon.host.context/writer-socket-path
+            [(pr-str {:seon.db.host/writer-socket-path
                      (::launch/request-socket-path descriptor-writer)
-                     :seon.host.context/database-name
+                     :seon.db.host/database-name
                      (::db.protocol/database-name descriptor-database)
-                     :seon.host.context/backend
+                     :seon.db.host/backend
                      (::db.protocol/backend descriptor-database)
-                     :seon.host.context/database-path
+                     :seon.db.host/database-path
                      (::db.protocol/database-path descriptor-database)
-                     :seon.host/database-pool-wait-timeout-ms
-                     (config/claim-driver-pool-wait-timeout-ms config)
-                     :seon.startgate/release-digest
-                     (:seon.dev.artifact/application-digest manifest)
-                     :seon.startgate/execution-digest
-                     (:seon.dev.artifact/execution-digest manifest)
-                     :seon.startgate/config-manifest-digest
-                     (get-in descriptor
-                             [::launch/resolved-manifest ::launch/sha-256])
-                     :seon.startgate/base-projection-path
-                     base-projection-path
-                     :seon.startgate/base-projection-digest
-                     base-projection-digest
-                     :seon.execution/artifact-inventories
-                     (:seon.dev.artifact/cljs-artifact-inventory manifest)
-                     :my.blob/storage-view
-                     (::launch/blob-storage-view descriptor)})])
+                     :seon.db.host/pool-wait-timeout-ms
+                     (config/claim-driver-pool-wait-timeout-ms config)})])
            :seon.dev.process/environment jvm-environment
            :seon.dev.process/dependencies
            (get process-graph host-id)
@@ -1072,6 +1050,11 @@
   (let [text (tail-text (:seon.dev.process/log record))]
     (every? #(build-ready? text %) (watcher-build-ids config))))
 
+(defn- host-ready?
+  [record]
+  (some #{"HOST READY"}
+        (str/split-lines (tail-text (:seon.dev.process/log record)))))
+
 (defn- watcher-build-failed?
   "True when a watcher build's newest terminal log line is a failure."
   [config record]
@@ -1182,7 +1165,7 @@
           (and (watcher-ready? config record)
                (current-watcher-outputs-ready? config spec))
           :seon.dev.process.readiness/host
-          (unix-socket-ready? (host-eval-socket config))
+          (boolean (host-ready? record))
           :seon.dev.process.readiness/web-render
           (pod-ready? config spec record)
           :seon.dev.process.readiness/pod (pod-ready? config spec record)
@@ -1336,8 +1319,7 @@
                         (some-> (slurp file) str/trim parse-long))]
         (tcp-ready? (or published
                         (:seon.dev.config/writer-repl-port config))))))
-    :seon.dev.process/host
-    (unix-socket-ready? (host-eval-socket config))
+    :seon.dev.process/host false
     :seon.dev.process/pod
     (boolean (when-let [port (or (get-in config
                                          [:seon.dev.config/launch-descriptor
@@ -1371,8 +1353,7 @@
     (->> [(:seon.dev.config/request-socket config)
           (:seon.dev.config/writer-repl-port-file config)]
          (filterv string?))
-    :seon.dev.process/host
-    (if-let [path (host-eval-socket config)] [path] [])
+    :seon.dev.process/host []
     :seon.dev.process/web-render
     [(web-render-port-file config)]
     :seon.dev.process/pod
@@ -1385,11 +1366,6 @@
     []))
 
 (defn- clear-readiness! [config id]
-  (when (and (= host-id id) (accepting-unmanaged? config id))
-    (throw (ex-info "Refusing to unlink a live host eval socket."
-                    {:seon.dev.process/id id
-                     :seon.dev.process/socket-path
-                     (host-eval-socket config)})))
   (doseq [path (readiness-paths config id)]
     (fs/delete-if-exists path)))
 

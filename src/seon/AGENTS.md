@@ -30,7 +30,7 @@ existing one needs strengthening IN PLACE.
 | Semantic search | `seon.embed` — ONE `:seon/embedding` attr + Proximum index (database server) | a second index or embedder |
 | Token counts | `seon.ai.tokens/estimate` — sizes shown to anyone are TOKENS | printing char counts; a second estimator |
 | LLM calls + retry | providers in `seon.ai.*`; `seon.agent.turn/call-llm!` is the sole retry authority | a parallel retry/backoff path |
-| Code execution | claimant JVMs invoke the one guarded `seon.host` SCI door; the Bun pod may dispatch authored symbols only through `seon.host.session.leaf` | a pod eval engine, self-host compiler state, execution child, or second guarded door |
+| Code execution | the cluster JVM runs `seon.agent.driver` through `seon.sci.eval`; `seon.db.host` binds the co-located database functions | a pod eval engine, retained per-agent SCI contexts, execution child, or second guarded door |
 | Pod process lifecycle | `seon.client/start-runtime!` + `stop-runtime!`; one retained closed launch capability and serialized phase order web/SSE → ticker/hosts → database session → admission/projection → awaited release | mode env flags, a second launcher, or a local database replica |
 | Restore intent | `seon.dev.restore` owns the pure writer-visible immutable plan, digest, and fact-derived next command; script-only `seon.dev.restore-state` owns fsync publication | a mutable phase/status file, ambient launch/config inputs, ancestry-inferred force success, or a writer-private intent shape |
 | Capability fns | `seon.agent.fs` is the template (gating, envelope, paging) | a tool with its own arg/result conventions |
@@ -40,13 +40,13 @@ existing one needs strengthening IN PLACE.
 
 ## Runtime boundaries
 
-- **`.cljs` = the JavaScript pod and disposable Bun package leaves** (HTTP
-  7890); the pod has no eval engine and uses the host-session client only for
-  authored-symbol invocation.
+- **`.clj` = the cluster JVM and web-render JVM.** The cluster JVM owns agent
+  driving, SCI evaluation, and database-bound functions; the web-render JVM
+  owns pure HTTP/SSE derivation.
+- **`.cljs` = the interim JavaScript pod and disposable Bun package leaves.**
+  The pod has no agent eval or authored-symbol IPC path.
 - **`db/*.clj` + `embed.clj`** = the active JVM database/heavy-work authority:
   sole Datahike writer, shared indexed reads, selective interests, and embeddings.
-- The former JVM application was deleted and is preserved only by Git history;
-  do not restore sibling JVM application namespaces.
 - `.cljc` is for genuinely portable schemas and pure mechanics. Promote a file
   only when both active runtime boundaries need the same code.
 
@@ -74,12 +74,6 @@ imperative reflexes, guessed library semantics). Ground first:
   latest ordinary database value. Async computation owners acquire one value
   and pass it through every related read; no caller retains a Datahike
   connection or reconstructs a local replica.
-- Home-ns data/function aliases (`db/`, `plan/`, `message/`, `schema/`) resolve
-  in agent-authored `my.*` namespaces through the JVM host context's retained
-  namespace setup; the source remains stored verbatim in `:seon.ns/source`
-  with its `:seon.ns/require-edges`. NOT auto-aliased: the `my.*` toolkit
-  (`my.ui/…`, `my.data/…`, `my.canvas/…`, `my.kb/…`), the `agent/` alias, and
-  the lifecycle refers (`wait`/`complete`/…) — full-qualify those.
 - Turn capture is live (one `:seon.agent.turn/rendered-tx` ref plus
   prompt/reply blob refs, `seon.agent.debug/turn`/`turn-diff`) and is the ONE capture
   path — the gated `seon.debug` file tree is deleted; Inspect AI and debug

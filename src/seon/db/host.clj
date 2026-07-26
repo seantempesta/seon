@@ -4,7 +4,9 @@
    The leaf owns retained UDS connections, bounded blocking calls, recovery
    sleeps, UUID generation, and ambient invocation access. Portable request
    construction and response interpretation remain in `seon.db`."
-  (:require [seon.db.protocol :as protocol]
+  (:require [seon.db :as db]
+            [seon.db.id :as db.id]
+            [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds]
             [seon.error :as error])
   (:import [java.nio.channels Channels SocketChannel]
@@ -943,3 +945,35 @@
      :seon.db.leaf/listen! #(listen! writer %)
      :seon.db.leaf/unlisten! #(unlisten! writer %)
      :seon.db.leaf/on-commit! (fn [_transaction-report] nil)}))
+
+(def ^:dynamic ^:private *agent-id* nil)
+(def ^:dynamic ^:private *tx-context* nil)
+
+(defn- database-context
+  []
+  {:seon.db.leaf/current-tx-context (fn [] *tx-context*)
+   :seon.db.leaf/current-agent-id (fn [] *agent-id*)
+   :seon.db.leaf/with-read-evidence (fn [f] (f))
+   :seon.db.leaf/record-read-evidence! (fn [_] nil)
+   :seon.db.leaf/with-agent
+   (fn [agent-id f] (binding [*agent-id* agent-id] (f)))
+   :seon.db.leaf/without-agent
+   (fn [f] (binding [*agent-id* nil] (f)))
+   :seon.db.leaf/with-tx-context
+   (fn [context f]
+     (binding [*tx-context* (merge *tx-context* context)] (f)))
+   :seon.db.leaf/install-configuration-context! (fn [_] nil)
+   :seon.db.leaf/schema-projection (constantly nil)
+   :seon.db.leaf/cache-schema-projection! (fn [_] nil)
+   :seon.db.leaf/schema-validation? (constantly true)})
+
+(defn database-functions
+  "Return synchronous database functions bound to this writer session."
+  [writer]
+  (db/bind-leaf (leaf writer database-context)))
+
+(defn allocate!
+  "Allocate generated identities through this writer session."
+  [writer request]
+  (binding [db/*leaf* (leaf writer database-context)]
+    (db.id/allocate! request)))

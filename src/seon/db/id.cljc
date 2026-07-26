@@ -748,7 +748,7 @@
                  (d/datoms db-value :avet identity-attr value))
                (keys policies)))
 
-     (defn- policy-error!
+     (defn- generator-policy-error
        [message error data]
        (throw
         (ex-info message
@@ -763,7 +763,7 @@
                     (some (fn [attr]
                             (when (seq (d/datoms db-after :avet attr)) attr))
                           removed)]
-           (policy-error!
+           (generator-policy-error
             "A generator policy cannot be removed while its identity values exist."
             :seon.db.id.error/generator-policy-removal-in-use
             {::identity-attr identity-attr})))
@@ -775,7 +775,7 @@
                               (when-not (policy-value-valid? generator (:v datom))
                                 datom)))
                           all-datoms)]
-           (policy-error!
+           (generator-policy-error
             "A stored identity value does not match its generator policy."
             :seon.db.id.error/invalid-managed-identity-value
             {::identity-attr (:a datom)
@@ -786,7 +786,7 @@
                             (when (> (count datoms) 1)
                               [value datoms]))
                           (group-by :v all-datoms))]
-           (policy-error!
+           (generator-policy-error
             "A generated identity value exists under more than one managed attribute."
             :seon.db.id.error/cross-attribute-identity-collision
             {::value value
@@ -829,7 +829,7 @@
                  root-genesis? (and (= :seon.agent/id identity-attr)
                                     (= "root" value))]
              (when-not (policy-value-valid? generator value)
-               (policy-error!
+               (generator-policy-error
                 "A generated identity value does not match its stored policy."
                 :seon.db.id.error/invalid-managed-identity-value
                 {::identity-attr identity-attr
@@ -839,14 +839,14 @@
                         (not allocated?)
                         (not preexisting?)
                         (not root-genesis?))
-               (policy-error!
+               (generator-policy-error
                 "A new generated identity must be created through seon.db.id/allocate!."
                 :seon.db.id.error/unallocated-generated-identity
                 {::identity-attr identity-attr
                  ::value value}))
              (let [occurrences (vec (value-occurrences db-after policies value))]
                (when (> (count occurrences) 1)
-                 (policy-error!
+                 (generator-policy-error
                   "A generated identity value collides across managed attributes."
                   :seon.db.id.error/cross-attribute-identity-collision
                   {::value value

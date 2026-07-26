@@ -1229,7 +1229,7 @@
                       (set! db/query original-query)
                       (done)))))))
 
-(deftest operator-processes-contains-no-retired-child-state
+(deftest operator-processes-is-an-empty-projection
   (async done
     (let [handler (deref #'serve/handle-operator-processes!)]
       (-> (js/Promise.resolve (handler nil nil))
@@ -1237,9 +1237,7 @@
                    (is (= 200 (.-status response)))
                    (.json response)))
           (.then (fn [body]
-                   (is (= 0
-                          (.-length
-                           (aget body "seon.host.session/processes"))))))
+                   (is (= 0 (.-length body)))))
           (.catch (fn [error] (is false (str error))))
           (.finally done)))))
 

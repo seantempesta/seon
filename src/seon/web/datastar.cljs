@@ -29,8 +29,6 @@
     [seon.db :as db]
     [seon.db.branch :as db.branch]
     [seon.error :as error]
-    [seon.host.session :as host.session]
-    [seon.host.session.leaf :as host.session.leaf]
     [seon.log :as log]
     [seon.reactive :as reactive]
     [seon.render :as render]
@@ -1101,78 +1099,36 @@
           (and (fn? variadic) (>= arity max-fixed)))
       (= arity (.-length function-value)))))
 
-(defn- ^:async invoke-authored-render!
-  [database agent-id
-   {function-symbol ::render/function-symbol
-    arguments ::render/arguments}]
-  (try
-    (let [result
-          (await
-           (host.session.leaf/invoke-authored!
-            {::host.session.leaf/database database
-             ::host.session.leaf/agent-id agent-id
-             ::host.session.leaf/function-symbol function-symbol
-             ::host.session.leaf/arguments arguments}))]
-      (cond
-        (contains? result :seon.execution/ok?)
-        result
-
-        (= host.session/result-message
-           (:seon.execution/message result))
-        (cond-> {:seon.execution/ok? true
-                 :seon.execution/value
-                 (:seon.execution/result result)}
-          (contains? result ::db/read-evidence)
-          (assoc ::db/read-evidence (::db/read-evidence result)))
-
-        :else
-        {:seon.execution/ok? false
-         :seon.execution/error
-         (or (:seon.execution/error result)
-             {:seon.error/message "The authored agent-view render failed."
-              :seon.error/kind :agent})}))
-    (catch :default exception
-      {:seon.execution/ok? false
-       :seon.execution/error (error/->map exception)})))
-
 (declare invoke-agent-view-calls!)
 
 (defn- ^:async invoke-agent-view-call!
   [database agent-id call]
   (let [function-symbol (:seon.execution/function-symbol call)]
-    (if (error/agent-authored-sym?
-         function-symbol (schema/current-projection))
-      (await
-       (invoke-authored-render!
-        database
-        agent-id
-        {::render/function-symbol function-symbol
-         ::render/arguments (:seon.execution/arguments call)}))
-      (try
-        (if-let [function-value
-                 (or (get render.core/renderer-functions function-symbol)
-                     (render.core/resolve-compiled function-symbol))]
-          (let [base-arguments (:seon.execution/arguments call)
-                arguments
-                (cond-> base-arguments
-                  (and (:seon.execution/invoke-selected? call)
-                       (supports-arity?
-                        function-value (inc (count base-arguments))))
-                  (conj #(invoke-agent-view-calls!
-                          database agent-id %)))
-                value (await (apply function-value arguments))]
-            {:seon.execution/ok? true :seon.execution/value value})
-          {:seon.execution/ok? false
-           :seon.execution/error
-           {:seon.error/message
-            "The selected compiled agent-view function is not loaded."
-            :seon.error/kind :core-bug
-            :seon.error/data
-            {:seon.execution/function-symbol function-symbol}}})
-        (catch :default exception
-          (error/record! {::error/raw exception ::error/fault :core})
-          {:seon.execution/ok? false
-           :seon.execution/error (error/->map exception)})))))
+    (try
+      (if-let [function-value
+               (or (get render.core/renderer-functions function-symbol)
+                   (render.core/resolve-compiled function-symbol))]
+        (let [base-arguments (:seon.execution/arguments call)
+              arguments
+              (cond-> base-arguments
+                (and (:seon.execution/invoke-selected? call)
+                     (supports-arity?
+                      function-value (inc (count base-arguments))))
+                (conj #(invoke-agent-view-calls!
+                        database agent-id %)))
+              value (await (apply function-value arguments))]
+          {:seon.execution/ok? true :seon.execution/value value})
+        {:seon.execution/ok? false
+         :seon.execution/error
+         {:seon.error/message
+          "The selected compiled agent-view function is not loaded."
+          :seon.error/kind :core-bug
+          :seon.error/data
+          {:seon.execution/function-symbol function-symbol}}})
+      (catch :default exception
+        (error/record! {::error/raw exception ::error/fault :core})
+        {:seon.execution/ok? false
+         :seon.execution/error (error/->map exception)}))))
 
 (defn- ^:async invoke-agent-view-calls!
   [database agent-id calls]

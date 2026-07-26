@@ -15,9 +15,7 @@
             [seon.db.transport.uds :as uds]
             [seon.launch :as launch])
   (:import [java.io BufferedReader InputStreamReader]
-           [java.net ServerSocket SocketException StandardProtocolFamily
-            UnixDomainSocketAddress]
-           [java.nio.channels ServerSocketChannel]
+           [java.net ServerSocket SocketException]
            [java.util.concurrent TimeUnit]))
 
 (defn- test-config []
@@ -233,15 +231,17 @@
     (is (= ["clojure" "-J-Xmx4096m" "-M:writer:host" "-m" "seon.host"]
            (subvec (:seon.dev.process/argv host) 0 5)))
     (let [request (edn/read-string (last (:seon.dev.process/argv host)))]
-      (is (= (:seon.dev.config/host-eval-socket configuration)
-             (:seon.host/socket-path request)))
+      (is (= (:seon.dev.config/request-socket configuration)
+             (:seon.db.host/writer-socket-path request)))
+      (is (= "test" (:seon.db.host/database-name request)))
       (is (= 110000
-             (:seon.host/database-pool-wait-timeout-ms request)))
-      (is (= (:seon.dev.artifact/cljs-artifact-inventory manifest)
-             (:seon.execution/artifact-inventories request)))
-      (is (= (::launch/blob-storage-view
-              (:seon.dev.config/launch-descriptor configuration))
-             (:my.blob/storage-view request))))
+             (:seon.db.host/pool-wait-timeout-ms request)))
+      (is (= #{:seon.db.host/writer-socket-path
+               :seon.db.host/database-name
+               :seon.db.host/backend
+               :seon.db.host/database-path
+               :seon.db.host/pool-wait-timeout-ms}
+             (set (keys request)))))
     (is (= [process/watcher-id process/writer-id process/host-id]
            (get-in spec-map [process/pod-id :seon.dev.process/dependencies])))
     (is (= 300000
@@ -499,24 +499,16 @@
       (finally
         (fs/delete-tree directory {:force true})))))
 
-(deftest host-readiness-cleanup-never-unlinks-a-live-listener
+(deftest host-readiness-follows-the-current-lifetime-ready-line
   (let [configuration (test-config)
-        socket-path (str (fs/path "tmp"
-                                  (str "h-" (subs (str (random-uuid)) 0 8)
-                                       ".sock")))
-        configuration (assoc configuration
-                             :seon.dev.config/host-eval-socket socket-path)]
+        log (fs/path (:seon.dev.test/directory configuration) "host.log")
+        record {:seon.dev.process/log (str log)}]
     (try
-      (with-open [server (ServerSocketChannel/open StandardProtocolFamily/UNIX)]
-        (.bind server (UnixDomainSocketAddress/of socket-path))
-        (is (#'process/unix-socket-ready? socket-path))
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                              #"live host eval socket"
-                              (#'process/clear-readiness!
-                               configuration process/host-id)))
-        (is (fs/exists? socket-path)))
+      (spit (str log) "booting\n")
+      (is (not (#'process/host-ready? record)))
+      (spit (str log) "booting\nHOST READY\n")
+      (is (#'process/host-ready? record))
       (finally
-        (fs/delete-if-exists socket-path)
         (fs/delete-tree (:seon.dev.test/directory configuration)
                         {:force true})))))
 
@@ -3812,18 +3804,18 @@
             (edn/read-string
              (last (:seon.dev.process/argv (get specs process/web-render-id))))]
         (is (= "experiment"
-               (:seon.host.context/database-name host-request)))
+               (:seon.db.host/database-name host-request)))
         (is (= :file
-               (:seon.host.context/backend host-request)))
+               (:seon.db.host/backend host-request)))
         (is (= (get-in descriptor
                        [::launch/database
                         :seon.db.protocol/database-path])
-               (:seon.host.context/database-path host-request)))
+               (:seon.db.host/database-path host-request)))
         (is (= "experiment"
                (:seon.web.server/database-name web-request)))
         (is (= (get-in source-descriptor
                        [::launch/writer-owner ::launch/request-socket-path])
-               (:seon.host.context/writer-socket-path host-request)
+               (:seon.db.host/writer-socket-path host-request)
                (:seon.web.server/writer-socket-path web-request))))
       (finally
         (fs/delete-tree directory)))))
