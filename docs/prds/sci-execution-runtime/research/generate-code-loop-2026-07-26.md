@@ -78,12 +78,38 @@ All existing or same-day ruled; the loop invents none of them:
 - **The tool itself** — agent-facing, so `my.*` flat (name TBD when built;
   `seon.ai` is the provider wire, not the home).
 
+## Ruled same evening (owner)
+
+- **Accrete-first.** Accretion is the primary move; adapt only when
+  accretion cannot go further. Question 1 below is RESOLVED: standing
+  policy, not per-change choice.
+- **Refactoring is the same admission at batch scope, not a reverse
+  process.** Two sanctioned moves: (a) accrete + drain — the new contract
+  arrives beside the old WITH its own tests; callers migrate under their
+  owners; the old fn's deletion is derived (graph shows zero callers),
+  never scheduled; old tests die with the old fn. (b) batch update — same
+  name, new contract, every caller and test replaced in ONE change set;
+  admission evaluates the whole set at its post-transaction basis, so an
+  internally consistent batch passes. Tests are never mutated to bless a
+  broken promise; a new contract brings new tests.
+- **Spec-first protocol.** The planner's deliverable is the contract layer:
+  (1) data-model changes, (2) Malli function schemas with `:=>` plus `:fn`
+  RELATIONAL properties (output-as-a-function-of-input — success defined
+  with zero knowledge of internals) plus example tests, generatively
+  checked. Implementation farms to cheap agents (local models) iterating
+  until green; expensive intelligence writes contracts, free intelligence
+  satisfies them. Anti-gaming: properties, not just examples — a hardcoded
+  implementation must survive the generators. Success that is not
+  spec-expressible (prose, UI feel) stays with `src-inspect-ai`, outside
+  the green-loop.
+
 ## Open questions for the owner
 
-1. Accrete-vs-adapt default when the planner hits breakage: planner's
-   choice per change, or a standing policy (e.g. accrete under open
-   lineage, adapt only by consumer consent)?
+1. ~~Accrete-vs-adapt default~~ RESOLVED above: accrete-first standing.
 2. Who arbitrates a consumer that refuses/fails to adapt — root always, or
    the planner up to a budget?
 3. Does a plan lineage get its own budget fact (total turns across all
    owners) in addition to per-owner escalation thresholds?
+4. Local-model implementers: which model rides the free tier first
+   (MLX/DiffusionGemma vs a small hosted row), and is implementer identity
+   a lineage fact so cost attribution is queryable?
