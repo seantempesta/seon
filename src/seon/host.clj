@@ -2,7 +2,6 @@
   "Serve the JVM execution protocol over one Unix-domain socket."
   (:require [clojure.edn :as edn]
             [my.blob.schema]
-            [seon.agent.driver.host :as driver.host]
             [seon.ai.http :as ai.http]
             [seon.capability :as capability]
             [seon.db.branch :as db.branch]
@@ -372,12 +371,7 @@
          "seon-host-acceptor")]
         (.setDaemon acceptor true)
         (.start acceptor)
-        (let [host (assoc host ::acceptor acceptor)]
-          (cond-> host
-            (:my.blob/storage-view request)
-            (assoc ::driver
-                   (driver.host/start!
-                    host (:my.blob/storage-view request))))))
+        (assoc host ::acceptor acceptor))
       (catch Throwable throwable
         (try (.close server) (catch Throwable _ nil))
         (try (delete-dead-socket! socket-path) (catch Throwable _ nil))
@@ -386,9 +380,7 @@
 (defn stop!
   "Stop the host acceptor and release its pools and socket."
   {:malli/schema [:=> [:cat ::host] :nil]}
-  [{::keys [server eval-pool watchdog socket-path writer driver]}]
-  (when-let [stop! (:seon.agent.driver/stop! driver)]
-    (stop!))
+  [{::keys [server eval-pool watchdog socket-path writer]}]
   (try (.close ^ServerSocketChannel server) (catch Throwable _))
   (.shutdownNow ^ExecutorService eval-pool)
   (.shutdownNow ^ScheduledExecutorService watchdog)
