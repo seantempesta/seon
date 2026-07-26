@@ -57,7 +57,7 @@
  ;; promote them to full. It does NOT drive render selection: the namespaces
  ;; block alone selects current/full/compact/test detail.
  :seon.config/namespaces
- {:seon.config/always     [my.kb my.data my.ui my.canvas seon.render.canvas
+ {:seon.config/always     [my.kb my.ui my.canvas seon.render.canvas
                            my.plan seon.agent.message seon.agent.lifecycle]}
 
  ;; ── RUN RESOURCE POLICY — safety ceilings, queryable as singleton datoms.
@@ -506,15 +506,10 @@
    [seon.schema :as schema]
    [seon.db :as db]
    [my.kb :as kb]
-   [my.data :as data]
    [my.ui :as ui]
    [my.canvas :as canvas]
    [my.blob :as blob]
-   [my.ns :as ns]
    [my.skills :as skills]
-   [seon.agent.search :as search]
-   [seon.agent.fs :as fs]
-   [seon.agent.shell :as shell]
    [seon.agent.web :as web]]}
 
  ;; ── CONTEXT RENDER PROFILES (repl-autosuggest A1) — named curated-subset
@@ -571,7 +566,7 @@
  ;; (bare `[ns]` is rejected by `seon.agent.home/require-spec`).
  :seon.config/root-context
  {:seon.eval/home-requires
-  [[seon.agent :refer [start! delegate! set-purpose! set-namespace!]]]
+  []
   :seon.agent/ctx
   [{:seon.agent.ctx/name :root-role
     :seon.agent.ctx/priority 15

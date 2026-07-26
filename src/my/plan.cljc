@@ -10,7 +10,7 @@
     [clojure.string :as str]
     [my.plan.generation :as generation]
     [my.plan.internal :as internal]
-    [seon.agent]   ; load-order: request schemas reference :seon.agent/id
+    [seon.agent.core]   ; load-order: request schemas reference :seon.agent/id
     [seon.agent.home :as home]
     [seon.agent.message :as message]
     [seon.db :as db]
