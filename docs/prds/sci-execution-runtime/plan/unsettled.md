@@ -108,10 +108,15 @@ shared resources and take down every cluster.
   `clojure.core`, `clojure.string`, and five `seon.agent.lifecycle` vars. No db,
   blob, fs, shell, web, messaging or LLM. Every demo, every load test and every
   proof of the design flows through the door that does not exist yet.
-- **Nothing verifies the JVM.** `bin/test-writer` discovers **0 tests** — it
-  needs the compiled artifact, so it needs a `bin/seon up`/`down` freeze. Every
-  claim about today's tree, including in this file, rests on targeted evaluation
-  rather than a suite.
+- **Nothing verifies the JVM** *(freeze run 2026-07-26; see [state.md](state.md)
+  §8 for the current count)*. `bin/test-writer` needs the compiled artifact. The
+  freeze rebuilt it and **`writer` and `host` both reached ready** — live proof
+  that the 58-line replacement `seon.host` main boots, which closes one of the
+  owed proofs. The **pod** failed readiness on a release-digest mismatch
+  (`this cluster was applied at release 596b6c1d; this artifact is dbdb10f7`,
+  remedy `bin/seon cluster apply default`), which is expected: the pod is on the
+  deletion list and the startgate is doing its job. Re-run `bin/plan-state` for
+  the suite count rather than trusting this bullet.
 - **The wire is still on the agent path.** `seon.db.host/writer-session` opens a
   UDS session to a separate `writer` process, so every agent read and write
   crosses a socket — measured at 6-7 writer round-trips for one form containing
