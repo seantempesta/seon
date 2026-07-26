@@ -13,7 +13,6 @@
    [my.ui]
    [seon.agent.ctx :as ctx]
    [seon.agent.ctx.canvas :as ctx-canvas]
-   [seon.agent.message :as message]
    [seon.agent.home :as home]
    [seon.config :as config]
    [seon.db :as db]
@@ -187,14 +186,11 @@
   {:seon.execution/function-symbol renderer
    :seon.execution/invoke-selected? true
    :seon.execution/arguments
-   [(cond-> {:seon.agent/id id
-             :seon.agent/entity entity
-             :seon.config/configuration configuration
-             ::db/db database
-             :seon.render/node block}
-      (contains? block :seon.render.chat/last-reply)
-      (assoc :seon.render.chat/last-reply
-             (:seon.render.chat/last-reply block)))]})
+   [{:seon.agent/id id
+     :seon.agent/entity entity
+     :seon.config/configuration configuration
+     ::db/db database
+     :seon.render/node block}]})
 
 (defn- page-state [entity]
   (let [run (:seon.agent/run entity)
@@ -249,52 +245,24 @@
                 (:seon.render.canvas/wired canvas-acquisition)
                 canvas-value
                 (:seon.render.canvas/value canvas-wired)
-                recent-messages
-                (when (= canvas/welcome-sym canvas-value)
-                  (await
-                   (message/recent
-                    {::db/db database
-                     :seon.agent/id id
-                     :seon.agent.message/recent-limit 50})))]
-            (if (:seon.error/message recent-messages)
-              recent-messages
-              (let [last-reply
-                    (when (vector? recent-messages)
-                      (some->> recent-messages
-                               (filter
-                                (fn [recent-message]
-                                  (and
-                                   (= id
-                                      (get-in
-                                       recent-message
-                                       [:seon.agent.message/from
-                                        :seon.agent/id]))
-                                   (some
-                                    :seon.user/id
-                                    (:seon.agent.message/to recent-message)))))
-                               last
-                               :seon.agent.message/content))
-                    blocks
-                    (->> (ctx/selected-agent-blocks entity nil)
-                         (keep
-                          (fn [block]
-                            (when-let [renderer
-                                       (html-slot
-                                        (:seon.render/html block))]
-                              (assoc block :seon.render/html renderer))))
-                         vec)
-                    canvas-block
-                    (cond->
-                     {:seon.agent.ctx/name :canvas
-                      :seon.render.surface/selection "canvas"
-                      :seon.render.surface/label "canvas"
-                      :seon.render/html canvas-value
-                      :seon.fn/read-attrs
-                      (:seon.fn/read-attrs canvas-acquisition)
-                      :seon.agent/entity
-                      (:seon.render/entity canvas-acquisition)}
-                      (some? last-reply)
-                      (assoc :seon.render.chat/last-reply last-reply))
+                blocks
+                (->> (ctx/selected-agent-blocks entity nil)
+                     (keep
+                      (fn [block]
+                        (when-let [renderer
+                                   (html-slot
+                                    (:seon.render/html block))]
+                          (assoc block :seon.render/html renderer))))
+                     vec)
+                canvas-block
+                {:seon.agent.ctx/name :canvas
+                 :seon.render.surface/selection "canvas"
+                 :seon.render.surface/label "canvas"
+                 :seon.render/html canvas-value
+                 :seon.fn/read-attrs
+                 (:seon.fn/read-attrs canvas-acquisition)
+                 :seon.agent/entity
+                 (:seon.render/entity canvas-acquisition)}
                     all-blocks (conj blocks canvas-block)
                     targets
                     (->> all-blocks
@@ -367,4 +335,4 @@
                    :seon.ui.header/running-count
                    (if (= :running state) 1 0)}}
                   remote-read-evidence
-                  (assoc ::db/read-evidence remote-read-evidence))))))))))
+                  (assoc ::db/read-evidence remote-read-evidence))))))))
