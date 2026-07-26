@@ -26,7 +26,17 @@ a lane holds); fold into the B2 contract at authoring.
 **2026-07-26 s3 close — the nucleus era.** README's session-3 rulings and
 the nucleus ladder (R0/B0-B3/N2-N6) supersede everything below that
 contradicts them; rows below predate the pivot and survive only as
-evidence pointers. UNBUILT right now, in order: **R0** — the atomic
+evidence pointers. **N2 IS GREEN** (verified 2026-07-26 s3 close: 7 tests / 24 assertions /
+0 failures / 0 errors via the nucleus loop command; implementation
+`d30a405f9`, contract revisions `1b03d80bb`+`a370b5e31`). The
+construction loop is PROVEN: three friction cycles, every stop
+legitimate, no schema or test weakened. First rung metrics: 1 namespace,
+17 registered attributes, 8 pure functions, ~330 nucleus source lines.
+Non-blocking friction on record: claim-tx's two observed takeover fields
+are independently optional but required together — tighten to one
+optional takeover map at the next contract revision, not before.
+
+UNBUILT right now, in order: **R0** — the atomic
 `src/`→`src-old/` split (orchestrator executes at the next lane-quiet
 point; the src-split-audit lane's inventory is the prerequisite); **B0+B1
 contract packages** (launch signature `bin/seon start [cluster]
