@@ -6,9 +6,9 @@ tags: [prd, agent, architecture]
 
 # Sci execution-runtime chunk runbook
 
-Read order for ANY implementer: **`roadmap.md` → "THE ONE ORDERED LEDGER"
-FIRST**, and take the earliest row whose `state` is `open`. That section is
-the **only** ordering in this chunk (owner ruling O17, 2026-07-26). Then the
+Read order for ANY implementer: **`roadmap.md` → "THE PLAN" FIRST**, and take the
+earliest step not yet done. That section is the **only** ordering in this chunk
+(owner ruling O17, 2026-07-26); a second ordered list anywhere here is a defect. Then the
 research doc(s) the row cites, then the SOURCE it names. Do not re-research
 settled designs; execute them.
 
@@ -17,10 +17,10 @@ in five naming schemes, which is why "follow the plan" had no referent. They are
 DELETED — git is the archive. `design.md` is still the architecture and nothing
 contradicts it, but it does not sequence work.
 
-**A row not re-verified since the last cut is a hypothesis, not work.** Every
-row carries a `verified` date; re-grep its evidence before you start, because a
-deletion elsewhere may already have discharged it — one cut discharged five
-rows on 2026-07-26. A deviation needs evidence and lands in the PRD with your
+**A step whose evidence is not re-grepped since the last cut is a hypothesis,
+not work.** Re-grep before you start: a deletion elsewhere may already have
+discharged it — one cut discharged five on 2026-07-26, and a step carried stale
+evidence within a day. A deviation needs evidence and lands in the PRD with your
 commit (see U2's receipt deviation as the model: it found an existing
 owner and deleted spec instead of building it — that is the bar).
 
