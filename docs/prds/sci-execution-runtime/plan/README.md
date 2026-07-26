@@ -454,6 +454,18 @@ way or the rung is not done:
    both numbers at each rung. A rung that grew the total without
    retiring old surface explains itself or is rejected.
 
+**Expect to shed, not to port (owner, s3 close).** Tight integration
+plus resilience-by-construction should make most old machinery
+unnecessary — the port manifest's default verdict is `dead`, and a rung
+that ports more than it sheds is suspect. The error mentality is R41,
+unchanged and load-bearing at every rung: **fail loud and hard in dev**
+(a violated invariant panics at the owning transition, immediately);
+**never fail in production** (the same event records one bounded core
+fault and degrades on the configured dial); **agents always get proper
+errors** (every agent-facing failure is a flat `:seon.error` value with
+a message that steers — never a throw, never a swallow, never a stack
+trace as prose). One config dial decides dev/prod; no per-site judgment.
+
 **Boot-order construction (owner directive, 2026-07-26 s3 late).** This is
 a deliberate ground-up rewrite: build in the order things RUN, make each
 rung solid before the next, and rule every ported piece explicitly. Each
