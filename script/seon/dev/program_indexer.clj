@@ -88,12 +88,12 @@
      :seon.dev.program-indexer/source source
      :seon.dev.program-indexer/namespace-info info}))
 
-(defn- production-namespace-closure [descriptions]
+(defn- namespace-closure [descriptions roots]
   (let [by-namespace
         (into {}
               (map (juxt :seon.dev.program-indexer/namespace identity))
               descriptions)]
-    (loop [pending (seq production-roots)
+    (loop [pending (seq roots)
            selected #{}]
       (if-let [namespace (first pending)]
         (if (contains? selected namespace)
@@ -115,6 +115,37 @@
               (recur (concat required (next pending))
                      (conj selected namespace)))))
         selected))))
+
+(defn- schema-attribute-owner-namespaces [descriptions]
+  (let [first-party-namespaces
+        (into #{}
+              (map :seon.dev.program-indexer/namespace)
+              descriptions)]
+    (into #{}
+          (keep
+           (fn [attribute]
+             (let [owner (some-> attribute namespace symbol)]
+               (when (contains? first-party-namespaces owner)
+                 owner))))
+          (schema/canonical-database-attributes))))
+
+(defn- production-namespace-closure
+  "Compute the source and schema-owner closure that produces program rows.
+
+   Entity schemas can reference an attribute owned by a namespace they do not
+   require: the attribute keyword is data. Load those owners, then repeat
+   because their schemas can reveal further attribute owners. The final fixed
+   point is also the exact namespace closure indexed into program rows."
+  [descriptions]
+  (loop [roots (set production-roots)]
+    (doseq [namespace (sort-by str roots)]
+      (require namespace))
+    (let [owner-namespaces
+          (schema-attribute-owner-namespaces descriptions)
+          next-roots (into roots owner-namespaces)]
+      (if (= roots next-roots)
+        (namespace-closure descriptions roots)
+        (recur next-roots)))))
 
 (defn- reduce-forms
   "Reduce source one reader form at a time.
@@ -447,8 +478,6 @@
   "Index the surviving JVM program and return all four artifact values."
   [{:seon.dev.program-indexer/keys
     [root config-manifest-digest page-rows]}]
-  (doseq [namespace production-roots]
-    (require namespace))
   (let [descriptions (mapv #(source-description root %) (source-files root))
         selected-namespaces (production-namespace-closure descriptions)
         selected

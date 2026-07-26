@@ -2,17 +2,37 @@
   "Properties over the source-current program graph emitted by the JVM indexer."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
+            [clojure.set :as set]
             [clojure.test :refer [deftest is]]
             [seon.program.edge :as edge]))
 
-(defn- emitted-function-rows []
+(defn- emitted-artifact [manifest-key]
   (let [manifest-path (System/getenv "SEON_WRITER_ARTIFACT_MANIFEST")
         manifest (edn/read-string (slurp manifest-path))
         checkout (System/getProperty "user.dir")
         row-path (io/file checkout
-                          (:seon.dev.artifact/program-row-path manifest))]
-    (:seon.dev.artifact/program-rows
-     (edn/read-string (slurp row-path)))))
+                          (get manifest manifest-key))]
+    (edn/read-string (slurp row-path))))
+
+(defn- emitted-function-rows []
+  (:seon.dev.artifact/program-rows
+   (emitted-artifact :seon.dev.artifact/program-row-path)))
+
+(defn- emitted-pages []
+  (get-in
+   (emitted-artifact :seon.dev.artifact/page-plan-path)
+   [:seon.dev.artifact/page-plan :seon.db/initialization-pages]))
+
+(defn- transaction-attributes [row]
+  (cond
+    (map? row)
+    (disj (set (keys row)) :db/id)
+
+    (and (vector? row) (keyword? (second row)))
+    #{(second row)}
+
+    :else
+    #{}))
 
 (defn- pure-call-graph? [root bundles]
   (loop [pending (list root)
@@ -52,3 +72,24 @@
         "the emitted graph retains the guarded transaction capability edge")
     (is (false? (pure-call-graph? root bundles))
         "a graph that reaches that capability is never classified pure")))
+
+(deftest every-emitted-page-attribute-has-a-canonical-schema-form
+  (let [pages (emitted-pages)
+        canonical-schema-keys
+        (into #{}
+              (keep :seon.schema/key)
+              (mapcat :seon.db/program pages))
+        referenced-attributes
+        (into #{}
+              (concat
+               (mapcat :seon.db/attributes pages)
+               (mapcat transaction-attributes
+                       (mapcat :seon.db/program pages))
+               (mapcat transaction-attributes
+                       (mapcat :seon.db/initial-data pages))))
+        missing
+        (set/difference referenced-attributes canonical-schema-keys)]
+    (is (empty? missing)
+        (str "Every attribute referenced by emitted page transaction data "
+             "must have a canonical schema form in the same pages; missing "
+             (pr-str (vec (sort missing)))))))
