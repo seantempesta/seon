@@ -831,6 +831,43 @@ one up. Already filed as
 `docs/seon/issues/namespace-addressed-resident-agents.md` — that note is now
 owner-ruled, not a proposal.
 
+## Owner rulings — 2026-07-25 night, second batch
+
+**O5. `:seon.agent.run/process` replaces `claimant`.** Ratified. Grounded both
+sides: `script/seon/dev/process.clj` ↔ JDK `ProcessHandle`.
+
+**O6. Sharing is AUTOMATIC, and the bar for now is a valid schema.** A function
+becomes available to every agent when it is a valid function with a
+`:malli/schema`. Nothing explicit interns it. The bar RATCHETS later — has at
+least one unit test, has been generatively tested against its schema — but
+those are added as further *attributes to filter on*, never as a second
+mechanism. What agents see is a query over those attributes.
+
+**O7. ONE messaging system, namespace-addressed, replacing the old one.** The
+flow-shaped, database-fact, namespace-addressed messaging supersedes the
+existing paths — it is not a second system beside them. Consolidate rather than
+add.
+
+**O8. Root and the owner can write into any namespace**, regardless of who is
+resident.
+
+**O9. CLUSTERS ARE CHEAP AND DISPOSABLE.** Run different agents on different
+clusters, reset any of them at any time. **NO DATA MIGRATIONS, ever.** Lanes may
+cycle a cluster freely for tests that need the artifact. This also makes
+load-testing safe: drive a throwaway cluster to destruction.
+
+**O10. Packages are scheduled AFTER the JVM system is solid** — after the new
+flow, the new messaging, and agents doing real work safely. The
+package-runtimes research is deferred, not cancelled.
+
+**O11. Implementation goes to sol lanes; Fable for design review only**, used
+sparingly.
+
+**Prototype disposition:** `src-flow-prototype/` stays outside `src/` because
+it does not compile against the real system, and it is **deleted, not merged,**
+when the real implementation lands. Its attack suite graduates to tests. Two
+implementations of one mechanism is the smell the rules ban.
+
 ## Vocabulary — RATIFIED by the owner, 2026-07-25
 
 Owner ruling 2026-07-25: invented language is the loudest complaint. Where SCI,
