@@ -2,7 +2,6 @@
   (:require
    [cljs.test :refer [async deftest is testing]]
    [seon.agent :as agent]
-   [seon.agent.lifecycle :as lifecycle]
    [seon.client :as client]
    [seon.db :as db]))
 
@@ -47,52 +46,6 @@
 (defn- detach-advertisement!
   []
   ((deref #'client/detach-runtime-advertisement!)))
-
-(deftest committed-agent-facts-resume-one-pod-runtime
-  (async done
-    (let [original-query db/query
-          original-resume lifecycle/resume!
-          reconcile! (deref #'client/reconcile-agent-runtimes!)
-          database {:t 7}
-          queries (atom [])
-          resumed (atom [])]
-      (set! db/query
-            (fn [request]
-              (swap! queries conj request)
-              (js/Promise.resolve
-               (cond
-                 (= (::db/query request)
-                    (deref #'client/agent-ids-for-entities-query)) ["child"]
-                 (= (::db/query request)
-                    (deref #'client/agent-ids-for-runs-query)) ["child"]
-                 :else []))))
-      (set! lifecycle/resume!
-            (fn [request]
-              (swap! resumed conj request)
-              (js/Promise.resolve
-               {:seon.agent/id (:seon.agent/id request)
-                :seon.agent.lifecycle/resumed? true})))
-      (-> (js/Promise.resolve nil)
-          (.then
-           (fn [_]
-             (reconcile!
-              {:db-after database
-               :tx-data [[101 :seon.agent/id "child" 7 true]
-                         [202 :seon.agent.run/paused-at nil 7 false]]})))
-          (.then
-           (fn [ids]
-             (is (= ["child"] ids))
-             (is (= [{:seon.agent/id "child"}] @resumed))
-             (is (= 2 (count @queries)))
-             (is (every? #(identical? database (::db/db %)) @queries))))
-          (.catch
-           (fn [error]
-             (is false (str "runtime fact reaction rejected: " error))))
-          (.finally
-           (fn []
-             (set! db/query original-query)
-             (set! lifecycle/resume! original-resume)
-             (done)))))))
 
 (deftest advertisement-attaches-once-and-follows-native-database-events
   (async done
@@ -139,8 +92,7 @@
                (is (= 1 (count @requests)))
                (is (= [{::db/a :seon.agent/id}
                        {::db/a :seon.agent/terminated-at}
-                       {::db/a :seon.agent.lifecycle/wake?}
-                       {::db/a :seon.agent.run/paused-at}]
+                       {::db/a :seon.agent.lifecycle/wake?}]
                       (::db/datom-patterns (first @requests))))
                (is (not (contains? (first @requests) ::db/query)))
                (reset! latest (with-meta database-1 {:decoded-copy true}))

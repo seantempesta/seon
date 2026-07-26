@@ -16,9 +16,8 @@
      ;; pivot into the running CLJS runtime:
      (shadow.cljs.devtools.api/nrepl-select :client)
 
-     ;; To cold-start with the deterministic stub:
-     (seon.client/start-runtime!
-       {:seon.client/llm-fn seon.ai.dispatch/stub})
+     ;; To cold-start:
+     (seon.client/start-runtime! {})
 
      ;; Then message it (from defaults to the calling scope; the
      ;; HTTP /chat adapter stamps from = the user ref explicitly):
@@ -52,7 +51,6 @@
     ;; trigger (seon.agent does NOT, to stay acyclic).
     [seon.agent.loop :as agent-loop]
     ;; The run lifecycle — the bootstrap turn-0 opens a run for its turn.
-    [seon.agent.run :as agent-run]
     ;; Cron-as-data — required so its `:seon.agent.schedule/*` register! calls
     ;; run before `agent-bootstrap-attrs` installs them, and so the ticker's
     ;; `fire-due-schedules!` is in the build.
@@ -385,72 +383,12 @@
 (def ^:private runtime-agent-datom-patterns
   [{::db/a :seon.agent/id}
    {::db/a :seon.agent/terminated-at}
-   {::db/a :seon.agent.lifecycle/wake?}
-   {::db/a :seon.agent.run/paused-at}])
-
-(def ^:private agent-ids-for-entities-query
-  '[:find [?id ...]
-    :in $ [?entity ...]
-    :where [?entity :seon.agent/id ?id]])
-
-(def ^:private agent-ids-for-runs-query
-  '[:find [?id ...]
-    :in $ [?run ...]
-    :where
-    [?agent :seon.agent/run ?run]
-    [?agent :seon.agent/id ?id]])
-
-(defn- event-entity-ids
-  [tx-data attributes]
-  (into []
-        (comp (filter (fn [[_ attribute]] (contains? attributes attribute)))
-              (map first)
-              (distinct))
-        tx-data))
-
-(defn- ^:async reconcile-agent-runtimes!
-  "Apply committed agent lifecycle facts to the pod's process-local runtimes."
-  [{database :db-after tx-data :tx-data}]
-  (when database
-    (let [agent-entities
-          (event-entity-ids
-           tx-data
-           #{:seon.agent/id :seon.agent/terminated-at
-             :seon.agent.lifecycle/wake?})
-          run-entities
-          (event-entity-ids tx-data #{:seon.agent.run/paused-at})
-          direct-ids
-          (if (seq agent-entities)
-            (await
-             (db/query
-              {::db/db database
-               ::db/query agent-ids-for-entities-query
-               ::db/args [agent-entities]}))
-            [])
-          run-ids
-          (if (seq run-entities)
-            (await
-             (db/query
-              {::db/db database
-               ::db/query agent-ids-for-runs-query
-               ::db/args [run-entities]}))
-            [])
-          failure
-          (some #(when (:seon.error/message %) %) [direct-ids run-ids])]
-      (if failure
-        (throw (ex-info "Agent runtime projection failed." failure))
-        (let [ids (into [] (comp cat (distinct)) [direct-ids run-ids])]
-          (doseq [id ids]
-            (await (lifecycle/resume! {:seon.agent/id id})))
-          ids)))))
+   {::db/a :seon.agent.lifecycle/wake?}])
 
 (defn- runtime-advertisement-event!
   [owner event]
   (when-let [database (:db-after event)]
-    (-> (js/Promise.all
-         #js [(refresh-runtime-advertisement! owner database)
-              (reconcile-agent-runtimes! event)])
-        (.then (fn [results] (aget results 0)))
+    (-> (refresh-runtime-advertisement! owner database)
         (.catch
          (fn [error]
            (log/error-console! "seon.client"
@@ -567,7 +505,7 @@
   (log/info-console! "seon.client" "reloading…")
   (stop-heartbeat!))
 
-(declare open-database-session! rehost-agent-runtimes!)
+(declare open-database-session!)
 
 (defn- instrumentation-summary
   "Drop per-function inventories from instrumentation status logs."
@@ -688,12 +626,24 @@
                           ;; program is one verified generation. Web feeds
                           ;; re-arm lazily.
                           (if (autonomous-runtime?)
-                            (do
-                              (await (rehost-agent-runtimes!))
+                            (let [database (await (db/db))
+                                  restored
+                                  (if (:seon.error/message database)
+                                    database
+                                    (await
+                                     (generate-code/restore-root-schedulers!
+                                      {::db/db database
+                                       :seon.config/model-variant
+                                       :execution})))]
+                              (when (:seon.error/message restored)
+                                (throw
+                                 (ex-info
+                                  "Reload scheduler restoration failed."
+                                  restored)))
                               (agent-loop/install-ticker! configuration))
                             (do
                               (agent-loop/uninstall-ticker!)
-                              (lifecycle/unhost-all!)))
+                              (agent-loop/uninstall-all-wake-triggers!)))
                           (start-heartbeat!))))
                      (.catch
                       (fn [publication-error]
@@ -716,10 +666,9 @@
 ;; ---------------------------------------------------------------------------
 ;; Cluster runtime
 ;;
-;; start-runtime! opens the authority session, installs the database schema,
-;; and resumes the durable agents.
+;; start-runtime! opens the authority session and installs the database schema.
 ;; Repeated calls consult that one open database session and return status without
-;; repeating cold work; hot reload reconstructs only process-local runtimes.
+;; repeating cold work; hot reload refreshes only shared runtime services.
 ;; ---------------------------------------------------------------------------
 
 ;; Datahike-side schema. Datahike requires every attribute have a
@@ -1729,65 +1678,6 @@
        :seon.db.initialization/fingerprint
        (:seon.db.initialization/fingerprint artifact)})))
 
-(schema/register! ::llm-fn        'fn?)
-(defn ^:async ^:private rehost-agent-runtimes!
-  "Reconstruct every nonterminated agent after a code reload.
-
-   This is process-local work only: [[seon.agent.lifecycle/resume!]] per
-   database-derived id. Each agent's execution child reconstructs its accepted
-   program lazily; the pod owns no compiler or program replay."
-  []
-  (if (db/attached?)
-    (let [ids (await (acquire-resumable-agent-ids!))
-          _ (when (:seon.error/message ids)
-              (throw (ex-info "reload: agent acquisition failed" ids)))
-          !results (volatile! [])
-          _ (doseq [id ids]
-              (vswap! !results conj
-                      (await
-                       (lifecycle/resume!
-                        {:seon.agent/id id}))))
-          results @!results
-          failed
-          (some #(when (false? (:seon.agent.lifecycle/resumed? %)) %) results)
-          superseded?
-          (and failed
-               (= :seon.runtime/unavailable
-                  (get-in failed [:seon/error :seon.error/kind]))
-               (not (admission/available?)))]
-      (if superseded?
-        ;; Admission closed mid-rehost: a newer publication began (or a fault
-        ;; owner already recorded its occurrence). The newest publication's
-        ;; own :build-complete rehosts every agent, so this pass simply ends.
-        (do
-          (log/info-console!
-           "seon.client"
-           "reload: rehost superseded by a newer publication"
-           {:seon.agent/id (:seon.agent/id failed)
-            ::admission/state (admission/state)})
-          [])
-        (do
-          (when failed
-            (throw (ex-info "reload: agent runtime rehost failed" failed)))
-          (let [database (await (db/db))
-                restored
-                (if (:seon.error/message database)
-                  database
-                  (await
-                   (generate-code/restore-root-schedulers!
-                    {::db/db database
-                     :seon.config/model-variant :execution})))]
-            (when (:seon.error/message restored)
-              (throw
-               (ex-info "reload: generated-code scheduler restore failed"
-                        restored)))
-            (log/info-console! "seon.client"
-                               "reload: agent runtimes rehosted"
-                               {:seon.client/reinstalled ids
-                                :seon.ai.generate-code/restored-roots restored})
-            ids))))
-    []))
-
 (defn- desired-identity-attrs
   "Registered entity identity attrs present in the desired population."
   [desired]
@@ -1874,7 +1764,6 @@
 
 (schema/register! ::start-runtime-request
   [:map {:closed true}
-   [::llm-fn {:optional true} ::llm-fn]
    [::launch-capability {:optional true} ::launch-capability]])
 (schema/register! ::resumed-ids [:vector :seon.agent/id])
 (schema/register! ::created-ids [:vector :seon.agent/id])
@@ -2271,14 +2160,13 @@
 
    The cold transition attaches the database, reconciles boot-managed facts,
    publishes instrumentation from the accepted graph, performs crash recovery,
-   resumes every nonterminated durable agent, and
-   starts shared HTTP/debug/ticker machinery. Agent birth is not a mode of this
+   and starts shared HTTP/debug/ticker machinery. Agent birth is not a mode of this
    function; warm callers use [[seon.agent/start!]]. A repeated attached call
    validates the retained capability, reads resumable ids, and idempotently
    reattaches the web surface. It never re-enters replay, publication,
    boot writes, or agent hosting."
   {:malli/schema [:=> [:cat ::start-runtime-request] :any]}
-  [{::keys [llm-fn launch-capability]}]
+  [{::keys [launch-capability]}]
   (let [capability (or launch-capability default-launch-capability)
         _ (claim-launch-capability! capability)
         autonomous? (true? (::autonomous? capability))
@@ -2424,26 +2312,6 @@
                    (str "instrumentation: "
                         (pr-str
                          (instrumentation-summary instrument-stats))))
-                results
-                (if autonomous?
-                  (let [!results (volatile! [])]
-                    (doseq [id resumable-ids]
-                      (vswap! !results conj
-                              (await
-                               (lifecycle/resume!
-                                (cond->
-                                  {:seon.agent/id id}
-                                  (fn? llm-fn)
-                                  (assoc :seon.agent.lifecycle/llm-fn llm-fn))))))
-                    @!results)
-                  [])
-                _ (when-let [failed
-                             (some #(when (false?
-                                            (:seon.agent.lifecycle/resumed? %))
-                                      %)
-                                   results)]
-                    (throw (ex-info "start-runtime!: agent resume failed"
-                                    failed)))
                 scheduler-database (when autonomous? (await (db/db)))
                 restored-roots
                 (when autonomous?
@@ -2458,8 +2326,6 @@
                      (ex-info
                       "start-runtime!: generated-code scheduler restore failed"
                       restored-roots)))
-                hosted (or (some #(when (= primary (:seon.agent/id %)) %) results)
-                           (first results))
                 {:seon.web/keys [port port-file]}
                 (await
                  (if restore-startup
@@ -2479,14 +2345,12 @@
                                 :created created-ids
                                 :port port
                                 :port-file port-file})
-            (cond-> {:seon.agent/id primary
-                     ::autonomous? autonomous?
-                     :seon.client/resumed-ids resumable-ids
-                     :seon.client/created-ids created-ids
-                     :seon.web/port port
-                     :seon.web/port-file port-file}
-              (:seon.agent/ns hosted)
-              (assoc :seon.agent/ns (:seon.agent/ns hosted)))))))))
+            {:seon.agent/id primary
+             ::autonomous? autonomous?
+             :seon.client/resumed-ids resumable-ids
+             :seon.client/created-ids created-ids
+             :seon.web/port port
+             :seon.web/port-file port-file}))))))
 
 (defn ^:async start-runtime!
   "Launch one runtime or refresh its proven running status.
@@ -2534,142 +2398,10 @@
   [:or
    [:map {:closed true}
     [::stopped? [:= true]]
-    [::lifecycle/unhosted-ids ::lifecycle/unhosted-ids]]
+    [::lifecycle/unhosted-ids [:vector :seon.agent/id]]]
    [:map {:closed true}
     [::stopped? [:= false]]
     [::stop-error ::stop-error]]])
-
-(defn- next-quiescence-observation!
-  "Yield once before re-reading durable run and turn facts."
-  []
-  (js/Promise. (fn [resolve _reject] (js/setTimeout resolve 10))))
-
-(defn- quiescence-deadline
-  "Deadline for the existing bounded-turn lifecycle to finish settling."
-  []
-  (+ (.now js/Date) (config/turn-timeout-ms)))
-
-(defn- ^:async settled-turns!
-  "Partition observed turn ids by terminal status at one database value."
-  [database turn-ids]
-  (let [turn-ids (vec (sort turn-ids))
-        rows
-        (if (seq turn-ids)
-          (await
-           (db/pull-many
-            {::db/db database
-             ::db/pull-pattern
-             [:seon.agent.turn/id :seon.agent.turn/status]
-             ::db/refs
-             (mapv (fn [turn-id]
-                     [:seon.agent.turn/id turn-id])
-                   turn-ids)}))
-          [])]
-    (when (:seon.error/message rows)
-      (throw (ex-info "Terminal turn acquisition failed."
-                      {:seon.error/ex-data rows
-                       :seon.error/kind :core-bug})))
-    (when-not (= (count turn-ids) (count rows))
-      (throw
-       (ex-info "Terminal turn acquisition lost input alignment."
-                {:seon.agent.turn/ids turn-ids
-                 :seon.agent.turn/values rows
-                 ::db/db database
-                 :seon.error/kind :core-bug})))
-    (reduce
-     (fn [result [turn-id row]]
-       (case (:seon.agent.turn/status row)
-         :done (update result ::completed-turn-ids conj turn-id)
-         :error (update result ::errored-turn-ids conj turn-id)
-         (throw
-          (ex-info "A drained turn has no terminal durable status."
-                   {:seon.agent.turn/id turn-id
-                    :seon.agent.turn/value row
-                    ::db/db database}))))
-     {::completed-turn-ids [] ::errored-turn-ids []}
-     (map vector turn-ids rows))))
-
-(defn ^:async ^:private close-quiescent-runs!
-  "Close the supplied pointer-owned runs and retain their results."
-  [current-runs]
-  (await
-   (loop [remaining current-runs
-          results []]
-     (if-let [{run-id :seon.agent.run/id
-               claim-epoch :seon.agent.run/claim-epoch} (first remaining)]
-       (let [result
-             (await
-              (agent-run/close-run!
-               {:seon.agent.run/id run-id
-                :seon.agent.run/claim-epoch claim-epoch
-                :seon.agent.run/closed-reason :quiesced}))]
-         (recur (next remaining) (conj results [run-id result])))
-       results))))
-
-(defn ^:async ^:private drain-agent-work!
-  "Close idle current runs and wait for every running turn bracket."
-  [deadline]
-  (await
-   (loop [quiesced-run-ids #{}
-          observed-turn-ids #{}]
-     (let [work (await (agent-run/quiescence-work!))
-           _ (when (:seon.error/message work)
-               (throw
-                (ex-info "Planned quiesce could not acquire current work."
-                         {:seon.error/ex-data work
-                          :seon.error/kind :core-bug})))
-           current-runs (::agent-run/current-runs work)
-           running-turns (::agent-run/running-turns work)
-           running-run-ids (into #{} (map :seon.agent.run/id) running-turns)
-           closable (remove #(contains? running-run-ids
-                                        (:seon.agent.run/id %))
-                            current-runs)
-           close-results (await (close-quiescent-runs! closable))
-           refreshed (await (agent-run/quiescence-work!))
-           _ (when (:seon.error/message refreshed)
-               (throw
-                (ex-info "Planned quiesce could not refresh current work."
-                         {:seon.error/ex-data refreshed
-                          :seon.error/kind :core-bug})))
-           remaining-run-ids
-           (into #{}
-                 (map :seon.agent.run/id)
-                 (::agent-run/current-runs refreshed))
-           failed-owned
-           (->> close-results
-                (keep (fn [[run-id result]]
-                        (when (and (:seon.error/message result)
-                                   (contains? remaining-run-ids run-id))
-                          run-id)))
-                vec)
-           quiesced-run-ids
-           (into quiesced-run-ids
-                 (keep (fn [[run-id result]]
-                         (when-not (:seon.error/message result) run-id)))
-                 close-results)
-           observed-turn-ids
-           (into observed-turn-ids
-                 (map :seon.agent.turn/id)
-                 running-turns)]
-       (when (seq failed-owned)
-         (throw
-          (ex-info "Planned quiesce could not close current runs."
-                   {::quiesced-run-ids failed-owned})))
-       (if (and (empty? (::agent-run/current-runs refreshed))
-                (empty? (::agent-run/running-turns refreshed)))
-         (merge
-          {::quiesced-run-ids (vec (sort quiesced-run-ids))}
-          (await
-           (settled-turns!
-            (::db/db refreshed)
-            observed-turn-ids)))
-         (if (<= deadline (.now js/Date))
-           (throw
-            (ex-info "Planned quiesce timed out waiting for durable work."
-                     {::agent-run/quiescence-work refreshed}))
-           (do
-             (await (next-quiescence-observation!))
-             (recur quiesced-run-ids observed-turn-ids))))))))
 
 (schema/register! ::writer-replacement-entered? :boolean)
 (schema/register! ::writer-replacement-resumed? :boolean)
@@ -2715,7 +2447,9 @@
                ::runtime-phase :seon.client.runtime/writer-replacement
                ::writer-replacement-payload payload)
         (try
-          (let [drained (await (drain-agent-work! (quiescence-deadline)))]
+          (let [drained {::quiesced-run-ids []
+                         ::completed-turn-ids []
+                         ::errored-turn-ids []}]
             (swap! !state assoc ::writer-replacement-drain drained)
             {::writer-replacement-entered? true
              ::launch/config-apply-generation
@@ -2813,7 +2547,7 @@
 
 (defn ^:async ^:private drain-runtime-owners!
   "Drain every runtime owner below the optional HTTP listener inverse."
-  [capability]
+  [_capability]
   (agent-loop/uninstall-ticker!)
   (let [{wake-ids ::agent-loop/uninstalled-ids}
         (agent-loop/uninstall-all-wake-triggers!)
@@ -2821,21 +2555,14 @@
                  merge-quiesce-progress
                  {::lifecycle/unhosted-ids wake-ids})
         {::keys [quiesced-run-ids completed-turn-ids errored-turn-ids]}
-        (if (true? (::autonomous? capability))
-          (await (drain-agent-work! (quiescence-deadline)))
-          {::quiesced-run-ids []
-           ::completed-turn-ids []
-           ::errored-turn-ids []})
+        {::quiesced-run-ids []
+         ::completed-turn-ids []
+         ::errored-turn-ids []}
         _ (swap! !state update ::quiesce-progress
                  merge-quiesce-progress
                  {::quiesced-run-ids quiesced-run-ids
                   ::completed-turn-ids completed-turn-ids
                   ::errored-turn-ids errored-turn-ids})
-        {host-ids ::lifecycle/unhosted-ids}
-        (lifecycle/unhost-all!)
-        _ (swap! !state update ::quiesce-progress
-                 merge-quiesce-progress
-                 {::lifecycle/unhosted-ids host-ids})
         _ (await (detach-runtime-advertisement!))]
     (let [progress (::quiesce-progress @!state)]
       (let [detached (admission/detach!)]
@@ -3125,12 +2852,10 @@
       ;; Malli instrumentation is installed from the validated PROGRAM
       ;; projection inside `start-runtime!`, after the core is indexed.
       (when-not (config/no-auto-boot?)
-        (let [llm-fn (ai.dispatch/llm-fn)]
-          (-> (start-runtime!
-               {::llm-fn llm-fn
-                ::launch-capability
-                (get-in launch/process-launch-descriptor
-                        [::launch/runtime :seon.client/launch-capability])})
+        (-> (start-runtime!
+             {::launch-capability
+              (get-in launch/process-launch-descriptor
+                      [::launch/runtime :seon.client/launch-capability])})
               (.then
                (fn [{:seon.agent/keys [id ns]
                      :seon.client/keys [resumed-ids created-ids]
@@ -3146,10 +2871,10 @@
               (.catch
                (fn [err]
                  (log/error-console!
-                  "seon.client"
+                 "seon.client"
                   "auto-boot FAILED — exiting (no local fallback)"
                   err)
-                 (.exit js/process 1))))))
+                 (.exit js/process 1)))))
       (log/info-console!
        "seon.client" "runtime entry started"
        {:seon.launch/client-build-id

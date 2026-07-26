@@ -49,7 +49,6 @@
             [seon.ai.tokens :as tokens]
             [seon.agent.fs.leaf :as fs.leaf]
             [seon.agent.lifecycle :as lifecycle]
-            [seon.agent.lifecycle.leaf :as lifecycle.leaf]
             [seon.agent.message :as message]
             [seon.agent.message.leaf :as message.leaf]
             [seon.agent.shell.leaf :as shell.leaf]
@@ -421,13 +420,6 @@
    ::message.leaf/uuid #(str (random-uuid))
    ::message.leaf/hop-cap 8})
 
-(defn- host-lifecycle-leaf []
-  {::lifecycle.leaf/available? (constantly true)
-   ::lifecycle.leaf/unavailable (constantly {:seon.error/message "Host admission is unavailable."
-                                             :seon.error/kind :core-bug})
-   ::lifecycle.leaf/now #(java.util.Date.)
-   ::lifecycle.leaf/uuid #(str (random-uuid))})
-
 (defn- toolkit-call
   [delegates function-symbol]
   (fn [& arguments]
@@ -685,11 +677,11 @@
             [['seon.agent.message
               (message/bind-leaf (host-message-leaf) database-leaf)]
              ['seon.agent.lifecycle
-              (assoc (lifecycle/bind-leaf (host-lifecycle-leaf) database-leaf)
-                     'complete
-                     (fn [& args]
-                       (binding [db/*leaf* database-leaf]
-                         (apply lifecycle/complete args))))]]]
+              {'wait lifecycle/wait
+               'complete lifecycle/complete
+               'pause lifecycle/pause
+               'resume lifecycle/resume
+               'terminate lifecycle/terminate}]]]
       (install!
        {::registry registry
         ::lib lib

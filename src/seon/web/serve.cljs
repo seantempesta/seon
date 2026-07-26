@@ -33,8 +33,6 @@
     [seon.ai :as ai]
     [seon.ai.tokens :as tokens]
     [seon.agent.debug :as agent-debug]
-    [seon.agent.lifecycle :as lifecycle]
-    [seon.agent.run :as run]
     [seon.config :as config]
     [seon.db :as db]
     [seon.db.branch :as branch]
@@ -672,13 +670,12 @@
                     (agent/start! request))))))))
       (.then
         (fn [{id :seon.agent/id :as result}]
-          (if (and id (not= false (:seon.agent.lifecycle/resumed? result)))
+          (if id
             (do
               (log/info-console! "seon.web.serve" "POST /agents OK"
                                  {:agent id})
               (write-status! res 200 "text/plain; charset=utf-8" (str id)))
             (let [message (or (:seon.error/message result)
-                              (:seon.agent.lifecycle/error result)
                               "agent creation returned no id")]
               (log/error-console! "seon.web.serve" "POST /agents refused" message)
               (write-status! res
@@ -707,35 +704,11 @@
                [:seon/error :seon.error/message])))))
 
 (defn- handle-complete-agent!
-  "POST /agent/<id>/complete — external control: CLOSE the agent's open run
-   `:completed` (derived state falls to `:idle`, the single wakeable parked
-   state — a new message opens a fresh run). Same effect as the agent's own
-   `complete` function. When the agent has no open run it is already idle → 200
-   no-op. 200 + id on success, 500 with the store error otherwise."
+  "Report that external run completion has no surviving owner."
   [_req res agent-id]
-  (-> (run/current-run {:seon.agent/id agent-id})
-      (.then (fn [current]
-               (if (:seon.error/message current)
-                 current
-                 (if current
-                   (run/close-run! {:seon.agent.run/id
-                                    (:seon.agent.run/id current)
-                                    :seon.agent.run/claim-epoch
-                                    (:seon.agent.run/claim-epoch current)
-                                    :seon.agent.run/closed-reason :completed})
-                   nil))))
-      (.then (fn [result]
-               (if-not (:seon.error/message result)
-                 (do (log/info-console! "seon.web.serve"
-                                        "POST /agent/<id>/complete OK"
-                                        {:agent agent-id})
-                     (write-status! res 200 "text/plain; charset=utf-8"
-                                    (str agent-id)))
-                 (let [error (:seon.error/message result)]
-                   (log/error-console! "seon.web.serve"
-                                       "/agent/<id>/complete refused" error)
-                   (write-status! res 500 "text/plain; charset=utf-8"
-                                  (str error))))))))
+  (write-status!
+   res 410 "text/plain; charset=utf-8"
+   (str "External completion is unavailable for agent " agent-id ".")))
 
 ;; ============================================================
 ;; POST /agents/run — the one-shot composition door, built purely from the
@@ -755,13 +728,8 @@
 ;; optional agent override that open-run! uses; the door owns no second bound.
 ;; ============================================================
 
-(defn- ^:async agent-run-timeout-ms [database agent-id requested]
-  (if requested
-    requested
-    (await
-     (run/effective-deadline-ms
-      (cond-> {::db/db database}
-        agent-id (assoc :seon.agent/id agent-id))))))
+(defn- ^:async agent-run-timeout-ms [_database _agent-id requested]
+  (or requested (config/turn-timeout-ms)))
 
 (defn- ^:async latest-run-start-ms
   "Wall-clock ms of the agent's MOST-RECENTLY-STARTED run (open or closed) over
@@ -1519,33 +1487,14 @@
             timeout? (assoc :timed_out true)))))))
 
 (defn- ^:async finish-agent-task!
-  "Close a timed-out run and project the task's final database value."
-  [database agent-id injected-at elapsed timeout?]
-  (let [current
-        (when (and timeout? (not (:seon.error/message database)))
-          (await
-           (run/current-run
-            {::db/db database :seon.agent/id agent-id})))
-        close-result
-        (cond
-          (:seon.error/message database) database
-          (:seon.error/message current) current
-          current
-          (await
-           (run/close-run!
-            {:seon.agent.run/id (:seon.agent.run/id current)
-             :seon.agent.run/claim-epoch
-             (:seon.agent.run/claim-epoch current)
-             :seon.agent.run/closed-reason :superseded}))
-          :else nil)]
-    (if (:seon.error/message close-result)
-      {:error (:seon.error/message close-result)}
-      (let [final-database (await (db/db))]
-        (if (:seon.error/message final-database)
-          {:error (:seon.error/message final-database)}
-          (await
-           (final-agent-task-result
-            final-database agent-id injected-at elapsed timeout?)))))))
+  "Project a task result without mutating its open run."
+  [_database agent-id injected-at elapsed timeout?]
+  (let [final-database (await (db/db))]
+    (if (:seon.error/message final-database)
+      {:error (:seon.error/message final-database)}
+      (await
+       (final-agent-task-result
+        final-database agent-id injected-at elapsed timeout?)))))
 
 (defn- ^:async run-agent-task!
   "Drive one task and derive its response from one final database value."
@@ -1575,8 +1524,7 @@
         (if (or (:seon.error/message minted)
                 (nil? aid))
           {:error (or (:seon.error/message minted)
-                      (:seon.agent.lifecycle/error minted)
-                      "agent task could not host its durable agent")}
+                      "agent task could not create its durable agent")}
           (let [start (js/Date.now)
                 injected-at start
                 message-result
@@ -1587,32 +1535,25 @@
                    :seon.agent.message/content input}))]
             (if (:seon.error/message message-result)
               {:error (:seon.error/message message-result)}
-              (let [resumed (when reuse?
-                              (await
-                               (lifecycle/resume!
-                                {:seon.agent/id aid})))]
-                (if (false? (::lifecycle/resumed? resumed))
-                  {:error (or (::lifecycle/error resumed)
-                              "agent task could not host its durable agent")}
-                  (do
-                    (log/info-console! "seon.web.serve"
-                                       "POST /agents/run — task in"
-                                       {:agent aid :reused reuse?
-                                        :tokens (tokens/estimate (str input))})
-                    (let [settlement
-                          (await
-                           (await-agent-task-settlement!
-                            initial-database aid injected-at timeout-ms))
-                          error (when (:seon.error/message settlement)
-                                  settlement)
-                          timeout? (true? (::timed-out? settlement))
-                          elapsed (- (js/Date.now) start)]
-                      (if error
-                        {:error (:seon.error/message error)}
-                        (let [database (await (db/db))]
-                          (await
-                           (finish-agent-task!
-                            database aid injected-at elapsed timeout?)))))))))))))))
+              (do
+                (log/info-console! "seon.web.serve"
+                                   "POST /agents/run — task in"
+                                   {:agent aid :reused reuse?
+                                    :tokens (tokens/estimate (str input))})
+                (let [settlement
+                      (await
+                       (await-agent-task-settlement!
+                        initial-database aid injected-at timeout-ms))
+                      error (when (:seon.error/message settlement)
+                              settlement)
+                      timeout? (true? (::timed-out? settlement))
+                      elapsed (- (js/Date.now) start)]
+                  (if error
+                    {:error (:seon.error/message error)}
+                    (let [database (await (db/db))]
+                      (await
+                       (finish-agent-task!
+                        database aid injected-at elapsed timeout?)))))))))))))
 
 (defn- handle-agent-run! [req res]
   (-> (read-body req)
@@ -1707,67 +1648,22 @@
                                                           (:seon.error/message result))))))))))))))))
 
 ;; ============================================================
-;; POST /stop — the graceful STOP: PAUSE the agent's open run (resumable).
-;; `run/pause!` stamps the open run `paused-at` (⇒ derived state `:paused`) and
-;; banks the remaining wall-clock budget; the drive loop reads the lost lease
-;; (the fencing CAS) and exits. No open run ⇒ already idle (204 no-op). The
-;; agent is HELD, not killed — POST /resume re-drives it.
+;; The old pause/resume actions have no owner in the open+unclaimed model.
 ;; ============================================================
 
-(defn- handle-stop! [req res]
-  (let [agent-id (or (query-param req "agent") (db/current-agent-id))]
-    (if-not agent-id
-      (write-status! res 400 "text/plain; charset=utf-8"
-                     "missing 'agent' query param (no agent-id in scope)")
-      (-> (run/current-run {:seon.agent/id agent-id})
-          (.then
-           (fn [current]
-             (cond
-               (:seon.error/message current) current
-               (nil? current) nil
-               :else
-               (run/pause! {:seon.agent/id agent-id
-                            :seon.agent.run/id
-                            (:seon.agent.run/id current)
-                            :seon.agent.run/claim-epoch
-                            (:seon.agent.run/claim-epoch current)}))))
-          (.then
-           (fn [result]
-             (if (:seon.error/message result)
-               (do
-                 (log/error-console! "seon.web.serve" "/stop refused" result)
-                 (write-status! res 422 "text/plain; charset=utf-8"
-                                (:seon.error/message result)))
-               (write-status! res 204 "text/plain; charset=utf-8" ""))))))))
+(defn- handle-stop! [_req res]
+  (write-status! res 410 "text/plain; charset=utf-8"
+                 "Pausing runs is unavailable."))
 
 ;; ============================================================
-;; POST /resume — wake a PAUSED run. `lifecycle/resume` clears `paused-at`,
-;; re-extends the deadline by the banked budget, AND re-enters the drive loop
-;; (the loop EXITED on :pause, so resume must re-drive). It reads
-;; `(db/current-agent-id)`, so we run it inside the agent's ALS scope via
-;; `db/with-agent` (which preserves the id across the resume's awaits). It
-;; returns the derived state keyword (`:running`) on success or a loud error
-;; envelope (e.g. not paused / no open run).
+;; POST /resume — resume the durable paused run. The database run owner
+;; validates the observed run and commits the deadline transition; the
+;; database-backed driver observes that fact independently.
 ;; ============================================================
 
-(defn- handle-resume! [req res]
-  (let [agent-id (or (query-param req "agent") (db/current-agent-id))]
-    (if-not agent-id
-      (write-status! res 400 "text/plain; charset=utf-8"
-                     "missing 'agent' query param (no agent-id in scope)")
-      (-> (js/Promise.resolve (db/with-agent agent-id (fn [] (lifecycle/resume))))
-        (.then (fn [result]
-                 ;; Success is a derived state keyword; failures are direct
-                 ;; error values.
-                 (if (keyword? result)
-                   (do
-                     (log/info-console! "seon.web.serve" "POST /resume — re-driving"
-                                        {:agent agent-id :state result})
-                     (write-status! res 204 "text/plain; charset=utf-8" ""))
-                   (let [error (:seon.error/message result)]
-                     (log/error-console! "seon.web.serve" "/resume refused" error)
-                     (write-status! res 422 "text/plain; charset=utf-8"
-                                    (str "resume refused: " error))))))))))
+(defn- handle-resume! [_req res]
+  (write-status! res 410 "text/plain; charset=utf-8"
+                 "Resuming runs is unavailable."))
 
 ;; ============================================================
 ;; CSRF / same-origin guard for state-changing POSTs. Loopback BINDING is not

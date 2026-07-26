@@ -8,7 +8,6 @@
    [seon.agent.ctx :as ctx]
     [seon.agent.ctx.admin :as ctx.admin]
    [seon.agent.loop :as agent-loop]
-   [seon.agent.lifecycle :as lifecycle]
    [seon.ai.generate-code :as generate-code]
    [seon.client :as client]
    [seon.config :as config]
@@ -785,7 +784,7 @@
            ::client/advertisement-interest-key :runtime-advertisement
            ::client/resumable-agent-ids ["root"])))
 
-(deftest completed-reload-ensures-before-publication-and-rehosting
+(deftest completed-reload-ensures-before-publication-and-runtime-services
   (async done
     (let [original-state @client/!state
           original-attached? db/attached?
@@ -795,17 +794,11 @@
           original-begin admission/begin-publication!
           original-publish admission/publish-committed!
           original-unavailable admission/mark-unavailable!
-          original-resume lifecycle/resume!
           original-restore generate-code/restore-root-schedulers!
           original-install agent-loop/install-ticker!
           original-heartbeat client/start-heartbeat!
           effects (atom [])
           attached? (atom false)
-          finish-resume (atom nil)
-          reload-settled-resolve (atom nil)
-          reload-settled
-          (js/Promise.
-           (fn [resolve _] (reset! reload-settled-resolve resolve)))
           finish (atom nil)
           finished (js/Promise. (fn [resolve _] (reset! finish resolve)))
           publish!
@@ -840,17 +833,8 @@
       (set! admission/mark-unavailable!
             (fn [failure]
               (swap! effects conj :unavailable)
-              (@reload-settled-resolve
-               {::reload-outcome :unavailable
-                ::reload-failure failure})
+              (@finish failure)
               true))
-      (set! lifecycle/resume!
-            (fn [request]
-              (swap! effects conj [::resume request])
-              (@reload-settled-resolve {::reload-outcome :rehost})
-              (js/Promise.
-               (fn [resolve _]
-                 (reset! finish-resume resolve)))))
       (set! generate-code/restore-root-schedulers!
             (fn [request]
               (swap! effects conj [::restore-schedulers request])
@@ -864,44 +848,21 @@
               (@finish true)))
       (is (true? (client/shadow-build-notify! {:type :build-start})))
       (is (true? (client/shadow-build-notify! {:type :build-complete})))
-      (-> reload-settled
+      (-> finished
           (.then
-           (fn [{::keys [reload-outcome reload-failure] :as settled}]
-             (is (= :rehost reload-outcome)
-                 (str "reload became unavailable before rehosting: "
-                      (pr-str reload-failure)))
-             (if (= :rehost reload-outcome)
-               (do
-                 (is (= [:close
-                         [::ensure-acquire
-                          {::client/initialize? true
-                           ::client/configuration configuration}]
-                         :publish
-                         [::resume {:seon.agent/id "root"}]]
-                        @effects)
-                     "a running runtime recovers its lost session before rehosting")
-                 (@finish-resume
-                  {:seon.agent.lifecycle/resumed? true
-                   :seon.agent/id "root"})
-                 (-> finished
-                     (.then (fn [_] settled))))
-               settled)))
-          (.then
-           (fn [{::keys [reload-outcome]}]
-             (when (= :rehost reload-outcome)
-               (is (= [:close
-                       [::ensure-acquire
-                        {::client/initialize? true
-                         ::client/configuration configuration}]
-                       :publish
-                       [::resume {:seon.agent/id "root"}]
-                       [::restore-schedulers
-                        {::db/db {:db-name "default"}
-                         :seon.config/model-variant :execution}]
-                       [:ticker configuration]
-                       :heartbeat]
-                      @effects)
-                   "reload has one ensure/acquire, publication, and rehost order"))))
+           (fn [_]
+             (is (= [:close
+                     [::ensure-acquire
+                      {::client/initialize? true
+                       ::client/configuration configuration}]
+                     :publish
+                     [::restore-schedulers
+                      {::db/db {:db-name "default"}
+                       :seon.config/model-variant :execution}]
+                     [:ticker configuration]
+                     :heartbeat]
+                    @effects)
+                 "reload publishes before restoring durable runtime services")))
           (.catch
            (fn [error]
              (is false (str "completed reload rejected: " error
@@ -916,13 +877,12 @@
              (set! admission/begin-publication! original-begin)
              (set! admission/publish-committed! original-publish)
              (set! admission/mark-unavailable! original-unavailable)
-             (set! lifecycle/resume! original-resume)
              (set! generate-code/restore-root-schedulers! original-restore)
              (set! agent-loop/install-ticker! original-install)
              (set! client/start-heartbeat! original-heartbeat)
              (done)))))))
 
-(deftest missing-reload-config-keeps-admission-closed-and-skips-rehost
+(deftest missing-reload-config-keeps-admission-closed
   (async done
     (let [original-state @client/!state
           original-attached? db/attached?
@@ -932,7 +892,6 @@
           original-begin admission/begin-publication!
           original-publish admission/publish-committed!
           original-unavailable admission/mark-unavailable!
-          original-resume lifecycle/resume!
           original-install agent-loop/install-ticker!
           original-heartbeat client/start-heartbeat!
           effects (atom [])
@@ -969,10 +928,6 @@
               (swap! effects conj :unavailable)
               (@finish true)
               true))
-      (set! lifecycle/resume!
-            (fn [_]
-              (swap! effects conj :rehost)
-              (js/Promise.resolve {:seon.agent.lifecycle/resumed? true})))
       (set! agent-loop/install-ticker!
             (fn [_configuration] (swap! effects conj :ticker)))
       (set! client/start-heartbeat!
@@ -984,7 +939,7 @@
            (fn [_]
              (is (false? @admission-open?))
              (is (= [:close :unavailable] @effects)
-                 "missing retained config cannot ensure, publish, rehost, tick, or heartbeat")))
+                 "missing retained config cannot publish, tick, or heartbeat")))
           (.catch
            (fn [error]
              (is false (str "missing config proof rejected: " error
@@ -999,7 +954,6 @@
              (set! admission/begin-publication! original-begin)
              (set! admission/publish-committed! original-publish)
              (set! admission/mark-unavailable! original-unavailable)
-             (set! lifecycle/resume! original-resume)
              (set! agent-loop/install-ticker! original-install)
              (set! client/start-heartbeat! original-heartbeat)
              (done)))))))

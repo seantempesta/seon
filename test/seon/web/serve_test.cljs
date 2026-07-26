@@ -13,8 +13,6 @@
     [goog.object :as gobj]
     [seon.agent :as agent]
     [seon.agent.debug :as agent-debug]
-    [seon.agent.lifecycle :as lifecycle]
-    [seon.agent.run :as run]
     [seon.ai :as ai]
     [seon.db :as db]
     [seon.db.branch :as branch]
@@ -375,49 +373,6 @@
               (set! schema/current-projection original-current)
               (done)))))))
 
-(deftest explicit-agent-task-persists-input-before-hosting-the-durable-agent
-  (async done
-    (let [run-task (deref #'serve/run-agent-task!)
-          original-db db/db
-          original-query db/query
-          original-resume lifecycle/resume!
-          original-message agent/message!
-          calls (atom [])]
-      (set! db/db (fn ([] (js/Promise.resolve database))
-                    ([_] (js/Promise.resolve database))))
-      (set! db/query (fn [_] (js/Promise.resolve 42)))
-      (set! lifecycle/resume!
-            (fn [request]
-              (swap! calls conj [:resume request])
-              (js/Promise.resolve
-               {:seon.agent/id "root"
-                ::lifecycle/resumed? false
-                ::lifecycle/error "host refused"})))
-      (set! agent/message!
-            (fn [request]
-              (swap! calls conj [:message request])
-              (js/Promise.resolve {})))
-      (-> (run-task "root" "work" 1000)
-          (.then
-           (fn [result]
-             (is (= {:error "host refused"} result))
-             (is (= [[:message
-                      {:seon.agent.message/from agent/user-ref
-                       :seon.agent.message/to [[:seon.agent/id "root"]]
-                       :seon.agent.message/content "work"}]
-                     [:resume {:seon.agent/id "root"}]]
-                    @calls))))
-          (.catch
-           (fn [error]
-             (is false (str "task hosting rejected: " error))))
-          (.finally
-           (fn []
-             (set! db/db original-db)
-             (set! db/query original-query)
-             (set! lifecycle/resume! original-resume)
-             (set! agent/message! original-message)
-             (done)))))))
-
 (deftest terminal-fault-door-persists-sync-and-async-core-faults
   (async done
     (let [door (deref #'serve/through-terminal-fault-door)
@@ -707,29 +662,6 @@
              (set! db/query original-query)
              (done)))))))
 
-(deftest agent-run-timeout-uses-explicit-value-or-run-policy
-  (async done
-    (let [original run/effective-deadline-ms]
-      (set! run/effective-deadline-ms
-            (fn [request]
-              (is (= {:seon.db/db :frozen-db
-                      :seon.agent/id "agent-1"}
-                     request))
-              (js/Promise.resolve 1800000)))
-      (-> (js/Promise.all
-           #js [((deref #'serve/agent-run-timeout-ms)
-                 :frozen-db "agent-1" 9000)
-                ((deref #'serve/agent-run-timeout-ms)
-                 :frozen-db "agent-1" nil)])
-          (.then
-           (fn [timeouts]
-             (is (= [9000 1800000] (vec timeouts)))))
-          (.catch (fn [error] (is false (str error))))
-          (.finally
-           (fn []
-             (set! run/effective-deadline-ms original)
-             (done)))))))
-
 (deftest agent-run-waits-for-terminal-turn-recording
   (async done
     (let [original db/query
@@ -840,16 +772,13 @@
              (set! reactive/unobserve! original-unobserve)
              (done)))))))
 
-(deftest agent-run-settlement-timeout-releases-and-supersedes
+(deftest agent-run-settlement-timeout-releases-observation
   (async done
     (let [original-db db/db
-          original-current run/current-run
-          original-close run/close-run!
           original-observe reactive/observe!
           original-unobserve reactive/unobserve!
           injected-at (js/Date.now)
-          released (atom 0)
-          closed (atom nil)]
+          released (atom 0)]
       (set! reactive/observe!
             (fn [request]
               (js/Promise.resolve (::reactive/consumer-key request))))
@@ -857,14 +786,6 @@
             (fn [_]
               (swap! released inc)
               (js/Promise.resolve true)))
-      (set! run/current-run
-            (fn [_]
-              (js/Promise.resolve {:seon.agent.run/id "run-1"
-                                   :seon.agent.run/claim-epoch 7})))
-      (set! run/close-run!
-            (fn [request]
-              (reset! closed request)
-              (js/Promise.resolve {})))
       (set! db/db
             (fn
               ([] (js/Promise.resolve
@@ -882,17 +803,11 @@
                database "agent-1" injected-at 10 true))))
           (.then
            (fn [result]
-             (is (= {:seon.agent.run/id "run-1"
-                     :seon.agent.run/claim-epoch 7
-                     :seon.agent.run/closed-reason :superseded}
-                    @closed))
              (is (= {:error "stop before final projection"} result))))
           (.catch (fn [error] (is false (str error))))
           (.finally
            (fn []
              (set! db/db original-db)
-             (set! run/current-run original-current)
-             (set! run/close-run! original-close)
              (set! reactive/observe! original-observe)
              (set! reactive/unobserve! original-unobserve)
              (done)))))))
