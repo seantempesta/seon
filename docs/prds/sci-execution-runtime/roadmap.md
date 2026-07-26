@@ -6,6 +6,47 @@ tags: [prd, agent, architecture, database]
 
 # Sci execution runtime roadmap
 
+## The graduation gate (owner, 2026-07-25 night) — READ THIS FIRST
+
+This is what "done" means. Not a slogan: every line is falsifiable, and a
+session that cannot point at one of these is not finished, however green its
+suite is.
+
+**Live agents, really running.** Not a fixture, not a drive script. Real agents
+take real turns against a real model in the default cluster, author functions
+into the one corpus, message each other, and are still running an hour later.
+The proof is a transcript and committed datoms, not a passing test.
+
+**Load-tested, by us, on purpose.** We drive it until something breaks, and we
+know which thing broke and why. Not "it seems fine" — a number, a ceiling, and
+the name of the resource that hit it. We already know the shape of the answer:
+the commit path is one core, SCI is ~5% of a turn, and the model dwarfs both.
+Find the real wall.
+
+**Kick-ass fast, measured.** Boot in seconds, agent start in milliseconds, a
+turn dominated by the model call and nothing else. Every performance claim
+carries the conditions it was measured under — this program has already been
+misled twice by a number without its context.
+
+**Every weird smell chased to its cause.** A coercion, an inconsistency, a
+duplicate mechanism, a silently-wrong default: each one is a bug until proven
+otherwise, and it gets an issue with evidence even when it is not fixed today.
+Today alone produced the vector-order defect, `read-string` honouring
+`*read-eval*`, and limits that did not bound — all found by pulling on
+something that merely looked odd.
+
+**Clojure already solved most of this — go read it.** Before inventing any
+mechanism, find where Clojure, `core.async`, `core.async.flow`, SCI, or
+Datahike already answers it, and take their answer *and their name for it*.
+This program's best decisions were all of that shape: `:interrupt-fn` over an
+invented door, `:io`/`:compute` over invented pool names, flow's `transform`
+discipline, the admin surface we get for free by putting state in a database,
+and `[:set X]` over a bridge rewrite. **The wheel is round. Every time we
+reinvented it today, the evidence took it away from us.**
+
+**And the standing test, from the owner:** *is this simpler than it was?* If it
+is equally complex, the model was ported, not applied.
+
 ## Program goal (owner, 2026-07-20 night)
 
 **Complete the transition: Seon runs fully on this architecture.** The
