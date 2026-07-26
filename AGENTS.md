@@ -338,8 +338,18 @@ the lane — never `nohup`/`&`, never hand-rolled shell):
 bin/codex-agent run <name> "<the full spec>"   # or spec on stdin (heredoc)
 ```
 
+**NEVER SANDBOX A LANE** (owner ruling 2026-07-26). There is no sandbox
+dial and there must not be one: a read-only audit finished a 63-file
+inventory and then had its one `apply_patch` rejected, losing every
+per-file evidence sentence it had produced. A sandbox does not make an
+audit safer — it makes the audit's output unrecordable, and every lane
+must commit its own report and file its own issue notes. Ownership is
+enforced by NAMING OWNED PATHS in the spec, path-limited commits, and
+your review of the diff. An audit is kept read-only by its spec and
+proven by its diff.
+
 The script owns the conventions: model/effort dials (`LANE_MODEL`,
-`LANE_EFFORT`, `LANE_SANDBOX=read-only` for audits), the `-o` summary
+`LANE_EFFORT`), the `-o` summary
 in `tmp/orchestrator/<name>-summary.txt`, and `tee`-streamed stdout so
 the user's task panel shows the live transcript while
 `<name>-stdout.log` persists. Tracked means lane exit re-invokes the

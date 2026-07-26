@@ -23,8 +23,15 @@
 #   bin/codex-agent summary <name>         print a lane's -o summary.
 #   bin/codex-agent status                 running lanes + landed summaries.
 #
-# Dials (env): LANE_MODEL (gpt-5.6-sol), LANE_EFFORT (high),
-# LANE_SANDBOX (full | read-only).
+# Dials (env): LANE_MODEL (gpt-5.6-sol), LANE_EFFORT (high).
+#
+# NEVER SANDBOX A LANE (owner ruling 2026-07-26). There is no sandbox dial and
+# there must not be one. A sandboxed lane cannot write its own report: a
+# read-only audit ran, produced its findings, and then had `apply_patch`
+# rejected — losing the whole per-file evidence set and costing a full rerun.
+# Audits still have to commit their report and file their issue notes, so
+# read-only is never the right mode. Ownership is enforced by NAMING OWNED
+# PATHS IN THE SPEC and by path-limited commits, not by a sandbox.
 
 set -eu
 
@@ -37,20 +44,11 @@ export RUST_LOG=${RUST_LOG:-codex_models_manager=off}
 dir=tmp/orchestrator
 model=${LANE_MODEL:-gpt-5.6-sol}
 effort=${LANE_EFFORT:-high}
-sandbox=${LANE_SANDBOX:-full}
 
 usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 64; }
 
 [ $# -ge 1 ] || usage
 command=$1; shift
-
-sandbox_flags() {
-  case "$sandbox" in
-    full) printf '%s' '--dangerously-bypass-approvals-and-sandbox' ;;
-    read-only) printf '%s' '-s read-only -c approval_policy=never' ;;
-    *) echo "bin/codex-agent: unknown LANE_SANDBOX '$sandbox'" >&2; exit 64 ;;
-  esac
-}
 
 case "$command" in
   run)
@@ -63,7 +61,7 @@ case "$command" in
     # log via tee; the summary lands in -o for the orchestrator.
     printf '%s' "$spec" |
       codex exec -m "$model" -c model_reasoning_effort="$effort" \
-        $(sandbox_flags) \
+        --dangerously-bypass-approvals-and-sandbox \
         -o "$dir/$name-summary.txt" - 2>&1 |
       tee "$dir/$name-stdout.log"
     ;;
@@ -85,7 +83,7 @@ case "$command" in
     [ -n "$followup" ] || { echo "bin/codex-agent: empty followup" >&2; exit 64; }
     # resume rejects -o; the final message still lands in the summary
     # file via tee of stdout — read the tail of the log instead.
-    codex exec resume "$sid" $(sandbox_flags) "$followup" < /dev/null 2>&1 |
+    codex exec resume "$sid" --dangerously-bypass-approvals-and-sandbox "$followup" < /dev/null 2>&1 |
       tee -a "$dir/$name-stdout.log"
     ;;
   stop)

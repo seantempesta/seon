@@ -30,8 +30,7 @@ approval prompts, may run any command and edit any file. It runs fully
 autonomously and returns when done. The final agent message lands in the `-o`
 file — that is the summary you read back.
 
-For a read-only investigation instead, swap that one flag for
-`-s read-only -c approval_policy=never`.
+**Never sandbox a lane** (owner ruling 2026-07-26) — see the section below.
 
 ## Launching under the Claude Code harness — bin/codex-agent, tracked, never nohup
 
@@ -101,19 +100,30 @@ effort or pick a stronger model. Per-run overrides never touch
 `~/.codex/config.toml` (which holds the persistent default `model` and
 `model_reasoning_effort`).
 
-## Sandbox and approvals — how much power to give it
+## NEVER SANDBOX A LANE
 
-Two dials: what it can touch (`-s`) and whether it pauses to ask
-(`-c approval_policy=`). For autonomous work you want no pauses, so set
-`approval_policy=never` and pick the sandbox:
+Owner ruling, 2026-07-26. Every lane runs
+`--dangerously-bypass-approvals-and-sandbox`. `bin/codex-agent` hardcodes it and
+has **no sandbox dial**; do not add one back, and do not hand-roll `-s` on a
+lane.
 
-- `-s read-only` — cannot write. Audits, traces, investigations.
-- `-s workspace-write` — may run commands and edit files inside the working root,
-  but is blocked from writing outside it (and network is restricted). Good default
-  for real changes confined to the repo.
-- `-s danger-full-access` — no restriction at all (writes anywhere, full network).
-- `--dangerously-bypass-approvals-and-sandbox` — shorthand for full access **and**
-  no approval prompts in one flag. This is the "just let it do everything" switch.
+**Why, concretely.** A read-only audit lane completed a 63-file inventory, then
+had its single `apply_patch` rejected by the sandbox. Its counts survived in the
+`-o` summary; **its per-file evidence sentences did not**, and the report had to
+be reconstructed by hand. A sandbox does not make an audit safer — it makes the
+audit's *output* unrecordable. Every lane, audit included, must commit its own
+report and file its own issue notes, so read-only is never the right mode.
+
+**What actually enforces ownership**, and it is not the sandbox:
+
+- name the lane's OWNED PATHS in the spec, and name the paths other lanes own
+  as forbidden;
+- require path-limited commits (`git commit --only -- <paths>`), never
+  `git add -A`;
+- review the diff yourself afterwards — that review is the safeguard.
+
+An audit that must not change source is told so in its spec and proven by its
+diff, not prevented by a flag that also stops it recording what it found.
 
 Other placement flags: `-C, --cd <DIR>` sets the working root (fresh `exec` runs
 only — `resume` has no `-C`, see below); `--add-dir <DIR>` adds extra writable dirs
@@ -132,10 +142,10 @@ did with `git status` / `git diff` before accepting; that review is the safeguar
 2. **Drive.** Run the command above. Add `--json` to also stream every step as
    JSONL to stdout (a full trace of commands it ran and files it read).
 3. **Read the summary** from the `-o` file.
-4. **Verify independently.** This is the whole point. For a read-only audit,
-   re-run the check yourself (`rg`, `ls`, read the cited `file:line`) and confirm
-   the claim. For a write task, `git diff` / `git status` and read the actual
-   change — confirm it matches the spec and touched nothing else.
+4. **Verify independently.** This is the whole point. For an audit, re-run the
+   check yourself (`rg`, `ls`, read the cited `file:line`) and confirm the claim.
+   For a write task, `git diff` / `git status` and read the actual change —
+   confirm it matches the spec and touched nothing else.
 5. **Accept or correct.** If it is wrong or incomplete, iterate on the same
    session by explicit id (see "Resuming a session" below).
 
@@ -172,8 +182,8 @@ top-level runs (`originator: codex_exec`) resume, so pass the id you captured.
 **3. Resume has a reduced flag set.** It rejects `-s`, `-o`, `-C`, `--json`, and
 `--output-schema` (e.g. `error: unexpected argument '-s' found`). So:
 
-- sandbox/approvals go through `-c sandbox_mode=...` / `-c approval_policy=...`, or
-  the single `--dangerously-bypass-approvals-and-sandbox` flag (which resume accepts);
+- resume accepts the single `--dangerously-bypass-approvals-and-sandbox` flag,
+  which is the only mode a lane ever runs (see "NEVER SANDBOX A LANE");
 - there is no `-C` — the working dir is the process cwd, so `cd` into it first;
 - there is no `-o` — read the final message from stdout.
 
@@ -221,14 +231,18 @@ subsystem:
 RUST_LOG=codex_models_manager=off codex exec [flags] "<spec>" < /dev/null
 ```
 
-## Proven-working example (read-only audit + verify)
+## Proven-working example (audit + verify)
+
+An audit is kept read-only by its SPEC and proven by its diff — never by a
+sandbox flag, which would also stop it writing its report.
 
 ```bash
 # Drive
-codex exec -m gpt-5.6-sol -c model_reasoning_effort=low -s read-only \
-  -c approval_policy=never --skip-git-repo-check -o summary.txt \
+codex exec -m gpt-5.6-sol -c model_reasoning_effort=low \
+  --dangerously-bypass-approvals-and-sandbox \
+  --skip-git-repo-check -o summary.txt \
   "List the .cljs and .cljc files directly inside src/seon/db/ (not subdirs).
-   Filenames one per line, then a count. Do not modify anything." < /dev/null
+   Filenames one per line, then a count. Change no source." < /dev/null
 
 # Verify independently — did its claim match reality?
 ls -1 src/seon/db/ | grep -E '\.(cljs|cljc)$'
