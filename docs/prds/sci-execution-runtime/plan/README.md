@@ -174,6 +174,25 @@ carried stale evidence within a day. Re-verify before starting.
   tuple, one datom, whole-value replace; the 8-cap fork lift plus the
   `run/forms` conversion is QUEUED behind this sweep. Child positions only
   for lists of entities (`turn/evals`).
+- **Errors, the flow way (two classes, never mixed).** Agent faults stay
+  values — `evaluate` returns flat `:seon.error` values, terminal receipts
+  commit them; they never touch flow's channels. Core faults ride flow's
+  `error-chan`/`report-chan` — which are `(sliding-buffer 100)` and
+  therefore transport, never a record: one `mult` fan-out owner feeds tap A
+  (a fault-committer proc committing every core fault as a durable fact
+  through the `:seon.config/on-core-error` dial, with a loud committed drop
+  counter on tap overflow) and tap B (flow-monitor). A throwing step-fn
+  keeps its proc alive with pre-step state per flow's own contract
+  (`flow/impl.clj:96-172`); the testbed proves the design
+  (`flow-testbed-2026-07-26.md`, error extension in flight).
+  **Routing is derivation, never a router:** the committed fault carries its
+  provenance (namespace, var, proc, run), so "who should fix this" is a
+  query — the namespace's assigned agent (`:seon.agent/namespace`, unique,
+  at most one) wakes on faults touching its namespace exactly the way
+  messages wake (one derived rule, L8-disjoint); a fault whose program-graph
+  call path spans namespaces derives multiple interested owners; root
+  coordinates from the same facts. No dispatch table, no subscription
+  registry — commit good provenance and the routing already exists.
 - **Step 1 lands messaging + db first**, then blob/fs/web as the same
   pattern; the double-send experiment becomes runnable and is a step-1
   acceptance item.
