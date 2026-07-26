@@ -36,17 +36,17 @@
                                    :seon.effect/args {}})]
       (is (= :seon.effect/not-implemented (:seon.error/kind result)))
       (is (string? (:seon.error/message result)))))
-  (testing "my.message/send! surfaces the same honest error"
+  (testing "my.message/message! surfaces the same honest error"
     (is (= :seon.effect/not-implemented
            (:seon.error/kind
-            (my.message/send!
+            (my.message/message!
              {:seon.agent.message/content "hello"
               :seon.agent.message/to ["root"]})))))
-  (testing "my.db/transact! surfaces the same honest error"
+  (testing "my.db/transact surfaces the same honest error"
     (is (= :seon.effect/not-implemented
            (:seon.error/kind
-            (my.db/transact!
-             {:seon.db/tx-data [{:my.db/probe true}]}))))))
+            (my.db/transact
+             {:tx-data [{:my.db/probe true}]}))))))
 
 (deftest ^:seon.contract/pending message-identity-is-derived
   ;; ACTIVATE WITH STEP-1 IMPLEMENTATION. The real property: two
@@ -56,7 +56,7 @@
   (testing "today: the stub cannot send at all, so no identity exists"
     (is (= :seon.effect/not-implemented
            (:seon.error/kind
-            (my.message/send!
+            (my.message/message!
              {:seon.agent.message/content "replay probe"
               :seon.agent.message/to ["root"]}))))))
 
@@ -67,6 +67,5 @@
   (testing "today: the stub cannot write at all"
     (is (= :seon.effect/not-implemented
            (:seon.error/kind
-            (my.db/transact!
-             {:seon.db/tx-data [{:my.db/probe true}]
-              :seon.capability/op-id "replay-probe-n"}))))))
+            (my.db/transact
+             {:tx-data [{:my.db/probe true}]}))))))

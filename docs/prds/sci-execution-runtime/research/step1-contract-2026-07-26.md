@@ -68,3 +68,24 @@ owners (`seon.agent.message/message!`, `seon.db/transact!`/query), keep
 every schema and test byte-identical except the sanctioned activation,
 and go green under `bin/test-writer`. Friction with a contract is
 reported, never resolved by loosening it.
+
+## Rulings applied (owner, 2026-07-26 late)
+
+1. **Datahike's names, Datahike's args.** `my.db/q` `(q query & inputs)`
+   and `my.db/transact` `(transact {:tx-data […]})` mirror `datahike.api`
+   exactly; the one shortcut is db-input injection (most recent database
+   value) when none is supplied. The same principle renames the message
+   tool to the owner's name: `my.message/message!`.
+2. **Messages are prose communication only.** Mechanical results
+   (receipts, faults, code-generation outcomes) are facts with their own
+   derivations, never messages.
+3. **ACK is derived, never stored.** An inbound message stays in the
+   recipient's derived context until a fact answers it (reply, plan
+   citation, or dismissal fact); "unanswered for N turns" is a query the
+   sender can escalate on. Wiring that derivation into the context owner
+   is a named step-1 follow-up, not part of the request!/family lane.
+4. **Replay is automatic.** Agents never mark anything; the run loop
+   derives `:seon.capability/op-id` from (run, ordinal, epoch);
+   `:seon.capability/replayed?` is observability, not an option.
+   (The `:seon.capability/*` → `:seon.db/*` / `:seon.effect/class`
+   attribute renames ride the standing rename wave.)

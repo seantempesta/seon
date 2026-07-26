@@ -37,10 +37,13 @@
   [:seon.error/message :string]
   [:seon.error/kind {:optional true} :qualified-keyword]])
 
-(defn send!
-  "Send one message to the named agents; returns the concise send result.
-  Delivery is at-least-once with replay identity from the sending
-  receipt, so a crash between commit and completion never double-sends."
+(defn message!
+  "Send one message to the named agents; the owner's name, mirrored.
+  Returns the concise send result. Delivery is at-least-once with
+  replay identity from the sending receipt, so a crash between commit
+  and completion never double-sends. An inbound message stays in the
+  recipient's derived context until a fact answers it — the reply is
+  the acknowledgement; no stored flag exists."
   {:malli/schema [:=> [:cat ::send-request] [:or ::sent ::error]]}
   [request]
   (effect/request!

@@ -1,23 +1,25 @@
 (ns my.db
-  "Query and transact the database — the flat my.* database tool.
+  "Query and transact the database with Datahike's own names and args.
 
-  CONTRACT LAYER ONLY (Fable-authored, 2026-07-26): schemas and function
-  contracts with honest not-implemented stubs; the step-1 implementation
-  activates them over `seon.effect/request!`. Reads are pointers into an
-  immutable database value (O1 co-location); writes carry the
-  `:seon.capability/op-id` replay identity `seon.db/transact!` already
-  honors, so a re-executed form replays its write instead of repeating
-  it. Results are concise domain maps or flat error values."
+  CONTRACT LAYER ONLY (Fable-authored, 2026-07-26): owner ruling — no new
+  names for established functions. `q` and `transact` mirror
+  `datahike.api` exactly, with one shortcut: omit the database input and
+  the most recent database value is injected. Writes carry the
+  `:seon.capability/op-id` replay identity the run loop derives from the
+  executing receipt, so at-least-once re-execution is a replay, never a
+  second write. Results are concise domain maps or flat error values.
+  Stubs return honest not-implemented errors until the step-1
+  implementation activates them over `seon.effect/request!`."
   (:require [seon.schema :as schema]
             [seon.effect :as effect]
             [datalog.parser :as datalog.parser]))
 
 (defn datalog-query?
-  "True when `q` parses under the database's own query grammar.
+  "True when `query` parses under the database's own query grammar.
   Delegates to datalog-parser — the dependency's parser is the one
   validator; nothing here re-implements its grammar."
-  [q]
-  (try (some? (datalog.parser/parse q))
+  [query]
+  (try (some? (datalog.parser/parse query))
        (catch #?(:clj Exception :cljs :default) _ false)))
 
 (defn tx-datum?
@@ -32,10 +34,11 @@
 (schema/register-core-predicate! 'my.db/tx-datum? tx-datum?)
 
 (schema/register!
- ::q
+ ::query
  [:fn {:error/message "must parse under datalog-parser's query grammar"
        :gen/schema [:= '[:find ?e :where [?e :seon.agent/id]]]}
   'my.db/datalog-query?])
+
 (schema/register!
  ::tx-datum
  [:fn {:error/message
@@ -44,23 +47,16 @@
   'my.db/tx-datum?])
 
 (schema/register!
- ::query-request
+ ::arg-map
  [:map {:closed true}
-  [:seon.db/q ::q]
-  [:seon.db/args {:optional true}
-   [:vector :seon.effect/args]]])
-
-(schema/register!
- ::transact-request
- [:map {:closed true}
-  [:seon.db/tx-data [:vector {:min 1} ::tx-datum]]
-  [:seon.capability/op-id {:optional true} :seon.capability/op-id]])
+  [:tx-data [:vector {:min 1} ::tx-datum]]])
 
 (schema/register!
  ::transacted
  [:map {:closed true}
   [:seon.db/t :int]
-  [:seon.capability/op-id :seon.capability/op-id]])
+  [:seon.capability/op-id :seon.capability/op-id]
+  [:seon.capability/replayed? {:optional true} :boolean]])
 
 (schema/register!
  ::error
@@ -69,23 +65,27 @@
   [:seon.error/kind {:optional true} :qualified-keyword]])
 
 (defn q
-  "Run one query against the current database value.
-  Returns the result set as ordinary data bounded by the admission caps."
-  {:malli/schema [:=> [:cat ::query-request]
-                  [:or [:map {:closed true}
-                        [:seon.db/result :seon.effect/value]]
-                   ::error]]}
-  [request]
+  "Run a Datalog query, exactly as datahike.api/q takes it.
+  `(q query & inputs)` — when no database value appears among the
+  inputs, the most recent database value is injected as the first
+  input. Returns the result as ordinary data bounded by the admission
+  caps, or a flat error value."
+  {:malli/schema [:=> [:cat ::query [:* :seon.effect/args]]
+                  [:or :seon.effect/value ::error]]}
+  [query & inputs]
   (effect/request!
    {:seon.effect/family :db
-    :seon.effect/args request}))
+    :seon.effect/args {:my.db/q query
+                       :my.db/inputs (vec inputs)}}))
 
-(defn transact!
-  "Commit transaction data; returns the concise basis result.
-  Carries the replay identity so at-least-once re-execution is a
-  replay, never a second write."
-  {:malli/schema [:=> [:cat ::transact-request] [:or ::transacted ::error]]}
-  [request]
+(defn transact
+  "Commit transaction data, exactly as datahike.api/transact takes it.
+  `(transact {:tx-data [...]})` — the connection is implied (the
+  co-located writer). Returns the concise basis result; the run loop's
+  replay identity makes re-execution after a crash a replay, never a
+  second write."
+  {:malli/schema [:=> [:cat ::arg-map] [:or ::transacted ::error]]}
+  [arg-map]
   (effect/request!
    {:seon.effect/family :db
-    :seon.effect/args request}))
+    :seon.effect/args {:my.db/tx-data (:tx-data arg-map)}}))
