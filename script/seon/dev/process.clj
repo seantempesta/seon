@@ -215,7 +215,10 @@
 
 (defn- web-render-port-file
   [config]
-  (str (fs/path (:seon.dev.config/process-dir config)
+  (str (fs/path (or (get-in config
+                            [:seon.dev.config/launch-descriptor
+                             ::launch/process ::launch/process-dir])
+                    (:seon.dev.config/process-dir config))
                 "web-render" "http.port")))
 
 (defn- owned-process-graph
@@ -320,9 +323,12 @@
 
 (defn- state-file [config id]
   (let [descriptor (:seon.dev.config/launch-descriptor config)
+        descriptor-process-dir
+        (get-in descriptor [::launch/process ::launch/process-dir])
         process-dir
-        (if (and (= pod-id id) (not (owns-writer-processes? descriptor)))
-          (get-in descriptor [::launch/process ::launch/process-dir])
+        (if (and descriptor-process-dir
+                 (some #{id} (target-process-ids config)))
+          descriptor-process-dir
           (:seon.dev.config/process-dir config))]
     (str (fs/path process-dir
                   "processes" (str (id-name id) ".edn")))))
@@ -526,6 +532,7 @@
           ::launch/application-digest
           (:seon.dev.artifact/application-digest manifest)})
         descriptor-runtime (::launch/runtime descriptor)
+        descriptor-database (::launch/database descriptor)
         descriptor-writer (::launch/writer-owner descriptor)
         descriptor-process (::launch/process descriptor)
         autonomous?
@@ -715,9 +722,9 @@
             [(pr-str {:seon.host/socket-path
                      (host-eval-socket config)
                      :seon.host.context/writer-socket-path
-                     (:seon.dev.config/request-socket config)
+                     (::launch/request-socket-path descriptor-writer)
                      :seon.host.context/database-name
-                     (:seon.dev.config/cluster-name config)
+                     (::db.protocol/database-name descriptor-database)
                      :seon.host/database-pool-wait-timeout-ms
                      (config/claim-driver-pool-wait-timeout-ms config)
                      :seon.startgate/release-digest
@@ -763,9 +770,9 @@
              "seon.web.server"
              [(pr-str
               {:seon.web.server/writer-socket-path
-               (:seon.dev.config/request-socket config)
+               (::launch/request-socket-path descriptor-writer)
                :seon.web.server/database-name
-               (:seon.dev.config/cluster-name config)
+               (::db.protocol/database-name descriptor-database)
                :seon.startgate/release-digest
                (:seon.dev.artifact/application-digest manifest)
                :seon.startgate/config-manifest-digest

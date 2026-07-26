@@ -143,10 +143,16 @@
       (is (= {:deps {}} (edn/read-string (slurp (str deps-edn)))))
       (finally (fs/delete-tree root {:force true})))))
 
-(deftest open-and-restart-use-the-one-pod-supervisor-path
+(deftest open-and-restart-reconcile-the-complete-owned-process-graph
   (let [{::cluster/keys [target-configuration] :as request} (target-request)
         manifest {:seon.dev.artifact/application-digest "application"}
-        pod {:seon.dev.process/id process/pod-id}
+        host {:seon.dev.process/id process/host-id
+              :seon.dev.process/dependencies []}
+        pod {:seon.dev.process/id process/pod-id
+             :seon.dev.process/dependencies [process/host-id]}
+        web-render {:seon.dev.process/id process/web-render-id
+                    :seon.dev.process/dependencies [process/pod-id]}
+        process-ids [process/host-id process/pod-id process/web-render-id]
         calls (atom [])
         package-roots (atom [])
         status-value {:seon.dev.target/status :seon.dev.target.status/ready}]
@@ -154,7 +160,10 @@
                   cluster/ensure-package-skeleton!
                   (fn [descriptor]
                     (swap! package-roots conj (::launch/packages-dir descriptor)))
-                  process/specs (fn [_ _] {process/pod-id pod})
+                  process/specs (fn [_ _]
+                                  {process/host-id host
+                                   process/pod-id pod
+                                   process/web-render-id web-render})
                   process/with-startup-ownership (fn [_ transition]
                                                    (transition
                                                     (fn [_id acquire! _cleanup]
@@ -162,9 +171,11 @@
                   state/with-lock (fn [_ _ _ transition] (transition))
                   process/ensure! (fn [selected spec acquire!]
                                     (is (= target-configuration selected))
-                                    (is (= pod spec))
-                                    (acquire! process/pod-id
-                                              #(swap! calls conj :ensure)))
+                                    (acquire!
+                                     (:seon.dev.process/id spec)
+                                     #(swap! calls conj
+                                             [:ensure
+                                              (:seon.dev.process/id spec)])))
                   process/clean-or-force!
                   (fn [{:seon.dev.process/keys [configuration operation targets]}]
                     (swap! calls conj [operation targets])
@@ -180,11 +191,11 @@
                                    (is (= manifest selected-manifest))
                                    status-value)]
       (is (= status-value (cluster/open! request)))
-      (is (= [:ensure] @calls))
+      (is (= (mapv #(vector :ensure %) process-ids) @calls))
       (reset! calls [])
       (is (= status-value (cluster/restart! request)))
-      (is (= [[:seon.dev.process.operation/restart #{process/pod-id}]
-              :ensure]
+      (is (= (into [[:seon.dev.process.operation/restart (set process-ids)]]
+                   (map #(vector :ensure %) process-ids))
              @calls))
       (is (= [(::launch/packages-dir
                (:seon.dev.config/launch-descriptor
@@ -485,7 +496,7 @@
            (cluster/apply! request))))
     (is (false? @published?))))
 
-(deftest close-stops-only-the-pod-and-does-not-delete-cluster-data
+(deftest close-stops-the-complete-owned-graph-and-does-not-delete-cluster-data
   (let [{::cluster/keys [target-configuration] :as request} (target-request)
         calls (atom [])
         result
@@ -496,6 +507,9 @@
          :seon.dev.process/elapsed-ms 0
          :seon.dev.process/results []}]
     (with-redefs [state/with-lock (fn [_ _ _ transition] (transition))
+                  process/target-process-ids
+                  (constantly [process/host-id process/pod-id
+                               process/web-render-id])
                   process/clean-or-force!
                   (fn [request]
                     (reset! calls request)
@@ -503,7 +517,8 @@
       (is (= result (cluster/close! request)))
       (is (= target-configuration
              (:seon.dev.process/configuration @calls)))
-      (is (= #{process/pod-id} (:seon.dev.process/targets @calls)))
+      (is (= #{process/host-id process/pod-id process/web-render-id}
+             (:seon.dev.process/targets @calls)))
       (is (= :seon.dev.process.operation/down
              (:seon.dev.process/operation @calls))))))
 

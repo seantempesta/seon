@@ -3798,12 +3798,27 @@
                      [::launch/runtime :seon.client/launch-capability])))
       (is (= (::launch/writer-owner source-descriptor)
              (::launch/writer-owner published)))
-      (is (= (get-in descriptor [::launch/process ::launch/process-dir])
-             (-> (#'process/state-file selected process/pod-id)
-                 fs/path
-                 fs/parent
-                 fs/parent
-                 str)))
+      (doseq [id [process/host-id process/pod-id process/web-render-id]]
+        (is (= (get-in descriptor [::launch/process ::launch/process-dir])
+               (-> (#'process/state-file selected id)
+                   fs/path
+                   fs/parent
+                   fs/parent
+                   str))))
+      (let [host-request
+            (edn/read-string
+             (last (:seon.dev.process/argv (get specs process/host-id))))
+            web-request
+            (edn/read-string
+             (last (:seon.dev.process/argv (get specs process/web-render-id))))]
+        (is (= "experiment"
+               (:seon.host.context/database-name host-request)))
+        (is (= "experiment"
+               (:seon.web.server/database-name web-request)))
+        (is (= (get-in source-descriptor
+                       [::launch/writer-owner ::launch/request-socket-path])
+               (:seon.host.context/writer-socket-path host-request)
+               (:seon.web.server/writer-socket-path web-request))))
       (finally
         (fs/delete-tree directory)))))
 

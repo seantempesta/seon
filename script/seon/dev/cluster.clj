@@ -1,5 +1,5 @@
 (ns seon.dev.cluster
-  "Autonomous pod lifecycle for cluster databases using an existing writer."
+  "Autonomous cluster lifecycle using an existing writer owner."
   (:require [babashka.fs :as fs]
             [babashka.process :as shell]
             [clojure.edn :as edn]
@@ -232,16 +232,17 @@
 
 (defn- ensure-under-lock!
   [target-configuration manifest acquire-owned!]
-  (let [pod (get (process/specs target-configuration manifest) process/pod-id)]
-    (process/ensure!
-     target-configuration pod
-     (fn [id acquire!]
-       (acquire-owned! id acquire!
-                       #(process/stop! target-configuration id))))
+  (let [spec-map (process/specs target-configuration manifest)]
+    (doseq [id (process/start-order spec-map)]
+      (process/ensure!
+       target-configuration (get spec-map id)
+       (fn [id acquire!]
+         (acquire-owned! id acquire!
+                         #(process/stop! target-configuration id)))))
     (process/status target-configuration manifest)))
 
 (defn open!
-  "Start or converge one autonomous cluster pod through the shared writer."
+  "Start or converge one autonomous cluster through the shared writer."
   {:malli/schema [:=> [:cat ::request] :map]}
   [{::keys [configuration target-configuration] :as request}]
   (validate! ::request request "The cluster open request is invalid.")
@@ -320,10 +321,11 @@
   (process/clean-or-force!
    {:seon.dev.process/configuration target-configuration
     :seon.dev.process/operation operation
-    :seon.dev.process/targets #{process/pod-id}}))
+    :seon.dev.process/targets
+    (set (process/target-process-ids target-configuration))}))
 
 (defn close!
-  "Stop only the selected cluster pod, preserving its database and blobs."
+  "Stop the selected cluster processes, preserving its database and blobs."
   {:malli/schema [:=> [:cat ::request] process/clean-or-force-result-schema]}
   [{::keys [configuration target-configuration] :as request}]
   (validate! ::request request "The cluster close request is invalid.")
@@ -333,7 +335,7 @@
                       :seon.dev.process.operation/down)))
 
 (defn restart!
-  "Restart only the selected cluster pod through its existing writer owner."
+  "Restart the selected cluster processes through its writer owner."
   {:malli/schema [:=> [:cat ::request] :map]}
   [{::keys [configuration target-configuration] :as request}]
   (validate! ::request request "The cluster restart request is invalid.")
@@ -350,7 +352,7 @@
                                acquire-owned!)))))))
 
 (defn status
-  "Return current pod and shared writer dependency health for one cluster."
+  "Return process and shared-writer dependency health for one cluster."
   {:malli/schema [:=> [:cat ::request] :map]}
   [{::keys [configuration target-configuration] :as request}]
   (validate! ::request request "The cluster status request is invalid.")
