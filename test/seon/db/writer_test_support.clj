@@ -4,6 +4,7 @@
             [clojure.java.io :as io]
             [seon.config.resolve :as config.resolve]
             [seon.db.host :as db.host]
+            [seon.db.program :as program]
             [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds]
             [seon.db.writer :as writer]
@@ -197,7 +198,7 @@
          (schema.form/database-attributes
           (schema-forms supplemental-schema-rows))
          pages
-         (protocol/initialization-pages
+         (program/compile-initialization-pages
           {:seon.execution/artifact-digest
            (:seon.execution/artifact-digest base)
            :seon.db.initialization/config-manifest-digest

@@ -2,6 +2,7 @@
   "Process-death recovery for pipelined file-backed mutations."
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is]]
+            [seon.db.program :as program]
             [seon.db.protocol :as protocol]
             [seon.db.writer-test-support :as writer-test])
   (:import [java.io File]
@@ -159,7 +160,7 @@
         first-log (.getAbsolutePath (io/file root "writer-first.log"))
         second-log (.getAbsolutePath (io/file root "writer-second.log"))
         database-name (str "writer-init-crash-" (random-uuid))
-        pages (protocol/initialization-pages paged-initialization)
+        pages (program/compile-initialization-pages paged-initialization)
         split-index (quot (count pages) 2)
         first-process
         (start-writer-process! database-name database-path socket-path first-log)]

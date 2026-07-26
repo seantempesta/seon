@@ -297,24 +297,22 @@
            (done))))))
 
 (def ^:private initialization
-  "One production-shaped initialization seeded through the canonical
-   schema authority, exactly like the build-time page-plan producer."
-  (let [schema-rows (mapv #(dissoc % :seon.schema/created-at)
-                          (schema/canonical-schema-rows (js/Date.)))]
+  "One precomputed initialization value, exactly as runtime receives it."
+  (let [fingerprint "remote-contract-initialization"
+        page (fn [index phase]
+               {:seon.db.initialization/fingerprint fingerprint
+                :seon.db.initialization/page-index index
+                :seon.db.initialization/page-count 2
+                :seon.db.initialization/page-rows 64
+                :seon.db.initialization/phase phase})]
     {:seon.execution/artifact-digest
      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
      :seon.db.initialization/config-manifest-digest
      "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
-     :seon.db.initialization/page-rows 64
-     :seon.db/attributes (schema/canonical-database-attributes)
-     :seon.db/program
-     (into schema-rows
-           [{:seon.ns/name 'seon.db
-             :seon.ns/source "(ns seon.db)"}
-            {:seon.fn/sym "seon.db/query"
-             :seon.fn/ns [:seon.ns/name 'seon.db]
-             :seon.fn/source "(defn query [input] input)"}])
-     :seon.db/initial-data [{:seon.user/id "user"}]}))
+     :seon.db/initialization-pages
+     [(assoc (page 0 :seon.db.initialization.phase/schema)
+             :seon.db/program [])
+      (page 1 :seon.db.initialization.phase/completion)]}))
 
 (defn- operation-requests
   [requests operation]

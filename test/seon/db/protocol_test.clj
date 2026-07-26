@@ -62,11 +62,18 @@
     (is (schema/valid-candidate-value?
          :seon.db/precomputed-initialization precomputed))
     (is (schema/valid-candidate-value? :seon.db/raw-initialization raw))
-    (is (every? #(schema/valid-candidate-value?
-                  :seon.db/initialization %)
-                [raw precomputed]))
+    (is (false?
+         (schema/valid-candidate-value? :seon.db/initialization raw))
+        "raw build input cannot cross the runtime initialization boundary")
+    (is (schema/valid-candidate-value?
+         :seon.db/initialization precomputed))
     (is (identical? pages (protocol/initialization-pages precomputed))
-        "precomputed pages cross the protocol boundary without reconstruction")))
+        "precomputed pages cross the protocol boundary without reconstruction")
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"no precomputed initialization pages"
+         (protocol/initialization-pages raw))
+        "a missing pages artifact fails at the runtime boundary")))
 
 (deftest initialization-state-shape-carries-optional-applied-identity
   (let [release-digest (apply str (repeat 64 "c"))

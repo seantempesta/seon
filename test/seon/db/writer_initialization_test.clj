@@ -5,6 +5,7 @@
             [datahike.api :as d]
             [seon.db.branch :as branch]
             [seon.db.executor :as executor]
+            [seon.db.program :as program]
             [seon.db.protocol :as protocol]
             [seon.db.registry :as registry]
             [seon.db.transport.uds :as uds]
@@ -149,7 +150,7 @@
           connection-id
           (assoc ::branch/connection-id connection-id)))))
     nil
-    (protocol/initialization-pages initialization))))
+    (program/compile-initialization-pages initialization))))
 
 (defn- ensure-page!
   [runtime database-name page]
@@ -182,7 +183,7 @@
         fingerprint
         (comp :seon.db.initialization/fingerprint
               first
-              protocol/initialization-pages)]
+              program/compile-initialization-pages)]
     (is (not= (fingerprint initialization)
               (fingerprint changed)))))
 
@@ -289,7 +290,7 @@
                    (mapv (fn [index]
                            {:seon.user/id (str "user-" index)})
                          (range 10))))
-        pages (protocol/initialization-pages synthetic)
+        pages (program/compile-initialization-pages synthetic)
         requests
         (mapv
          (fn [page]
@@ -309,7 +310,7 @@
         "population growth creates more bounded pages, not larger frames")))
 
 (deftest schema-pages-commit-references-before-generated-identities
-  (let [pages (protocol/initialization-pages initialization)
+  (let [pages (program/compile-initialization-pages initialization)
         ordered-keys
         (into []
               (comp
@@ -334,7 +335,7 @@
           ::writer/backend :memory
           ::writer/request-socket-path (.getAbsolutePath socket-file)})
         runtime (::writer/runtime server)
-        pages (protocol/initialization-pages initialization)
+        pages (program/compile-initialization-pages initialization)
         split-index (quot (count pages) 2)
         prefix (subvec pages 0 split-index)
         suffix (subvec pages split-index)
@@ -811,7 +812,7 @@
         branch-connection-id
         (assoc (::registry/connection-id main) 1 branch)
         invalid-page
-        (assoc (first (protocol/initialization-pages initialization))
+        (assoc (first (program/compile-initialization-pages initialization))
                :seon.db/program [])]
     (try
       (let [failed
@@ -842,7 +843,7 @@
                ::protocol/backend :memory
                ::branch/connection-id branch-connection-id
                :seon.db/initialization-page
-               (first (protocol/initialization-pages initialization))}))
+               (first (program/compile-initialization-pages initialization))}))
             after
             (branch/head
              (d/branch-as-db (::registry/conn main) branch))]
