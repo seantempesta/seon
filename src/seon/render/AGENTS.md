@@ -1,3 +1,9 @@
+# CONDEMNED FILE FENCE
+DYING — `system.cljs` is deleted at Group 6/Step 7.
+Do not extend, do not port, do not add requires to this namespace from new code.
+Surviving owner: `seon.render`.
+Deletion plan: `docs/prds/sci-execution-runtime/research/pod-cut-verdict-2026-07-26.md`.
+
 # src/seon/render — the ONE projection engine (with src/seon/ui as its view library)
 
 **Read before editing:** `docs/seon/architecture/ui.md` (block/render/canvas/

@@ -1,3 +1,9 @@
+# CONDEMNED FILE FENCE
+DYING — `debug.cljs` is deleted at Group 6/Step 7.
+Do not extend, do not port, do not add requires to this namespace from new code.
+Surviving owners: `seon.agent.driver` and `seon.render`.
+Deletion plan: `docs/prds/sci-execution-runtime/research/pod-cut-verdict-2026-07-26.md`.
+
 # src/seon/agent — the engine (loop, run, turn, context, capability fns)
 
 **Read before editing:** `docs/seon/architecture/agent-runtime.md` (loop/run/

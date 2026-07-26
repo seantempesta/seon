@@ -1,3 +1,9 @@
+# CONDEMNED FILE FENCE
+DYING — Group 6/Step 7 deletes `brand.cljs`, `datastar.cljs`, `debug.cljs`, `router.cljs`, `serve.cljs`, and `value.cljs`.
+Do not extend, do not port, do not add requires to these namespaces from new code.
+Surviving owners: `seon.web.server`, `seon.web.feed`, and `seon.render`.
+Deletion plan: `docs/prds/sci-execution-runtime/research/pod-cut-verdict-2026-07-26.md`.
+
 # src/seon/web — HTTP/SSE derivation on pod and JVM tiers
 
 **Read before editing:** `docs/seon/architecture/ui.md` (the live channel +

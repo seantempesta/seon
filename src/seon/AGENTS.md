@@ -1,3 +1,9 @@
+# CONDEMNED FILE FENCE
+DYING — Group 5/Step 6 deletes `client.cljs`, `config.cljs`, `demo.cljs`, `log.cljs`, and `platform.cljs`; Group 6/Step 7 deletes `derive.cljs` and `route.cljs`.
+Do not extend, do not port, do not add requires to these namespaces from new code.
+Surviving owners: `seon.dev.program-indexer`, `seon.host`, `seon.config.resolve`, `seon.error`, `seon.derive.state`, and `seon.web.server`.
+Deletion plan: `docs/prds/sci-execution-runtime/research/pod-cut-verdict-2026-07-26.md`.
+
 # src/seon — orientation (auto-loaded when editing anything under here)
 
 **Before editing, read the canonical architecture:** `docs/seon/architecture/`
