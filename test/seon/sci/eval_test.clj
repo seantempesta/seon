@@ -59,6 +59,28 @@
     (is (= :ok (get-in result [::eval/record :seon.eval/outcome])))
     (is (pos? (get-in result [::eval/record :seon.eval/fn-entries])))))
 
+(deftest lifecycle-completion-is-an-ordinary-evaluation-value
+  (eval/open! {::eval/concurrency 1})
+  (let [result
+        (eval/evaluate
+         {::eval/source "(seon.agent.lifecycle/complete \"X\")"
+          ::interrupt/time-limit-ms 1000})]
+    (is (= {:seon.agent.lifecycle/disposition :completed
+            :seon.agent.lifecycle/result "X"}
+           (::eval/value result)))
+    (is (= :ok (get-in result [::eval/record :seon.eval/outcome])))))
+
+(deftest unresolved-symbol-error-names-the-symbol
+  (eval/open! {::eval/concurrency 1})
+  (let [result
+        (eval/evaluate
+         {::eval/source "(missing.namespace/function 1)"
+          ::interrupt/time-limit-ms 1000})]
+    (is (eval/error? (::eval/value result)))
+    (is (= 'missing.namespace/function
+           (get-in result
+                   [::eval/value :seon.error/data :sci.impl/symbol])))))
+
 (deftest blocked-host-call-consumes-only-its-own-capacity
   (let [release (promise)
         base-ctx

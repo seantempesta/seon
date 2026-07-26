@@ -65,15 +65,18 @@
 
 (defn- error-value
   [throwable record]
-  {:seon.error/message (diagnosis record)
-   :seon.error/kind (:seon.eval/outcome record)
-   :seon.error/data
-   (cond->
-    {:seon.sci.eval/throwable-class (.getName (class throwable))
-     :seon.sci.eval/record record}
-     (.getMessage ^Throwable throwable)
-     (assoc :seon.sci.eval/raw-message
-            (.getMessage ^Throwable throwable)))})
+  (let [exception-data (ex-data throwable)]
+    {:seon.error/message (diagnosis record)
+     :seon.error/kind (:seon.eval/outcome record)
+     :seon.error/data
+     (cond->
+      {:seon.sci.eval/throwable-class (.getName (class throwable))
+       :seon.sci.eval/record record}
+       (.getMessage ^Throwable throwable)
+       (assoc :seon.sci.eval/raw-message
+              (.getMessage ^Throwable throwable))
+       (:sci.impl/symbol exception-data)
+       (assoc :sci.impl/symbol (:sci.impl/symbol exception-data)))}))
 
 (defn evaluate
   "Evaluate one source form and return a value plus diagnostics."
