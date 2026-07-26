@@ -21,6 +21,10 @@
    {org.clojure/clojure {:mvn/version "1.12.5"}
     metosin/malli {:mvn/version "0.20.0"}
     org.replikativ/datalog-parser {:mvn/version "0.2.37"}
+    ;; Flow is published from core.async's dev-flow-alpha branch under the
+    ;; same artifact as core.async. 1.9.865 is the latest stable release;
+    ;; alpha3 is the current Flow release and adds :ping-map-fn.
+    org.clojure/core.async {:mvn/version "1.10.874-alpha3"}
 
     org.replikativ/datahike
     {:local/root "reference-code/datahike"
@@ -75,7 +79,12 @@
   ;; bin/test-writer selects exact retained namespaces without booting the
   ;; server or discovering unrelated CLJS tests.
   :writer-test
-  {:extra-paths ["test" "script"]}
+  {:extra-paths ["test" "script"]
+   ;; The monitor is a JVM-only testbed dependency. Its vendored source matches
+   ;; the current published v0.1.5@376d6ec coordinate exactly.
+   :extra-deps
+   {io.github.clojure/core.async.flow-monitor
+    {:local/root "reference-code/core.async.flow-monitor"}}}
 
   ;; The database-writer test namespaces load against the exact :writer basis;
   ;; there is no second writer dependency graph or broad JVM test discovery.
@@ -137,7 +146,9 @@
          :extra-deps    {;; B2-EXPERIMENTAL sci pin — see the alias comment above.
                          org.babashka/sci                     {:local/root "reference-code/sci"}
                          org.clojure/clojurescript            {:mvn/version "1.12.145"}
-                         org.clojure/core.async               {:mvn/version "1.10.870-alpha2"}
+                         ;; Mirrors :writer: Flow remains JVM-only, but this
+                         ;; keeps the shared core.async coordinate identical.
+                         org.clojure/core.async               {:mvn/version "1.10.874-alpha3"}
                          ;; Maintained upstream 3.4.11 fork with the exact-selector
                          ;; symbol/hash fix and truthful Node reload completion.
                          ;; The npm 3.4.10 package remains only the CLI shim.
