@@ -435,6 +435,35 @@ Each phase names its trusted libraries, its falsifier, and absorbs what the
 old capability-ordered steps still owed. The old steps are superseded — do
 not resurrect them; their surviving content is named inside each phase.
 
+**Boot-order construction (owner directive, 2026-07-26 s3 late).** This is
+a deliberate ground-up rewrite: build in the order things RUN, make each
+rung solid before the next, and rule every ported piece explicitly. Each
+rung's contract package carries a **port manifest** — a table naming every
+candidate old piece with a verdict (`adopt` as-is / `adapt` at a named
+seam / `rewrite` fresh / `dead` — stays unlinked) and why. Nothing enters
+the nucleus through an undecided require. The extra layers and wire
+protocols are what this removes: no host/writer split, no UDS on the agent
+path, no pod. N1 decomposes into the ladder:
+
+- **B0 — the entry.** `seon.cluster` main: the process starts from source,
+  prints its identity, and opens its io-prepl IMMEDIATELY — the REPL is
+  online from second zero, before anything else exists. Ports: none
+  (clojure.core.server only).
+- **B1 — the store.** Open Datahike in-process (`:self` writer), the one
+  `flock` single-writer assert, clean reopen after kill -9. Port decision
+  rung: Datahike direct first; the `seon.db` facade is adopted
+  deliberately or not at all.
+- **B2 — schema + pages.** `seon.schema` (adopt — trusted) and the
+  initialization-pages consumer (adapt from `seon.db.protocol`); boot from
+  the publish artifact/template store.
+- **B3 — the loop's tools.** The nucleus edit-test feedback (in-memory
+  suites, seconds per cycle), the MCP REPL pointed at the nucleus process,
+  and the hook selecting nucleus tests — a really good feedback loop from
+  zero is itself a rung with a falsifier.
+
+Then N2 (run model — in flight), N3 (loop), N4 (render), N5 (corpus),
+N6 (proofs/leaves) as below, each with its own port manifest.
+
 **Trusted components (libraries, not baggage):** Datahike (`:self` writer,
 in-process), `seon.schema` (register!/bridge), `seon.sci.eval` (guarded
 eval + computed binding table + home-require exposure), `seon.flow`
@@ -472,7 +501,7 @@ Wake (`listen!` interest) → claim → derived prompt → model call on `:io`
 → plan freeze (absent→digest CAS) → reduce forms through the guarded
 eval → commit facts with provenance meta. Errors are values the agent
 sees. Absorbs the old step-1 capability goal: the computed binding table
-+ home-require exposure already land db/message/lifecycle in the eval
+and home-require exposure already land db/message/lifecycle in the eval
 world; blob/fs/shell/web arrive as ordinary owners with schemas when a
 phase needs them. **Falsifier:** a real agent turn against DeepSeek on
 the one JVM; then kill -9 mid-turn — next wake shows the one interrupted
