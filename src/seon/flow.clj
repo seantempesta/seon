@@ -4,14 +4,19 @@
    This namespace deliberately does not own durable runtime state. Ordinary
    Flow processes retain only disposable counters and handles; the custom
    database process obtains facts and commits facts through supplied
-   functions. Flow channels carry scheduling and wake signals."
-  (:require [clojure.core.async :as async]
+  functions. Flow channels carry scheduling and wake signals."
+  (:require [clojure.core.protocols :as core.protocols]
+            [clojure.core.async :as async]
             [clojure.core.async.flow :as flow]
+            [clojure.core.async.flow.impl.graph :as flow.graph]
             [clojure.core.async.flow.spi :as flow.spi]
+            [clojure.core.async.impl.protocols :as async.impl]
             [clojure.datafy :as datafy]
             [clojure.walk :as walk]
             [seon.schema :as schema])
-  (:import [java.util.concurrent Executor Executors Semaphore]))
+  (:import [clojure.lang Counted]
+           [java.util LinkedList]
+           [java.util.concurrent Executor Executors Semaphore]))
 
 (set! *warn-on-reflection* true)
 
@@ -31,10 +36,20 @@
   [value]
   (satisfies? flow.spi/ProcLauncher value))
 
+(defn- graph?
+  [value]
+  (satisfies? flow.graph/Graph value))
+
+(defn- channel?
+  [value]
+  (satisfies? async.impl/Channel value))
+
 (schema/register-core-predicate! 'seon.flow/executor? executor?)
 (schema/register-core-predicate! 'seon.flow/semaphore? semaphore?)
 (schema/register-core-predicate! 'seon.flow/atom-reference? atom-reference?)
 (schema/register-core-predicate! 'seon.flow/proc-launcher? proc-launcher?)
+(schema/register-core-predicate! 'seon.flow/graph? graph?)
+(schema/register-core-predicate! 'seon.flow/channel? channel?)
 
 (schema/register! ::parallelism [:int {:min 1}])
 (schema/register! ::executor [:fn 'seon.flow/executor?])
@@ -45,7 +60,14 @@
 (schema/register! ::read-facts 'fn?)
 (schema/register! ::step-fn 'fn?)
 (schema/register! ::stopped! 'fn?)
+(schema/register! ::commit-fault! 'fn?)
+(schema/register! ::commit-drop! 'fn?)
+(schema/register! ::read-core-error-mode 'fn?)
+(schema/register! ::panic! 'fn?)
 (schema/register! ::launcher [:fn 'seon.flow/proc-launcher?])
+(schema/register! ::graph [:fn 'seon.flow/graph?])
+(schema/register! ::channel [:fn 'seon.flow/channel?])
+(schema/register! ::buffer-capacity [:int {:min 1}])
 (schema/register!
  ::eval-proc-request
  [:map
@@ -64,12 +86,204 @@
   [::read-facts ::read-facts]
   [::step-fn ::step-fn]
   [::stopped! ::stopped!]])
+(schema/register!
+ ::fault-committer-proc-request
+ [:map
+  [::fault-channel ::channel]
+  [::read-core-error-mode ::read-core-error-mode]
+  [::commit-fault! ::commit-fault!]
+  [::panic! ::panic!]])
+(schema/register!
+ ::error-fanout-request
+ [:map
+  [::graph ::graph]
+  [::started
+   [:map
+    [:report-chan ::channel]
+    [:error-chan ::channel]]]
+  [::fault-buffer-capacity ::buffer-capacity]
+  [::monitor-buffer-capacity ::buffer-capacity]
+  [::read-core-error-mode ::read-core-error-mode]
+  [::commit-fault! ::commit-fault!]
+  [::commit-drop! ::commit-drop!]
+  [::panic! ::panic!]])
+(schema/register!
+ ::error-fanout
+ [:map
+  [::graph ::graph]
+  [::fault-graph ::graph]
+  [::application-report-channel ::channel]
+  [::monitor-report-channel ::channel]
+  [::monitor-error-channel ::channel]
+  [::fault-channel ::channel]])
 
 (defn bounded-platform-executor
   "Create a bounded executor whose workers are platform threads."
   {:malli/schema [:=> [:catn [::parallelism ::parallelism]] ::executor]}
   [parallelism]
   (Executors/newFixedThreadPool (int parallelism)))
+
+(deftype CountedDroppingBuffer
+  [^LinkedList buffer ^long capacity drop!]
+  async.impl/UnblockingBuffer
+  async.impl/Buffer
+  (full? [_]
+    false)
+  (remove! [_]
+    (.removeLast buffer))
+  (add!* [this value]
+    (if (>= (.size buffer) capacity)
+      (drop! value)
+      (.addFirst buffer value))
+    this)
+  (close-buf! [_])
+  Counted
+  (count [_]
+    (.size buffer))
+  async.impl/Capacity
+  (capacity [_]
+    capacity)
+  core.protocols/Datafiable
+  (datafy [_]
+    {:type 'CountedDroppingBuffer
+     :count (.size buffer)
+     :capacity capacity}))
+
+(defn- counted-dropping-buffer
+  [capacity drop!]
+  (CountedDroppingBuffer. (LinkedList.) (long capacity) drop!))
+
+(defn fault-committer-proc
+  "Create the Flow proc that turns core faults into durable facts.
+
+   The supplied mode reader represents the database-backed
+   :seon.config/on-core-error decision. Record mode commits the fault; panic
+   mode invokes the supplied development panic function."
+  {:malli/schema
+   [:=> [:catn [::request ::fault-committer-proc-request]] ::launcher]}
+  [{::keys [fault-channel read-core-error-mode commit-fault! panic!]}]
+  (flow/process
+   (flow/map->step
+    {:describe
+     (fn []
+       {:workload :io
+        :ping-map-fn #(select-keys % [::committed ::panicked])})
+     :init
+     (fn [_]
+       {::flow/in-ports {::core-fault fault-channel}
+        ::committed 0
+        ::panicked 0})
+     :transform
+     (fn [state _input fault]
+       (case (read-core-error-mode)
+         :record
+         (do
+           (commit-fault! fault)
+           [(update state ::committed inc) nil])
+
+         :panic
+         (do
+           (panic! fault)
+           [(update state ::panicked inc) nil])
+
+         (throw
+          (ex-info
+           "Unknown fake :seon.config/on-core-error value."
+           {::core-error-mode (read-core-error-mode)}))))})))
+
+(defn- monitor-graph
+  [graph report-channel error-channel]
+  (reify
+    core.protocols/Datafiable
+    (datafy [_]
+      (-> (datafy/datafy graph)
+          (assoc-in [:chans :report] (datafy/datafy report-channel))
+          (assoc-in [:chans :error] (datafy/datafy error-channel))))
+
+    flow.graph/Graph
+    (start [_] (flow.graph/start graph))
+    (stop [_] (flow.graph/stop graph))
+    (pause [_] (flow.graph/pause graph))
+    (resume [_] (flow.graph/resume graph))
+    (ping [_ timeout-ms] (flow.graph/ping graph timeout-ms))
+    (pause-proc [_ pid] (flow.graph/pause-proc graph pid))
+    (resume-proc [_ pid] (flow.graph/resume-proc graph pid))
+    (ping-proc [_ pid timeout-ms]
+      (flow.graph/ping-proc graph pid timeout-ms))
+    (command-proc [_ pid command more-kvs]
+      (flow.graph/command-proc graph pid command more-kvs))
+    (inject [_ coordinate messages]
+      (flow.graph/inject graph coordinate messages))))
+
+(defn start-error-fanout!
+  "Own report/error fan-out for one already-started Flow graph.
+
+   Core faults enter a bounded nonblocking tap. Every admitted fault is
+   processed by a dedicated Flow proc; each overflow calls commit-drop! with
+   the dropped fault. Flow Monitor receives independent sliding-buffer taps
+   through the returned datafiable graph, so it never competes for the source
+   channels or delays fault commitment."
+  {:malli/schema
+   [:=> [:catn [::request ::error-fanout-request]] ::error-fanout]}
+  [{::keys [graph started fault-buffer-capacity monitor-buffer-capacity
+            read-core-error-mode commit-fault! commit-drop! panic!]}]
+  (let [report-mult (async/mult (:report-chan started))
+        error-mult (async/mult (:error-chan started))
+        application-report-channel
+        (async/chan (async/sliding-buffer monitor-buffer-capacity))
+        monitor-report-channel
+        (async/chan (async/sliding-buffer monitor-buffer-capacity))
+        monitor-error-channel
+        (async/chan (async/sliding-buffer monitor-buffer-capacity))
+        fault-channel
+        (async/chan
+         (counted-dropping-buffer fault-buffer-capacity commit-drop!))
+        fault-graph
+        (flow/create-flow
+         {:procs
+          {::fault-committer
+           {:proc
+            (fault-committer-proc
+             {::fault-channel fault-channel
+              ::read-core-error-mode read-core-error-mode
+              ::commit-fault! commit-fault!
+              ::panic! panic!})}}
+          :conns []})
+        _ (flow/start fault-graph)
+        _ (flow/resume fault-graph)
+        monitor-view
+        (monitor-graph
+         graph monitor-report-channel monitor-error-channel)]
+    (async/tap report-mult application-report-channel)
+    (async/tap report-mult monitor-report-channel)
+    (async/tap error-mult fault-channel)
+    (async/tap error-mult monitor-error-channel)
+    {::graph monitor-view
+     ::source-graph graph
+     ::fault-graph fault-graph
+     ::report-mult report-mult
+     ::error-mult error-mult
+     ::application-report-channel application-report-channel
+     ::monitor-report-channel monitor-report-channel
+     ::monitor-error-channel monitor-error-channel
+     ::fault-channel fault-channel}))
+
+(defn stop-error-fanout!
+  "Detach and stop one error fan-out without stopping its source graph."
+  {:malli/schema
+   [:=> [:catn [::fanout ::error-fanout]] :boolean]}
+  [{::keys [fault-graph report-mult error-mult
+            application-report-channel monitor-report-channel
+            monitor-error-channel fault-channel]}]
+  (let [stopped? (boolean (flow/stop fault-graph))]
+    (async/untap report-mult application-report-channel)
+    (async/untap report-mult monitor-report-channel)
+    (async/untap error-mult monitor-error-channel)
+    (async/untap error-mult fault-channel)
+    (doseq [channel [application-report-channel monitor-report-channel
+                     monitor-error-channel]]
+      (async/close! channel))
+    stopped?))
 
 (defn eval-proc
   "Create a compute proc that simulates one guarded evaluation."
@@ -226,7 +440,7 @@
    [:=> [:catn [::request ::database-proc-request]] ::launcher]}
   [{::keys [read-facts step-fn stopped!]}]
   (reify
-    clojure.core.protocols/Datafiable
+    core.protocols/Datafiable
     (datafy [_]
       {::launcher ::database})
 

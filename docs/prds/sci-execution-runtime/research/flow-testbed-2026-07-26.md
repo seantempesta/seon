@@ -13,14 +13,26 @@ Path A is technically viable: the public Flow API runs Seon's ordinary
 database-backed proc reconstructs its state from surviving Datahike facts, and
 bounded platform-thread capacity remains directly observable.
 
-The testbed also proved five parts of the prior understanding wrong or
+The testbed also proved six parts of the prior understanding wrong or
 incomplete:
 
-- **Flow Monitor is not a non-invasive report tap.** Its
-  `report-monitoring` loop takes directly from the Flow graph's report and
-  error channels. An application consumer and Flow Monitor therefore compete
-  for messages. Production adoption needs one explicit fan-out owner before
-  the monitor can be treated as an operations surface.
+- **Flow Monitor is not a non-invasive report tap; the testbed now resolves
+  that defect.** Its `report-monitoring` loop takes directly from the channels
+  exposed by the graph it receives. Passing the real graph therefore makes
+  application consumers and Flow Monitor compete. `seon.flow` now owns one
+  `mult` per source channel, gives the fault-committer proc and application
+  report consumer tap A, and exposes independent sliding tap B channels to
+  Flow Monitor through a public-API-delegating, datafiable graph. A thrown eval
+  step reached both a durable Datahike fault fact and Flow Monitor; an ordinary
+  report reached both the application tap and Flow Monitor. The prior direct
+  attachment was wrong.
+- **Core fault overflow cannot be made observable with core.async's released
+  dropping buffer alone.** `DroppingBuffer.add!*` silently ignores a new value
+  at capacity and has no callback. The fan-out therefore uses a small
+  core.async `Buffer` implementation with the same nonblocking bounded
+  semantics plus a drop callback. The standing proof pauses the committer:
+  six faults at capacity six all commit, while five faults at capacity two
+  commit two fault facts and a durable drop count of three.
 - **A wedged proc cannot report its own wedge.** Its proc loop is blocked
   waiting for the compute future, so `ping` times it out. A separate responsive
   capacity-observer proc can name the active proc, platform thread, wedge flag,
@@ -91,7 +103,10 @@ at
   `(sliding-buffer 1)` tap; and
 - a custom database proc whose ping and step both read facts through a
   supplied function, whose step commits through a supplied function, and whose
-  channels contain wake values rather than durable state.
+  channels contain wake values rather than durable state; and
+- the report/error fan-out owner, a fault-committer proc governed by a supplied
+  database-backed core-error mode reader, and a Flow Monitor graph view whose
+  lifecycle and control calls delegate to the real graph.
 
 The recurring proof is `test/seon/flow_test.clj`. The real child-process
 crash helper is `test/seon/flow/kill_child.clj`; it lives under `test/` because
@@ -112,10 +127,15 @@ the experiment must run again.
 | 9. Two graphs are isolated in one JVM | Stopping one graph does not damage another graph's lifecycle or executor | Passed. Graph A and its executor stopped; graph B remained running and completed a new submission. Public operations on stopped A failed as expected. |
 | 10. Forced process death preserves commits | SIGKILL loses process-local compute but not committed facts | Passed. A child JVM committed count 1 and published readiness, was killed with SIGKILL, and a new Datahike connection reopened count 1. A replacement Flow database proc then committed count 2. |
 | 11. Flow Monitor renders live topology | The released monitor attaches to a running graph and exposes topology, buffer, and wedge evidence | Passed at the server/WebSocket boundary. HTTP returned 200 with the Flow Monitor title. The WebSocket's initial datafy and live ping messages named all four procs, `FixedBuffer`, and `:seon.flow/wedged-procs` containing `:eval`. |
+| 12. Core fault fan-out does not compete | A throwing step reaches durable fault storage and Flow Monitor; a report reaches the application and monitor taps | Passed. The committed fact and Flow Monitor error both named `:eval`; a following successful report appeared once at each consumer. Flow Monitor was attached to the proxy graph through its released `start-server`. |
+| 13. Fault tap is lossless within its bound | N faults admitted to a capacity-N tap survive a paused committer | Passed for N = 6. No facts existed while paused, no drops were recorded, and resume committed all six distinct fault messages. |
+| 14. Fault overflow is loud and durable | Values beyond the committer tap bound do not disappear silently | Passed at capacity 2 with five faults. Two fault facts committed and the durable drop counter became 3. The monitor tap independently received all five because its test capacity was five. |
+| 15. Agent errors remain values | A flat eval error value never enters Flow's core error channel | Passed. The synthetic interrupt returned `:seon.error/kind :timeout` in the normal eval report, the Flow error channel remained empty, and the proc handled its next submission. |
 
-An additional error-path regression throws an ordinary exception from the eval
-step. Flow publishes the error with the pre-step state and count, then the same
-proc successfully handles the next submission.
+The two error classes are now executable rather than documentary: exceptions
+escaping a Flow step are core faults routed through the fan-out and committed;
+agent-facing `:seon.error` maps are ordinary returned values and never enter
+Flow's error channel.
 
 Scenario 11 used the accepted report-channel/server evidence rather than a DOM
 screenshot. The connected in-app Browser runtime reported that no browser was
@@ -142,7 +162,8 @@ clojure -M:writer:host:writer-test -e \
    (clojure.test/run-tests (quote seon.flow-test))'
 ```
 
-Result: 11 tests, 59 assertions, 0 failures, 0 errors.
+Result after the error-design extension: 14 tests, 66 assertions, 0 failures,
+0 errors.
 
 The focused pre-existing JVM async paths were run on the same alpha3 basis:
 
@@ -178,8 +199,12 @@ The production move should preserve the tested split:
   lifecycle commands, and disposable diagnostics.
 - Datahike owns run, receipt, and other restart-relevant facts.
 - A responsive observer, not a wedged proc, names capacity loss.
-- Monitor report/error fan-out must be designed before Flow Monitor is enabled
-  alongside any other consumer.
+- Flow Monitor must receive the fan-out owner's datafiable graph view, never
+  the source graph. The fault tap is bounded, lossless within its configured
+  capacity, and commits overflow counts as facts; monitor taps are independently
+  bounded and cannot delay fault commitment.
+- Agent error values stay on the ordinary result path. Only exceptions escaping
+  Flow machinery enter the core-fault path and obey the core-error config fact.
 
 This testbed does not move the existing semaphore/eval path and is not proof
 that the production mechanism has already adopted Flow.

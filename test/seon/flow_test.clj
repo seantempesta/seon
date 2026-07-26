@@ -34,6 +34,32 @@
     :db/cardinality :db.cardinality/one
     :db/unique :db.unique/identity}
    {:db/ident ::event-value
+   :db/valueType :db.type/long
+    :db/cardinality :db.cardinality/one}])
+
+(def ^:private fault-schema
+  [{:db/ident ::core-error-config-id
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one
+    :db/unique :db.unique/identity}
+   {:db/ident ::on-core-error
+    :db/valueType :db.type/keyword
+    :db/cardinality :db.cardinality/one}
+   {:db/ident ::fault-id
+    :db/valueType :db.type/uuid
+    :db/cardinality :db.cardinality/one
+    :db/unique :db.unique/identity}
+   {:db/ident ::fault-proc
+    :db/valueType :db.type/keyword
+    :db/cardinality :db.cardinality/one}
+   {:db/ident ::fault-message
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one}
+   {:db/ident ::fault-drop-id
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one
+    :db/unique :db.unique/identity}
+   {:db/ident ::fault-drop-count
     :db/valueType :db.type/long
     :db/cardinality :db.cardinality/one}])
 
@@ -358,6 +384,76 @@
         (d/release connection)
         (d/delete-database configuration)))))
 
+(defn- with-fault-database
+  [body]
+  (let [configuration
+        {:store {:backend :memory :id (random-uuid)}
+         :schema-flexibility :write}
+        _ (d/create-database configuration)
+        connection (d/connect configuration)]
+    (try
+      (d/transact connection fault-schema)
+      (d/transact
+       connection
+       [{::core-error-config-id "testbed"
+         ::on-core-error :record}
+        {::fault-drop-id "fault-committer"
+         ::fault-drop-count 0}])
+      (body connection)
+      (finally
+        (d/release connection)
+        (d/delete-database configuration)))))
+
+(defn- core-error-mode
+  [connection]
+  (d/q
+   '[:find ?mode .
+     :where
+     [?config :seon.flow-test/core-error-config-id "testbed"]
+     [?config :seon.flow-test/on-core-error ?mode]]
+   @connection))
+
+(defn- commit-fault!
+  [connection fault]
+  (d/transact
+   connection
+   [{::fault-id (random-uuid)
+     ::fault-proc (::flow/pid fault)
+     ::fault-message (ex-message (::flow/ex fault))}]))
+
+(defn- commit-fault-drop!
+  [connection _fault]
+  (let [count
+        (d/q
+         '[:find ?count .
+           :where
+           [?counter :seon.flow-test/fault-drop-id "fault-committer"]
+           [?counter :seon.flow-test/fault-drop-count ?count]]
+         @connection)]
+    (d/transact
+     connection
+     [{::fault-drop-id "fault-committer"
+       ::fault-drop-count (inc count)}])))
+
+(defn- committed-faults
+  [connection]
+  (d/q
+   '[:find ?proc ?message
+     :where
+     [?fault :seon.flow-test/fault-id]
+     [?fault :seon.flow-test/fault-proc ?proc]
+     [?fault :seon.flow-test/fault-message ?message]]
+   @connection))
+
+(defn- committed-drop-count
+  [connection]
+  (d/q
+   '[:find ?count .
+     :where
+     [?counter :seon.flow-test/fault-drop-id "fault-committer"]
+     [?counter :seon.flow-test/fault-drop-count ?count]]
+   @connection))
+
 (defn- event-count
   [connection]
   (d/q
@@ -492,7 +588,7 @@
   (testing "an armed interrupt returns a timeout value without losing capacity"
     (let [{::keys [graph completed permits] :as testbed}
           (single-eval-testbed 2)
-          {:keys [report-chan]} (flow/start graph)
+          {:keys [report-chan error-chan]} (flow/start graph)
           deadline (+ (System/nanoTime) (* 1000000 30))
           interrupt-fn
           (fn []
@@ -517,7 +613,9 @@
               result (::sut/result report)]
           (is (= :timeout (:seon.error/kind result)))
           (is (= :eval (get-in result
-                               [:seon.error/data ::sut/pid]))))
+                               [:seon.error/data ::sut/pid])))
+          (is (nil? (async/poll! error-chan))
+              "an agent error value is not a Flow core fault"))
         (is (= :running
                (::flow/status (flow/ping-proc graph :eval))))
         @(flow/inject
@@ -566,6 +664,194 @@
          #(= 1 (::flow/count (flow/ping-proc graph :eval))))
         (finally
           (stop-testbed! testbed))))))
+
+(defn- throwing-work-message
+  [ordinal]
+  {::sut/work-fn
+   (fn [_]
+     (throw
+      (RuntimeException.
+       (str "synthetic core fault " ordinal))))
+   ::sut/wedged? false})
+
+(defn- start-test-fanout!
+  [connection graph started fault-buffer-capacity monitor-buffer-capacity]
+  (sut/start-error-fanout!
+   {::sut/graph graph
+    ::sut/started started
+    ::sut/fault-buffer-capacity fault-buffer-capacity
+    ::sut/monitor-buffer-capacity monitor-buffer-capacity
+    ::sut/read-core-error-mode #(core-error-mode connection)
+    ::sut/commit-fault! #(commit-fault! connection %)
+    ::sut/commit-drop! #(commit-fault-drop! connection %)
+    ::sut/panic!
+    (fn [fault]
+      (throw
+       (ex-info
+        "The record-mode testbed unexpectedly selected panic."
+        {::fault fault})))}))
+
+(declare free-port)
+
+(deftest core-fault-fanout-commits-and-copies-without-competition
+  (testing "one throwing step reaches durable facts and the monitor tap"
+    (with-fault-database
+      (fn [connection]
+        (let [{::keys [graph completed] :as testbed}
+              (single-eval-testbed 2)
+              started (flow/start graph)
+              fanout (start-test-fanout! connection graph started 4 4)
+              monitor-messages (atom [])]
+          (try
+            (with-redefs
+              [flow-monitor/send-message
+               (fn [_state message]
+                 (swap! monitor-messages conj message))]
+              (let [monitor-state
+                    (flow-monitor/start-server
+                     {:flow (::sut/graph fanout)
+                      :port (free-port)})]
+                (try
+                  (flow/resume graph)
+                  @(flow/inject
+                    graph
+                    [:eval ::sut/submission]
+                    [(throwing-work-message 0)])
+                  (await-condition!
+                   ::monitor-core-fault
+                   #(some
+                     (fn [{:keys [action data]}]
+                       (and (= :error action)
+                            (str/includes?
+                             data
+                             ":pid :eval")
+                            (str/includes?
+                             data
+                             "synthetic core fault 0")))
+                     @monitor-messages))
+                  @(flow/inject
+                    graph
+                    [:eval ::sut/submission]
+                    [(work-message completed ::fanout-report)])
+                  (let [application-copy
+                        (take-event!
+                         (::sut/application-report-channel fanout)
+                         ::application-report-copy)]
+                    (is (= ::fanout-report
+                           (::sut/result application-copy))))
+                  (await-condition!
+                   ::monitor-report-copy
+                   #(some
+                     (fn [{:keys [action data]}]
+                       (and (= :message action)
+                            (= ::fanout-report (::sut/result data))))
+                     @monitor-messages))
+                  (finally
+                    (flow-monitor/stop-server monitor-state)))))
+            (await-condition!
+             ::core-fault-committed
+             #(= #{[:eval
+                    "java.lang.RuntimeException: synthetic core fault 0"]}
+                 (set (committed-faults connection))))
+            (is (= 1
+                   (get-in
+                    (flow/ping-proc
+                     (::sut/fault-graph fanout)
+                     ::sut/fault-committer)
+                    [::flow/state ::sut/committed])))
+            (finally
+              (sut/stop-error-fanout! fanout)
+              (stop-testbed! testbed))))))))
+
+(deftest fault-tap-retains-every-fault-under-capacity
+  (testing "N admitted faults below the bounded tap capacity lose nothing"
+    (with-fault-database
+      (fn [connection]
+        (let [fault-count 6
+              {::keys [graph] :as testbed}
+              (single-eval-testbed fault-count)
+              started (flow/start graph)
+              fanout
+              (start-test-fanout!
+               connection graph started fault-count fault-count)
+              fault-graph (::sut/fault-graph fanout)]
+          (try
+            (flow/pause-proc fault-graph ::sut/fault-committer)
+            (await-condition!
+             ::fault-committer-paused
+             #(= :paused
+                 (::flow/status
+                  (flow/ping-proc
+                   fault-graph ::sut/fault-committer))))
+            (flow/resume graph)
+            @(flow/inject
+              graph
+              [:eval ::sut/submission]
+              (mapv throwing-work-message (range fault-count)))
+            (dotimes [_ fault-count]
+              (take-event!
+               (::sut/monitor-error-channel fanout)
+               ::monitor-buffered-core-fault))
+            (is (empty? (committed-faults connection)))
+            (is (zero? (committed-drop-count connection)))
+            (flow/resume-proc fault-graph ::sut/fault-committer)
+            (await-condition!
+             ::all-core-faults-committed
+             #(= fault-count
+                 (count (committed-faults connection))))
+            (is (= (set (map #(str "java.lang.RuntimeException: "
+                                   "synthetic core fault " %)
+                             (range fault-count)))
+                   (set (map second
+                             (committed-faults connection)))))
+            (finally
+              (sut/stop-error-fanout! fanout)
+              (stop-testbed! testbed))))))))
+
+(deftest fault-tap-overflow-commits-a-loud-drop-counter
+  (testing "faults beyond the bounded tap are counted as durable drops"
+    (with-fault-database
+      (fn [connection]
+        (let [fault-buffer-capacity 2
+              fault-count 5
+              {::keys [graph] :as testbed}
+              (single-eval-testbed fault-count)
+              started (flow/start graph)
+              fanout
+              (start-test-fanout!
+               connection graph started
+               fault-buffer-capacity fault-count)
+              fault-graph (::sut/fault-graph fanout)]
+          (try
+            (flow/pause-proc fault-graph ::sut/fault-committer)
+            (await-condition!
+             ::overflow-fault-committer-paused
+             #(= :paused
+                 (::flow/status
+                  (flow/ping-proc
+                   fault-graph ::sut/fault-committer))))
+            (flow/resume graph)
+            @(flow/inject
+              graph
+              [:eval ::sut/submission]
+              (mapv throwing-work-message (range fault-count)))
+            (dotimes [_ fault-count]
+              (take-event!
+               (::sut/monitor-error-channel fanout)
+               ::monitor-overflow-core-fault))
+            (await-condition!
+             ::fault-drops-committed
+             #(= (- fault-count fault-buffer-capacity)
+                 (committed-drop-count connection)))
+            (flow/resume-proc fault-graph ::sut/fault-committer)
+            (await-condition!
+             ::retained-core-faults-committed
+             #(= fault-buffer-capacity
+                 (count (committed-faults connection))))
+            (is (= 3 (committed-drop-count connection)))
+            (finally
+              (sut/stop-error-fanout! fanout)
+              (stop-testbed! testbed))))))))
 
 (deftest sliding-mailbox-is-nonblocking-bounded-and-latest-only
   (testing "a paused sliding buffer of one retains only the latest snapshot"
@@ -921,8 +1207,18 @@
             client (HttpClient/newHttpClient)
             wedge-started (CountDownLatch. 1)
             release-wedge (CountDownLatch. 1)
-            post-wedge-results (atom [])]
-        (flow/start graph)
+            post-wedge-results (atom [])
+            started (flow/start graph)
+            fanout
+            (sut/start-error-fanout!
+             {::sut/graph graph
+              ::sut/started started
+              ::sut/fault-buffer-capacity 8
+              ::sut/monitor-buffer-capacity 8
+              ::sut/read-core-error-mode (constantly :record)
+              ::sut/commit-fault! (fn [_])
+              ::sut/commit-drop! (fn [_])
+              ::sut/panic! (fn [_])})]
         (flow/resume graph)
         @(flow/inject
           graph
@@ -947,7 +1243,9 @@
                       (channel-data graph :eval ::sut/submission)
                       [:buffer :count])))
               monitor-state
-              (flow-monitor/start-server {:flow graph :port port})]
+              (flow-monitor/start-server
+               {:flow (::sut/graph fanout)
+                :port port})]
           (try
             (let [request
                   (-> (HttpRequest/newBuilder)
@@ -992,6 +1290,7 @@
               (await-condition!
                ::monitor-post-wedge-drain
                #(= 3 (count @post-wedge-results)))
+              (sut/stop-error-fanout! fanout)
               (flow/stop graph)
               (await-latch! database-stopped ::monitor-database-stopped)
               (stop-executor! compute-executor))))))))
