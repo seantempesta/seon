@@ -75,20 +75,6 @@
   [run-id ordinal]
   (pr-str [run-id ordinal]))
 
-(defn message-id
-  "Compact deterministic identity of the message emitted by one receipt."
-  {:malli/schema
-   [:=> [:catn [::run-id :string]
-                [::ordinal :seon.eval/ordinal]
-                [::claim-epoch :seon.eval/claim-epoch]]
-    :seon.agent.message/id]}
-  [run-id ordinal claim-epoch]
-  (str "m"
-       (subs
-        (content-hash/sha-256
-         (receipt/receipt-id run-id ordinal claim-epoch))
-        0 11)))
-
 (defn lifecycle-tx-data
   "Interpret one lifecycle disposition as ordinary transaction data."
   [{agent-id :seon.agent/id
@@ -107,8 +93,7 @@
          :seon.agent.turn/status :done}
         {:seon.agent.run/id run-id
          :seon.agent.run/result result}
-        {:seon.agent.message/id
-         (message-id run-id ordinal claim-epoch)
+        {:seon.agent.message/id "seon.agent.driver/message"
          :seon.agent.message/from [:seon.agent/id agent-id]
          :seon.agent.message/to [message/user-ref]
          :seon.agent.message/content result
@@ -317,6 +302,30 @@
   ((get database-functions 'transact!)
    {:seon.db/tx-data (vec tx-data)}))
 
+(defn- allocated-transact!
+  [allocate! database-functions tx-data]
+  (if-let [message
+           (some #(when (and (map? %)
+                             (:seon.agent.message/id %))
+                    %)
+                 tx-data)]
+    (let [database ((get database-functions 'db))]
+      (allocate!
+       {::db/db database
+        ::db.id/allocations
+        [{::db.id/key :seon.agent.message/id
+          ::db.id/identity-attr :seon.agent.message/id}]
+        ::db.id/transaction-builder
+        (fn [ids]
+          {::db/tx-data
+           (mapv
+            #(if (identical? % message)
+               (assoc % :seon.agent.message/id
+                      (get ids :seon.agent.message/id))
+               %)
+            tx-data)})}))
+    (transact! database-functions tx-data)))
+
 (defn- pending-messages [database-functions]
   ((get database-functions 'query)
    {:seon.db/query pending-message-query
@@ -365,6 +374,28 @@
     (when-not (:seon.error/message allocation)
       {:seon.agent.run/id run-id
        :seon.agent.run/claim-epoch 1})))
+
+(defn- open-turn!
+  [allocate! database-functions agent-id run-id claim-epoch at]
+  (let [database ((get database-functions 'db))
+        allocation
+        (allocate!
+         {::db/db database
+          ::db.id/allocations
+          [{::db.id/key :seon.agent.turn/id
+            ::db.id/identity-attr :seon.agent.turn/id}]
+          ::db.id/transaction-builder
+          (fn [ids]
+            {::db/tx-data
+             (into
+              (run/run-fence agent-id run-id claim-epoch)
+              [{:seon.agent.turn/id
+                (get ids :seon.agent.turn/id)
+                :seon.agent.turn/run [:seon.agent.run/id run-id]
+                :seon.agent.turn/at at
+                :seon.agent.turn/status :running}])})})]
+    (when-not (:seon.error/message allocation)
+      (get-in allocation [::db.id/ids :seon.agent.turn/id]))))
 
 (defn- model-request
   [database-functions agent-id content]
@@ -417,16 +448,9 @@
                 claim-epoch :seon.agent.run/claim-epoch}
                (open-run! allocate! database-functions process-id message-id
                           agent-id at lease-until)]
-      (let [turn-id (compact-id "t" run-id)
-            turn-ref [:seon.agent.turn/id turn-id]
-            _ (transact!
-               database-functions
-               (into
-                (run/run-fence agent-id run-id claim-epoch)
-                [{:seon.agent.turn/id turn-id
-                  :seon.agent.turn/run [:seon.agent.run/id run-id]
-                  :seon.agent.turn/at now
-                  :seon.agent.turn/status :running}]))
+      (let [turn-id
+            (open-turn! allocate! database-functions agent-id run-id
+                        claim-epoch now)
             response (llm-transport!
                       (model-request database-functions agent-id content))
             reply (:seon.ai/text response)
@@ -450,7 +474,8 @@
               (when (< ordinal (count sources))
                 (let [result
                       (execute-form!
-                       #(transact! database-functions %)
+                       #(allocated-transact!
+                         allocate! database-functions %)
                        evaluate!
                        lifecycle-tx-data
                        {:seon.agent/id agent-id

@@ -71,17 +71,9 @@
            (:seon.agent.run/status
             (some #(when (:seon.agent.run/status %) %) tx-data))))
     (is (= "X" (:seon.agent.message/content message)))
-    (is (= (driver/message-id "run-a" 2 3)
-           (:seon.agent.message/id message)))
-    (is (= (:seon.agent.message/id message)
-           (:seon.agent.message/id
-            (some
-             #(when (:seon.agent.message/id %) %)
-             (driver/lifecycle-tx-data
-              request
-              {:seon.agent.lifecycle/disposition :completed
-               :seon.agent.lifecycle/result "X"}))))
-        "re-execution in one receipt epoch cannot duplicate delivery")))
+    (is (= "seon.agent.driver/message"
+           (:seon.agent.message/id message))
+        "the allocation transaction replaces this local placeholder")))
 
 (deftest rejected-agent-value-terminalizes-receipt-alone
   (let [transactions (atom [])
