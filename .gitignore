@@ -48,8 +48,12 @@ resources/public/css/output.css
 hs_err_pid*.log
 
 # shadow-cljs build outputs + per-build state
+# lane-suffixed variants (.shadow-cljs-<lane>/, out-<lane>/) are disposable
+# per-lane cache roots and never source
 .shadow-cljs/
+.shadow-cljs-*/
 out/
+out-*/
 # frozen bench bundle (:bench-client) — built on demand by bin/seon
 out-bench/
 

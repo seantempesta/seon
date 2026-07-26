@@ -34,7 +34,7 @@ another, delete it and point here.
 
 ---
 
-# Sci execution runtime roadmap
+## Sci execution runtime roadmap
 
 ## The final system gate (owner, 2026-07-25 night) — READ THIS FIRST
 
@@ -184,6 +184,39 @@ the JVM `/data` feed. Bounding is incomplete: `terminal-receipt-data`
 `pr-str`s unbounded and drops `fn-entries`/`allocated-bytes`; prints are
 lost; lazy values realize outside the armed boundary. `bin/test-writer`
 discovers 0 tests. Five supervised processes; the target is three.
+
+## 2b. The piece map — State A → State B
+
+State B is small: the four-file live path, plus a door, an admission
+operation, a corpus resolver, one scheduler, and a web-render tier — three
+processes, seven constructs, an agent surface of three shapes. The distance
+from here to there is not new machinery; it is pieces that already exist
+wearing the wrong name or the wrong shape. This table names each one, says
+which base construct (§1) it really is, and points at the step that
+discharges it. **It sequences nothing — order lives only in §3.** Verify a
+row against [state.md](state.md) before acting on it.
+
+| piece today (State A) | what it really is | State B shape | discharged by |
+|---|---|---|---|
+| `seon.sci.eval`'s `Semaphore` | two mechanisms in one object — queueing and parallelism | bounded submission channel per workload class (backpressure) + bounded `:compute` executor (parallelism), both config facts; semaphore deleted (`3564882a3`) | scheduling design; wedge-N experiment in [unsettled.md](unsettled.md) §2 |
+| the pod — 63 files, 30,962 lines | three unrelated jobs in one process: the pages producer (construct 6's first-party half), the render tier (construct 7), and a duplicate execution engine (construct 4, already owned by the JVM) | producer → JVM compile-time indexer; renderer → web-render over committed facts; engine → deleted, no replacement | steps 5–7 per `pod-cut-verdict-2026-07-26.md` |
+| `seon.db.host/writer-session` UDS wire on the agent path | a process-boundary artifact mislabeled as database access | O1 co-location: a read is a pointer into a database value, a write is a function call in the cluster JVM | step 6 |
+| `seon.sci.ctx/base`'s `:namespaces` literal | a hand list where a derived view belongs (L17) | computed binding table from corpus facts, every capability fn entering the one door | step 1 |
+| code as source strings | the corpus with only its write half — facts committed, nothing resolves them | terminal tx commits `:seon.fn`/`:seon.ns`/`:seon.schema`; acquisition materializes a namespace from facts at a basis | steps 4–5 |
+| `terminal-receipt-data`'s unbounded `pr-str`, dropped `fn-entries`/`allocated-bytes`, and the `persisted-value?` / wire-predicate split | value admission scattered across consumers instead of one choke point (L3) | one admission operation inside `evaluate` before disarm; one `ordinary-wire-value?` | step 3 |
+| reply message with a freshly allocated id; wake filtered on `:origin :human` | allocated identity where derived identity belongs; a derivation with a hand filter | message identity = sending receipt `(run, ordinal, epoch)`; wake on the one inbound rule | step 2 + [[../../../seon/issues/agent-messages-never-wake-the-jvm-driver]] |
+| run opened before its plan commits | custody split across two transactions that recovery reads as one | the pre-plan window recoverable (or run+plan one commit) | **no step owns it end to end** — [[../../../seon/issues/run-is-unrecoverable-before-its-plan-commits]] |
+| `:seon.ai.attempt/*` 24 used / 0 registered; `:seon.agent.turn/*` 17 / 9; `:seon.agent/run` registered twice, once in a `.cljs` | facts written without their schema half; a registration on the deletion list | one surviving `.cljc` owner per attribute, moved before the pod cut | step 6 precondition (state.md §10–11) |
+| hand-rolled `newCachedThreadPool` called `:compute` | borrowed vocabulary without the mechanism | core.async's own `executor-for :compute`, or the name goes | §5 flow ruling |
+| the "or derive from raw initialization" branch | a second pages producer | deleted; missing pages fail loudly (O16) | step 5 |
+| five supervised processes | writer+host are one construct split by history; the pod is the three jobs above | three: cluster JVM, web-render JVM, disposable leaves | steps 6, 8 |
+| two writers on one store both winning the CAS | a configuration that must be impossible, currently merely documented (L6) | refuses to open, loudly | step 6, O2 |
+| a stored render snapshot (O14) | not a violation — the one ruled exception to derive-don't-store, wearing guilt it hasn't earned | cardinality-one no-history fact, equality-suppressed, fenced by the ruling | step 7, O14 |
+
+The pattern across every row is the one [unsettled.md](unsettled.md) §4
+names: the write half of a primitive exists and the read half does not, or
+one object is doing two constructs' jobs. Nothing here needs an eighth
+construct.
 
 ## 3. The steps
 
