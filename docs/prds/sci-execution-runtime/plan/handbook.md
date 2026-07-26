@@ -113,13 +113,16 @@ lands, and until then the nucleus loop above avoids them entirely.
 
 ## Where things are defined
 
-- **Attribute/entity schemas**: PROVISIONAL direction (owner leaning
-  yes, seal pending in [unsettled.md](unsettled.md)): EDN data files,
-  one per attribute namespace (`schema/<attr-ns>.edn`), admitted as ONE
-  validated population at boot — every reference must resolve at
-  admission, killing the load-order/dangling-ref class that bit three
-  times on 2026-07-26. Until sealed, N2's in-code `register!` calls
-  stand.
+- **Attribute/entity schemas**: SEALED (owner, s3 close) — EDN data
+  under `src/seon/schema/*.edn`, the schema owner's classpath folder,
+  admitted as ONE validated GLOBAL population (file boundaries are
+  editorial only; duplicates across files refuse; every reference must
+  resolve; generative-honesty lint) — killing the load-order/
+  dangling-ref class that bit three times on 2026-07-26, at boot AND at
+  the build-time indexer, which reads the directory instead of loading
+  namespaces. Agents' `register!` stays, flowing through the same gate
+  as committed schema facts. N2's in-code registrations convert when
+  its lane returns.
 - **Function contracts**: `:malli/schema` metadata ON the defn — they
   describe the function and travel with the var into the program graph.
 - **Named predicates**: code, `register-core-predicate!`, referenced by
