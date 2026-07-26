@@ -1268,7 +1268,7 @@
     config
     #(let [prepared (prepare-dependencies-unlocked! config aliases)]
        (when (and (:seon.dev.config/source-checkout? config)
-                  (= [:writer] aliases))
+                  (some #{:writer} aliases))
          (let [selected
                (if (:seon.dev.config/resolved-configuration config)
                  config

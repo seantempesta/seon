@@ -630,7 +630,7 @@
                 (catch clojure.lang.ExceptionInfo error
                   (:seon.dev.artifact/failure (ex-data error)))))))))
 
-(deftest standalone-writer-preparation-selects-and-freezes-program-pages
+(deftest writer-preparation-selects-and-freezes-program-pages-with-cljs
   (let [events (atom [])
         base {:seon.dev.config/root "/checkout"
               :seon.dev.config/environment {}
@@ -659,9 +659,9 @@
          :artifact)
        #'artifact/atomic-spit!
        (fn [path value] (swap! events conj [:publish path value]))}
-      #(is (= {:seon.dev.artifact/prepared-aliases [:writer]}
-              (artifact/prepare-dependencies! base [:writer]))))
-    (is (= [[:dependencies [:writer]]
+      #(is (= {:seon.dev.artifact/prepared-aliases [:writer :cljs]}
+              (artifact/prepare-dependencies! base [:writer :cljs]))))
+    (is (= [[:dependencies [:writer :cljs]]
             [:manifest base nil]
             [:writer selected]
             [:pages selected]
