@@ -237,7 +237,8 @@
              (when-some [schema-key (:seon.schema/key row)]
                (let [stored-generator
                      (get-in schemas [schema-key :seon.db.id/generator])]
-                 (when (and (not= no-generator stored-generator)
+                 (when (and (contains? schemas schema-key)
+                            (not= no-generator stored-generator)
                             (not (contains? row :seon.db.id/generator)))
                    [[:db/retract [:seon.schema/key schema-key]
                      :seon.db.id/generator stored-generator]])))))
