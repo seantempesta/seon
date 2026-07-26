@@ -46,6 +46,10 @@
   the acknowledgement; no stored flag exists."
   {:malli/schema [:=> [:cat ::send-request] [:or ::sent ::error]]}
   [request]
-  (effect/request!
-   {:seon.effect/family :message
-    :seon.effect/args request}))
+  (let [result
+        (effect/request!
+         {:seon.effect/family :message
+          :seon.effect/args request})]
+    (if (:seon.error/message result)
+      result
+      (:seon.effect/value result))))

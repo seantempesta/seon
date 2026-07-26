@@ -73,10 +73,14 @@
   {:malli/schema [:=> [:cat ::query [:* :seon.effect/args]]
                   [:or :seon.effect/value ::error]]}
   [query & inputs]
-  (effect/request!
-   {:seon.effect/family :db
-    :seon.effect/args {:my.db/q query
-                       :my.db/inputs (vec inputs)}}))
+  (let [result
+        (effect/request!
+         {:seon.effect/family :db
+          :seon.effect/args {:my.db/q query
+                             :my.db/inputs (vec inputs)}})]
+    (if (:seon.error/message result)
+      result
+      (:seon.effect/value result))))
 
 (defn transact
   "Commit transaction data, exactly as datahike.api/transact takes it.
@@ -86,6 +90,10 @@
   second write."
   {:malli/schema [:=> [:cat ::arg-map] [:or ::transacted ::error]]}
   [arg-map]
-  (effect/request!
-   {:seon.effect/family :db
-    :seon.effect/args {:my.db/tx-data (:tx-data arg-map)}}))
+  (let [result
+        (effect/request!
+         {:seon.effect/family :db
+          :seon.effect/args {:my.db/tx-data (:tx-data arg-map)}})]
+    (if (:seon.error/message result)
+      result
+      (:seon.effect/value result))))

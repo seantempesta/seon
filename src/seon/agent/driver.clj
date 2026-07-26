@@ -11,16 +11,23 @@
   (:require [seon.ai.core :as ai]
             [seon.agent.lifecycle :as lifecycle]
             [seon.agent.message :as message]
+            [seon.agent.message.leaf :as message.leaf]
             [seon.agent.run.core :as run]
             [seon.config.resolve :as config.resolve]
             [seon.content-hash :as content-hash]
             [seon.db :as db]
             [seon.db.host :as db.host]
             [seon.db.id :as db.id]
+            [seon.db.leaf :as db.leaf]
             [seon.eval.receipt :as receipt]
             [seon.repl.parse :as repl.parse]
             [seon.schema :as schema]
+            [seon.sci.ctx :as sci.ctx]
             [seon.sci.eval :as sci.eval]
+            ;; These are program-index roots, not a binding list. The SCI
+            ;; table is derived exclusively from their committed fn facts.
+            [my.db]
+            [my.message]
             [taoensso.timbre :as log])
   (:import [java.lang ProcessHandle]
            [java.util Date]
@@ -631,6 +638,77 @@
      :seon.agent.turn/duration-ns total-duration-ns
      :seon.agent.turn/timings (set timings)}]))
 
+(def ^:private callable-program-functions-query
+  '[:find [?sym ...]
+    :where
+    [?function :seon.fn/sym ?sym]
+    [?function :seon.fn/spec _]
+    [?function :seon.fn/fn-var? true]
+    [(get-else $ ?function :seon.fn/private? false) ?private]
+    [(= false ?private)]])
+
+(defn- callable-program-functions
+  [database-functions]
+  (let [database ((get database-functions 'db))
+        result
+        ((get database-functions 'query)
+         {::db/db database
+          ::db/query callable-program-functions-query
+          ::db/max-work 100000
+          ::db/max-results 4096
+          ::db/max-result-weight 1048576})]
+    (if (:seon.error/message result)
+      (throw
+       (ex-info "The program-graph function facts could not be acquired."
+                {:seon.error/kind :core-bug
+                 :seon/error result}))
+      (vec result))))
+
+(defn- invocation-database-context
+  [agent-id]
+  {::db.leaf/current-agent-id (constantly agent-id)
+   ::db.leaf/current-tx-context (constantly nil)})
+
+(defn- effect-request-context
+  [writer agent-id run-id ordinal claim-epoch]
+  (let [database-leaf
+        (db.host/leaf
+         writer
+         #(invocation-database-context agent-id))
+        database-functions (db/bind-leaf database-leaf)
+        message-leaf
+        {::message.leaf/available? (constantly true)
+         ::message.leaf/unavailable
+         (constantly
+          {:seon.error/message "The message capability is unavailable."
+           :seon.error/kind :seon.effect/unavailable})
+         ::message.leaf/now #(Date.)
+         ::message.leaf/uuid #(str (random-uuid))}]
+    {:seon.agent/id agent-id
+     :seon.capability/op-id
+     (receipt/receipt-id run-id ordinal claim-epoch)
+     :seon.effect/query (get database-functions 'query)
+     :seon.effect/transact! (get database-functions 'transact!)
+     :seon.effect/message!
+     (fn [request]
+       (binding [db/*leaf* database-leaf
+                 message/*leaf* message-leaf]
+         (message/message! request)))}))
+
+(defn- form-evaluate!
+  [database-functions agent-id run-id ordinal claim-epoch]
+  (if-let [writer (::writer database-functions)]
+    (let [base-ctx
+          (sci.ctx/base
+           {::sci.ctx/program-functions
+            (callable-program-functions database-functions)
+            ::sci.ctx/request-context
+            (effect-request-context
+             writer agent-id run-id ordinal claim-epoch)})]
+      (fn [request]
+        (evaluate! (assoc request ::sci.eval/base-ctx base-ctx))))
+    evaluate!))
+
 (defn- drive-sources!
   [allocate! database-functions agent-id run-id claim-epoch turn-id
    sources start-ordinal lease-duration-ms initial-timings]
@@ -640,7 +718,8 @@
       (let [result
             (execute-form!
              #(allocated-transact! allocate! database-functions %)
-             evaluate!
+             (form-evaluate!
+              database-functions agent-id run-id ordinal claim-epoch)
              lifecycle-tx-data
              {:seon.agent/id agent-id
               :seon.agent.run/id run-id
@@ -827,7 +906,8 @@
 (defn start!
   "Start the database-interest-driven JVM run driver."
   [writer allocate! database-functions llm-transport!]
-  (let [scanning? (AtomicBoolean. false)
+  (let [database-functions (assoc database-functions ::writer writer)
+        scanning? (AtomicBoolean. false)
         scan-requested? (AtomicBoolean. false)
         in-flight-message-ids (atom #{})
         in-flight-run-ids (atom #{})
