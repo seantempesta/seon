@@ -534,9 +534,9 @@ D3's *mechanism* is prototype-only: HEAD's terminal transition **is** CAS-fenced
 
 **Vocabulary reconciliation, mandatory.**
 `docs/seon/issues/multi-form-eval-order-is-not-durable.md:59-102` proposes
-`:seon.eval/position`. That is the **same fact** as `:seon.eval/index` +
+`:seon.eval/position`. That is the **same fact** as `:seon.eval/ordinal` +
 `:seon.eval/total`. **Do not implement both.** The repo already owns three
-ordering idioms — `:seon.error.frame/index`, the terminal status datom's
+ordering idioms — `:seon.error.frame/ordinal`, the terminal status datom's
 transaction id (`::status-tx`), and `(juxt :seon.eval/at :db/id)` — and a fourth
 is the banned parallel mechanism. Mark `:seon.eval/position` superseded in that
 issue's triage.

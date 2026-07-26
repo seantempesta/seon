@@ -298,7 +298,7 @@
                    "    at /Users/x/seon/out/client/cljs-runtime/seon.eval.js:22:5\n")
         frames (error/parse-frames stack)]
     (is (vector? frames))
-    (is (= 0 (:seon.error.frame/index (first frames))))
+    (is (= 0 (:seon.error.frame/ordinal (first frames))))
     (is (= "myFn" (:seon.error.frame/fn (first frames))))
     (is (= 106 (:seon.error.frame/line (first frames))))
     (is (= 10 (:seon.error.frame/column (first frames))))
@@ -322,7 +322,7 @@
         frames (error/parse-frames stack)]
     (is (vector? frames))
     (testing "the top frame is the throw site, not constructor noise"
-      (is (= 0 (:seon.error.frame/index (first frames))))
+      (is (= 0 (:seon.error.frame/ordinal (first frames))))
       (is (= "<anonymous>" (:seon.error.frame/fn (first frames))))
       (is (= "<eval>" (:seon.error.frame/file (first frames))))
       (is (= 2 (:seon.error.frame/line (first frames)))))

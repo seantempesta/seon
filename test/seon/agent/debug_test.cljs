@@ -134,7 +134,7 @@
            (str "{:probe/note \"rendered :seon.error.malli/fn-sym fake/run\", "
                 ":seon.error.malli/fn-sym probe/run}")
            :seon.error/frames
-           [{:seon.error.frame/index 0
+           [{:seon.error.frame/ordinal 0
              :seon.error.frame/fn "probe/run"
              :seon.error.frame/file "probe.cljs"
              :seon.error.frame/line 7}]}

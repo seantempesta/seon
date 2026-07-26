@@ -408,7 +408,7 @@
   '[:find ?e ?fn
     :where
     [?e :seon.error/frames ?f]
-    [?f :seon.error.frame/index 0]
+    [?f :seon.error.frame/ordinal 0]
     [?f :seon.error.frame/fn ?fn]])
 
 (def ^:private core-fault-query

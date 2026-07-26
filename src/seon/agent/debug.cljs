@@ -261,11 +261,11 @@
               :seon.db/args [eid]})))
 
 (defn- top-frame-str
-  "\"fn (file:line)\" for the index-0 frame of pulled `frames`, or nil."
+  "\"fn (file:line)\" for the ordinal-zero pulled frame, or nil."
   [frames]
   (when-let [{f :seon.error.frame/fn file :seon.error.frame/file
               line :seon.error.frame/line}
-             (first (sort-by :seon.error.frame/index frames))]
+             (first (sort-by :seon.error.frame/ordinal frames))]
     (let [base (when file (last (str/split file #"/")))]
       (when (or f base)
         (str (or f "?")
@@ -276,7 +276,7 @@
    :seon.error/store-id :seon.error/branch-name
    :seon.error/commit-id :seon.error/basis-t
    :seon.error/stack :seon.error/args-edn :seon.error/data-edn
-   {:seon.error/frames [:seon.error.frame/index :seon.error.frame/fn
+   {:seon.error/frames [:seon.error.frame/ordinal :seon.error.frame/fn
                         :seon.error.frame/file :seon.error.frame/line
                         :seon.error.frame/column]}])
 
@@ -412,7 +412,7 @@
                                        :seon.error/args-edn :seon.error/data-edn]))
           (seq (:seon.error/frames e))
           (assoc ::frames (->> (:seon.error/frames e)
-                               (sort-by :seon.error.frame/index)
+                               (sort-by :seon.error.frame/ordinal)
                                (mapv #(dissoc % :db/id))))
           aid     (assoc :seon.agent/id aid)
           teid    (assoc ::turn-eid teid :seon.agent.turn/id tid)))

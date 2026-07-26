@@ -74,11 +74,11 @@
   "Attributes emitted by the bounded persisted error projection."
   #{::fault ::message ::kind ::store-id ::branch-name ::commit-id ::basis-t
     ::stack ::frames ::args-edn ::data-edn
-    :seon.error.frame/index :seon.error.frame/fn :seon.error.frame/file
+    :seon.error.frame/ordinal :seon.error.frame/fn :seon.error.frame/file
     :seon.error.frame/line :seon.error.frame/column})
 
 ;; Frame leaf attrs precede the frame entity shape (leaf-rule).
-(schema/register! :seon.error.frame/index  [:int {:min 0}])
+(schema/register! :seon.error.frame/ordinal [:int {:min 0}])
 (schema/register! :seon.error.frame/fn     :string)
 (schema/register! :seon.error.frame/file   :string)
 (schema/register! :seon.error.frame/line   :int)
@@ -89,7 +89,7 @@
 ;; render/sci"). Registered ONCE; ::frames references it.
 (schema/register! ::frame
   [:map
-   [:seon.error.frame/index  :seon.error.frame/index]
+   [:seon.error.frame/ordinal :seon.error.frame/ordinal]
    [:seon.error.frame/fn     {:optional true} :seon.error.frame/fn]
    [:seon.error.frame/file   {:optional true} :seon.error.frame/file]
    [:seon.error.frame/line   {:optional true} :seon.error.frame/line]
@@ -327,7 +327,7 @@
             fs (into []
                      (map-indexed
                        (fn [i {:keys [file function line column]}]
-                         (cond-> {:seon.error.frame/index i}
+                         (cond-> {:seon.error.frame/ordinal i}
                            (string? file)     (assoc :seon.error.frame/file file)
                            (and (string? function) (seq function))
                            (assoc :seon.error.frame/fn function)
@@ -346,8 +346,8 @@
        (not-empty
         (into []
               (map-indexed
-               (fn [index ^StackTraceElement frame]
-                 (cond-> {:seon.error.frame/index index
+               (fn [ordinal ^StackTraceElement frame]
+                 (cond-> {:seon.error.frame/ordinal ordinal
                           :seon.error.frame/fn
                           (str (.getClassName frame) "/" (.getMethodName frame))}
                    (.getFileName frame)

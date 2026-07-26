@@ -42,7 +42,7 @@ before the work starts.
 The plan, Wave 2, says:
 
 > `:seon.eval/position` is **SUPERSEDED, not to be implemented** — the repo
-> already owns three ordering idioms (`:seon.error.frame/index`; the terminal
+> already owns three ordering idioms (`:seon.error.frame/ordinal`; the terminal
 > status datom's transaction id; `(juxt :seon.eval/at :db/id)`) and a fourth is
 > the banned parallel mechanism. The design's `:seon.eval/index` +
 > `:seon.eval/total` is the same fact under a different name; **reconcile the

@@ -5,7 +5,7 @@
    `[:vector X]` schema LOOKS like it round-trips — the shape returns, the
    order does not. Scalars pull in value order and refs pull in target
    entity-id order. Component refs are NOT an exception: `:seon.error/frames`
-   is safe only because its renderers sort by an explicit frame index.
+   is safe only because its renderers sort by an explicit frame ordinal.
 
    So order is never a property of the collection type. Where it matters,
    store the position.
@@ -33,10 +33,10 @@
 ;;;
 ;;; NOTHING in Datahike preserves insertion order for a `:db.cardinality/many`
 ;;; attribute — not component refs, not anything. `:seon.error/frames` is safe
-;;; only because its renderers sort by an explicit frame index. So a stored
+;;; only because its renderers sort by an explicit frame ordinal. So a stored
 ;;; `[:vector X]` declaration always promises an order the database will not
 ;;; keep, and the fix is never a different collection type: it is either a
-;;; `[:set X]` declaration or an explicit index attribute.
+;;; `[:set X]` declaration or an explicit ordinal attribute.
 ;;;
 ;;; `:db.type/tuple` is NOT an escape hatch: measured, homogeneous tuples cap
 ;;; at 8 values ("Cannot store more than 8 values for homogeneous tuple") and
@@ -68,7 +68,7 @@
                "  - order is NOT meaningful (almost always) -> `[:set X]`\n"
                "  - order IS meaningful -> keep `[:set X]` and store the "
                "position explicitly on the child, the way "
-               "`:seon.error/frames` renderers sort by frame index.\n\n"
+               "`:seon.error/frames` renderers sort by frame ordinal.\n\n"
                "Do NOT reach for `:db.type/tuple`: it caps at 8 values and "
                "kills element-level queries.\n\n"
                "Offenders: " (pr-str offenders))))))

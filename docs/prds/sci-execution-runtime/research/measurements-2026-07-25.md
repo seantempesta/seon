@@ -990,7 +990,7 @@ transaction (`datom.cljc:325-330`). **A pulled vector is index-order
 materialization, not transaction input order.**
 
 `:seon.error/frames` is safe only because its renderers sort by an explicit
-`:seon.error.frame/index`.
+`:seon.error.frame/ordinal`.
 
 ### 10.3 Tuples are not a general escape
 
@@ -1001,7 +1001,7 @@ Element-level Datalog against a tuple returns nothing; only whole-value match wo
 ### 10.4 The rule this episode teaches
 
 **Order is never a property of the collection type.** It is a stored ordinal on the
-child (`:seon.error.frame/index`), a recovered transaction id (`::status-tx`), or an
+child (`:seon.error.frame/ordinal`), a recovered transaction id (`::status-tx`), or an
 explicit sort key (`(juxt :seon.eval/at :db/id)`). No architecture document states
 this, which is why `docs/seon/architecture/data-model.md:434, :558, :559` still shows
 `[:vector …]` as a *design* shape.

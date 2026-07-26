@@ -138,20 +138,19 @@ Two predicates that disagree on 6 of 9 tested shapes (R-12).
 `:seon.eval/ordinal` + `:seon.eval/total` shipped in the O12 cut against the
 plan's explicit "reconcile the name" instruction.
 
-**Measured spellings in `src/`** (attribute keywords only):
+**Measured meanings in `src/`** (attribute keywords only):
 
-| spelling | registered attributes |
+| meaning | registered attributes |
 |---|---|
-| `ordinal` | `:seon.eval/ordinal`, `:seon.agent.run.form/ordinal`, `:seon.agent.turn.timing/ordinal`, `:seon.ai.attempt/ordinal` |
-| `index` (as a position) | `:seon.error.frame/index`, `:seon.embed/index`, `:seon.db.protocol.operation/index` |
-| `index` (as Datahike's **indexing facet** — a different meaning) | `:db/index` 14 uses, `:seon.db/index` 5 uses, `:datahike/index` 2 uses |
+| stored ordinal | `:seon.eval/ordinal`, `:seon.agent.run.form/ordinal`, `:seon.agent.turn.timing/ordinal`, and the outlier `:seon.error.frame/ordinal` |
+| index selection/facet | `:db/index`, `::db/index`, `:seon.db/index`, `:datahike/index`, `:seon.db.protocol/index`, `seon.db/::index` |
+| Proximum secondary index | `:seon.embed/index` |
 
-`:seon.ai.attempt/ordinal` predates this work (`f6f6673b6`). So the repo's
-dominant spelling for a stored position is already `ordinal`, and `index` is
-overloaded by the dependency's own indexing vocabulary. **The reconciliation
-therefore runs opposite to the plan's assumption: keep `ordinal`, rename
-`:seon.error.frame/index`** and correct `measurements-2026-07-25.md:1003-1005`,
-which names `index` as the idiom.
+All three eval/run/timing ordinal attributes are new in this program, while the
+error-frame attribute predated them, so seniority alone argued for `index`.
+Non-collision decides the other way: Datahike and Proximum use `index` for an
+actual index, and a position is not an index. The reconciliation therefore
+keeps `ordinal` and renames the error-frame attribute.
 
 ## 5. What is NOT old code (do not cut)
 

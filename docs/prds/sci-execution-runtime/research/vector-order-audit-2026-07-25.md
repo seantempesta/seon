@@ -139,7 +139,7 @@ scrambles that apparent order.
 
 The stack itself is ordered, but the outer database relationship is not the
 order authority. Each frame stores an explicit
-`:seon.error.frame/index`; the schema declares that ordinal alongside the
+`:seon.error.frame/ordinal`; the schema declares that ordinal alongside the
 component-ref collection at `src/seon/error.cljc:80-98`.
 
 Writes:
@@ -157,9 +157,9 @@ Reads:
 
 - Debug acquisition pulls the frame components at
   `src/seon/agent/debug.cljs:367-382`.
-- Compact rendering explicitly sorts by frame index before taking the first
+- Compact rendering explicitly sorts by frame ordinal before taking the first
   frame at `src/seon/agent/debug.cljs:356-365`.
-- Full rendering explicitly sorts all frames by frame index before rendering
+- Full rendering explicitly sorts all frames by frame ordinal before rendering
   them in stack order at `src/seon/agent/debug.cljs:482-510`.
 - Warning acquisition queries the individual index-zero frame at
   `src/seon/agent/ctx/warnings.cljc:407-412`.
@@ -563,7 +563,7 @@ chosen directly:
 
 No correct behavior among the twelve relies on EAVT order:
 
-- frames recover stack order from `:seon.error.frame/index`;
+- frames recover stack order from `:seon.error.frame/ordinal`;
 - context blocks recover prompt order from priority and name;
 - identified config children are reindexed or selected by identity;
 - allowed domains use membership;

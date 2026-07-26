@@ -1248,7 +1248,7 @@ the presence of `:seon.error/fault` and carrying only EDN-safe projections:
 | `:seon.error/kind` | `:keyword` | keyword / one | optional diagnostic value enum |
 | `:seon.error/db` | `:seon.db/database-value` | ordinary encoded map / one | complete catch-site database value |
 | `:seon.error/stack` | `:string` | string / one | optional bounded raw stack |
-| `:seon.error/frames` | `[:set {:seon.db/component true} :seon.db/ref]` | ref / many / component | optional parsed frames; `:seon.error.frame/index` restores stack order |
+| `:seon.error/frames` | `[:set {:seon.db/component true} :seon.db/ref]` | ref / many / component | optional parsed frames; `:seon.error.frame/ordinal` restores stack order |
 | `:seon.error/args-edn` | `:string` | string / one | optional bounded arguments |
 | `:seon.error/data-edn` | `:string` | string / one | optional bounded structured data |
 
