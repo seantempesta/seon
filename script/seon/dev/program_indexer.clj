@@ -17,8 +17,15 @@
 
 (def ^:private production-roots
   "The AOT roots frozen by `build.clj`; their require closure is the surviving
-   first-party JVM program."
-  '[seon.db.server seon.host seon.web.server])
+   first-party JVM program. Agent identity's surviving schema owner is also a
+   root because fresh-database genesis requires it before any agent context is
+   rendered."
+  '[seon.db.server
+    seon.host
+    seon.web.server
+    seon.agent.ctx
+    seon.agent.home
+    seon.render])
 
 (def ^:private eof (Object.))
 
