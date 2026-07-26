@@ -301,6 +301,66 @@ by EMITTING the five keys, not by tightening the schema* (that would break the
 compatibility the cited commit deliberately preserved). It is in no issue file
 and no roadmap; that is the actual risk.
 
+## 3.5 Build order after the cut (owner method, 2026-07-25 night)
+
+> "After the old is gone build it up in pieces so you can test each piece. Get
+> the clusters healthy and normal with the db and then start building. Do as
+> much as you can in parallel when you see straightaways, and slow down on the
+> curvy dangerous parts."
+
+Two rules fall out, and the second is the one people get wrong: caution is
+**spent where the road bends**, not spread evenly. A team that is careful
+everywhere is slow everywhere and still crashes on the curve.
+
+### First, and alone: get a cluster healthy
+
+Nothing below can be tested until a cluster boots. **Known blocker:** pod
+admission fails with the default database initialization stuck `:in-progress`
+at 93 pages (found by Wave 0, undiagnosed). This is a curve — a boot that
+half-succeeds is worse than one that fails, because everything downstream then
+lies. Fix it, prove `bin/seon up` reaches ready, and only then build.
+
+Clusters are cheap and disposable (O9) — do this on a throwaway, reset freely,
+never migrate.
+
+### Straightaways — run these in parallel
+
+Each is independently testable with no database and no cluster, so a lane can
+own one end to end and prove it alone:
+
+| piece | proves itself by |
+|---|---|
+| `seon.sci.interrupt` | kills on `time-limit`; kills on allocation; records `fn-entries`; the marker survives `try`/`catch`. All measurable on one thread, no database. |
+| `seon.sci.ctx` | fork isolates new defs; the base-vars-are-immutable invariant holds; fork cost stays ~539 bytes. |
+| the attack suite → `test/` | mechanical relocation of proven tests. |
+| vocabulary and doc reconciliation | text only, collides with nothing. |
+
+### Curves — one at a time, with a falsifier before the edit
+
+Every one of these is a place where a wrong answer is *silent*:
+
+| piece | why it bends |
+|---|---|
+| the database init stall | a half-initialized cluster makes every later result untrustworthy |
+| `seon.sci.eval` | needs interrupt + ctx; D7 (`read-string` honours `*read-eval*`) and D8 (sampling bounds nothing) both live here |
+| the driver's claim/CAS | D3 receipt identity — a wrong key let one step run **704 times** while receipts read clean |
+| D1 write connection | two writers on one store silently destroyed each other's history |
+| D6 read-modify-write | 39 of 40 concurrent updates lost with **no error at all** |
+| D2 the wake path | a lease expiry is not a commit, so `listen!` structurally cannot deliver it |
+
+The tell for a curve: **the failure produces no exception.** Where a mistake
+throws, go fast — the system tells you. Where it silently returns a wrong
+answer, slow down and write the falsifier first.
+
+### The order
+
+1. cluster healthy (curve, alone)
+2. `interrupt` ‖ `ctx` ‖ attack-suite relocation (straightaway, parallel)
+3. `eval` (curve)
+4. driver claim/CAS + D1 + D3 (curve, one at a time)
+5. receipts + ordinal, D2, D6 (curve)
+6. **one live turn** — the gate
+
 ## 4. Waves, in defect order
 
 A wave lands completely before the next begins (cut first, seam-fix second).
