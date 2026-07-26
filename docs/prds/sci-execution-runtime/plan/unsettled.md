@@ -25,12 +25,18 @@ Three categories, and the distinction matters:
 
 ## 1. UNDECIDED — needs an owner ruling
 
-| # | question | what turns on it | recommendation |
-|---|---|---|---|
-| O14 | Does a rendered snapshot get **committed** as a cardinality-one no-history fact? | It stores a derived value, against a standing rule. But it is the only way "render once, cached, still there for a second tab after everyone disconnects" holds; without it, zero-extra-evaluation is true only for *overlapping* consumers. | Commit it. The owner's own words describe materialization, and `:seon.db/no-history?` cardinality-one is already the ratified pattern for high-churn presentation state. Record it as a named exception to derive-don't-store rather than pretending it isn't one. |
-| O4 | Is there an allocation **limit**, or only a diagnostic? | Today it is a diagnostic, so one agent can exhaust the shared heap of every agent in its cluster. | Keep it a diagnostic and accept that heap is the process boundary — no in-process metric can bound it (measured: 200 MB allocated in 1 ms with **0** fn entries, invisible to any cadence). Then the real answer is disposable per-agent processes, which is step 8 territory. Say so instead of implying the cap works. |
-| O2 | May two cluster JVMs serve one store? | `architecture.md:242-246` promises interchangeable cluster JVMs. Measured: two live JVMs on one file store both won the same epoch CAS and **40 of 40** of the parent's returned commits vanished, zero errors, store pristine on reopen. | Amend the architecture and make the configuration **refuse to open**. Note this does *not* constrain N stores in one process — `create-writer :self` is per-connection. |
-| — | Is `core.async.flow` adopted as a **library**, or only its vocabulary? | Flow's added value is a proc graph plus `ping`/`pause`/`resume`/`inject`, and that API exists *because* flow's state is hidden in memory. | Adopt `core.async`, not `core.async.flow`. **The flow-vs-Integrant overlap is resolved** (`bd8038419`): Integrant owns in-process boot ORDER, core.async owns SCHEDULING. Different jobs, no competition. Still wants an explicit owner ruling that non-adoption of the library is deliberate. |
+**Empty as of 2026-07-26 PM.** All four standing rulings landed the same day
+— see README's "Rulings 2026-07-26 PM" section for the full text:
+
+- **O14 dissolved**: web-render merges into the cluster JVM, so nothing
+  rendered is stored — the commit-vs-derive debate was about *transport*,
+  and same-memory serving removes the transport.
+- **O4**: diagnostic + a process-heap watermark at heartbeat cadence; spikes
+  remain the process boundary.
+- **O2**: clusters never share a store; second open refuses via one `flock`
+  assert.
+- **Flow**: the non-adoption recommendation was REVERSED — adopted, Path A,
+  `seon.flow` implements `flow.spi`, flow-monitor is the ops surface.
 
 **Resolved 2026-07-26, recorded so it is not reopened.** Integrant is adopted
 **narrowly and conditionally** (`bd8038419`): only when writer, driver and
@@ -46,6 +52,20 @@ than a preference: a flat `refset` edge would make one cluster's halt traverse
 shared resources and take down every cluster.
 
 ## 2. UNKNOWN — needs evidence, with the experiment named
+
+**Answered 2026-07-26 (evidence in `research/`, kept here one line each):**
+boot after the door deletion = **2,794 ms** mean artifact boot
+(`boot-remeasure-2026-07-26.md`); the pod cut **does** lose needed coverage,
+differentiated — 34 namespaces need fresh JVM invariants, 23 delete clean,
+36 already covered (`pod-test-coverage-2026-07-26.md`); the three
+`::calls` discard sites are **closed**, unknown targets fail toward
+not-pure/not-`:compute` (`62bc86cb1`); the double-send experiment is
+**unreachable until step 1's messaging binding exists** — the lifecycle
+reply path commits message+receipt+closure atomically, so the reachable
+window opens only with agent-authored sends; idempotency stays UNPROVEN and
+is a step-1 acceptance item (`double-send-experiment-2026-07-26.md`). The
+semaphore-replacement and three-turtles questions are now the flow
+testbed's scenario matrix (`flow-testbed-2026-07-26.md`, in flight).
 
 - **~~Does the submission-channel design replace the semaphore?~~ ANSWERED
   2026-07-26** (`3564882a3`): the semaphore is **deleted, not kept beside the
@@ -108,6 +128,11 @@ shared resources and take down every cluster.
   `clojure.core`, `clojure.string`, and five `seon.agent.lifecycle` vars. No db,
   blob, fs, shell, web, messaging or LLM. Every demo, every load test and every
   proof of the design flows through the door that does not exist yet.
+- **UPDATE 2026-07-26 PM: the gate is GREEN — 551 tests / 3,881 assertions,
+  0 failures, 0 errors** (`tmp/plan-evidence/vector-order-test-writer-full-2026-07-26.log`).
+  The registration fix, the frozen-prompt fixture fix, and the
+  ordered-collection reshape (5 sets, 2 positions) landed same-day; the
+  original note below is history.
 - **The JVM gate is RESTORED and RED** *(2026-07-26 — see [state.md](state.md) §8,
   regenerated from the retained log)*. **544 tests / 3,676 assertions, 3 failures,
   1 error.** All four are named and filed. Restoring it paid immediately: six

@@ -485,6 +485,14 @@ Use discoverable code names, not umbrella nouns or synonyms:
 | initialization pages, rows, transaction data | seed bundle, sidecar | paged database population; `src/seon/db/protocol.cljc` (pages/phases) ↔ Datahike tx-data |
 | process record, generation, (pid, start-instant) identity | orphan registry, liveness flag | operator-managed process descriptors; `script/seon/dev/process.clj` + `state.clj` ↔ JDK `ProcessHandle` |
 | pre-processing, apply, resume | warmup, hydration | the explicit derive-once/install/attach operations (R45); `docs/prds/sci-execution-runtime/research/preprocessing-design-2026-07-23.md` until code owners land |
+| reduce (plan execution) | fold | executing a plan is a reduce over its forms; the accumulator is the basis; `clojure.core/reduce` ↔ the Datahike transaction report's `:db-after` (`r/fold` is parallel — wrong word) |
+| run loop | driver, driving | the loop claiming runs via `:db.fn/cas` and reducing plans; `src/seon/agent/driver.clj` until the rename wave |
+| `seon.effect`, `effect/request!` | the door, capability dispatch, call center | the one system-side owner every flat `my.*` tool call enters; effects carry the one request identity |
+| program graph | corpus | the collective name for `:seon.fn`/`:seon.ns`/`:seon.schema` facts; owners rename to `seon.code.fn`/`.ns`/`.schema`/`.test` |
+| proc, step-fn, conns, graph-def, report channel | invented scheduler nouns | `clojure.core.async.flow`'s own vocabulary — adopted Path A, `seon.flow` implements `flow.spi`; `reference-code/core.async/src/main/clojure/clojure/core/async/flow/spi.clj` |
+| `(sliding-buffer 1)` tap | latest-wins mailbox | core.async's own newest-only delivery; `reference-code/core.async/src/main/clojure/clojure/core/async/impl/buffers.clj` |
+| tuple (`:db/tupleType`) | small limited vector, ordered many | Datahike's single-value ordered construct — one datom, whole-value replace; homogeneous cap 8 (fork lift queued); cardinality-many is a SET (`reference-code/datahike/src/datahike/index/persistent_set.cljc:133`) |
+| `my.agents.<id>` | agent workspace, sandbox ns | each agent's scratch namespace; a real namespace has at most one assigned agent (`:seon.agent/namespace`, unique) |
 
 This table is maintained: when a boundary term is settled, add its row in the
 same change, and when the meaning spans an integration boundary, name the

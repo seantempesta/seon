@@ -120,6 +120,66 @@ carried stale evidence within a day. Re-verify before starting.
 | `bin/codex-agent` | the sandbox dial, which made an audit's own output unrecordable | `42a9faf2e` |
 | `reference-code/http-kit` | vendored as a submodule | `2953a3b2f` |
 
+### Rulings 2026-07-26 PM (owner, conversational session) — applied by the same-day sweep
+
+- **Vocabulary.** Plan execution is a **reduce** (never "fold" — `r/fold` is
+  parallel); the **run loop** (never "driver") claims runs via Datahike's
+  `:db.fn/cas`; the one system-side effect owner is **`seon.effect`**
+  (`effect/request!`) — every "door"/"capability dispatch" phrase dies; the
+  **program graph** is the collective name for `:seon.fn`/`:seon.ns`/
+  `:seon.schema` facts, whose owners rename to `seon.code.fn`/`.ns`/`.schema`/
+  `.test` (attribute rename included: search-and-replace + cluster reset,
+  L18); a "latest-wins mailbox" is a `(sliding-buffer 1)` tap; the cluster
+  JVM entry becomes **`seon.cluster`** at the merge; receipts move under
+  `seon.agent.run`.
+- **Agent world is `my.*`, flat.** Tools are flat siblings (`my.fs`,
+  `my.shell`, `my.web` beside `my.blob`); every agent gets scratch at
+  `my.agents.<id>`; a real namespace has at most one assigned agent; temp
+  agents need none. **No disk write-back, ever** — an agent override of a
+  core function is a later transaction on the same program-graph facts; the
+  base is the compiled package's pages; reset returns to base.
+- **`core.async.flow` ADOPTED, Path A**
+  (`research/flow-api-adoption-2026-07-26.md`): `seon.flow` implements
+  flow's own `flow.spi` protocols, zero forked files; flow-monitor is the
+  graph-visualization/ops surface; the testbed
+  (`research/flow-testbed-2026-07-26.md`) derisks the full scenario matrix
+  before any production mechanism moves.
+- **O14 DISSOLVED — nothing rendered is stored.** Web-render merges into the
+  cluster JVM; crash protection is supervision + bounded evals + component
+  restart, not process walls. The render pipeline is in-process flow:
+  `listen!` interest wake → render proc through the ONE
+  `seon.sci.eval/evaluate` (fork, `:interrupt-fn`, admission) → equality
+  suppression (snapshot held in registration memory) → `mult` → per-tab
+  per-render-unit `(sliding-buffer 1)` taps → per-tab `:io` writer → one SSE
+  connection per tab carrying datastar element patches, bounded writes.
+  Restart = one re-render per pinned canvas. Streamed reply partials ride
+  the same pipeline; their coalesced no-history fact is retired. State B
+  process kinds: **two** — cluster JVM(s) + disposable leaves.
+- **O4.** The allocation metric stays a diagnostic; the limit reaction is a
+  process-heap watermark checked at the heartbeat cadence, loud. A 1 ms
+  spike stays invisible to any cadence; that case remains the process
+  boundary.
+- **O2.** Clusters never share a store; one cluster JVM per store; a second
+  open REFUSES via one `flock` assert at store open — the one fenced place
+  where coordination precedes the database (you cannot coordinate opening
+  the database through the database; the realistic accident is the orphan
+  JVM).
+- **Datom size.** No string-size limit exists (the 65k folklore was
+  Fressian's chunk buffer); the measured cost is ~2.2× index amplification,
+  so bulk content stays in blobs (`laws.md`,
+  `research/datom-size-limits-2026-07-26.md`).
+- **Ordered collections.** Five of the seven "ordered" attributes were sets;
+  two use child positions (gate green, 551/3,881/0/0). The general mechanism
+  for a plain-data ordered list is the value IS a vector — a homogeneous
+  tuple, one datom, whole-value replace; the 8-cap fork lift plus the
+  `run/forms` conversion is QUEUED behind this sweep. Child positions only
+  for lists of entities (`turn/evals`).
+- **Step 1 lands messaging + db first**, then blob/fs/web as the same
+  pattern; the double-send experiment becomes runnable and is a step-1
+  acceptance item.
+- **Pod cut groups 1–4 launched** the same day, delete-never-port; group 5
+  waits for step 5's producer replacement.
+
 ## 1. The base constructs
 
 Everything the runtime is made of. Every step below is an application of
@@ -144,18 +204,20 @@ these and nothing else; a proposal that needs an eighth construct is wrong.
    semaphore (`seon.sci.eval/evaluate`). Everything leaving is deeply
    realized and bounded at that one choke point; the heap's boundary is the
    process.
-5. **The door.** The single dispatcher every genuine capability call enters —
-   db, blob, fs, shell, web, messaging, LLM. Bindings computed from the
-   corpus, never listed. Effects carry the one request identity (`seon.db`
+5. **The effect owner (`seon.effect`).** The single guarded function every
+   genuine capability request enters — db, blob, fs, shell, web, messaging,
+   LLM — reached through flat `my.*` tool bindings computed from the program
+   graph, never listed. Effects carry the one request identity (`seon.db`
    operation IDs); the honest ceiling is at-least-once.
-6. **The corpus.** Code is facts: `:seon.fn`/`:seon.ns`/`:seon.schema`
-   committed like any data, acquired at a basis into a fresh fork. One corpus
-   answers "what exists?" and "load it." A compile-time JVM index is its
-   first-party producer; agents are its runtime producer.
+6. **The program graph.** Code is facts: `:seon.fn`/`:seon.ns`/`:seon.schema`
+   (owners renaming to `seon.code.*`) committed like any data, acquired at a
+   basis into a fresh fork. One graph answers "what exists?" and "load it."
+   A compile-time JVM index is its first-party producer; agents are its
+   runtime producer, overriding by later transaction — never by disk write.
 7. **The derived view.** Prompt, page, warning, context: pure functions of a
-   database value on one reactive chain — interest → equality suppression →
-   latest-wins (`seon.reactive`, `seon.db.host/listen!`). Nothing rendered is
-   stored, with one owner-ruled exception pending (O14).
+   database value on one reactive chain — interest wake → equality
+   suppression → per-consumer `(sliding-buffer 1)` taps (`seon.reactive`,
+   `listen!`). Nothing rendered is stored (O14 dissolved 2026-07-26).
 
 Corollary (owner ruling 2026-07-24): the agent-facing surface is three shapes
 only — values the driver interprets, requests through the door, facts the
@@ -204,14 +266,14 @@ row against [state.md](state.md) before acting on it.
 | `seon.sci.ctx/base`'s `:namespaces` literal | a hand list where a derived view belongs (L17) | computed binding table from corpus facts, every capability fn entering the one door | step 1 |
 | code as source strings | the corpus with only its write half — facts committed, nothing resolves them | terminal tx commits `:seon.fn`/`:seon.ns`/`:seon.schema`; acquisition materializes a namespace from facts at a basis | steps 4–5 |
 | `terminal-receipt-data`'s unbounded `pr-str`, dropped `fn-entries`/`allocated-bytes`, and the `persisted-value?` / wire-predicate split | value admission scattered across consumers instead of one choke point (L3) | one admission operation inside `evaluate` before disarm; one `ordinary-wire-value?` | step 3 |
-| reply message with a freshly allocated id; wake filtered on `:origin :human` | allocated identity where derived identity belongs; a derivation with a hand filter | message identity = sending receipt `(run, ordinal, epoch)`; wake on the one inbound rule | step 2 + [[../../../seon/issues/agent-messages-never-wake-the-jvm-driver]] |
+| reply message with a freshly allocated id; ~~wake filtered on `:origin :human`~~ (fixed `4dbaeda0e`) | allocated identity where derived identity belongs | message identity = sending receipt `(run, ordinal, epoch)`; idempotency proof is a step-1 acceptance item (`research/double-send-experiment-2026-07-26.md`) | step 2 |
 | run opened before its plan commits | custody split across two transactions that recovery reads as one | the pre-plan window recoverable (or run+plan one commit) | **no step owns it end to end** — [[../../../seon/issues/run-is-unrecoverable-before-its-plan-commits]] |
 | `:seon.ai.attempt/*` 24 used / 0 registered; `:seon.agent.turn/*` 17 / 9; `:seon.agent/run` registered twice, once in a `.cljs` | facts written without their schema half; a registration on the deletion list | one surviving `.cljc` owner per attribute, moved before the pod cut | step 6 precondition (state.md §10–11) |
 | hand-rolled `newCachedThreadPool` called `:compute` | borrowed vocabulary without the mechanism | core.async's own `executor-for :compute`, or the name goes | §5 flow ruling |
 | the "or derive from raw initialization" branch | a second pages producer | deleted; missing pages fail loudly (O16) | step 5 |
-| five supervised processes | writer+host are one construct split by history; the pod is the three jobs above | three: cluster JVM, web-render JVM, disposable leaves | steps 6, 8 |
-| two writers on one store both winning the CAS | a configuration that must be impossible, currently merely documented (L6) | refuses to open, loudly | step 6, O2 |
-| a stored render snapshot (O14) | not a violation — the one ruled exception to derive-don't-store, wearing guilt it hasn't earned | cardinality-one no-history fact, equality-suppressed, fenced by the ruling | step 7, O14 |
+| five supervised processes | writer+host+web-render are one construct split by history; the pod is the three jobs above | **two** process kinds: cluster JVM(s) + disposable leaves (ruled 2026-07-26 PM) | steps 6, 8 |
+| two writers on one store both winning the CAS | a configuration that must be impossible, currently merely documented (L6) | refuses to open, loudly — one `flock` assert at store open | step 6, O2 (ruled: refuse) |
+| a stored render snapshot (O14) | a question that dissolved: serving moved in-process, so there is nothing to transport | registration memory + per-tab `(sliding-buffer 1)` taps; restart = one re-render per pinned canvas | step 7 (revised per rulings) |
 
 The pattern across every row is the one [unsettled.md](unsettled.md) §4
 names: the write half of a primitive exists and the read half does not, or
@@ -299,10 +361,11 @@ with shadow-cljs stopped; deleting the pages artifact fails boot loudly, not
 slowly; a call graph reaching a capability edge is never classified pure.
 Forced before step 6 finishes: the shadow hooks are today's only producer.
 
-### Step 6 — One system, three processes
+### Step 6 — One system, two process kinds (revised per rulings 2026-07-26 PM)
 
-`bin/seon up` starts watcher, cluster JVM, web-render; kill any one and the
-system recovers from facts. **Change:** the pod cut per
+`bin/seon up` starts watcher and cluster JVM(s) — web-render MERGES into the
+cluster JVM (each cluster serves its own UI in-memory); kill any process and
+the system recovers from facts. **Change:** the pod cut per
 `research/pod-cut-verdict-2026-07-26.md` — groups 1–4 (15,231 lines) now,
 they block nothing; group 5 (substrate, 8,806) after step 5 replaces the
 pages producer; then `:seon.dev.process/pod` leaves
@@ -315,18 +378,25 @@ documentation), L7 (lease wake stays event-armed, `arm-lease-wake!`), L18.
 **Falsifier:** the reset-boundary live proof on the default cluster with the
 pod gone; two JVMs pointed at one store: the second refuses to open, loudly.
 
-### Step 7 — A human watches without costing the agents anything
+### Step 7 — A human watches without costing the agents anything (REVISED per rulings 2026-07-26 PM — O14 dissolved, in-process pipeline)
 
 Any number of tabs sees every agent live; an authored infinite-loop canvas
-costs one bounded evaluation and the agent learns why. **Change:** implement
-`research/jvm-render-design-2026-07-26.md` on the ruled target
-(`ui.md:23-27`) once O14 rules: one cluster-side registration per pinned
-canvas, admission via step 3's boundary, equality-suppressed commit of the
-complete snapshot as a cardinality-one no-history fact (never overwriting
-`:seon.render.canvas/content`); web-render serves the whole UI from committed
-facts and its replica; streamed reply partials ride the same construct — one
-coalesced no-history fact; fence http-kit's unbounded socket queue (filed);
-delete the 15 render-held files and `seon.reactive`'s CLJS async branches.
+costs one bounded evaluation and the agent learns why. **Change:** the
+in-process flow pipeline, same JVM, no stored snapshot:
+`listen!` interest wake `(sliding-buffer 1)` → one render proc per render
+unit running agent-authored renderers through the ONE
+`seon.sci.eval/evaluate` (admission via step 3's boundary) → equality
+suppression with the current snapshot held in registration memory → `mult` →
+per-tab per-visible-unit `(sliding-buffer 1)` taps → per-tab `:io` writer
+proc batching datastar element patches onto ONE bounded SSE connection per
+tab (this fences http-kit's unbounded socket queue, filed). Fine-grained
+element morphs are preserved exactly; the initial paint is the only
+whole-page render; restart = one re-render per pinned canvas. Streamed
+reply partials ride the same pipeline as another producer (their coalesced
+no-history fact is retired). Delete the 15 render-held files and
+`seon.reactive`'s CLJS async branches.
+`research/jvm-render-design-2026-07-26.md` needs revision to this target
+before implementation.
 **Landmines:** L3 (no authored closure after disarm), L2, L7. **Falsifier:**
 32 tabs → one authored evaluation; reconnect after zero consumers → zero; the
 loop canvas → error morph to every consumer, healthy server, and a committed
@@ -388,20 +458,17 @@ Each measured or a dependency property; violating one is silently wrong.
 
 ## 5. Open owner decisions
 
-- **O14 render materialization.** Blocks step 7. Recommend **commit** the
-  snapshot as a cardinality-one no-history fact — measured 1 → 0 evaluations
-  across a zero-consumer gap, survives restart — fenced as the one ruled
-  exception to derive-don't-store.
-- **O4 allocation.** Recommend **ratify diagnostic-only** (L2: the metric
-  bounds the wrong quantity); heap protection is the process boundary plus
-  loud OOM recording.
-- **O2 horizontal cluster JVMs.** Blocks step 6's refusal gate. Recommend
-  **amend `architecture.md:242-246`**: one cluster JVM per store (O1/O9),
-  scale by adding clusters, interchangeable-JVM prose deleted.
-- **`core.async.flow` non-adoption.** Recommend **ratify**: keep the
-  transform vocabulary, skip the library; route `seon.sci.eval`'s hand-rolled
-  `newCachedThreadPool` through core.async's own `:compute` dispatch or stop
-  borrowing the word.
+**All four resolved 2026-07-26 PM — see the Rulings section above.** O14
+dissolved (no stored render; web-render merges in-process). O4: diagnostic +
+heartbeat heap watermark. O2: refuse via the `flock` assert. Flow: the
+non-adoption recommendation was REVERSED — `core.async.flow` is adopted,
+Path A, with `seon.flow` implementing `flow.spi` and flow-monitor as the
+visualization surface; the hand-rolled `newCachedThreadPool` is replaced by
+the bounded `:compute` executor the flow launchers own.
+
+Newly open (queued, not blocking): the homogeneous-tuple 8-cap fork lift +
+`run/forms` vector-value conversion (behind the sweep); the run-opened-
+before-plan-commits window still has no owning step.
 
 ## 6. What done looks like
 
