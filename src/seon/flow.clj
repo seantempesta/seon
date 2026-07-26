@@ -4,7 +4,7 @@
    This namespace deliberately does not own durable runtime state. Ordinary
    Flow processes retain only disposable counters and handles; the custom
    database process obtains facts and commits facts through supplied
-  functions. Flow channels carry scheduling and wake signals."
+   functions. Flow channels carry scheduling and wake signals."
   (:require [clojure.core.protocols :as core.protocols]
             [clojure.core.async :as async]
             [clojure.core.async.flow :as flow]
@@ -68,6 +68,24 @@
 (schema/register! ::graph [:fn 'seon.flow/graph?])
 (schema/register! ::channel [:fn 'seon.flow/channel?])
 (schema/register! ::buffer-capacity [:int {:min 1}])
+(schema/register! ::seed :int)
+(schema/register! ::owner-ordinal [:int {:min 0}])
+(schema/register! ::attempt [:int {:min 0}])
+(schema/register!
+ ::fix-outcome
+ [:enum ::fix-succeeds ::fix-fails ::fix-breaks-other-namespace
+  ::no-response])
+(schema/register! ::plan-step-fn 'fn?)
+(schema/register! ::fix-step-fn 'fn?)
+(schema/register! ::owner-count [:int {:min 1}])
+(schema/register! ::successful-owners [:set :keyword])
+(schema/register! ::escalated? :boolean)
+(schema/register! ::admitted? :boolean)
+(schema/register! ::lineage-status [:enum ::iterating ::escalated ::done])
+(schema/register! ::turn-count [:int {:min 0}])
+(schema/register! ::failure-count [:int {:min 0}])
+(schema/register! ::max-turns [:int {:min 1}])
+(schema/register! ::max-failures [:int {:min 1}])
 (schema/register!
  ::eval-proc-request
  [:map
@@ -116,6 +134,32 @@
   [::monitor-report-channel ::channel]
   [::monitor-error-channel ::channel]
   [::fault-channel ::channel]])
+(schema/register!
+ ::seeded-outcome-request
+ [:map
+  [::seed ::seed]
+  [::owner-ordinal ::owner-ordinal]
+  [::attempt ::attempt]])
+(schema/register!
+ ::lineage-status-request
+ [:map
+  [::owner-count ::owner-count]
+  [::successful-owners ::successful-owners]
+  [::escalated? ::escalated?]
+  [::admitted? ::admitted?]])
+(schema/register!
+ ::escalation-request
+ [:map
+  [::turn-count ::turn-count]
+  [::failure-count ::failure-count]
+  [::max-turns ::max-turns]
+  [::max-failures ::max-failures]])
+(schema/register!
+ ::planner-proc-request
+ [:map [::plan-step-fn ::plan-step-fn]])
+(schema/register!
+ ::namespace-owner-proc-request
+ [:map [::fix-step-fn ::fix-step-fn]])
 
 (defn bounded-platform-executor
   "Create a bounded executor whose workers are platform threads."
@@ -284,6 +328,86 @@
                      monitor-error-channel]]
       (async/close! channel))
     stopped?))
+
+(defn seeded-outcome
+  "Return a deterministic fake-owner outcome for an explicit seed."
+  {:malli/schema
+   [:=> [:catn [::request ::seeded-outcome-request]] ::fix-outcome]}
+  [{::keys [seed owner-ordinal attempt]}]
+  (let [mixed-seed
+        (bit-xor
+         (long seed)
+         (unchecked-multiply
+          6364136223846793005
+          (long (inc owner-ordinal)))
+         (unchecked-multiply
+          1442695040888963407
+          (long (inc attempt))))
+        random (java.util.SplittableRandom. mixed-seed)]
+    (nth [::fix-succeeds ::fix-fails ::fix-breaks-other-namespace
+          ::no-response]
+         (.nextInt random 4))))
+
+(defn lineage-status
+  "Derive the prototype lineage status from current facts."
+  {:malli/schema
+   [:=> [:catn [::request ::lineage-status-request]] ::lineage-status]}
+  [{::keys [owner-count successful-owners escalated? admitted?]}]
+  (cond
+    escalated? ::escalated
+    (and admitted? (= owner-count (count successful-owners))) ::done
+    :else ::iterating))
+
+(defn escalate-lineage?
+  "Whether an open prototype lineage has exhausted either fact budget."
+  {:malli/schema
+   [:=> [:catn [::request ::escalation-request]] :boolean]}
+  [{::keys [turn-count failure-count max-turns max-failures]}]
+  (or (>= turn-count max-turns)
+      (>= failure-count max-failures)))
+
+(defn planner-proc
+  "Create a fake planner proc whose supplied step returns ordinary data."
+  {:malli/schema
+   [:=> [:catn [::request ::planner-proc-request]] ::launcher]}
+  [{::keys [plan-step-fn]}]
+  (flow/process
+   (flow/map->step
+    {:describe
+     (fn []
+       {:ins {::planner-wake "A fact-derived planner wake value."}
+        :workload :io
+        :ping-map-fn #(select-keys % [::attempts])})
+     :init (fn [_] {::attempts 0})
+     :transform
+     (fn [state _input message]
+       (let [result (plan-step-fn message)]
+         [(update state ::attempts inc)
+          {::flow/report
+           [{::event ::planner-attempt
+             ::result result}]}]))})))
+
+(defn namespace-owner-proc
+  "Create a fake namespace-owner proc returning one scripted outcome."
+  {:malli/schema
+   [:=> [:catn [::request ::namespace-owner-proc-request]] ::launcher]}
+  [{::keys [fix-step-fn]}]
+  (flow/process
+   (flow/map->step
+    {:describe
+     (fn []
+       {:ins {::owner-step
+              "An initial fact-derived wake or open-run continuation."}
+        :workload :io
+        :ping-map-fn #(select-keys % [::attempts])})
+     :init (fn [_] {::attempts 0})
+     :transform
+     (fn [state _input message]
+       (let [outcome (fix-step-fn message)]
+         [(update state ::attempts inc)
+          {::flow/report
+           [{::event ::owner-attempt
+             ::outcome outcome}]}]))})))
 
 (defn eval-proc
   "Create a compute proc that simulates one guarded evaluation."

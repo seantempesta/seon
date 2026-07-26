@@ -1,0 +1,25 @@
+{:seon.flow.loop-evidence/id :generate-code-loop-2026-07-26
+ :seon.flow.loop-evidence/prototype-only? true
+ :seon.flow.loop-evidence/llm-calls 0
+ :seon.flow.loop-evidence/command
+ ["clojure" "-M:writer:host:writer-test" "-e"
+  "(require 'seon.flow-test 'seon.flow.loop-test) (clojure.test/run-tests 'seon.flow-test 'seon.flow.loop-test)"]
+ :seon.flow.loop-evidence/result
+ {:tests 18
+  :assertions 97
+  :failures 0
+  :errors 0}
+ :seon.flow.loop-evidence/test-check
+ {:generator-seed 20260726
+  :trials 60
+  :outcome-seeds [7 17 41 73 101 211 307 401 509 997]}
+ :seon.flow.loop-evidence/properties
+ {:seeded-terminal :passed
+  :no-self-wake :passed
+  :escalation-damping :passed
+  :current-basis-replan :passed
+  :admission-rejection-value :passed}
+ :seon.flow.loop-evidence/divergences
+ [:open-owner-run-continues-without-a-new-wake
+  :escalation-threshold-is-inclusive
+  :seed-mixing-requires-explicit-wrapping-arithmetic]}

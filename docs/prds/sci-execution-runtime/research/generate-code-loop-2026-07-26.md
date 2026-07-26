@@ -12,6 +12,55 @@ committed step until it enters the plan. Prerequisites: step 1
 (`seon.effect`, messaging + db, then LLM family), step 4 (terminal
 transaction commits program-graph facts).
 
+## Prototype verdict — divergences first
+
+The fake-agent Flow testbed supports the ruled composition, with three
+clarifications that the sketch did not make precise:
+
+- **An open owner run needs continuation, not another wake.** The first planner
+  wake starts the namespace owner's fix run. A failed attempt from that same
+  open run must not create another owner wake; the proc continues the already
+  open run. Treating every retry as a fact-derived wake would violate the
+  no-self-wake rule and create the very positive-feedback loop the damping rule
+  is meant to prevent.
+- **The escalation boundary must be inclusive and idempotent.** The prototype
+  escalates when either `turn-count >= max-turns` or
+  `failure-count >= max-failures`, and gives the escalation one identity.
+  “Past N” was ambiguous; waiting for N+1 permits one extra failed attempt
+  after the configured budget is exhausted.
+- **Deterministic seed mixing needs wrapping arithmetic.** Checked JVM
+  multiplication overflowed on the first property trial. The corrected
+  seed-random outcome function uses explicit wrapping multiplication before
+  constructing `SplittableRandom`. This is testbed machinery, but it matters:
+  a recorded seed that throws instead of selecting an outcome is not a
+  deterministic simulation.
+
+Everything else survived contact. The plan status remains derived rather than
+stored; only the escalation event is a durable fact. A planner re-woken after
+owner B escalated queried the current database value with `since` and observed
+owner A's already-committed success. A fake admission rejection stayed an
+ordinary value containing the affected consumers and committed the
+accrete-vs-adapt choice point.
+
+The schema in `test/seon/flow/loop_test.clj` is explicitly a **prototype only**.
+It uses throwaway in-memory Datahike connections and does not claim the
+production attributes that land with step 4.
+
+## Prototype expected versus observed
+
+| property | expected | observed |
+|---|---|---|
+| Seeded termination | Every seed reaches all-green or escalated before either fact budget can be exceeded | Passed for 60 test.check trials selected from ten recorded outcome seeds. Every run returned derived `:seon.flow/done` or `:seon.flow/escalated` with `turn-count <= max-turns`. |
+| No self-wake and escalation damping | An owner's own open-run fault never wakes it; after escalation only the planner is actionable | Passed. Failed B-attempt facts derived no B wake. B had exactly one wake, the initial planner wake. After two failures at `max-failures = 2`, repeated action derivation returned only `wake-planner`, and B remained at exactly two attempts. |
+| Asymmetric current-basis re-plan | A succeeds once; B exhausts its budget; planner attempt two sees A's committed success | Passed. A committed at the first owner turn, B failed twice, and the escalation fact woke the planner. A query over `(d/since current-db before-a-success)` returned exactly `#{:owner-a}`; planner attempt two returned and durably recorded that same set at its current basis. |
+| Contract rejection as a value | The controlled admission predicate rejects with consumers and records the accrete-vs-adapt choice point | Passed. The planner report carried `#{:consumer.alpha :consumer.beta}`, Flow's error channel stayed empty, and the plan facts recorded rejection, both consumers, and `accrete-or-adapt`. No real breakage detection was built. |
+
+The test.check generator seed is `20260726`. The explicit outcome seeds carried
+by the simulated runs are `7`, `17`, `41`, `73`, `101`, `211`, `307`, `401`,
+`509`, and `997`. The real N-owner Flow proof uses seed `20260726` across three
+owner procs and three attempts each. The recurring command and result are
+recorded in `tmp/plan-evidence/generate-code-loop-2026-07-26.edn`.
+
 ## The ruled shape
 
 Design B won over a fan-out coordinator: **the planner is one agent with the
@@ -69,12 +118,19 @@ All existing or same-day ruled; the loop invents none of them:
 ## Genuinely missing (small, named)
 
 - **The admission/contract check** at the terminal transaction (breakage =
-  computed rejection). Belongs to step 4's commit path.
+  computed rejection). Belongs to step 4's commit path. The prototype supplies
+  a controlled accept/reject function and proves only the loop's reaction to
+  its returned value.
 - **The escalation rule**: a fix lineage open past N turns / M failed
   attempts (config facts) derives an escalation fact that wakes the planner.
-  Symmetric damping: an escalated lineage stops waking its owner.
+  Symmetric damping: an escalated lineage stops waking its owner. The prototype
+  proves inclusive thresholding, one escalation fact, and the continuation
+  versus wake distinction; the production query and transaction owner remain
+  missing.
 - **Plan lineage schema**: plan entity → spawned fix runs → derived status,
-  so done/iterating/escalated are queries.
+  so done/iterating/escalated are queries. The throwaway prototype proves the
+  connections and derived statuses, but deliberately does not register the
+  production schema before step 4.
 - **The tool itself** — agent-facing, so `my.*` flat (name TBD when built;
   `seon.ai` is the provider wire, not the home).
 
