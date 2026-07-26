@@ -10,7 +10,7 @@ tags: [prd, agent, architecture]
 produced by the command shown, against the working tree — so a stale row is
 impossible and an agent can re-verify any claim in one line.
 
-Generated from `codex/runtime-reliability-refactor` at `bd8038419`, measuring the **working tree** — so a
+Generated from `codex/runtime-reliability-refactor` at `e8c84fcdd`, measuring the **working tree** — so a
 lane with uncommitted work shows up here. Rows that can differ between committed
 and working state say both. `git status --short` before trusting a surprising row.
 
@@ -111,7 +111,7 @@ decides whether the scheduling design is needed.
 |---|---|---|
 | SCI eval | YES — semaphore | `rg -c Semaphore src/seon/sci/eval.clj` → 4 |
 | transactions (Datahike side) | ALWAYS bounded | `create-writer :self` builds `transaction-queue` + `commit-queue`; defaults `DEFAULT_QUEUE_SIZE` / `DEFAULT_COMMIT_WAIT_TIME 0` |
-| transactions (Seon supplies values?) | NO — Datahike defaults | committed: 0 hits · working tree: 21 hits |
+| transactions (Seon supplies values?) | YES | committed: 21 hits · working tree: 21 hits |
 | run admission | NO — unbounded spawn | `rg -c "start-virtual-thread!" src/seon/agent/driver.clj` → 4 call sites, none behind a permit |
 | agent capability calls | NO | `rg -c Semaphore src/seon/db/host.clj src/seon/ai/http.clj` → 0 |
 
@@ -173,6 +173,48 @@ defect: the read returns nil and any sort over it is meaningless.
 :seon\.ai\.attempt/*  distinct used: 24   registered: 0
 :seon\.agent\.turn/*  distinct used: 17   registered: 9
 ```
+
+## 11. The agent entity
+
+The owner's model: "The agent is just attributes and values in an entity with
+lookups and refs to other things it cares about like it's context." Verified.
+
+```
+registered :seon.agent/* attributes:
+  :seon.agent/ctx
+  :seon.agent/default-deadline-ms
+  :seon.agent/default-turn-limit
+  :seon.agent/namespace
+  :seon.agent/parent
+  :seon.agent/purpose
+  :seon.agent/run
+  :seon.agent/schedules
+  :seon.agent/terminated-at
+
+registered in:
+  src/seon/agent.cljs
+  src/seon/agent/run/core.cljc
+  src/seon/agent/ctx.cljc
+```
+
+**Duplicate registrations:** `:seon.agent/run ` — one attribute registered in two
+places. Check whether both agree, and note that a registration living in a
+`.cljs` file dies with the pod cut.
+
+`.cljs` files registering agent attributes: **1**. Every one is on the
+pod deletion list, so the agent's own schema must move to a surviving owner
+before that cut.
+
+## 12. Surfaces and mechanisms not yet in place
+
+| question | answer | evidence |
+|---|---|---|
+| who serves the web UI? | web-render JVM serves only: [:get "/_seon/ready"] [:get "/data"] [:get "/data/feed"] [:get "/js/datastar.js"] [:get "/css/output.css"]  · the pod serves the rest | `rg '\[:get' src/seon/web/server.clj`; pod router install sites → 1 |
+| does an unsafe two-writer configuration refuse to open? | **NO** | `rg -c "refuse" src/seon/db/registry.clj` → 0 (O2 still unruled) |
+| does agent scheduling use core.async dispatch? | **NO — hand-rolled** | core.async refs → 0; hand-rolled pools → 1 |
+| is workload a fact yet? | **NO — designed, not built** | `rg -c ":seon.fn/workload"` → 0 |
+| reader conditionals in `.cljc` | 448 | `rg -c "#?\(" src/ --glob "*.cljc"`; the pod cut is projected to retire most |
+| is Integrant a dependency? | no | `rg -c integrant deps.edn` → 0 (adoption is conditional, `bd8038419`) |
 
 ## How to trust this file
 

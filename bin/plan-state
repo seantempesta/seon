@@ -255,6 +255,69 @@ done
 echo '```'
 echo
 
+cat <<'S11'
+## 11. The agent entity
+
+The owner's model: "The agent is just attributes and values in an entity with
+lookups and refs to other things it cares about like it's context." Verified.
+
+S11
+echo '```'
+echo "registered :seon.agent/* attributes:"
+rg --no-filename -o 'schema/register! :seon\.agent/[a-z?-]+' src/ 2>/dev/null | sed 's/.*register! //' | sort -u | sed 's/^/  /'
+echo
+echo "registered in:"
+rg -l 'schema/register! :seon\.agent/' src/ 2>/dev/null | sed 's/^/  /'
+echo '```'
+echo
+DUP=$(rg --no-filename -o 'schema/register! (:seon\.agent/[a-z?-]+)' -r '$1' src/ 2>/dev/null | sort | uniq -d | tr '\n' ' ')
+if [ -n "$DUP" ]; then
+  echo "**Duplicate registrations:** \`$DUP\` — one attribute registered in two"
+  echo "places. Check whether both agree, and note that a registration living in a"
+  echo "\`.cljs\` file dies with the pod cut."
+else
+  echo "**No duplicate \`:seon.agent/*\` registrations.**"
+fi
+CLJSREG=$(rg -l 'schema/register! :seon\.agent/' src/ --glob '*.cljs' 2>/dev/null | wc -l | tr -d ' ')
+echo
+echo "\`.cljs\` files registering agent attributes: **$CLJSREG**. Every one is on the"
+echo "pod deletion list, so the agent's own schema must move to a surviving owner"
+echo "before that cut."
+echo
+
+cat <<'S12'
+## 12. Surfaces and mechanisms not yet in place
+
+S12
+printf '| question | answer | evidence |\n|---|---|---|\n'
+
+WR=$(rg --no-filename -o '\[:get "[^"]+"\]' src/seon/web/server.clj 2>/dev/null | tr '\n' ' ')
+POD=$(n 'router/install!' src/seon/web/serve.cljs)
+printf '| who serves the web UI? | web-render JVM serves only: %s · the pod serves the rest | `rg %s src/seon/web/server.clj`; pod router install sites → %s |\n' \
+  "${WR:-none}" "'\[:get'" "$POD"
+
+CAS=$(n 'datahike-server|:datahike-server' src/seon/db/ 2>/dev/null)
+REFUSE=$(n 'refuse|already has a live write|second writer' src/seon/db/registry.clj 2>/dev/null)
+printf '| does an unsafe two-writer configuration refuse to open? | %s | `rg -c "refuse" src/seon/db/registry.clj` → %s (O2 still unruled) |\n' \
+  "$([ "$REFUSE" != "0" ] && echo 'some refusal exists — read it' || echo '**NO**')" "$REFUSE"
+
+DISP=$(n 'core\.async|executor-for|dispatch/exec' src/seon/sci/eval.clj src/seon/agent/driver.clj 2>/dev/null)
+CACHED=$(n 'newCachedThreadPool|newFixedThreadPool' src/seon/sci/eval.clj 2>/dev/null)
+printf '| does agent scheduling use core.async dispatch? | %s | core.async refs → %s; hand-rolled pools → %s |\n' \
+  "$([ "$DISP" != "0" ] && echo 'partly' || echo '**NO — hand-rolled**')" "$DISP" "$CACHED"
+
+WL=$(n 'seon\.fn/workload|:seon\.capability/workload' src/ 2>/dev/null)
+printf '| is workload a fact yet? | %s | `rg -c ":seon.fn/workload"` → %s |\n' \
+  "$([ "$WL" != "0" ] && echo yes || echo '**NO — designed, not built**')" "$WL"
+
+RC=$(n '#\?\(' src/ --glob '*.cljc' 2>/dev/null)
+printf '| reader conditionals in `.cljc` | %s | `rg -c "#\?\(" src/ --glob "*.cljc"`; the pod cut is projected to retire most |\n' "$RC"
+
+IG=$(n 'integrant' deps.edn 2>/dev/null)
+printf '| is Integrant a dependency? | %s | `rg -c integrant deps.edn` → %s (adoption is conditional, `bd8038419`) |\n' \
+  "$([ "$IG" != "0" ] && echo yes || echo 'no')" "$IG"
+echo
+
 cat <<'FOOTER'
 ## How to trust this file
 
