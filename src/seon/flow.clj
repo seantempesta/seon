@@ -13,10 +13,12 @@
             [clojure.core.async.impl.protocols :as async.impl]
             [clojure.datafy :as datafy]
             [clojure.walk :as walk]
+            [seon.config.resolve :as config.resolve]
             [seon.schema :as schema])
   (:import [clojure.lang Counted]
            [java.util LinkedList]
-           [java.util.concurrent Executor Executors Semaphore]))
+           [java.util.concurrent Executor ExecutorService Executors Future
+            TimeUnit]))
 
 (set! *warn-on-reflection* true)
 
@@ -24,13 +26,13 @@
   [value]
   (instance? Executor value))
 
-(defn- semaphore?
-  [value]
-  (instance? Semaphore value))
-
 (defn- atom-reference?
   [value]
   (instance? clojure.lang.IAtom value))
+
+(defn- java-future?
+  [value]
+  (instance? Future value))
 
 (defn- proc-launcher?
   [value]
@@ -45,16 +47,20 @@
   (satisfies? async.impl/Channel value))
 
 (schema/register-core-predicate! 'seon.flow/executor? executor?)
-(schema/register-core-predicate! 'seon.flow/semaphore? semaphore?)
 (schema/register-core-predicate! 'seon.flow/atom-reference? atom-reference?)
+(schema/register-core-predicate! 'seon.flow/java-future? java-future?)
 (schema/register-core-predicate! 'seon.flow/proc-launcher? proc-launcher?)
 (schema/register-core-predicate! 'seon.flow/graph? graph?)
 (schema/register-core-predicate! 'seon.flow/channel? channel?)
 
 (schema/register! ::parallelism [:int {:min 1}])
 (schema/register! ::executor [:fn 'seon.flow/executor?])
-(schema/register! ::permits [:fn 'seon.flow/semaphore?])
 (schema/register! ::active-evals [:fn 'seon.flow/atom-reference?])
+(schema/register! ::active-work [:fn 'seon.flow/atom-reference?])
+(schema/register! ::future [:fn 'seon.flow/java-future?])
+(schema/register! ::workload [:enum :compute])
+(schema/register! ::submission-id [:or :uuid :keyword :string])
+(schema/register! ::work-fn 'fn?)
 (schema/register! ::compute-timeout-ms [:int {:min 1}])
 (schema/register! ::deliver! 'fn?)
 (schema/register! ::read-facts 'fn?)
@@ -68,6 +74,24 @@
 (schema/register! ::graph [:fn 'seon.flow/graph?])
 (schema/register! ::channel [:fn 'seon.flow/channel?])
 (schema/register! ::buffer-capacity [:int {:min 1}])
+(schema/register!
+ ::launcher-configuration
+ [:map {:closed true}
+  [:seon.config.flow.compute/queue-depth
+   :seon.config.flow.compute/queue-depth]
+  [:seon.config.flow.compute/concurrency
+   :seon.config.flow.compute/concurrency]])
+(schema/register!
+ ::work-launcher-request
+ [:map {:closed true}
+  [::configuration ::launcher-configuration]])
+(schema/register!
+ ::work-submission
+ [:map {:closed true}
+  [::submission-id ::submission-id]
+  [::workload ::workload]
+  [::work-fn ::work-fn]
+  [::time-limit-ms ::compute-timeout-ms]])
 (schema/register! ::seed :int)
 (schema/register! ::owner-ordinal [:int {:min 0}])
 (schema/register! ::attempt [:int {:min 0}])
@@ -94,14 +118,14 @@
 (schema/register!
  ::eval-proc-request
  [:map
-  [::permits ::permits]
+  [::parallelism ::parallelism]
   [::active-evals ::active-evals]
   [::compute-timeout-ms ::compute-timeout-ms]])
 (schema/register!
  ::capacity-observer-request
  [:map
-  [::permits ::permits]
-  [::active-evals ::active-evals]])
+  [::parallelism ::parallelism]
+  [::active-work ::active-work]])
 (schema/register! ::mailbox-request [:map [::deliver! ::deliver!]])
 (schema/register!
  ::database-proc-request
@@ -179,6 +203,336 @@
   {:malli/schema [:=> [:catn [::parallelism ::parallelism]] ::executor]}
   [parallelism]
   (Executors/newFixedThreadPool (int parallelism)))
+
+(defn- capacity-facts
+  [parallelism active-work]
+  (let [active @active-work
+        compute-active
+        (into {}
+              (filter (fn [[_ facts]]
+                        (= :compute (::workload facts))))
+              active)]
+    {::active-submissions (set (keys compute-active))
+     ::active-procs (set (keys compute-active))
+     ::wedged-submissions
+     (into #{}
+           (keep (fn [[submission-id facts]]
+                   (when (::wedged? facts) submission-id)))
+           compute-active)
+     ::wedged-procs
+     (into #{}
+           (keep (fn [[submission-id facts]]
+                   (when (::wedged? facts) submission-id)))
+           compute-active)
+     ::available-capacity (- parallelism (count compute-active))
+     ::available-permits (- parallelism (count compute-active))
+     ::platform-threads?
+     (every? ::platform-thread? (vals compute-active))}))
+
+(defn capacity-observer-proc
+  "Create a responsive proc that reports current compute occupancy."
+  {:malli/schema
+   [:=> [:catn [::request ::capacity-observer-request]] ::launcher]}
+  [{::keys [parallelism active-work]}]
+  (flow/process
+   (flow/map->step
+    {:describe
+     (fn []
+       {:ins {::observe "A process-local request to refresh observations."}
+        :ping-map-fn
+        (fn [_state] (capacity-facts parallelism active-work))})
+     :init (fn [_] {::observations 0})
+     :transform
+     (fn [state _input _message]
+       [(update state ::observations inc)
+        {::flow/report
+         [(assoc (capacity-facts parallelism active-work)
+                 ::event ::capacity)]}])})))
+
+(defn- launcher-ping
+  [pid status count ins outs parallelism active-work]
+  (walk/postwalk
+   datafy/datafy
+   #::flow{:pid pid
+           :status status
+           :count count
+           :ins (dissoc ins ::flow/control ::flow/casts)
+           :outs (dissoc outs ::flow/error ::flow/report)
+           :state (capacity-facts parallelism active-work)}))
+
+(defn- execute-work!
+  [pid compute-executor error report completion active-work
+   {::keys [submission-id work-fn result started] :as work}]
+  (swap! active-work
+         assoc submission-id
+         {::workload :compute
+          ::wedged? false
+          ::platform-thread? false})
+  (try
+    (.execute
+     ^Executor compute-executor
+     ^Runnable
+     (fn []
+       (swap! active-work
+              update submission-id
+              assoc
+              ::platform-thread?
+              (not (.isVirtual (Thread/currentThread))))
+       (let [started? (atom false)
+             started!
+             (fn []
+               (when (compare-and-set! started? false true)
+                 (deliver started (System/nanoTime))))]
+         (try
+           (let [value (work-fn {::started! started!})]
+             (started!)
+             (deliver result {::value value})
+             (async/offer!
+              report
+              {::pid pid
+               ::event ::work-complete
+               ::submission-id submission-id
+               ::value value}))
+           (catch Throwable throwable
+             (started!)
+             (deliver result {::throwable throwable})
+             (async/>!!
+              error
+              #::flow{:pid pid
+                      :status :running
+                      :cid ::compute-submission
+                      :msg (dissoc work ::work-fn ::result ::started)
+                      :op ::work
+                      :ex throwable}))
+           (finally
+             (swap! active-work dissoc submission-id)
+             (when-not
+              (async/offer!
+               completion
+               {::submission-id submission-id
+                ::workload :compute})
+               (async/offer!
+                error
+                #::flow{:pid pid
+                        :status :running
+                        :cid ::compute-submission
+                        :op ::completion-overflow
+                        :ex
+                        (ex-info
+                         "The launcher completion channel overflowed."
+                         {::submission-id submission-id})})))))))
+    (catch Throwable throwable
+      (swap! active-work dissoc submission-id)
+      (deliver started (System/nanoTime))
+      (deliver result {::throwable throwable})
+      (async/offer!
+       completion
+       {::submission-id submission-id
+        ::workload :compute}))))
+
+(defn- work-launcher-proc
+  [{::keys [parallelism active-work]}]
+  (reify
+    core.protocols/Datafiable
+    (datafy [_]
+      {::launcher ::work-launcher})
+
+    flow.spi/ProcLauncher
+    (describe [_]
+      {:ins {::compute-submission
+             "One disposable compute submission backed by durable work."}})
+    (start [_ {:keys [pid ins outs resolver]}]
+      (let [control (::flow/control ins)
+            submission (::compute-submission ins)
+            error (::flow/error outs)
+            report (::flow/report outs)
+            completion (async/chan parallelism)
+            compute-executor (flow.spi/get-exec resolver :compute)]
+        (.execute
+         ^Executor (flow.spi/get-exec resolver :io)
+         ^Runnable
+         (fn []
+           ;; A channel is a scheduling buffer over durable work, never the
+           ;; record of the work. Its fixed buffer parks submitters. Only this
+           ;; loop consumes class channels and accounts live compute slots.
+           (loop [status :paused
+                  count 0
+                  active-count 0]
+             (let [channels
+                   (cond-> [control completion]
+                     (and (= status :running)
+                          (< active-count parallelism))
+                     (conj submission))
+                   [message channel] (async/alts!! channels)]
+               (cond
+                 (= channel completion)
+                 (recur status count (dec active-count))
+
+                 (= channel submission)
+                 (do
+                   (execute-work!
+                    pid compute-executor error report completion active-work
+                    message)
+                   (recur status (inc count) (inc active-count)))
+
+                 (= channel control)
+                 (let [command (::flow/command message)
+                       addressed?
+                       (contains? #{pid ::flow/all} (::flow/to message))]
+                   (cond
+                     (not addressed?)
+                     (recur status count active-count)
+
+                     (= command ::flow/stop)
+                     nil
+
+                     (= command ::flow/pause)
+                     (recur :paused count active-count)
+
+                     (= command ::flow/resume)
+                     (recur :running count active-count)
+
+                     (= command ::flow/ping)
+                     (do
+                       (async/>!!
+                        (::flow/reply-chan message)
+                        (launcher-ping
+                         pid status count ins outs parallelism active-work))
+                       (recur status count active-count))
+
+                     :else
+                     (recur status count active-count)))
+
+                 :else
+                 nil)))))))))
+
+(defn- required-launcher-configuration
+  [configuration]
+  (let [selected
+        (config.resolve/flow-workload-configuration configuration)
+        required
+        [:seon.config.flow.compute/queue-depth
+         :seon.config.flow.compute/concurrency]
+        missing (remove #(contains? selected %) required)]
+    (when (seq missing)
+      (throw
+       (ex-info
+        "The compute work launcher is not ready: required config facts are missing."
+        {:seon.error/kind :configuration
+         ::missing-config-facts (vec missing)})))
+    selected))
+
+(defn start-work-launcher!
+  "Start the one bounded work launcher from acquired config facts."
+  [{::keys [configuration]}]
+  (let [configuration (required-launcher-configuration configuration)
+        queue-depth
+        (:seon.config.flow.compute/queue-depth configuration)
+        parallelism
+        (:seon.config.flow.compute/concurrency configuration)
+        active-work (atom {})
+        compute-executor (bounded-platform-executor parallelism)
+        graph
+        (flow/create-flow
+         {:procs
+          {::work-launcher
+           {:proc
+            (work-launcher-proc
+             {::parallelism parallelism
+              ::active-work active-work})
+            :chan-opts
+            {::compute-submission {:buf-or-n queue-depth}}}
+           ::capacity-observer
+           {:proc
+            (capacity-observer-proc
+             {::parallelism parallelism
+              ::active-work active-work})}}
+          :conns []
+          :compute-exec compute-executor})
+        started (flow/start graph)]
+    (flow/resume graph)
+    {::graph graph
+     ::started started
+     ::active-work active-work
+     ::compute-executor compute-executor
+     ::configuration configuration}))
+
+(defn stop-work-launcher!
+  "Stop a work launcher and interrupt its owned compute executor."
+  [{::keys [graph compute-executor]}]
+  (when graph
+    (flow/stop graph))
+  (when compute-executor
+    (.shutdownNow ^ExecutorService compute-executor))
+  nil)
+
+(defonce ^:private installed-work-launcher
+  (atom nil))
+
+(defn install-work-launcher!
+  "Replace the process work launcher with one built from acquired facts."
+  [{::keys [configuration]}]
+  (let [launcher
+        (start-work-launcher! {::configuration configuration})
+        [previous _]
+        (swap-vals! installed-work-launcher (constantly launcher))]
+    (when previous
+      (stop-work-launcher! previous))
+    launcher))
+
+(defn stop-installed-work-launcher!
+  "Stop and forget the process work launcher."
+  []
+  (when-let [launcher
+             (first
+              (swap-vals! installed-work-launcher (constantly nil)))]
+    (stop-work-launcher! launcher))
+  nil)
+
+(defn current-work-launcher
+  "Return the installed work launcher or fail the readiness check."
+  []
+  (or @installed-work-launcher
+      (throw
+       (ex-info
+        "The bounded work launcher is not installed."
+        {:seon.error/kind :configuration}))))
+
+(defn submit!!
+  "Submit compute work with fixed-buffer backpressure and await its result."
+  [{::keys [submission-id workload work-fn time-limit-ms]}]
+  (let [{::keys [graph active-work]} (current-work-launcher)
+        result (promise)
+        started (promise)
+        submitted-at (System/nanoTime)
+        injection
+        (flow/inject
+         graph
+         [::work-launcher ::compute-submission]
+         [{::submission-id submission-id
+           ::workload workload
+           ::work-fn work-fn
+           ::result result
+           ::started started}])]
+    (.get ^Future injection)
+    (let [started-at @started
+          submission-wait-ms
+          (quot (- (long started-at) submitted-at) 1000000)
+          settled (deref result time-limit-ms ::time-limit)]
+      (if (= ::time-limit settled)
+        (do
+          (swap! active-work
+                 (fn [active]
+                   (if (contains? active submission-id)
+                     (assoc-in active [submission-id ::wedged?] true)
+                     active)))
+          {::outcome ::time-limit
+           ::submission-wait-ms submission-wait-ms})
+        (if-let [throwable (::throwable settled)]
+          (throw throwable)
+          {::outcome ::completed
+           ::value (::value settled)
+           ::submission-wait-ms submission-wait-ms})))))
 
 (deftype CountedDroppingBuffer
   [^LinkedList buffer ^long capacity drop!]
@@ -495,7 +849,7 @@
   "Create a compute proc that simulates one guarded evaluation."
   {:malli/schema
    [:=> [:catn [::request ::eval-proc-request]] ::launcher]}
-  [{::keys [permits active-evals compute-timeout-ms]}]
+  [{::keys [parallelism active-evals compute-timeout-ms]}]
   (flow/process
    (flow/map->step
     {:describe
@@ -528,10 +882,10 @@
                   (ex-info
                    "The fake interrupt function was called after disarm."
                    {::pid pid}))))]
-         (.acquire ^Semaphore permits)
          (swap! active-evals
                 assoc pid
-                {::interrupt-fn armed-interrupt-fn
+                {::workload :compute
+                 ::interrupt-fn armed-interrupt-fn
                  ::platform-thread? (not (.isVirtual (Thread/currentThread)))
                  ::wedged? (true? wedged?)})
          (try
@@ -554,44 +908,9 @@
                ::result [result]}])
            (finally
              (reset! armed? false)
-             (swap! active-evals dissoc pid)
-             (.release ^Semaphore permits)))))})
+             (swap! active-evals dissoc pid)))))})
    {:workload :compute
     :compute-timeout-ms compute-timeout-ms}))
-
-(defn- capacity-facts
-  [permits active-evals]
-  (let [active @active-evals]
-    {::active-procs (set (keys active))
-     ::wedged-procs
-     (into #{}
-           (keep (fn [[pid facts]]
-                   (when (::wedged? facts) pid)))
-           active)
-     ::available-permits
-     (.availablePermits ^Semaphore permits)
-     ::platform-threads?
-     (every? ::platform-thread? (vals active))}))
-
-(defn capacity-observer-proc
-  "Create a responsive proc that reports current compute occupancy."
-  {:malli/schema
-   [:=> [:catn [::request ::capacity-observer-request]] ::launcher]}
-  [{::keys [permits active-evals]}]
-  (flow/process
-   (flow/map->step
-    {:describe
-     (fn []
-       {:ins {::observe "A process-local request to refresh observations."}
-        :ping-map-fn
-        (fn [_state] (capacity-facts permits active-evals))})
-     :init (fn [_] {::observations 0})
-     :transform
-     (fn [state _input _message]
-       [(update state ::observations inc)
-        {::flow/report
-         [(assoc (capacity-facts permits active-evals)
-                 ::event ::capacity)]}])})))
 
 (defn mailbox-proc
   "Create a proc that delivers each message to a supplied sink."

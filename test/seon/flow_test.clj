@@ -12,7 +12,7 @@
            [java.net.http HttpClient HttpRequest HttpResponse$BodyHandlers
             WebSocket WebSocket$Listener]
            [java.util.concurrent CountDownLatch ExecutorService Future
-            Semaphore TimeUnit]))
+            TimeUnit]))
 
 (def ^:private event-backstop-seconds
   ;; Every wait below has a real publisher. This clock turns a missing event
@@ -140,11 +140,11 @@
   (await-condition! ::statuses #(= expected (statuses graph))))
 
 (defn- testbed-procs
-  [{::keys [permits active-evals database-launcher deliver!]}]
+  [{::keys [parallelism active-evals database-launcher deliver!]}]
   {:eval
    {:proc
     (sut/eval-proc
-     {::sut/permits permits
+     {::sut/parallelism parallelism
       ::sut/active-evals active-evals
       ::sut/compute-timeout-ms 10000})
     :chan-opts
@@ -160,8 +160,8 @@
    :observer
    {:proc
     (sut/capacity-observer-proc
-     {::sut/permits permits
-      ::sut/active-evals active-evals})
+     {::sut/parallelism parallelism
+      ::sut/active-work active-evals})
     :chan-opts
     {::sut/observe {:buf-or-n 2}}}})
 
@@ -186,8 +186,8 @@
 (deftest public-lifecycle-and-durable-recreation
   (with-database
     (fn [connection]
-      (let [compute-executor (sut/bounded-platform-executor 2)
-            permits (Semaphore. 2)
+      (let [parallelism 2
+            compute-executor (sut/bounded-platform-executor parallelism)
             active-evals (atom {})
             deliveries (atom [])
             mailbox-delivered (CountDownLatch. 1)
@@ -204,7 +204,7 @@
               (.countDown mailbox-delivered))
             procs
             (testbed-procs
-             {::permits permits
+             {::parallelism parallelism
               ::active-evals active-evals
               ::database-launcher database-launcher
               ::deliver! deliver!})
@@ -252,8 +252,8 @@
                 (is (= :eval (::sut/pid report)))
                 (is (= ::sut/eval-complete (::sut/event report)))
                 (is (= ::bounded-result (::sut/result report))))
-              (is (= 2 (.availablePermits permits))
-                  "the guarded transform releases its permit in finally")
+              (is (empty? @active-evals)
+                  "the guarded transform releases its launcher slot in finally")
 
               @(flow/inject graph [:database ::sut/wake] [::wake])
               (await-condition!
@@ -302,14 +302,14 @@
             (stop-executor! compute-executor)))))))
 
 (defn- eval-procs
-  [count permits active-evals]
+  [count parallelism active-evals]
   (into {}
         (map
          (fn [ordinal]
            [(keyword (str "eval-" ordinal))
             {:proc
              (sut/eval-proc
-              {::sut/permits permits
+              {::sut/parallelism parallelism
                ::sut/active-evals active-evals
                ::sut/compute-timeout-ms 10000})
              :chan-opts
@@ -335,8 +335,8 @@
 
 (defn- single-eval-testbed
   [buffer-size]
-  (let [compute-executor (sut/bounded-platform-executor 1)
-        permits (Semaphore. 1)
+  (let [parallelism 1
+        compute-executor (sut/bounded-platform-executor parallelism)
         active-evals (atom {})
         completed (atom [])
         graph
@@ -345,7 +345,7 @@
           {:eval
            {:proc
             (sut/eval-proc
-             {::sut/permits permits
+             {::sut/parallelism parallelism
               ::sut/active-evals active-evals
               ::sut/compute-timeout-ms 10000})
             :chan-opts
@@ -358,7 +358,7 @@
           :compute-exec compute-executor})]
     {::graph graph
      ::compute-executor compute-executor
-     ::permits permits
+     ::parallelism parallelism
      ::active-evals active-evals
      ::completed completed}))
 
@@ -461,11 +461,73 @@
      :where [?event :seon.flow-test/event-id]]
    @connection))
 
+(deftest production-launcher-wedges-degrade-capacity-by-exactly-n
+  (let [parallelism 4
+        wedge-count 2
+        wedge-started (CountDownLatch. wedge-count)
+        release-wedges (CountDownLatch. 1)
+        configuration
+        {:seon.config.flow.compute/queue-depth 2
+         :seon.config.flow.compute/concurrency parallelism}
+        launcher
+        (sut/install-work-launcher!
+         {::sut/configuration configuration})
+        wedge-ids #{:wedge-0 :wedge-1}
+        wedges
+        (mapv
+         (fn [submission-id]
+           (future
+             (sut/submit!!
+              {::sut/submission-id submission-id
+               ::sut/workload :compute
+               ::sut/time-limit-ms 25
+               ::sut/work-fn
+               (fn [{::sut/keys [started!]}]
+                 (started!)
+                 (.countDown wedge-started)
+                 (await-latch! release-wedges ::release-production-wedges)
+                 ::released)})))
+         wedge-ids)]
+    (try
+      (await-latch! wedge-started ::production-wedges-started)
+      (is (every? #(= ::sut/time-limit (::sut/outcome @%)) wedges))
+      (let [observer-state
+            (::flow/state
+             (flow/ping-proc
+              (::sut/graph launcher)
+              ::sut/capacity-observer))]
+        (is (= wedge-ids (::sut/active-submissions observer-state)))
+        (is (= wedge-ids (::sut/wedged-submissions observer-state)))
+        (is (= (- parallelism wedge-count)
+               (::sut/available-capacity observer-state)))
+        (is (true? (::sut/platform-threads? observer-state))))
+      (let [remaining
+            (mapv
+             (fn [submission-id]
+               (future
+                 (sut/submit!!
+                  {::sut/submission-id submission-id
+                   ::sut/workload :compute
+                   ::sut/time-limit-ms 1000
+                   ::sut/work-fn
+                   (fn [{::sut/keys [started!]}]
+                     (started!)
+                     submission-id)})))
+             [:remaining-0 :remaining-1])]
+        (is (= #{:remaining-0 :remaining-1}
+               (into #{} (map (comp ::sut/value deref)) remaining))
+            "all and only the remaining compute slots make progress"))
+      (finally
+        (.countDown release-wedges)
+        (await-condition!
+         ::production-wedges-released
+         #(empty? @(::sut/active-work launcher)))
+        (sut/stop-installed-work-launcher!)))))
+
 (deftest wedged-steps-degrade-capacity-exactly-and-name-themselves
   (let [parallelism 4
         wedge-count 2
         compute-executor (sut/bounded-platform-executor parallelism)
-        permits (Semaphore. parallelism)
         active-evals (atom {})
         wedge-started (CountDownLatch. wedge-count)
         release-wedges (CountDownLatch. 1)
@@ -474,11 +536,11 @@
         observer
         {:proc
          (sut/capacity-observer-proc
-          {::sut/permits permits
-           ::sut/active-evals active-evals})
+          {::sut/parallelism parallelism
+           ::sut/active-work active-evals})
          :chan-opts
          {::sut/observe {:buf-or-n 2}}}
-        procs (assoc (eval-procs parallelism permits active-evals)
+        procs (assoc (eval-procs parallelism parallelism active-evals)
                      :observer observer)
         graph (flow/create-flow
                {:procs procs
@@ -541,9 +603,9 @@
               ::sut/wedged? false}]))
         (await-latch! remaining-work-finished ::remaining-capacity)
         (await-condition!
-         ::normal-work-released-permits
+         ::normal-work-released-slots
          #(= (- parallelism wedge-count)
-             (.availablePermits permits))))
+             (- parallelism (count @active-evals)))))
       (finally
         (.countDown release-wedges)
         (await-condition! ::all-evals-finished #(empty? @active-evals))
@@ -586,7 +648,7 @@
 
 (deftest fake-interrupt-ends-a-spin-and-the-proc-survives
   (testing "an armed interrupt returns a timeout value without losing capacity"
-    (let [{::keys [graph completed permits] :as testbed}
+    (let [{::keys [graph completed active-evals] :as testbed}
           (single-eval-testbed 2)
           {:keys [report-chan error-chan]} (flow/start graph)
           deadline (+ (System/nanoTime) (* 1000000 30))
@@ -628,7 +690,7 @@
         (await-condition!
          ::after-interrupt-count
          #(= 2 (::flow/count (flow/ping-proc graph :eval))))
-        (is (= 1 (.availablePermits ^Semaphore permits)))
+        (is (empty? @active-evals))
         (finally
           (stop-testbed! testbed))))))
 
@@ -1187,8 +1249,8 @@
 (deftest flow-monitor-attaches-and-publishes-the-render-graph
   (with-database
     (fn [connection]
-      (let [compute-executor (sut/bounded-platform-executor 1)
-            permits (Semaphore. 1)
+      (let [parallelism 1
+            compute-executor (sut/bounded-platform-executor parallelism)
             active-evals (atom {})
             database-stopped (CountDownLatch. 1)
             database-launcher
@@ -1198,7 +1260,7 @@
               ::sut/stopped! (fn [_] (.countDown database-stopped))})
             procs
             (testbed-procs
-             {::permits permits
+             {::parallelism parallelism
               ::active-evals active-evals
               ::database-launcher database-launcher
               ::deliver! (fn [_])})

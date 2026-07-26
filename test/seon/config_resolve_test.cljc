@@ -10,6 +10,23 @@
    :seon.hardware/system-memory-bytes (* 32 1024 1024 1024)
    :seon.hardware/fd-soft-limit 2048})
 
+(deftest flow-workload-bounds-resolve-to-required-singleton-facts
+  (let [defaults
+        (resolve/resolve-config-singleton {} {} fixed-hardware)
+        configured
+        (resolve/resolve-config-singleton
+         {:seon.config/flow
+          {:seon.config.flow.compute/queue-depth 7
+           :seon.config.flow.compute/concurrency 3}}
+         {}
+         fixed-hardware)]
+    (is (= {:seon.config.flow.compute/queue-depth 10
+            :seon.config.flow.compute/concurrency 8}
+           (resolve/flow-workload-configuration defaults)))
+    (is (= {:seon.config.flow.compute/queue-depth 7
+            :seon.config.flow.compute/concurrency 3}
+           (resolve/flow-workload-configuration configured)))))
+
 (deftest root-context-preserves-literal-render-text
   (let [render-text "; root role\n; Preserve this exact literal."
         singleton

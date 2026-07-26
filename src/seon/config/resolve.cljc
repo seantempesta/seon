@@ -338,6 +338,37 @@
 (doseq [[attribute shape] operator-dial-schemas]
   (schema/register! attribute shape))
 
+(def flow-workload-dial-schemas
+  "Flow launcher bounds with their units and evidence provenance."
+  {:seon.config.flow.compute/queue-depth
+   [:int
+    {:min 1
+     :description
+     "Queued compute submissions. Default 10 preserves core.async.flow's fixed per-channel default at alpha3; a full channel parks the submitter and loses no work."}]
+   :seon.config.flow.compute/concurrency
+   [:int
+    {:min 1
+     :description
+     "Concurrent compute submissions. Default equals the acquired :seon.hardware/cores fact, preserving the measured pre-Flow availableProcessors bound without a runtime fallback."}]})
+
+(doseq [[attribute shape] flow-workload-dial-schemas]
+  (schema/register! attribute shape))
+
+(schema/register! :seon.config/flow
+  (into [:map {:closed true}]
+        (map (fn [attribute]
+               [attribute {:optional true} attribute]))
+        (keys flow-workload-dial-schemas)))
+
+(def flow-workload-attributes
+  "Flat singleton attributes consumed by the Flow work launcher."
+  (vec (keys flow-workload-dial-schemas)))
+
+(defn flow-workload-configuration
+  "Project launcher bounds from one acquired config singleton."
+  [singleton]
+  (select-keys singleton flow-workload-attributes))
+
 (schema/register! :seon.config/web-render
   (into [:map {:closed true}]
         (map (fn [attribute]
@@ -1135,6 +1166,10 @@
     {:optional true} :seon.config.model-transport/connect-timeout-ms]
    [:seon.config.model-transport/maximum-response-bytes
     {:optional true} :seon.config.model-transport/maximum-response-bytes]
+   [:seon.config.flow.compute/queue-depth
+    {:optional true} :seon.config.flow.compute/queue-depth]
+   [:seon.config.flow.compute/concurrency
+    {:optional true} :seon.config.flow.compute/concurrency]
    [:seon.config.web-render/heartbeat-interval-ms
     {:optional true} :seon.config.web-render/heartbeat-interval-ms]
    [:seon.config.web-render/mailbox-depth
@@ -1276,6 +1311,7 @@
    [:seon.config/shell         {:optional true} :seon.config/shell]
    [:seon.config/search        {:optional true} :seon.config/search]
    [:seon.config/model-transport {:optional true} :seon.config/model-transport]
+   [:seon.config/flow           {:optional true} :seon.config/flow]
    [:seon.config/web-render      {:optional true} :seon.config/web-render]
    [:seon.config/claim-driver    {:optional true} :seon.config/claim-driver]
    [:seon.config/operator        {:optional true} :seon.config/operator]
@@ -1954,6 +1990,7 @@
         render-context (get manifest :seon.config/render-context {})
         run (merge (default-run-policy) (get manifest :seon.config/run {}))
         transport (get manifest :seon.config/model-transport {})
+        flow-workload (get manifest :seon.config/flow {})
         web-render (get manifest :seon.config/web-render {})
         claim-driver (get manifest :seon.config/claim-driver {})
         operator (get manifest :seon.config/operator {})
@@ -2056,6 +2093,14 @@
              (get search :seon.config.search/maximum-preview-tokens 32)
              :seon.config.search/default-maximum-results
              (get search :seon.config.search/default-maximum-results 12)
+             :seon.config.flow.compute/queue-depth
+             (get flow-workload
+                  :seon.config.flow.compute/queue-depth
+                  10)
+             :seon.config.flow.compute/concurrency
+             (get flow-workload
+                  :seon.config.flow.compute/concurrency
+                  (:seon.hardware/cores hardware))
              :seon.config.web-render/heartbeat-interval-ms
              (get web-render :seon.config.web-render/heartbeat-interval-ms 15000)
              :seon.config.web-render/mailbox-depth
