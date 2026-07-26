@@ -1,8 +1,5 @@
 (ns seon.client
-  "CLJS cluster host entry point.
-
-   Responsibility: attach and cold-start the cluster runtime via
-   [[start-runtime!]]. Warm agent birth belongs to [[seon.agent/start!]].
+  "CLJS pages-producer and render-tier entry point.
 
    How to run it:
 
@@ -17,14 +14,7 @@
      (shadow.cljs.devtools.api/nrepl-select :client)
 
      ;; To cold-start:
-     (seon.client/start-runtime! {})
-
-     ;; Then message it (from defaults to the calling scope; the
-     ;; HTTP /chat adapter stamps from = the user ref explicitly):
-     (seon.agent/message!
-       {:seon.agent.message/from    seon.agent/user-ref
-        :seon.agent.message/to      [[:seon.agent/id \"<agent-id>\"]]
-        :seon.agent.message/content \"hello\"})"
+     (seon.client/start-runtime! {})"
   (:require
     ["node:path" :as npath]
     [cljs.reader :as reader]
@@ -40,30 +30,10 @@
     [seon.launch :as launch]
     [seon.client.schema]
     [seon.config.resolve :as config.resolve]
-    ;; Pull in the agent's required namespaces at compile time so all
-    ;; schemas are registered before start-runtime! runs.
-    [seon.agent :as agent]
     [seon.agent.home :as home]
     [seon.agent.lifecycle :as lifecycle]
     ;; Lifecycle functions (wait/complete/terminate) — host-bundled so the agent
     ;; home ns can `:refer` them; required here so the build includes the ns.
-    ;; The agent loop + wake trigger: the client boot path ARMS the wake
-    ;; trigger (seon.agent does NOT, to stay acyclic).
-    ;; The run lifecycle — the bootstrap turn-0 opens a run for its turn.
-    ;; Cron-as-data — required so its `:seon.agent.schedule/*` register! calls
-    ;; run before `agent-bootstrap-attrs` installs them, and so the ticker's
-    ;; `fire-due-schedules!` is in the build.
-    [seon.agent.schedule]
-    [seon.agent.ctx :as agent.ctx]
-    [seon.agent.ctx.admin :as agent.ctx.admin]
-    [seon.ai :as ai]
-    ;; Core provider namespaces self-register with dispatch at load. Optional
-    ;; diffusion providers enter through an explicit development preload.
-    [seon.ai.anthropic]
-    [seon.ai.dispatch :as ai.dispatch]
-    [seon.ai.openai-compat]
-    [seon.ai.typeahead]
-    [seon.ai.generate-code :as generate-code]
     [seon.db :as db]
     [seon.db.branch :as db.branch]
     [seon.db.id :as id]
@@ -92,11 +62,6 @@
     ;; so char/regex/string-literal parens are balanced correctly (a raw
     ;; depth counter truncates such a form). Same parser `parse-forms` uses.
     [seon.repl.parse :as repl-internal]
-    ;; REPL autocomplete (repl-autosuggest lane): the byte-exact situation
-    ;; projection + the turn-mining exporter. Required so the build includes
-    ;; it (curation attrs registered, export!/context callable + indexed).
-    [seon.repl.autocomplete]
-    [seon.runtime.recovery :as recovery]
     ;; Schemas-as-queryable-data (research file
     ;; schemas-as-queryable-data-2026-05-26.md). At boot,
     ;; start-runtime! decomposes every entity-shape :map schema into
@@ -126,38 +91,20 @@
     [seon.render.handlers.fn]
     [seon.render.handlers.schema]
     [seon.render.handlers.ns]
-    ;; Shared envelope shapes — the `:seon.result/ok?` discriminator and
-    ;; the `:seon.items/*` self-describing-collection envelope. Required
-    ;; here (before the my.* scaffold) so their register! calls run before
-    ;; any consumer (`my.data` et al.) registers shapes that reference them.
-    [seon.items]
-    ;; The my.* scaffold — shared provenance shapes (my.kb) + the
-    ;; system-wide instruction singleton (my.kb.shared). Required here so their
-    ;; registrations are present in the compiled initialization program.
+    ;; The my.* scaffold — shared provenance shapes.
     [my.kb]
-    [my.kb.shared]
     ;; Pull-reference corpus — the `:my.skills/*` schema + scanner used by the
     ;; one declarative config reconciliation. These rows are available on
     ;; demand and are not standing context blocks.
     ;; Required here so its register! calls run and the build includes it.
     [my.skills]
-    ;; The canvas/canvas TOOLKIT — the aggregation (`my.data`) + static
-    ;; (`my.ui`) + interactive (`my.canvas`) functions the agent composes its
-    ;; canvas from. Required here so they BUILD + INDEX at boot (their
-    ;; `:seon.fn` rows render full in the `:namespaces` block — the worked
-    ;; examples, not `(no public fns indexed yet)`). They reference the
-    ;; `:seon.items/*` envelope required above.
-    [my.data]
+    ;; The static and interactive canvas functions used by the render tier.
     [my.ui]
     [my.canvas]
     ;; Content-addressed blob store — the disk tier (big text lives behind
     ;; a :my.blob/hash ref, never as datoms). Required so it builds +
     ;; indexes at boot and turn-capture/web-fetch can compose on it.
     [my.blob :as blob]
-    ;; Program-graph introspection — (my.ns/functions {:my.ns/ns 'x})
-    ;; lists a namespace's fns as the compact one-line cards. Required so
-    ;; it builds + indexes at boot.
-    [my.ns]
     ;; Inert foreign-code values — the `#code` heredoc literal's schemas
     ;; (`:seon.code/lang`/`::text`/`::block`). Required here so register!
     ;; runs before the reader/fs functions hand these maps around.
@@ -169,21 +116,6 @@
     ;; Holistic declarative-state reconciliation routes config, routes, and
     ;; skills through `seon.runtime.state/reconcile!`, including stale retractions.
     [seon.runtime.state :as state]
-    ;; Local-machine capability surface — A-9. Required so the agent
-    ;; can call (seon.agent.fs/read-file ...) from
-    ;; bootstrap-CLJS eval.
-    [seon.agent.fs]
-    ;; Content search over allowed files — the exemplar npm-package
-    ;; wrapper (@vscode/ripgrep). Required so the agent can call
-    ;; (seon.agent.search/grep ...) from bootstrap-CLJS eval and so the
-    ;; core-vars seed below can index it.
-    [seon.agent.search]
-    ;; Run real commands / Python — argv through the shared Bun subprocess
-    ;; owner over the fs cwd gate,
-    ;; default-deny behind the SEON_SHELL host grant. Required so the
-    ;; agent can call (seon.agent.shell/run ...) / (seon.agent.shell/py-run
-    ;; ...) from bootstrap-CLJS eval and so the core seed indexes it.
-    [seon.agent.shell]
     ;; Fetch + extract web pages — undici transport, readability→markdown,
     ;; blob-stored, SSRF-gated behind the SEON_WEB host grant. Required so
     ;; the agent can call (seon.agent.web/fetch ...) from bootstrap-CLJS
@@ -203,10 +135,6 @@
     [seon.agent.ctx.transcript]
     [seon.agent.ctx.subagents]
     [seon.agent.ctx.menu]
-    ;; The :typeahead-steps block family (NOT seeded by default — installed
-    ;; explicitly per agent / via a manifest overlay). Required so the build
-    ;; includes it and its render-slot symbols resolve.
-    [seon.agent.ctx.typeahead-steps]
     [seon.platform]
     ;; Namespace-source parsing and its persisted schema registrations.
     [seon.ns.source :as ns.source]
@@ -347,7 +275,9 @@
   (if-not (identical? owner (::advertisement-owner @!state))
     (js/Promise.resolve false)
     (let [refresh
-          (-> (agent/resumable-agent-ids! {::db/db database})
+          ;; Group-4 cut: `seon.agent` (pod agent runtime) is deleted; runs
+          ;; are JVM-owned, so the pod honestly advertises no resumable ids.
+          (-> (js/Promise.resolve [])
               (.then
                (fn [ids]
                  (when (:seon.error/message ids)
@@ -620,26 +550,6 @@
                                (instrumentation-summary
                                 (::admission/instrumentation published)))))
                         (when (::admission/published? published)
-                          ;; Reinstall listeners/ticker only after the reloaded
-                          ;; program is one verified generation. Web feeds
-                          ;; re-arm lazily.
-                          (if (autonomous-runtime?)
-                            (let [database (await (db/db))
-                                  restored
-                                  (if (:seon.error/message database)
-                                    database
-                                    (await
-                                     (generate-code/restore-root-schedulers!
-                                      {::db/db database
-                                       :seon.config/model-variant
-                                       :execution})))]
-                              (when (:seon.error/message restored)
-                                (throw
-                                 (ex-info
-                                  "Reload scheduler restoration failed."
-                                  restored)))
-                              restored)
-                            nil)
                           (start-heartbeat!))))
                      (.catch
                       (fn [publication-error]
@@ -753,30 +663,20 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- initial-data
-  "Return the user and empty system-wide instruction singleton.
+  "Return the one user identity.
 
-   The database authority admits these identities with the compiled program
+   The database authority admits this identity with the compiled program
    before publishing the first usable database value. The config singleton is
    intentionally absent: [[reconcile-config!]] is its one write surface, and
    cluster apply invokes that surface after page application.
 
-   The EMPTY system-wide instruction
-   singleton (`my.kb.shared/seed-tx-data`); agents and the user APPEND
-   rows at runtime, read back via `(my.kb.shared/instructions)` in the
-   bootstrap turn.
-
    The user row is the ONE `:seon.user/id` entity every
    `:seon.agent.message/from`/`to` user-ref resolves to (identity upsert,
    idempotent — same pattern as agent entities; one human for now).
-   The instruction singleton identity-upserts on `:my.kb.shared/id`
-   carrying NO rows — re-running asserts zero new datoms and never
-   clobbers runtime appends.
 
-  Reopening the database never clobbers runtime appends."
+   Reopening the database preserves the identity."
   []
-  (db/encode-edn-slot-values
-   (into [{:seon.user/id "user"}]
-         (my.kb.shared/seed-tx-data))))
+  (db/encode-edn-slot-values [{:seon.user/id "user"}]))
 
 ;; ---------------------------------------------------------------------------
 ;; index-core! — runtime introspection of compiled core fns
@@ -1694,9 +1594,8 @@
    development operator. Routes, skills, the flattened config singleton, and
    a declared cluster-default LLM row land through one provenance-scoped
    `seon.runtime.state/reconcile!`; a converged apply submits no transaction.
-   An absent `:seon.config/ai` section contributes no desired entity, preserving
-   an existing row for `seon.ai/sync!`'s seed-once contract. The manifest is
-   already resolved data, never ambient process state."
+   An absent `:seon.config/ai` section contributes no desired entity. The
+   manifest is already resolved data, never ambient process state."
   [manifest singleton]
   (let [ai-rows (config/resolve-ai-config manifest)
         desired (-> (vec (config/resolve-routes
@@ -1727,22 +1626,7 @@
               (let [reconciled
                     (await
                      (state/reconcile! reconcile-request))]
-                (if-not (:seon.runtime.state/ok? reconciled)
-                  reconciled
-                  (let [migrated
-                        (await (agent.ctx.admin/migrate-plan-surface-default!))]
-                    (cond
-                      (not (::agent.ctx/ok? migrated))
-                      {:seon.error/message (::agent.ctx/error migrated)
-                       :seon.error/kind :core-bug}
-
-                      :else
-                      (-> reconciled
-                          (update :seon.runtime.state/changed?
-                                  #(or %
-                                       (::agent.ctx/changed? migrated)))
-                          (update :seon.runtime.state/operations +
-                                  (::agent.ctx/operations migrated))))))))))))))
+                reconciled))))))))
 
 (defn ^:async apply-config!
   "Apply one operator-resolved config payload without rereading its manifest."
@@ -2311,20 +2195,6 @@
                    (str "instrumentation: "
                         (pr-str
                          (instrumentation-summary instrument-stats))))
-                scheduler-database (when autonomous? (await (db/db)))
-                restored-roots
-                (when autonomous?
-                  (if (:seon.error/message scheduler-database)
-                    scheduler-database
-                    (await
-                     (generate-code/restore-root-schedulers!
-                      {::db/db scheduler-database
-                       :seon.config/model-variant :execution}))))
-                _ (when (:seon.error/message restored-roots)
-                    (throw
-                     (ex-info
-                      "start-runtime!: generated-code scheduler restore failed"
-                      restored-roots)))
                 {:seon.web/keys [port port-file]}
                 (await
                  (if restore-startup
@@ -2335,7 +2205,6 @@
                    (web.serve/start!
                     {::web.serve/configuration configuration})))]
             (when autonomous?
-              (await (ai/sync!))
               (await (web.brand/sync!)))
             (log/info-console! "seon.client" "runtime started"
                                {:autonomous? autonomous?
