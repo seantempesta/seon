@@ -155,7 +155,8 @@
         (ensure-development-processes!
          configuration (selected-manifest configuration) start-owned!
          prior-stop-results)
-        (if-let [manifest (process/current-watcher-manifest configuration)]
+        (if-let [manifest (or (artifact/current-manifest configuration)
+                              (process/current-watcher-manifest configuration))]
         (let [late-recovery (recover-dead-processes! configuration)
               stop-results (cond-> prior-stop-results
                              late-recovery (conj late-recovery))]
