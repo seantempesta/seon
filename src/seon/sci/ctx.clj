@@ -9,13 +9,6 @@
 
 (schema/register! ::ctx 'some?)
 (schema/register! ::base-ctx 'some?)
-(schema/register! ::program-functions [:vector :string])
-(schema/register! ::request-context 'map?)
-(schema/register!
- ::base-request
- [:map {:closed true}
-  [::program-functions ::program-functions]
-  [::request-context ::request-context]])
 (schema/register! ::fork-request
                   [:map {:closed true}
                    [::base-ctx {:optional true} ::base-ctx]
@@ -77,7 +70,6 @@
 
 (defn base
   "Build the SCI base from current program-graph function facts."
-  {:malli/schema [:=> [:cat ::base-request] ::base-ctx]}
   [{::keys [program-functions request-context]}]
   (sci/merge-opts
    (sci/fork @core-base)
