@@ -26,6 +26,18 @@
   (:require [seon.schema :as schema]))
 
 ;;; ---------------------------------------------------------------------------
+;;; The nucleus agent pointer — owned HERE, deliberately not ported.
+;;; Port manifest: old `:seon.agent/*` attrs are DEAD for the nucleus;
+;;; the agent entity model is re-decided at its own rung. The run model
+;;; needs exactly an identity to point from and the current-run pointer
+;;; its opens race on.
+;;; ---------------------------------------------------------------------------
+
+(schema/register! :seon.cluster.agent/id
+                  [:string {:min 1 :seon.db/identity true}])
+(schema/register! :seon.cluster.agent/run :seon.db/ref)
+
+;;; ---------------------------------------------------------------------------
 ;;; The run entity
 ;;; ---------------------------------------------------------------------------
 
@@ -131,7 +143,7 @@
                              [::id ::id]
                              [::agent ::agent]
                              [::opened-at ::opened-at]
-                             [:seon.agent/id [:string {:min 1}]]]]
+                             [:seon.cluster.agent/id [:string {:min 1}]]]]
                   [:vector :some]]}
   [request]
   (throw (ex-info "seon.cluster.run/open-tx awaits its N2 implementation."
@@ -184,7 +196,7 @@
                              [::process ::process]
                              [::claim-epoch ::claim-epoch]
                              [::closed-at ::closed-at]
-                             [:seon.agent/id [:string {:min 1}]]]]
+                             [:seon.cluster.agent/id [:string {:min 1}]]]]
                   [:vector :some]]}
   [request]
   (throw (ex-info "seon.cluster.run/close-tx awaits its N2 implementation."

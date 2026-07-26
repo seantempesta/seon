@@ -20,8 +20,8 @@
 ;;; ---------------------------------------------------------------------------
 
 (def ^:private model-attributes
-  [:seon.agent/id
-   :seon.agent/run
+  [:seon.cluster.agent/id
+   :seon.cluster.agent/run
    :seon.cluster.run/id
    :seon.cluster.run/agent
    :seon.cluster.run/opened-at
@@ -62,11 +62,11 @@
 
 (defn- open-run!
   [connection run-id]
-  (d/transact connection [{:seon.agent/id "runner"}])
+  (d/transact connection [{:seon.cluster.agent/id "runner"}])
   (d/transact connection (run/open-tx {::run/id run-id
-                                       ::run/agent [:seon.agent/id "runner"]
+                                       ::run/agent [:seon.cluster.agent/id "runner"]
                                        ::run/opened-at t0
-                                       :seon.agent/id "runner"})))
+                                       :seon.cluster.agent/id "runner"})))
 
 (defn- claim!
   "Attempt one claim; truthy result on commit, nil when the CAS lost."
@@ -292,16 +292,16 @@
   (is (seon.schema/valid-candidate-value?
        :seon.cluster.run/run
        {::run/id "r1"
-        ::run/agent [:seon.agent/id "runner"]
+        ::run/agent [:seon.cluster.agent/id "runner"]
         ::run/opened-at t0}))
   (is (not (seon.schema/valid-candidate-value?
             :seon.cluster.run/run
-            {::run/agent [:seon.agent/id "runner"]
+            {::run/agent [:seon.cluster.agent/id "runner"]
              ::run/opened-at t0}))
       "identity is required")
   (is (not (seon.schema/valid-candidate-value?
             :seon.cluster.run/run
             {::run/id ""
-             ::run/agent [:seon.agent/id "runner"]
+             ::run/agent [:seon.cluster.agent/id "runner"]
              ::run/opened-at t0}))
       "a blank identity is refused"))

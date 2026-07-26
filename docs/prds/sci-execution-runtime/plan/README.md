@@ -453,9 +453,14 @@ path, no pod. N1 decomposes into the ladder:
   `flock` single-writer assert, clean reopen after kill -9. Port decision
   rung: Datahike direct first; the `seon.db` facade is adopted
   deliberately or not at all.
-- **B2 — schema + pages.** `seon.schema` (adopt — trusted) and the
-  initialization-pages consumer (adapt from `seon.db.protocol`); boot from
-  the publish artifact/template store.
+- **B2 — schema + pages + config.** `seon.schema` (adopt — trusted), the
+  initialization-pages consumer (adapt from `seon.db.protocol`), and the
+  config machinery: the explicitly selected manifest reconciles into
+  database facts at boot; runtime reads the database, never the file.
+  Boot inputs come from the publish artifact/template store — the JVM
+  indexer is a BUILD-time producer (rung "-1", the publish command), not
+  something the runtime launches; its proper name and invocation are the
+  build audit's deliverable.
 - **B3 — the loop's tools.** The nucleus edit-test feedback (in-memory
   suites, seconds per cycle), the MCP REPL pointed at the nucleus process,
   and the hook selecting nucleus tests — a really good feedback loop from
