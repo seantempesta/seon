@@ -417,6 +417,12 @@
   [writer]
   (bound-database-functions writer))
 
+(defn allocate!
+  "Allocate generated identities through this writer session."
+  [writer request]
+  (binding [db/*leaf* (db.host/leaf writer #(database-context writer))]
+    (db.id/allocate! request)))
+
 (defn- host-message-leaf []
   {::message.leaf/available? (constantly true)
    ::message.leaf/unavailable (constantly {:seon.error/message "Host admission is unavailable."

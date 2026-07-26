@@ -338,6 +338,7 @@
         watchdog (Executors/newScheduledThreadPool 2)
         driver-listener
         (driver/start! writer
+                       #(context/allocate! writer %)
                        (context/database-functions writer)
                        ai.http/complete)
         host (merge

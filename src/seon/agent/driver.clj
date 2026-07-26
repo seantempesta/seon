@@ -14,7 +14,9 @@
             [seon.agent.run.core :as run]
             [seon.config.resolve :as config.resolve]
             [seon.content-hash :as content-hash]
+            [seon.db :as db]
             [seon.db.host :as db.host]
+            [seon.db.id :as db.id]
             [seon.eval.receipt :as receipt]
             [seon.repl.parse :as repl.parse]
             [seon.schema :as schema]
@@ -331,40 +333,38 @@
     :datahike.resource/max-result-weight 262144}))
 
 (defn open-run-tx-data
-  "Build the idempotent run row and its atomic idle-agent attachment."
-  [process-id message-id agent-id at lease-until]
-  (let [run-id (compact-id "r" message-id)
-        run-ref [:seon.agent.run/id run-id]]
-    {:seon.agent.driver/create-tx-data
-     [{:seon.agent.run/id run-id
-       :seon.agent.run/agent [:seon.agent/id agent-id]
-       :seon.agent.run/started-at at
-       :seon.agent.run/status :open}]
-     :seon.agent.driver/attach-tx-data
-     [[:db.fn/cas [:seon.agent/id agent-id] :seon.agent/run nil run-ref]
-      {:seon.agent.run/id run-id
-       :seon.agent.run/cause [:seon.agent.message/id message-id]
-       :seon.agent.run/process process-id
-       :seon.agent.run/claim-epoch 1
-       :seon.agent.run/lease-until lease-until}]}))
+  "Build one allocated run row and its idle-agent pointer CAS."
+  [run-id process-id message-id agent-id at lease-until]
+  (let [run-ref [:seon.agent.run/id run-id]]
+    [{:seon.agent.run/id run-id
+      :seon.agent.run/agent [:seon.agent/id agent-id]
+      :seon.agent.run/cause [:seon.agent.message/id message-id]
+      :seon.agent.run/started-at at
+      :seon.agent.run/status :open
+      :seon.agent.run/process process-id
+      :seon.agent.run/claim-epoch 1
+      :seon.agent.run/lease-until lease-until}
+     [:db.fn/cas [:seon.agent/id agent-id] :seon.agent/run nil run-ref]]))
 
 (defn- open-run!
-  [database-functions process-id message-id agent-id at lease-until]
-  (let [run-id (compact-id "r" message-id)
-        transactions
-        (open-run-tx-data process-id message-id agent-id at lease-until)
-        created
-        (transact!
-         database-functions
-         (:seon.agent.driver/create-tx-data transactions))]
-    (when-not (:seon.error/message created)
-      (let [attached
-            (transact!
-             database-functions
-             (:seon.agent.driver/attach-tx-data transactions))]
-        (when-not (:seon.error/message attached)
-          {:seon.agent.run/id run-id
-           :seon.agent.run/claim-epoch 1})))))
+  [allocate! database-functions process-id message-id agent-id at lease-until]
+  (let [database ((get database-functions 'db))
+        allocation
+        (allocate!
+         {::db/db database
+          ::db.id/allocations
+          [{::db.id/key :seon.agent.run/id
+            ::db.id/identity-attr :seon.agent.run/id}]
+          ::db.id/transaction-builder
+          (fn [ids]
+            {::db/tx-data
+             (open-run-tx-data
+              (get ids :seon.agent.run/id)
+              process-id message-id agent-id at lease-until)})})
+        run-id (get-in allocation [::db.id/ids :seon.agent.run/id])]
+    (when-not (:seon.error/message allocation)
+      {:seon.agent.run/id run-id
+       :seon.agent.run/claim-epoch 1})))
 
 (defn- model-request
   [database-functions agent-id content]
@@ -409,14 +409,14 @@
       :seon.agent.turn/error message}])))
 
 (defn- process-message!
-  [database-functions llm-transport! process-id
+  [allocate! database-functions llm-transport! process-id
    [message-id agent-id content at]]
   (let [now (Date.)
         lease-until (Date. (+ (.getTime now) 120000))]
     (when-let [{run-id :seon.agent.run/id
                 claim-epoch :seon.agent.run/claim-epoch}
-               (open-run! database-functions process-id message-id agent-id
-                          at lease-until)]
+               (open-run! allocate! database-functions process-id message-id
+                          agent-id at lease-until)]
       (let [turn-id (compact-id "t" run-id)
             turn-ref [:seon.agent.turn/id turn-id]
             _ (transact!
@@ -471,7 +471,7 @@
 
 (defn start!
   "Start the database-interest-driven JVM run driver."
-  [writer database-functions llm-transport!]
+  [writer allocate! database-functions llm-transport!]
   (let [scanning? (AtomicBoolean. false)
         process-id (str "host-" (.pid (ProcessHandle/current)))
         scan-body!
@@ -480,7 +480,7 @@
             (Thread/startVirtualThread
              (fn []
                (try
-                 (process-message! database-functions llm-transport!
+                 (process-message! allocate! database-functions llm-transport!
                                    process-id message)
                  (catch Throwable throwable
                    (log/error throwable
