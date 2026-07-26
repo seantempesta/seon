@@ -10,19 +10,53 @@
 (defn evaluation-value?
   "Whether a value is a possible result from SCI evaluation."
   {:malli/schema [:=> [:cat :any] :boolean]}
-  [_]
-  true)
+  [value]
+  (or (not (and (map? value)
+                (contains? value :seon.error/message)))
+      (and (string? (:seon.error/message value))
+           (keyword? (:seon.error/kind value))
+           (map? (:seon.error/data value)))))
+
+(schema/register-core-predicate!
+ 'seon.sci.eval/evaluation-value?
+ evaluation-value?)
 
 (schema/register! ::source :string)
 (schema/register! ::base-ctx 'some?)
 (schema/register! ::concurrency 'pos-int?)
 (schema/register! ::semaphore-wait-ms :int)
-(schema/register! ::value 'seon.sci.eval/evaluation-value?)
-(schema/register! ::record :map)
+(schema/register!
+ ::value
+ [:fn
+  {:error/message
+   "must be a successful SCI value or a complete evaluation error"
+   :gen/schema
+   [:or
+    :nil
+    :boolean
+    :int
+    :double
+    :string
+    :keyword
+    :symbol
+    [:vector :int]
+    [:map {:closed true}
+     [:seon.error/message :string]
+     [:seon.error/kind :keyword]
+     [:seon.error/data :map]]]}
+  'seon.sci.eval/evaluation-value?])
+(schema/register!
+ ::record
+ [:map {:closed true}
+  [:seon.eval/fn-entries :int]
+  [:seon.eval/duration-ms :int]
+  [:seon.eval/allocated-bytes :int]
+  [:seon.eval/outcome [:enum :ok :time :error]]
+  [::semaphore-wait-ms ::semaphore-wait-ms]])
 (schema/register! ::evaluation
                   [:map {:closed true}
                    [::value ::value]
-                   [::record :map]])
+                   [::record ::record]])
 (schema/register! ::evaluate-request
                   [:map {:closed true}
                    [::source ::source]

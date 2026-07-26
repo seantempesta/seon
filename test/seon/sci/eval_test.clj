@@ -2,8 +2,40 @@
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
             [sci.core :as sci]
+            [seon.schema :as schema]
             [seon.sci.eval :as eval]
             [seon.sci.interrupt :as interrupt]))
+
+(deftest evaluation-schema-resolves-a-real-value-contract
+  (testing "successful values remain genuinely polymorphic"
+    (doseq [value [nil 1 :ok 'result (map inc (range 3))]]
+      (is (schema/valid-candidate-value? ::eval/value value)
+          (pr-str value))))
+  (testing "an error-shaped result must carry the evaluator's complete error"
+    (is (schema/valid-candidate-value?
+         ::eval/value
+         {:seon.error/message "Unable to resolve symbol."
+          :seon.error/kind :error
+          :seon.error/data {:sci.impl/symbol 'missing}}))
+    (is (not (schema/valid-candidate-value?
+              ::eval/value
+              {:seon.error/message "Incomplete."}))))
+  (testing "the response record names every diagnostic the evaluator returns"
+    (is (schema/valid-candidate-value?
+         ::eval/evaluation
+         {::eval/value nil
+          ::eval/record
+          {:seon.eval/fn-entries 0
+           :seon.eval/duration-ms 1
+           :seon.eval/allocated-bytes 0
+           :seon.eval/outcome :ok
+           ::eval/semaphore-wait-ms 0}}))
+    (is (not (schema/valid-candidate-value?
+              ::eval/evaluation
+              {::eval/value nil
+               ::eval/record
+               {:seon.eval/outcome :ok
+                ::eval/semaphore-wait-ms 0}})))))
 
 (deftest sci-reader-refuses-read-eval-before-host-code-runs
   (let [path (str (System/getProperty "user.dir")

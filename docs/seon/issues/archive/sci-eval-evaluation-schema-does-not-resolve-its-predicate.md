@@ -1,11 +1,50 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, runtime, database]
 ---
 
 # Resolve `seon.sci.eval`'s value predicate at schema admission
+
+## Resolution
+
+Resolved by the commit that archives this note.
+
+`::value` is now one admitted named `[:fn]` predicate schema whose callable is
+supplied through the existing core-predicate cache. The predicate preserves the
+genuinely polymorphic successful SCI value surface while requiring every
+error-shaped value to carry the evaluator's complete flat error contract.
+`::record` now names all five diagnostics that `evaluate` returns instead of
+accepting an arbitrary map. There is no second schema registration.
+
+The pre-edit JVM REPL probe established why the successful arm cannot honestly
+be narrowed before the separate deep-realization boundary lands: current SCI
+evaluation returns nil, lazy sequences, SCI functions, atoms, promises, and
+even Throwable objects as ordinary successful values. The related
+[[../lazy-authored-values-escape-the-armed-interrupt-boundary]] issue therefore
+remains open.
+
+## Proof
+
+Before the fix, `tmp/plan-evidence/test-writer-2026-07-26.log` reported:
+
+- `FAIL composes-the-established-frozen-prompt-projections` at lines 50 and 52;
+- `FAIL no-stored-attribute-promises-an-order-the-database-cannot-keep`; and
+- `ERROR every-registered-wire-shape-is-total-and-round-trips`.
+
+After the fix,
+`tmp/plan-evidence/test-writer-2026-07-26-suite-green.log` reports 545 tests,
+3,849 assertions, three failures, and zero errors.
+`every-registered-wire-shape-is-total-and-round-trips` passes. Both
+`composes-the-established-frozen-prompt-projections` assertions still fail, so
+the issue's “three of four” hypothesis is disproved rather than silently
+accepted. The remaining third failure is the known ordered-collection design
+issue and is outside this fix.
+
+The focused post-edit JVM REPL probe also proves that `::value` resolves,
+accepts `45`, rejects an incomplete error-shaped map, and that `::evaluation`
+accepts the exact five-key diagnostic record.
 
 ## Problem
 
@@ -84,5 +123,5 @@ keyword in the same admitted schema population."*
   exactly where values must be proven ordinary and bounded.
 - No second registration path is added to make the reference resolve.
 
-Related: [[lazy-authored-values-escape-the-armed-interrupt-boundary]],
-[[../../prds/sci-execution-runtime/plan/state.md]] §8.
+Related: [[../lazy-authored-values-escape-the-armed-interrupt-boundary]],
+[[../../../prds/sci-execution-runtime/plan/state.md]] §8.
