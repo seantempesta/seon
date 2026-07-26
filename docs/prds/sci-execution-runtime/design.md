@@ -4,6 +4,12 @@ status: active
 tags: [prd, agent, architecture, database]
 ---
 
+> **SUPERSEDED AS AN ORDERING (2026-07-26, owner ruling O17).** This file is
+> EVIDENCE. The one ordering for this chunk lives in
+> [roadmap.md](roadmap.md) under "THE ONE ORDERED LEDGER". Seven
+> orderings across six files in five naming schemes is why the previous plan
+> had no referent — do not sequence work from here.
+
 # The agent runtime design
 
 One sentence: agents are database rows that think — each a sci CONTEXT on

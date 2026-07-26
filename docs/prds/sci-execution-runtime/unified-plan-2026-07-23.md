@@ -4,6 +4,12 @@ status: active
 tags: [prd, agent, runtime, architecture]
 ---
 
+> **SUPERSEDED AS AN ORDERING (2026-07-26, owner ruling O17).** This file is
+> EVIDENCE. The one ordering for this chunk lives in
+> [roadmap.md](roadmap.md) under "THE ONE ORDERED LEDGER". Seven
+> orderings across six files in five naming schemes is why the previous plan
+> had no referent — do not sequence work from here.
+
 Terminology: this note records evidence from before the rename; the process holding a run is now `:seon.agent.run/process`.
 
 # Unified plan — the all-JVM CLJC/sci runtime (2026-07-23)

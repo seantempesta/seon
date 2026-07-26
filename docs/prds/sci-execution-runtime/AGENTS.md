@@ -6,11 +6,24 @@ tags: [prd, agent, architecture]
 
 # Sci execution-runtime chunk runbook
 
-Read order for ANY implementer: `design.md` (the architecture — nothing
-here contradicts it), then `roadmap.md` (the transition ledger — pick the
-earliest unit marked ready), then the research doc(s) your unit cites,
-then the SOURCE the unit names. Do not re-research settled designs;
-execute them. A deviation needs evidence and lands in the PRD with your
+Read order for ANY implementer: **`roadmap.md` → "THE ONE ORDERED LEDGER"
+FIRST**, and take the earliest row whose `state` is `open`. That section is
+the **only** ordering in this chunk (owner ruling O17, 2026-07-26). Then the
+research doc(s) the row cites, then the SOURCE it names. Do not re-research
+settled designs; execute them.
+
+**Sequence from nowhere else.** Seven orderings once existed across six files
+in five naming schemes — U/B/C-series here, P-series in `unified-plan`, a build
+order in `design.md`, plus §3.5 "The order" and §4 "Waves" in
+`research/implementation-plan-2026-07-25.md` — which is why "follow the plan"
+had no referent. Each of those files now carries a SUPERSEDED banner and is
+evidence only. `design.md` is still the architecture and nothing contradicts it,
+but it does not sequence work.
+
+**A row not re-verified since the last cut is a hypothesis, not work.** Every
+row carries a `verified` date; re-grep its evidence before you start, because a
+deletion elsewhere may already have discharged it — one cut discharged five
+rows on 2026-07-26. A deviation needs evidence and lands in the PRD with your
 commit (see U2's receipt deviation as the model: it found an existing
 owner and deleted spec instead of building it — that is the bar).
 
