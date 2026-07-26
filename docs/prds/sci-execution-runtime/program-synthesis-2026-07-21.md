@@ -8,6 +8,14 @@ Terminology: this note records evidence from before the rename; the process hold
 
 # Program anchor — all-JVM sci runtime (pruned 2026-07-23)
 
+> **START AT [plan/README.md](plan/README.md) INSTEAD (2026-07-26).** That
+> directory is the one entry point: the ordered plan, `state.md` generated from
+> the live tree by `bin/plan-state`, `unsettled.md` for what is undecided, and
+> `history.md` for what was tried. **This file does not sequence work** — it
+> predates the guarded-door deletion (`8dc8623ad`), the documentation
+> consolidation (`24053c64e`), and owner rulings O13–O17, so treat every
+> state claim in it as historical.
+
 This file was a 2,640-line session diary; it is now the COMPACT
 state ledger. The full history lives in git at `b1752173c` and
 earlier — consult it only for archaeology, never for current truth.

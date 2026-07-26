@@ -879,7 +879,8 @@ embeddings PRD.
 ## Key entry points
 
 - `docs/seon/architecture/architecture.md` — intended system map; read first;
-- `docs/prds/sci-execution-runtime/program-synthesis-2026-07-21.md` — active program ledger;
+- `docs/prds/sci-execution-runtime/plan/README.md` — **the one entry point**: ordered
+  plan, generated `state.md`, `unsettled.md`, `history.md`;
 - `docs/prds/sci-execution-runtime/AGENTS.md` — current chunk runbook;
 - `docs/conventions.md` — code/schema patterns;
 - `src/seon/AGENTS.md` — one-mechanism and runtime ownership table;
