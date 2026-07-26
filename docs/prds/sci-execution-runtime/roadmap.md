@@ -143,6 +143,19 @@ interpreter, not merely hosts it:
 
 ## Evidence base
 
+The 2026-07-25 CLJS instrument checkpoint fixed the gate that precedes
+load-testing and end-to-end measurement. Commit `1fbbc7b8e` takes Datahike's
+entity-id, pull-selector, query-form, and connection-ID definitions directly,
+pins the codec-totality seed to `424242`, and repairs test cleanup that leaked
+global database stubs across namespaces. Two unchanged full runs now report
+the same 1,304 tests, 6,697 assertions, zero failures, and one error. The one
+error is named R28 fallout:
+`seon.web.serve-test/model-transport-projection-is-ordered-bounded-and-fail-closed`
+still asks the deleted pod turn stack for `:seon.ai.attempt/entity`. This
+checkpoint makes the suite a stable instrument; it does not satisfy the live
+load, performance, or end-to-end final system gates. Full evidence:
+[[research/codec-test-instrument-repair-2026-07-25]].
+
 The 2026-07-24 reset-boundary checkpoint fixed claimant-host committed
 acquisition in `c2c5faeff`: one frozen database value, AEVT identity pages,
 and one bounded query per variable-size form row. Fresh isolated start →
