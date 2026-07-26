@@ -12,7 +12,6 @@
  seon.launch
  seon.error.instrument
  seon.error
- seon.effect
  seon.db.leaf
  seon.ai.tokens
  seon.db.internal

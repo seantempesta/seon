@@ -20,7 +20,6 @@
             [seon.db.host :as db.host]
             [seon.db.id :as db.id]
             [seon.db.leaf :as db.leaf]
-            [seon.effect :as effect]
             [seon.eval.receipt :as receipt]
             [seon.repl.parse :as repl.parse]
             [seon.schema :as schema]
@@ -672,22 +671,15 @@
    ::message.leaf/unavailable
    (constantly
     {:seon.error/message "The message capability is unavailable."
-     :seon.error/kind :seon.effect/unavailable})
+     :seon.error/kind :seon.agent.message/unavailable})
    ::message.leaf/now #(Date.)
    ::message.leaf/uuid #(str (random-uuid))})
 
 (defn- invocation-bindings
   "The {Var value} context every tool call establishes on the eval
-  thread: the executing form's effect coordinates and the platform
-  leaves. Claim epoch is deliberately absent — it fences run
-  transactions and is never part of effect identity, so recovery
-  re-derives the same op-ids and ledgered owners replay."
-  [database-leaf agent-id run-id ordinal]
-  {#'effect/*request-context*
-   (assoc (effect/request-context run-id ordinal)
-          :seon.agent/id agent-id)
-   #'effect/*effect-counter* (effect/effect-counter)
-   #'db/*leaf* database-leaf
+  thread: the platform leaves the owning APIs read ambiently."
+  [database-leaf _agent-id _run-id _ordinal]
+  {#'db/*leaf* database-leaf
    #'message/*leaf* (message-platform-leaf)})
 
 (defn- exposed-namespaces
