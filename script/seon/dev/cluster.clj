@@ -5,6 +5,7 @@
             [clojure.edn :as edn]
             [clojure.string :as str]
             [malli.core :as m]
+            [seon.config.resolve :as config.resolve]
             [seon.db.protocol :as protocol]
             [seon.dev.artifact :as artifact]
             [seon.dev.config :as config]
@@ -317,6 +318,54 @@
    :seon.dev.cluster/directory
    (:seon.dev.config/root target-configuration)})
 
+(defn- release-config-request
+  [target-configuration manifest]
+  (let [page-plan
+        (:seon.dev.artifact/page-plan
+         (edn/read-string
+          (slurp (artifact/page-plan-path target-configuration))))
+        pages (:seon.db/initialization-pages page-plan)]
+    {:seon.db.program/database-name
+     (:seon.dev.config/cluster-name target-configuration)
+     :seon.db.program/database-path
+     (str (database-path target-configuration))
+     :seon.db.program/configuration
+     (:seon.dev.config/resolved-configuration target-configuration)
+     :seon.db.program/ai-rows
+     (config.resolve/resolve-ai-config
+      (:seon.dev.config/resolved-manifest target-configuration))
+     :seon.db.program/applied-identity
+     {:seon.db.initialization/fingerprint
+      (:seon.db.initialization/fingerprint (first pages))
+      :seon.db.initialization/page-count (count pages)
+      :seon.db.initialization/release-digest
+      (:seon.dev.artifact/application-digest manifest)
+      :seon.db.initialization/config-manifest-digest
+      (:seon.db.initialization/config-manifest-digest page-plan)}}))
+
+(defn- apply-release-config!
+  [target-configuration manifest]
+  (let [result
+        (shell/sh
+         {:continue true
+          :dir (:seon.dev.config/root target-configuration)
+          :in (pr-str (release-config-request target-configuration manifest))
+          :out :string
+          :err :string
+          :cmd ["clojure"
+                "-Sdeps" "{:paths [\"src\" \"script\"]}"
+                "-M:writer"
+                "-m" "seon.dev.apply-release-config"]})]
+    (when-not (zero? (:exit result))
+      (throw
+       (ex-info "The JVM release config transaction failed."
+                {:seon.dev.cluster/exit (:exit result)
+                 :seon.dev.cluster/output
+                 (bounded-diagnostic (:out result))
+                 :seon.dev.cluster/error
+                 (bounded-diagnostic (:err result))})))
+    result))
+
 (defn ensure-package-skeleton!
   "Materialize missing manifests for one cluster package root."
   {:malli/schema [:=> [:cat ::launch/descriptor] ::launch/packages-dir]}
@@ -395,7 +444,9 @@
                           process/writer-id)
               started-writer (atom nil)
               direct-writer? (some? writer)
-              _ (when direct-writer?
+              start-writer!
+              (fn []
+                (when direct-writer?
                   (process/ensure!
                    target-configuration writer
                    (fn [id acquire!]
@@ -406,7 +457,14 @@
                          record)
                       #(if-let [record @started-writer]
                          (process/stop! target-configuration id record)
-                         (process/stop! target-configuration id))))))
+                         (process/stop! target-configuration id)))))))
+              stop-writer!
+              (fn []
+                (when-let [record @started-writer]
+                  (process/stop! target-configuration
+                                 process/writer-id record)
+                  (reset! started-writer nil)))
+              _ (start-writer!)
            pod (get (process/specs target-configuration manifest)
                     process/pod-id)
            _ (require-apply-readiness! target-configuration manifest pod)
@@ -416,22 +474,35 @@
            (get-in target-configuration
                    [:seon.dev.config/launch-descriptor
                     ::launch/process ::launch/process-dir])
-           result-path
-           (str (fs/path process-dir "cluster-apply"
-                         (str (random-uuid) ".edn")))
-           {:seon.dev.cluster/keys [argv environment directory]}
-           (apply-command target-configuration pod result-path)
-           _ (fs/create-dirs (fs/parent result-path))
-           process-result
-           (shell/sh {:continue true
-                      :dir directory
-                      :env environment
-                      :out :string
-                      :err :string
-                      :cmd argv})
+           run-apply!
+           (fn []
+             (let [result-path
+                   (str (fs/path process-dir "cluster-apply"
+                                 (str (random-uuid) ".edn")))
+                   {:seon.dev.cluster/keys [argv environment directory]}
+                   (apply-command target-configuration pod result-path)]
+               (fs/create-dirs (fs/parent result-path))
+               [result-path
+                (shell/sh {:continue true
+                           :dir directory
+                           :env environment
+                           :out :string
+                           :err :string
+                           :cmd argv})]))
+           [first-result-path first-process-result] (run-apply!)
+           [result-path process-result]
+           (if (and direct-writer?
+                    (not (zero? (:exit first-process-result))))
+             (do
+               (stop-writer!)
+               (apply-release-config! target-configuration manifest)
+               (start-writer!)
+               (require-apply-readiness!
+                target-configuration manifest pod)
+               (run-apply!))
+             [first-result-path first-process-result])
            result (read-apply-result! result-path process-result)]
-       (when-let [record @started-writer]
-         (process/stop! target-configuration process/writer-id record))
+       (stop-writer!)
        (publish-template-database! target-configuration manifest)
        (config/publish-applied-manifest! target-configuration)
        result))))))
