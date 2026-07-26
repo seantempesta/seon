@@ -8,7 +8,7 @@
 
 (def database
   {:db-name "prompt-test"
-   :store-id ["prompt-test" "main"]
+   :store-id [#uuid "10000000-0000-0000-0000-000000000001" :db]
    :t 17
    :as-of nil
    :since nil
