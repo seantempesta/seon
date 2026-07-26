@@ -41,6 +41,13 @@
   [:and {:seon.db/identity true
          :seon.db.id/generator :seon.db.id.generator/compact}
    ::db.id/compact-value])
+(schema/register! :seon.agent.turn/at
+                  [:inst {:seon.db/index true}])
+(schema/register! :seon.agent.turn/status
+                  [:enum :running :done :error :interrupted])
+(schema/register! :seon.agent.turn/rendered-tx :seon.db/ref)
+(schema/register! :seon.agent.turn/error :string)
+(schema/register! :seon.agent.turn/usage-estimated? :boolean)
 (schema/register! :seon.agent.turn/evals
                   [:vector {:seon.db/component true} :seon.db/ref])
 
