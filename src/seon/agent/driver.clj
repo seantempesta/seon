@@ -331,31 +331,40 @@
     :datahike.resource/max-result-weight 262144}))
 
 (defn open-run-tx-data
-  "Build the atomic idle-agent pointer and new run transaction."
+  "Build the idempotent run row and its atomic idle-agent attachment."
   [process-id message-id agent-id at lease-until]
   (let [run-id (compact-id "r" message-id)
-        run-tempid -1]
-    [[:db.fn/cas [:seon.agent/id agent-id] :seon.agent/run nil run-tempid]
-     {:db/id run-tempid
-      :seon.agent.run/id run-id
-      :seon.agent.run/agent [:seon.agent/id agent-id]
-      :seon.agent.run/cause [:seon.agent.message/id message-id]
-      :seon.agent.run/started-at at
-      :seon.agent.run/status :open
-      :seon.agent.run/process process-id
-      :seon.agent.run/claim-epoch 1
-      :seon.agent.run/lease-until lease-until}]))
+        run-ref [:seon.agent.run/id run-id]]
+    {:seon.agent.driver/create-tx-data
+     [{:seon.agent.run/id run-id
+       :seon.agent.run/agent [:seon.agent/id agent-id]
+       :seon.agent.run/started-at at
+       :seon.agent.run/status :open}]
+     :seon.agent.driver/attach-tx-data
+     [[:db.fn/cas [:seon.agent/id agent-id] :seon.agent/run nil run-ref]
+      {:seon.agent.run/id run-id
+       :seon.agent.run/cause [:seon.agent.message/id message-id]
+       :seon.agent.run/process process-id
+       :seon.agent.run/claim-epoch 1
+       :seon.agent.run/lease-until lease-until}]}))
 
 (defn- open-run!
   [database-functions process-id message-id agent-id at lease-until]
   (let [run-id (compact-id "r" message-id)
-        result
+        transactions
+        (open-run-tx-data process-id message-id agent-id at lease-until)
+        created
         (transact!
          database-functions
-         (open-run-tx-data process-id message-id agent-id at lease-until))]
-    (when-not (:seon.error/message result)
-      {:seon.agent.run/id run-id
-       :seon.agent.run/claim-epoch 1})))
+         (:seon.agent.driver/create-tx-data transactions))]
+    (when-not (:seon.error/message created)
+      (let [attached
+            (transact!
+             database-functions
+             (:seon.agent.driver/attach-tx-data transactions))]
+        (when-not (:seon.error/message attached)
+          {:seon.agent.run/id run-id
+           :seon.agent.run/claim-epoch 1})))))
 
 (defn- model-request
   [database-functions agent-id content]
@@ -491,10 +500,10 @@
     (let [listener
           (db.host/listen!
            writer
-           {:seon.db/key ::messages
+            {:seon.db/key ::messages
             :seon.db/datom-patterns
-            [[:seon.agent.message/to]
-             [:seon.agent.run/lease-until]]
+            [{:seon.db/a :seon.agent.message/to}
+             {:seon.db/a :seon.agent.run/lease-until}]
             :seon.db/handler (fn [_] (scan!))})]
       (scan-body!)
       listener)))

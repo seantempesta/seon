@@ -40,16 +40,19 @@
           [{:seon.eval/ordinal 0 :seon.eval/status :done}
            {:seon.eval/ordinal 1 :seon.eval/status :error}])))))
 
-(deftest new-run-pointer-uses-the-same-transaction-tempid
-  (let [[cas run]
+(deftest new-run-is-created-before-lookup-ref-attachment
+  (let [{:seon.agent.driver/keys [create-tx-data attach-tx-data]}
         (driver/open-run-tx-data
          "host-1" "message-a" "agent-a"
          #inst "2026-07-25T22:00:00.000-00:00"
-         #inst "2026-07-25T22:02:00.000-00:00")]
-    (is (= (:db/id run) (last cas)))
+         #inst "2026-07-25T22:02:00.000-00:00")
+        run (first create-tx-data)
+        [cas attached] attach-tx-data]
+    (is (= [:seon.agent.run/id (:seon.agent.run/id run)]
+           (last cas)))
     (is (= [:seon.agent.message/id "message-a"]
-           (:seon.agent.run/cause run)))
-    (is (= 1 (:seon.agent.run/claim-epoch run)))))
+           (:seon.agent.run/cause attached)))
+    (is (= 1 (:seon.agent.run/claim-epoch attached)))))
 
 (deftest completion-value-closes-run-and-delivers-once
   (let [request {:seon.agent/id "agent-a"
