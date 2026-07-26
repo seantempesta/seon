@@ -2,7 +2,46 @@
   "Pure shell capability request and response policy."
   (:require
    [clojure.string :as str]
-   [seon.ai.tokens :as tokens]))
+   [seon.ai.tokens :as tokens]
+   [seon.schema :as schema]))
+
+(schema/register! :seon.agent.shell/cmd [:string {:min 1}])
+(schema/register! :seon.agent.shell/args [:vector :string])
+(schema/register! :seon.agent.shell/cwd [:string {:min 1}])
+(schema/register! :seon.agent.shell/stdin :string)
+(schema/register! :seon.agent.shell/timeout-ms :int)
+(schema/register! :seon.agent.shell/source [:string {:min 1}])
+(schema/register! :seon.agent.shell/ok? :boolean)
+(schema/register! :seon.agent.shell/exit :int)
+(schema/register! :seon.agent.shell/out :string)
+(schema/register! :seon.agent.shell/err :string)
+(schema/register! :seon.agent.shell/out-tokens :int)
+(schema/register! :seon.agent.shell/err-tokens :int)
+(schema/register! :seon.agent.shell/timed-out? :boolean)
+(schema/register! :seon.agent.shell/truncated? :boolean)
+(schema/register! :seon.agent.shell/hint :string)
+(schema/register! :seon.agent.shell/granted? :boolean)
+(schema/register! :seon.agent.shell/job-id [:string {:min 1}])
+(schema/register! :seon.agent.shell/state
+                  [:enum :running :exited :stopped])
+(schema/register! :seon.agent.shell/runtime-ms :int)
+(schema/register! :seon.agent.shell/stream [:enum :out :err])
+(schema/register! :seon.agent.shell/since [:int {:min 0}])
+(schema/register! :seon.agent.shell/next-since :int)
+(schema/register! :seon.agent.shell/content :string)
+(schema/register! :seon.agent.shell/tokens :int)
+(schema/register!
+  :seon.agent.shell/job-summary
+  [:map
+   [:seon.agent.shell/job-id :seon.agent.shell/job-id]
+   [:seon.agent.shell/state :seon.agent.shell/state]
+   [:seon.agent.shell/cmd :seon.agent.shell/cmd]
+   [:seon.agent.shell/runtime-ms :seon.agent.shell/runtime-ms]
+   [:seon.agent.shell/out-tokens :seon.agent.shell/out-tokens]
+   [:seon.agent.shell/err-tokens :seon.agent.shell/err-tokens]
+   [:seon.agent.shell/exit {:optional true} :seon.agent.shell/exit]])
+(schema/register! :seon.agent.shell/jobs
+                  [:vector :seon.agent.shell/job-summary])
 
 (def killed-exit 143)
 

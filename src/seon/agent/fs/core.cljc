@@ -2,7 +2,54 @@
   "Pure filesystem capability request and response policy."
   (:require
    [clojure.string :as str]
-   [seon.content-hash :as content-hash]))
+   [seon.agent.fs.match]
+   [seon.code]
+   [seon.content-hash :as content-hash]
+   [seon.schema :as schema]))
+
+(schema/register! :seon.agent.fs/path :string)
+(schema/register! :seon.agent.fs/encoding :string)
+(schema/register! :seon.agent.fs/content :seon.code/value)
+(schema/register! :seon.agent.fs/ok? :boolean)
+(schema/register! :seon.agent.fs/error :string)
+(schema/register! :seon.agent.fs/denial [:enum :allowlist])
+(schema/register! :seon.agent.fs/entries [:vector :string])
+(schema/register! :seon.agent.fs/dir? :boolean)
+(schema/register! :seon.agent.fs/file? :boolean)
+(schema/register! :seon.agent.fs/mtime :inst)
+(schema/register! :seon.agent.fs/allowed-roots [:vector :string])
+(schema/register! :seon.agent.fs/read-only? :boolean)
+(schema/register! :seon.agent.fs/locked? :boolean)
+(schema/register! :seon.agent.fs/from-line :int)
+(schema/register! :seon.agent.fs/max-lines :int)
+(schema/register! :seon.agent.fs/lines-returned :int)
+(schema/register! :seon.agent.fs/total-lines :int)
+(schema/register! :seon.agent.fs/file-sha :string)
+(schema/register! :seon.agent.fs/to-line :int)
+(schema/register! :seon.agent.fs/old-string :string)
+(schema/register! :seon.agent.fs/new-string :string)
+(schema/register! :seon.agent.fs/lines-replaced :int)
+(schema/register! :seon.agent.fs/lines-inserted :int)
+(schema/register! :seon.agent.fs/context :string)
+(schema/register! :seon.agent.fs/context-from-line :int)
+(schema/register! :seon.agent.fs/match-ext :string)
+(schema/register! :seon.agent.fs/glob :string)
+(schema/register! :seon.agent.fs/skip-hidden :boolean)
+(schema/register! :seon.agent.fs/max-results :int)
+(schema/register! :seon.agent.fs/total-found :int)
+(schema/register! :seon.agent.fs/truncated? :boolean)
+(schema/register! :seon.agent.fs/hint :string)
+(schema/register! :seon.agent.fs/sort [:enum :name :mtime])
+(schema/register! :seon.agent.fs/range-after
+                  :seon.agent.fs.match/range)
+(schema/register! :seon.agent.fs/lines-added :int)
+(schema/register! :seon.agent.fs/lines-removed :int)
+(schema/register! :seon.agent.fs/excerpt :string)
+(schema/register! :seon.agent.fs/normalizations
+                  :seon.agent.fs.match/normalizations)
+(schema/register! :seon.agent.fs/after-line :int)
+(schema/register! :seon.agent.fs/before-line :int)
+(schema/register! :seon.agent.fs/all? :seon.agent.fs.match/all?)
 
 (defn error
   "Return the flat filesystem failure envelope."
