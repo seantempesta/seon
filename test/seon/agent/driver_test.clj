@@ -1,6 +1,94 @@
 (ns seon.agent.driver-test
   (:require [clojure.test :refer [deftest is testing]]
-            [seon.agent.driver :as driver]))
+            [seon.agent.driver :as driver]
+            [seon.db.host :as db.host])
+  (:import [java.util.concurrent CountDownLatch TimeUnit]))
+
+(def ^:private event-backstop-seconds
+  ;; A latch publishes completion; this clock only turns a missing event into
+  ;; an immediate, named test failure instead of wedging the writer runner.
+  5)
+
+(defn- await-event! [^CountDownLatch latch event]
+  (when-not (.await latch event-backstop-seconds TimeUnit/SECONDS)
+    (throw
+     (ex-info "The driver test did not observe its required event."
+              {:seon.agent.driver-test/event event}))))
+
+(defn- in-flight-scan-measurement [agent-count]
+  (let [messages
+        (mapv
+         (fn [ordinal]
+           [(str "message-" ordinal)
+            (str "agent-" ordinal)
+            "Complete."
+            #inst "2026-07-26T12:00:00.000-00:00"])
+         (range agent-count))
+        processing-started (CountDownLatch. agent-count)
+        processing-finished (CountDownLatch. agent-count)
+        release-processing (CountDownLatch. 1)
+        scheduled-tasks (atom [])
+        run-open-transaction-calls (atom 0)
+        database-functions
+        {'query (constantly messages)}
+        process-message!
+        (fn [_allocate! _database-functions _llm-transport! _process-id _message]
+          (swap! run-open-transaction-calls inc)
+          (.countDown processing-started)
+          (await-event! release-processing :processing-release)
+          (.countDown processing-finished))]
+    (with-redefs-fn
+      {#'db.host/listen! (fn [_writer request] request)
+       #'driver/process-message! process-message!
+       #'driver/start-virtual-thread!
+       (fn [task]
+         (swap! scheduled-tasks conj task)
+         ::scheduled)}
+      (fn []
+        (let [listener
+              (driver/start!
+               ::writer nil database-functions ::llm-transport!)
+              initial-tasks @scheduled-tasks
+              _ (reset! scheduled-tasks [])
+              threads
+              (mapv #(Thread/startVirtualThread ^Runnable %)
+                    initial-tasks)]
+          (is (= agent-count (count initial-tasks))
+              "the initial scan schedules every distinct pending message")
+          (await-event! processing-started :initial-processing)
+          ((:seon.db/handler listener) {:seon.db/datoms []})
+          (is (= 1 (count @scheduled-tasks))
+              "one matching commit schedules one serialized scan")
+          (let [[scan-task] @scheduled-tasks]
+            (reset! scheduled-tasks [])
+            (scan-task))
+          (let [duplicate-run-open-calls (count @scheduled-tasks)]
+            (swap! run-open-transaction-calls + duplicate-run-open-calls))
+          (.countDown release-processing)
+          (await-event! processing-finished :processing-completion)
+          (doseq [^Thread thread threads]
+            (.join thread))
+          {:seon.agent.driver-test/agent-count agent-count
+           :seon.agent.driver-test/run-open-transaction-calls-per-useful-run
+           (/ (double @run-open-transaction-calls) agent-count)
+           :seon.agent.driver-test/losing-cas-count
+           (- @run-open-transaction-calls agent-count)
+           :seon.agent.driver-test/listener-patterns
+           (:seon.db/datom-patterns listener)})))))
+
+(deftest wake-rescans-submit-one-run-open-transaction-per-in-flight-message
+  (doseq [agent-count [1 5 10 25]]
+    (let [measurement (in-flight-scan-measurement agent-count)]
+      (is (= 1.0
+             (:seon.agent.driver-test/run-open-transaction-calls-per-useful-run
+              measurement))
+          (str "N=" agent-count " keeps run-open transaction calls O(1)"))
+      (is (zero?
+           (:seon.agent.driver-test/losing-cas-count measurement))
+          (str "N=" agent-count " has no same-process losing run-open CAS"))
+      (is (= [{:seon.db/a :seon.agent.message/to}]
+             (:seon.agent.driver-test/listener-patterns measurement))
+          "the wake interest excludes attributes committed by driver work"))))
 
 (def plan-request
   {:seon.agent/id "agent-a"

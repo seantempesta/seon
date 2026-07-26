@@ -352,6 +352,14 @@
     :datahike.resource/max-results 64
     :datahike.resource/max-result-weight 131072}))
 
+(defn- start-virtual-thread! [task]
+  (Thread/startVirtualThread task))
+
+(defn- claim-message! [in-flight-message-ids message-id]
+  (let [[before after]
+        (swap-vals! in-flight-message-ids conj message-id)]
+    (not= before after)))
+
 (defn- pull-one [database-functions pattern ref]
   ((get database-functions 'pull)
    {:seon.db/pull-pattern pattern
@@ -631,23 +639,34 @@
   "Start the database-interest-driven JVM run driver."
   [writer allocate! database-functions llm-transport!]
   (let [scanning? (AtomicBoolean. false)
+        in-flight-message-ids (atom #{})
         process-id (str "host-" (.pid (ProcessHandle/current)))
         scan-body!
         (fn []
           (doseq [message (pending-messages database-functions)]
-            (Thread/startVirtualThread
-             (fn []
-               (try
-                 (process-message! allocate! database-functions llm-transport!
-                                   process-id message)
-                 (catch Throwable throwable
-                   (log/error throwable
-                              "JVM run driver message processing failed"
-                              {:seon.agent.message/id (first message)})))))))
+            (let [message-id (first message)]
+              (when (claim-message! in-flight-message-ids message-id)
+                (try
+                  (start-virtual-thread!
+                   (fn []
+                     (try
+                       (process-message!
+                        allocate! database-functions llm-transport!
+                        process-id message)
+                       (catch Throwable throwable
+                         (log/error
+                          throwable
+                          "JVM run driver message processing failed"
+                          {:seon.agent.message/id message-id}))
+                       (finally
+                         (swap! in-flight-message-ids disj message-id)))))
+                  (catch Throwable throwable
+                    (swap! in-flight-message-ids disj message-id)
+                    (throw throwable)))))))
         scan!
         (fn scan! []
           (when (.compareAndSet scanning? false true)
-            (Thread/startVirtualThread
+            (start-virtual-thread!
              (fn []
                (try
                  (scan-body!)
@@ -658,10 +677,10 @@
     (let [listener
           (db.host/listen!
            writer
-            {:seon.db/key ::messages
+           {:seon.db/key ::messages
+            ;; Wake attributes must not be committed by work this wake starts.
             :seon.db/datom-patterns
-            [{:seon.db/a :seon.agent.message/to}
-             {:seon.db/a :seon.agent.run/lease-until}]
+            [{:seon.db/a :seon.agent.message/to}]
             :seon.db/handler (fn [_] (scan!))})]
       (scan-body!)
       listener)))
