@@ -445,6 +445,19 @@ the nucleus through an undecided require. The extra layers and wire
 protocols are what this removes: no host/writer split, no UDS on the agent
 path, no pod. N1 decomposes into the ladder:
 
+- **R0 — the tree split (owner, s3 close: "start truly fresh").**
+  `src/` → `src-old/` (kept on the classpath so every running gate and
+  cluster still works), and a fresh `src/` holding ONLY the nucleus. The
+  port manifest becomes physical: adopting an old piece is a `git mv`
+  from `src-old/` into `src/`, reviewed like any port verdict; "what have
+  we adopted" is `ls src/`. The orchestrator executes the move ATOMICALLY
+  at a lane-quiet point (cross-cutting renames are orchestrator-owned);
+  an audit lane first inventories every consumer of the literal `"src"`
+  path (deps/bb/shadow edn, the changed-test hook's corpus scan, indexer
+  roots, AOT discovery, kondo config) so the split is one coherent
+  commit, not a bleed. `test/` splits the same way when the nucleus
+  suites outgrow co-residence.
+
 - **B0 — the entry.** `seon.cluster` main: the process starts from source,
   prints its identity, and opens its io-prepl IMMEDIATELY — the REPL is
   online from second zero, before anything else exists. Ports: none
