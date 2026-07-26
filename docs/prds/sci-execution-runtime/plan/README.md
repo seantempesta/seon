@@ -633,6 +633,14 @@ one bounded eval and the agent learns why.
 defn in form 1 → committed program facts → callable in form 2 and by
 another agent after restart; acquisition at a basis; `:malli/schema`
 required for durable defns. **Falsifier:** old step 4 verbatim.
+**Schema facts stay GLOBAL in the `seon.code.*` port (owner, s3
+close):** a schema is one row in the one global population, looked up
+on demand — never attached to or embedded in a fn/ns entity. Code
+entities carry REFERENCES to schema keys (a contract naming its
+shapes); the reverse lookup — which fns/namespaces/attributes reference
+this schema — is a DERIVED query over those references (how dynamic
+agent context already pulls relevant specs), never a stored
+back-pointer.
 
 ### N6 — proofs, gates, leaves
 
