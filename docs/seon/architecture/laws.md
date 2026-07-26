@@ -63,6 +63,14 @@ sample sizes, and acceptance evidence belong in PRD research and roadmaps.
   `step-fn`s, bounded workload channels, `conns`, a `graph-def`, and a report
   channel. Custom launchers implement `flow.spi/ProcLauncher`; flow-monitor is
   the operational surface. Database facts remain the durable work record.
+- **Build once, fork everywhere.** Expensive values are derived once and
+  forked by consumers — never rebuilt, never shared mutably: the sci base
+  `ctx` forks per evaluation; a database value at a basis is a free fork
+  (`as-of`/`since` are temporal forks); the template store clones per
+  cluster reset (APFS copy-on-write); a proc restart forks from facts at
+  `init` state 0. Structural sharing makes every fork O(1); divergence is
+  local by construction. Mutation exists in exactly one place per store —
+  the writer's serial transaction path.
 - **Reset, never migrate.** A cluster reconciles to current code and schema by
   resetting and reinstalling from the manifest and program facts. No data
   migration path exists; a live proof runs on a freshly reset cluster at the
