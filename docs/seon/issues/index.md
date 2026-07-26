@@ -34,9 +34,7 @@ See `README.md` for the convention.
 | [Keep database control entry independent of occupied handlers](uds-codec-capacity-can-delay-control-entry.md) | blocker | Core |
 | [Keep pod republication's reusable projection inside its contract](pod-republication-passes-nil-reusable-projection.md) | blocker | agent |
 | [Keep restore publication closed through completion](restore-completion-cannot-precede-admission.md) | blocker | Core |
-| [Keep the release digest stable across source-unchanged startup](source-unchanged-up-publishes-new-release-digest.md) | blocker | Core |
 | [Let the common Inspect pod solver address an existing agent](inspect-pod-solver-cannot-address-existing-agent.md) | blocker | agent |
-| [Make cluster reset stop before explicit apply](cluster-reset-starts-admission-before-initialization-schema.md) | blocker | Core |
 | [Make the downstream runtime package self-contained](downstream-runtime-package-is-not-self-contained.md) | blocker | Core |
 | [Make writer drain proof consumable by the operator](planned-restart-cannot-observe-writer-drain-result.md) | blocker | Core |
 | [Plan a visible JVM claimant reply on an inspected tier](jvm-claimant-rejects-visible-reply-without-exact-execution-plan.md) | blocker | agent |
@@ -49,24 +47,26 @@ See `README.md` for the convention.
 | [Read-side attribute admission fails open (silent empty results, :all fallback)](read-side-attribute-admission-fails-open.md) | blocker | Core |
 | [Reconcile the JVM claimant for named clusters](named-cluster-open-does-not-reconcile-jvm-host.md) | blocker | agent |
 | [Reduce retained memory in each execution child](execution-children-retain-hundreds-of-megabytes.md) | blocker | agent |
-| [Release the apply writer before returning success](cluster-apply-retains-writer-generation.md) | blocker | Core |
 | [Restore writer admin transition is unimplemented](restore-writer-admin-transition-is-unimplemented.md) | blocker | Core |
 | [Retain complete model transport evidence in Inspect logs](inspect-model-transport-evidence-is-incomplete.md) | blocker | agent |
 | [Retain live eval values in the owning JVM host](retain-live-eval-values-in-the-owning-jvm-host.md) | blocker | agent |
+| [Retained per-agent SCI contexts are never evicted, and each shares one guard holder](retained-agent-contexts-are-never-evicted-and-share-one-holder.md) | blocker | general |
 | [Score reachability from real context transitions](inspect-reachability-assumes-nonexistent-evidence.md) | blocker | agent |
 | [Separate restore intent from completion identity](restore-completion-reuses-operator-intent-identity.md) | blocker | Core |
 | [Sequence calls within each agent execution child](rendering-and-turns-collided-in-one-execution-child.md) | blocker | UI |
 | [Share one driver for an open agent run](wake-and-replay-can-drive-the-same-open-run.md) | blocker | agent |
 | [Skip the receipt reread branch after a successful eval write](successful-eval-receipt-called-state-on-nil.md) | blocker | agent |
 | [Supply the execution artifact to the production container launch](container-launch-omits-execution-artifact.md) | blocker | agent |
+| [The agent toolkit teaches a `:seon.db/ok?` contract `transact!` does not produce](toolkit-teaches-a-db-ok-contract-transact-does-not-produce.md) | blocker | agent |
 | [The host base does not resolve the agent-facing surface (q34, W5-0 gate)](host-base-agent-surface-parity.md) | blocker | agent |
 | [Toolkit current-ns wedges the agent since the cljc packaging window](toolkit-current-ns-wedges-agent-after-cljc-packaging.md) | blocker | agent |
 | [Value drill has no total work bounds](value-drill-has-no-total-work-bounds.md) | blocker | UI |
 | [Value-drill result literals failed boot schema admission](value-drill-result-literals-failed-boot-schema-admission.md) | blocker | Core |
 | [Writer run-readiness! busy-spins when a ready source has no runtime](writer-run-readiness-busy-spins-without-runtime.md) | blocker | Core |
 | [seon.agent.ctx file reads bypass the filesystem grant](agent-ctx-file-reads-bypass-fs-grant.md) | blocker | agent |
+| [tools.reader executes agent source at read time, outside SCI entirely](tools-reader-evaluates-agent-source-at-read-time.md) | blocker | general |
 
-## Friction (72)
+## Friction (73)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -108,6 +108,7 @@ See `README.md` for the convention.
 | [Make program indexing independent of the active schema projection](program-indexer-drops-valid-specs-outside-active-schema-projection.md) | friction | agent |
 | [Make transaction retry policy available during first config reconcile](transaction-retry-policy-cannot-be-database-owned-during-first-config-reconcile.md) | friction | Core |
 | [Operator trial processes leak across days](operator-trial-processes-leak-across-days.md) | friction | docs |
+| [Package placement is a namespace-prefix hand list](package-placement-is-a-namespace-prefix-hand-list.md) | friction | general |
 | [Persisted program error prevents agent repair](persisted-program-error-prevents-agent-repair.md) | friction | agent |
 | [Pin the backward-compatibility writer below the maintained Konserve version](datahike-backward-compat-gate-writes-newer-konserve.md) | friction | Core |
 | [Plan completion has no checkable verification evidence](plan-completion-verification-evidence.md) | friction | agent |
@@ -143,7 +144,7 @@ See `README.md` for the convention.
 | [test-cljs compile failure retains a live lock owner](test-cljs-compile-failure-retains-live-lock-owner.md) | friction | general |
 | [try in expression position inside a compiled ^:async fn auto-awaits](async-try-expression-iife-auto-awaits.md) | friction | agent |
 
-## Cleanup (8)
+## Cleanup (9)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -152,6 +153,7 @@ See `README.md` for the convention.
 | [Inspect concurrent attributed agent messages](inspect-concurrent-agent-messages.md) | cleanup | agent |
 | [Move product routes out of the static router supplement](static-routes-bypass-database-route-authority.md) | cleanup | UI |
 | [Partially-Stale Reference Docs Need Updates](stale-reference-docs.md) | cleanup | docs |
+| [Remove the remaining child vocabulary and tier dial](u9-surviving-child-vocabulary-and-tier-dial.md) | cleanup | agent |
 | [Subagents block is implemented but not installed](subagents-block-is-implemented-but-not-installed.md) | cleanup | agent |
 | [Surface recency may be recomputed globally](surface-recency-recomputed.md) | cleanup | UI |
 | [Unify agent and operation AsyncLocalStorage](als-unify-tx-meta.md) | cleanup | Core |

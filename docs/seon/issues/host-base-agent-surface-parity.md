@@ -117,6 +117,69 @@ all ten turns are `:published/:done`. No synthesis message entity exists, so
 the alive-caveat gate is honestly NOT cleared. Full evidence is in
 `tmp/orchestrator/alivegate2-gate.log`.
 
+## The DISCOVERY surface is also absent on the host tier — 2026-07-25
+
+The census above is written as a *call* census. A source read of
+`seon.host.context/register-host-capabilities!` (context.clj:635–1013) shows the
+same blackout covers the surface an agent uses to FIND a function it has never
+called. Every `::lib` the host registry provisions is enumerable
+(`rg -n "::lib '" src/seon/host/context.clj`): `seon.ai.provider`, `seon.db`,
+`seon.agent.message`, `seon.agent.lifecycle`, `seon.agent.home`, `seon.embed`,
+`seon.agent.fs`, `seon.agent.shell`, `seon.agent.web`, `my.blob`, `seon.db.id`,
+`seon.db.protocol`, `seon.schema`, `seon.ai.tokens`, `seon.content-hash`,
+`seon.time`, `seon.repl.parse`, `seon.repl.parse.repair`, `seon.agent.ctx`,
+`my.plan`, `my.kb`, `my.kb.shared`, `my.skills`, `seon.render.canvas`.
+
+Three of the four discovery paths are therefore unavailable to an agent running
+on the claimant JVM:
+
+- `seon.agent.search/grep-graph` — the one literal search over `:seon.fn`
+  source/doc/name — is not registered at all, and its only implementation is
+  `src/seon/agent/search.cljs` (CLJS, deletion path).
+- `my.ns/functions` / `full!` / `compact!` — the "what can I call in X?" door —
+  is `src/my/ns.cljs`, `^{:async true}`, so `pure-block?` (context.clj:1060)
+  excludes it from the portable slice, and it is absent from
+  `host-toolkit-bindings` (context.clj:1298), so it never loads.
+- `seon.embed/enabled?` is registered as `(constantly false)` and
+  `seon.embed/search-pull` as a fixed `:user-input` error value
+  (context.clj:729–739), so semantic recall over `:seon.fn/source` — the ranking
+  input `seon.ai.generate-code/ranked-namespaces!` depends on
+  (generate_code.cljs:190–226) — is hard-off on this tier.
+
+The fourth path, the pushed `:namespaces` and `:function-menu` context blocks,
+has no host caller either: every consumer of
+`seon.agent.ctx.namespaces/namespaces-block` and `seon.agent.ctx.menu` is `.cljs`
+(`seon/agent/turn.cljs`, `seon/agent/ctx/driver.cljs`, `seon/agent.cljs`,
+`seon/web/datastar.cljs`, `seon/ai/generate_code.cljs`).
+
+Consequence for the non-programming-agent demo case: on the surviving tier an
+agent can only call what is already in its home requires
+(`seon.agent.home/home-ns-require-specs`, home.cljc:95–112 — five namespaces) or
+what it already knows by name. It cannot find a corpus function it has not seen.
+
+Acceptance folds into the same census: the census must classify DISCOVERY
+functions, not only capability functions, and the host-tier live drive must
+include an agent locating a corpus function it did not previously know and
+calling it.
+
+## Three independent readers of the same code — 2026-07-25
+
+The same function text reaches three consumers through three unrelated readers:
+
+1. the pod boot indexer (`seon.client/ns-row`, client.cljs:1044) reads the
+   admitted `SEON_PROGRAM_SOURCE_PATH` artifact and writes `:seon.ns`/`:seon.fn`
+   rows — the corpus every context block and search reads;
+2. the JVM host base reads `src/my` from the working directory at runtime
+   (`toolkit-source-root`, context.clj:1017, a relative `io/file` + `file-seq`)
+   and evals the blocks that pass the `pure-block?` regex; and
+3. `seon.host.graduate/rebuild!` (graduate.clj:256) replays `:seon.fn/source`
+   rows from the database into the registry.
+
+(2) makes the claimant depend on a source tree at its CWD rather than on the
+artifact or the database, and it is the only one of the three whose inclusion
+rule is a regex over source text. Naming this here so the census can decide
+which reader survives.
+
 ## R53 contract and acceptance — 2026-07-24
 
 `seon.agent.lifecycle/complete` is not a capability. It is a pure,
