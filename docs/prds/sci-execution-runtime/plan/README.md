@@ -449,10 +449,24 @@ path, no pod. N1 decomposes into the ladder:
   prints its identity, and opens its io-prepl IMMEDIATELY — the REPL is
   online from second zero, before anything else exists. Ports: none
   (clojure.core.server only).
+  **Multi-instance from day 0 (owner, s3 close):** the process identity IS
+  (cluster-name, pid, start-instant); every path derives from the cluster
+  name (`data/clusters/<name>/`, per-cluster process dir); each instance
+  publishes its REPL coordinate to the discoverable per-cluster
+  advertisement (the dynamic-port-file convention — adopt), so the MCP
+  REPL reaches EVERY instance always. Banned by construction: any
+  process-global singleton that assumes "the" cluster — connections,
+  caches, and sessions are keyed by cluster/store, never ambient-one.
+  Falsifier includes: start instances for clusters `a` and `b`
+  side-by-side, REPL into BOTH by name, prove isolation.
 - **B1 — the store.** Open Datahike in-process (`:self` writer), the one
   `flock` single-writer assert, clean reopen after kill -9. Port decision
   rung: Datahike direct first; the `seon.db` facade is adopted
-  deliberately or not at all.
+  deliberately or not at all — and the old per-process one-authority-
+  session cache is `adapt-or-dead` (it is exactly the ambient-one-cluster
+  singleton B0 bans). Invariant stays O1/O2: ONE live write connection
+  per store, clusters never share a store; a process MAY host several
+  stores — nothing in the nucleus may assume one.
 - **B2 — schema + pages + config.** `seon.schema` (adopt — trusted), the
   initialization-pages consumer (adapt from `seon.db.protocol`), and the
   config machinery: the explicitly selected manifest reconciles into
