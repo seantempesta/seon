@@ -10,7 +10,7 @@ tags: [prd, agent, architecture]
 produced by the command shown, against the working tree — so a stale row is
 impossible and an agent can re-verify any claim in one line.
 
-Generated from `codex/runtime-reliability-refactor` at `10c12e1c1`, measuring the **working tree** — so a
+Generated from `codex/runtime-reliability-refactor` at `69398065e`, measuring the **working tree** — so a
 lane with uncommitted work shows up here. Rows that can differ between committed
 and working state say both. `git status --short` before trusting a surprising row.
 
@@ -143,8 +143,8 @@ unfinished log proves nothing.
 
 Test source inventory (what exists, not what passes):
 ```
-test files:           144
-deftest (clj/cljc):   1042
+test files:           145
+deftest (clj/cljc):   1052
 deftest (cljs):       605
 ```
 
@@ -189,8 +189,8 @@ registered :seon.agent/* attributes:
   :seon.agent/terminated-at
 
 registered in:
-  src/seon/agent/core.cljc
   src/seon/agent/ctx.cljc
+  src/seon/agent/core.cljc
 ```
 
 **No duplicate `:seon.agent/*` registrations.**
