@@ -3,8 +3,7 @@
   (:require
    #?(:clj [clojure.test :refer [deftest is testing]]
       :cljs [cljs.test :refer [deftest is testing]])
-   [seon.agent.fs.core :as core]
-   #?(:cljs [seon.agent.fs :as fs])))
+   [seon.agent.fs.core :as core]))
 
 (deftest portable-request-and-response-policy
   (testing "line paging preserves the child response vocabulary"
@@ -24,31 +23,3 @@
                 (core/write-decision {:seon.agent.fs/path "/allowed/a"
                                       :seon.agent.fs/read-only? false
                                       :seon.agent.fs/in-scope? true}))))))
-
-#?(:cljs
-   (deftest public-entry-effects-and-home-error
-     (doseq [[v effect]
-             [[#'fs/grants :read] [#'fs/read-file :read]
-              [#'fs/write-file :external] [#'fs/edit-file :external]
-              [#'fs/list-dir :read] [#'fs/stat :read]
-              [#'fs/file-exists? :read] [#'fs/home-dir :read]
-              [#'fs/walk-dir :read] [#'fs/view :read]
-              [#'fs/replace! :external] [#'fs/insert! :external]]]
-       (is (= effect (:seon.capability/effect (meta v)))
-           (str (:name (meta v)) " effect")))
-     (let [env (.-env js/process)
-           home (aget env "HOME")
-           profile (aget env "USERPROFILE")]
-       (js-delete env "HOME")
-       (js-delete env "USERPROFILE")
-       (try
-         (let [response (fs/home-dir)]
-           (is (map? response))
-           (is (false? (:seon.agent.fs/ok? response)))
-           (is (re-find #":seon.config/fs-home-dir"
-                        (:seon.error/message response))))
-         (finally
-           (if-some [value home] (aset env "HOME" value) (js-delete env "HOME"))
-           (if-some [value profile]
-             (aset env "USERPROFILE" value)
-             (js-delete env "USERPROFILE")))))))

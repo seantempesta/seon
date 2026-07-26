@@ -5,18 +5,10 @@
    content-addressed blob tier, and returns a token-bounded preview with honest
    metadata and links. It does not render JavaScript or create another paging
    mechanism; transport, redirects, and reachability checks are internal."
-  #?(:clj (:refer-clojure :exclude [await fetch])
-     :cljs (:refer-clojure :exclude [fetch]))
+  (:refer-clojure :exclude [fetch])
   (:require
-    [clojure.string :as str]
-    #?(:cljs [my.blob :as blob])
     [seon.agent.web.core :as int]
-    #?(:cljs [seon.agent.web.pod :as pod])
-    [seon.ai.tokens :as tokens]
-    #?(:cljs [seon.db :as db])
     [seon.schema :as schema]))
-
-#?(:clj (defmacro await [value] value))
 
 (def ^:dynamic *leaf* nil)
 
@@ -202,29 +194,17 @@
    `:allowlist`), and `:seon.agent.web/search-backend` (the EFFECTIVE
    `search` backend — the configured provider, or `:none` when its API key
    is absent from the env so no search can run). The policy + backend are
-   cluster CONFIG (`config/system.edn`'s `:seon.config/web`); nothing inside
-   the pod can loosen them."
+   cluster CONFIG (`config/system.edn`'s `:seon.config/web`); agent code
+   cannot loosen them."
   {:malli/schema [:=> [:cat ::grants-request] ::grants-response]}
   [{configuration :seon.config/configuration}]
-  #?(:cljs
-     (let [p (pod/policy configuration)
-        {::keys [search-backend]} (pod/search-config configuration)
-        has-key? (case search-backend
-                   :gemini-grounding (some? (pod/gemini-key))
-                   :serper           (some? (pod/serper-key))
-                   false)]
-    {::enabled?        (pod/granted?)
-     ::policy          (::policy p)
-     ::allowed-domains (::allowed-domains p)
-       ::search-backend  (if has-key? search-backend :none)})
-     :clj
-     ((leaf-fn ::grants) {:seon.config/configuration configuration})))
+  ((leaf-fn ::grants) {:seon.config/configuration configuration}))
 
 ;; ============================================================
-;; fetch — the one ^:async function.
+;; fetch — the external JVM leaf function.
 ;; ============================================================
 
-(defn ^{:async #?(:cljs true :clj false)
+(defn ^{:async false
         :seon.capability/effect :external} fetch
   "Fetch a web page as markdown: a preview now, the full text as a blob.
 
@@ -232,7 +212,7 @@
    :seon.agent.web/url (a :seon.web/url or bare :url is NOT a request
    key and fails input validation).
 
-   `^:async` — resolves to a :seon.agent.web/fetch-response, NEVER rejects
+   Returns a :seon.agent.web/fetch-response and never throws into the agent
    (errors are values). ok? true = the fetch RAN to a final response and
    content was extracted + blobbed — a non-2xx (404, 500, …) is a
    legitimate result: read :seon.agent.web/status yourself. The preview is
@@ -250,8 +230,9 @@
 
    Worked example:
 
-     (await (seon.agent.web/fetch {:seon.agent.web/url \"https://example.com\"}))
-     ; ⟹ «map: ::ok? true, ::status 200, ::extractor :readability, ::total-tokens 84, ::blob-hash \"9f86d0…\", ::preview \"# …\"»"
+     (seon.agent.web/fetch {:seon.agent.web/url \"https://example.com\"})
+     ; Returns a successful response with status, extractor, blob hash,
+     ; token totals, and a bounded preview."
   {:malli/schema [:=> [:cat ::fetch-request] ::fetch-response]}
   [{::keys [url timeout-ms max-preview-tokens max-age-ms]
     configuration :seon.config/configuration
@@ -264,124 +245,20 @@
               (:seon.config.web/default-timeout-ms configuration))
           max-preview-tokens
           (or max-preview-tokens
-              (:seon.config.web/default-preview-tokens configuration))
-          maximum-response-bytes
-          (:seon.config.web/maximum-response-bytes configuration)
-          maximum-redirects
-          (:seon.config.web/maximum-redirects configuration)]
-      #?(:cljs
-     (try
-    (cond
-      (not (pod/granted?))
-      (int/ungranted url)
-
-      (or (nil? url) (str/blank? url))
-      (int/err url ":seon.agent.web/url is required and must be non-blank.")
-
-      :else
-      (let [policy (pod/policy configuration)]
-        (if-let [cached (and (pos? max-age-ms)
-                             (await (pod/fresh-projection url max-age-ms)))]
-          (pod/projection->response cached max-preview-tokens)
-          (let [res (await (pod/transport policy url timeout-ms
-                                          maximum-response-bytes
-                                          maximum-redirects))]
-          (cond
-            (not (::ok? res))
-            res
-
-            (::binary? res)
-            (int/err url (str "refusing binary content (" (::content-type res)
-                              ") — this function extracts text; a blob-tier binary "
-                              "fetch is a later capability.")
-                     {::status (::status res) ::final-url (::final-url res)
-                      ::content-type (::content-type res)})
-
-            :else
-            (let [final-url (::final-url res)
-                  {:keys [md title extractor links]}
-                  (pod/extract-content
-                   (::lane res) (::body res) final-url configuration)
-                  md        (or md "")
-                  total     (tokens/estimate md)
-                  {bok? :my.blob/ok? hash :my.blob/hash berr :my.blob/error}
-                  (await (blob/put! {:my.blob/content md :my.blob/media :markdown}))]
-              (if-not bok?
-                (int/err url (str "extracted content but the blob store rejected it: " berr))
-                (let [preview (if (> total max-preview-tokens)
-                                (str (subs md 0 (tokens/estimate-chars max-preview-tokens)) "…")
-                                md)
-                      now     (js/Date.)
-                      proj    (cond-> {::url          url
-                                       ::final-url    final-url
-                                       ::status       (::status res)
-                                       ::content-type (::content-type res)
-                                       ::extractor    extractor
-                                       ::total-tokens total
-                                       ::blob-hash    hash
-                                       ::fetched-at   now}
-                                title (assoc ::title title))]
-                  ;; Best-effort projection — the blob is the durable record;
-                  ;; a rejected projection tx must not fail the fetch.
-                  (await (db/transact! {:seon.db/tx-data [proj]}))
-                  (cond-> {::ok?            true
-                           ::url            url
-                           ::final-url      final-url
-                           ::status         (::status res)
-                           ::content-type   (::content-type res)
-                           ::extractor      extractor
-                           ::preview        preview
-                           ::preview-tokens (tokens/estimate preview)
-                           ::total-tokens   total
-                           ::truncated?     (boolean (::truncated? res))
-                           ::blob-hash      hash
-                           ::fetched-at     now}
-                    title            (assoc ::title title)
-                    (seq links)      (assoc ::links links)
-                    (< total 40)     (assoc ::hint (str "extracted only ~" total
-                                                        " tokens — the page may be "
-                                                        "script-rendered; a browser tier is "
-                                                        "needed for JS-built content.")))))))))))
-    (catch :default e
-      (int/err url (str "unexpected error in seon.agent.web/fetch: "
-                        (or (some-> e .-message) (str e))))))
-     :clj
-     ((leaf-fn ::fetch)
-      (cond-> {::url url
-               ::timeout-ms timeout-ms
-               ::max-preview-tokens max-preview-tokens
-               ::max-age-ms max-age-ms}
-        configuration
-        (assoc :seon.config/configuration configuration)))))))
+              (:seon.config.web/default-preview-tokens configuration))]
+      ((leaf-fn ::fetch)
+       (cond-> {::url url
+                ::timeout-ms timeout-ms
+                ::max-preview-tokens max-preview-tokens
+                ::max-age-ms max-age-ms}
+         configuration
+         (assoc :seon.config/configuration configuration))))))
 
 ;; ============================================================
-;; search — the one ^:async grounded-search function.
+;; search — the grounded-search function.
 ;; ============================================================
 
-(def ^:private redirect-hint
-  "Standing note on the grounded-URL shape — the URLs are Google
-   grounding-redirect URIs (fetchable NOW via seon.agent.web/fetch, but
-   ephemeral ~30 days); fetch's :seon.agent.web/final-url recovers the
-   canonical page."
-  (str "the ::url values are Google grounding-redirect URIs — fetchable now "
-       "with (seon.agent.web/fetch), but ephemeral (~30 days); fetch's "
-       ":seon.agent.web/final-url recovers the canonical page."))
-
-(defn- empty-results-hint
-  "Truthful hint for an ok? true search that grounded NOTHING — ::results is
-   empty, so there are NO urls to fetch (never advertise the redirect-hint
-   here). The backend commonly declines to search conceptual/how-to queries
-   and answers from its own knowledge; occasionally the answer is filtered."
-  [answer]
-  (str "no web sources were returned — the grounded backend attached no "
-       "results for this query"
-       (if (str/blank? answer)
-         " and produced no ::answer (the response may have been filtered — "
-         "; the ::answer is the model's direct (UNGROUNDED) synthesis — ")
-       "there are NO ::url values to fetch. Rephrase toward a concrete "
-       "fact-lookup query (or retry) if you need citable web sources."))
-
-(defn ^{:async #?(:cljs true :clj false)
+(defn ^{:async false
         :seon.capability/effect :external} search
   "Search the web; ranked result rows plus a grounded answer.
 
@@ -389,7 +266,7 @@
    non-blank), :seon.agent.web/max-results (default 10, capped 20),
    :seon.agent.web/timeout-ms (default 30000).
 
-   `^:async` — resolves to a :seon.agent.web/search-response, NEVER rejects
+   Returns a :seon.agent.web/search-response and never throws into the agent
    (errors are values). ok? true carries backend-agnostic :seon.agent.web/
    results — each row a {::url ::title ::snippet ::rank} (rank 0-based) —
    the HONEST pre-cap :seon.agent.web/result-count, the executed
@@ -413,9 +290,9 @@
 
    Worked example:
 
-     (await (seon.agent.web/search {:seon.agent.web/query \"current stable Clojure version\"}))
-     ; ⟹ «map: ::ok? true, ::backend :gemini-grounding, ::results [«::url, ::title, ::snippet, ::rank» …], ::result-count 2, ::answer \"…\", ::answer-tokens 18, ::queries [\"…\"], …»
-     ; then fetch a row's ::url to page the real page into a blob."
+     (seon.agent.web/search {:seon.agent.web/query \"current stable Clojure version\"})
+     ; Returns ranked rows and an honest result count; fetch a row's
+     ; ::url to page the real page into a blob."
   {:malli/schema [:=> [:cat ::search-request] ::search-response]}
   [{::keys [query max-results timeout-ms]
     configuration :seon.config/configuration}]
@@ -427,108 +304,10 @@
               (:seon.config.web/default-timeout-ms configuration))
           max-results
           (or max-results
-              (:seon.config.web/default-search-results configuration))
-          maximum-search-results
-          (:seon.config.web/maximum-search-results configuration)]
-      #?(:cljs
-     (try
-    (cond
-      (not (pod/granted?))
-      (int/search-ungranted query)
-
-      (or (nil? query) (str/blank? query))
-      (int/search-err query ":seon.agent.web/query is required and must be non-blank.")
-
-      :else
-      (let [{backend ::search-backend model ::search-model}
-            (pod/search-config configuration)
-            n (max 1 (min max-results maximum-search-results))]
-        (case backend
-          :gemini-grounding
-          (let [key (pod/gemini-key)]
-            (if (or (nil? key) (str/blank? key))
-              (int/search-err query
-                              (str "no search backend key — GEMINI_API_KEY is unset "
-                                   "in the pod's env; the :gemini-grounding backend "
-                                   "cannot run. Inspect with (seon.agent.web/grants {})."))
-              (let [res (await (pod/gemini-request query model key timeout-ms))]
-                (if-not (::ok? res)
-                  res
-                  (let [{::keys [results result-count queries answer]}
-                        (int/parse-grounding (::body res) n)
-                        now  (js/Date.)
-                        ;; HONEST hint: the redirect-hint promises fetchable
-                        ;; ::url values — only true when rows exist. An empty
-                        ;; result set (grounding declined — common for
-                        ;; conceptual queries) must NOT advertise urls it
-                        ;; doesn't have.
-                        hint (if (seq results)
-                               redirect-hint
-                               (empty-results-hint answer))]
-                    ;; Best-effort projection — grep-graph/forensics can see what
-                    ;; was searched; a rejected tx must not fail the search.
-                    (await (db/transact!
-                             {:seon.db/tx-data
-                              [(cond-> {::query        query
-                                        ::backend      :gemini-grounding
-                                        ::result-count result-count
-                                        ::fetched-at   now}
-                                 (seq queries) (assoc ::queries queries))]}))
-                    (cond-> {::ok?           true
-                             ::query         query
-                             ::backend       :gemini-grounding
-                             ::results       results
-                             ::result-count  result-count
-                             ::hint          hint}
-                      (seq queries)            (assoc ::queries queries)
-                      (not (str/blank? answer))
-                      (-> (assoc ::answer answer)
-                          (assoc ::answer-tokens (tokens/estimate answer)))))))))
-
-          :serper
-          (let [key (pod/serper-key)]
-            (if (or (nil? key) (str/blank? key))
-              (int/search-err query
-                              (str "no search backend key — SERPER_API_KEY is unset "
-                                   "in the pod's env; the :serper backend cannot run. "
-                                   "Inspect with (seon.agent.web/grants {})."))
-              (let [res (await (pod/serper-request query n timeout-ms))]
-                (if-not (::ok? res)
-                  res
-                  (let [{::keys [results result-count]} (int/parse-serper (::body res) n)
-                        now  (js/Date.)
-                        ;; HONEST hint: redirect-hint only when rows exist;
-                        ;; serper returns real page urls (not redirect URIs) —
-                        ;; an empty set just means no SERP matches.
-                        hint (if (seq results)
-                               "the ::url values are the real page urls the SERP returned — fetch a row's ::url with (seon.agent.web/fetch)."
-                               "no web results matched this query — rephrase toward a concrete fact-lookup query, or retry.")]
-                    ;; Best-effort projection — a rejected tx must not fail search.
-                    (await (db/transact!
-                             {:seon.db/tx-data
-                              [{::query        query
-                                ::backend      :serper
-                                ::result-count result-count
-                                ::fetched-at   now}]}))
-                    {::ok?          true
-                     ::query        query
-                     ::backend      :serper
-                     ::results      results
-                     ::result-count result-count
-                     ::hint         hint})))))
-
-          ;; A configured-but-unwired backend — legible refusal.
-          (int/search-err query
-                          (str "search backend " (pr-str backend) " is not wired yet "
-                               "(only :gemini-grounding ships) — set "
-                               ":seon.agent.web/search-backend in config/system.edn.")))))
-    (catch :default e
-      (int/search-err query (str "unexpected error in seon.agent.web/search: "
-                                 (or (some-> e .-message) (str e))))))
-     :clj
-     ((leaf-fn ::search)
-      (cond-> {::query query
-               ::max-results max-results
-               ::timeout-ms timeout-ms}
-        configuration
-        (assoc :seon.config/configuration configuration)))))))
+              (:seon.config.web/default-search-results configuration))]
+      ((leaf-fn ::search)
+       (cond-> {::query query
+                ::max-results max-results
+                ::timeout-ms timeout-ms}
+         configuration
+         (assoc :seon.config/configuration configuration))))))

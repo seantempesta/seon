@@ -3,8 +3,7 @@
   (:require
    #?(:clj [clojure.test :refer [deftest is testing]]
       :cljs [cljs.test :refer [deftest is testing]])
-   [seon.agent.shell.core :as core]
-   #?(:cljs [seon.agent.shell :as shell])))
+   [seon.agent.shell.core :as core]))
 
 (deftest portable-request-builders-and-interpreters
   (testing "run preserves every frozen child option"
@@ -40,13 +39,3 @@
   (testing "denial names the governing config key"
     (is (= :seon.config/shell-enabled?
            (get-in (core/ungranted) [:seon.error/data :seon.config/key])))))
-
-#?(:cljs
-   (deftest public-entry-effects
-     (doseq [[v effect]
-             [[#'shell/grants :read] [#'shell/run :external]
-              [#'shell/py-run :external] [#'shell/run-bg! :external]
-              [#'shell/list-jobs :read] [#'shell/job-status :read]
-              [#'shell/job-output :read] [#'shell/job-stop! :external]]]
-       (is (= effect (:seon.capability/effect (meta v)))
-           (str (:name (meta v)) " effect")))))

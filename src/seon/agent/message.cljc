@@ -9,7 +9,6 @@
     [clojure.string :as str]
     [seon.agent.message.internal :as internal]
     [seon.agent.message.leaf :as leaf]
-    #?(:cljs [seon.agent.message.pod :as pod])
     [seon.db :as db]
     [seon.db.id :as db.id]
     [seon.db.protocol :as protocol]
@@ -38,7 +37,7 @@
              [#'user #'agent]))))
 
 (defn- platform-leaf []
-  (or *leaf* #?(:cljs (pod/services) :clj nil)))
+  *leaf*)
 
 (defn- leaf-fn [key]
   (or (get (platform-leaf) key)
@@ -548,7 +547,7 @@
 ;; crash. Both reuse `::message-response`.
 ;; ============================================================
 
-(defn ^{:async #?(:cljs true :clj false)
+(defn ^{:async false
         :seon.capability/effect :idempotent} user
   "Send a message to your human user.
 
@@ -562,7 +561,7 @@
   (await (message! {:seon.agent.message/content content
                     :seon.agent.message/to      [user-ref]})))
 
-(defn ^{:async #?(:cljs true :clj false)
+(defn ^{:async false
         :seon.capability/effect :idempotent} agent
   "Send a message to a PEER agent by id.
 

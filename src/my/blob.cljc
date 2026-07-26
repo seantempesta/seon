@@ -10,9 +10,7 @@
      :cljs (:refer-clojure :exclude [get]))
   (:require
     [my.blob.core :as core]
-    #?(:cljs [my.blob.leaf :as leaf])
     [my.blob.schema]
-    [seon.ai.tokens :as tokens]
     [seon.db :as db]
     #?(:cljs [seon.dev.restore.schema])
     [seon.schema :as schema]))
@@ -198,7 +196,7 @@
    into context, so an unbounded read is never the default."
   100)
 
-(def ^:dynamic *leaf* #?(:cljs leaf/node-leaf :clj nil))
+(def ^:dynamic *leaf* nil)
 
 (defn bind-leaf
   "Return agent-facing `blob/` functions closed over one platform leaf."
@@ -281,12 +279,11 @@
   [content from-line max-lines]
   (core/page-lines content from-line max-lines))
 
-;;; FUNCTIONS — put! is ^:async (it AWAITS the datom write); reads are sync so
-;;; they compose inside let-bindings without an await.
+;;; FUNCTIONS — the JVM leaf owns effects; reads compose as ordinary values.
 
 (declare stat) ; text refuses a binary blob by naming stat's recorded media
 
-(defn ^{:async #?(:cljs true :clj false)
+(defn ^{:async false
         :seon.capability/effect :idempotent} put!
   "Save a long text durably; read it back page by page later.
 
@@ -301,13 +298,12 @@
    literal content — larger pastes truncate mid-form. For big content,
    put! it in chunks, then [[concat!]] the hashes into ONE canonical blob.
 
-   Resolves to `{:my.blob/ok? true :my.blob/hash h :my.blob/tokens n}` —
+   Returns `{:my.blob/ok? true :my.blob/hash h :my.blob/tokens n}` —
    store the HASH on your own entity (a ref-by-value pointer); never
    re-carry the content in datoms."
   {:malli/schema [:=> [:cat ::put-request] ::put-response]}
   [request]
-  #?(:cljs (await ((leaf-fn ::put!) request))
-     :clj ((leaf-fn ::put!) request)))
+  ((leaf-fn ::put!) request))
 
 (defn ^{:seon.capability/effect :read} get
   "Fetch a stored text's full content by hash, for use in code.
@@ -331,7 +327,7 @@
         (cond-> {::content (core/concatenate (mapv ::content reads))}
           media (assoc ::media media)))))))
 
-(defn ^{:async #?(:cljs true :clj false)
+(defn ^{:async false
         :seon.capability/effect :idempotent} concat!
   "Join stored blobs, in order, into ONE new canonical blob.
 
@@ -344,8 +340,7 @@
    written. The source chunks stay stored (append-only, no GC)."
   {:malli/schema [:=> [:cat ::concat-request] ::put-response]}
   [request]
-  #?(:cljs (await (concat-with-effects! request *leaf*))
-     :clj (concat-with-effects! request *leaf*)))
+  (concat-with-effects! request *leaf*))
 
 (declare stat-with-effects!)
 
@@ -372,10 +367,10 @@
              (page-lines (::content env) from-line
                          (or max-lines default-max-lines))))))
 
-(defn ^{:async #?(:cljs true :clj false) :seon.capability/effect :read} text
+(defn ^{:async false :seon.capability/effect :read} text
   "Read a stored blob page by page, as a bounded line window.
 
-   Resolves with honest totals, never the whole document at once.
+   Returns honest totals, never the whole document at once.
    Defaults to the FIRST `default-max-lines` lines; pass a 1-based
    `:my.blob/from-line` + `:my.blob/max-lines` to walk the rest. The
    response always carries `:my.blob/total-lines` and the whole blob's
@@ -388,8 +383,7 @@
    [[get]] instead."
   {:malli/schema [:=> [:cat ::text-request] ::text-response]}
   [request]
-  #?(:cljs (await (text-with-effects! request *leaf*))
-     :clj (text-with-effects! request *leaf*)))
+  (text-with-effects! request *leaf*))
 
 (defn- ^:async stat-with-effects!
   [{::keys [hash] :as request} effects]
@@ -428,7 +422,7 @@
                      ::at at}
               (not= :my.blob.media/absent media) (assoc ::media media))))))))
 
-(defn ^{:async #?(:cljs true :clj false) :seon.capability/effect :read} stat
+(defn ^{:async false :seon.capability/effect :read} stat
   "Check whether a blob exists, and its size, without reading it.
 
    The blob's DB projection — exists?, tokens, media, at; no disk
@@ -442,5 +436,4 @@
   ;; FIND by attribute presence (never a lookup-ref here: on a store no
   ;; put! has touched yet the attr isn't installed and a lookup-ref throws;
   ;; a query just returns nothing).
-  #?(:cljs (await (stat-with-effects! request *leaf*))
-     :clj (stat-with-effects! request *leaf*)))
+  (stat-with-effects! request *leaf*))
