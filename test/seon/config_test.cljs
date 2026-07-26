@@ -1069,6 +1069,7 @@
                                        :seon.agent.ctx/priority))))]
           (is (= [[:namespaces 20]
                   [:canvas 35]
+                  [:interaction-outcome 39]
                   [:warnings 40]
                   [:plan 45]
                   [:transcript 100]]
@@ -1082,6 +1083,7 @@
               "new agents seed the current plan surface directly")
           (is (= [[:root-role 15]
                   [:namespaces 20]
+                  [:interaction-outcome 39]
                   [:warnings 40]
                   [:core-faults 41]
                   [:instrumentation-gaps 42]
@@ -1106,7 +1108,9 @@
                                (:seon.eval/home-requires context)))
               blocks   (into #{} (map :seon.agent.ctx/name)
                              (:seon.agent/ctx ordinary))]
-          (is (= #{:namespaces :canvas :warnings :plan :transcript} blocks)
+          (is (= #{:namespaces :canvas :interaction-outcome
+                   :warnings :plan :transcript}
+                 blocks)
               "experimental function-menu/typeahead blocks stay off")
           (is (every? (targets ordinary) '[acme.brand acme.widget my.ns my.skills]))
           (is (not-any? (targets ordinary) '[acme.helpers acme.notes]))

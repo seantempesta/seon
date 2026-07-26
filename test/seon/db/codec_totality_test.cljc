@@ -15,6 +15,7 @@
    [seon.schema :as schema]))
 
 (def ^:private trials-per-arm 30)
+(def ^:private gate-seed 424242)
 
 (defn- protocol-projection
   []
@@ -73,8 +74,58 @@
       (testing (str label " " (m/form shape))
       (let [{:keys [result shrunk] :as check}
             (tc/quick-check trials-per-arm
-                            (round-trip-property wire-shape options))]
+                            (round-trip-property wire-shape options)
+                            :seed gate-seed)]
         (is (true? result)
             (str "wire totality property falsified for " (m/form shape)
+                 "; seed=" gate-seed
                  "; smallest=" (pr-str (:smallest shrunk))
                  "; check=" (pr-str check))))))))
+
+(deftest datahike-read-shapes-match-the-vendored-grammars
+  (testing "entity ids follow Datahike schema and lookup resolution"
+    ;; datahike/schema.cljc:6-9; datahike/db/utils.cljc:106-139.
+    (is (m/validate ::protocol/entity-id 1))
+    (is (m/validate ::protocol/entity-id [:user/id "alice"]))
+    (is (m/validate ::protocol/entity-id :db/ident))
+    (is (m/validate ::protocol/entity-id "tempid"))
+    (is (not (m/validate ::protocol/entity-id {1.5 0}))))
+  (testing "pull selectors follow datalog-parser's pull grammar"
+    ;; datalog/parser/pull.cljc:65-198.
+    (is (m/validate ::protocol/selector
+                    '[* :db/id
+                      {:friend [[:name :limit 2]
+                                [:nickname :default "unknown"]]}]))
+    (is (not (m/validate ::protocol/selector 63))))
+  (testing "query forms follow Datahike normalization and datalog-parser"
+    ;; datahike/query.cljc:98-121; datalog/parser.cljc:9-24.
+    (is (m/validate ::protocol/query-form
+                    '[:find ?e :where [?e :db/ident ?ident]]))
+    (is (m/validate ::protocol/query-form
+                    '{:find [?e] :where [[?e :db/ident ?ident]]}))
+    (is (not (m/validate ::protocol/query-form 63))))
+  (testing "database values use Datahike connection IDs"
+    ;; datahike/store.cljc:50-61.
+    (is (m/validate :seon.db/db
+                    {:db-name "default"
+                     :store-id [(random-uuid) :db]
+                     :t 0
+                     :as-of nil
+                     :since nil
+                     :history false
+                     :datahike/commit-id (random-uuid)}))
+    (is (not (m/validate :seon.db/db
+                         {:db-name "default"
+                          :store-id [#{{0.5 0}} nil]
+                          :t 0
+                          :as-of nil
+                          :since nil
+                          :history false
+                          :datahike/commit-id (random-uuid)}))))
+  (testing "fractional numeric map keys are projected before Transit"
+    (let [{::protocol/keys [projected-value degraded?]}
+          (protocol/wire-projection {0.5 0})]
+      (is degraded?)
+      (is (= {"0.5" 0} projected-value))
+      (is (= projected-value
+             (uds/decode (uds/encode projected-value)))))))

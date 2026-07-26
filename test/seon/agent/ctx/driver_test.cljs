@@ -20,6 +20,7 @@
 
 (def database
   {:db-name "default"
+   :store-id [#uuid "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" :db]
    :t 42
    :as-of nil
    :since nil
@@ -171,10 +172,11 @@
              (is (contains? (:seon.web.datastar/dependencies projection)
                             :my.example/value))
              (is (contains? (:seon.web.datastar/dependencies projection)
-                            :seon.agent/id))
-             (done)))
-          (.catch (fn [error] (is false (str error)) (done)))
-          (.finally (fn [] (set! db/execute-many original)))))))
+                            :seon.agent/id))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally (fn []
+                      (set! db/execute-many original)
+                      (done)))))))
 
 (deftest agent-view-unwired-canvas-resolves-to-welcome
   (async done
@@ -254,12 +256,12 @@
                     (->> (:seon.render.surface/surfaces projection)
                          (some #(when (= "canvas"
                                          (:seon.render.surface/label %))
-                                  (:seon.render.surface/expanded %))))))
-             (done)))
-          (.catch (fn [error] (is false (str error)) (done)))
+                                  (:seon.render.surface/expanded %))))))))
+          (.catch (fn [error] (is false (str error))))
           (.finally (fn []
                       (set! db/execute-many original)
-                      (set! message/recent original-recent)))))))
+                      (set! message/recent original-recent)
+                      (done)))))))
 
 (deftest agent-view-direct-acquisition-error-short-circuits
   (async done
@@ -284,7 +286,8 @@
              (is (= 1 @requests)
                  "the malformed page result never starts canvas acquisition")
              (is (zero? @selected)
-                 "no selected renderer runs after page acquisition failure")
-             (done)))
-          (.catch (fn [error] (is false (str error)) (done)))
-          (.finally (fn [] (set! db/execute-many original)))))))
+                 "no selected renderer runs after page acquisition failure")))
+          (.catch (fn [error] (is false (str error))))
+          (.finally (fn []
+                      (set! db/execute-many original)
+                      (done)))))))

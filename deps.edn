@@ -4,7 +4,8 @@
              "clojars" {:url "https://repo.clojars.org/"}}
 
  :deps {org.clojure/clojure {:mvn/version "1.12.5"}
-        metosin/malli {:mvn/version "0.20.0"}}
+        metosin/malli {:mvn/version "0.20.0"}
+        org.replikativ/datalog-parser {:mvn/version "0.2.37"}}
 
  :aliases
  {;; JVM datahike writer. This alias is the complete server contract: it
@@ -19,6 +20,7 @@
    :replace-deps
    {org.clojure/clojure {:mvn/version "1.12.5"}
     metosin/malli {:mvn/version "0.20.0"}
+    org.replikativ/datalog-parser {:mvn/version "0.2.37"}
 
     org.replikativ/datahike
     {:local/root "reference-code/datahike"

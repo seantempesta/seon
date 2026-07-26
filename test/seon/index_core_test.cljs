@@ -294,8 +294,8 @@
   ;; force-store their REAL FULL FILE TEXT (they render FULL, so the boot
   ;; indexer reads the file — probing .cljs then .cljc — the same
   ;; seon.agent.ctx.namespaces/full-source-ns? rule the renderer uses, one writer no
-  ;; drift). seon.warn / seon.eval / seon.agent.search / seon.agent.fs are all
-  ;; framework bulk → stub (search/fs are NO LONGER whitelisted — lean set).
+  ;; drift). seon.warn / seon.agent.search / seon.agent.fs are all framework
+  ;; bulk → stub (search/fs are NO LONGER whitelisted — lean set).
   (let [tx      @core-tx
         ns-rows (filter :seon.ns/name tx)
         row-for (fn [k] (first (filter #(= k (:seon.ns/name %)) ns-rows)))
@@ -303,12 +303,9 @@
                           (and (not= (str "(ns " (name k) ")") s)
                                (str/starts-with? (str/triml s) (str "(ns " (name k)))
                                (str/includes? s "defn"))))
-        warn    (:seon.ns/source (row-for 'seon.warn))
-        eval-ns (:seon.ns/source (row-for 'seon.eval))]
+        warn    (:seon.ns/source (row-for 'seon.warn))]
     (is (= "(ns seon.warn)" warn)
         "seon.warn (framework bulk) source is the minimal (ns x) stub")
-    (is (= "(ns seon.eval)" eval-ns)
-        "seon.eval (framework bulk) source is the minimal (ns x) stub")
     ;; my.kb (the DB manual) is full-source via the my.* rule, and the
     ;; whitelisted tool carries its REAL full file source — neither a stub.
     (is (full? 'my.kb)

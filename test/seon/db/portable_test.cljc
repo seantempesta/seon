@@ -14,7 +14,7 @@
 
 (def database
   {:db-name "portable"
-   :store-id ["portable" "main"]
+   :store-id [#uuid "00000000-0000-0000-0000-000000000000" :db]
    :t 0
    :as-of nil
    :since nil

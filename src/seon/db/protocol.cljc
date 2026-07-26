@@ -12,6 +12,8 @@
    delivery through recovery."
   (:require [clojure.set :as set]
             [clojure.string :as str]
+            [datalog.parser :as datalog.parser]
+            [datalog.parser.pull :as datalog.pull]
             [malli.core :as m]
             [malli.transform :as mt]
             #?@(:bb [] :default [[hasch.core :as hasch]])
@@ -158,7 +160,11 @@
     false
 
     (map? value)
-    (and (every? ordinary-wire-value? (keys value))
+    (and (every? #(and (ordinary-wire-value? %)
+                       ;; Transit JSON gives every numeric map key its integer
+                       ;; tag, so a fractional key is not round-trip safe.
+                       (not (and (number? %) (not (integer? %)))))
+                 (keys value))
          (every? ordinary-wire-value? (vals value)))
 
     (vector? value)
@@ -252,8 +258,16 @@
   [value path]
   (reduce
    (fn [[projected degraded-paths] [k v]]
-     (let [[projected-key key-paths]
-           (project-wire-node k (conj path "<key>"))
+     (let [key-path (conj path "<key>")
+           ;; Transit JSON encodes a numeric map key with its integer tag. On
+           ;; CLJS a fractional key such as 0.5 therefore decodes as 0. Keep
+           ;; fractional numbers as ordinary values, but degrade them when
+           ;; their map-key position would make the codec lossy.
+           [projected-key key-paths]
+           (if (and (number? k) (not (integer? k)))
+             [(safe-wire-text k)
+              [(str "$/" (str/join "/" key-path))]]
+             (project-wire-node k key-path))
            value-path (conj path (wire-path-segment projected-key))
            [projected-value value-paths]
            (project-wire-node v value-path)]
@@ -372,18 +386,125 @@
 (schema/register! ::maximum-connections [:int {:min 1}])
 (schema/register! ::peer-version [:int {:min 1}])
 (schema/register! ::configuration-key :qualified-keyword)
-;; Datahike query and pull values are intentionally polymorphic. The compiled
-;; envelope encoder owns their ordinary wire projection at the codec boundary.
+
+;; Datahike defines :db.type/id as a JVM Long or string and, on CLJS, as a
+;; safe integer or string:
+;; reference-code/datahike/src/datahike/schema.cljc:6-9.
+(defn- datahike-id?
+  [value]
+  #?(:clj (or (= (class value) java.lang.Long)
+              (string? value))
+     :cljs (or (and (number? value)
+                    (js/Number.isSafeInteger value))
+               (string? value))
+     :bb (or (integer? value)
+             (string? value))))
+
+(schema/register-core-predicate!
+ 'seon.db.protocol/datahike-id?
+ datahike-id?)
+
+(schema/register!
+ ::datahike-id
+ [:fn {:error/message "must be a Datahike id"
+       :gen/elements [1 "tempid"]}
+  'seon.db.protocol/datahike-id?])
+
+;; Datahike resolves positive numeric ids, two-element lookup refs, and keyword
+;; idents in reference-code/datahike/src/datahike/db/utils.cljc:106-139.
+(schema/register!
+ ::lookup-ref
+ [:tuple [:or ::datahike-id :keyword] ::ordinary-wire-value])
+(schema/register!
+ ::entity-id
+ [:or ::datahike-id ::lookup-ref :keyword])
+
+;; The pull grammar is owned by datalog-parser. Attributes, wildcards, nested
+;; maps, recursion, limit/default expressions, and open :as/:default values are
+;; parsed at reference-code/datalog-parser/src/datalog/parser/pull.cljc:65-198.
+(defn- pull-selector?
+  [value]
+  (and
+   (ordinary-wire-value? value)
+   (try
+     (some? (datalog.pull/parse-pull value))
+     (catch #?(:clj Throwable :cljs :default) _
+       false))))
+
+(schema/register-core-predicate!
+ 'seon.db.protocol/pull-selector?
+ pull-selector?)
+
+(schema/register!
+ ::selector
+ [:fn
+  {:error/message "must follow Datahike's pull selector grammar"
+   :gen/elements
+   [[:db/id]
+    '[*]
+    '[{:friend [:db/id]}]
+    '[[:friend :limit 10]]
+    '[[:nickname :default "unknown"]]
+    '[{:friend 2}]
+    '[(limit :friend 10)]
+    '[(default :nickname "unknown")]]}
+  'seon.db.protocol/pull-selector?])
+
+;; Datahike normalizes vector, map, and EDN-string queries before passing the
+;; result to datalog-parser:
+;; reference-code/datahike/src/datahike/query.cljc:98-121 and
+;; reference-code/datalog-parser/src/datalog/parser.cljc:9-24.
+(defn- query-form?
+  [value]
+  (when (and (ordinary-wire-value? value)
+             (or (vector? value) (map? value) (string? value)))
+    (try
+      (let [read-value
+            (if (string? value)
+              (#?(:cljs reader/read-string :default edn/read-string) value)
+              value)
+            unquoted
+            (if (and (sequential? read-value)
+                     (= 'quote (first read-value)))
+              (second read-value)
+              read-value)]
+        ;; The protocol carries query arguments separately, so its query form
+        ;; is Datahike's inner query, never the outer {:query ... :args ...}
+        ;; convenience wrapper normalized at datahike/query.cljc:103-111.
+        (some? (datalog.parser/parse unquoted)))
+      (catch #?(:clj Throwable :cljs :default) _
+        false))))
+
+(schema/register-core-predicate!
+ 'seon.db.protocol/query-form?
+ query-form?)
+
+(schema/register!
+ ::query-form
+ [:fn
+  {:error/message "must follow Datahike's query grammar"
+   :gen/elements
+   ['[:find ?e :where [?e :db/ident ?ident]]
+    '{:find [?e] :where [[?e :db/ident ?ident]]}
+    "[:find ?e :where [?e :db/ident ?ident]]"]}
+  'seon.db.protocol/query-form?])
+
+;; Query :in bindings accept sources, rules, scalars, tuples, collections, and
+;; relations (datalog parser impl.cljc:245-257). Their runtime values are
+;; genuinely open; this wire boundary narrows them only to ordinary data.
 (schema/register! ::result ::wire-value)
 (schema/register! ::arguments [:vector ::ordinary-wire-value])
-(schema/register! ::selector ::ordinary-wire-value)
-(schema/register! ::entity-id ::wire-value)
-(schema/register! ::query-form
-                  [:or [:vector ::wire-value] :map [:string {:min 1}]])
 (schema/register! :seon.db/db
                   [:map {:closed true}
                    [:db-name [:string {:min 1}]]
-                   [:store-id [:vector {:min 2 :max 3} ::wire-value]]
+                   ;; Datahike constructs the process-local connection ID as
+                   ;; [store UUID, branch] for :self and appends the writer
+                   ;; backend for remote writers:
+                   ;; reference-code/datahike/src/datahike/store.cljc:50-61.
+                   [:store-id
+                    [:or
+                     ::branch/connection-id
+                     [:tuple ::branch/store-id ::branch/name :keyword]]]
                    [:t [:int {:min 0}]]
                    [:as-of [:or :nil [:int {:min 0}] :inst]]
                    [:since [:or :nil [:int {:min 0}] :inst]]
@@ -600,7 +721,7 @@
 (schema/register! ::datom-patterns
                   [:vector {:min 1 :max 64} ::datom-pattern])
 (schema/register! ::listening? :boolean)
-(schema/register! ::entity-ids [:vector ::wire-value])
+(schema/register! ::entity-ids [:vector ::entity-id])
 (schema/register! ::knn-entity-ids [:vector :int])
 (schema/register! ::hits [:vector :map])
 (schema/register! :db-before :seon.db/db)

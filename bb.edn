@@ -3,6 +3,7 @@
         cheshire/cheshire {:mvn/version "5.13.0"}
         metosin/malli {:mvn/version "0.20.0"}
         nrepl/bencode {:mvn/version "1.2.0"}
+        org.replikativ/datalog-parser {:mvn/version "0.2.37"}
         parinferish/parinferish {:mvn/version "0.8.0"}}
  :tasks
  {operator-test

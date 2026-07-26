@@ -13,6 +13,7 @@
 
 (def database
   {:db-name "default"
+   :store-id [#uuid "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" :db]
    :t 42
    :as-of nil
    :since nil
