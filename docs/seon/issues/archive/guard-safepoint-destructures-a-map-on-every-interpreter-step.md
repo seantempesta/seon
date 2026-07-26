@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, agent, runtime, flow]
 ---
@@ -26,10 +26,12 @@ per safepoint. The arrays it needs are already allocated once in
 `guard/holder` (`src/seon/host/guard.cljc:53-55`) and never change identity —
 the closure could simply close over them.
 
-## Implemented change (pending wrapper verification)
+## Resolution
 
-The Item 1 commit that archives this note makes the retained `::check!` closure
-capture the `long-array` and `object-array` once. The normal fn-entry path
+Resolved by `b1df45785`.
+
+The retained `::check!` closure now captures the `long-array` and
+`object-array` once. The normal fn-entry path
 therefore performs array access directly; the holder map is retained only for
 the exceptional policy-trip path that builds the error value.
 
@@ -168,15 +170,21 @@ claim; no speedup is inferred from the eliminated-loop probe.
 
 ### Verification
 
-- `seon.host.guard-test`: 8 tests, 25 assertions, 0 failures, 0 errors.
-- A direct combined `guard-test` + `guard-context-test` invocation ran 10 tests
-  and 33 assertions with 0 failures and 1 unrelated error: the existing
-  captured-output fixture reaches a null synchronization lock in the protected
-  `src/seon/host/eval.clj:218`. This item did not change or work around that
-  protected path.
-- `bin/test-writer` initially stopped before test discovery because the
-  dependency bump invalidated the compiled program artifact. Its coordinated
-  post-rebuild result is reported with the Wave 0 integration evidence.
+- The coordinated operator checkpoint rebuilt and published the writer
+  AOT+AppCDS artifact, and the writer/host reached ready. Pod admission then
+  stopped on the pre-existing default-database initialization fingerprint
+  still marked `:in-progress` after 93 pages; shutdown completed cleanly.
+- Against that current artifact, authoritative `bin/test-writer` selections
+  reported `seon.host.guard-test`: 8 tests, 25 assertions, 0 failures, 0 errors.
+- `seon.host.guard-context-test` reported 3 tests, 9 assertions, 0 failures,
+  1 error. The combined selection reported 13 tests, 38 assertions, 0 failures,
+  1 error. Both errors are the same existing captured-output fixture reaching
+  a null synchronization lock in the protected `src/seon/host/eval.clj:218`;
+  this item did not change or work around that protected path.
+- The full writer gate stopped during test loading, before running tests,
+  because the protected `host_eval_wire_safety_writer_test.clj` references the
+  missing `session/error-value`. That compile blocker is outside this item's
+  clean-file ownership.
 
 Historical reproduction script used for the eliminated-loop table:
 `bench-guard` (scratchpad, 2026-07-25) — compiled loop body via
