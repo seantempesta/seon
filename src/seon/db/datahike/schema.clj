@@ -21,7 +21,8 @@
    Public API:
    - `malli-type->datahike-type` -- leaf type mapping
    - `malli-map->datahike-schema` -- full schema vector derivation"
-  (:require [malli.core :as m]
+  (:require [datahike.schema :as datahike-schema]
+            [malli.core :as m]
             [malli.registry :as mr]
             [seon.schema.form :as schema.form]))
 
@@ -338,6 +339,64 @@
             {:schema-alias-chain alias-chain}
             throwable))
           (throw throwable))))))
+
+(def ^:private datahike-value-type->malli-form
+  {:db.type/boolean :boolean
+   :db.type/double :double
+   :db.type/float :float
+   :db.type/instant :inst
+   :db.type/keyword :keyword
+   :db.type/long :long
+   :db.type/string :string
+   :db.type/symbol :symbol
+   :db.type/uuid :uuid})
+
+(defn emitted-facet-schema-forms
+  "Derive canonical forms for dependency facets emitted by this bridge.
+
+   Datahike's ordinary `:db/*` schema keys are implicit and the writer excludes
+   them from application admission. Extension facets such as
+   `:db.secondary/*` have their own qualified namespace, so return forms for
+   every such key actually emitted by compiling `attributes`. The value shape
+   comes from Datahike's maintained implicit schema, never an attribute-name
+   list. A newly emitted unsupported facet fails the build."
+  {:malli/schema
+   [:=> [:catn [::forms :map]
+               [::attributes [:set :qualified-keyword]]]
+    [:map-of :qualified-keyword :any]]}
+  [forms attributes]
+  (let [emitted-facets
+        (into #{}
+              (comp
+               (mapcat
+                (fn [attribute]
+                  (keys
+                   (malli-form->datahike-attribute
+                    forms attribute (get forms attribute)))))
+               (filter qualified-keyword?)
+               (remove #(= "db" (namespace %)))
+               (remove #(contains? forms %)))
+              attributes)]
+    (into {}
+          (map
+           (fn [facet]
+             (let [{:db/keys [valueType cardinality] :as implicit}
+                   (get datahike-schema/implicit-schema-spec facet)
+                   scalar-form (get datahike-value-type->malli-form valueType)
+                   form
+                   (case cardinality
+                     :db.cardinality/one scalar-form
+                     :db.cardinality/many
+                     (when scalar-form [:set scalar-form])
+                     nil)]
+               (when-not (and implicit form)
+                 (throw
+                  (ex-info
+                   "An emitted Datahike facet has no canonical Malli form."
+                   {:seon.db.datahike.schema/facet facet
+                    :seon.db.datahike.schema/implicit-schema implicit})))
+               [facet form])))
+          emitted-facets)))
 
 (defn malli-map->datahike-schema
   "Derive a datahike schema vector from a Malli `:map` schema.

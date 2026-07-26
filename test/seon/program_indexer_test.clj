@@ -4,6 +4,7 @@
             [clojure.java.io :as io]
             [clojure.set :as set]
             [clojure.test :refer [deftest is]]
+            [seon.db.datahike.schema :as datahike.schema]
             [seon.program.edge :as edge]))
 
 (defn- emitted-artifact [manifest-key]
@@ -79,10 +80,33 @@
         (into #{}
               (keep :seon.schema/key)
               (mapcat :seon.db/program pages))
+        canonical-schema-forms
+        (into {}
+              (keep
+               (fn [{:seon.schema/keys [key form]}]
+                 (when (and key form)
+                   [key (edn/read-string form)])))
+              (mapcat :seon.db/program pages))
+        declared-attributes
+        (set (mapcat :seon.db/attributes pages))
+        compiled-schema-attributes
+        (into #{}
+              (comp
+               (mapcat
+                (fn [attribute]
+                  (keys
+                   (datahike.schema/malli-form->datahike-attribute
+                    canonical-schema-forms
+                    attribute
+                    (get canonical-schema-forms attribute)))))
+               (filter qualified-keyword?)
+               (remove #(= "db" (namespace %))))
+              declared-attributes)
         referenced-attributes
         (into #{}
               (concat
-               (mapcat :seon.db/attributes pages)
+               declared-attributes
+               compiled-schema-attributes
                (mapcat transaction-attributes
                        (mapcat :seon.db/program pages))
                (mapcat transaction-attributes

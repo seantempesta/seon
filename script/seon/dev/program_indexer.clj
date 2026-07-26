@@ -7,6 +7,7 @@
             [clojure.string :as str]
             [datahike.db :as datahike-db]
             [malli.core :as m]
+            [seon.db.datahike.schema :as datahike.schema]
             [seon.db.program :as program]
             [seon.dev.test-roots :as test-roots]
             [seon.ns.source :as ns.source]
@@ -460,6 +461,24 @@
        :seon.schema/function-source-rows source-rows
        :seon.schema/artifact-exports #{}}))))
 
+(defn- canonical-schema-rows [created-at]
+  (let [application-rows (schema/canonical-schema-rows created-at)
+        forms
+        (into {}
+              (map (juxt :seon.schema/key
+                         (comp edn/read-string :seon.schema/form)))
+              application-rows)
+        attributes (set (schema/canonical-database-attributes))
+        facet-forms
+        (datahike.schema/emitted-facet-schema-forms forms attributes)]
+    (into application-rows
+          (map
+           (fn [[facet form]]
+             {:seon.schema/key facet
+              :seon.schema/form (pr-str form)
+              :seon.schema/created-at created-at}))
+          (sort-by (comp str key) facet-forms))))
+
 (defn- atomic-spit! [path value]
   (let [path (.toPath (io/file path))
         temporary (.toPath (io/file (str path "." (random-uuid) ".tmp")))]
@@ -493,7 +512,7 @@
         namespace-rows (mapv namespace-row all-descriptions)
         function-rows (indexed-function-rows selected)
         schema-rows
-        (schema/canonical-schema-rows
+        (canonical-schema-rows
          (java.util.Date/from java.time.Instant/EPOCH))
         test-rows (test-rows test-descriptions)
         desired (into namespace-rows
