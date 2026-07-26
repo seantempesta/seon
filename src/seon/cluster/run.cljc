@@ -191,12 +191,22 @@
                              [::lease-until ::lease-until]]]
                   [:vector :some]]}
   [request]
-  (let [{::keys [id process observed-epoch lease-until]} request
-        run-ref [::id id]]
-    [[:db.fn/cas run-ref ::claim-epoch
-      observed-epoch (inc (or observed-epoch 0))]
-     [:db.fn/cas run-ref ::process nil process]
-     [:db/add run-ref ::lease-until lease-until]]))
+  (let [{::keys [id process observed-epoch observed-process
+                 observed-lease-until lease-until]} request
+        run-ref [::id id]
+        takeover? (and (contains? request ::observed-process)
+                       (contains? request ::observed-lease-until))]
+    (cond-> [[:db.fn/cas run-ref ::claim-epoch
+              observed-epoch (inc (or observed-epoch 0))]
+             [:db.fn/cas run-ref ::process
+              (when takeover? observed-process)
+              process]]
+      takeover?
+      (conj [:db.fn/cas run-ref ::lease-until
+             observed-lease-until lease-until])
+
+      (not takeover?)
+      (conj [:db/add run-ref ::lease-until lease-until]))))
 
 (defn heartbeat-tx
   "Renew the holder's lease under the run fence."
