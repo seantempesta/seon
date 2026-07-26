@@ -10,7 +10,7 @@ tags: [prd, agent, architecture]
 produced by the command shown, against the working tree — so a stale row is
 impossible and an agent can re-verify any claim in one line.
 
-Generated from `codex/runtime-reliability-refactor` at `4ccc0a7fc`, measuring the **working tree** — so a
+Generated from `codex/runtime-reliability-refactor` at `10c12e1c1`, measuring the **working tree** — so a
 lane with uncommitted work shows up here. Rows that can differ between committed
 and working state say both. `git status --short` before trusting a surprising row.
 
@@ -27,34 +27,10 @@ rg -A14 ':namespaces' src/seon/sci/ctx.clj
 ```
 
 ```clojure
-       {:namespaces
-        {'clojure.core sci.interrupt/clojure-core
-         'clojure.string sci.interrupt/clojure-string
-         'seon.agent.lifecycle
-         {'wait (sci/copy-var lifecycle/wait lifecycle-ns)
-          'complete (sci/copy-var lifecycle/complete lifecycle-ns)
-          'pause (sci/copy-var lifecycle/pause lifecycle-ns)
-          'resume (sci/copy-var lifecycle/resume lifecycle-ns)
-          'terminate (sci/copy-var lifecycle/terminate lifecycle-ns)}}
-        ;; SCI already exposes Exception. Keep the additional JVM surface to
-        ;; the two broad roots instead of enumerating exception subclasses.
-        :classes
-   {:namespaces (tool-namespaces program-functions request-context)}))
-
-(defn fork
-  "Fork the shared `ctx` and install one evaluation's `:interrupt-fn`."
-  {:malli/schema [:=> [:cat ::fork-request] ::ctx]}
-  [{::keys [base-ctx] :keys [interrupt-fn]}]
-  (assoc (sci/fork (or base-ctx
-                       (base {::program-functions []
-                              ::request-context {}})))
-         :interrupt-fn interrupt-fn))
 ```
 
-**VERDICT: bindings are computed, but 3 effect arm(s) are honest
-not-implemented stubs** (`rg -c not-implemented src/seon/effect.cljc`).
-An agent can call the tools and receives error values; it cannot yet act
-on the world.
+**VERDICT: an agent cannot act.** No computed binding table in ctx.clj
+(`rg -c tool-namespaces src/seon/sci/ctx.clj` → 0).
 
 ## 2. The live execution path
 
@@ -63,12 +39,11 @@ wc -l src/seon/agent/driver.clj src/seon/sci/*.clj src/seon/host.clj
 ```
 
 ```
-     982 src/seon/agent/driver.clj
+     991 src/seon/agent/driver.clj
      105 src/seon/sci/interrupt.clj
-      85 src/seon/sci/ctx.clj
-     180 src/seon/sci/eval.clj
+     282 src/seon/sci/eval.clj
       61 src/seon/host.clj
-    1413 total
+    1439 total
 ```
 
 **Containment mechanisms:** `seon.sci.interrupt` present;
@@ -109,7 +84,7 @@ find src -name '*.cljs' | wc -l ; find src -name '*.cljs' | xargs wc -l | tail -
 35-(def ^:private legacy-containment-shutdown-grace-ms 2500)
 --
 cljs files: 26
-   15731 total
+   14043 total
 ```
 
 ## 5. Where work is bounded, and where it is not
@@ -143,7 +118,7 @@ O15: index at compile time from a JVM build only; never at runtime.
 
 | fact | value | meaning |
 |---|---|---|
-| shadow-cljs build hooks | 6 | the CLJS-only compile-time indexer; dies with the pod |
+| shadow-cljs build hooks | 1 | the CLJS-only compile-time indexer; dies with the pod |
 | runtime derive branch | 0 | O16 deletes this; missing pages must fail loudly |
 | production callers of `compile-tx-data` | 1 | 0 = the reconciler is orphaned |
 
@@ -154,37 +129,30 @@ a `bin/seon up` / `bin/seon down` freeze rebuilds it. A full `bin/test-writer`
 run tees its own retained evidence to `tmp/plan-evidence/test-writer-latest.log`;
 dated copies in the same directory are archives.
 
-**WARNING: no canonical `test-writer-latest.log` yet** — falling back to
-newest name-matched log, which missed the true latest run once before.
-Run the full `bin/test-writer` to establish the canonical log.
-
-Last retained run — `tmp/plan-evidence/test-writer-2026-07-26-frozen-prompt-final.log` (2026-07-26):
+Last retained run — `tmp/plan-evidence/test-writer-latest.log` (2026-07-26):
 
 ```
-Ran 549 tests containing 3865 assertions.
-1 failures, 0 errors.
+<no summary line>
+<no result line>
 ```
 
-**Not green. Every failing test, named:**
-
-- `FAIL no-stored-attribute-promises-an-order-the-database-cannot-keep`
-
-An unnamed failure count is worse than no gate — it launders red into a
-number. Each of these is either a real defect or a test pinning a deleted
-path; decide which and act, never re-baseline the count.
+**INCOMPLETE — do not read this as green.** The log has no
+`N failures, N errors.` line, so the run did not finish (still writing,
+killed, or crashed before the summary). Absence of `FAIL in` lines in an
+unfinished log proves nothing.
 
 Test source inventory (what exists, not what passes):
 ```
-test files:           146
-deftest (clj/cljc):   1049
+test files:           144
+deftest (clj/cljc):   1042
 deftest (cljs):       605
 ```
 
 ## 9. Open blockers
 
 ```
-open issues:    166
-blockers:       66
+open issues:    168
+blockers:       68
 ```
 
 Filed 2026-07-26 and not yet owned end to end by a step:
@@ -199,8 +167,8 @@ An attribute read or written with no `schema/register!` anywhere. Each is a real
 defect: the read returns nil and any sort over it is meaningless.
 
 ```
-:seon\.ai\.attempt/*  distinct used: 24   registered: 0
-:seon\.agent\.turn/*  distinct used: 16   registered: 0
+:seon\.ai\.attempt/*  distinct used: 2   registered: 0
+:seon\.agent\.turn/*  distinct used: 15   registered: 0
 ```
 
 ## 11. The agent entity
@@ -221,8 +189,8 @@ registered :seon.agent/* attributes:
   :seon.agent/terminated-at
 
 registered in:
-  src/seon/agent/ctx.cljc
   src/seon/agent/core.cljc
+  src/seon/agent/ctx.cljc
 ```
 
 **No duplicate `:seon.agent/*` registrations.**
@@ -239,7 +207,7 @@ before that cut.
 | does an unsafe two-writer configuration refuse to open? | **NO** | `rg -c "refuse" src/seon/db/registry.clj` → 0 (O2 still unruled) |
 | does agent scheduling use core.async dispatch? | **NO — hand-rolled** | core.async refs → 0; hand-rolled pools → 1 |
 | is workload a fact yet? | **NO — designed, not built** | `rg -c ":seon.fn/workload"` → 0 |
-| reader conditionals in `.cljc` | 424 | `rg -c "#?\(" src/ --glob "*.cljc"`; the pod cut is projected to retire most |
+| reader conditionals in `.cljc` | 423 | `rg -c "#?\(" src/ --glob "*.cljc"`; the pod cut is projected to retire most |
 | is Integrant a dependency? | no | `rg -c integrant deps.edn` → 0 (adoption is conditional, `bd8038419`) |
 
 ## How to trust this file

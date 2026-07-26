@@ -291,6 +291,43 @@ carried stale evidence within a day. Re-verify before starting.
   build once the indexer's emitted rows are current facts; it replaces
   the hook's clj-kondo/Shadow namespace closure (a second graph builder).
 
+### Rulings 2026-07-26 late night, session 3 (owner) — the crash model, the nucleus, the build split
+
+- **The crash model.** Errors are caught and shown to the agent — nothing
+  throws into the loop and nothing crashes on an agent mistake. Process
+  crashes are RARE. Recovery = reopen the database, mark dangling receipts
+  `:interrupted`, and the agent adapts from derived context. **NOTHING ever
+  re-executes a form or refires an effect.** `fire-the-missles!` is safe
+  because the system never refires anything, not because of an identity
+  scheme. Presentation on resume: every eval has a result; results that
+  never happened are absent facts, surfaced as ONE derived warning in the
+  context block ("interrupted at form N; later results missing") — never
+  per-eval marker tokens. Receipts: effect attribution is the transaction's
+  provenance metadata (already written); the only receipt entities are the
+  run machinery's eval receipts (running → done/error/interrupted).
+- **The effect-replay layer is DELETED** (`10c12e1c1`): the crash model
+  gives it no job. `:seon.capability/op-id` remains the writer's
+  transport-retry identity, which predates it. What the pilot proved is
+  recorded (`research/effect-pilot-evidence-2026-07-26.md`); what survives
+  it: the computed binding table, home-require exposure derivation, the
+  invocation-binding mechanism, and the crash-walk authoring discipline.
+- **The dev/publish build split.** DEV runs from the source classpath
+  everywhere — no AOT, hot reload through the REPL, slow first boot
+  accepted. PUBLISH is one deliberate build — AOT + AppCDS + the JVM
+  program index + initialization pages + digests — that clusters deploy
+  and reset from (the template store, `c669c2f6b`, is the deploy half).
+  The build-audit lane inventories every build against this axis.
+- **The State B nucleus replaces topology-first sequencing** (§3 below):
+  a fresh, small namespace set with zero baggage, composed from the
+  trusted components; old `src/` files stay unlinked unless adopted as
+  libraries; delete-never-port stays in force.
+- **The construction experiment is explicit**: per nucleus namespace, the
+  orchestrator authors the data model + `:=>` contracts + tests (with the
+  crash-walk discipline); ONE sol lane implements THAT namespace until
+  green without touching a schema or test; the orchestrator reviews,
+  integrates, and proves live. This tests the generate-code thesis on our
+  own core.
+
 ## 1. The base constructs
 
 Everything the runtime is made of. Every step below is an application of
@@ -391,139 +428,78 @@ names: the write half of a primitive exists and the read half does not, or
 one object is doing two constructs' jobs. Nothing here needs an eighth
 construct.
 
-## 3. The steps
+## 3. The nucleus — the one ordering (rewritten 2026-07-26 s3)
 
-Each: the capability, the change, landmines respected (§4), a falsifier.
+The State B nucleus is built spec-first, per namespace, from a small base.
+Each phase names its trusted libraries, its falsifier, and absorbs what the
+old capability-ordered steps still owed. The old steps are superseded — do
+not resurrect them; their surviving content is named inside each phase.
 
-### Step 1 — An agent can act
+**Trusted components (libraries, not baggage):** Datahike (`:self` writer,
+in-process), `seon.schema` (register!/bridge), `seon.sci.eval` (guarded
+eval + computed binding table + home-require exposure), `seon.flow`
+(flow.spi), the JVM indexer + initialization pages + template store
+(`2ef6f0bbd`, `c669c2f6b` — old step 5, DONE), `seon.repl.parse`,
+`seon.eval.receipt`. Everything else in `src/` stays unlinked until a phase
+adopts it deliberately.
 
-One live reply uses db, blob, messaging, fs, and web through one door.
-**Change:** `seon.sci.ctx/base` gains one computed, schema'd binding table
-whose capability functions all enter one guarded dispatcher; derive it from
-the corpus facts today's initialization pages already commit, so no producer
-change blocks it. Writes carry the existing operation-ID contract.
-**Landmines:** L17 (computed, never the old two hand lists), L10, L1 (a
-blocked host call keeps exactly its one permit — accepted residue until step
-8 places foreign work), L20. **Falsifier:** the five-capability live reply
-commits its receipts; `rg` finds no literal toolkit list and no per-family
-session path; removing a capability fn from the corpus removes it from the
-table with zero source edits. First: it blocks every demo, and steps 3–4 are
-proven through it.
+### N1 — `seon.cluster.boot`: one process, from source
 
-### Step 2 — The machine proves itself
+One JVM opens the store directly (`:self` writer in-process, the one
+`flock` assert — L6/O2), loads the initialization pages from the publish
+artifact/template store, publishes a readiness fact, serves io-prepl, and
+in dev runs FROM SOURCE (no AOT — the build split ruling). Orchestrator
+authors: boot data model (readiness/identity facts), refusal contracts,
+tests. **Falsifier:** boot in seconds; edit a namespace and REPL-reload
+changes behavior with zero rebuild; a second open of the same store
+refuses loudly; kill -9 and reopen recovers cleanly.
 
-Every claim above is claimed by a runner that runs. **Change:**
-`bin/test-writer` restored behind one `bin/seon up`/`down` artifact freeze;
-it claims the standing regression classes — resume-ordinal holes, duplicate
-execution, poison-pill terminal receipts, plan-CAS splices, lazy admission,
-door-is-computed — plus the open row-6 items: derive message identity from
-`(run, ordinal, epoch)` (today `lifecycle-tx-data`'s reply message takes a
-fresh allocated id, so re-execution can double-send) and bounded provider
-attempt facts on the frozen request. Keep one regression that wake damping
-holds: the terminal reply asserts wake attribute `:seon.agent.message/to`,
-damped only by `pending-message-query`'s `:origin :human` filter (L8).
-**Falsifier:** `bin/test-writer` count > 0 and red on any seeded regression.
-A standing lane from the same day as step 1 (blocked runner = development
-incident); second only because step 1 defines what it covers.
+### N2 — `seon.cluster.run`: the run data model
 
-### Step 3 — What an agent returns is whole, bounded, and diagnosed
+Run/claim/lease/eval-receipt facts and their PURE transitions: open,
+claim (CAS + epoch), heartbeat, release, close, and the crash rule —
+mark dangling receipts `:interrupted` at boot; nothing re-executes.
+Absorbs the custody-B verdict (a run is not claimable until its plan
+exists) and the run-opened-before-plan window. The heaviest generative
+property surface in the nucleus. **Falsifier:** generated interleavings
+of claim/kill/reopen never yield two live claims, a lost commit, or a
+re-executed form; the interrupted warning derives from facts and vanishes
+when the run closes.
 
-Any value an eval produces crosses out eager, capped, printable, explained.
-**Change:** one admission operation inside `seon.sci.eval/evaluate` before
-`::interrupt/stop!`: deep realization, depth/item/string caps, bounded print
-capture; the terminal receipt keeps `:seon.eval/fn-entries` and
-`:seon.eval/allocated-bytes` (today dropped); the time limit and caps become
-config facts (`drive-sources!` hardcodes 60000). Same totality at the wire:
-merge `persisted-value?` into one `ordinary-wire-value?` in
-`seon.db.protocol`; delete the `pr-str` degradation path. **Landmines:** L3
-(one choke point, never per consumer), L2, L16. **Falsifier:** a returned
-lazy bomb runs zero callbacks after `evaluate` returns and comes back
-`:time`; `(map inc [1 2 3])` crosses as `(2 3 4)`; a kill receipt carries the
-spin-versus-blocked numbers. Before step 4: corpus values and renders both
-cross this boundary.
+### N3 — `seon.cluster.loop`: the run loop as a flow proc
 
-### Step 4 — Code an agent writes today exists tomorrow
+Wake (`listen!` interest) → claim → derived prompt → model call on `:io`
+→ plan freeze (absent→digest CAS) → reduce forms through the guarded
+eval → commit facts with provenance meta. Errors are values the agent
+sees. Absorbs the old step-1 capability goal: the computed binding table
++ home-require exposure already land db/message/lifecycle in the eval
+world; blob/fs/shell/web arrive as ordinary owners with schemas when a
+phase needs them. **Falsifier:** a real agent turn against DeepSeek on
+the one JVM; then kill -9 mid-turn — next wake shows the one interrupted
+warning and the agent adapts; zero refires.
 
-An agent defines a function in form 1, calls it in form 2, and another agent
-calls it next turn after a restart. **Change:** (a) thread each report's
-`:db-after` plus namespace identity into the next evaluate as the fold basis
-— never a retained ctx; (b) the terminal transaction commits canonical
-`:seon.fn`/`:seon.ns`/`:seon.schema`/require-edge facts with agent+process
-provenance, requiring a complete `:malli/schema` for durable defns; (c)
-acquisition materializes a namespace from corpus facts at a basis into the
-fresh fork — `:namespaces` plus one `:load-fn`, and the fork materializes the
-current namespace itself. **Landmines:** L5 (the fold basis is measured
-FORCED), L14, L15, L13. **Falsifier:** the two-form reply returns the value,
-not "Unable to resolve symbol"; kill the JVM; a second agent requires and
-calls the function next turn — proof is committed datoms.
+### N4 — `seon.cluster.render`: the in-process render pipeline
 
-### Step 5 — The index has one producer
+Old step 7 unchanged in content (interest wake → render proc through the
+one guarded eval → equality suppression → mult → per-tab
+`(sliding-buffer 1)` taps → one bounded SSE per tab; two projections
+:seon.render/ai + :seon.render/html), now targeting the nucleus JVM.
+**Falsifier:** 32 tabs → one authored evaluation; the loop canvas costs
+one bounded eval and the agent learns why.
 
-A fresh cluster starts with every first-party function, schema, and test
-already facts, produced by one JVM build step — never at runtime. **Change:**
-a JVM compile-time indexer in `script/seon/dev/` emits mandatory
-initialization pages and becomes the one caller of
-`seon.db.program/compile-tx-data` (today: only its own test); delete
-`seon.db.protocol/initialization-pages`' "or derive from raw initialization"
-branch — missing pages fail loudly; make `::calls` sound (three discard sites
-in `seon.program.edge`, ledger row 10) so purity and placement stay computed.
-**Landmines:** L17, L18. **Falsifier:** a throwaway cluster resets from pages
-with shadow-cljs stopped; deleting the pages artifact fails boot loudly, not
-slowly; a call graph reaching a capability edge is never classified pure.
-Forced before step 6 finishes: the shadow hooks are today's only producer.
+### N5 — corpus round trip (old step 4)
 
-### Step 6 — One system, two process kinds (revised per rulings 2026-07-26 PM)
+defn in form 1 → committed program facts → callable in form 2 and by
+another agent after restart; acquisition at a basis; `:malli/schema`
+required for durable defns. **Falsifier:** old step 4 verbatim.
 
-`bin/seon up` starts watcher and cluster JVM(s) — web-render MERGES into the
-cluster JVM (each cluster serves its own UI in-memory); kill any process and
-the system recovers from facts. **Change:** the pod cut per
-`research/pod-cut-verdict-2026-07-26.md` — groups 1–4 (15,231 lines) now,
-they block nothing; group 5 (substrate, 8,806) after step 5 replaces the
-pages producer; then `:seon.dev.process/pod` leaves
-`script/seon/dev/process.clj`. Merge writer and host into the one cluster JVM
-per store (O1 co-location; the measured shared-writer topology contradicts
-O9), and make the two-writer configuration refuse to open once O2 amends
-`architecture.md:242-246`. `bin/test-writer` claims the ground the 98 CLJS
-test namespaces held — no fourth runner. **Landmines:** L6 (refusal, not
-documentation), L7 (lease wake stays event-armed, `arm-lease-wake!`), L18.
-**Falsifier:** the reset-boundary live proof on the default cluster with the
-pod gone; two JVMs pointed at one store: the second refuses to open, loudly.
+### N6 — proofs, gates, leaves
 
-### Step 7 — A human watches without costing the agents anything (REVISED per rulings 2026-07-26 PM — O14 dissolved, in-process pipeline)
-
-Any number of tabs sees every agent live; an authored infinite-loop canvas
-costs one bounded evaluation and the agent learns why. **Change:** the
-in-process flow pipeline, same JVM, no stored snapshot:
-`listen!` interest wake `(sliding-buffer 1)` → one render proc per render
-unit running agent-authored renderers through the ONE
-`seon.sci.eval/evaluate` (admission via step 3's boundary) → equality
-suppression with the current snapshot held in registration memory → `mult` →
-per-tab per-visible-unit `(sliding-buffer 1)` taps → per-tab `:io` writer
-proc batching datastar element patches onto ONE bounded SSE connection per
-tab (this fences http-kit's unbounded socket queue, filed). Fine-grained
-element morphs are preserved exactly; the initial paint is the only
-whole-page render; restart = one re-render per pinned canvas. Streamed
-reply partials ride the same pipeline as another producer (their coalesced
-no-history fact is retired). Delete the 15 render-held files and
-`seon.reactive`'s CLJS async branches.
-`research/jvm-render-design-2026-07-26.md` needs revision to this target
-before implementation.
-**Landmines:** L3 (no authored closure after disarm), L2, L7. **Falsifier:**
-32 tabs → one authored evaluation; reconnect after zero consumers → zero; the
-loop canvas → error morph to every consumer, healthy server, and a committed
-`:agent` fault distinguishing spin from blocked.
-
-### Step 8 — Packages return as disposable leaves (LAST, O10)
-
-An agent calls a function from an installed JS package; the process serving
-it can be killed freely. **Change:** choose and prove one package-native
-compile/install-time surface enumeration (GAP 5 — nothing owns this after
-step 5 deletes shadow indexing); runtime only reads its committed facts;
-placement derives from the indexed call graph. **Landmines:** L1 (the leaf is
-the cancellation boundary a blocked call finally gets), L10, L17.
-**Falsifier:** kill the leaf mid-call: the agent receives a flat error naming
-what may have happened; the surface facts exist with zero runtime
-enumeration.
+`bin/test-writer` claims every nucleus class (old step 2 standing);
+function-level affected-test selection over the program graph replaces
+the namespace-closure hook; disposable leaves last (old step 8, O10).
+The final system gate (§top) is unchanged: live agents for an hour,
+load-tested to a named wall, fast with conditions, every smell chased.
 
 ## 4. The landmines — standing constraints
 
