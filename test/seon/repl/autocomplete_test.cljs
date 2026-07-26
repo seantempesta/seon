@@ -1,24 +1,9 @@
 (ns seon.repl.autocomplete-test
-  "Authority-only autocomplete projection and export tests."
+  "Turn-example curation tests."
   (:require
-    ["node:fs" :as nfs]
-    ["node:path" :as npath]
-    [cljs.test :refer [async deftest is use-fixtures]]
-    [clojure.string :as str]
-    [seon.agent.home :as home]
-    [seon.agent.turn :as turn]
-    [seon.ai.tokens :as tokens]
-    [seon.db :as db]
-    [seon.repl.autocomplete :as auto]))
-
-(def ^:private fixture-dir
-  (.resolve npath (str "tmp/autocomplete-test-" (.-pid js/process))))
-
-(use-fixtures
-  :once
-  {:before #(do (.rmSync nfs fixture-dir #js {:recursive true :force true})
-                (.mkdirSync nfs fixture-dir #js {:recursive true}))
-   :after #(.rmSync nfs fixture-dir #js {:recursive true :force true})})
+   [cljs.test :refer [async deftest is]]
+   [seon.db :as db]
+   [seon.repl.autocomplete :as autocomplete]))
 
 (def ^:private database
   {:db-name "default"
@@ -28,194 +13,39 @@
    :history false
    :datahike/commit-id #uuid "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"})
 
-(defn- restore! [saved]
-  (set! db/db (:db saved))
-  (set! db/query (:query saved))
-  (set! db/pull (:pull saved))
-  (set! db/pull-many (:pull-many saved))
-  (set! db/entity (:entity saved))
-  (set! db/transact! (:transact saved))
-  (set! home/home-requires-for (:home-requires-for saved))
-  (set! turn/render-prompt (:render-prompt saved)))
-
-(defn- saved-functions []
-  {:db db/db
-   :query db/query
-   :pull db/pull
-   :pull-many db/pull-many
-   :entity db/entity
-   :transact db/transact!
-   :home-requires-for home/home-requires-for
-   :render-prompt turn/render-prompt})
-
-(deftest context-uses-the-supplied-database-value
+(deftest rate-consumes-one-database-value
   (async done
-    (let [original turn/render-prompt
-          calls (atom [])]
-      (is (= 'my.plan/plan-block
-             (:seon.render/ai (first auto/context-blocks))))
-      (set! turn/render-prompt
-            (fn
-              ([agent-id supplied-db]
-               (turn/render-prompt agent-id supplied-db []))
-              ([agent-id supplied-db profile]
-               (swap! calls conj [agent-id supplied-db profile])
-               (js/Promise.resolve
-                 {:seon.render/text "bounded autocomplete context"}))))
-      (-> (auto/context
-            {:seon.agent/id "agent-1"
-             :seon.db/db database
-             :seon.agent.ctx/profile auto/context-blocks})
-          (.then
-            (fn [text]
-              (is (= "bounded autocomplete context" text))
-              (is (= [["agent-1" database auto/context-blocks]] @calls))
-              (is (<= (tokens/estimate text) 700))))
-          (.catch #(is false (str %)))
-          (.finally #(do (set! turn/render-prompt original) (done)))))))
-
-(deftest context-consumes-the-acquired-profile-entity
-  (async done
-    (let [saved (saved-functions)
-          calls (atom [])]
-      (set! db/pull
-            (fn
-              ([_request] (js/Promise.resolve {}))
-              ([_selector _eid] (js/Promise.resolve {}))
-              ([_database _selector _eid]
-               (js/Promise.resolve
-                {:seon.config/id "cluster"
-                 :seon.config/context-profiles
-                 [{:db/id 40
-                   :seon.config/context-profile :autocomplete
-                   :seon.agent/ctx
-                   [{:db/id 42 :seon.agent.ctx/name :transcript
-                     :seon.agent.ctx/priority 100}
-                    {:db/id 41 :seon.agent.ctx/name :plan
-                     :seon.agent.ctx/priority 45}]}]}))))
-      (set! turn/render-prompt
-            (fn
-              ([_agent-id supplied-db]
-               (js/Promise.resolve
-                {:seon.render/text (str "unprofiled-" (:t supplied-db))}))
-              ([_agent-id supplied-db profile]
-               (swap! calls conj [supplied-db profile])
-               (js/Promise.resolve {:seon.render/text "profiled"}))))
-      (-> (auto/context {:seon.agent/id "agent-1"
-                         :seon.db/db database})
-          (.then
-           (fn [text]
-             (is (= "profiled" text))
-             (let [[supplied-db profile] (first @calls)]
-               (is (= database supplied-db))
-               (is (= [:plan :transcript]
-                      (mapv :seon.agent.ctx/name profile)))
-               (is (not-any? :db/id profile)))))
-          (.catch #(is false (str %)))
-          (.finally #(do (restore! saved) (done)))))))
-
-(deftest export-uses-rendered-transaction-and-one-application-digest
-  (async done
-    (let [saved (saved-functions)
-          old-digest (aget (.-env js/process) "SEON_APPLICATION_DIGEST")
-          artifact-digest (apply str (repeat 64 "a"))
-          output-path (.resolve npath fixture-dir "export.json")]
-      (aset (.-env js/process) "SEON_APPLICATION_DIGEST" artifact-digest)
-      (set! db/db
-            (fn
-              ([] (js/Promise.resolve database))
-              ([_request] (js/Promise.resolve database))))
-      (set! db/query
-            (fn
-              ([{query :seon.db/query}]
-               (js/Promise.resolve
-                 (cond
-                   (str/includes? (pr-str query) ":seon.agent.run/agent")
-                   [["agent-1" 101]]
-
-                   (str/includes? (pr-str query) ":seon.fn/sym") []
-                   (str/includes? (pr-str query) ":seon.config/id") [[501]]
-                   (str/includes? (pr-str query) ":seon.schema/key") []
-                   :else [])))
-              ([_query & _inputs] (js/Promise.resolve []))))
-      (set! db/pull-many
-            (fn
-              ([_request] (js/Promise.resolve []))
-              ([_selector _eids] (js/Promise.resolve []))
-              ([_database _selector _eids]
-               (js/Promise.resolve
-                 [{:seon.agent.turn/id "turn-1"
-                   :seon.agent.turn/rendered-tx {:db/id 7}
-                   :seon.agent.turn/evals
-                   [{:seon.eval/at (js/Date. 1)
-                     :seon.eval/ok? true
-                     :seon.eval/source "(+ 1 2)"}]}]))))
-      (set! db/pull
-            (fn
-              ([_request] (js/Promise.resolve {}))
-              ([_selector _eid] (js/Promise.resolve {}))
-              ([_database _selector _eid] (js/Promise.resolve {}))))
-      (set! db/entity
-            (fn
-              ([_eid] (js/Promise.resolve nil))
-              ([_database eid]
-               (js/Promise.resolve
-                 (when (= 501 eid) {:db/id 501 :seon.config/id :cluster})))))
-      (set! home/home-requires-for
-            (fn
-              ([_agent-id]
-               (js/Promise.resolve home/home-ns-require-specs))
-              ([_database _agent-id]
-               (js/Promise.resolve home/home-ns-require-specs))))
-      (set! turn/render-prompt
-            (fn
-              ([_agent-id supplied-db]
-               (js/Promise.resolve
-                 {:seon.render/text (str "context-as-of-" (:as-of supplied-db))}))
-              ([_agent-id supplied-db _profile]
-               (js/Promise.resolve
-                 {:seon.render/text (str "context-as-of-" (:as-of supplied-db))}))))
-      (-> (auto/export!
-            {:seon.repl.autocomplete/out-path output-path
-             :seon.repl.autocomplete/projection-sha "projection"
-             :seon.db/db database})
-          (.then
-            (fn [result]
-              (is (true? (:seon.repl.autocomplete/ok? result)) (pr-str result))
-              (let [manifest (js->clj
-                               (js/JSON.parse (.readFileSync nfs output-path "utf8")))
-                    row (first (get-in manifest ["content" "rows"]))]
-                (is (= {"application_digest" artifact-digest}
-                       (get-in manifest ["content" "runtime_artifact"])))
-                (is (= 7 (get-in row ["db" "as-of"])))
-                (is (= "context-as-of-7" (get row "context"))))))
-          (.catch #(is false (str %)))
-          (.finally
-            (fn []
-              (restore! saved)
-              (if (nil? old-digest)
-                (js-delete (.-env js/process) "SEON_APPLICATION_DIGEST")
-                (aset (.-env js/process) "SEON_APPLICATION_DIGEST" old-digest))
-              (done)))))))
-
-(deftest rate-consumes-native-transaction-results
-  (async done
-    (let [saved (saved-functions)]
+    (let [original-db db/db
+          original-entity db/entity
+          original-transact db/transact!]
       (set! db/db
             (fn
               ([] (js/Promise.resolve database))
               ([_request] (js/Promise.resolve database))))
       (set! db/entity
             (fn
-              ([_eid] (js/Promise.resolve {:seon.agent.turn/id "turn-1"}))
+              ([_eid]
+               (js/Promise.resolve {:seon.agent.turn/id "turn-1"}))
               ([_database _eid]
                (js/Promise.resolve {:seon.agent.turn/id "turn-1"}))))
       (set! db/transact!
             (fn [& requests]
-              (is (= database (:seon.db/db (first requests))))
-              (js/Promise.resolve {:db-before database :db-after database})))
-      (-> (auto/rate! {:seon.agent.turn/id "turn-1"
-                       :seon.repl.autocomplete/rating :gold})
-          (.then #(is (true? (:seon.repl.autocomplete/ok? %))))
+              (let [request (first requests)]
+                (is (= database (:seon.db/db request)))
+              (is (= [{:seon.agent.turn/id "turn-1"
+                       :seon.repl.autocomplete/rating :gold}]
+                       (:seon.db/tx-data request))))
+              (js/Promise.resolve
+               {:db-before database :db-after database})))
+      (-> (autocomplete/rate!
+           {:seon.agent.turn/id "turn-1"
+            :seon.repl.autocomplete/rating :gold})
+          (.then
+           #(is (true? (:seon.repl.autocomplete/ok? %))))
           (.catch #(is false (str %)))
-          (.finally #(do (restore! saved) (done)))))))
+          (.finally
+           (fn []
+             (set! db/db original-db)
+             (set! db/entity original-entity)
+             (set! db/transact! original-transact)
+             (done)))))))

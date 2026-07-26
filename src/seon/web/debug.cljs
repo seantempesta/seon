@@ -84,15 +84,40 @@
    [:h1 {:class "text-signal font-mono"} (str "debug · " agent-id)]
    (if-let [message (:seon.error/message preview)]
      [:div {:class "text-error"} message]
-     [:pre {:id "debug-exact-prompt"
+     [:pre {:id "debug-persisted-turn"
             :class "whitespace-pre-wrap text-xs"}
-      (:seon.render/text preview)])])
+      (or (::agent-debug/reply preview)
+          (::agent-debug/prompt preview)
+          (pr-str preview))])])
+
+(defn- persisted-turn! [agent-id database]
+  (-> (db/query
+       {::db/db database
+        ::db/query
+        '[:find ?turn-id ?at
+          :in $ ?agent-id
+          :where
+          [?agent :seon.agent/id ?agent-id]
+          [?run :seon.agent.run/agent ?agent]
+          [?turn :seon.agent.turn/run ?run]
+          [?turn :seon.agent.turn/id ?turn-id]
+          [?turn :seon.agent.turn/at ?at]]
+        ::db/args [agent-id]})
+      (.then
+       (fn [rows]
+         (if (:seon.error/message rows)
+           rows
+           (if-let [[turn-id] (last (sort-by second rows))]
+             (agent-debug/turn
+              {:seon.agent.turn/id turn-id
+               ::db/db database})
+             {::agent-debug/ok? false
+              ::agent-debug/error
+              (str "no persisted turn for " (pr-str agent-id))}))))))
 
 (defn- render-debug! [agent-id database]
   (-> (js/Promise.all
-       #js [(agent-debug/ctx-preview
-             {:seon.agent/id agent-id
-              ::db/db database})
+       #js [(persisted-turn! agent-id database)
             (system/acquire-fleet-summary database)])
       (.then (fn [[preview agents]]
                (debug-element agent-id preview agents)))))

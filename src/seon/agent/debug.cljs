@@ -1,17 +1,11 @@
 (ns seon.agent.debug
-  "Inspect the exact context and turn data available to an agent.
-
-   This namespace exposes read-only debugging projections over the same
-   acquired prompt, transcript, and persisted turn artifacts used at runtime.
-   It does not introduce a second rendering or capture path."
+  "Inspect persisted turn and error data available to an agent."
   (:require
     [cljs.reader :as reader]
     [clojure.string :as str]
     [my.blob :as blob]
-    [seon.ai :as ai]
     [seon.ai.tokens :as tokens]
     [seon.agent.ctx.usage :as usage]
-    [seon.agent.turn :as turn]
     [seon.db :as db]
     [seon.schema :as schema]))
 
@@ -20,90 +14,6 @@
 ;; unknown id / missing scope is `{::ok? false ::error <guiding>}`).
 (schema/register! ::ok?   :boolean)
 (schema/register! ::error :string)
-
-(schema/register! :seon.agent.debug/request
-  [:map
-   [:seon.agent/id {:optional true} :seon.agent/id]
-   [:seon.db/db {:optional true} :seon.db/db]
-   [:seon.render/formats {:optional true}
-    [:enum #{:ai} #{:ai :html}]]])
-
-;; One resolved context block, carrying either or both rendered formats.
-(schema/register! :seon.agent.debug/rendered-context-block
-  [:map
-   [:seon.agent.ctx/name :seon.agent.ctx/name]
-   [:seon.agent.ctx/priority :seon.agent.ctx/priority]
-   [:seon.render/text {:optional true} :string]
-   [:seon.render/hiccup {:optional true} :seon.render.canvas/hiccup]
-   [:seon.render/token-estimate {:optional true} :int]])
-
-;; `::ok?` required, render keys optional — the same envelope shape as
-;; `::turn-response` below: `::ok? false` + a guiding `::error` when no
-;; agent scope resolves (errors are values, never a throw).
-(schema/register! :seon.agent.debug/ctx-response
-  [:map
-   [::ok? ::ok?]
-   [::error {:optional true} ::error]
-   [:seon.render/text {:optional true} :string]
-   [:seon.agent.ctx/rendered-blocks {:optional true}
-    [:vector :seon.agent.debug/rendered-context-block]]
-   [:seon.render/token-estimate {:optional true} :int]])
-
-(schema/register! :seon.agent.debug/ctx-result
-  [:or
-   :seon.agent.debug/ctx-response
-   [:map
-    [:seon.error/message :string]
-    [:seon.error/kind :keyword]
-    [:seon.error/data {:optional true} :map]]])
-
-(defn- ctx-preview*
-  "Format one accepted compiled prompt result for operator inspection."
-  [{text :seon.render/text
-    system :seon.ai/system-prompt
-    blocks :seon.agent.ctx/rendered-blocks}]
-  (let [full-text (ai/debug-full-prompt {:seon.ai/ctx text
-                                         :seon.ai/system-prompt system})]
-    {::ok?                        true
-     :seon.render/text            full-text
-     :seon.agent.ctx/rendered-blocks
-     (into [{:seon.agent.ctx/name :system
-             :seon.agent.ctx/priority 0
-             :seon.render/text system
-             :seon.render/token-estimate (tokens/estimate system)}]
-           blocks)
-     ;; Estimate over the WHOLE prompt — same units as the composer
-     ;; (~4 chars/token, via seon.ai.tokens), so the count grows by the
-     ;; system-block length.
-     :seon.render/token-estimate  (tokens/estimate full-text)}))
-
-(defn ^:async ctx-preview
-  "Return the FULL prompt the agent would see on its next render.
-
-   The exact bytes the LLM receives: the frozen system block first, then the
-   assembled context. Both come from the same compiled child result the real
-   turn consumes, so the debug adapter has no local prompt renderer or config
-   fallback.
-   `:seon.render/text` = system + boundary + context.
-   `:seon.agent.ctx/rendered-blocks` leads with the `:system` block, then the
-   exact ordered context blocks with whichever render formats they declare.
-   `:seon.render/token-estimate` counts the WHOLE
-   prompt (system included). An explicit immutable `:seon.db/db` is used
-   as-is; omission uses the session's cached latest value. Errors are
-   values: no id and no agent scope returns `::ok? false` plus a
-   guiding `::error` — nothing throws."
-  {:malli/schema [:=> [:cat :seon.agent.debug/request] :seon.agent.debug/ctx-result]}
-  [{:seon.agent/keys [id]
-    database :seon.db/db}]
-  (if-let [id (or id (db/current-agent-id))]
-    (let [database (or database (await (db/db)))
-          rendered (await (turn/render-prompt id database))]
-      (if (:seon.error/message rendered)
-        rendered
-        (ctx-preview* rendered)))
-    {::ok?   false
-     ::error (str "seon.agent.debug/ctx-preview: no agent-id — pass "
-                  ":seon.agent/id or call inside (seon.db/with-agent id ...).")}))
 
 ;;; ============================================================
 ;;; Turn reconstruction — read one persisted turn from its rendered transaction,

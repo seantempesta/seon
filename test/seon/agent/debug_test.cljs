@@ -1,11 +1,10 @@
 (ns seon.agent.debug-test
-  "Point-in-time compiled-child contract for agent context preview."
+  "Persisted turn and error debugging tests."
   (:require
     [cljs.test :refer [async deftest is]]
     [clojure.string :as str]
     [seon.agent.ctx.usage :as usage]
     [seon.agent.debug :as debug]
-    [seon.agent.turn :as turn]
     [seon.db :as db]))
 
 (def database
@@ -15,62 +14,6 @@
    :since nil
    :history false
    :datahike/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"})
-
-(deftest preview-keeps-system-and-context-on-one-database-value
-  (async done
-    (let [original turn/render-prompt
-          calls (atom [])]
-      (set! turn/render-prompt
-            (fn
-              ([agent-id database]
-               (swap! calls conj [agent-id database])
-               (js/Promise.resolve
-                {:seon.render/text "context bytes"
-                 :seon.ai/system-prompt "frozen system"
-                 :seon.agent.ctx/rendered-blocks
-                 [{:seon.agent.ctx/name :context
-                   :seon.agent.ctx/priority 10
-                   :seon.render/text "context bytes"}]}))
-              ([agent-id database _profile]
-               (turn/render-prompt agent-id database))))
-      (-> (debug/ctx-preview
-            {:seon.agent/id "agent-1"
-             :seon.db/db database})
-          (.then
-            (fn [preview]
-              (let [system-block
-                    (first (:seon.agent.ctx/rendered-blocks preview))]
-                (is (= [["agent-1" database]] @calls))
-                (is (= "frozen system" (:seon.render/text system-block)))
-                (is (str/starts-with? (:seon.render/text preview)
-                                      "frozen system"))
-                (is (str/ends-with? (:seon.render/text preview)
-                                    "context bytes")))))
-          (.catch (fn [error] (is false (str error))))
-          (.finally
-            (fn []
-              (set! turn/render-prompt original)
-              (done)))))))
-
-(deftest preview-preserves-the-compiled-child-error
-  (async done
-    (let [original turn/render-prompt
-          child-error {:seon.error/message "authority unavailable"
-                       :seon.error/kind :core-bug
-                       :seon.error/data {:seon.db/results []}}]
-      (set! turn/render-prompt
-            (fn
-              ([_ _] (js/Promise.resolve child-error))
-              ([_ _ _] (js/Promise.resolve child-error))))
-      (-> (debug/ctx-preview
-            {:seon.agent/id "agent-1"
-             :seon.db/db database})
-          (.then (fn [result] (is (= child-error result))))
-          (.catch (fn [error] (is false (str error))))
-          (.finally
-            (fn []
-              (set! turn/render-prompt original)
-              (done)))))))
 
 (deftest turn-reconstruction-uses-one-ordinary-database-value
   (async done
