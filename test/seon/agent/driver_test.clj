@@ -1,7 +1,10 @@
 (ns seon.agent.driver-test
   (:require [clojure.test :refer [deftest is testing]]
+            [datahike.api :as d]
+            [seon.agent.ctx.render-fns]
             [seon.agent.driver :as driver]
             [seon.agent.run.core :as run]
+            [seon.db :as db]
             [seon.db.host :as db.host])
   (:import [java.util.concurrent CountDownLatch TimeUnit]))
 
@@ -16,14 +19,95 @@
      (ex-info "The driver test did not observe its required event."
               {:seon.agent.driver-test/event event}))))
 
+(def ^:private wake-schema-attributes
+  [:seon.agent/id
+   :seon.agent/run
+   :seon.agent.message/id
+   :seon.agent.message/from
+   :seon.agent.message/to
+   :seon.agent.message/content
+   :seon.agent.message/at
+   :seon.agent.message/origin
+   :seon.agent.run/id
+   :seon.agent.run/agent
+   :seon.agent.run/cause
+   :seon.agent.run/started-at
+   :seon.agent.run/status
+   :seon.agent.run/process
+   :seon.agent.run/claim-epoch
+   :seon.agent.run/lease-until])
+
+(defn- with-wake-database [body]
+  (let [configuration
+        {:store {:backend :memory :id (random-uuid)}
+         :schema-flexibility :write}
+        _ (d/create-database configuration)
+        connection (d/connect configuration)]
+    (try
+      (d/transact connection
+                  (db/malli->datahike-schema wake-schema-attributes))
+      (body connection)
+      (finally
+        (d/release connection)
+        (d/delete-database configuration)))))
+
+(defn- transact-agent-message!
+  [connection recipients]
+  (let [at #inst "2026-07-26T12:00:00.000-00:00"]
+    (d/transact
+     connection
+     [{:seon.agent/id "sender"}
+      {:seon.agent/id "recipient"}
+      {:seon.agent.message/id "message-a"
+       :seon.agent.message/from [:seon.agent/id "sender"]
+       :seon.agent.message/to
+       (mapv (fn [agent-id] [:seon.agent/id agent-id]) recipients)
+       :seon.agent.message/content "Do the work."
+       :seon.agent.message/at at
+       :seon.agent.message/origin :agent}])
+    at))
+
+(defn- pending-wakes [connection]
+  (#'driver/pending-messages
+   {'query
+    (fn [{query :seon.db/query}]
+      (d/q query @connection))}))
+
+(deftest agent-origin-message-makes-only-its-recipient-claimable
+  (with-wake-database
+    (fn [connection]
+      (let [at (transact-agent-message!
+                connection ["sender" "recipient"])]
+        (is (= [["message-a" "recipient" "Do the work." at]]
+               (pending-wakes connection))
+            "the one inbound rule admits the recipient and rejects the sender")))))
+
+(deftest processed-wake-cannot-reenumerate-the-same-message
+  (with-wake-database
+    (fn [connection]
+      (let [at (transact-agent-message! connection ["recipient"])]
+        (is (= 1 (count (pending-wakes connection)))
+            "the message is claimable before run admission")
+        (d/transact
+         connection
+         (driver/open-run-tx-data
+          "run-a" "host-1" "message-a" "recipient" at
+          #inst "2026-07-26T12:20:00.000-00:00"))
+        (is (empty? (pending-wakes connection))
+            "the run cause damps the processed message without another wake")))))
+
 (defn- in-flight-scan-measurement [agent-count]
   (let [messages
         (mapv
          (fn [ordinal]
-           [(str "message-" ordinal)
-            (str "agent-" ordinal)
-            "Complete."
-            #inst "2026-07-26T12:00:00.000-00:00"])
+           [{:seon.agent.message/id (str "message-" ordinal)
+             :seon.agent.message/content "Complete."
+             :seon.agent.message/at
+             #inst "2026-07-26T12:00:00.000-00:00"
+             :seon.agent.message/origin :human
+             :seon.agent.message/from {:db/id 1}}
+            {:db/id (+ 2 ordinal)
+             :seon.agent/id (str "agent-" ordinal)}])
          (range agent-count))
         processing-started (CountDownLatch. agent-count)
         processing-finished (CountDownLatch. agent-count)

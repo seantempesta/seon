@@ -330,14 +330,18 @@
   (sci.eval/evaluate request))
 
 (def ^:private pending-message-query
-  '[:find ?message-id ?agent-id ?content ?at
+  '[:find
+    (pull ?message
+          [:seon.agent.message/id
+           :seon.agent.message/content
+           :seon.agent.message/at
+           :seon.agent.message/origin
+           {:seon.agent.message/from [:db/id]}])
+    (pull ?agent [:db/id :seon.agent/id])
     :where
-    [?message :seon.agent.message/id ?message-id]
-    [?message :seon.agent.message/origin :human]
+    [?message :seon.agent.message/id _]
     [?message :seon.agent.message/to ?agent]
-    [?agent :seon.agent/id ?agent-id]
-    [?message :seon.agent.message/content ?content]
-    [?message :seon.agent.message/at ?at]
+    [?agent :seon.agent/id _]
     (not [?run :seon.agent.run/cause ?message])])
 
 (def ^:private recoverable-run-query
@@ -410,11 +414,20 @@
     (transact! database-functions tx-data)))
 
 (defn- pending-messages [database-functions]
-  ((get database-functions 'query)
-   {:seon.db/query pending-message-query
-    :datahike.resource/max-work 100000
-    :datahike.resource/max-results 64
-    :datahike.resource/max-result-weight 131072}))
+  (into
+   []
+   (keep
+    (fn [[message-row agent]]
+      (when (message/waking-inbound? message-row (:db/id agent))
+        [(:seon.agent.message/id message-row)
+         (:seon.agent/id agent)
+         (:seon.agent.message/content message-row)
+         (:seon.agent.message/at message-row)])))
+   ((get database-functions 'query)
+    {:seon.db/query pending-message-query
+     :datahike.resource/max-work 100000
+     :datahike.resource/max-results 64
+     :datahike.resource/max-result-weight 131072})))
 
 (defn- start-virtual-thread! [task]
   (Thread/startVirtualThread task))
