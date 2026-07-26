@@ -40,10 +40,22 @@
           [{:seon.eval/ordinal 0 :seon.eval/status :done}
            {:seon.eval/ordinal 1 :seon.eval/status :error}])))))
 
+(deftest new-run-pointer-uses-the-same-transaction-tempid
+  (let [[cas run]
+        (driver/open-run-tx-data
+         "host-1" "message-a" "agent-a"
+         #inst "2026-07-25T22:00:00.000-00:00"
+         #inst "2026-07-25T22:02:00.000-00:00")]
+    (is (= (:db/id run) (last cas)))
+    (is (= [:seon.agent.message/id "message-a"]
+           (:seon.agent.run/cause run)))
+    (is (= 1 (:seon.agent.run/claim-epoch run)))))
+
 (deftest completion-value-closes-run-and-delivers-once
   (let [request {:seon.agent/id "agent-a"
                  :seon.agent.run/id "run-a"
                  :seon.agent.run/claim-epoch 3
+                 :seon.agent.turn/id "turn-a"
                  :seon.eval/ordinal 2
                  :seon.eval/at
                  #inst "2026-07-25T22:00:00.000-00:00"}

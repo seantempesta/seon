@@ -329,22 +329,29 @@
     :datahike.resource/max-results 2048
     :datahike.resource/max-result-weight 262144}))
 
+(defn open-run-tx-data
+  "Build the atomic idle-agent pointer and new run transaction."
+  [process-id message-id agent-id at lease-until]
+  (let [run-id (compact-id "r" message-id)
+        run-tempid "seon.agent.driver/run"]
+    [[:db.fn/cas [:seon.agent/id agent-id] :seon.agent/run nil run-tempid]
+     {:db/id run-tempid
+      :seon.agent.run/id run-id
+      :seon.agent.run/agent [:seon.agent/id agent-id]
+      :seon.agent.run/cause [:seon.agent.message/id message-id]
+      :seon.agent.run/started-at at
+      :seon.agent.run/status :open
+      :seon.agent.run/process process-id
+      :seon.agent.run/claim-epoch 1
+      :seon.agent.run/lease-until lease-until}]))
+
 (defn- open-run!
   [database-functions process-id message-id agent-id at lease-until]
   (let [run-id (compact-id "r" message-id)
-        run-ref [:seon.agent.run/id run-id]
         result
         (transact!
          database-functions
-         [[:db.fn/cas [:seon.agent/id agent-id] :seon.agent/run nil run-ref]
-          {:seon.agent.run/id run-id
-           :seon.agent.run/agent [:seon.agent/id agent-id]
-           :seon.agent.run/cause [:seon.agent.message/id message-id]
-           :seon.agent.run/started-at at
-           :seon.agent.run/status :open
-           :seon.agent.run/process process-id
-           :seon.agent.run/claim-epoch 1
-           :seon.agent.run/lease-until lease-until}])]
+         (open-run-tx-data process-id message-id agent-id at lease-until))]
     (when-not (:seon.error/message result)
       {:seon.agent.run/id run-id
        :seon.agent.run/claim-epoch 1})))
