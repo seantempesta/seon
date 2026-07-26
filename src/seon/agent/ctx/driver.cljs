@@ -364,7 +364,8 @@
              (or (::render-fns/current-ns namespace-value)
                  (symbol (str "my.agent." id))))
              (config.resolve/llm-retry-configuration cluster-config-row)
-             (ai/reply-policy-from-rows cluster-config-row entity)))))))
+             (ai/reply-configuration-from-rows
+              cluster-config-row entity)))))))
 
 (def agent-view-members
   [(merge

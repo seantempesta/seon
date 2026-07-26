@@ -607,12 +607,12 @@
   (core/resolved-config-from-rows
    shipped-defaults config-row agent-row (config/llm-attempt-timeout-ms)))
 
-(defn reply-policy-from-rows
+(defn reply-configuration-from-rows
   "Resolve wire streaming and reply evaluation from one database value."
   {:malli/schema
    [:=> [:catn [::config-row :map] [::agent-row :map]] :map]}
   [config-row agent-row]
-  (core/reply-policy-from-rows config-row agent-row))
+  (core/reply-configuration-from-rows config-row agent-row))
 
 (defn bounded-evidence-error
   "Bound an evidence error using one resolved positive cap."

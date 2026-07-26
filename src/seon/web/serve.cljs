@@ -1176,12 +1176,13 @@
                        (assoc cluster-row
                               :seon.config/id config/cluster-config-id))
                 agent-row))
-              reply-policy (ai/reply-policy-from-rows cluster-row agent-row)]
+              reply-configuration
+              (ai/reply-configuration-from-rows cluster-row agent-row)]
           (every?
            (fn [attempt]
-             (and (= (:seon.ai/wire-stream? reply-policy)
+             (and (= (:seon.ai/wire-stream? reply-configuration)
                      (:seon.ai.attempt/stream? attempt))
-                  (= (:seon.ai/reply-evaluation reply-policy)
+                  (= (:seon.ai/reply-evaluation reply-configuration)
                      (:seon.ai.attempt/reply-evaluation attempt))
                   (response-identity-valid? attempt resolved)
                   (= (:seon.ai.attempt/adapter attempt)

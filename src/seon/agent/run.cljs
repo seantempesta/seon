@@ -498,14 +498,16 @@
                     " — create the agent first."))
               (let [now        (js/Date.)
             policy     (policy-from stored-policy)
-            reply-policy (ai/reply-policy-from-rows stored-policy a)
+            reply-configuration
+            (ai/reply-configuration-from-rows stored-policy a)
             ;; Run-bound SEED (config-driven agent-init, move 9): the new
             ;; Agent-level datoms are explicit overrides. Cluster defaults are
             ;; the frozen config singleton policy above.
             turn-limit (or tl
                            (:seon.agent/default-turn-limit a)
                            (if (= :first-form
-                                  (:seon.ai/reply-evaluation reply-policy))
+                                  (:seon.ai/reply-evaluation
+                                   reply-configuration))
                              (:seon.config.run/stream-form-limit policy)
                              (:seon.config.run/batch-turn-limit policy)))
             deadline   (or dl (js/Date. (+ (.getTime now)

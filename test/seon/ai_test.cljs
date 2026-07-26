@@ -359,27 +359,27 @@
     (is (= :config-row
            (get-in resolution [::ai/provenance ::ai/max-tokens])))))
 
-(deftest r36-reply-policy-resolves-each-axis-with-legacy-precedence
+(deftest r36-reply-configuration-resolves-each-axis-with-legacy-precedence
   (let [cluster {:seon.ai/wire-stream? false
                  :seon.ai/reply-evaluation :batch
                  :seon.config/repl-mode :batch}]
     (is (= {:seon.ai/wire-stream? false
             :seon.ai/reply-evaluation :batch}
-           (ai/reply-policy-from-rows cluster {})))
+           (ai/reply-configuration-from-rows cluster {})))
     (is (= {:seon.ai/wire-stream? true
             :seon.ai/reply-evaluation :first-form}
-           (ai/reply-policy-from-rows cluster
-                                      {:seon.config/repl-mode :stream}))
+           (ai/reply-configuration-from-rows
+            cluster {:seon.config/repl-mode :stream}))
         "an agent legacy pair outranks exact singleton facts")
     (is (= {:seon.ai/wire-stream? false
             :seon.ai/reply-evaluation :first-form}
-           (ai/reply-policy-from-rows
+           (ai/reply-configuration-from-rows
             {:seon.config/repl-mode :stream}
             {:seon.ai/wire-stream? false}))
         "an exact agent fact overrides only its own axis")
     (is (= {:seon.ai/wire-stream? true
             :seon.ai/reply-evaluation :batch}
-           (ai/reply-policy-from-rows
+           (ai/reply-configuration-from-rows
             {:seon.ai/wire-stream? true
              :seon.ai/reply-evaluation :batch}
             {})))))

@@ -243,7 +243,7 @@
          {:seon.config/model-variants ['*]}]
         (concat config-attrs model-transport-cap-attrs)))
 
-(defn reply-policy-from-rows
+(defn reply-configuration-from-rows
   "Resolve R36 wire and evaluation facts independently from acquired rows."
   {:malli/schema
    [:=> [:catn [::config-row :map] [::agent-row :map]] :map]}
