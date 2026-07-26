@@ -30,18 +30,9 @@
       (and (or (vector? v) (set? v) (list? v))
            (every? ordinary-request-value? v))))
 
-(defn invocation-counter?
-  "True for the invocation-local effect counter (an atom)."
-  [v]
-  #?(:clj (instance? clojure.lang.IAtom v)
-     :cljs (instance? cljs.core/Atom v)))
-
 (schema/register-core-predicate!
  'seon.effect/ordinary-request-value?
  ordinary-request-value?)
-(schema/register-core-predicate!
- 'seon.effect/invocation-counter?
- invocation-counter?)
 
 (schema/register!
  ::args
@@ -54,11 +45,12 @@
        :gen/schema [:map-of :keyword :string]}
   'seon.effect/ordinary-request-value?])
 
-;;; The executing form's effect coordinates. The run loop injects one
-;;; context per form execution; the counter is invocation-local
-;;; coordination (a sanctioned atom) — never indexed, never persisted —
-;;; reset by construction on every re-execution so a re-run derives the
-;;; same ordinal sequence. Effect identity therefore assumes SEQUENTIAL
+;;; The executing form's effect coordinates — pure data, honestly
+;;; generable. The invocation-local counter lives in its OWN dynamic var
+;;; (a sanctioned atom for invocation-local coordination) — never inside
+;;; a registered schema, never indexed, never persisted — reset by
+;;; construction on every re-execution so a re-run derives the same
+;;; ordinal sequence. Effect identity therefore assumes SEQUENTIAL
 ;;; effect issue within one form; a parallel eval surface needs its own
 ;;; identity ruling before it ships.
 
@@ -67,15 +59,20 @@
  [:map {:closed true}
   [::run-id [:string {:min 1}]]
   [::form-ordinal [:int {:min 0}]]
-  [::effect-counter
-   [:fn {:error/message "must be the invocation counter atom"
-         :gen/schema [:= nil]}
-    'seon.effect/invocation-counter?]]
   [:seon.agent/id {:optional true} [:string {:min 1}]]])
 
 (def ^:dynamic *request-context*
   "The executing form's effect coordinates, or nil outside a run."
   nil)
+
+(def ^:dynamic *effect-counter*
+  "The executing form's invocation-local effect counter, or nil."
+  nil)
+
+(defn effect-counter
+  "Build one form execution's fresh effect-ordinal counter."
+  []
+  (atom -1))
 
 (defn request-context
   "Build one form execution's effect context from its receipt coordinates."
@@ -84,8 +81,7 @@
                   ::request-context]}
   [run-id form-ordinal]
   {::run-id run-id
-   ::form-ordinal form-ordinal
-   ::effect-counter (atom -1)})
+   ::form-ordinal form-ordinal})
 
 (defn op-id
   "Derive one effect's replay identity from its executing coordinates."
@@ -103,6 +99,6 @@
   explicit `:seon.capability/op-id`."
   {:malli/schema [:=> [:cat] [:maybe [:string {:min 1}]]]}
   []
-  (when-let [{::keys [run-id form-ordinal effect-counter]}
-             *request-context*]
-    (op-id run-id form-ordinal (swap! effect-counter inc))))
+  (when-let [{::keys [run-id form-ordinal]} *request-context*]
+    (when-let [counter *effect-counter*]
+      (op-id run-id form-ordinal (swap! counter inc)))))

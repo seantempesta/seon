@@ -139,6 +139,38 @@ namespace and run it through `bin/test-cljs`. Database properties should use a
 fresh connection and exercise the same `schema/register!` → lazy install →
 transact → read-back boundary as the application.
 
+A generator gate is three separate assertions, never one:
+
+1. the generator constructs and runs at fixed seeds and several sizes;
+2. every emitted value validates against the exact compiled schema/registry
+   (`:gen/*` overrides REPLACE generation — Malli never checks their output);
+3. owner-named domain partitions and recursive size bounds are exercised.
+
+Every predicate schema needs an honest `:gen/schema`/`:gen/gen` —
+`:gen/return`, `:gen/elements`, or a token placeholder do not satisfy the
+house rule for an open domain. On failure print the schema key, seed, size,
+generated value, explanation, and the complete shrunk check.
+
+Function contracts split by what the property must observe:
+
+- **One-call `[args result]` relations**: a three-child `:=>` guard; assert
+  `(nil? (mi/check ...))` inside a discovered `deftest` with explicit
+  `:data` — never populate or scan Malli's process-global function-schema
+  registry, and never merely *call* `mi/check` (it returns failures; a suite
+  must assert them). Malli 0.20.0 runs 100 trials and does not forward
+  generator options.
+- **State transitions** (replay, idempotency, "twice", "after resume",
+  committed facts): explicit `(tc/quick-check ... :seed fixed-seed)` invoking
+  the production boundary, observing database facts independently of returned
+  envelopes, asserting `(:result check)` and printing the complete check.
+
+A CLJ-only generator pass cannot certify CLJS — tier-dependent schemas (regex
+above all) need recurring coverage on every owning runner. Grounding and the
+pitfall catalog:
+`docs/prds/sci-execution-runtime/research/malli-generative-patterns-2026-07-26.md`
++ `research/spec-authorship-relational-properties-2026-07-26.md` (the guard
+vs state-transition boundary).
+
 ## Key test files
 
 | File | What it teaches |

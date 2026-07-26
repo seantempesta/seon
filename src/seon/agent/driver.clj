@@ -686,6 +686,7 @@
   {#'effect/*request-context*
    (assoc (effect/request-context run-id ordinal)
           :seon.agent/id agent-id)
+   #'effect/*effect-counter* (effect/effect-counter)
    #'db/*leaf* database-leaf
    #'message/*leaf* (message-platform-leaf)})
 

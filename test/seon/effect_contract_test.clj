@@ -21,7 +21,8 @@
   (testing "identity carries run, form ordinal, and effect ordinal only"
     (is (= (pr-str ["run" 4 0]) (effect/op-id "run" 4 0))))
   (testing "two effects in one form execution derive distinct identities"
-    (binding [effect/*request-context* (effect/request-context "run" 4)]
+    (binding [effect/*request-context* (effect/request-context "run" 4)
+              effect/*effect-counter* (effect/effect-counter)]
       (is (= [(effect/op-id "run" 4 0) (effect/op-id "run" 4 1)]
              [(effect/next-op-id!) (effect/next-op-id!)]))))
   (testing "re-execution derives the identical sequence — claim epoch is
@@ -29,7 +30,9 @@
             repeating"
     (let [sequence-of (fn []
                         (binding [effect/*request-context*
-                                  (effect/request-context "run" 4)]
+                                  (effect/request-context "run" 4)
+                                  effect/*effect-counter*
+                                  (effect/effect-counter)]
                           [(effect/next-op-id!) (effect/next-op-id!)]))]
       (is (= (sequence-of) (sequence-of)))))
   (testing "distinct forms never share an identity"

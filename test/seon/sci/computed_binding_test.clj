@@ -49,7 +49,9 @@
              (eval-with
               {:program-functions ["seon.effect/next-op-id!"]
                :exposed-namespaces #{'seon.effect}
-               :bindings {#'effect/*request-context* context}
+               :bindings {#'effect/*request-context* context
+                          #'effect/*effect-counter*
+                          (effect/effect-counter)}
                :source "(seon.effect/next-op-id!)"}))))))
 
 (deftest require-spec-namespaces-derive-from-policy-data
