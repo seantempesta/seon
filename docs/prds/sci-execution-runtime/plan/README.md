@@ -6,6 +6,34 @@ tags: [prd, agent, architecture, database]
 
 Terminology: this note records evidence from before the rename; the process holding a run is now `:seon.agent.run/process`.
 
+# Seon runtime — the plan
+
+**You are in the right place. Read these four files, in this order, and nothing
+else.**
+
+| file | what it is | trust |
+|---|---|---|
+| **this file** | the ONE ordering: 7 base constructs, 8 capability-ordered steps, the landmines, the open owner rulings | current as of its last edit |
+| [state.md](state.md) | what is TRUE right now, **generated** by `bin/plan-state` from the live tree, every row carrying the command that produced it | **highest — regenerate it and it cannot be stale** |
+| [unsettled.md](unsettled.md) | what is UNDECIDED (needs a ruling), UNKNOWN (needs an experiment), UNBUILT — and where the primitives do not yet compose | current |
+| [history.md](history.md) | what was tried before, with commit hashes, and the mistakes worth not repeating | permanent |
+
+`reference/` holds the audits these steps were derived from, copied here so
+everything is colocated. The originals stay in `../research/`; neither is
+deleted. Cite them, do not re-derive them.
+
+**If [state.md](state.md) disagrees with this file, state.md wins.** Run
+`bin/plan-state` first — this session repeatedly found plan rows that a
+one-day-old document had made wrong, and six of six assumptions falsified in a
+single sitting. Verify against the tree, not against prose.
+
+**A second ordered list anywhere in this chunk is a defect.** Seven once existed
+across six files in five naming schemes, which is why "follow the plan" had no
+referent. An eighth was created and collapsed on 2026-07-26. If you find
+another, delete it and point here.
+
+---
+
 # Sci execution runtime roadmap
 
 ## The final system gate (owner, 2026-07-25 night) — READ THIS FIRST

@@ -30,11 +30,30 @@ Three categories, and the distinction matters:
 | O14 | Does a rendered snapshot get **committed** as a cardinality-one no-history fact? | It stores a derived value, against a standing rule. But it is the only way "render once, cached, still there for a second tab after everyone disconnects" holds; without it, zero-extra-evaluation is true only for *overlapping* consumers. | Commit it. The owner's own words describe materialization, and `:seon.db/no-history?` cardinality-one is already the ratified pattern for high-churn presentation state. Record it as a named exception to derive-don't-store rather than pretending it isn't one. |
 | O4 | Is there an allocation **limit**, or only a diagnostic? | Today it is a diagnostic, so one agent can exhaust the shared heap of every agent in its cluster. | Keep it a diagnostic and accept that heap is the process boundary — no in-process metric can bound it (measured: 200 MB allocated in 1 ms with **0** fn entries, invisible to any cadence). Then the real answer is disposable per-agent processes, which is step 8 territory. Say so instead of implying the cap works. |
 | O2 | May two cluster JVMs serve one store? | `architecture.md:242-246` promises interchangeable cluster JVMs. Measured: two live JVMs on one file store both won the same epoch CAS and **40 of 40** of the parent's returned commits vanished, zero errors, store pristine on reopen. | Amend the architecture and make the configuration **refuse to open**. Note this does *not* constrain N stores in one process — `create-writer :self` is per-connection. |
-| — | Is `core.async.flow` adopted as a **library**, or only its vocabulary? | We use channels, the workload tags and the transform discipline. Flow's added value is a proc graph plus `ping`/`pause`/`resume`/`inject`, and that API exists *because* flow's state is hidden in memory. | Adopt `core.async`, not `core.async.flow`. But this overlaps the Integrant evaluation — both offer "declare the graph, boot in order," and we must not adopt both. **This is the one place two candidate mechanisms are live at once.** |
+| — | Is `core.async.flow` adopted as a **library**, or only its vocabulary? | Flow's added value is a proc graph plus `ping`/`pause`/`resume`/`inject`, and that API exists *because* flow's state is hidden in memory. | Adopt `core.async`, not `core.async.flow`. **The flow-vs-Integrant overlap is resolved** (`bd8038419`): Integrant owns in-process boot ORDER, core.async owns SCHEDULING. Different jobs, no competition. Still wants an explicit owner ruling that non-adoption of the library is deliberate. |
+
+**Resolved 2026-07-26, recorded so it is not reopened.** Integrant is adopted
+**narrowly and conditionally** (`bd8038419`): only when writer, driver and
+web-render merge into one JVM, and only if that merge deletes the ~360 lines of
+standalone lifecycle scaffolding it identifies. The operator's OS-process graph
+stays separate — an OS process cannot be an `init-key` value. Shape: one root
+system containing one nested Integrant system per cluster, so a single-cluster
+reset halts only its own nested system. Strongest borrow from the archive: the
+single derived `ig/assert-key :seon/component` Malli-validation choke point.
+`suspend-key!`/`resume-key` are **rejected** until measurement proves a specific
+restart resource is too slow. Biggest risk, and an acceptance condition rather
+than a preference: a flat `refset` edge would make one cluster's halt traverse
+shared resources and take down every cluster.
 
 ## 2. UNKNOWN — needs evidence, with the experiment named
 
-- **Does the submission-channel design actually replace the semaphore?** A
+- **~~Does the submission-channel design replace the semaphore?~~ ANSWERED
+  2026-07-26** (`3564882a3`): the semaphore is **deleted, not kept beside the
+  channel** — `open!`/`available`/`permits` go; its queueing job becomes the
+  channel's fixed buffer and its concurrency job becomes the launcher's slot
+  count, both per-class config facts, with nothing outside the launcher able to
+  acquire capacity. The launcher is one loop parked in `alts!!` over the three
+  class channels. What remains UNKNOWN is only the measurement below. A
   bounded channel bounds the *queue* and parks puts (`async.clj:113-117`: "When
   full, puts will block/park"). It does **not** bound parallelism — the
   executor does. So `seon.sci.eval`'s semaphore is doing two jobs, and the
