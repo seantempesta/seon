@@ -56,6 +56,17 @@ shipped two identity defects
   effect. Nondeterministic agent code that produces different effect
   content under an already-used op-id hits the writer's hash conflict —
   a loud error value, the honest at-least-once ceiling (L10).
+- **Named constraint (owner challenge, recorded): effect identity
+  assumes SEQUENTIAL effect issue within one form.** The counter is a
+  loop index for a loop whose body is opaque agent code — invocation-
+  local, reconstructed by re-execution, never durable (the durable
+  record is the committed request-ids and receipts). Today's eval
+  surface is single-threaded within a form, so the assumption holds by
+  construction; if a parallel surface (threads, futures) is ever
+  exposed to agent code, concurrent effects make ordinal assignment
+  order-nondeterministic — the failure surfaces as the writer's loud
+  hash conflict, never a silent double-fire, and that surface needs its
+  own identity ruling BEFORE it ships.
 
 ### The envelope — owner symbol, not enum
 

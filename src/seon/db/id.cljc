@@ -1161,25 +1161,36 @@
 ;;; of generating fresh candidates — fresh candidates change the logical
 ;;; transaction hash, which the writer correctly refuses as a conflict.
 
-     (defn- allocation-recovery
-       "Recover a committed allocation by its replay identity, or nil."
+     (defn- ^:async allocation-recovery
+       "Recover a committed allocation by its replay identity, or nil.
+       Queries through the one `seon.db/query` facade — a wire database
+       value is a descriptor, and querying it directly returns silently
+       empty, which this fn's first live falsifier caught."
        [database op-id allocations]
        (when op-id
          (when-let [transaction
                     (first
-                     (d/q '[:find [?tx ...]
-                            :in $ ?request-id
-                            :where
-                            [?tx :seon.db.protocol/request-id ?request-id]]
-                          database op-id))]
+                     (await
+                      (db/query
+                       {::db/db database
+                        ::db/query '[:find [?tx ...]
+                                     :in $ ?request-id
+                                     :where
+                                     [?tx :seon.db.protocol/request-id
+                                      ?request-id]]
+                        ::db/args [op-id]})))]
            (let [rows
                  (mapv (fn [{allocation-key ::key
                              identity-attr ::identity-attr}]
                          [allocation-key
-                          (vec (d/q '[:find ?value ?entity
-                                      :in $ ?tx ?attr
-                                      :where [?entity ?attr ?value ?tx]]
-                                    database transaction identity-attr))])
+                          (vec (await
+                                (db/query
+                                 {::db/db database
+                                  ::db/query '[:find ?value ?entity
+                                               :in $ ?tx ?attr
+                                               :where
+                                               [?entity ?attr ?value ?tx]]
+                                  ::db/args [transaction identity-attr]})))])
                        allocations)]
              (if (every? (fn [[_ pairs]] (= 1 (count pairs))) rows)
                {::ids (into {} (map (fn [[k pairs]] [k (ffirst pairs)]))
@@ -1507,7 +1518,7 @@
                ;; A replay identity that already committed is recovered from
                ;; facts — no candidate is generated, so the retry cannot
                ;; change the logical transaction hash.
-               (allocation-recovery database op-id (::allocations request))
+               (await (allocation-recovery database op-id (::allocations request)))
                (let [policies (or (::generator-policies request)
                                   (await
                                    (acquire-generator-policies!
@@ -1528,8 +1539,8 @@
                    ;; database value; any other error stands.
                    (let [fresh (await (db/db))]
                      (or (when-not (error-value? fresh)
-                           (allocation-recovery
-                            fresh op-id (::allocations request)))
+                           (await (allocation-recovery
+                                    fresh op-id (::allocations request))))
                          result))
                    result))))
             (catch :default e
@@ -1555,7 +1566,7 @@
                  ;; A replay identity that already committed is recovered
                  ;; from facts — no candidate is generated, so the retry
                  ;; cannot change the logical transaction hash.
-                 (allocation-recovery database op-id (::allocations request))
+                 (await (allocation-recovery database op-id (::allocations request)))
                  (let [policies
                        (or (::generator-policies request)
                            (acquire-generator-policies!
@@ -1572,8 +1583,8 @@
                      ;; from a fresh database value; other errors stand.
                      (let [fresh (db/db)]
                        (or (when-not (error-value? fresh)
-                             (allocation-recovery
-                              fresh op-id (::allocations request)))
+                             (await (allocation-recovery
+                                      fresh op-id (::allocations request))))
                            result))
                      result))))
               (do

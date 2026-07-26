@@ -89,7 +89,15 @@ reported, never resolved by loosening it.
    `:seon.capability/replayed?` is observability, not an option.
    (The `:seon.capability/*` → `:seon.db/*` attribute renames ride the
    standing rename wave.)
-5. **Effect classification refined (owner, same night).** The attribute
+5. **SUPERSEDED 2026-07-26 session 2 — the `:seon.code.fn/effect`
+   attribute is DEAD.** No effect tag exists: effectfulness derives from
+   call-graph reachability of the capability owners, and the one
+   surviving fact is `redispatch-on-crash` (landing as
+   `:seon.code.fn/redispatch-on-crash`). The enum below also died (owner
+   symbol is the identity), and the family enum went with it — see plan
+   README "Rulings 2026-07-26 night, session 2" and
+   `effect-identity-contract-2026-07-26.md`. Original text kept for the
+   record: The attribute
    is `:seon.code.fn/effect` — a program-graph fact colocated with the
    fn facts; the runtime mechanism stays `seon.effect`. Functions are
    untagged by default and carry ONLY their Malli contract; purity is
