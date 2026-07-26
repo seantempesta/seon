@@ -80,7 +80,13 @@ In order. The audit trail the owner asked to keep.
 | `d29138d1d`, `3564882a3` | Workload-tagged scheduling; then revised so channels return as bounded submission queues |
 | `6b5f37bf2` | Filed two driver blockers found by verifying a lane's claim |
 | `05451d5c5` | Collapsed the **eighth** ordering; created `plan/` |
-| `bd8038419` | Decided Integrant boot ownership |
+| `bd8038419` | Decided Integrant boot ownership — adopt narrowly, conditional on the writer/host/web-render merge |
+| `736672cb1` | Exposed Datahike's three writer dials as per-cluster stage-1 config, with reconnect coverage |
+| `e8c84fcdd` | Made `plan/` a self-verifying entry point: `bin/plan-state`, `state.md`, `history.md`, `reference/` |
+| `1ca49daaf` | Extended the state generator; fixed a duplicate-check false negative that found `:seon.agent/run` registered twice |
+| `8a3e41a11` | **The freeze.** `bin/seon up` rebuilt the artifact; `writer` and `host` reached ready — live proof the 58-line replacement main boots |
+| `c0c0fe749` | Made the suite row read the retained log and refuse to report green from an unfinished run |
+| `27a9f6f1b`, `f4c5b127b` | Filed what the restored gate found: an invalid `:seon.sci.eval/evaluation` registration and six ordered-collection declarations |
 
 ## 4. Mistakes this session made, recorded so they are not repeated
 
@@ -99,8 +105,19 @@ Not decoration — each is a live failure mode.
 - **I wrote a plan row from a one-day-old document.** Four of its six defects
   were already fixed at HEAD.
 
+- **I shipped two checks that reported false clearances**, both within an hour.
+  The duplicate-registration check said "none" because `rg` prefixes filenames
+  when searching a directory, so `uniq -d` never matched. The suite check said
+  "green" by inferring passing from the absence of `FAIL` lines in a log that was
+  still being written. Both turned *absence of signal* into *evidence of health*,
+  which is the worst failure an evidence tool can have.
+- **I destroyed a test run's failure detail with `| tail -18`** and had to re-run
+  the suite to recover it. Redirect the whole log.
+
 The pattern: **verify against the tree, not against a document — including a
-document written yesterday by me.** That is what `bin/plan-state` is for.
+document written yesterday by me.** That is what `bin/plan-state` is for. And
+when you write a check, ask what it reports when the thing it checks is *absent*
+— if that answer is "fine", the check is worse than nothing.
 
 ## 5. Earlier sessions
 
