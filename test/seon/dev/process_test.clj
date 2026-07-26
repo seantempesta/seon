@@ -3813,6 +3813,12 @@
              (last (:seon.dev.process/argv (get specs process/web-render-id))))]
         (is (= "experiment"
                (:seon.host.context/database-name host-request)))
+        (is (= :file
+               (:seon.host.context/backend host-request)))
+        (is (= (get-in descriptor
+                       [::launch/database
+                        :seon.db.protocol/database-path])
+               (:seon.host.context/database-path host-request)))
         (is (= "experiment"
                (:seon.web.server/database-name web-request)))
         (is (= (get-in source-descriptor

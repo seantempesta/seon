@@ -273,9 +273,7 @@
               writer (get (process/specs target-configuration manifest)
                           process/writer-id)
               started-writer (atom nil)
-              direct-writer?
-              (= (:seon.dev.config/process-dir configuration)
-                 (:seon.dev.config/process-dir target-configuration))
+              direct-writer? (some? writer)
               _ (when direct-writer?
                   (process/ensure!
                    target-configuration writer

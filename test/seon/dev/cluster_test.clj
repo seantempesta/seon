@@ -216,7 +216,6 @@
         request (assoc request ::cluster/target-configuration
                        target-configuration)
         manifest {:seon.dev.artifact/application-digest "application"}
-        writer {:seon.dev.process/id process/writer-id}
         pod {:seon.dev.process/id process/pod-id
              :seon.dev.process/argv ["/runtime/bun" "/runtime/client.js"]
              :seon.dev.process/environment {"EXISTING" "pod"}}
@@ -234,12 +233,11 @@
         (fn [selected selected-manifest]
           (is (= target-configuration selected))
           (is (= manifest selected-manifest))
-          {process/writer-id writer
-           process/pod-id pod})
+          {process/pod-id pod})
         process/ensure!
-        (fn [selected spec _start-owned!]
-          (is (= target-configuration selected))
-          (is (= writer spec)))
+        (fn [& _]
+          (throw (ex-info "A named cluster must use its external writer."
+                          {})))
         process/status
         (fn [selected selected-manifest]
           (is (= target-configuration selected))

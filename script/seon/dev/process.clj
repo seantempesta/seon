@@ -725,6 +725,10 @@
                      (::launch/request-socket-path descriptor-writer)
                      :seon.host.context/database-name
                      (::db.protocol/database-name descriptor-database)
+                     :seon.host.context/backend
+                     (::db.protocol/backend descriptor-database)
+                     :seon.host.context/database-path
+                     (::db.protocol/database-path descriptor-database)
                      :seon.host/database-pool-wait-timeout-ms
                      (config/claim-driver-pool-wait-timeout-ms config)
                      :seon.startgate/release-digest
