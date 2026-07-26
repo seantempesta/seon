@@ -13,7 +13,8 @@ else.**
 
 | file | what it is | trust |
 |---|---|---|
-| **this file** | the ONE ordering: 7 base constructs, 8 capability-ordered steps, the landmines, the open owner rulings | current as of its last edit |
+| **this file** | the ONE ordering: the rulings, the nucleus ladder, the landmines | current as of its last edit |
+| [handbook.md](handbook.md) | the UNDERSTANDING: why the fresh tree, how the construction loop runs, the mentality, where things are defined — read it to GET IT without re-deriving a week of conversation | current |
 | [state.md](state.md) | what is TRUE right now, **generated** by `bin/plan-state` from the live tree, every row carrying the command that produced it | **highest — regenerate it and it cannot be stale** |
 | [unsettled.md](unsettled.md) | what is UNDECIDED (needs a ruling), UNKNOWN (needs an experiment), UNBUILT — and where the primitives do not yet compose | current |
 | [history.md](history.md) | what was tried before, with commit hashes, and the mistakes worth not repeating | permanent |

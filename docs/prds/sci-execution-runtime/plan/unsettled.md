@@ -6,6 +6,16 @@ tags: [prd, agent, architecture]
 
 # What is not settled
 
+**UNDECIDED (needs the owner's seal): schema definitions leave code
+files.** Recommended and owner-leaning-yes at s3 close: attribute/entity
+schemas move to EDN data files, one per attribute namespace, admitted as
+ONE validated population at boot (kills the load-order/dangling-ref
+class — three incidents 2026-07-26); function contracts stay on defns;
+named predicates stay in code. Full reasoning in
+[handbook.md](handbook.md) §Where things are defined. On seal: fold into
+the B2 contract and convert N2's registrations into the first
+`schema/seon.cluster.run.edn`.
+
 **2026-07-26 s3 close — the nucleus era.** README's session-3 rulings and
 the nucleus ladder (R0/B0-B3/N2-N6) supersede everything below that
 contradicts them; rows below predate the pivot and survive only as
