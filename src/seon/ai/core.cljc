@@ -15,6 +15,44 @@
       [java.time ZonedDateTime]
       [java.time.format DateTimeFormatter])))
 
+(schema/register! :seon.ai/text :string)
+(schema/register! :seon.ai/model :string)
+(schema/register! :seon.ai/response-model [:string {:min 1}])
+(schema/register! :seon.ai/system-fingerprint [:string {:min 1}])
+(schema/register! :seon.ai/request-id [:string {:min 1}])
+(schema/register! :seon.ai/temperature :double)
+(schema/register! :seon.ai/max-tokens :int)
+(schema/register! :seon.ai/completion-limit-field
+                  [:enum :max-tokens :max-completion-tokens])
+(schema/register! :seon.ai/system-prompt :string)
+(schema/register! :seon.ai/ctx :string)
+(schema/register! :seon.ai/usage :map)
+(schema/register! :seon.ai/tools [:sequential :map])
+(schema/register! :seon.ai/tool-choice :any)
+(schema/register! :seon.ai/tool-calls [:sequential :map])
+(schema/register! :seon.ai/provider-fields [:map])
+(schema/register! :seon.ai/extra-body [:map])
+(schema/register! :seon.ai/stream? :boolean)
+(schema/register! :seon.ai/estimated? :boolean)
+(schema/register! :seon.ai/truncated? :boolean)
+(schema/register! :seon.ai/id [:string {:seon.db/identity true}])
+(schema/register! :seon.ai/dg-backend [:enum :vllm :control])
+(schema/register! :seon.ai/base-url [:string {:min 1}])
+(schema/register! :seon.ai/api-key-env [:string {:min 1}])
+(schema/register! :seon.ai/thinking [:string {:min 1}])
+(schema/register! :seon.ai/timeout-ms :int)
+(schema/register! :seon.ai/extra-body-edn [:string {:min 1}])
+(schema/register! :seon.ai/extra-body-digest
+                  [:string {:min 64 :max 64}])
+(schema/register! :seon.ai/credential-class
+                  [:enum
+                   :configured-env
+                   :provider-default-env
+                   :conventional-env])
+(schema/register! :seon.ai/credential-source
+                  [:map
+                   [:seon.ai/credential-class :seon.ai/credential-class]
+                   [:seon.ai/api-key-env :seon.ai/api-key-env]])
 (schema/register! :seon.ai/msg :string)
 (schema/register! :seon.ai/status :int)
 (schema/register! :seon.ai/timeout? :boolean)
@@ -53,6 +91,93 @@
   [:seon.ai/raw-body {:optional true} :seon.ai/raw-body]
   [:seon.ai/exception-class {:optional true} :seon.ai/exception-class]
   [:seon.ai/exception-message {:optional true} :seon.ai/exception-message]])
+
+(schema/register!
+ :seon.ai/resolved-config
+ [:map
+  [:seon.ai/provider :seon.ai/provider]
+  [:seon.ai/model {:optional true} :seon.ai/model]
+  [:seon.ai/temperature {:optional true} :seon.ai/temperature]
+  [:seon.ai/max-tokens {:optional true} :seon.ai/max-tokens]
+  [:seon.ai/completion-limit-field
+   {:optional true}
+   :seon.ai/completion-limit-field]
+  [:seon.ai/thinking {:optional true} :seon.ai/thinking]
+  [:seon.ai/timeout-ms {:optional true} :seon.ai/timeout-ms]
+  [:seon.ai/base-url {:optional true} :seon.ai/base-url]
+  [:seon.ai/api-key-env {:optional true} :seon.ai/api-key-env]
+  [:seon.ai/dg-backend {:optional true} :seon.ai/dg-backend]
+  [:seon.config.model-transport/response-identity-cap
+   {:optional true}
+   :seon.config.model-transport/response-identity-cap]
+  [:seon.config.model-transport/endpoint-cap
+   {:optional true}
+   :seon.config.model-transport/endpoint-cap]
+  [:seon.ai/extra-body-digest
+   {:optional true}
+   :seon.ai/extra-body-digest]])
+(schema/register! :seon.ai/source
+                  [:enum :agent-override :config-row :default])
+(schema/register!
+ :seon.ai/provenance
+ [:map
+  [:seon.ai/provider :seon.ai/source]
+  [:seon.ai/model {:optional true} :seon.ai/source]
+  [:seon.ai/temperature {:optional true} :seon.ai/source]
+  [:seon.ai/max-tokens {:optional true} :seon.ai/source]
+  [:seon.ai/completion-limit-field {:optional true} :seon.ai/source]
+  [:seon.ai/thinking {:optional true} :seon.ai/source]
+  [:seon.ai/timeout-ms {:optional true} :seon.ai/source]
+  [:seon.ai/base-url {:optional true} :seon.ai/source]
+  [:seon.ai/api-key-env {:optional true} :seon.ai/source]
+  [:seon.ai/dg-backend {:optional true} :seon.ai/source]
+  [:seon.config.model-transport/response-identity-cap
+   {:optional true}
+   :seon.ai/source]
+  [:seon.config.model-transport/endpoint-cap
+   {:optional true}
+   :seon.ai/source]
+  [:seon.ai/extra-body-digest {:optional true} :seon.ai/source]])
+(schema/register!
+ :seon.ai/provider-config-resolution
+ [:map
+  [:seon.ai/resolved-config :seon.ai/resolved-config]
+  [:seon.ai/provenance :seon.ai/provenance]
+  [:seon.ai/agent-max-retries
+   {:optional true}
+   :seon.ai/agent-max-retries]
+  [:seon.ai/agent-attempt-timeout-ms
+   {:optional true}
+   :seon.ai/agent-attempt-timeout-ms]
+  [:seon.ai/extra-body {:optional true} :seon.ai/extra-body]])
+(schema/register!
+ :seon.ai/resolved-config-response
+ [:map
+  [:seon.ai/resolved-config :seon.ai/resolved-config]
+  [:seon.ai/provenance :seon.ai/provenance]
+  [:seon.ai/agent-max-retries
+   {:optional true}
+   :seon.ai/agent-max-retries]
+  [:seon.ai/agent-attempt-timeout-ms
+   {:optional true}
+   :seon.ai/agent-attempt-timeout-ms]
+  [:seon.ai/extra-body {:optional true} :seon.ai/extra-body]
+  [:seon.ai/fallback-variant
+   {:optional true}
+   :seon.config/model-variant]
+  [:seon.ai/fallback-config-resolution
+   {:optional true}
+   :seon.ai/provider-config-resolution]])
+(schema/register! :seon.ai/config-resolution
+                  :seon.ai/resolved-config-response)
+(schema/register!
+ :seon.ai/config-evidence
+ [:map
+  [:seon.ai/resolved-config :seon.ai/resolved-config]
+  [:seon.ai/provenance :seon.ai/provenance]
+  [:seon.ai/credential-source
+   {:optional true}
+   :seon.ai/credential-source]])
 
 (def shipped-defaults
   "Per-provider shipped defaults for resolved model configuration."

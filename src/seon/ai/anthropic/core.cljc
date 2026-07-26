@@ -3,7 +3,10 @@
   (:require
    [clojure.string :as str]
    [seon.ai.core :as ai]
-   [seon.ai.tokens :as tokens]))
+   [seon.ai.tokens :as tokens]
+   [seon.schema :as schema]))
+
+(schema/register! :seon.ai.anthropic/stop-reason :string)
 
 (def ^:private known-message-keys
   #{:content :usage :id :type :role :model :stop_reason :stop_sequence
