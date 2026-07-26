@@ -8,7 +8,10 @@
 
    This namespace contains no process loop and opens no database connection.
    Its caller supplies the one writer operation and immutable database values."
-  (:require [seon.agent.run.core :as run]
+  (:require [seon.agent.lifecycle :as lifecycle]
+            [seon.agent.message :as message]
+            [seon.agent.run.core :as run]
+            [seon.content-hash :as content-hash]
             [seon.eval.receipt :as receipt]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]))
@@ -61,6 +64,56 @@
     :seon.agent.run.form/id]}
   [run-id ordinal]
   (pr-str [run-id ordinal]))
+
+(defn message-id
+  "Compact deterministic identity of the message emitted by one receipt."
+  {:malli/schema
+   [:=> [:catn [::run-id :string]
+                [::ordinal :seon.eval/ordinal]
+                [::claim-epoch :seon.eval/claim-epoch]]
+    :seon.agent.message/id]}
+  [run-id ordinal claim-epoch]
+  (str "m"
+       (subs
+        (content-hash/sha-256
+         (receipt/receipt-id run-id ordinal claim-epoch))
+        0 11)))
+
+(defn lifecycle-tx-data
+  "Interpret one lifecycle disposition as ordinary transaction data."
+  [{agent-id :seon.agent/id
+    run-id :seon.agent.run/id
+    claim-epoch :seon.agent.run/claim-epoch
+    ordinal :seon.eval/ordinal
+    at :seon.eval/at}
+   value]
+  (case (::lifecycle/disposition value)
+    :completed
+    (let [result (::lifecycle/result value)]
+      (into
+       (run/finish-tx-data agent-id run-id claim-epoch :completed at)
+       [{:seon.agent.run/id run-id
+         :seon.agent.run/result result}
+        {:seon.agent.message/id
+         (message-id run-id ordinal claim-epoch)
+         :seon.agent.message/from [:seon.agent/id agent-id]
+         :seon.agent.message/to [message/user-ref]
+         :seon.agent.message/content result
+         :seon.agent.message/at at
+         :seon.agent.message/hops 0
+         :seon.agent.message/origin :agent}]))
+
+    :wait
+    (run/release-tx-data agent-id run-id claim-epoch)
+
+    nil
+    []
+
+    (throw
+     (ex-info
+      "The lifecycle disposition is not supported by the run driver."
+      {:seon.error/kind :user-input
+       ::lifecycle/disposition (::lifecycle/disposition value)}))))
 
 (defn plan-tx-data
   "Atomically install exactly one complete ordered form plan.

@@ -40,6 +40,36 @@
           [{:seon.eval/ordinal 0 :seon.eval/status :done}
            {:seon.eval/ordinal 1 :seon.eval/status :error}])))))
 
+(deftest completion-value-closes-run-and-delivers-once
+  (let [request {:seon.agent/id "agent-a"
+                 :seon.agent.run/id "run-a"
+                 :seon.agent.run/claim-epoch 3
+                 :seon.eval/ordinal 2
+                 :seon.eval/at
+                 #inst "2026-07-25T22:00:00.000-00:00"}
+        tx-data
+        (driver/lifecycle-tx-data
+         request
+         {:seon.agent.lifecycle/disposition :completed
+          :seon.agent.lifecycle/result "X"})
+        message
+        (some #(when (:seon.agent.message/id %) %) tx-data)]
+    (is (= :closed
+           (:seon.agent.run/status
+            (some #(when (:seon.agent.run/status %) %) tx-data))))
+    (is (= "X" (:seon.agent.message/content message)))
+    (is (= (driver/message-id "run-a" 2 3)
+           (:seon.agent.message/id message)))
+    (is (= (:seon.agent.message/id message)
+           (:seon.agent.message/id
+            (some
+             #(when (:seon.agent.message/id %) %)
+             (driver/lifecycle-tx-data
+              request
+              {:seon.agent.lifecycle/disposition :completed
+               :seon.agent.lifecycle/result "X"}))))
+        "re-execution in one receipt epoch cannot duplicate delivery")))
+
 (deftest rejected-agent-value-terminalizes-receipt-alone
   (let [transactions (atom [])
         transact!
