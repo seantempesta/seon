@@ -488,6 +488,28 @@ path, no pod. N1 decomposes into the ladder:
   indexer is a BUILD-time producer (rung "-1", the publish command), not
   something the runtime launches; its proper name and invocation are the
   build audit's deliverable.
+
+  **The launch/config design (owner, s3 close — smart defaults, no magic
+  numbers):** ONE verb, everything optional —
+  `bin/seon start [cluster] [--config <path>]`; bare `start` = cluster
+  `default` with the shipped default config; a name = that cluster, same
+  defaults; `--config` = that cluster's own manifest. `default` is just a
+  name. Config has exactly TWO phases:
+  1. **bootstrap** — the closed, enumerated, deliberately TINY key set the
+     process needs before the store opens (store backend/path, prepl
+     bind, log dir — everything else derivable from (cluster-name,
+     root) by convention). A key trying to enter bootstrap that the
+     database could own is a design smell caught by the closed schema.
+  2. **database** — everything else reconciles into facts after open
+     (the existing explicit-apply pattern: converged = zero writes,
+     drift repaired, effective config queryable). Later changes are
+     database modifications — re-apply a manifest or transact the facts;
+     the file is just one producer of that transaction.
+  The shipped default config is THE defaults document: complete,
+  explicit, every constant named with units and calibration provenance.
+  A user manifest declares only overrides; absent key = default. **No
+  numeric fallback in code, ever** — `(or x 60000)` is the banned shape;
+  a tuned constant outside the defaults document is a review flag.
 - **B3 — the loop's tools.** The nucleus edit-test feedback (in-memory
   suites, seconds per cycle), the MCP REPL pointed at the nucleus process,
   and the hook selecting nucleus tests — a really good feedback loop from
