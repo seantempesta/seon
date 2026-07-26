@@ -166,9 +166,7 @@
    [(cond->
      {:seon.eval/id eval-id
       :seon.eval/result-edn (pr-str value)
-      :seon.eval/duration-ms (:seon.eval/duration-ms record)
-      :seon.eval/fn-entries (:seon.eval/fn-entries record)
-      :seon.eval/allocated-bytes (:seon.eval/allocated-bytes record)}
+      :seon.eval/duration-ms (:seon.eval/duration-ms record)}
       (= :error status)
       (assoc :seon.eval/error
              (or (:seon.error/message value)
