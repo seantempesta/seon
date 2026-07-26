@@ -10,7 +10,7 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (58)
+## Blocker (60)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -48,9 +48,11 @@ See `README.md` for the convention.
 | [Private-function presence law is incomplete outside core indexing](private-function-presence-law-incomplete.md) | blocker | general |
 | [Project a turn's rendered transaction ref as its basis transaction](turn-debug-must-project-rendered-transaction-ref.md) | blocker | agent |
 | [Projected map keys are not drill paths](projected-map-keys-are-not-drill-paths.md) | blocker | UI |
+| [Prove agent-message identity under form re-execution](agent-message-reexecution-idempotency-is-unproven.md) | blocker | agent |
 | [Pull cluster JVM limits from the cluster config identity](jvm-claimant-pulls-config-with-wrong-identity.md) | blocker | agent |
 | [Read-side attribute admission fails open (silent empty results, :all fallback)](read-side-attribute-admission-fails-open.md) | blocker | Core |
 | [Realize authored values deeply before disarming the interrupt](lazy-authored-values-escape-the-armed-interrupt-boundary.md) | blocker | agent |
+| [Recover a run opened before its plan commits](run-is-unrecoverable-before-its-plan-commits.md) | blocker | agent |
 | [Reduce retained memory in each execution child](execution-children-retain-hundreds-of-megabytes.md) | blocker | agent |
 | [Refuse model dispatch when turn allocation fails](jvm-driver-continues-after-turn-allocation-error.md) | blocker | agent |
 | [Restore writer admin transition is unimplemented](restore-writer-admin-transition-is-unimplemented.md) | blocker | Core |
