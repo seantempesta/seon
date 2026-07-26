@@ -1,11 +1,9 @@
 (ns seon.host-conformance-writer-test
-  "Execution-protocol conformance for the JVM agent host (`seon.host`).
+  "Host-session protocol conformance for the JVM agent host (`seon.host`).
 
-   The harness client replays the pod->child message sequences inventoried
-   from `seon.execution`/`seon.execution.host`/`seon.execution.runtime`
-   over UDS and asserts each response matches the child contract
-   shape-for-shape. The writer is a local fake `uds/start-request-server!`
-   handler (the same self-contained pattern as `seon.db.transport-uds-test`)
+   The harness client replays startup/invoke/cancel/session-loss sequences
+   over UDS and asserts each response matches the portable host-session
+   contract. The writer is a local fake `uds/start-request-server!` handler,
    so the suite needs no live cluster."
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
@@ -248,7 +246,7 @@
              invocation-database run-fence turn-id]
       :or {deadline-ms (+ (System/currentTimeMillis) 30000)
            result-limit-bytes 1000000
-           function-symbol 'seon.execution.runtime/eval-batch!
+           function-symbol host.session/eval-batch-function-symbol
            identity-key :seon.execution/artifact-digest
            invocation-database database
            turn-id "turn-conformance"}}]
@@ -947,21 +945,6 @@
                (get-in timeout [:seon.execution/error
                                 :seon.error/data
                                 :seon.error.sci/class]))))
-      (finally (close! session)))))
-
-(deftest render-entrypoints-answer-with-pod-steering-errors
-  (let [[session _ready] (open-session! "render-agent")]
-    (try
-      (doseq [selected ['seon.execution.runtime/render-prompt!
-                        'seon.execution.runtime/render-agent-view!]]
-        (send! session (invoke-value "render-agent"
-                                     (str "invocation-" selected) []
-                                     :function-symbol selected))
-        (let [response (recv! session)]
-          (is (= :core-bug (get-in response [:seon.execution/error
-                                             :seon.error/kind])))
-          (is (re-find #"rendering stay on the pod"
-                       (error-of response)))))
       (finally (close! session)))))
 
 (deftest authored-identity-verifies-the-pinned-database-source

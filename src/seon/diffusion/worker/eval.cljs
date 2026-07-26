@@ -26,8 +26,9 @@
 
    `cljs.js` (self-host compiler) + `shadow.cljs.bootstrap.node` (the analysis
    cache loader) + `cljs.analyzer` (warning capture) +
-   `seon.eval.bootstrap-cache` (the shared LEAF cache loader — deliberately
-   free of seon.db/seon.schema/pod state). NO `seon.eval`, NO datahike —
+   `seon.diffusion.bootstrap-cache` (the isolated LEAF cache loader —
+   deliberately free of seon.db/seon.schema/pod state). NO `seon.eval`,
+   NO datahike —
    this is a separate leaf bundle so the self-host weight never bloats the
    lean parse bundle, and it must not drag pod runtime state onto the worker
    image.
@@ -76,7 +77,7 @@
     [cljs.js :as cljs]
     [cljs.analyzer :as ana]
     [seon.repl.parse.repair :as candidates]
-    [seon.eval.bootstrap-cache :as bootstrap-cache]
+    [seon.diffusion.bootstrap-cache :as bootstrap-cache]
     [shadow.cljs.bootstrap.node :as boot]
     ["fs" :as fs]
     ["vm" :as vm]

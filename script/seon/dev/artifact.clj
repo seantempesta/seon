@@ -16,6 +16,13 @@
 
 (def current-version 14)
 
+(def jvm-family-options
+  "JVM options that must match the shared AOT+CDS build and every launch."
+  ["--add-modules" "jdk.incubator.vector"
+   "--enable-native-access=ALL-UNNAMED"
+   "--sun-misc-unsafe-memory-access=allow"
+   "-XX:+UseG1GC"])
+
 (def bun-identity-schema
   [:map {:closed true}
    [:seon.dev.artifact/bun-executable :string]
@@ -67,10 +74,18 @@
    [:seon.dev.artifact/maintained-dependencies
     [:vector {:min 6 :max 6} maintained-dependency-schema]]
    [:seon.dev.artifact/writer-digest [:re #"[0-9a-f]{64}"]]
-   ;; AppCDS is opt-in until an orchestrator checkpoint proves the paired
-   ;; archive and writer artifact together; existing manifests stay valid.
+   ;; Optional only for reading a pre-cutover manifest. Every new source build
+   ;; publishes the exact AOT jar + AppCDS pair and its producing Java command.
+   [:seon.dev.artifact/writer-path {:optional true} :string]
+   [:seon.dev.artifact/writer-file-digest
+    {:optional true} [:re #"[0-9a-f]{64}"]]
    [:seon.dev.artifact/writer-cds-path {:optional true} :string]
    [:seon.dev.artifact/writer-cds-digest {:optional true} [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/writer-java-command {:optional true} :string]
+   [:seon.dev.artifact/writer-java-identity-digest
+    {:optional true} [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/writer-jvm-options-digest
+    {:optional true} [:re #"[0-9a-f]{64}"]]
    [:seon.dev.artifact/client-digest [:re #"[0-9a-f]{64}"]]
    [:seon.dev.artifact/execution-digest [:re #"[0-9a-f]{64}"]]
    [:seon.dev.artifact/bootstrap-digest [:re #"[0-9a-f]{64}"]]
@@ -78,12 +93,21 @@
    [:seon.dev.artifact/application-digest [:re #"[0-9a-f]{64}"]]])
 
 (def ^:private writer-cache-schema
-  [:map
-   [:seon.dev.writer-cache/version [:= 2]]
+  [:map {:closed true}
+   [:seon.dev.writer-cache/version [:= 3]]
    [:seon.dev.writer-cache/input-digest [:re #"[0-9a-f]{64}"]]
-   [:seon.dev.writer-cache/writer-digest [:re #"[0-9a-f]{64}"]]])
+   [:seon.dev.writer-cache/writer-path :string]
+   [:seon.dev.writer-cache/writer-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.writer-cache/writer-file-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.writer-cache/writer-cds-path :string]
+   [:seon.dev.writer-cache/writer-cds-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.writer-cache/writer-java-command :string]
+   [:seon.dev.writer-cache/writer-java-identity-digest
+    [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.writer-cache/writer-jvm-options-digest
+    [:re #"[0-9a-f]{64}"]]])
 
-(declare validate-maintained-dependencies!)
+(declare validate-maintained-dependencies! current-writer-publication)
 
 (defn- validate-manifest! [manifest]
   (when-not (m/validate artifact-manifest-schema manifest)
@@ -557,7 +581,14 @@
    [:seon.dev.artifact/bun-executable-digest [:re #"[0-9a-f]{64}"]]
    [:seon.dev.artifact/bun-version :string]
    [:seon.dev.artifact/bun-revision [:re #"[0-9a-f]{40}"]]
+   [:seon.dev.artifact/writer-path :string]
    [:seon.dev.artifact/writer-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/writer-file-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/writer-cds-path :string]
+   [:seon.dev.artifact/writer-cds-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/writer-java-command :string]
+   [:seon.dev.artifact/writer-java-identity-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/writer-jvm-options-digest [:re #"[0-9a-f]{64}"]]
    [:seon.dev.artifact/client-digest [:re #"[0-9a-f]{64}"]]
    [:seon.dev.artifact/program-source-path :string]
    [:seon.dev.artifact/program-source-digest [:re #"[0-9a-f]{64}"]]
@@ -577,7 +608,10 @@
    [:seon.dev.artifact/application-digest [:re #"[0-9a-f]{64}"]]])
 
 (defn- derive-application-digest
-  [{:keys [config bun maintained-dependencies writer-digest client-digest
+  [{:keys [config bun maintained-dependencies
+           writer-digest writer-file-digest writer-cds-digest
+           writer-java-identity-digest writer-jvm-options-digest
+           client-digest
            program-source-path program-source-digest
            program-row-path program-row-digest
            base-projection-path base-projection-digest
@@ -594,6 +628,10 @@
                   "client-output" (:seon.dev.config/client-output config)
                   "shadow-cache-root" (:seon.dev.config/shadow-cache-root config)
                   "writer" writer-digest
+                  "writer-file" writer-file-digest
+                  "writer-cds" writer-cds-digest
+                  "writer-java" writer-java-identity-digest
+                  "writer-jvm-options" writer-jvm-options-digest
                   "maintained-dependencies" (pr-str maintained-dependencies)
                   "client" client-digest
                   "program-source-path" program-source-path
@@ -617,7 +655,8 @@
   [config]
   (let [root (:seon.dev.config/root config)
         bun (bun-identity! config)
-        writer-digest (current-writer-digest config)
+        writer-publication (current-writer-publication config)
+        writer-digest (:seon.dev.artifact/writer-digest writer-publication)
         maintained-dependencies (maintained-dependencies root)
         client-digest (current-client-digest config)
         program-source-path
@@ -651,6 +690,14 @@
           :bun bun
           :maintained-dependencies maintained-dependencies
           :writer-digest writer-digest
+          :writer-file-digest
+          (:seon.dev.artifact/writer-file-digest writer-publication)
+          :writer-cds-digest
+          (:seon.dev.artifact/writer-cds-digest writer-publication)
+          :writer-java-identity-digest
+          (:seon.dev.artifact/writer-java-identity-digest writer-publication)
+          :writer-jvm-options-digest
+          (:seon.dev.artifact/writer-jvm-options-digest writer-publication)
           :client-digest client-digest
           :program-source-path program-source-path
           :program-source-digest program-source-digest
@@ -665,24 +712,24 @@
           :execution-digest execution-digest
           :bootstrap-digest bootstrap-digest
           :css-digest css-digest})]
-    (merge bun
-     {:seon.dev.artifact/writer-digest writer-digest
-     :seon.dev.artifact/client-digest client-digest
-     :seon.dev.artifact/program-source-path program-source-path
-     :seon.dev.artifact/program-source-digest program-source-digest
-     :seon.dev.artifact/program-row-path program-row-path
-     :seon.dev.artifact/program-row-digest program-row-digest
-     :seon.dev.artifact/base-projection-path base-projection-path
-     :seon.dev.artifact/base-projection-digest base-projection-digest
-     :seon.dev.artifact/page-plan-path page-plan-path
-     :seon.dev.artifact/page-plan-digest page-plan-digest
-     :seon.dev.artifact/client-inventory-path client-inventory-path
-     :seon.dev.artifact/client-inventory-digest client-inventory-digest
-     :seon.dev.artifact/execution-digest execution-digest
-     :seon.dev.artifact/cljs-artifact-inventory cljs-artifact-inventory
-     :seon.dev.artifact/bootstrap-digest bootstrap-digest
-     :seon.dev.artifact/css-digest css-digest
-      :seon.dev.artifact/application-digest application-digest})))
+    (merge bun writer-publication
+           {:seon.dev.artifact/client-digest client-digest
+            :seon.dev.artifact/program-source-path program-source-path
+            :seon.dev.artifact/program-source-digest program-source-digest
+            :seon.dev.artifact/program-row-path program-row-path
+            :seon.dev.artifact/program-row-digest program-row-digest
+            :seon.dev.artifact/base-projection-path base-projection-path
+            :seon.dev.artifact/base-projection-digest base-projection-digest
+            :seon.dev.artifact/page-plan-path page-plan-path
+            :seon.dev.artifact/page-plan-digest page-plan-digest
+            :seon.dev.artifact/client-inventory-path client-inventory-path
+            :seon.dev.artifact/client-inventory-digest client-inventory-digest
+            :seon.dev.artifact/execution-digest execution-digest
+            :seon.dev.artifact/cljs-artifact-inventory
+            cljs-artifact-inventory
+            :seon.dev.artifact/bootstrap-digest bootstrap-digest
+            :seon.dev.artifact/css-digest css-digest
+            :seon.dev.artifact/application-digest application-digest})))
 
 (defn read-manifest
   "Read the last atomically published artifact manifest."
@@ -909,6 +956,19 @@
                                :cmd argv})]
     (str (:out result) "\n" (:err result))))
 
+(defn java-identity-digest
+  "Hash the exact Java command and runtime identity used by AppCDS."
+  [config]
+  (let [java-command
+        (get-in config [:seon.dev.config/environment "JAVA_CMD"] "java")]
+    (digest-values [java-command
+                    (capture-command! config [java-command "-version"])])))
+
+(defn jvm-family-options-digest
+  "Hash the fixed options shared by the JVM-family build and launch."
+  []
+  (digest-values jvm-family-options))
+
 (defn- build-lock-directory [config]
   (fs/path (:seon.dev.config/root config) "tmp/seon-artifact-build"))
 
@@ -931,7 +991,7 @@
         environment (:seon.dev.config/environment config)
         java-command (get environment "JAVA_CMD" "java")]
     (digest-values
-      ["writer-cache-version" 2
+      ["writer-cache-version" 3
        "local-inputs"
        (digest-paths root ["build.clj"
                            "deps.edn"
@@ -953,35 +1013,122 @@
       (when (m/validate writer-cache-schema cache) cache))
     (catch Throwable _ nil)))
 
-(defn- verified-writer-digest [config input-digest]
+(defn- verified-writer-publication [config input-digest]
   (let [cache (read-writer-cache config)
-        output (:seon.dev.config/writer-output config)]
+        writer-path (:seon.dev.writer-cache/writer-path cache)
+        cds-path (:seon.dev.writer-cache/writer-cds-path cache)
+        java-command
+        (get-in config [:seon.dev.config/environment "JAVA_CMD"] "java")
+        java-identity (java-identity-digest config)
+        options-digest (jvm-family-options-digest)]
     (when (and (= input-digest
                   (:seon.dev.writer-cache/input-digest cache))
-               (fs/regular-file? output))
+               (= java-command
+                  (:seon.dev.writer-cache/writer-java-command cache))
+               (= java-identity
+                  (:seon.dev.writer-cache/writer-java-identity-digest cache))
+               (= options-digest
+                  (:seon.dev.writer-cache/writer-jvm-options-digest cache))
+               (fs/regular-file? writer-path)
+               (fs/regular-file? cds-path))
       (try
-        (let [actual (digest-jar output)]
-          (when (= actual (:seon.dev.writer-cache/writer-digest cache)) actual))
+        (when (and
+               (= (file-digest writer-path)
+                  (:seon.dev.writer-cache/writer-file-digest cache))
+               (= (file-digest cds-path)
+                  (:seon.dev.writer-cache/writer-cds-digest cache)))
+          cache)
         (catch Throwable _ nil)))))
+
+(defn- publish-writer-pair!
+  [config input-digest writer-digest writer-file-digest]
+  (let [root (:seon.dev.config/root config)
+        java-command
+        (get-in config [:seon.dev.config/environment "JAVA_CMD"] "java")
+        java-identity (java-identity-digest config)
+        options-digest (jvm-family-options-digest)
+        identity (digest-values [input-digest writer-digest writer-file-digest
+                                 java-identity options-digest])
+        directory (fs/path root "tmp/seon-jvm-artifacts" identity)
+        writer-path (fs/path directory "seon-jvm-aot.jar")
+        cds-path (fs/path directory "seon-jvm-aot.jsa")
+        cds-temporary
+        (fs/path directory (str ".seon-jvm-aot." (random-uuid) ".jsa"))
+        source (:seon.dev.config/writer-output config)]
+    (fs/create-dirs directory)
+    (when-not (and (fs/regular-file? writer-path)
+                   (= writer-file-digest (file-digest writer-path)))
+      (let [temporary
+            (fs/path directory (str ".seon-jvm-aot." (random-uuid) ".jar"))]
+        (fs/copy source temporary {:replace-existing true})
+        (fs/move temporary writer-path
+                 {:replace-existing true :atomic-move true})))
+    ;; The archive records its classpath entry. Generate it only after the jar
+    ;; occupies its final digest-keyed path; copying a trained pair elsewhere
+    ;; makes `-Xshare:on` fail closed with a classpath mismatch.
+    (run-step!
+     config
+     "publish canonical JVM AppCDS archive"
+     ["clojure" "-T:build" "writer-cds"
+      ":jar" (pr-str (str writer-path))
+      ":archive" (pr-str (str cds-temporary))])
+    (fs/move cds-temporary cds-path
+             {:replace-existing true :atomic-move true})
+    {:seon.dev.writer-cache/version 3
+     :seon.dev.writer-cache/input-digest input-digest
+     :seon.dev.writer-cache/writer-path (str writer-path)
+     :seon.dev.writer-cache/writer-digest writer-digest
+     :seon.dev.writer-cache/writer-file-digest writer-file-digest
+     :seon.dev.writer-cache/writer-cds-path (str cds-path)
+     :seon.dev.writer-cache/writer-cds-digest (file-digest cds-path)
+     :seon.dev.writer-cache/writer-java-command java-command
+     :seon.dev.writer-cache/writer-java-identity-digest java-identity
+     :seon.dev.writer-cache/writer-jvm-options-digest options-digest}))
 
 (defn- ensure-writer! [config]
   (let [input-digest (writer-input-digest config)]
-    (if-let [writer-digest (verified-writer-digest config input-digest)]
+    (if-let [publication
+             (verified-writer-publication config input-digest)]
       (do
-        (println "  ● reuse canonical database server")
-        writer-digest)
+        (println "  ● reuse canonical shared JVM AOT+CDS pair")
+        publication)
       (do
         (run-step! config "warm writer classpath" ["clojure" "-P" "-M:writer"])
-        (run-step! config "build canonical database server"
+        (run-step! config "build canonical shared JVM AOT artifact"
                    ["clojure" "-T:build" "writer-uber"])
-        (let [writer-digest (digest-jar
-                              (:seon.dev.config/writer-output config))]
-          (state/write-edn!
-            (writer-cache-path config)
-            {:seon.dev.writer-cache/version 2
-             :seon.dev.writer-cache/input-digest input-digest
-             :seon.dev.writer-cache/writer-digest writer-digest})
-          writer-digest)))))
+        (let [output (:seon.dev.config/writer-output config)
+              writer-digest (digest-jar output)
+              writer-file-digest (file-digest output)
+              publication
+              (publish-writer-pair! config input-digest writer-digest
+                                    writer-file-digest)]
+          (state/write-edn! (writer-cache-path config) publication)
+          publication)))))
+
+(defn current-writer-publication
+  "Return the verified digest-keyed shared JVM AOT+CDS publication."
+  [config]
+  (if-let [publication
+           (verified-writer-publication config (writer-input-digest config))]
+    {:seon.dev.artifact/writer-path
+     (:seon.dev.writer-cache/writer-path publication)
+     :seon.dev.artifact/writer-digest
+     (:seon.dev.writer-cache/writer-digest publication)
+     :seon.dev.artifact/writer-file-digest
+     (:seon.dev.writer-cache/writer-file-digest publication)
+     :seon.dev.artifact/writer-cds-path
+     (:seon.dev.writer-cache/writer-cds-path publication)
+     :seon.dev.artifact/writer-cds-digest
+     (:seon.dev.writer-cache/writer-cds-digest publication)
+     :seon.dev.artifact/writer-java-command
+     (:seon.dev.writer-cache/writer-java-command publication)
+     :seon.dev.artifact/writer-java-identity-digest
+     (:seon.dev.writer-cache/writer-java-identity-digest publication)
+     :seon.dev.artifact/writer-jvm-options-digest
+     (:seon.dev.writer-cache/writer-jvm-options-digest publication)}
+    (throw
+     (ex-info "The canonical shared JVM AOT+CDS publication is absent or stale."
+              {:seon.dev.artifact/writer-cache (writer-cache-path config)}))))
 
 (defn- prepare-dependencies-unlocked! [config aliases]
   (let [extra-args (when (some #{:cljs} aliases)
@@ -1215,10 +1362,12 @@
 
 (defn- output-manifest [config bun]
   (let [root (:seon.dev.config/root config)
-        writer (:seon.dev.config/writer-output config)
+        writer-publication (current-writer-publication config)
+        writer (:seon.dev.artifact/writer-path writer-publication)
+        writer-cds (:seon.dev.artifact/writer-cds-path writer-publication)
         bootstrap (fs/path root "out/bootstrap")
         css (fs/path root "resources/public/css/output.css")
-        required [writer
+        required [writer writer-cds
                   (:seon.dev.config/client-output config)
                   (program-source-path config)
                   (program-row-path config)
@@ -1231,7 +1380,8 @@
     (when (seq missing)
       (throw (ex-info "Canonical build did not publish every required output."
                       {:seon.dev.artifact/missing (mapv str missing)})))
-    (let [writer-digest (digest-jar writer)
+    (let [writer-digest
+          (:seon.dev.artifact/writer-digest writer-publication)
           maintained-dependencies (maintained-dependencies root)
           client-digest (current-client-digest config)
           program-source-relative-path
@@ -1285,6 +1435,14 @@
             :bun bun
             :maintained-dependencies maintained-dependencies
             :writer-digest writer-digest
+            :writer-file-digest
+            (:seon.dev.artifact/writer-file-digest writer-publication)
+            :writer-cds-digest
+            (:seon.dev.artifact/writer-cds-digest writer-publication)
+            :writer-java-identity-digest
+            (:seon.dev.artifact/writer-java-identity-digest writer-publication)
+            :writer-jvm-options-digest
+            (:seon.dev.artifact/writer-jvm-options-digest writer-publication)
             :client-digest client-digest
             :program-source-path program-source-relative-path
             :program-source-digest program-source-digest
@@ -1300,7 +1458,7 @@
             :bootstrap-digest bootstrap-digest
             :css-digest css-digest})]
       (validate-manifest!
-        (merge bun
+        (merge bun writer-publication
         {:seon.dev.artifact/version current-version
          :seon.dev.artifact/published-at (str (Instant/now))
          :seon.dev.artifact/flavor
@@ -1314,7 +1472,6 @@
          :seon.dev.artifact/runtime-root runtime-root
          :seon.dev.artifact/source-input-digest (source-input-digest config)
          :seon.dev.artifact/maintained-dependencies maintained-dependencies
-         :seon.dev.artifact/writer-digest writer-digest
          :seon.dev.artifact/client-digest client-digest
          :seon.dev.artifact/program-source-path
          program-source-relative-path

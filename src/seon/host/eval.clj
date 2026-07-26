@@ -332,7 +332,7 @@
     outcome))
 
 (defn eval-batch-result
-  "Serve `seon.execution.runtime/eval-batch!` over sci WITH recording.
+  "Serve the host-session eval batch over SCI with recording.
 
    Each executed form records through the one corpus mechanism: a
    `:running` receipt with a managed `:seon.eval/id` commits BEFORE the

@@ -1,4 +1,4 @@
-(ns seon.eval.bootstrap-cache
+(ns seon.diffusion.bootstrap-cache
   "Load analysis caches for self-hosted CLJS evaluation.
 
    Loads every `<bootstrap>/ana/*.transit.json` emitted by the shadow

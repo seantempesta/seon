@@ -285,6 +285,10 @@
 
 (deftest current-output-identity-rehashes-every-runtime-component
   (let [component (atom {:writer (apply str (repeat 64 "a"))
+                         :writer-file (apply str (repeat 64 "2"))
+                         :writer-cds (apply str (repeat 64 "3"))
+                         :writer-java (apply str (repeat 64 "4"))
+                         :writer-options (apply str (repeat 64 "0"))
                          :client (apply str (repeat 64 "b"))
                          :program-source (apply str (repeat 64 "7"))
                          :program-row (apply str (repeat 64 "8"))
@@ -302,7 +306,21 @@
                 :seon.dev.config/shadow-cache-root "/repo/.shadow-cljs"}
         observe
         #(with-redefs-fn
-           {#'artifact/current-writer-digest (fn [_] (:writer @component))
+           {#'artifact/current-writer-publication
+            (fn [_]
+              {:seon.dev.artifact/writer-path "/runtime/seon-jvm-aot.jar"
+               :seon.dev.artifact/writer-digest (:writer @component)
+               :seon.dev.artifact/writer-file-digest
+               (:writer-file @component)
+               :seon.dev.artifact/writer-cds-path
+               "/runtime/seon-jvm-aot.jsa"
+               :seon.dev.artifact/writer-cds-digest
+               (:writer-cds @component)
+               :seon.dev.artifact/writer-java-command "/runtime/java"
+               :seon.dev.artifact/writer-java-identity-digest
+               (:writer-java @component)
+               :seon.dev.artifact/writer-jvm-options-digest
+               (:writer-options @component)})
             #'artifact/current-client-digest (fn [_] (:client @component))
             #'artifact/current-program-source-digest
             (fn [_] (:program-source @component))
@@ -332,12 +350,21 @@
            (fn [] (artifact/current-output-digests config)))]
     (let [initial (observe)]
       (is (= (select-keys @component
-                          [:writer :client :program-source :program-row
+                          [:writer :writer-file :writer-cds :writer-java
+                           :writer-options :client :program-source :program-row
                            :base-projection :page-plan
                            :client-inventory
                            :execution
                            :bootstrap :css])
              {:writer (:seon.dev.artifact/writer-digest initial)
+              :writer-file
+              (:seon.dev.artifact/writer-file-digest initial)
+              :writer-cds
+              (:seon.dev.artifact/writer-cds-digest initial)
+              :writer-java
+              (:seon.dev.artifact/writer-java-identity-digest initial)
+              :writer-options
+              (:seon.dev.artifact/writer-jvm-options-digest initial)
               :client (:seon.dev.artifact/client-digest initial)
               :program-source
               (:seon.dev.artifact/program-source-digest initial)
@@ -354,6 +381,12 @@
               :css (:seon.dev.artifact/css-digest initial)}))
       (doseq [[component-key manifest-key]
               [[:writer :seon.dev.artifact/writer-digest]
+               [:writer-file :seon.dev.artifact/writer-file-digest]
+               [:writer-cds :seon.dev.artifact/writer-cds-digest]
+               [:writer-java
+                :seon.dev.artifact/writer-java-identity-digest]
+               [:writer-options
+                :seon.dev.artifact/writer-jvm-options-digest]
                [:client :seon.dev.artifact/client-digest]
                [:program-source :seon.dev.artifact/program-source-digest]
                [:program-row :seon.dev.artifact/program-row-digest]
@@ -707,10 +740,16 @@
                                    {:git/url "https://example.test/datahike"
                                     :git/sha "revision-a"}})
         run-step
-        (fn [_config label _argv]
-          (when (= "build canonical database server" label)
+        (fn [_config label argv]
+          (case label
+            "build canonical shared JVM AOT artifact"
             (let [generation (swap! build-count inc)]
-              (write-test-jar! output (str "writer-" generation)))))]
+              (write-test-jar! output (str "writer-" generation)))
+
+            "publish canonical JVM AppCDS archive"
+            (spit (edn/read-string (last argv)) "trained-cds")
+
+            nil))]
     (try
       (fs/create-dirs (fs/parent source))
       (spit (str (fs/path directory "build.clj")) "(ns build)")
@@ -722,13 +761,13 @@
          #'artifact/writer-local-root-identities
          (fn [_] @dependency-identity)}
         (fn []
-          (let [default-digest (#'artifact/ensure-writer! default-config)
-                acme-digest (#'artifact/ensure-writer! acme-config)]
+          (let [default-publication (#'artifact/ensure-writer! default-config)
+                acme-publication (#'artifact/ensure-writer! acme-config)]
             (is (= 1 @build-count)
                 "unchanged downstream build reuses the canonical writer")
-            (is (= default-digest acme-digest)
+            (is (= default-publication acme-publication)
                 "both target manifests receive one verified writer identity")
-            (is (= default-digest
+            (is (= (:seon.dev.writer-cache/writer-digest default-publication)
                    (:seon.dev.writer-cache/writer-digest
                      (edn/read-string
                        (slurp (#'artifact/writer-cache-path acme-config)))))))
@@ -752,7 +791,9 @@
           (#'artifact/ensure-writer! acme-config)
           (is (= 5 @build-count) "a compiler or runtime change rebuilds")
 
-          (spit output "not a jar")
+          (let [cache (edn/read-string
+                       (slurp (#'artifact/writer-cache-path default-config)))]
+            (spit (:seon.dev.writer-cache/writer-path cache) "not a jar"))
           (#'artifact/ensure-writer! default-config)
           (is (= 6 @build-count) "a corrupt cached jar rebuilds")))
       (finally (fs/delete-tree directory)))))
@@ -1027,6 +1068,18 @@
         (fs/create-dirs (fs/parent path))
         (spit (str path) value))
       (with-redefs [artifact/maintained-dependencies (fn [_] @dependencies)
+                    artifact/current-writer-publication
+                    (fn [_]
+                      (let [semantic (artifact/current-writer-digest config)
+                            exact (artifact/file-digest writer)]
+                        {:seon.dev.artifact/writer-path (str writer)
+                         :seon.dev.artifact/writer-digest semantic
+                         :seon.dev.artifact/writer-file-digest exact
+                         :seon.dev.artifact/writer-cds-path (str writer)
+                         :seon.dev.artifact/writer-cds-digest exact
+                         :seon.dev.artifact/writer-java-command "java"
+                         :seon.dev.artifact/writer-java-identity-digest exact
+                         :seon.dev.artifact/writer-jvm-options-digest exact}))
                     artifact/publish-runtime-root!
                     (fn [_ bootstrap-digest
                          program-source-digest program-row-digest

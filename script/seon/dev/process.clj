@@ -262,7 +262,8 @@
            :seon.dev.artifact/client-output
            (:seon.dev.config/client-output config)
            :seon.dev.artifact/writer-output
-           (:seon.dev.config/writer-output config))
+           (or (:seon.dev.artifact/writer-path manifest)
+               (:seon.dev.config/writer-output config)))
     (let [identity (:seon.dev.release/identity manifest)
           member-sha #(get (release-member manifest %)
                            :seon.dev.release/sha-256)
@@ -416,6 +417,77 @@
     (assoc :seon.dev.process/client-digest
            (:seon.dev.artifact/client-digest manifest))))
 
+(defn- file-digest
+  [path]
+  (when (and (string? path) (fs/regular-file? path))
+    (artifact/file-digest path)))
+
+(defn- jvm-publication-status
+  [config manifest]
+  (let [environment (:seon.dev.config/environment config)
+        java-command (get environment "JAVA_CMD" "java")
+        writer-path (:seon.dev.artifact/writer-output manifest)
+        cds-path (:seon.dev.artifact/writer-cds-path manifest)
+        expected
+        {:seon.dev.artifact/writer-file-digest
+         (:seon.dev.artifact/writer-file-digest manifest)
+         :seon.dev.artifact/writer-cds-digest
+         (:seon.dev.artifact/writer-cds-digest manifest)
+         :seon.dev.artifact/writer-java-command
+         (:seon.dev.artifact/writer-java-command manifest)
+         :seon.dev.artifact/writer-java-identity-digest
+         (:seon.dev.artifact/writer-java-identity-digest manifest)
+         :seon.dev.artifact/writer-jvm-options-digest
+         (:seon.dev.artifact/writer-jvm-options-digest manifest)}
+        actual
+        {:seon.dev.artifact/writer-file-digest (file-digest writer-path)
+         :seon.dev.artifact/writer-cds-digest (file-digest cds-path)
+         :seon.dev.artifact/writer-java-command java-command
+         :seon.dev.artifact/writer-java-identity-digest
+         (artifact/java-identity-digest config)
+         :seon.dev.artifact/writer-jvm-options-digest
+         (artifact/jvm-family-options-digest)}
+        mismatches
+        (into {}
+              (keep (fn [[key expected-value]]
+                      (let [actual-value (get actual key)]
+                        (when-not (= expected-value actual-value)
+                          [key {:seon.dev.process/expected expected-value
+                                :seon.dev.process/actual actual-value}]))))
+              expected)]
+    {:seon.dev.process/jvm-publication-ready? (empty? mismatches)
+     :seon.dev.process/jvm-writer-path writer-path
+     :seon.dev.process/jvm-cds-path cds-path
+     :seon.dev.process/jvm-publication-mismatches mismatches}))
+
+(defn- jvm-family-argv
+  [config manifest publication heap main arguments]
+  (let [environment (:seon.dev.config/environment config)
+        java-command (get environment "JAVA_CMD" "java")
+        source-checkout?
+        (not= false (:seon.dev.config/source-checkout? config))
+        writer-path (:seon.dev.artifact/writer-output manifest)]
+    (if (:seon.dev.process/jvm-publication-ready? publication)
+      (into [java-command]
+            (concat artifact/jvm-family-options
+                    [(str "-Xmx" heap)
+                     "-Xshare:on"
+                     (str "-XX:SharedArchiveFile="
+                          (:seon.dev.process/jvm-cds-path publication))
+                     "-cp"
+                     (:seon.dev.process/jvm-writer-path publication)
+                     "clojure.main" "-m" main]
+                    arguments))
+      (if source-checkout?
+        (into ["clojure" (str "-J-Xmx" heap)
+               "-M:writer:host" "-m" main]
+              arguments)
+        (into [java-command]
+              (concat artifact/jvm-family-options
+                      [(str "-Xmx" heap)
+                       "-cp" writer-path "clojure.main" "-m" main]
+                      arguments))))))
+
 (defn specs
   "Derive the selected runtime process graph from one verified manifest."
   [config manifest]
@@ -423,6 +495,15 @@
         process-graph (owned-process-graph config)
         manifest (process-artifact config manifest)
         environment (:seon.dev.config/environment config)
+        jvm-publication (jvm-publication-status config manifest)
+        _ (when-not
+            (:seon.dev.process/jvm-publication-ready? jvm-publication)
+            (println
+             "SEON LOUD: shared JVM AOT+CDS identity mismatch;"
+             "using the source launch fallback"
+             (pr-str
+              (:seon.dev.process/jvm-publication-mismatches
+               jvm-publication))))
         source-descriptor (:seon.dev.config/launch-descriptor config)
         source-runtime (::launch/runtime source-descriptor)
         configured-artifact
@@ -546,7 +627,6 @@
                                  page-plan-path
                                  "SEON_PAGE_PLAN_DIGEST"
                                  page-plan-digest))
-        java (get environment "JAVA_CMD" "java")
         bun-identity
         (select-keys manifest
                      [:seon.dev.artifact/bun-executable
@@ -628,10 +708,11 @@
           (cond->
            {:seon.dev.process/id host-id
            :seon.dev.process/argv
-           ["clojure"
-            (str "-J-Xmx" (config/claim-driver-heap-mb config) "m")
-            "-M:writer:host" "-m" "seon.host"
-            (pr-str {:seon.host/socket-path
+           (jvm-family-argv
+            config manifest jvm-publication
+            (str (config/claim-driver-heap-mb config) "m")
+            "seon.host"
+            [(pr-str {:seon.host/socket-path
                      (host-eval-socket config)
                      :seon.host.context/writer-socket-path
                      (:seon.dev.config/request-socket config)
@@ -653,7 +734,7 @@
                      :seon.execution/artifact-inventories
                      (:seon.dev.artifact/cljs-artifact-inventory manifest)
                      :my.blob/storage-view
-                     (::launch/blob-storage-view descriptor)})]
+                     (::launch/blob-storage-view descriptor)})])
            :seon.dev.process/environment jvm-environment
            :seon.dev.process/dependencies
            (get process-graph host-id)
@@ -676,8 +757,11 @@
           (cond->
            {:seon.dev.process/id web-render-id
             :seon.dev.process/argv
-            ["clojure" "-M:writer:host" "-m" "seon.web.server"
-             (pr-str
+            (jvm-family-argv
+             config manifest jvm-publication
+             (str (config/claim-driver-heap-mb config) "m")
+             "seon.web.server"
+             [(pr-str
               {:seon.web.server/writer-socket-path
                (:seon.dev.config/request-socket config)
                :seon.web.server/database-name
@@ -692,7 +776,7 @@
                base-projection-digest
                :seon.web.server/port-file
                (web-render-port-file config)
-               :seon.web.server/port 0})]
+               :seon.web.server/port 0})])
             :seon.dev.process/environment jvm-environment
             :seon.dev.process/dependencies
             (get process-graph web-render-id)
@@ -724,21 +808,23 @@
      writer-id
      {:seon.dev.process/id writer-id
       :seon.dev.process/argv
-      (cond->
-       [java "--add-modules" "jdk.incubator.vector"
-        "--enable-native-access=ALL-UNNAMED" "-XX:+UseG1GC"
-        (str "-Xmx" (config/writer-max-heap config))
-        "-jar" (:seon.dev.artifact/writer-output manifest)
-        "--backend" "file"
-        "--db-name" (:seon.dev.config/cluster-name config)
-        "--path" (str (fs/path (:seon.dev.config/cluster-dir config) "db"))
-        "--req-sock" (:seon.dev.config/request-socket config)]
-        (:seon.dev.config/launch-envelope-path config)
-        (into ["--launch-envelope" (:seon.dev.config/launch-envelope-path config)])
+      (jvm-family-argv
+       config manifest jvm-publication
+       (config/writer-max-heap config)
+       "seon.db.server"
+       (cond->
+        ["--backend" "file"
+         "--db-name" (:seon.dev.config/cluster-name config)
+         "--path" (str (fs/path (:seon.dev.config/cluster-dir config) "db"))
+         "--req-sock" (:seon.dev.config/request-socket config)]
+         (:seon.dev.config/launch-envelope-path config)
+         (into ["--launch-envelope"
+                (:seon.dev.config/launch-envelope-path config)])
 
-        true
-        (into ["--repl-port" (str (:seon.dev.config/writer-repl-port config))
-               "--repl-port-file" (:seon.dev.config/writer-repl-port-file config)]))
+         true
+         (into ["--repl-port" (str (:seon.dev.config/writer-repl-port config))
+                "--repl-port-file"
+                (:seon.dev.config/writer-repl-port-file config)])))
       :seon.dev.process/environment environment
       :seon.dev.process/dependencies (get process-graph writer-id)
       :seon.dev.process/readiness :seon.dev.process.readiness/writer

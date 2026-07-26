@@ -21,7 +21,7 @@
 ;; :writer replaces the broad project graph and owns the maintained forks,
 ;; dependency-owned secondary-index source, JVM flags, and writer-only
 ;; dependencies in one basis.
-(def writer-aliases [:writer])
+(def writer-aliases [:writer :host])
 
 ;; The build owns this exact JDK because compiled classes and an AppCDS archive
 ;; are JVM-version specific. The development operator selects the same JDK.
@@ -171,19 +171,21 @@
 ;; this artifact's build cannot race/clobber the source `jar` target (C19).
 
 (defn- write-writer-cds!
-  [server-uber-file]
-  (b/delete {:path writer-aot-cds-file})
+  [server-uber-file archive-file]
+  (b/delete {:path archive-file})
   ;; AppCDS records class metadata against this exact jar and JDK. It is a
   ;; build output, never a mutable runtime cache.
   (checked-process!
    {:command-args (into [writer-java-command]
                         (concat writer-jvm-options
-                                [(str "-XX:ArchiveClassesAtExit=" writer-aot-cds-file)
+                                [(str "-XX:ArchiveClassesAtExit=" archive-file)
                                  "-cp" server-uber-file "clojure.main" "-e"
-                                 "(do (require 'seon.db.server) (shutdown-agents)"]))
+                                 (str "(do (require 'seon.db.server "
+                                      "'seon.host 'seon.web.server) "
+                                      "(shutdown-agents))")]))
     :out :capture :err :capture}
    "Writer AppCDS archive generation failed")
-  writer-aot-cds-file)
+  archive-file)
 
 (defn- writer-uber!
   [aot? cds?]
@@ -215,13 +217,18 @@
              :basis writer-basis
              :main 'seon.DatabaseServerMain})
     (when cds?
-      (write-writer-cds! server-uber-file))
+      (write-writer-cds! server-uber-file writer-aot-cds-file))
     (println "writer-uber → " server-uber-file)))
 
 (defn writer-uber
-  "Build the canonical source-only writer artifact."
+  "Build the canonical shared JVM AOT artifact."
   [_]
-  (writer-uber! false false))
+  (writer-uber! true false))
+
+(defn writer-cds
+  "Build one AppCDS archive against its final published JVM artifact path."
+  [{:keys [jar archive]}]
+  (write-writer-cds! (str jar) (str archive)))
 
 (defn writer-uber-aot
   "Explicit writer AOT experiment; never invoked by the development operator."

@@ -11,6 +11,7 @@
             [seon.host :as host]
             [seon.host.context :as context]
             [seon.host.invoke :as host.invoke]
+            [seon.host.session :as host.session]
             [seon.host-registry-writer-test :as registry-test]
             [seon.schema :as schema])
   (:import [java.io File]
@@ -134,7 +135,7 @@
     :seon.execution/invocation-id invocation-id
     :seon.db/db (context/resolve-head! *writer-session*)
     :seon.execution/function-identity
-    {:seon.execution/function-symbol 'seon.execution.runtime/eval-batch!
+    {:seon.execution/function-symbol host.session/eval-batch-function-symbol
      :seon.execution/artifact-digest artifact-digest}
     :seon.execution/arguments
     [{:seon.eval/parsed (mapv form sources)

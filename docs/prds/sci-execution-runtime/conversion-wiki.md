@@ -1953,3 +1953,20 @@ the variable-weight values they select.
   be deleted (`src/seon/agent/lifecycle.cljc`,
   `src/seon/agent/driver/host.clj`,
   `docs/seon/issues/host-base-agent-surface-parity.md`).
+
+## D-list claimant-session cut scar (2026-07-24)
+
+- **Recovery facts describe lost claimant custody, never a retired child
+  process.** The recovery transaction records the thin
+  `:seon.runtime.recovery/reason :claimant-session-loss` anchor and connects
+  it to the interrupted eval receipt while the same transaction closes the
+  run and turn. PID, exit, signal, resource, stdout/stderr, diagnostic-blob,
+  and child-artifact matching do not belong in this database mechanism
+  (`src/seon/runtime/recovery.cljs`).
+- **The one agent-eval contract is the JVM claimant contract.** System
+  teaching has no tier boolean or Bun/self-host/Promise arm; recorded
+  definitions rebuild from database program facts and admitted work is not
+  blindly replayed. Diffusion's isolated self-host compiler cache lives under
+  `seon.diffusion`, and the live eval-batch wire symbol is the
+  `seon.host.session/eval-batch-function-symbol` protocol value rather than a
+  symbol naming the deleted execution runtime.

@@ -256,6 +256,54 @@
                         :seon.dev.process/ready-timeout-ms))
         "Pod readiness has no total-duration abort condition")))
 
+(deftest jvm-processes-use-one-verified-aot-cds-publication
+  (let [base (test-config)
+        directory (:seon.dev.test/directory base)
+        configuration (target-config base directory)
+        writer (fs/path directory "published/seon-jvm-aot.jar")
+        cds (fs/path directory "published/seon-jvm-aot.jsa")]
+    (fs/create-dirs (fs/parent writer))
+    (spit (str writer) "aot")
+    (spit (str cds) "cds")
+    (let [manifest
+          (assoc (target-manifest-for configuration)
+                 :seon.dev.artifact/writer-path (str writer)
+                 :seon.dev.artifact/writer-file-digest
+                 (artifact/file-digest writer)
+                 :seon.dev.artifact/writer-cds-path (str cds)
+                 :seon.dev.artifact/writer-cds-digest
+                 (artifact/file-digest cds)
+                 :seon.dev.artifact/writer-java-command
+                 (get-in configuration
+                         [:seon.dev.config/environment "JAVA_CMD"]
+                         "java")
+                 :seon.dev.artifact/writer-java-identity-digest
+                 (artifact/java-identity-digest configuration)
+                 :seon.dev.artifact/writer-jvm-options-digest
+                 (artifact/jvm-family-options-digest))
+          canonical (process/specs configuration manifest)]
+      (doseq [[id main] [[process/writer-id "seon.db.server"]
+                         [process/host-id "seon.host"]
+                         [process/web-render-id "seon.web.server"]]]
+        (let [argv (get-in canonical [id :seon.dev.process/argv])
+              classpath-index (.indexOf argv "-cp")]
+          (is (some #{"-Xshare:on"} argv))
+          (is (some #{(str "-XX:SharedArchiveFile=" cds)} argv))
+          (is (= (str writer) (nth argv (inc classpath-index))))
+          (is (= ["clojure.main" "-m" main]
+                 (subvec argv (+ classpath-index 2) (+ classpath-index 5))))))
+      (spit (str cds) "changed")
+      (let [output (with-out-str
+                     (let [fallback (process/specs configuration manifest)]
+                       (doseq [id [process/writer-id process/host-id
+                                   process/web-render-id]]
+                         (is (= "clojure"
+                                (first
+                                 (get-in fallback
+                                         [id :seon.dev.process/argv])))))))]
+        (is (str/includes? output
+                           "shared JVM AOT+CDS identity mismatch"))))))
+
 (deftest pod-boot-stall-timeout-is-derived-and-fires-with-its-config-key
   (let [manifest-configuration
         (dev-config/select-manifest (operator-config) "config/system.edn")
@@ -3841,8 +3889,11 @@
           (is (= [(:seon.dev.config/bun-executable config)
                   (:seon.dev.config/client-output config)]
                  (:seon.dev.process/argv pod)))
-          (is (= (:seon.dev.config/writer-output config)
-                 (nth (:seon.dev.process/argv writer) 7)))
+          (let [argv (:seon.dev.process/argv writer)
+                classpath-index (.indexOf argv "-cp")]
+            (is (pos? classpath-index))
+            (is (= (:seon.dev.config/writer-output config)
+                   (nth argv (inc classpath-index)))))
           (is (= (:seon.dev.config/runtime-assets config)
                  (get-in pod [:seon.dev.process/environment
                               "SEON_RUNTIME_ROOT"])))

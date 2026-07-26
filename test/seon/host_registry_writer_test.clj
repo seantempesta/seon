@@ -29,6 +29,7 @@
             [seon.db.writer-test-support :as writer-test]
             [seon.host :as host]
             [seon.host.context :as context]
+            [seon.host.session :as host.session]
             [seon.agent.ctx.render-fns]
             [seon.schema :as schema])
   (:import [java.io File]
@@ -428,7 +429,7 @@
     :seon.execution/invocation-id invocation-id
     :seon.db/db database
     :seon.execution/function-identity
-    {:seon.execution/function-symbol 'seon.execution.runtime/eval-batch!
+    {:seon.execution/function-symbol host.session/eval-batch-function-symbol
      :seon.execution/artifact-digest parity-digest}
     :seon.execution/arguments
     [{:seon.eval/parsed parsed

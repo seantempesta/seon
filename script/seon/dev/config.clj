@@ -608,7 +608,7 @@
          :seon.dev.config/writer-output
          (or (:seon.dev.config/writer-output package)
              (str (fs/path root
-                           "target/seon-database-server-standalone.jar")))
+                           "target/seon-database-server-aot.jar")))
          :seon.dev.config/artifact-manifest
          (or (:seon.dev.config/artifact-manifest package)
              (str (fs/path

@@ -8,6 +8,7 @@
             [seon.host.guard :as guard]
             [seon.host.instrument :as instrument]
             [seon.host.sample :as sample]
+            [seon.host.session :as host.session]
             [seon.host.session.leaf :as session]
             [seon.schema :as schema])
   (:import [java.nio.channels SocketChannel]
@@ -140,7 +141,7 @@
               (:seon.execution/source-digest identity-value)
               arguments (or run-fence {}))}
 
-            (= function-symbol 'seon.execution.runtime/eval-batch!)
+            (= function-symbol host.session/eval-batch-function-symbol)
               (let [sampling-limits (sample/acquire-sampling-policy!
                                      (::session/writer session) database)
                     sampling-limits

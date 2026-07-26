@@ -78,7 +78,11 @@
 
 (defn- assert-program-artifact-manifest!
   [manifest manifest-path]
-  (let [required-strings
+  (let [current-version
+        (some-> (System/getenv "SEON_WRITER_ARTIFACT_VERSION")
+                not-empty
+                Long/parseLong)
+        required-strings
         [:seon.dev.artifact/runtime-root
          :seon.dev.artifact/program-source-path
          :seon.dev.artifact/program-row-path]
@@ -87,7 +91,8 @@
          :seon.dev.artifact/program-source-digest
          :seon.dev.artifact/program-row-digest]]
     (when-not
-     (and (= 11 (:seon.dev.artifact/version manifest))
+     (and (or (nil? current-version)
+              (= current-version (:seon.dev.artifact/version manifest)))
           (every? #(string? (get manifest %)) required-strings)
           (every? #(sha256-digest? (get manifest %)) required-digests))
       (throw

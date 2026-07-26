@@ -7,6 +7,7 @@
             [seon.db.writer :as writer]
             [seon.host :as host]
             [seon.host.context :as context]
+            [seon.host.session :as host.session]
             [seon.host-registry-writer-test :as registry-test])
   (:import [java.io File]
            [java.nio.channels Channels SocketChannel]))
@@ -56,7 +57,7 @@
       :seon.execution/invocation-id invocation-id
       :seon.db/db (context/resolve-head! *writer-session*)
       :seon.execution/function-identity
-      {:seon.execution/function-symbol 'seon.execution.runtime/eval-batch!
+      {:seon.execution/function-symbol host.session/eval-batch-function-symbol
        :seon.execution/artifact-digest artifact-digest}
       :seon.execution/arguments
       [{:seon.eval/parsed [{:seon.repl/kind :form

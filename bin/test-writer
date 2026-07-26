@@ -40,6 +40,13 @@ WRITER_ARTIFACT_MANIFEST=$(
 )
 export SEON_WRITER_ARTIFACT_MANIFEST="$WRITER_ARTIFACT_MANIFEST"
 
+SEON_WRITER_ARTIFACT_VERSION=$(
+  bb --config bb.edn --deps-root . -e \
+    '(require (quote seon.dev.artifact))
+     (print seon.dev.artifact/current-version)'
+)
+export SEON_WRITER_ARTIFACT_VERSION
+
 WRITER_TEST_LIST=$(IFS=,; echo "$*")
 
 RUNNER='(let [log-fn-var (requiring-resolve (quote taoensso.trove/*log-fn*))

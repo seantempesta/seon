@@ -10,6 +10,7 @@
 (def ready-message :seon.execution.message/ready)
 (def result-message :seon.execution.message/result)
 (def error-message :seon.execution.message/error)
+(def eval-batch-function-symbol 'seon.host.session/eval-batch!)
 
 (schema/register! ::protocol-version [:= protocol-version])
 (schema/register! ::agent-id [:string {:min 1}])

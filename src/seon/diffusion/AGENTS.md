@@ -9,8 +9,8 @@ The require fence is directional: the main system never requires
 Diffusion-backed providers are
 explicit-configuration opt-in only and never activate as a side effect.
 
-Logical membership is `seon.diffusion.gemma`, `.grammar`, `.retrieval`,
-`.oracle`, `.scaffold`, `.worker.eval`, and `.worker.parse`. Gemma
+Logical membership is `seon.diffusion.bootstrap-cache`, `.gemma`, `.grammar`,
+`.retrieval`, `.oracle`, `.scaffold`, `.worker.eval`, and `.worker.parse`. Gemma
 self-registers its provider
 descriptor and the typeahead step backing when explicitly loaded.
 
