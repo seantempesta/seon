@@ -4,13 +4,12 @@
             [clojure.test :refer [deftest is]]
             [jsonista.core :as json]
             [malli.core :as m]
-            [seon.agent.driver.host :as driver.host]
             [seon.ai.http :as http]
             [seon.config.resolve :as config.resolve])
   (:import [com.sun.net.httpserver HttpHandler HttpServer]
            [java.net InetSocketAddress ServerSocket]
            [java.nio.charset StandardCharsets]
-           [java.util.concurrent CountDownLatch Executors TimeUnit]))
+           [java.util.concurrent CountDownLatch TimeUnit]))
 
 (def ^:private transport-config
   {:seon.config.model-transport/response-identity-cap 128
@@ -116,11 +115,9 @@
       (finally
         (.stop instance 0)))))
 
-(deftest long-lived-claimant-failures-retain-flat-causes
-  (let [bounded (deref #'driver.host/bounded-llm-transport!)
-        watchdog (Executors/newScheduledThreadPool 1)
-        host {:seon.host/watchdog watchdog
-              :seon.agent.driver/llm-transport! http/complete}]
+(deftest long-lived-http-failures-retain-flat-causes
+  (let [bounded (fn [_ request] (http/complete request))
+        host nil]
     (try
       (reset-client!)
       (binding [http/*environment-value* (constantly nil)]
@@ -230,8 +227,7 @@
           (finally
             (.stop invalid-json-server 0))))
       (finally
-        (reset-client!)
-        (.shutdownNow watchdog)))))
+        (reset-client!)))))
 
 (deftest stream-aborts-after-the-portable-first-form-predicate
   (let [instance
@@ -317,14 +313,11 @@
              (.countDown entered)
              (.await release 5 TimeUnit/SECONDS)
              (.close exchange))))
-        watchdog (Executors/newScheduledThreadPool 1)]
+        ]
     (try
       (binding [http/*environment-value* (constantly "stub-key")]
-        (let [bounded (deref #'driver.host/bounded-llm-transport!)
-              result
-              (bounded
-               {:seon.host/watchdog watchdog
-                :seon.agent.driver/llm-transport! http/complete}
+        (let [result
+              (http/complete
                (request (.getPort (.getAddress instance)) true 100))]
           (is (.await entered 1 TimeUnit/SECONDS))
           (is (true? (get-in result [:seon.ai/error :seon.ai/timeout?])))
@@ -332,30 +325,4 @@
           (is (map? result))))
       (finally
         (.countDown release)
-        (.shutdownNow watchdog)
         (.stop instance 0)))))
-
-(deftest claimant-watchdog-timeout-is-a-flat-timeout
-  (let [release (CountDownLatch. 1)
-        entered (CountDownLatch. 1)
-        watchdog (Executors/newScheduledThreadPool 1)
-        bounded (deref #'driver.host/bounded-llm-transport!)]
-    (try
-      (let [result
-            (bounded
-             {:seon.host/watchdog watchdog
-              :seon.agent.driver/llm-transport!
-              (fn [_]
-                (.countDown entered)
-                (.await release 5 TimeUnit/SECONDS))}
-             (request 1 false 25))]
-        (is (.await entered 1 TimeUnit/SECONDS))
-        (is (true? (get-in result [:seon.ai/error :seon.ai/timeout?])))
-        (is (true? (get-in result [:seon.ai/error
-                                   :seon.ai/outer-timeout?])))
-        (is (str/includes? (get-in result [:seon.ai/error :seon.ai/msg])
-                           "claimant deadline"))
-        (is (map? result)))
-      (finally
-        (.countDown release)
-        (.shutdownNow watchdog)))))
