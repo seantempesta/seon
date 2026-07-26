@@ -14,6 +14,7 @@ namespaces. Neither seam may gain a compatibility path.
 
 ## Evidence
 
+- The completed Group 1 seam repair is commit `8a09d615e`.
 - Fixed in this seam: `test/seon/ai/dispatch_test.cljs` was deleted. It tested
   the deleted mutable pod dispatch registry and required four deleted pod
   namespaces: Group 1's `seon.diffusion.gemma`, plus Group 3's

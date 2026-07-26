@@ -17,6 +17,8 @@ Post-cut `rg` finds direct requires in `src/seon/client.cljs`, `src/seon/web/ser
 
 ## Repair evidence
 
+The completed Group 3 seam repair is commit `fd304e8c1`.
+
 The seam-repair wave removed the dead provider-backed `my.kb/recall` and
 `my.kb/source-stats` surfaces instead of relocating their Group 3/4
 dependencies. `my.kb` now loads on the JVM through its surviving database and

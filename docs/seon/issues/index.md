@@ -10,7 +10,7 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (62)
+## Blocker (63)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -57,6 +57,7 @@ See `README.md` for the convention.
 | [Refuse model dispatch when turn allocation fails](jvm-driver-continues-after-turn-allocation-error.md) | blocker | agent |
 | [Remove surviving requires of pod provider namespaces](pod-cut-group-3-leaves-surviving-provider-requires.md) | blocker | agent |
 | [Remove surviving requires of pod toolkit namespaces](pod-cut-group-4-leaves-surviving-toolkit-requires.md) | blocker | agent |
+| [Replace the pod pages producer before the writer gate can run](pod-cut-blocks-current-program-artifact-before-jvm-indexer.md) | blocker | agent |
 | [Restore writer admin transition is unimplemented](restore-writer-admin-transition-is-unimplemented.md) | blocker | Core |
 | [Resume JVM execution from the committed run plan](jvm-driver-does-not-resume-committed-plan.md) | blocker | agent |
 | [Retain complete model transport evidence in Inspect logs](inspect-model-transport-evidence-is-incomplete.md) | blocker | agent |

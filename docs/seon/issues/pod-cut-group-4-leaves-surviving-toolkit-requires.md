@@ -17,6 +17,8 @@ Post-cut `rg` finds direct requires in `src/my/plan.cljc`, `src/my/kb.cljc`, `sr
 
 ## Repair evidence
 
+The completed Group 4 seam repair is commit `aa766168e`.
+
 The seam-repair wave fixed each live portable owner without restoring a pod
 namespace:
 

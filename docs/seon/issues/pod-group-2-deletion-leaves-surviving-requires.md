@@ -11,7 +11,8 @@ tags: [issue, agent, runtime]
 
 The protected Group 5 pod entry still requires namespaces deleted by pod cut
 Group 2. The Group 2-owned source and test seams are removed. Top-level
-integrated the configuration repair in `aa766168e`.
+integrated the configuration repair in `aa766168e`; the remaining Group 2 seam
+repair is commit `10cc8fd11`.
 
 ## Evidence
 
