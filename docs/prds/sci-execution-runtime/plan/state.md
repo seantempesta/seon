@@ -10,7 +10,7 @@ tags: [prd, agent, architecture]
 produced by the command shown, against the working tree — so a stale row is
 impossible and an agent can re-verify any claim in one line.
 
-Generated from `codex/runtime-reliability-refactor` at `e8c84fcdd`, measuring the **working tree** — so a
+Generated from `codex/runtime-reliability-refactor` at `8a3e41a11`, measuring the **working tree** — so a
 lane with uncommitted work shows up here. Rows that can differ between committed
 and working state say both. `git status --short` before trusting a surprising row.
 
@@ -139,16 +139,29 @@ O15: index at compile time from a JVM build only; never at runtime.
 
 ## 8. Can the machine prove anything?
 
+The JVM gate needs the compiled program artifact, so it reports zero tests until
+a `bin/seon up` / `bin/seon down` freeze rebuilds it. Retained runs live in
+`tmp/plan-evidence/`; re-run with
+`bin/test-writer > tmp/plan-evidence/test-writer-$(date +%F).log 2>&1`.
+
+Last retained run — `tmp/plan-evidence/test-writer-2026-07-26.log` (2026-07-26):
+
 ```
-test/ files:            189
-deftest count (JVM):    760
-deftest count (cljs):   1216
+<no summary line>
+<no result line>
 ```
 
-`bin/test-writer` needs the compiled program artifact, so it reports **0 tests**
-until a `bin/seon up` / `bin/seon down` freeze rebuilds it. Until then no suite
-verifies the JVM and every claim rests on targeted evaluation. Check with:
-`bin/test-writer 2>&1 | tail -5`.
+**INCOMPLETE — do not read this as green.** The log has no
+`N failures, N errors.` line, so the run did not finish (still writing,
+killed, or crashed before the summary). Absence of `FAIL in` lines in an
+unfinished log proves nothing.
+
+Test source inventory (what exists, not what passes):
+```
+test files:           189
+deftest (clj/cljc):   1017
+deftest (cljs):       1216
+```
 
 ## 9. Open blockers
 
@@ -193,8 +206,8 @@ registered :seon.agent/* attributes:
 
 registered in:
   src/seon/agent.cljs
-  src/seon/agent/run/core.cljc
   src/seon/agent/ctx.cljc
+  src/seon/agent/run/core.cljc
 ```
 
 **Duplicate registrations:** `:seon.agent/run ` — one attribute registered in two

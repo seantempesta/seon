@@ -206,17 +206,56 @@ echo
 cat <<'S8'
 ## 8. Can the machine prove anything?
 
+The JVM gate needs the compiled program artifact, so it reports zero tests until
+a `bin/seon up` / `bin/seon down` freeze rebuilds it. Retained runs live in
+`tmp/plan-evidence/`; re-run with
+`bin/test-writer > tmp/plan-evidence/test-writer-$(date +%F).log 2>&1`.
+
 S8
-echo '```'
-echo "test/ files:            $(find test -name '*_test.clj*' 2>/dev/null | wc -l | tr -d ' ')"
-echo "deftest count (JVM):    $(n 'deftest' test/ --glob '*.clj')"
-echo "deftest count (cljs):   $(n 'deftest' test/ --glob '*.cljs')"
-echo '```'
+LOG=$(ls -t tmp/plan-evidence/test-writer-*.log 2>/dev/null | head -1)
+if [ -n "$LOG" ]; then
+  RAN=$(rg --no-filename -o 'Ran [0-9]+ tests containing [0-9]+ assertions\.' "$LOG" 2>/dev/null | tail -1)
+  RES=$(rg --no-filename -o '[0-9]+ failures, [0-9]+ errors\.' "$LOG" 2>/dev/null | tail -1)
+  echo "Last retained run — \`$LOG\` ($(date -r "$LOG" +%Y-%m-%d 2>/dev/null)):"
+  echo
+  echo '```'
+  echo "${RAN:-<no summary line>}"
+  echo "${RES:-<no result line>}"
+  echo '```'
+  echo
+  FAILED=$(rg --no-filename -o '(FAIL|ERROR) in \(([a-z0-9!?*<>=-]+)\)' -r '$1 $2' "$LOG" 2>/dev/null | sort -u)
+  if [ -z "$RES" ]; then
+    echo "**INCOMPLETE — do not read this as green.** The log has no"
+    echo "\`N failures, N errors.\` line, so the run did not finish (still writing,"
+    echo "killed, or crashed before the summary). Absence of \`FAIL in\` lines in an"
+    echo "unfinished log proves nothing."
+  elif [ "$RES" = "0 failures, 0 errors." ]; then
+    echo "**Green** — the run completed and reported zero failures and zero errors."
+  elif [ -n "$FAILED" ]; then
+    echo "**Not green. Every failing test, named:**"
+    echo
+    echo "$FAILED" | sed 's/^/- `/; s/$/`/'
+    echo
+    echo "An unnamed failure count is worse than no gate — it launders red into a"
+    echo "number. Each of these is either a real defect or a test pinning a deleted"
+    echo "path; decide which and act, never re-baseline the count."
+  else
+    echo "**NOT GREEN, and the failing tests are not named in the log.**"
+    echo "\`$RES\` — but no \`FAIL in\` / \`ERROR in\` line was captured, which usually"
+    echo "means the output was truncated (a \`| tail\` will do it). Re-run redirecting"
+    echo "the WHOLE log, not a tail."
+  fi
+else
+  echo "**No retained run.** \`tmp/plan-evidence/\` is empty, so nothing has verified"
+  echo "the JVM. Run the freeze, then the command above."
+fi
 echo
-echo "\`bin/test-writer\` needs the compiled program artifact, so it reports **0 tests**"
-echo "until a \`bin/seon up\` / \`bin/seon down\` freeze rebuilds it. Until then no suite"
-echo "verifies the JVM and every claim rests on targeted evaluation. Check with:"
-echo '`bin/test-writer 2>&1 | tail -5`.'
+echo "Test source inventory (what exists, not what passes):"
+echo '```'
+echo "test files:           $(find test -name '*_test.clj*' 2>/dev/null | wc -l | tr -d ' ')"
+echo "deftest (clj/cljc):   $(n 'deftest' test/ --glob '*.clj' --glob '*.cljc')"
+echo "deftest (cljs):       $(n 'deftest' test/ --glob '*.cljs')"
+echo '```'
 echo
 
 cat <<'S9'
