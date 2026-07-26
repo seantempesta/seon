@@ -87,5 +87,18 @@ reported, never resolved by loosening it.
 4. **Replay is automatic.** Agents never mark anything; the run loop
    derives `:seon.capability/op-id` from (run, ordinal, epoch);
    `:seon.capability/replayed?` is observability, not an option.
-   (The `:seon.capability/*` → `:seon.db/*` / `:seon.effect/class`
-   attribute renames ride the standing rename wave.)
+   (The `:seon.capability/*` → `:seon.db/*` attribute renames ride the
+   standing rename wave.)
+5. **Effect classification refined (owner, same night).** The attribute
+   is `:seon.code.fn/effect` — a program-graph fact colocated with the
+   fn facts; the runtime mechanism stays `seon.effect`. Functions are
+   untagged by default and carry ONLY their Malli contract; purity is
+   never assumed and never declared — it is DERIVED by reachability
+   (pure iff the call graph reaches no tagged leaf and no unknown
+   target; unknown fails closed). Only world-touching LEAVES are
+   tagged, and the tag is the family. The real axis is externality,
+   not read-vs-write: database reads are not effects at all (a pointer
+   into an immutable value — replay-free, no identity); database
+   writes carry the op-id; external reads (web, llm) are effects
+   despite being reads — cost, limits, and nondeterminism under
+   replay, not mutation, are what they owe attribution for.
