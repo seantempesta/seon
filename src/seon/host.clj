@@ -3,6 +3,7 @@
   (:require [clojure.edn :as edn]
             [my.blob.schema]
             [seon.ai.http :as ai.http]
+            [seon.agent.driver :as driver]
             [seon.capability :as capability]
             [seon.db.branch :as db.branch]
             [seon.db.host :as db.host]
@@ -16,6 +17,7 @@
             [seon.host.session :as protocol]
             [seon.host.session.leaf :as session]
             [seon.schema :as schema]
+            [seon.sci.eval :as sci.eval]
             [taoensso.timbre :as log])
   (:import [java.net StandardProtocolFamily UnixDomainSocketAddress]
            [java.nio.file Files Path]
@@ -330,24 +332,33 @@
              instrument-state (::context/projection acquired-projection)))
         eval-pool (Executors/newFixedThreadPool
                    (int (or eval-threads default-eval-threads)))
+        _ (sci.eval/open!
+           {::sci.eval/concurrency
+            (int (or eval-threads default-eval-threads))})
         watchdog (Executors/newScheduledThreadPool 2)
-        host (merge writer
-                    {::writer writer
-                     ::server server
-                     ::base base
-                     ::instrument/state instrument-state
-                     ::projection-state projection-state
-                     ::graduation-report graduation-report
-                     ::contexts contexts
-                     ::eval-pool eval-pool
-                     ::watchdog watchdog
-                     :seon.execution/artifact-inventories
-                     artifact-inventories
-                     :seon.agent.driver/llm-transport! ai.http/complete
-                     :seon.startgate/execution-digest
-                     (:seon.startgate/execution-digest request)
-                     :seon.startgate/applied-identity applied-identity
-                     ::socket-path socket-path})
+        driver-listener
+        (driver/start! writer
+                       (context/database-functions writer)
+                       ai.http/complete)
+        host (merge
+              writer
+              {::writer writer
+               ::server server
+               ::base base
+               ::instrument/state instrument-state
+               ::projection-state projection-state
+               ::graduation-report graduation-report
+               ::contexts contexts
+               ::eval-pool eval-pool
+               ::watchdog watchdog
+               ::driver-listener driver-listener
+               :seon.execution/artifact-inventories
+               artifact-inventories
+               :seon.agent.driver/llm-transport! ai.http/complete
+               :seon.startgate/execution-digest
+               (:seon.startgate/execution-digest request)
+               :seon.startgate/applied-identity applied-identity
+               ::socket-path socket-path})
         acceptor
         (Thread.
          ^Runnable

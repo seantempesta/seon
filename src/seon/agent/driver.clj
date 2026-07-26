@@ -8,13 +8,20 @@
 
    This namespace contains no process loop and opens no database connection.
    Its caller supplies the one writer operation and immutable database values."
-  (:require [seon.agent.lifecycle :as lifecycle]
+  (:require [seon.ai.core :as ai]
+            [seon.agent.lifecycle :as lifecycle]
             [seon.agent.message :as message]
             [seon.agent.run.core :as run]
+            [seon.config.resolve :as config.resolve]
             [seon.content-hash :as content-hash]
+            [seon.db.host :as db.host]
             [seon.eval.receipt :as receipt]
+            [seon.repl.parse :as repl.parse]
             [seon.schema :as schema]
-            [seon.sci.eval :as sci.eval]))
+            [seon.sci.eval :as sci.eval])
+  (:import [java.lang ProcessHandle]
+           [java.util Date]
+           [java.util.concurrent.atomic AtomicBoolean]))
 
 (schema/register! :seon.agent.run/plan-digest :string)
 (schema/register! :seon.agent.run/forms
@@ -84,6 +91,7 @@
   [{agent-id :seon.agent/id
     run-id :seon.agent.run/id
     claim-epoch :seon.agent.run/claim-epoch
+    turn-id :seon.agent.turn/id
     ordinal :seon.eval/ordinal
     at :seon.eval/at}
    value]
@@ -92,7 +100,9 @@
     (let [result (::lifecycle/result value)]
       (into
        (run/finish-tx-data agent-id run-id claim-epoch :completed at)
-       [{:seon.agent.run/id run-id
+       [{:seon.agent.turn/id turn-id
+         :seon.agent.turn/status :done}
+        {:seon.agent.run/id run-id
          :seon.agent.run/result result}
         {:seon.agent.message/id
          (message-id run-id ordinal claim-epoch)
@@ -285,3 +295,187 @@
                   ::sci.eval/evaluation]}
   [request]
   (sci.eval/evaluate request))
+
+(def ^:private pending-message-query
+  '[:find ?message-id ?agent-id ?content ?at
+    :where
+    [?message :seon.agent.message/id ?message-id]
+    [?message :seon.agent.message/origin :human]
+    [?message :seon.agent.message/to ?agent]
+    [?agent :seon.agent/id ?agent-id]
+    [?message :seon.agent.message/content ?content]
+    [?message :seon.agent.message/at ?at]
+    (not [?run :seon.agent.run/cause ?message])])
+
+(defn- compact-id [prefix value]
+  (str prefix (subs (content-hash/sha-256 value) 0 11)))
+
+(defn- transact! [database-functions tx-data]
+  ((get database-functions 'transact!)
+   {:seon.db/tx-data (vec tx-data)}))
+
+(defn- pending-messages [database-functions]
+  ((get database-functions 'query)
+   {:seon.db/query pending-message-query
+    :datahike.resource/max-work 100000
+    :datahike.resource/max-results 64
+    :datahike.resource/max-result-weight 131072}))
+
+(defn- pull-one [database-functions pattern ref]
+  ((get database-functions 'pull)
+   {:seon.db/pull-pattern pattern
+    :seon.db/ref ref
+    :datahike.resource/max-work 100000
+    :datahike.resource/max-results 2048
+    :datahike.resource/max-result-weight 262144}))
+
+(defn- open-run!
+  [database-functions process-id message-id agent-id at lease-until]
+  (let [run-id (compact-id "r" message-id)
+        run-ref [:seon.agent.run/id run-id]
+        result
+        (transact!
+         database-functions
+         [[:db.fn/cas [:seon.agent/id agent-id] :seon.agent/run nil run-ref]
+          {:seon.agent.run/id run-id
+           :seon.agent.run/agent [:seon.agent/id agent-id]
+           :seon.agent.run/cause [:seon.agent.message/id message-id]
+           :seon.agent.run/started-at at
+           :seon.agent.run/status :open
+           :seon.agent.run/process process-id
+           :seon.agent.run/claim-epoch 1
+           :seon.agent.run/lease-until lease-until}])]
+    (when-not (:seon.error/message result)
+      {:seon.agent.run/id run-id
+       :seon.agent.run/claim-epoch 1})))
+
+(defn- model-request
+  [database-functions agent-id content]
+  (let [configuration
+        (pull-one database-functions
+                  (ai/config-pull-pattern)
+                  config.resolve/cluster-config-lookup-ref)
+        agent
+        (pull-one database-functions
+                  (ai/agent-config-pull-pattern)
+                  [:seon.agent/id agent-id])
+        attempt-time-limit-ms
+        (or (:seon.ai/agent-attempt-timeout-ms agent) 60000)]
+    {:seon.ai/system-prompt
+     (str "Return only Clojure forms. Finish with "
+          "(seon.agent.lifecycle/complete \"your concise reply\").")
+     :seon.ai/ctx content
+     :seon.ai/stream? false
+     :seon.ai/reply-evaluation :batch
+     :seon.ai/request-timeout-ms attempt-time-limit-ms
+     :seon.ai/config-resolution
+     (ai/resolved-config-from-rows
+      ai/shipped-defaults configuration agent attempt-time-limit-ms)}))
+
+(defn- reply-sources [reply]
+  (let [program
+        (repl.parse/parse-program
+         reply
+         {:seon.repl/current-ns 'user
+          :seon.repl/strip-fences? true})]
+    (when (empty? (:seon.repl/errors program))
+      (mapv :seon.repl/source (:seon.repl/eval-entries program)))))
+
+(defn- close-error!
+  [database-functions agent-id run-id claim-epoch turn-id at message]
+  (transact!
+   database-functions
+   (into
+    (run/finish-tx-data agent-id run-id claim-epoch :error at)
+    [{:seon.agent.turn/id turn-id
+      :seon.agent.turn/status :error
+      :seon.agent.turn/error message}])))
+
+(defn- process-message!
+  [database-functions llm-transport! process-id
+   [message-id agent-id content at]]
+  (let [now (Date.)
+        lease-until (Date. (+ (.getTime now) 120000))]
+    (when-let [{run-id :seon.agent.run/id
+                claim-epoch :seon.agent.run/claim-epoch}
+               (open-run! database-functions process-id message-id agent-id
+                          at lease-until)]
+      (let [turn-id (compact-id "t" run-id)
+            turn-ref [:seon.agent.turn/id turn-id]
+            _ (transact!
+               database-functions
+               (into
+                (run/run-fence agent-id run-id claim-epoch)
+                [{:seon.agent.turn/id turn-id
+                  :seon.agent.turn/run [:seon.agent.run/id run-id]
+                  :seon.agent.turn/at now
+                  :seon.agent.turn/status :running}]))
+            response (llm-transport!
+                      (model-request database-functions agent-id content))
+            reply (:seon.ai/text response)
+            sources (when (string? reply) (reply-sources reply))]
+        (if-not (seq sources)
+          (close-error!
+           database-functions agent-id run-id claim-epoch turn-id (Date.)
+           (or (get-in response [:seon.ai/error :seon.ai/msg])
+               "The model reply contained no executable forms."))
+          (do
+            (transact!
+             database-functions
+             (plan-tx-data
+              {:seon.agent/id agent-id
+               :seon.agent.run/id run-id
+               :seon.agent.run/claim-epoch claim-epoch
+               :seon.agent.run/plan-digest
+               (content-hash/sha-256 (pr-str sources))
+               ::sources sources}))
+            (loop [ordinal 0]
+              (when (< ordinal (count sources))
+                (let [result
+                      (execute-form!
+                       #(transact! database-functions %)
+                       evaluate!
+                       lifecycle-tx-data
+                       {:seon.agent/id agent-id
+                        :seon.agent.run/id run-id
+                        :seon.agent.run/claim-epoch claim-epoch
+                        :seon.agent.turn/id turn-id
+                        :seon.eval/at (Date.)
+                        :seon.eval/ordinal ordinal
+                        :seon.eval/total (count sources)
+                        :seon.eval/source (nth sources ordinal)
+                        :seon.eval/ns 'user
+                        :seon.sci.interrupt/time-limit-ms 60000})]
+                  (when (and (not= :error (:seon.eval/status result))
+                             (not= :completed
+                                   (::lifecycle/disposition
+                                    (:seon.sci.eval/value result))))
+                    (recur (inc ordinal))))))))))))
+
+(defn start!
+  "Start the database-interest-driven JVM run driver."
+  [writer database-functions llm-transport!]
+  (let [scanning? (AtomicBoolean. false)
+        process-id (str "host-" (.pid (ProcessHandle/current)))
+        scan!
+        (fn scan! []
+          (when (.compareAndSet scanning? false true)
+            (Thread/startVirtualThread
+             (fn []
+               (try
+                 (doseq [message (pending-messages database-functions)]
+                   (Thread/startVirtualThread
+                    #(process-message! database-functions llm-transport!
+                                       process-id message)))
+                 (finally
+                   (.set scanning? false)))))))]
+    (let [listener
+          (db.host/listen!
+           writer
+           {:seon.db/key ::messages
+            :seon.db/datom-patterns
+            [[:seon.agent.message/to]
+             [:seon.agent.run/lease-until]]
+            :seon.db/handler (fn [_] (scan!))})]
+      (scan!)
+      listener)))

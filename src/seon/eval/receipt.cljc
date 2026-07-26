@@ -45,6 +45,7 @@
                   [:inst {:seon.db/index true}])
 (schema/register! :seon.agent.turn/status
                   [:enum :running :done :error :interrupted])
+(schema/register! :seon.agent.turn/run :seon.db/ref)
 (schema/register! :seon.agent.turn/rendered-tx :seon.db/ref)
 (schema/register! :seon.agent.turn/error :string)
 (schema/register! :seon.agent.turn/usage-estimated? :boolean)

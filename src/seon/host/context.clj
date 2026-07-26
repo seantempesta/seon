@@ -412,6 +412,11 @@
   [writer]
   (db/bind-leaf (db.host/leaf writer #(database-context writer))))
 
+(defn database-functions
+  "Return the synchronous database functions bound to this writer session."
+  [writer]
+  (bound-database-functions writer))
+
 (defn- host-message-leaf []
   {::message.leaf/available? (constantly true)
    ::message.leaf/unavailable (constantly {:seon.error/message "Host admission is unavailable."
