@@ -1,10 +1,16 @@
 (ns seon.db.program
-  "Reconcile compiled program facts at the database authority.
+  "Compile and reconcile first-party program graph facts.
 
    Namespace, function, schema, and test rows are diffed by their established
-   identities and committed together; compilation remains a pod concern."
-  (:require [datahike.api :as d]
-            [seon.schema :as schema]))
+   identities and committed together. Fresh-database initialization pages are
+   compiled here too, before an artifact is frozen; runtime code only consumes
+   those mandatory pages."
+  (:require [clojure.edn :as edn]
+            [clojure.set :as set]
+            [datahike.api :as d]
+            [hasch.core :as hasch]
+            [seon.schema :as schema]
+            [seon.schema.form :as schema.form]))
 
 ;; A compiled program row is intentionally open: namespace, function, schema,
 ;; and test entities share only their established identity attributes.
@@ -15,6 +21,17 @@
 ;; third-party boundaries retained only inside this authority namespace.
 (schema/register! ::db-value :any)
 (schema/register! ::tx-data [:vector :any])
+
+(schema/register! :seon.test/sym
+                  [:string {:seon.db/identity true}])
+(schema/register! :seon.test/source :string)
+(schema/register! :seon.test/ns :seon.db/ref)
+(schema/register!
+ :seon.test
+ [:map {:seon.db/entity true}
+  [:seon.test/sym :seon.test/sym]
+  [:seon.test/ns {:optional true} :seon.test/ns]
+  [:seon.test/source {:optional true} :seon.test/source]])
 
 (def ^:private identity-attrs
   [:seon.ns/name :seon.fn/sym :seon.schema/key :seon.test/sym])
@@ -295,3 +312,170 @@
    [:=> [:catn [::db-value ::db-value] [::desired ::desired]] ::tx-data]}
   [db-value desired]
   (compile-acquired-tx-data desired (acquire-current db-value)))
+
+;;; Fresh-database page compilation
+
+(def ^:private initialization-bootstrap-attributes
+  "Fixed schema closure needed to persist genesis, canonical schema rows, and
+   the initialization receipt before the rest of the schema corpus exists."
+  #{:seon.agent/id
+    :seon.db.process/id
+    :seon.db/user
+    :seon.db/process
+    :seon.ns/name
+    :seon.schema/key
+    :seon.schema/form
+    :seon.schema/ns
+    :seon.db.id/generator
+    :seon.db.initialization/id
+    :seon.db.initialization/fingerprint
+    :seon.db.initialization/page-fingerprint
+    :seon.db.initialization/identities
+    :seon.db.initialization/page-count
+    :seon.db.initialization/status})
+
+(defn- initialization-schema-form [row]
+  (edn/read-string (:seon.schema/form row)))
+
+(defn- schema-reference-closure [projection forms roots]
+  (loop [pending (set roots)
+         closure #{}]
+    (if (empty? pending)
+      closure
+      (let [key (first pending)
+            dependencies
+            (schema/direct-references projection (get forms key))]
+        (recur (into (disj pending key)
+                     (remove closure)
+                     dependencies)
+               (conj closure key))))))
+
+(defn- schema-dependency-order [projection forms resolved pending]
+  (let [known (set (keys forms))]
+    (loop [resolved (set resolved)
+           pending (set pending)
+           ordered []]
+      (if (empty? pending)
+        ordered
+        (let [ready
+              (->> pending
+                   (filter
+                    (fn [key]
+                      (set/subset?
+                       (set/intersection
+                        known
+                        (schema/direct-references projection
+                                                  (get forms key)))
+                       resolved)))
+                   (sort-by str)
+                   vec)]
+          (when (empty? ready)
+            (throw
+             (ex-info "Database initialization schema dependencies are cyclic."
+                      {:seon.db.initialization/pending-schema-keys
+                       (vec (sort-by str pending))
+                       :seon.error/kind :core-bug})))
+          (recur (into resolved ready)
+                 (reduce disj pending ready)
+                 (into ordered ready)))))))
+
+(defn- initialization-schema-pages [schema-rows page-rows]
+  (let [rows-by-key (into {} (map (juxt :seon.schema/key identity))
+                          schema-rows)
+        forms (update-vals rows-by-key initialization-schema-form)
+        projection (schema/build-projection forms)
+        missing (set (remove #(contains? forms %)
+                             initialization-bootstrap-attributes))]
+    (when (seq missing)
+      (throw
+       (ex-info "Database initialization lacks bootstrap schema forms."
+                {:seon.db.initialization/missing-schema-keys
+                 (vec (sort missing))
+                 :seon.error/kind :core-bug})))
+    (let [bootstrap-keys
+          (schema-reference-closure
+           projection forms initialization-bootstrap-attributes)
+          bootstrap-rows
+          (into [] (keep rows-by-key) (sort bootstrap-keys))
+          remaining-keys
+          (set/difference (set (keys rows-by-key)) bootstrap-keys)
+          remaining-rows
+          (into []
+                (keep rows-by-key)
+                (schema-dependency-order
+                 projection forms bootstrap-keys remaining-keys))]
+      (into [bootstrap-rows]
+            (comp (map vec) (remove empty?))
+            (partition-all page-rows remaining-rows)))))
+
+(defn- initialization-entity-attributes [schema-rows]
+  (into #{}
+        (comp
+         (map initialization-schema-form)
+         (filter schema.form/map-shape?)
+         (filter #(true? (:seon.db/entity
+                          (schema.form/schema-properties %))))
+         (mapcat schema.form/map-entries)
+         (keep (fn [entry]
+                 (let [attribute (when (vector? entry) (first entry))]
+                   (when (qualified-keyword? attribute) attribute)))))
+        schema-rows))
+
+(defn compile-initialization-pages
+  "Compile bounded mandatory initialization pages from one raw build value."
+  {:malli/schema [:=> [:cat :seon.db/raw-initialization]
+                  :seon.db/initialization-pages]}
+  [initialization]
+  (let [page-rows (:seon.db.initialization/page-rows initialization)
+        program (:seon.db/program initialization)
+        schema-rows
+        (into [] (filter #(contains? % :seon.schema/key)) program)
+        ordinary-program
+        (into [] (remove #(contains? % :seon.schema/key)) program)
+        schema-pages (initialization-schema-pages schema-rows page-rows)
+        attributes
+        (into []
+              (distinct)
+              (concat (:seon.db/attributes initialization)
+                      (sort (initialization-entity-attributes schema-rows))))
+        fingerprint (str (hasch/uuid initialization))
+        payloads
+        (into
+         (mapv
+          (fn [rows]
+            {:seon.db.initialization/phase
+             :seon.db.initialization.phase/schema
+             :seon.db/program rows})
+          schema-pages)
+         (concat
+          (map
+           (fn [page-attributes]
+             {:seon.db.initialization/phase
+              :seon.db.initialization.phase/attributes
+              :seon.db/attributes (vec page-attributes)})
+           (partition-all page-rows attributes))
+          (map
+           (fn [rows]
+             {:seon.db.initialization/phase
+              :seon.db.initialization.phase/program
+              :seon.db/program (vec rows)})
+           (partition-all page-rows ordinary-program))
+          (map
+           (fn [rows]
+             {:seon.db.initialization/phase
+              :seon.db.initialization.phase/initial-data
+              :seon.db/initial-data (vec rows)})
+           (partition-all page-rows
+                          (:seon.db/initial-data initialization)))
+          [{:seon.db.initialization/phase
+            :seon.db.initialization.phase/completion}]))
+        page-count (count payloads)]
+    (mapv
+     (fn [page-index payload]
+       (assoc payload
+              :seon.db.initialization/fingerprint fingerprint
+              :seon.db.initialization/page-index page-index
+              :seon.db.initialization/page-count page-count
+              :seon.db.initialization/page-rows page-rows))
+     (range)
+     payloads)))

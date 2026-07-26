@@ -289,18 +289,21 @@
         (add-uncertainty :value-passed-pattern))))
 
 (defn- static-pull-request [arguments]
-  (let [first-argument (quoted-value (first arguments))]
+  (let [first-argument (quoted-value (first arguments))
+        refs (when (map? first-argument)
+               (quoted-value (::db/refs first-argument)))]
     (cond
       (and (map? first-argument)
-           (contains? first-argument ::db/pull-pattern))
+           (contains? first-argument ::db/pull-pattern)
+           (or (not (contains? first-argument ::db/refs))
+               (sequential? refs)))
       (cond-> {::db/pull-pattern
                (quoted-value (::db/pull-pattern first-argument))}
         (::db/ref first-argument)
         (assoc ::db/refs [(quoted-value (::db/ref first-argument))])
         (::db/refs first-argument)
         (assoc ::db/refs
-               (mapv quoted-value
-                     (quoted-value (::db/refs first-argument)))))
+               (mapv quoted-value refs)))
 
       (vector? first-argument)
       {::db/pull-pattern first-argument
@@ -363,7 +366,8 @@
       (walk-expressions state resolution locals body))))
 
 (defn- fn-methods [tail]
-  (let [tail (drop-while #(or (string? %) (map? %)) tail)]
+  (let [tail (drop-while #(or (string? %) (map? %)) tail)
+        tail (cond-> tail (symbol? (first tail)) next)]
     (if (vector? (first tail))
       [tail]
       tail)))
