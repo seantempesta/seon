@@ -435,6 +435,25 @@ Each phase names its trusted libraries, its falsifier, and absorbs what the
 old capability-ordered steps still owed. The old steps are superseded — do
 not resurrect them; their surviving content is named inside each phase.
 
+**The method (owner, s3 close): simple building blocks that compose.**
+Every rung ships the SMALLEST block that composes with the ones below it,
+and three metrics are reported at every rung review, trending the right
+way or the rung is not done:
+
+1. **Blocks compose** — each namespace is one block: its data model, its
+   pure transitions, nothing else; a block that needs to know another
+   block's internals is two blocks welded, split it. Composition is
+   proven by the next rung using only the block's public contract.
+2. **The data model tightens** — count the registered attributes the
+   nucleus needs; every attribute earns its place (no projection twins,
+   no stored derivables, no bool mirrors of absence — the s3 rulings).
+   Fewer, sharper attributes each rung is the goal; an attribute nobody
+   queries is deleted, not kept warm.
+3. **The codebase shrinks** — nucleus lines grow slowly; `src-old/` only
+   ever shrinks (adopt = mv out, dead = delete when convenient). Report
+   both numbers at each rung. A rung that grew the total without
+   retiring old surface explains itself or is rejected.
+
 **Boot-order construction (owner directive, 2026-07-26 s3 late).** This is
 a deliberate ground-up rewrite: build in the order things RUN, make each
 rung solid before the next, and rule every ported piece explicitly. Each
