@@ -198,6 +198,14 @@ carried stale evidence within a day. Re-verify before starting.
   acceptance item.
 - **Pod cut groups 1–4 launched** the same day, delete-never-port; group 5
   waits for step 5's producer replacement.
+- **The render contract is two projections on one unit (owner, 2026-07-26
+  night).** Any value carrying `:seon.render/ai` and `:seon.render/html` is
+  renderable to both destinations: the `ai` projection derives into agent
+  context; the `html` projection rides the step-7 flow pipeline to the
+  ruled surfaces — **canvas** (focal, `:seon.render.canvas/content`) and
+  **surface** (a context render). No third surface noun; "tile" stays
+  banned. Step 1's effect families and step 7's pipeline both honor these
+  two keys as the one render contract.
 - **A smaller suite is a desired outcome, not a regression.** Port ideas
   (invariants), never tests; one regression per failure class at one choke
   point. When simplification removes mechanisms, their tests die with them
