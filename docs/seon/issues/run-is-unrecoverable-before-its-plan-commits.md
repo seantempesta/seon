@@ -50,21 +50,83 @@ plus a double kill converged, one re-execution per crash, and SIGKILL inside
 transactions. Every one of those cases had a committed plan. **No prior resume
 evidence covers the pre-plan window.**
 
+## Custody-window simulation
+
+`test/seon/flow/custody_window_test.clj` now exercises both candidate shapes
+with a real Flow `:io` proc, a throwaway in-memory Datahike connection, an
+injectable kill while the fake provider call holds custody, and explicit seed
+`20260726`. The focused result is 2 tests, 26 assertions, 0 failures, and 0
+errors.
+
+Candidate A behaved as proposed:
+
+- **Expected:** a derived plan-less/lapsed query names the invisible claimed
+  run; takeover closes it with a receipt; wake derivation restarts the message
+  exactly once.
+- **Observed:** the current recoverable-run and pending-message queries were
+  both empty. The candidate query named the exact run, takeover advanced epoch
+  1 to 2, recovery recorded `:failed-before-plan`, and one retry completed.
+  There were two physical provider invocations, one upserted logical model-call
+  fact, one recovery receipt, no open run, and no orphan.
+
+Candidate B also behaved as proposed and is the recommendation:
+
+- **Expected:** the provider call is held by a bounded attempt, not an open
+  run. A lapsed attempt is recoverable; a successful attempt creates the run
+  and freezes the plan atomically.
+- **Observed:** the killed attempt was fenced and recorded `:crashed`, which
+  re-derived exactly one wake for attempt ordinal 1. Every retained database
+  value had zero open runs without plans. Run identity and plan digest datoms
+  shared one transaction, the existing plan-only recoverable-run query saw the
+  resulting run, outcomes were exactly `#{:crashed :success}`, and no
+  recoverable attempt remained.
+
+B wins because it makes the bad run state unrepresentable, preserves one
+plan-complete meaning for run recovery, and extends the existing bounded
+provider-attempt owner instead of occupying the run pointer during the longest
+window. It needs attempt connections to the originating message and holding
+process plus claim epoch and lease instant. Attempt recovery queries open,
+lapsed attempts and uses epoch/lease takeover before recording `:crashed`;
+pending-message derivation excludes a live attempt or resulting run, but admits
+the same message after a crashed attempt. The successful attempt transaction
+fences its epoch and commits run identity, cause, process, claim epoch, lease,
+plan digest, plan forms, and agent run pointer together. Run recovery remains
+unchanged and requires a plan.
+
+This breaks the current ordering deliberately: `open-run!` moves after the
+provider reply, the separate absent-to-digest `plan-tx-data` CAS is no longer
+the publication boundary, and run claim epoch begins only after provider
+success. Attempt takeover must reuse or generalize the existing run
+claim-epoch/lease algebra. A deadline alone is insufficient because it cannot
+fence a late former holder.
+
+Step 2's message-identity work must settle originating message identity before
+this change: attempt identity derives from `(originating-message-id,
+attempt-ordinal)`, provider request identity derives from the attempt, and
+re-executing a sending receipt `(run, ordinal, epoch)` must reproduce the same
+originating message ID. Otherwise recovery creates a second attempt lineage.
+The outbound message ID remains the sending receipt identity, not the provider
+attempt identity.
+
+The issue remains open until production admission adopts B and the recurring
+test is claimed by the repository writer runner.
+
 ## Owner
 
-`seon.agent.driver` owns run admission and recovery enumeration.
-`seon.agent.run.core` owns the claim/epoch/lease algebra and is unchanged by
-this.
+`seon.agent.driver` owns wake derivation and the atomic run-plus-plan
+publication boundary. `seon.ai.attempt` owns provider-attempt evidence.
+`seon.agent.run.core` owns the claim/epoch/lease algebra that attempt custody
+must reuse or generalize.
 
 ## Acceptance
 
-- A process killed between run open and plan commit leaves work that a survivor
-  completes, proven by an executing test that kills mid-provider-call — not by
-  argument. The existing kill-position harness is the model.
-- The fix does not introduce a second recovery path or a scan that competes with
-  the wake feed. Prefer making the run visible to the recovery it already has
-  over adding a third query; an open run with no plan is a legitimate,
-  queryable state and should be recoverable *as* that state.
+- A process killed during the provider call leaves an open attempt whose
+  expiry re-derives the same message wake. Run recovery remains the one
+  plan-complete run path; attempt expiry does not compete with the wake feed.
+- No committed database value contains an open run without both plan digest
+  and plan forms.
+- An attempt holder is fenced by process, claim epoch, and lease; a late former
+  holder cannot publish a run or plan after takeover.
 - No wake attribute is added that the wake path's own work commits (landmine 8;
   the earlier feedback loop measured 7.0 → 14.4 → 124.8 commits per useful run
   and OOM at n=20).

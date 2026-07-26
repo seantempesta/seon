@@ -13,6 +13,51 @@ Path A is technically viable: the public Flow API runs Seon's ordinary
 database-backed proc reconstructs its state from surviving Datahike facts, and
 bounded platform-thread capacity remains directly observable.
 
+**Custody-window verdict: candidate B wins.** The provider call belongs to a
+bounded attempt before a run becomes claimable; the successful attempt creates
+the open run and freezes its plan in one transaction. The three strongest
+reasons are:
+
+1. B makes a committed open run without a plan unrepresentable. Candidate A
+   preserves that invalid state and adds a compensating recovery protocol for
+   it.
+2. B preserves one meaning for the existing recoverable-run query: every
+   recoverable run has a complete plan. A adds a pre-plan close transition,
+   special pending-message derivation, and multiple run identities for one
+   message.
+3. The existing bounded provider-attempt facts already own provider request
+   configuration, deadline, ordinal, and outcome. Extending that entity with
+   message custody localizes the 78.5% provider window without occupying the
+   agent's run pointer.
+
+Candidate A did pass its requested measures, but at the higher semantic cost:
+the plan-less/lapsed query found the otherwise invisible run, takeover advanced
+its claim epoch, recovery closed it with a receipt, and the modified wake
+derivation caused exactly one retry. Final state had one logical model-call
+fact, no open run, and no orphan.
+
+Candidate B needs the attempt to connect to the originating message and record
+the holding process, claim epoch, and lease instant. Recovery selects an open,
+lapsed attempt, advances its epoch, records `:crashed`, and re-derives the same
+message wake. A successful holder fences that attempt and commits run identity,
+cause, process, claim epoch, lease, plan digest, plan forms, and the agent run
+pointer atomically. The existing run recovery query remains unchanged and
+plan-only.
+
+This changes the ordering of `open-run!`: it moves after the provider reply,
+and the old separate absent-to-digest plan CAS is replaced by the successful
+attempt fence plus atomic run-and-plan creation. The attempt transition must
+reuse or generalize the existing claim-epoch/lease algebra rather than grow a
+second implementation.
+
+Step 2's message-identity work must coordinate exactly these identities:
+attempt identity derives from `(originating-message-id, attempt-ordinal)`;
+provider request identity derives from that attempt identity; and a
+re-executed sending receipt `(run, ordinal, epoch)` must reproduce the same
+originating message ID. Otherwise recovery creates a second legitimate attempt
+lineage instead of retrying the first. The outbound message ID remains the
+sending receipt's identity, not the provider-attempt ID.
+
 The indexer-as-proc extension found one production-interface defect that must
 be fixed before the production lane can treat edge generations as stable:
 
@@ -191,6 +236,8 @@ runner:
 | 19. Slow committer backpressure | A full fixed buffer parks the indexer and loses no transaction page | Passed. An event latch proved all three pages had compiled, public indexer ping timed out while its third delivery was parked, release committed all three pages, and all three namespaces existed. |
 | 20. Mid-drain graph recreation | Stopping and recreating the graph completes without duplicate or torn program facts | Passed. The first graph stopped while its first commit was held; after release, a fresh graph drained the complete fixture snapshot. Final facts equaled the direct result with exactly three function and three schema identities. |
 | 21. Flow Monitor indexer topology | The released monitor names all three procs and observes drain progress | Passed. Its WebSocket stream named `:source-enumerator`, `:indexer`, and `:page-committer`, contained `namespace-indexed`, and the committer public ping reported count three. |
+| 22. Candidate A recovers a plan-less claimed run | A lapsed plan-less run is named, closed with a recovery receipt, and wakes exactly one retry without duplicate logical work or an orphan | Passed with seed `20260726`. The current recoverable-run and pending-message queries were both empty after the injected kill. The candidate query named the exact run; takeover advanced epoch 1 to 2, closed it as failed-before-plan, and committed one receipt. The modified wake derivation admitted one retry. Two physical provider invocations represented the killed call plus exactly one retry, while the upserted logical model-call fact remained singular and no open run or pending wake remained. |
+| 23. Candidate B keeps provider custody on an attempt | No open run exists until the provider reply; attempt recovery re-wakes work, and successful retry creates run plus plan atomically | Passed with seed `20260726`. The killed attempt was fenced and recorded `:crashed`; the message woke once for ordinal 1. Every retained database value contained zero open runs without plans. The run ID and plan digest datoms shared one transaction, the unchanged recoverable-run query saw the planned run, attempt outcomes were exactly `#{:crashed :success}`, and no recoverable attempt remained. |
 
 The two error classes are now executable rather than documentary: exceptions
 escaping a Flow step are core faults routed through the fan-out and committed;
@@ -240,6 +287,18 @@ receipt is
 The existing Flow proofs and the indexer extension were then run in one JVM:
 17 tests, 77 assertions, 0 failures, 0 errors.
 
+The custody-window simulation was run independently on the same basis:
+
+```sh
+clojure -M:writer:host:writer-test -e \
+  '(require (quote seon.flow.custody-window-test))
+   (clojure.test/run-tests (quote seon.flow.custody-window-test))'
+```
+
+Result: 2 tests, 26 assertions, 0 failures, 0 errors. Both candidates used
+explicit seed `20260726`; the fake provider's ordinal zero was killed while its
+Flow `:io` step held custody, and ordinal one returned the scripted reply.
+
 The focused pre-existing JVM async paths were run on the same alpha3 basis:
 
 ```sh
@@ -273,6 +332,10 @@ The production move should preserve the tested split:
 - Flow owns process-local scheduling, bounded channels, workload executors,
   lifecycle commands, and disposable diagnostics.
 - Datahike owns run, receipt, and other restart-relevant facts.
+- Provider-call custody belongs to a bounded attempt. A run becomes claimable
+  only when its identity and complete plan can commit in the same transaction.
+  Attempt recovery re-derives the originating message wake; run recovery stays
+  plan-only.
 - A responsive observer, not a wedged proc, names capacity loss.
 - Flow Monitor must receive the fan-out owner's datafiable graph view, never
   the source graph. The fault tap is bounded, lossless within its configured
