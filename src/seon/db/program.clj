@@ -9,6 +9,8 @@
             [clojure.set :as set]
             [datahike.api :as d]
             [hasch.core :as hasch]
+            [seon.db.backend :as backend]
+            [seon.db.internal :as db.internal]
             [seon.schema :as schema]
             [seon.schema.form :as schema.form]))
 
@@ -480,3 +482,66 @@
               :seon.db.initialization/page-rows page-rows))
      (range)
      payloads)))
+
+(defn apply-release-config!
+  "Apply the manifest-derived cluster delta to a closed file database.
+
+   Stamp the exact release identity in the same transaction.
+
+   Initialization pages remain the population authority. This operation accepts
+   only their completed fingerprint/page-count pair, so config publication can
+   never turn a partial page prefix into an admitted release."
+  [{:seon.db.program/keys
+    [database-name database-path configuration ai-rows applied-identity]}]
+  (let [datahike-config
+        (backend/datahike-config
+         {::backend/database-name (keyword database-name)
+          ::backend/backend :file
+          ::backend/path database-path})
+        connection (d/connect datahike-config)]
+    (try
+      (let [db-value (d/db connection)
+            actual
+            (some-> (d/entity db-value
+                              [:seon.db.initialization/id "database"])
+                    (select-keys
+                     [:seon.db.initialization/fingerprint
+                      :seon.db.initialization/page-count
+                      :seon.db.initialization/status]))
+            expected
+            (assoc
+             (select-keys
+              applied-identity
+              [:seon.db.initialization/fingerprint
+               :seon.db.initialization/page-count])
+             :seon.db.initialization/status
+             :seon.db.initialization.status/complete)]
+        (when-not (= expected actual)
+          (throw
+           (ex-info
+            "Cluster config requires the complete matching page population."
+            {:seon.db.program/expected-initialization expected
+             :seon.db.program/actual-initialization actual
+             :seon.error/kind :core-bug})))
+        (let [transaction-data
+              (into
+               [(assoc configuration :seon.config/id "cluster")]
+               (concat
+                ai-rows
+                [(merge
+                  {:seon.db.initialization/id "database"}
+                  applied-identity)
+                 {:db/id :db/current-tx
+                  :seon.db/user [:seon.agent/id "root"]
+                  :seon.db/process
+                  [:seon.db.process/id :seon.db.process/config]}]))
+              report
+              (d/transact!
+               connection
+               (db.internal/encode-edn-slot-values transaction-data))]
+          {:seon.db.program/changed? true
+           :seon.db.program/basis-t (get-in report [:db-after :t])
+           :seon.db.program/commit-id
+           (d/commit-id (:db-after report))}))
+      (finally
+        (d/release connection)))))
