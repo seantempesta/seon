@@ -792,6 +792,45 @@ inside one un-overridden host call.
 
 ---
 
+## Owner rulings — 2026-07-25 night, the blocking four
+
+**O1. Co-location ACCEPTED.** Agent evals run in the database process. Reads
+are a pointer into the immutable database value; writes are a function call.
+The entire wire layer comes off the agent path. The blast radius is accepted
+explicitly: nothing in-process bounds live memory, one large host allocation is
+uncatchable, and an agent OOM is a cluster restart — downtime, not data loss,
+because the lease resumes the work. Measured basis: an agent OOM did not take
+the writer down (0 failed transactions, store consistent on reopen, one 180ms
+latency spike against a 33ms median).
+
+**O2. The wedge is a process kill.** The door promises only what a safepoint
+can enforce. A CPU-bound host call reaches no interpreted fn body, the
+`:interrupt-fn` never fires, and `Thread.stop` is gone — so a wedged eval is
+detected by lease expiry and the process is replaced, with the run resuming
+from receipts. State the hole; never imply the limits bound it. Benefit: the
+recovery path is exercised routinely instead of never.
+
+**O3. Spec gaps close in parallel with Wave 1.** They are documentation
+consistency, not design error.
+
+**O4. NAMESPACE-ADDRESSED RESIDENT AGENTS — the premise of "ownership" is
+rejected.** There is no ownership claim, no lease, no CAS, and nothing stored.
+
+- An agent's name IS a namespace. Ephemeral agents spun up for a short task get
+  `seon.agents.<id>`.
+- A failure in namespace N sends a message to N.
+- If an agent already lives at N, **wake it and tell it what it broke.**
+- If nobody lives at N, **spin up a new agent named for that namespace.**
+- Reuse an existing resident; otherwise create.
+
+So `:seon.ns/owner` is not a stored attribute — "who is responsible for N" is
+**derived** from whether an agent's home namespace is N. This deletes the
+ownership mechanism, the lease-renewal bug that came with it, and the
+liveness question of what happens when an owner dies: nobody home means spin
+one up. Already filed as
+`docs/seon/issues/namespace-addressed-resident-agents.md` — that note is now
+owner-ruled, not a proposal.
+
 ## Vocabulary — RATIFIED by the owner, 2026-07-25
 
 Owner ruling 2026-07-25: invented language is the loudest complaint. Where SCI,
