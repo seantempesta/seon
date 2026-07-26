@@ -656,6 +656,186 @@ A plan that hides its own reversals is worthless.
   so **the message schema does not exist on the JVM**. Invisible today; a hard
   blocker the moment messaging moves to the cluster JVM, and the structural reason
   the JVM invariant test can never see the attribute.
+
+## 9. Plan changes and owner rulings, 2026-07-26
+
+Appended, not rewritten. The rows above keep their wording; this section
+records what changed under them, what the owner ruled, and which of the plan's
+own citations went stale. A row and its correction must be read together.
+
+### 9.1 Stale citations found by grep, 2026-07-26
+
+Three of this plan's `file:line` anchors no longer resolve. The plan's premise
+is that every claim carries one, so these are recorded rather than silently
+re-pointed:
+
+- **`src/seon/agent/driver/host.clj` does not exist.** The driver is
+  `src/seon/agent/driver.clj` (667). Every Wave 1/2 row citing
+  `driver/host.clj:136-152`, `:580-621`, `:773-795`, `:809-814` is pointing at
+  a deleted file; read it in git history.
+- **D5's fix had already half-landed.** `:datahike.read/dependency-plan :all`
+  is gone; `::protocol/datom-patterns` is in place at
+  `src/seon/agent/driver.clj:658-666`. It is **still a feedback loop**, for a
+  reason the plan did not anticipate: `open-run-tx-data` writes
+  `:seon.agent.run/lease-until` (`driver.clj:374`) and that attribute is in the
+  listener's own pattern set (`:664`). The residual invariant, which belongs in
+  the design rather than in a patch: **no wake attribute may be one the wake
+  path's own work commits.** Owned by lane `d5-wake`.
+- **Placement is gone.** `rg 'plan-execution|execution-plan-disposition'`
+  returns nothing across `src/` and `test/`. Wave 4's first row is discharged.
+
+### 9.2 The name reconciliation runs OPPOSITE to Wave 2's assumption
+
+Wave 2 says `:seon.eval/index` + `:seon.eval/total` "is the same fact under a
+different name; **reconcile the name**", and the O12 cut shipped
+`:seon.eval/ordinal` instead. Measured spellings in `src/`:
+
+| spelling | registered attributes |
+|---|---|
+| `ordinal` | `:seon.eval/ordinal`, `:seon.agent.run.form/ordinal`, `:seon.agent.turn.timing/ordinal`, `:seon.ai.attempt/ordinal` |
+| `index` as a position | `:seon.error.frame/index`, `:seon.embed/index`, `:seon.db.protocol.operation/index` |
+| `index` as Datahike's **indexing facet** — a different meaning | `:db/index` (14), `:seon.db/index` (5), `:datahike/index` (2) |
+
+`:seon.ai.attempt/ordinal` predates this work (`f6f6673b6`). So `ordinal` is
+already the repo's dominant spelling for a stored position, and `index` is
+overloaded by the dependency's own indexing vocabulary — naming a position
+`index` collides with Datahike. **Decision: keep `ordinal`; rename
+`:seon.error.frame/index`; correct `measurements-2026-07-25.md:1003-1005`,**
+which names `index` as the idiom. This is a reconciliation to ONE spelling,
+which is what the row asked for; it is not a fourth mechanism.
+
+### 9.3 O13 — the pod dies unconditionally (owner ruling, 2026-07-26)
+
+Every remaining `.cljs` goes, and `:seon.dev.process/pod` is removed from the
+supervised set (`script/seon/dev/process.clj:33`). Five supervised processes
+become three: watcher, writer/cluster JVM, web-render.
+
+Bun returns **only** as a disposable on-demand **leaf runtime** for the
+packages work — agents installing java/CLJ and js/cljs packages, with calls
+routing transparently to those runtimes, executing, and returning data across
+the wire. Never a long-lived supervised process. Owner: *"This is complicated
+so do this last."* That is Wave 5's leaf-runtime row plus O10, and it is the
+**final** wave, after render.
+
+The agent loop is already gone: `src/seon/agent/loop/` and
+`src/seon/agent/turn/` are empty directories.
+
+### 9.4 O14 — the datastar/render work joins this plan, and is INVESTIGATED before it is designed
+
+Owner ruling, 2026-07-26. Two parts, and the second one gates the first.
+
+**Part 1 — it belongs here.** The plan treated Wave 4's render item as "a PORT
+of ~1,273 CLJS-only lines". That framing is wrong in both directions:
+
+- *Less is missing than the plan says.* The JVM web-render process **already
+  serves SSE over http-kit** (`src/seon/web/server.clj:8` requires
+  `org.httpkit.server`), the sliding buffer of one **is built**
+  (`src/seon/web/feed.clj:22-25`), and the render engine is **already
+  portable** — `render.cljc` 1,132, `reactive.cljc` 680, `ui/html.cljc` 353,
+  `ui/markdown.cljc` 226, `ui/clojure.cljc` 192, `render/canvas.cljc`,
+  `my/canvas.cljc`, `my/ui.cljc`. The genuinely CLJS-only set is
+  `web/datastar.cljs` 1,268, `agent/ctx/driver.cljs` 605,
+  `ui/agent_view.cljs` 93, `ui/header.cljs` 47.
+- *The blocker is one hardcoded refusal.* `src/seon/host/invoke.clj:167-172`,
+  comment verbatim: *"render-prompt!/render-agent-view! remain pod-served: the
+  host serves EVAL; the pod keeps rendering (design §1)."* It comes off by
+  **deletion** with BLOCK 1, not by an edit.
+
+**Agent-authored render is not a special case.** It is the first of the three
+sanctioned shapes — pure code returning a VALUE the driver interprets — so it
+is contained by the *same* one `:interrupt-fn`, one `time-limit`, one
+`:compute` permit. Owner requirement, verbatim: *"If an agent writes hiccup
+with an infinite loop we are to detect it and to kill it and tell the agent
+they fucked up without it crashing the system or locking everything up."*
+The diagnostic already exists: large `fn-entries` reads as a spin, small reads
+as blocked in a host call.
+
+**Part 2 — do NOT decide the design yet.** Owner, verbatim: *"I don't want to
+quickly decide on the web rendering side. I want you to come up with possible
+ideas and investigate them with sol agents and maybe mock something up to test
+it before we commit to any design. I want to understand the actual pros/cons
+and what the optimal path is."*
+
+Two design inputs the owner supplied, both load-bearing:
+
+1. **Render once, cache per consumption, de-dupe across consumers.** *"an agent
+   authoring some hiccup, us rendering it once to sanity check it and then it's
+   cached for that specific consumption and de-duped so if the another tab is
+   opened we still only rendered it once and the results are still there and
+   cached."* Target: N connected tabs on one canvas cause exactly **one**
+   agent-code evaluation.
+2. **The Bun version's cost is a design input.** *"the reactive web rendering
+   was working really well in the Bun pod but it was a resource pig. This new
+   design should be better NOT a straight port."* That cost centre is recorded
+   in **no** document. A design that cannot name it cannot claim to beat it.
+
+Investigation lane: `render-design`, delivering
+`research/jvm-render-design-2026-07-26.md`. It commits nothing under `src/`.
+The render wave is **blocked on that report plus an owner ruling on its
+recommendation.**
+
+Vendored and readable, all present: `reference-code/datastar`,
+`reference-code/datastar-clojure` (`libraries/sdk-http-kit` is what
+`deps.edn:70-72` resolves), `reference-code/hyperlith`,
+`reference-code/http-kit` (v2.9.0-beta2 — a loose copy with its own git repo
+and **no `.gitmodules` entry**, contrary to the vendor-as-submodules rule).
+Note `docs/seon/reference/datastar-extended-patterns.md` points at
+`/reference-code/n/examples/`, a stale path for `reference-code/hyperlith`.
+
+### 9.5 Revised wave order after these rulings
+
+1. **BLOCK 1 — the old guarded door.** `src/seon/host.clj` + all of
+   `src/seon/host/`, 5,715 lines, zero production `:require` from outside
+   itself. Discharges Wave 1's D9 and `policy-error!` rows, Wave 2's
+   per-agent-ctx-retention and fixed-eval-thread-count rows, and half of Wave
+   4's second-IPC-path row — **by deletion, not by edit.** Lane `cut1-door`.
+2. **D5 + D2, the wake path.** Lane `d5-wake`. §9.1.
+3. **The name reconciliation.** §9.2.
+4. **Wave 1's residue** — D15's catchable classes (`seon.sci.ctx:29-32` adds
+   `Throwable`/`Error` only; `RuntimeException`, `StackOverflowError` and
+   `:default` are still unresolvable), and stating the single-host-call
+   allocation hole rather than implying a bound. **D7 is structurally closed
+   by BLOCK 1's deletion**: `seon.sci.eval` parses with
+   `sci/parse-string` inside the armed ctx (`eval.clj:110-112`), which refuses
+   `#=`, and `seon.repl.parse` is pure rewrite-clj. No tools.reader read path
+   survives on the agent path.
+5. **Wave 2's residue** — D1/D3/D6/D10/D12/D13, the committed ordered step
+   plan and its D11 companion.
+6. **Wave 3 — the wire.** One predicate; result symbols; `seon.result/ok?`.
+   Free deletion riding here: `::mailbox-depth` (`config/system.edn:171`,
+   `config/resolve.cljc:284`/`:1133-1135`/`:2054-2055`,
+   `web/server.clj:21,33,293`, `web/feed.clj:114`) — `.clear` before every
+   `.offer` makes depth > 1 structurally unreachable.
+7. **RENDER — blocked on O14's investigation and ruling.** Then the pod's
+   remaining `.cljs` and `:seon.dev.process/pod` go, per O13.
+8. **Wave 5's capability work**, then packages/bun-as-leaf **last**.
+
+### 9.6 Still open, and NOT decided by these rulings
+
+- **`seon.sci.eval` borrows `:compute` without core.async's dispatch.**
+  `src/seon/sci/eval.clj:33-38` hand-rolls
+  `(Executors/newCachedThreadPool …)` while its docstring says *"on a bounded
+  `:compute` platform thread"*. core.async's `:compute` is `make-ctp-named`
+  (`reference-code/core.async/.../impl/dispatch.clj:71-73`) — the same
+  construct, and core.async is already loaded in this process (Datahike's
+  transactor is a go-loop). Borrowing the word without the mechanism is the
+  "claimant" defect. *Recommendation: route through core.async's dispatch, do
+  not rename our pool.* The owner has stated the design frame — all state in
+  the database, all execution on `:io` or `:compute` threads — but has not
+  ruled on this site.
+- **O4, the allocation limit.** `src/seon/sci/interrupt.clj:5` demotes
+  allocation to a diagnostic. Defensible under O2, but it was a silent
+  deviation. Ratify or restore.
+- **`core.async.flow`'s non-adoption.** Zero occurrences in `src/`; its
+  vocabulary and transform discipline were adopted, the library was not.
+  Deliberate, still unratified.
+- **The admin surface** (`ping`/`pause`/`resume`/`inject` → queries and facts),
+  recorded as the single strongest argument for the design and verified
+  2026-07-26 as **not built**. `seon.sci.eval/available` exists and nothing
+  exposes it.
+
+### 9.7 Corrections to the plan's own framing
+
 - The one surviving `:seon.agent.turn/evals` order consumer is `no-progress-streak`
   (`src/seon/agent/loop/core.cljc:26-48` → `driver.cljc:168-169`) and its failure
   mode is a **false negative**: a reordered pull makes two identical turns compare
