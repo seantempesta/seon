@@ -18,7 +18,8 @@
             [seon.eval.receipt :as receipt]
             [seon.repl.parse :as repl.parse]
             [seon.schema :as schema]
-            [seon.sci.eval :as sci.eval])
+            [seon.sci.eval :as sci.eval]
+            [taoensso.timbre :as log])
   (:import [java.lang ProcessHandle]
            [java.util Date]
            [java.util.concurrent.atomic AtomicBoolean]))
@@ -464,16 +465,27 @@
   [writer database-functions llm-transport!]
   (let [scanning? (AtomicBoolean. false)
         process-id (str "host-" (.pid (ProcessHandle/current)))
+        scan-body!
+        (fn []
+          (doseq [message (pending-messages database-functions)]
+            (Thread/startVirtualThread
+             (fn []
+               (try
+                 (process-message! database-functions llm-transport!
+                                   process-id message)
+                 (catch Throwable throwable
+                   (log/error throwable
+                              "JVM run driver message processing failed"
+                              {:seon.agent.message/id (first message)})))))))
         scan!
         (fn scan! []
           (when (.compareAndSet scanning? false true)
             (Thread/startVirtualThread
              (fn []
                (try
-                 (doseq [message (pending-messages database-functions)]
-                   (Thread/startVirtualThread
-                    #(process-message! database-functions llm-transport!
-                                       process-id message)))
+                 (scan-body!)
+                 (catch Throwable throwable
+                   (log/error throwable "JVM run driver scan failed"))
                  (finally
                    (.set scanning? false)))))))]
     (let [listener
@@ -484,5 +496,5 @@
             [[:seon.agent.message/to]
              [:seon.agent.run/lease-until]]
             :seon.db/handler (fn [_] (scan!))})]
-      (scan!)
+      (scan-body!)
       listener)))
