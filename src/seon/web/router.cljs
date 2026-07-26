@@ -255,9 +255,8 @@
 (defn- static-supplement
   "The non-core reitit routes built from serve's injected handlers."
   [h]
-  (let [{::keys [static readiness chat stop resume clear log
-                 complete agent-run config-apply operator-quiesce
-                 operator-blobs operator-processes product-evidence]} h]
+  (let [{::keys [static readiness log config-apply operator-quiesce
+                 operator-blobs]} h]
     (cond->
      [["/css/{*path}" {:get {:handler (fn [r] (static nil (:uri r)))}}]
      ["/js/{*path}"  {:get {:handler (fn [r] (static nil (:uri r)))}}]
@@ -270,21 +269,9 @@
                              (fn [r]
                                (readiness (:seon.http/request r) nil))}}]
 
-     ["/chat"        {:post {:middleware [:seon.route/same-origin] :handler (admitted-post-handler chat)}}]
-     ["/stop"        {:post {:middleware [:seon.route/same-origin] :handler (post-handler stop)}}]
-     ["/resume"      {:post {:middleware [:seon.route/same-origin] :handler (admitted-post-handler resume)}}]
-     ["/clear"       {:post {:middleware [:seon.route/same-origin] :handler (admitted-post-handler clear)}}]
      ["/log"         {:post {:middleware [:seon.route/same-origin] :handler (admitted-post-handler log)}}]
-     ;; The one-shot composition door: start-or-reuse an agent in THE pod's
-     ;; own cluster, deliver the input via the real wake path, run its OWN
-     ;; FSM to idle, return the truthful reply + turn/eval metadata as JSON.
-     ;; same-origin-gated like the others.
-     ["/agents/run"  {:post {:middleware [:seon.route/same-origin] :handler (admitted-post-handler agent-run)}}]
      ["/_seon/operator/config" {:post {:middleware [:seon.route/loopback-peer]
-                                        :handler (post-handler config-apply)}}]
-     ["/agent/{id}/complete" {:post {:middleware [:seon.route/same-origin]
-                                     :handler (fn [r] (complete (:seon.http/request r) nil
-                                                                (get-in r [:path-params :id])))}}]]
+                                        :handler (post-handler config-apply)}}]]
       operator-quiesce
       (conj ["/_seon/operator/quiesce"
              {:post {:middleware [:seon.route/loopback-peer]
@@ -292,17 +279,7 @@
       operator-blobs
       (conj ["/_seon/operator/blobs"
              {:post {:middleware [:seon.route/loopback-peer]
-                     :handler (post-handler operator-blobs)}}])
-      operator-processes
-      (conj ["/_seon/operator/processes"
-             {:get {:middleware [:seon.route/loopback-peer]
-                    :handler
-                    (fn [r]
-                      (operator-processes (:seon.http/request r) nil))}}])
-      product-evidence
-      (conj ["/_seon/operator/product-evidence"
-             {:post {:middleware [:seon.route/loopback-peer]
-                     :handler (post-handler product-evidence)}}]))))
+                     :handler (post-handler operator-blobs)}}]))))
 
 ;; ============================================================
 ;; The no-match default-handler — a graceful redirect HOME (#28). reitit
@@ -442,9 +419,8 @@
    load and [[attach!]] acquires the route projection before HTTP admission;
    hot reload rebuilds the compiled handler from the already accepted ordinary
    projection. `config` keys:
-   `:seon.web.router/{static chat stop resume clear log complete agent-run
-   config-apply operator-quiesce operator-blobs operator-processes
-   product-evidence}` (the serve handler fns) +
+   `:seon.web.router/{static readiness log config-apply operator-quiesce
+   operator-blobs}` (the serve handler fns) +
    `:seon.web.router/same-origin?` and `:seon.web.router/loopback-peer?`
    (the predicates). The CORE routes are NOT in
    `config` — they project from the

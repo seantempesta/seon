@@ -97,9 +97,6 @@
   []
   [{::pattern "/"                ::method :get  ::name ::root
     ::handler 'seon.web.datastar/serve-root!}
-   {::pattern "/agents"          ::method :post ::name ::agents-create
-    ::handler 'seon.web.serve/create-agent!
-    ::middleware ::same-origin}
    {::pattern "/agent/{id}"      ::method :get  ::name ::agent
     ::handler 'seon.web.datastar/serve-agent-page!}
    {::pattern "/agent/{id}/value" ::method :get ::name ::agent-value

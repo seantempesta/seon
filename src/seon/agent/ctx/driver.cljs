@@ -1,9 +1,9 @@
 (ns seon.agent.ctx.driver
-  "Derive prompt and agent-view renders inside the pod.
+  "Derive agent-view renders inside the pod.
 
    Trusted composition stays in-process over one immutable database value.
    Callers inject the selected-function door so agent-authored renderers remain
-   guarded without moving the trusted prompt or page projection."
+   guarded without moving the page projection."
   (:require
    [my.blob]
    [my.canvas]

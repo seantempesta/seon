@@ -612,9 +612,8 @@
          ;; the feed's whole-element morph replaces `#app-view`'s attributes with
          ;; the pushed element's (which carries no `data-init`), so an opener
          ;; ON the morph target is stripped by its own first paint — datastar
-         ;; cancels the stream ~100ms after open and the page goes dead
-         ;; (the 2026-07-11 '/agents never updates' bug). Same
-         ;; outside-the-morph rule as the human input bars.
+         ;; cancels the stream ~100ms after open and the page goes dead. Keep
+         ;; the opener outside the morph target.
          (when feed-url
            (str "<div id=\"app-feed-opener\" style=\"display:none\""
                 " data-init=\"@get('" feed-url
@@ -623,88 +622,6 @@
          "</body></html>")))
 
 ;; ============================================================
-;; Human input bars — the surfaces the view page needs so a human can
-;; OPERATE (not just observe). Each lives OUTSIDE `<main id=\"app-view\">` (a
-;; SIBLING in <body>) so the feed's whole-`#app-view` morph never clobbers the
-;; input's focus/value. They reuse the already-routed, same-origin-gated
-;; POST endpoints (`/chat`, `/agents`) — no Core change. A fixed bottom
-;; bar + an inline-style spacer reserves scroll room so the last card is never
-;; hidden behind the bar. Only output.css-present utilities are used (the
-;; spacer height is an inline style, not a Tailwind class).
-;; ============================================================
-
-(defn- chat-form-html
-  "P0 — the human→agent chat input for `/agent/{id}`, as a raw HTML string.
-
-   A static `<form>` (outside the morph) that submits a DATASTAR FORM-MODE
-   POST to the existing `/chat?agent=<id>`: `data-on:submit` (datastar
-   auto-prevents the native submit on a `<form>`) runs
-   `@post(url,{contentType:'form'})`, which reads THIS form's named fields and
-   posts them `application/x-www-form-urlencoded` — exactly the `text=` shape
-   the `/chat` handler parses (the same wire contract the legacy chat bar
-   used). `data-bind=\"text\"` keeps the input value in a datastar signal so a
-   trailing `$text=''` clears it after send; `required` blocks a blank send
-   client-side. The agent's reply needs NO handling here: it transacts and the
-   broadcast feed re-renders the `:transcript` surface. A 204 reply closes the
-   datastar stream cleanly (no morph from this POST). `id` is pre-validated by
-   `safe-id?`, so it is injection-safe inside the single-quoted `@post('…')`."
-  [id]
-  (html/->string
-    [:form {:id                     "app-chat"
-              (keyword "data-on:submit") (str "@post('/chat?agent=" id
-                                              "', {contentType:'form'}); $text=''")
-              :class "shrink-0 flex items-center gap-2 border-t border-base-800 bg-base-900 px-3 py-2"}
-       [:input {:type         "text"
-                :name         "text"
-                :data-bind    "text"
-                :required     true
-                :autocomplete "off"
-                :autofocus    true
-                :placeholder  (str "message agent " id " …")
-                :class "flex-1 bg-base-950 border border-base-800 rounded px-2 py-1 text-text-100 text-xs font-mono"}]
-       [:button {:type  "submit"
-                 :class "bg-base-800 hover:bg-base-700 text-signal border border-base-700 px-3 py-1 rounded text-xs font-mono"}
-        "send"]]))
-
-(defn- agent-create-form-html
-  "The root view's namespace-aware agent creation form."
-  []
-  (html/->string
-    [:form {:id "app-agent-create"
-            (keyword "data-on:submit")
-            "@post('/agents', {contentType:'form'})"
-            :class (str "shrink-0 flex flex-wrap items-center gap-2 border-t "
-                        "border-base-800 bg-base-900 px-3 py-2")}
-     [:span {:class "text-xs text-text-400 font-mono"} "new agent"]
-     [:input {:type "text"
-              :name "namespace"
-              :data-bind "agentNamespace"
-              :autocomplete "off"
-              :placeholder "namespace (optional)"
-              :aria-label "agent namespace"
-              :class (str "flex-1 bg-base-950 border border-base-800 "
-                          "rounded px-2 py-1 text-text-100 text-xs font-mono")}]
-     [:input {:type "text"
-              :name "purpose"
-              :data-bind "agentPurpose"
-              :autocomplete "off"
-              :placeholder "purpose (optional)"
-              :aria-label "agent purpose"
-              :class (str "flex-1 bg-base-950 border border-base-800 "
-                          "rounded px-2 py-1 text-text-100 text-xs font-mono")}]
-     [:input {:type "text"
-              :name "message"
-              :data-bind "agentMessage"
-              :autocomplete "off"
-              :placeholder "initial message (optional)"
-              :aria-label "initial agent message"
-              :class (str "flex-1 bg-base-950 border border-base-800 "
-                          "rounded px-2 py-1 text-text-100 text-xs font-mono")}]
-     [:button {:type "submit"
-               :class (str "bg-base-800 hover:bg-base-700 text-signal border "
-                           "border-base-700 px-3 py-1 rounded text-xs font-mono")}
-      "start"]]))
-
 (defn- agent-feed-opener-html
   "The hidden live-feed owner for an agent page, outside the morph target.
 
@@ -995,13 +912,12 @@
    [[shim-html]]). `id` is pre-validated by `safe-id?`.
 
    The hidden [[agent-feed-opener-html]] owns the live stream outside the morph
-   target; chat is a normal-flow bottom dock."
+   target."
   [id]
   (shim-html (str "agent " id)
              "h-screen overflow-hidden flex flex-col bg-base-950 text-text-200 font-mono p-3"
              nil
-             (str (chat-form-html id)
-                  (agent-feed-opener-html id))))
+             (agent-feed-opener-html id)))
 
 (defn- agent-page-response
   "Return the shared agent shim for already-validated `id`."
@@ -1011,14 +927,12 @@
              "Cache-Control" "no-store, no-cache, must-revalidate"}))
 
 (defn- root-page-html
-  "The root system-view shim with its ordinary cluster controls."
+  "The root system-view shim."
   []
   (shim-html "agent root"
              "h-screen overflow-hidden flex flex-col bg-base-950 text-text-200 font-mono p-3"
              nil
-             (str (agent-create-form-html)
-                  (chat-form-html "root")
-                  (agent-feed-opener-html "root"))))
+             (agent-feed-opener-html "root")))
 
 (defn- root-page-response []
   (response (root-page-html) 200
