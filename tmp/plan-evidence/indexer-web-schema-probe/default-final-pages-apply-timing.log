@@ -1,0 +1,86 @@
+▶ prepare writer, cljs dependencies
+  ● prepare writer, cljs dependencies (1183ms)
+  ● reuse canonical shared JVM AOT+CDS pair
+▶ warm CLJS classpath
+  ● warm CLJS classpath (560ms)
+▶ build self-host bootstrap
+[:bootstrap] Compiling ...
+[:bootstrap] Build completed. (91 files, 1 compiled, 3 warnings, 1.25s)
+
+[1m------ WARNING #1 - :undeclared-var --------------------------------------------[0m
+ Resource: cljs/analyzer/api.cljc:227:6
+--------------------------------------------------------------------------------
+[2m 224 |    (resolve-extern env/*compiler* sym))[0m
+[2m 225 |   ([state sym][0m
+[2m 226 |    (let [pre (ana/->pre sym)][0m
+[1m 227 |      (env/with-compiler-env state[0m
+------------^-------------------------------------------------------------------
+ [33;1mUse of undeclared Var cljs.analyzer.api/clojure[0m
+--------------------------------------------------------------------------------
+[2m 228 |        (:info (ana/resolve-extern pre))))))[0m
+[2m 229 | [0m
+[2m 230 | (defn find-ns[0m
+[2m 231 |   "Given a namespace return the corresponding namespace analysis map. Analagous[0m
+--------------------------------------------------------------------------------
+
+[1m------ WARNING #2 - :undeclared-var --------------------------------------------[0m
+ Resource: cljs/analyzer/api.cljc:227:6
+--------------------------------------------------------------------------------
+[2m 224 |    (resolve-extern env/*compiler* sym))[0m
+[2m 225 |   ([state sym][0m
+[2m 226 |    (let [pre (ana/->pre sym)][0m
+[1m 227 |      (env/with-compiler-env state[0m
+------------^-------------------------------------------------------------------
+ [33;1mUse of undeclared Var cljs.analyzer.api/java[0m
+--------------------------------------------------------------------------------
+[2m 228 |        (:info (ana/resolve-extern pre))))))[0m
+[2m 229 | [0m
+[2m 230 | (defn find-ns[0m
+[2m 231 |   "Given a namespace return the corresponding namespace analysis map. Analagous[0m
+--------------------------------------------------------------------------------
+
+[1m------ WARNING #3 - :undeclared-var --------------------------------------------[0m
+ Resource: cljs/analyzer/api.cljc:227:6
+--------------------------------------------------------------------------------
+[2m 224 |    (resolve-extern env/*compiler* sym))[0m
+[2m 225 |   ([state sym][0m
+[2m 226 |    (let [pre (ana/->pre sym)][0m
+[1m 227 |      (env/with-compiler-env state[0m
+------------^-------------------------------------------------------------------
+ [33;1mUse of undeclared Var cljs.core/class[0m
+--------------------------------------------------------------------------------
+[2m 228 |        (:info (ana/resolve-extern pre))))))[0m
+[2m 229 | [0m
+[2m 230 | (defn find-ns[0m
+[2m 231 |   "Given a namespace return the corresponding namespace analysis map. Analagous[0m
+--------------------------------------------------------------------------------
+  ● build self-host bootstrap (4215ms)
+▶ repair bootstrap macro metadata
+✓ no broken symbols found (already fixed or unaffected build)
+✓ normalized bootstrap index timestamps
+  ● repair bootstrap macro metadata (61ms)
+▶ install frozen Bun dependencies
+[0.02ms] ".env"
+bun install v1.4.0-canary.1 (d8ecf0985)
+
+Checked 79 installs across 124 packages (no changes) [10.00ms]
+  ● install frozen Bun dependencies (16ms)
+▶ build web CSS
+≈ tailwindcss v4.1.18
+
+Done in 84ms
+  ● build web CSS (154ms)
+▶ index JVM program graph and initialization pages
+WARNING: Using incubator modules: jdk.incubator.vector
+WARNING: await already refers to: #'clojure.core/await in namespace: seon.agent.ctx.render-fns, being replaced by: #'seon.agent.ctx.render-fns/await
+WARNING: await already refers to: #'clojure.core/await in namespace: seon.agent.ctx, being replaced by: #'seon.agent.ctx/await
+WARNING: await already refers to: #'clojure.core/await in namespace: seon.agent.home, being replaced by: #'seon.agent.home/await
+WARNING: agent already refers to: #'clojure.core/agent in namespace: seon.agent.message, being replaced by: #'seon.agent.message/agent
+{:seon.ns/count 161, :seon.fn/count 1647, :seon.schema/count 1628, :seon.test/count 584, :seon.db.initialization/page-count 12, :seon.db.initialization/fact-row-count 4177}
+  ● index JVM program graph and initialization pages (17355ms)
+  ✗ writer readiness probe refused: #:seon.dev.process{:readiness-stage :seon.dev.process/writer-repl-port-file, :readiness-refusal "The writer REPL port file is absent.", :readiness-path "/Users/sean/src/seon/tmp/seon-writer-repl-port-default"}
+✗ Cluster apply exited unsuccessfully.
+#:seon.dev.cluster{:exit 1, :output "2026-07-26T23:08:46.583Z  INFO  [seon.web.router] router installed {:supplement 9}\nshadow-cljs - #3 ready!\n2026-07-26T23:08:48.187Z  INFO  [seon.db.session] database initialization page received {:seon.db.initialization/page-index 0, :seon.db.initialization/page-count 12, :seon.db.initialization/phase :seon.db.initialization.phase/schema}\n2026-07-26T23:08:48.402Z  INFO  [seon.db.session] database initialization page received {:seon.db.initialization/page-index 1, :seon.db.initialization/page-count 12, :seon.db.initialization/phase :seon.db.initialization.phase/schema}\n2026-07-26T23:08:48.561Z  INFO  [seon.db.session] database initialization page received {:seon.db.initialization/page-index 2, :seon.db.initialization/page-count 12, :seon.db.initialization/phase :seon.db.initialization.phase/schema}\n2026-07-26T23:08:48.696Z  INFO  [seon.db.session] database initialization page received {:seon.db.initialization/page-index 3, :seon.db.initialization/page-count 12, :seon.db.initialization/phase :seon.db.initialization.phase/schema}\n2026-07-26T23:08:48.791Z  INFO  [seon.db.session] database initialization page received {:seon.db.initialization/page-index 4, :seon.db.initialization/page-count 12, :seon.db.initialization/phase :seon.db.initialization.phase/schema}\n2026-07-26T23:08:48.902Z  INFO  [seon.db.session] database initialization page received {:seon.db.initialization/page-index 5, :seon.db.initialization/page-count 12, :seon.db.initialization/phase :seon.db.initialization.phase/attributes}\n2026-07-26T23:08:49.948Z  INFO  [seon.db.session] database initialization page received {:seon.db.initialization/page-index 6, :seon.db.initialization/page-count 12, :seon.db.initialization/phase :seon.db.initialization.phase/program}\n2026-07-26T23:08:50.366Z  INFO  [seon.db.session] database initialization page received {:seon.db.initialization/page-index 7, :seon.db.initialization/page-count 12, :seon.db.initialization/phase :seon.db.initialization.phase/program}\n2026-07-26T23:08:50.702Z  INFO  [seon.db.session] database initialization page received {:seon.db.initialization/page-index 8, :seon.db.initialization/page-count 12, :seon.db.initialization/phase :seon.db.initialization.phase/program}\n2026-07-26T23:08:50.954Z  INFO  [seon.db.session] database initialization page received {:seon.db.initialization/page-index 9, :seon.db.initialization/page-count 12, :seon.db.initialization/phase :seon.db.initialization.phase/program}\n2026-07-26T23:08:51.347Z  INFO  [seon.db.session] database initialization page received {:seon.db.initialization/page-index 10, :seon.db.initialization/page-count 12, :seon.db.initialization/phase :seon.db.initialization.phase/program}\n2026-07-26T23:08:51.512Z  INFO  [seon.db.session] database initialization page received {:seon.db.initialization/page-index 11, :seon.db.initialization/page-count 12, :seon.db.initialization/phase :seon.db.initialization.phase/completion}\n2026-07-26T23:08:51.533Z  INFO  [seon.client/open-database-session!] database default: /Users/sean/src/seon/data/clusters/default/db (writer: /Users/sean/src/seon/tmp/seon-cluster-default-req.sock)", :error "2026-07-26T23:08:51.644Z  ERROR [seon.client] cluster apply failed TypeError: undefined is not an object (evaluating 'my.skills.seed_skills_tx_data.cljs$core$IFn$_invoke$arity$1')\nTypeError: undefined is not an object (evaluating 'my.skills.seed_skills_tx_data.cljs$core$IFn$_invoke$arity$1')\n    at undefined.<anonymous> (/Users/sean/src/seon/.shadow-cljs/builds/client/dev/out/cljs-runtime/seon/client.cljs:1609:9)\n    at undefined.seon$client$reconcile_config_BANG_ (/Users/sean/src/seon/.shadow-cljs/builds/client/dev/out/cljs-runtime/seon/client.cljs:1609:9)\n    at undefined.seon$client$cluster_apply_BANG_ (/Users/sean/src/seon/.shadow-cljs/builds/client/dev/out/cljs-runtime/seon/client.cljs:2003:18)", :apply-result-path "/Users/sean/src/seon/tmp/seon-operator/cluster-apply/ddc578da-ab0e-41fe-acab-d98a4512f01c.edn"}
+real 99.87
+user 89.72
+sys 6.92

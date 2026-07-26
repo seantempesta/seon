@@ -1,0 +1,86 @@
+▶ prepare writer, cljs dependencies
+  ● prepare writer, cljs dependencies (1149ms)
+  ● reuse canonical shared JVM AOT+CDS pair
+▶ warm CLJS classpath
+  ● warm CLJS classpath (503ms)
+▶ build self-host bootstrap
+[:bootstrap] Compiling ...
+[:bootstrap] Build completed. (91 files, 1 compiled, 3 warnings, 1.10s)
+
+[1m------ WARNING #1 - :undeclared-var --------------------------------------------[0m
+ Resource: cljs/analyzer/api.cljc:227:6
+--------------------------------------------------------------------------------
+[2m 224 |    (resolve-extern env/*compiler* sym))[0m
+[2m 225 |   ([state sym][0m
+[2m 226 |    (let [pre (ana/->pre sym)][0m
+[1m 227 |      (env/with-compiler-env state[0m
+------------^-------------------------------------------------------------------
+ [33;1mUse of undeclared Var cljs.analyzer.api/clojure[0m
+--------------------------------------------------------------------------------
+[2m 228 |        (:info (ana/resolve-extern pre))))))[0m
+[2m 229 | [0m
+[2m 230 | (defn find-ns[0m
+[2m 231 |   "Given a namespace return the corresponding namespace analysis map. Analagous[0m
+--------------------------------------------------------------------------------
+
+[1m------ WARNING #2 - :undeclared-var --------------------------------------------[0m
+ Resource: cljs/analyzer/api.cljc:227:6
+--------------------------------------------------------------------------------
+[2m 224 |    (resolve-extern env/*compiler* sym))[0m
+[2m 225 |   ([state sym][0m
+[2m 226 |    (let [pre (ana/->pre sym)][0m
+[1m 227 |      (env/with-compiler-env state[0m
+------------^-------------------------------------------------------------------
+ [33;1mUse of undeclared Var cljs.analyzer.api/java[0m
+--------------------------------------------------------------------------------
+[2m 228 |        (:info (ana/resolve-extern pre))))))[0m
+[2m 229 | [0m
+[2m 230 | (defn find-ns[0m
+[2m 231 |   "Given a namespace return the corresponding namespace analysis map. Analagous[0m
+--------------------------------------------------------------------------------
+
+[1m------ WARNING #3 - :undeclared-var --------------------------------------------[0m
+ Resource: cljs/analyzer/api.cljc:227:6
+--------------------------------------------------------------------------------
+[2m 224 |    (resolve-extern env/*compiler* sym))[0m
+[2m 225 |   ([state sym][0m
+[2m 226 |    (let [pre (ana/->pre sym)][0m
+[1m 227 |      (env/with-compiler-env state[0m
+------------^-------------------------------------------------------------------
+ [33;1mUse of undeclared Var cljs.core/class[0m
+--------------------------------------------------------------------------------
+[2m 228 |        (:info (ana/resolve-extern pre))))))[0m
+[2m 229 | [0m
+[2m 230 | (defn find-ns[0m
+[2m 231 |   "Given a namespace return the corresponding namespace analysis map. Analagous[0m
+--------------------------------------------------------------------------------
+  ● build self-host bootstrap (4006ms)
+▶ repair bootstrap macro metadata
+✓ no broken symbols found (already fixed or unaffected build)
+✓ normalized bootstrap index timestamps
+  ● repair bootstrap macro metadata (53ms)
+▶ install frozen Bun dependencies
+[0.02ms] ".env"
+bun install v1.4.0-canary.1 (d8ecf0985)
+
+Checked 79 installs across 124 packages (no changes) [5.00ms]
+  ● install frozen Bun dependencies (11ms)
+▶ build web CSS
+≈ tailwindcss v4.1.18
+
+Done in 68ms
+  ● build web CSS (123ms)
+▶ index JVM program graph and initialization pages
+WARNING: Using incubator modules: jdk.incubator.vector
+WARNING: await already refers to: #'clojure.core/await in namespace: seon.agent.ctx.render-fns, being replaced by: #'seon.agent.ctx.render-fns/await
+WARNING: await already refers to: #'clojure.core/await in namespace: seon.agent.ctx, being replaced by: #'seon.agent.ctx/await
+WARNING: await already refers to: #'clojure.core/await in namespace: seon.agent.home, being replaced by: #'seon.agent.home/await
+WARNING: agent already refers to: #'clojure.core/agent in namespace: seon.agent.message, being replaced by: #'seon.agent.message/agent
+{:seon.ns/count 161, :seon.fn/count 1648, :seon.schema/count 1628, :seon.test/count 584, :seon.db.initialization/page-count 12, :seon.db.initialization/fact-row-count 4178}
+  ● index JVM program graph and initialization pages (16220ms)
+  ✗ writer readiness probe refused: #:seon.dev.process{:readiness-stage :seon.dev.process/writer-repl-port-file, :readiness-refusal "The writer REPL port file is absent.", :readiness-path "/Users/sean/src/seon/tmp/seon-writer-repl-port-default"}
+● cluster default applied
+#:seon.cluster.apply{:ok? true, :changed? true, :config-owner :jvm}
+real 66.30
+user 120.32
+sys 8.71

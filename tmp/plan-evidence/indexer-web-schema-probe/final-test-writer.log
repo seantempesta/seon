@@ -1,0 +1,1857 @@
+▶ prepare writer dependencies
+  ● prepare writer dependencies (1110ms)
+  ● reuse canonical shared JVM AOT+CDS pair
+▶ index JVM program graph and initialization pages
+WARNING: Using incubator modules: jdk.incubator.vector
+WARNING: await already refers to: #'clojure.core/await in namespace: seon.agent.ctx.render-fns, being replaced by: #'seon.agent.ctx.render-fns/await
+WARNING: await already refers to: #'clojure.core/await in namespace: seon.agent.ctx, being replaced by: #'seon.agent.ctx/await
+WARNING: await already refers to: #'clojure.core/await in namespace: seon.agent.home, being replaced by: #'seon.agent.home/await
+WARNING: agent already refers to: #'clojure.core/agent in namespace: seon.agent.message, being replaced by: #'seon.agent.message/agent
+{:seon.ns/count 161, :seon.fn/count 1648, :seon.schema/count 1628, :seon.test/count 584, :seon.db.initialization/page-count 12, :seon.db.initialization/fact-row-count 4178}
+  ● index JVM program graph and initialization pages (16576ms)
+WARNING: Using incubator modules: jdk.incubator.vector
+WARNING: await already refers to: #'clojure.core/await in namespace: seon.agent.ctx.render-fns, being replaced by: #'seon.agent.ctx.render-fns/await
+WARNING: await already refers to: #'clojure.core/await in namespace: seon.agent.home, being replaced by: #'seon.agent.home/await
+WARNING: agent already refers to: #'clojure.core/agent in namespace: seon.agent.message, being replaced by: #'seon.agent.message/agent
+WARNING: await already refers to: #'clojure.core/await in namespace: seon.agent.ctx, being replaced by: #'seon.agent.ctx/await
+WARNING: await already refers to: #'clojure.core/await in namespace: seon.db.portable-test, being replaced by: #'seon.db.portable-test/await
+
+Testing my.blob.host-leaf-test
+
+Testing seon.agent.driver-test
+2026-07-26T23:32:02.345Z seans-m5-macbook-pro ERROR [seon.agent.driver:934] - JVM run driver committed-plan recovery failed {:seon.agent.run/id "run-a"}
+                 java.lang.VirtualThread.run  VirtualThread.java: 475
+                                         ...                        
+         seon.agent.driver/start!/launch!/fn          driver.clj: 932
+      seon.agent.driver/start!/scan-body!/fn          driver.clj: 957
+    seon.agent.driver/claim-recoverable-run!          driver.clj: 817
+               seon.agent.driver/resume-run!          driver.clj: 790
+            seon.agent.driver/drive-sources!          driver.clj: 730
+            seon.agent.driver/form-evaluate!          driver.clj: 712
+seon.agent.driver/callable-program-functions          driver.clj: 650
+java.lang.NullPointerException: Cannot invoke "clojure.lang.IFn.invoke(Object)" because the return value of "clojure.lang.RT.get(Object, Object)" is null
+
+
+
+ERROR in (replacement-arms-the-committed-lease-and-resumes-without-a-commit) (driver_test.clj:19)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: clojure.lang.ExceptionInfo: The driver test did not observe its required event.
+#:seon.agent.driver-test{:event :replacement-drive-settled}
+ at seon.agent.driver_test$await_event_BANG_.invokeStatic (driver_test.clj:19)
+    seon.agent.driver_test$await_event_BANG_.invoke (driver_test.clj:16)
+    seon.agent.driver_test$fn__89208$fn__89251.invoke (driver_test.clj:356)
+    clojure.core$with_redefs_fn.invokeStatic (core.clj:7710)
+    clojure.core$with_redefs_fn.invoke (core.clj:7694)
+    seon.agent.driver_test$fn__89208.invokeStatic (driver_test.clj:322)
+    seon.agent.driver_test/fn (driver_test.clj:239)
+    clojure.test$test_var$fn__9898.invoke (test.clj:717)
+    clojure.test$test_var.invokeStatic (test.clj:717)
+    clojure.test$test_var.invoke (test.clj:708)
+    clojure.test$test_vars$fn__9924$fn__9929.invoke (test.clj:735)
+    clojure.test$default_fixture.invokeStatic (test.clj:687)
+    clojure.test$default_fixture.invoke (test.clj:683)
+    clojure.test$test_vars$fn__9924.invoke (test.clj:735)
+    clojure.test$default_fixture.invokeStatic (test.clj:687)
+    clojure.test$default_fixture.invoke (test.clj:683)
+    clojure.test$test_vars.invokeStatic (test.clj:731)
+    clojure.test$test_all_vars.invokeStatic (test.clj:737)
+    clojure.test$test_ns.invokeStatic (test.clj:758)
+    clojure.test$test_ns.invoke (test.clj:743)
+    clojure.core$map$fn__5956.invoke (core.clj:2774)
+    clojure.lang.LazySeq.force (LazySeq.java:50)
+    clojure.lang.LazySeq.realize (LazySeq.java:87)
+    clojure.lang.LazySeq.seq (LazySeq.java:104)
+    clojure.lang.Cons.next (Cons.java:41)
+    clojure.lang.RT.boundedLength (RT.java:1810)
+    clojure.lang.RestFn.applyTo (RestFn.java:133)
+    clojure.core$apply.invokeStatic (core.clj:669)
+    clojure.test$run_tests.invokeStatic (test.clj:768)
+    clojure.test$run_tests.doInvoke (test.clj:768)
+    clojure.lang.RestFn.applyTo (RestFn.java:140)
+    clojure.lang.Var.applyTo (Var.java:707)
+    clojure.core$apply.invokeStatic (core.clj:667)
+    clojure.core$apply.invoke (core.clj:662)
+    user$eval134.invokeStatic (NO_SOURCE_FILE:25)
+    user$eval134.invoke (NO_SOURCE_FILE:1)
+    clojure.lang.Compiler.eval (Compiler.java:7757)
+    clojure.lang.Compiler.eval (Compiler.java:7712)
+    clojure.core$eval.invokeStatic (core.clj:3236)
+    clojure.main$eval_opt.invokeStatic (main.clj:489)
+    clojure.main$eval_opt.invoke (main.clj:483)
+    clojure.main$initialize.invokeStatic (main.clj:509)
+    clojure.main$null_opt.invokeStatic (main.clj:543)
+    clojure.main$null_opt.invoke (main.clj:540)
+    clojure.main$main.invokeStatic (main.clj:665)
+    clojure.main$main.doInvoke (main.clj:617)
+    clojure.lang.RestFn.applyTo (RestFn.java:140)
+    clojure.lang.Var.applyTo (Var.java:707)
+    clojure.main.main (main.java:40)
+
+Testing seon.agent.fs-portable-test
+
+Testing seon.agent.fs.host-leaf-test
+
+Testing seon.agent.fs.match-test
+
+Testing seon.agent.home-schema-test
+
+Testing seon.agent.jvm-runtime-schema-test
+
+Testing seon.agent.lifecycle-test
+
+Testing seon.agent.message.portable-test
+
+Testing seon.agent.prompt-test
+
+Testing seon.agent.shell-portable-test
+
+Testing seon.agent.shell.host-leaf-test
+
+Testing seon.agent.web-portable-test
+
+Testing seon.agent.web.host-leaf-test
+
+Testing seon.ai.http-test
+
+Testing seon.ai.portable-test
+
+Testing seon.ai.provider-test
+
+Testing seon.cluster.run-test
+
+ERROR in (plan-freeze-is-mutually-exclusive) (run.cljc:149)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: clojure.lang.ExceptionInfo: seon.cluster.run/open-tx awaits its N2 implementation.
+#:seon.cluster.run{:contract :seon.cluster.run/open-tx}
+ at seon.cluster.run$open_tx.invokeStatic (run.cljc:149)
+    seon.cluster.run$open_tx.invoke (run.cljc:138)
+    seon.cluster.run_test$open_run_BANG_.invokeStatic (run_test.clj:66)
+    seon.cluster.run_test$open_run_BANG_.invoke (run_test.clj:63)
+    seon.cluster.run_test$fn__94313$fn__94314.invoke (run_test.clj:180)
+    seon.cluster.run_test$with_model_database.invokeStatic (run_test.clj:54)
+    seon.cluster.run_test$with_model_database.invoke (run_test.clj:47)
+    seon.cluster.run_test$fn__94313.invokeStatic (run_test.clj:177)
+    seon.cluster.run_test/fn (run_test.clj:176)
+    clojure.test$test_var$fn__9898.invoke (test.clj:717)
+    clojure.test$test_var.invokeStatic (test.clj:717)
+    clojure.test$test_var.invoke (test.clj:708)
+    clojure.test$test_vars$fn__9924$fn__9929.invoke (test.clj:735)
+    clojure.test$default_fixture.invokeStatic (test.clj:687)
+    clojure.test$default_fixture.invoke (test.clj:683)
+    clojure.test$test_vars$fn__9924.invoke (test.clj:735)
+    clojure.test$default_fixture.invokeStatic (test.clj:687)
+    clojure.test$default_fixture.invoke (test.clj:683)
+    clojure.test$test_vars.invokeStatic (test.clj:731)
+    clojure.test$test_all_vars.invokeStatic (test.clj:737)
+    clojure.test$test_ns.invokeStatic (test.clj:758)
+    clojure.test$test_ns.invoke (test.clj:743)
+    clojure.core$map$fn__5956.invoke (core.clj:2774)
+    clojure.lang.LazySeq.force (LazySeq.java:50)
+    clojure.lang.LazySeq.realize (LazySeq.java:87)
+    clojure.lang.LazySeq.seq (LazySeq.java:104)
+    clojure.lang.Cons.next (Cons.java:41)
+    clojure.lang.RT.boundedLength (RT.java:1810)
+    clojure.lang.RestFn.applyTo (RestFn.java:133)
+    clojure.core$apply.invokeStatic (core.clj:669)
+    clojure.test$run_tests.invokeStatic (test.clj:768)
+    clojure.test$run_tests.doInvoke (test.clj:768)
+    clojure.lang.RestFn.applyTo (RestFn.java:140)
+    clojure.lang.Var.applyTo (Var.java:707)
+    clojure.core$apply.invokeStatic (core.clj:667)
+    clojure.core$apply.invoke (core.clj:662)
+    user$eval134.invokeStatic (NO_SOURCE_FILE:25)
+    user$eval134.invoke (NO_SOURCE_FILE:1)
+    clojure.lang.Compiler.eval (Compiler.java:7757)
+    clojure.lang.Compiler.eval (Compiler.java:7712)
+    clojure.core$eval.invokeStatic (core.clj:3236)
+    clojure.main$eval_opt.invokeStatic (main.clj:489)
+    clojure.main$eval_opt.invoke (main.clj:483)
+    clojure.main$initialize.invokeStatic (main.clj:509)
+    clojure.main$null_opt.invokeStatic (main.clj:543)
+    clojure.main$null_opt.invoke (main.clj:540)
+    clojure.main$main.invokeStatic (main.clj:665)
+    clojure.main$main.doInvoke (main.clj:617)
+    clojure.lang.RestFn.applyTo (RestFn.java:140)
+    clojure.lang.Var.applyTo (Var.java:707)
+    clojure.main.main (main.java:40)
+
+ERROR in (state-is-derived-from-primitives) (run.cljc:103)
+open is the absence of closed-at
+expected: (true? (run/open? {}))
+  actual: clojure.lang.ExceptionInfo: seon.cluster.run/open? awaits its N2 implementation.
+#:seon.cluster.run{:contract :seon.cluster.run/open?}
+ at seon.cluster.run$open_QMARK_.invokeStatic (run.cljc:103)
+    seon.cluster.run$open_QMARK_.invoke (run.cljc:97)
+    seon.cluster.run_test$fn__94232$fn__94233$fn__94234.invoke (run_test.clj:91)
+    seon.cluster.run_test$fn__94232$fn__94233.invoke (run_test.clj:91)
+    seon.cluster.run_test$fn__94232.invokeStatic (run_test.clj:90)
+    seon.cluster.run_test/fn (run_test.clj:89)
+    clojure.test$test_var$fn__9898.invoke (test.clj:717)
+    clojure.test$test_var.invokeStatic (test.clj:717)
+    clojure.test$test_var.invoke (test.clj:708)
+    clojure.test$test_vars$fn__9924$fn__9929.invoke (test.clj:735)
+    clojure.test$default_fixture.invokeStatic (test.clj:687)
+    clojure.test$default_fixture.invoke (test.clj:683)
+    clojure.test$test_vars$fn__9924.invoke (test.clj:735)
+    clojure.test$default_fixture.invokeStatic (test.clj:687)
+    clojure.test$default_fixture.invoke (test.clj:683)
+    clojure.test$test_vars.invokeStatic (test.clj:731)
+    clojure.test$test_all_vars.invokeStatic (test.clj:737)
+    clojure.test$test_ns.invokeStatic (test.clj:758)
+    clojure.test$test_ns.invoke (test.clj:743)
+    clojure.core$map$fn__5956.invoke (core.clj:2774)
+    clojure.lang.LazySeq.force (LazySeq.java:50)
+    clojure.lang.LazySeq.realize (LazySeq.java:87)
+    clojure.lang.LazySeq.seq (LazySeq.java:104)
+    clojure.lang.Cons.next (Cons.java:41)
+    clojure.lang.RT.boundedLength (RT.java:1810)
+    clojure.lang.RestFn.applyTo (RestFn.java:133)
+    clojure.core$apply.invokeStatic (core.clj:669)
+    clojure.test$run_tests.invokeStatic (test.clj:768)
+    clojure.test$run_tests.doInvoke (test.clj:768)
+    clojure.lang.RestFn.applyTo (RestFn.java:140)
+    clojure.lang.Var.applyTo (Var.java:707)
+    clojure.core$apply.invokeStatic (core.clj:667)
+    clojure.core$apply.invoke (core.clj:662)
+    user$eval134.invokeStatic (NO_SOURCE_FILE:25)
+    user$eval134.invoke (NO_SOURCE_FILE:1)
+    clojure.lang.Compiler.eval (Compiler.java:7757)
+    clojure.lang.Compiler.eval (Compiler.java:7712)
+    clojure.core$eval.invokeStatic (core.clj:3236)
+    clojure.main$eval_opt.invokeStatic (main.clj:489)
+    clojure.main$eval_opt.invoke (main.clj:483)
+    clojure.main$initialize.invokeStatic (main.clj:509)
+    clojure.main$null_opt.invokeStatic (main.clj:543)
+    clojure.main$null_opt.invoke (main.clj:540)
+    clojure.main$main.invokeStatic (main.clj:665)
+    clojure.main$main.doInvoke (main.clj:617)
+    clojure.lang.RestFn.applyTo (RestFn.java:140)
+    clojure.lang.Var.applyTo (Var.java:707)
+    clojure.main.main (main.java:40)
+
+ERROR in (state-is-derived-from-primitives) (run.cljc:103)
+open is the absence of closed-at
+expected: (false? (run/open? #:seon.cluster.run{:closed-at t2}))
+  actual: clojure.lang.ExceptionInfo: seon.cluster.run/open? awaits its N2 implementation.
+#:seon.cluster.run{:contract :seon.cluster.run/open?}
+ at seon.cluster.run$open_QMARK_.invokeStatic (run.cljc:103)
+    seon.cluster.run$open_QMARK_.invoke (run.cljc:97)
+    seon.cluster.run_test$fn__94232$fn__94233.invoke (run_test.clj:92)
+    seon.cluster.run_test$fn__94232.invokeStatic (run_test.clj:90)
+    seon.cluster.run_test/fn (run_test.clj:89)
+    clojure.test$test_var$fn__9898.invoke (test.clj:717)
+    clojure.test$test_var.invokeStatic (test.clj:717)
+    clojure.test$test_var.invoke (test.clj:708)
+    clojure.test$test_vars$fn__9924$fn__9929.invoke (test.clj:735)
+    clojure.test$default_fixture.invokeStatic (test.clj:687)
+    clojure.test$default_fixture.invoke (test.clj:683)
+    clojure.test$test_vars$fn__9924.invoke (test.clj:735)
+    clojure.test$default_fixture.invokeStatic (test.clj:687)
+    clojure.test$default_fixture.invoke (test.clj:683)
+    clojure.test$test_vars.invokeStatic (test.clj:731)
+    clojure.test$test_all_vars.invokeStatic (test.clj:737)
+    clojure.test$test_ns.invokeStatic (test.clj:758)
+    clojure.test$test_ns.invoke (test.clj:743)
+    clojure.core$map$fn__5956.invoke (core.clj:2774)
+    clojure.lang.LazySeq.force (LazySeq.java:50)
+    clojure.lang.LazySeq.realize (LazySeq.java:87)
+    clojure.lang.LazySeq.seq (LazySeq.java:104)
+    clojure.lang.Cons.next (Cons.java:41)
+    clojure.lang.RT.boundedLength (RT.java:1810)
+    clojure.lang.RestFn.applyTo (RestFn.java:133)
+    clojure.core$apply.invokeStatic (core.clj:669)
+    clojure.test$run_tests.invokeStatic (test.clj:768)
+    clojure.test$run_tests.doInvoke (test.clj:768)
+    clojure.lang.RestFn.applyTo (RestFn.java:140)
+    clojure.lang.Var.applyTo (Var.java:707)
+    clojure.core$apply.invokeStatic (core.clj:667)
+    clojure.core$apply.invoke (core.clj:662)
+    user$eval134.invokeStatic (NO_SOURCE_FILE:25)
+    user$eval134.invoke (NO_SOURCE_FILE:1)
+    clojure.lang.Compiler.eval (Compiler.java:7757)
+    clojure.lang.Compiler.eval (Compiler.java:7712)
+    clojure.core$eval.invokeStatic (core.clj:3236)
+    clojure.main$eval_opt.invokeStatic (main.clj:489)
+    clojure.main$eval_opt.invoke (main.clj:483)
+    clojure.main$initialize.invokeStatic (main.clj:509)
+    clojure.main$null_opt.invokeStatic (main.clj:543)
+    clojure.main$null_opt.invoke (main.clj:540)
+    clojure.main$main.invokeStatic (main.clj:665)
+    clojure.main$main.doInvoke (main.clj:617)
+    clojure.lang.RestFn.applyTo (RestFn.java:140)
+    clojure.lang.Var.applyTo (Var.java:707)
+    clojure.main.main (main.java:40)
+
+ERROR in (state-is-derived-from-primitives) (run.cljc:110)
+claimed means a holder under a live lease
+expected: (true? (run/claimed? #:seon.cluster.run{:process "p1", :lease-until t2} t1))
+  actual: clojure.lang.ExceptionInfo: seon.cluster.run/claimed? awaits its N2 implementation.
+#:seon.cluster.run{:contract :seon.cluster.run/claimed?}
+ at seon.cluster.run$claimed_QMARK_.invokeStatic (run.cljc:110)
+    seon.cluster.run$claimed_QMARK_.invoke (run.cljc:106)
+    seon.cluster.run_test$fn__94232$fn__94241$fn__94242.invoke (run_test.clj:94)
+    seon.cluster.run_test$fn__94232$fn__94241.invoke (run_test.clj:94)
+    seon.cluster.run_test$fn__94232.invokeStatic (run_test.clj:93)
+    seon.cluster.run_test/fn (run_test.clj:89)
+    clojure.test$test_var$fn__9898.invoke (test.clj:717)
+    clojure.test$test_var.invokeStatic (test.clj:717)
+    clojure.test$test_var.invoke (test.clj:708)
+    clojure.test$test_vars$fn__9924$fn__9929.invoke (test.clj:735)
+    clojure.test$default_fixture.invokeStatic (test.clj:687)
+    clojure.test$default_fixture.invoke (test.clj:683)
+    clojure.test$test_vars$fn__9924.invoke (test.clj:735)
+    clojure.test$default_fixture.invokeStatic (test.clj:687)
+    clojure.test$default_fixture.invoke (test.clj:683)
+    clojure.test$test_vars.invokeStatic (test.clj:731)
+    clojure.test$test_all_vars.invokeStatic (test.clj:737)
+    clojure.test$test_ns.invokeStatic (test.clj:758)
+    clojure.test$test_ns.invoke (test.clj:743)
+    clojure.core$map$fn__5956.invoke (core.clj:2774)
+    clojure.lang.LazySeq.force (LazySeq.java:50)
+    clojure.lang.LazySeq.realize (LazySeq.java:87)
+    clojure.lang.LazySeq.seq (LazySeq.java:104)
+    clojure.lang.Cons.next (Cons.java:41)
+    clojure.lang.RT.boundedLength (RT.java:1810)
+    clojure.lang.RestFn.applyTo (RestFn.java:133)
+    clojure.core$apply.invokeStatic (core.clj:669)
+    clojure.test$run_tests.invokeStatic (test.clj:768)
+    clojure.test$run_tests.doInvoke (test.clj:768)
+    clojure.lang.RestFn.applyTo (RestFn.java:140)
+    clojure.lang.Var.applyTo (Var.java:707)
+    clojure.core$apply.invokeStatic (core.clj:667)
+    clojure.core$apply.invoke (core.clj:662)
+    user$eval134.invokeStatic (NO_SOURCE_FILE:25)
+    user$eval134.invoke (NO_SOURCE_FILE:1)
+    clojure.lang.Compiler.eval (Compiler.java:7757)
+    clojure.lang.Compiler.eval (Compiler.java:7712)
+    clojure.core$eval.invokeStatic (core.clj:3236)
+    clojure.main$eval_opt.invokeStatic (main.clj:489)
+    clojure.main$eval_opt.invoke (main.clj:483)
+    clojure.main$initialize.invokeStatic (main.clj:509)
+    clojure.main$null_opt.invokeStatic (main.clj:543)
+    clojure.main$null_opt.invoke (main.clj:540)
+    clojure.main$main.invokeStatic (main.clj:665)
+    clojure.main$main.doInvoke (main.clj:617)
+    clojure.lang.RestFn.applyTo (RestFn.java:140)
+    clojure.lang.Var.applyTo (Var.java:707)
+    clojure.main.main (main.java:40)
+
+ERROR in (state-is-derived-from-primitives) (run.cljc:110)
+claimed means a holder under a live lease
+expected: (false? (run/claimed? #:seon.cluster.run{:process "p1", :lease-until t0} t1))
+  actual: clojure.lang.ExceptionInfo: seon.cluster.run/claimed? awaits its N2 implementation.
+#:seon.cluster.run{:contract :seon.cluster.run/claimed?}
+ at seon.cluster.run$claimed_QMARK_.invokeStatic (run.cljc:110)
+    seon.cluster.run$claimed_QMARK_.invoke (run.cljc:106)
+    seon.cluster.run_test$fn__94232$fn__94241$fn__94246.invoke (run_test.clj:95)
+    seon.cluster.run_test$fn__94232$fn__94241.invoke (run_test.clj:95)
+    seon.cluster.run_test$fn__94232.invokeStatic (run_test.clj:93)
+    seon.cluster.run_test/fn (run_test.clj:89)
+    clojure.test$test_var$fn__9898.invoke (test.clj:717)
+    clojure.test$test_var.invokeStatic (test.clj:717)
+    clojure.test$test_var.invoke (test.clj:708)
+    clojure.test$test_vars$fn__9924$fn__9929.invoke (test.clj:735)
+    clojure.test$default_fixture.invokeStatic (test.clj:687)
+    clojure.test$default_fixture.invoke (test.clj:683)
+    clojure.test$test_vars$fn__9924.invoke (test.clj:735)
+    clojure.test$default_fixture.invokeStatic (test.clj:687)
+    clojure.test$default_fixture.invoke (test.clj:683)
+    clojure.test$test_vars.invokeStatic (test.clj:731)
+    clojure.test$test_all_vars.invokeStatic (test.clj:737)
+    clojure.test$test_ns.invokeStatic (test.clj:758)
+    clojure.test$test_ns.invoke (test.clj:743)
+    clojure.core$map$fn__5956.invoke (core.clj:2774)
+    clojure.lang.LazySeq.force (LazySeq.java:50)
+    clojure.lang.LazySeq.realize (LazySeq.java:87)
+    clojure.lang.LazySeq.seq (LazySeq.java:104)
+    clojure.lang.Cons.next (Cons.java:41)
+    clojure.lang.RT.boundedLength (RT.java:1810)
+    clojure.lang.RestFn.applyTo (RestFn.java:133)
+    clojure.core$apply.invokeStatic (core.clj:669)
+    clojure.test$run_tests.invokeStatic (test.clj:768)
+    clojure.test$run_tests.doInvoke (test.clj:768)
+    clojure.lang.RestFn.applyTo (RestFn.java:140)
+    clojure.lang.Var.applyTo (Var.java:707)
+    clojure.core$apply.invokeStatic (core.clj:667)
+    clojure.core$apply.invoke (core.clj:662)
+    user$eval134.invokeStatic (NO_SOURCE_FILE:25)
+    user$eval134.invoke (NO_SOURCE_FILE:1)
+    clojure.lang.Compiler.eval (Compiler.java:7757)
+    clojure.lang.Compiler.eval (Compiler.java:7712)
+    clojure.core$eval.invokeStatic (core.clj:3236)
+    clojure.main$eval_opt.invokeStatic (main.clj:489)
+    clojure.main$eval_opt.invoke (main.clj:483)
+    clojure.main$initialize.invokeStatic (main.clj:509)
+    clojure.main$null_opt.invokeStatic (main.clj:543)
+    clojure.main$null_opt.invoke (main.clj:540)
+    clojure.main$main.invokeStatic (main.clj:665)
+    clojure.main$main.doInvoke (main.clj:617)
+    clojure.lang.RestFn.applyTo (RestFn.java:140)
+    clojure.lang.Var.applyTo (Var.java:707)
+    clojure.main.main (main.java:40)
+
+ERROR in (state-is-derived-from-primitives) (run.cljc:110)
+claimed means a holder under a live lease
+expected: (false? (run/claimed? {} t1))
+  actual: clojure.lang.ExceptionInfo: seon.cluster.run/claimed? awaits its N2 implementation.
+#:seon.cluster.run{:contract :seon.cluster.run/claimed?}
+ at seon.cluster.run$claimed_QMARK_.invokeStatic (run.cljc:110)
+    seon.cluster.run$claimed_QMARK_.invoke (run.cljc:106)
+    seon.cluster.run_test$fn__94232$fn__94241.invoke (run_test.clj:96)
+    seon.cluster.run_test$fn__94232.invokeStatic (run_test.clj:93)
+    seon.cluster.run_test/fn (run_test.clj:89)
+    clojure.test$test_var$fn__9898.invoke (test.clj:717)
+    clojure.test$test_var.invokeStatic (test.clj:717)
+    clojure.test$test_var.invoke (test.clj:708)
+    clojure.test$test_vars$fn__9924$fn__9929.invoke (test.clj:735)
+    clojure.test$default_fixture.invokeStatic (test.clj:687)
+    clojure.test$default_fixture.invoke (test.clj:683)
+    clojure.test$test_vars$fn__9924.invoke (test.clj:735)
+    clojure.test$default_fixture.invokeStatic (test.clj:687)
+    clojure.test$default_fixture.invoke (test.clj:683)
+    clojure.test$test_vars.invokeStatic (test.clj:731)
+    clojure.test$test_all_vars.invokeStatic (test.clj:737)
+    clojure.test$test_ns.invokeStatic (test.clj:758)
+    clojure.test$test_ns.invoke (test.clj:743)
+    clojure.core$map$fn__5956.invoke (core.clj:2774)
+    clojure.lang.LazySeq.force (LazySeq.java:50)
+    clojure.lang.LazySeq.realize (LazySeq.java:87)
+    clojure.lang.LazySeq.seq (LazySeq.java:104)
+    clojure.lang.Cons.next (Cons.java:41)
+    clojure.lang.RT.boundedLength (RT.java:1810)
+    clojure.lang.RestFn.applyTo (RestFn.java:133)
+    clojure.core$apply.invokeStatic (core.clj:669)
+    clojure.test$run_tests.invokeStatic (test.clj:768)
+    clojure.test$run_tests.doInvoke (test.clj:768)
+    clojure.lang.RestFn.applyTo (RestFn.java:140)
+    clojure.lang.Var.applyTo (Var.java:707)
+    clojure.core$apply.invokeStatic (core.clj:667)
+    clojure.core$apply.invoke (core.clj:662)
+    user$eval134.invokeStatic (NO_SOURCE_FILE:25)
+    user$eval134.invoke (NO_SOURCE_FILE:1)
+    clojure.lang.Compiler.eval (Compiler.java:7757)
+    clojure.lang.Compiler.eval (Compiler.java:7712)
+    clojure.core$eval.invokeStatic (core.clj:3236)
+    clojure.main$eval_opt.invokeStatic (main.clj:489)
+    clojure.main$eval_opt.invoke (main.clj:483)
+    clojure.main$initialize.invokeStatic (main.clj:509)
+    clojure.main$null_opt.invokeStatic (main.clj:543)
+    clojure.main$null_opt.invoke (main.clj:540)
+    clojure.main$main.invokeStatic (main.clj:665)
+    clojure.main$main.doInvoke (main.clj:617)
+    clojure.lang.RestFn.applyTo (RestFn.java:140)
+    clojure.lang.Var.applyTo (Var.java:707)
+    clojure.main.main (main.java:40)
+
+ERROR in (state-is-derived-from-primitives) (run.cljc:117)
+expired means open with a lapsed holder
+expected: (true? (run/expired? #:seon.cluster.run{:process "p1", :lease-until t0} t1))
+  actual: clojure.lang.ExceptionInfo: seon.cluster.run/expired? awaits its N2 implementation.
+#:seon.cluster.run{:contract :seon.cluster.run/expired?}
+ at seon.cluster.run$expired_QMARK_.invokeStatic (run.cljc:117)
+    seon.cluster.run$expired_QMARK_.invoke (run.cljc:113)
+    seon.cluster.run_test$fn__94232$fn__94253.invoke (run_test.clj:98)
+    seon.cluster.run_test$fn__94232.invokeStatic (run_test.clj:98)
+    seon.cluster.run_test/fn (run_test.clj:89)
+    clojure.test$test_var$fn__9898.invoke (test.clj:717)
+    clojure.test$test_var.invokeStatic (test.clj:717)
+    clojure.test$test_var.invoke (test.clj:708)
+    clojure.test$test_vars$fn__9924$fn__9929.invoke (test.clj:735)
+    clojure.test$default_fixture.invokeStatic (test.clj:687)
+    clojure.test$default_fixture.invoke (test.clj:683)
+    clojure.test$test_vars$fn__9924.invoke (test.clj:735)
+    clojure.test$default_fixture.invokeStatic (test.clj:687)
+    clojure.test$default_fixture.invoke (test.clj:683)
+    clojure.test$test_vars.invokeStatic (test.clj:731)
+    clojure.test$test_all_vars.invokeStatic (test.clj:737)
+    clojure.test$test_ns.invokeStatic (test.clj:758)
+    clojure.test$test_ns.invoke (test.clj:743)
+    clojure.core$map$fn__5956.invoke (core.clj:2774)
+    clojure.lang.LazySeq.force (LazySeq.java:50)
+    clojure.lang.LazySeq.realize (LazySeq.java:87)
+    clojure.lang.LazySeq.seq (LazySeq.java:104)
+    clojure.lang.Cons.next (Cons.java:41)
+    clojure.lang.RT.boundedLength (RT.java:1810)
+    clojure.lang.RestFn.applyTo (RestFn.java:133)
+    clojure.core$apply.invokeStatic (core.clj:669)
+    clojure.test$run_tests.invokeStatic (test.clj:768)
+    clojure.test$run_tests.doInvoke (test.clj:768)
+    clojure.lang.RestFn.applyTo (RestFn.java:140)
+    clojure.lang.Var.applyTo (Var.java:707)
+    clojure.core$apply.invokeStatic (core.clj:667)
+    clojure.core$apply.invoke (core.clj:662)
+    user$eval134.invokeStatic (NO_SOURCE_FILE:25)
+    user$eval134.invoke (NO_SOURCE_FILE:1)
+    clojure.lang.Compiler.eval (Compiler.java:7757)
+    clojure.lang.Compiler.eval (Compiler.java:7712)
+    clojure.core$eval.invokeStatic (core.clj:3236)
+    clojure.main$eval_opt.invokeStatic (main.clj:489)
+    clojure.main$eval_opt.invoke (main.clj:483)
+    clojure.main$initialize.invokeStatic (main.clj:509)
+    clojure.main$null_opt.invokeStatic (main.clj:543)
+    clojure.main$null_opt.invoke (main.clj:540)
+    clojure.main$main.invokeStatic (main.clj:665)
+    clojure.main$main.doInvoke (main.clj:617)
+    clojure.lang.RestFn.applyTo (RestFn.java:140)
+    clojure.lang.Var.applyTo (Var.java:707)
+    clojure.main.main (main.java:40)
+
+ERROR in (state-is-derived-from-primitives) (run.cljc:117)
+expired means open with a lapsed holder
+expected: (false? (run/expired? #:seon.cluster.run{:process "p1", :lease-until t2} t1))
+  actual: clojure.lang.ExceptionInfo: seon.cluster.run/expired? awaits its N2 implementation.
+#:seon.cluster.run{:contract :seon.cluster.run/expired?}
+ at seon.cluster.run$expired_QMARK_.invokeStatic (run.cljc:117)
+    seon.cluster.run$expired_QMARK_.invoke (run.cljc:113)
+    seon.cluster.run_test$fn__94232$fn__94257.invoke (run_test.clj:99)
+    seon.cluster.run_test$fn__94232.invokeStatic (run_test.clj:99)
+    seon.cluster.run_test/fn (run_test.clj:89)
+    clojure.test$test_var$fn__9898.invoke (test.clj:717)
+    clojure.test$test_var.invokeStatic (test.clj:717)
+    clojure.test$test_var.invoke (test.clj:708)
+    clojure.test$test_vars$fn__9924$fn__9929.invoke (test.clj:735)
+    clojure.test$default_fixture.invokeStatic (test.clj:687)
+    clojure.test$default_fixture.invoke (test.clj:683)
+    clojure.test$test_vars$fn__9924.invoke (test.clj:735)
+    clojure.test$default_fixture.invokeStatic (test.clj:687)
+    clojure.test$default_fixture.invoke (test.clj:683)
+    clojure.test$test_vars.invokeStatic (test.clj:731)
+    clojure.test$test_all_vars.invokeStatic (test.clj:737)
+    clojure.test$test_ns.invokeStatic (test.clj:758)
+    clojure.test$test_ns.invoke (test.clj:743)
+    clojure.core$map$fn__5956.invoke (core.clj:2774)
+    clojure.lang.LazySeq.force (LazySeq.java:50)
+    clojure.lang.LazySeq.realize (LazySeq.java:87)
+    clojure.lang.LazySeq.seq (LazySeq.java:104)
+    clojure.lang.Cons.next (Cons.java:41)
+    clojure.lang.RT.boundedLength (RT.java:1810)
+    clojure.lang.RestFn.applyTo (RestFn.java:133)
+    clojure.core$apply.invokeStatic (core.clj:669)
+    clojure.test$run_tests.invokeStatic (test.clj:768)
+    clojure.test$run_tests.doInvoke (test.clj:768)
+    clojure.lang.RestFn.applyTo (RestFn.java:140)
+    clojure.lang.Var.applyTo (Var.java:707)
+    clojure.core$apply.invokeStatic (core.clj:667)
+    clojure.core$apply.invoke (core.clj:662)
+    user$eval134.invokeStatic (NO_SOURCE_FILE:25)
+    user$eval134.invoke (NO_SOURCE_FILE:1)
+    clojure.lang.Compiler.eval (Compiler.java:7757)
+    clojure.lang.Compiler.eval (Compiler.java:7712)
+    clojure.core$eval.invokeStatic (core.clj:3236)
+    clojure.main$eval_opt.invokeStatic (main.clj:489)
+    clojure.main$eval_opt.invoke (main.clj:483)
+    clojure.main$initialize.invokeStatic (main.clj:509)
+    clojure.main$null_opt.invokeStatic (main.clj:543)
+    clojure.main$null_opt.invoke (main.clj:540)
+    clojure.main$main.invokeStatic (main.clj:665)
+    clojure.main$main.doInvoke (main.clj:617)
+    clojure.lang.RestFn.applyTo (RestFn.java:140)
+    clojure.lang.Var.applyTo (Var.java:707)
+    clojure.main.main (main.java:40)
+
+ERROR in (state-is-derived-from-primitives) (run.cljc:117)
+expired means open with a lapsed holder
+expected: (false? (run/expired? #:seon.cluster.run{:closed-at t2, :process "p1", :lease-until t0} t1))
+  actual: clojure.lang.ExceptionInfo: seon.cluster.run/expired? awaits its N2 implementation.
+#:seon.cluster.run{:contract :seon.cluster.run/expired?}
+ at seon.cluster.run$expired_QMARK_.invokeStatic (run.cljc:117)
+    seon.cluster.run$expired_QMARK_.invoke (run.cljc:113)
+    seon.cluster.run_test$fn__94232.invokeStatic (run_test.clj:100)
+    seon.cluster.run_test/fn (run_test.clj:89)
+    clojure.test$test_var$fn__9898.invoke (test.clj:717)
+    clojure.test$test_var.invokeStatic (test.clj:717)
+    clojure.test$test_var.invoke (test.clj:708)
+    clojure.test$test_vars$fn__9924$fn__9929.invoke (test.clj:735)
+    clojure.test$default_fixture.invokeStatic (test.clj:687)
+    clojure.test$default_fixture.invoke (test.clj:683)
+    clojure.test$test_vars$fn__9924.invoke (test.clj:735)
+    clojure.test$default_fixture.invokeStatic (test.clj:687)
+    clojure.test$default_fixture.invoke (test.clj:683)
+    clojure.test$test_vars.invokeStatic (test.clj:731)
+    clojure.test$test_all_vars.invokeStatic (test.clj:737)
+    clojure.test$test_ns.invokeStatic (test.clj:758)
+    clojure.test$test_ns.invoke (test.clj:743)
+    clojure.core$map$fn__5956.invoke (core.clj:2774)
+    clojure.lang.LazySeq.force (LazySeq.java:50)
+    clojure.lang.LazySeq.realize (LazySeq.java:87)
+    clojure.lang.LazySeq.seq (LazySeq.java:104)
+    clojure.lang.Cons.next (Cons.java:41)
+    clojure.lang.RT.boundedLength (RT.java:1810)
+    clojure.lang.RestFn.applyTo (RestFn.java:133)
+    clojure.core$apply.invokeStatic (core.clj:669)
+    clojure.test$run_tests.invokeStatic (test.clj:768)
+    clojure.test$run_tests.doInvoke (test.clj:768)
+    clojure.lang.RestFn.applyTo (RestFn.java:140)
+    clojure.lang.Var.applyTo (Var.java:707)
+    clojure.core$apply.invokeStatic (core.clj:667)
+    clojure.core$apply.invoke (core.clj:662)
+    user$eval134.invokeStatic (NO_SOURCE_FILE:25)
+    user$eval134.invoke (NO_SOURCE_FILE:1)
+    clojure.lang.Compiler.eval (Compiler.java:7757)
+    clojure.lang.Compiler.eval (Compiler.java:7712)
+    clojure.core$eval.invokeStatic (core.clj:3236)
+    clojure.main$eval_opt.invokeStatic (main.clj:489)
+    clojure.main$eval_opt.invoke (main.clj:483)
+    clojure.main$initialize.invokeStatic (main.clj:509)
+    clojure.main$null_opt.invokeStatic (main.clj:543)
+    clojure.main$null_opt.invoke (main.clj:540)
+    clojure.main$main.invokeStatic (main.clj:665)
+    clojure.main$main.doInvoke (main.clj:617)
+    clojure.lang.RestFn.applyTo (RestFn.java:140)
+    clojure.lang.Var.applyTo (Var.java:707)
+    clojure.main.main (main.java:40)
+
+ERROR in (epochs-fence-monotonically) (run.cljc:149)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: clojure.lang.ExceptionInfo: seon.cluster.run/open-tx awaits its N2 implementation.
+#:seon.cluster.run{:contract :seon.cluster.run/open-tx}
+ at seon.cluster.run$open_tx.invokeStatic (run.cljc:149)
+    seon.cluster.run$open_tx.invoke (run.cljc:138)
+    seon.cluster.run_test$open_run_BANG_.invokeStatic (run_test.clj:66)
+    seon.cluster.run_test$open_run_BANG_.invoke (run_test.clj:63)
+    seon.cluster.run_test$fn__94292$fn__94293.invoke (run_test.clj:155)
+    seon.cluster.run_test$with_model_database.invokeStatic (run_test.clj:54)
+    seon.cluster.run_test$with_model_database.invoke (run_test.clj:47)
+    seon.cluster.run_test$fn__94292.invokeStatic (run_test.clj:152)
+    seon.cluster.run_test/fn (run_test.clj:151)
+    clojure.test$test_var$fn__9898.invoke (test.clj:717)
+    clojure.test$test_var.invokeStatic (test.clj:717)
+    clojure.test$test_var.invoke (test.clj:708)
+    clojure.test$test_vars$fn__9924$fn__9929.invoke (test.clj:735)
+    clojure.test$default_fixture.invokeStatic (test.clj:687)
+    clojure.test$default_fixture.invoke (test.clj:683)
+    clojure.test$test_vars$fn__9924.invoke (test.clj:735)
+    clojure.test$default_fixture.invokeStatic (test.clj:687)
+    clojure.test$default_fixture.invoke (test.clj:683)
+    clojure.test$test_vars.invokeStatic (test.clj:731)
+    clojure.test$test_all_vars.invokeStatic (test.clj:737)
+    clojure.test$test_ns.invokeStatic (test.clj:758)
+    clojure.test$test_ns.invoke (test.clj:743)
+    clojure.core$map$fn__5956.invoke (core.clj:2774)
+    clojure.lang.LazySeq.force (LazySeq.java:50)
+    clojure.lang.LazySeq.realize (LazySeq.java:87)
+    clojure.lang.LazySeq.seq (LazySeq.java:104)
+    clojure.lang.Cons.next (Cons.java:41)
+    clojure.lang.RT.boundedLength (RT.java:1810)
+    clojure.lang.RestFn.applyTo (RestFn.java:133)
+    clojure.core$apply.invokeStatic (core.clj:669)
+    clojure.test$run_tests.invokeStatic (test.clj:768)
+    clojure.test$run_tests.doInvoke (test.clj:768)
+    clojure.lang.RestFn.applyTo (RestFn.java:140)
+    clojure.lang.Var.applyTo (Var.java:707)
+    clojure.core$apply.invokeStatic (core.clj:667)
+    clojure.core$apply.invoke (core.clj:662)
+    user$eval134.invokeStatic (NO_SOURCE_FILE:25)
+    user$eval134.invoke (NO_SOURCE_FILE:1)
+    clojure.lang.Compiler.eval (Compiler.java:7757)
+    clojure.lang.Compiler.eval (Compiler.java:7712)
+    clojure.core$eval.invokeStatic (core.clj:3236)
+    clojure.main$eval_opt.invokeStatic (main.clj:489)
+    clojure.main$eval_opt.invoke (main.clj:483)
+    clojure.main$initialize.invokeStatic (main.clj:509)
+    clojure.main$null_opt.invokeStatic (main.clj:543)
+    clojure.main$null_opt.invoke (main.clj:540)
+    clojure.main$main.invokeStatic (main.clj:665)
+    clojure.main$main.doInvoke (main.clj:617)
+    clojure.lang.RestFn.applyTo (RestFn.java:140)
+    clojure.lang.Var.applyTo (Var.java:707)
+    clojure.main.main (main.java:40)
+
+FAIL in (exactly-one-claim-wins) (run_test.clj:148)
+claim exclusivity failed: {:shrunk {:total-nodes-visited 1, :depth 0, :pass? false, :result #error {
+ :cause "seon.cluster.run/open-tx awaits its N2 implementation."
+ :data #:seon.cluster.run{:contract :seon.cluster.run/open-tx}
+ :via
+ [{:type clojure.lang.ExceptionInfo
+   :message "seon.cluster.run/open-tx awaits its N2 implementation."
+   :data #:seon.cluster.run{:contract :seon.cluster.run/open-tx}
+   :at [seon.cluster.run$open_tx invokeStatic "run.cljc" 149]}]
+ :trace
+ [[seon.cluster.run$open_tx invokeStatic "run.cljc" 149]
+  [seon.cluster.run$open_tx invoke "run.cljc" 138]
+  [seon.cluster.run_test$open_run_BANG_ invokeStatic "run_test.clj" 66]
+  [seon.cluster.run_test$open_run_BANG_ invoke "run_test.clj" 63]
+  [seon.cluster.run_test$fn__94279$fn__94280$fn__94281 invoke "run_test.clj" 137]
+  [clojure.lang.AFn applyToHelper "AFn.java" 156]
+  [clojure.lang.AFn applyTo "AFn.java" 144]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [clojure.test.check.properties$apply_gen$fn__94140$fn__94141 invoke "properties.cljc" 31]
+  [clojure.test.check.properties$apply_gen$fn__94140 invoke "properties.cljc" 30]
+  [clojure.test.check.rose_tree$fmap invokeStatic "rose_tree.cljc" 77]
+  [clojure.test.check.rose_tree$fmap invoke "rose_tree.cljc" 73]
+  [clojure.test.check.rose_tree$fmap$fn__93437 invoke "rose_tree.cljc" 77]
+  [clojure.core$map$fn__5956 invoke "core.clj" 2776]
+  [clojure.lang.LazySeq force "LazySeq.java" 50]
+  [clojure.lang.LazySeq realize "LazySeq.java" 87]
+  [clojure.lang.LazySeq seq "LazySeq.java" 104]
+  [clojure.lang.RT seq "RT.java" 555]
+  [clojure.core$seq__5488 invokeStatic "core.clj" 139]
+  [clojure.core$empty_QMARK_ invokeStatic "core.clj" 6335]
+  [clojure.core$empty_QMARK_ invoke "core.clj" 6328]
+  [clojure.test.check$shrink_loop invokeStatic "check.cljc" 263]
+  [clojure.test.check$shrink_loop invoke "check.cljc" 242]
+  [clojure.test.check$failure invokeStatic "check.cljc" 314]
+  [clojure.test.check$failure invoke "check.cljc" 297]
+  [clojure.test.check$quick_check invokeStatic "check.cljc" 228]
+  [clojure.test.check$quick_check doInvoke "check.cljc" 59]
+  [clojure.lang.RestFn invoke "RestFn.java" 467]
+  [seon.cluster.run_test$fn__94279$fn__94280 invoke "run_test.clj" 132]
+  [seon.cluster.run_test$with_model_database invokeStatic "run_test.clj" 54]
+  [seon.cluster.run_test$with_model_database invoke "run_test.clj" 47]
+  [seon.cluster.run_test$fn__94279 invokeStatic "run_test.clj" 129]
+  [seon.cluster.run_test$fn__94279 invoke "run_test.clj" 128]
+  [clojure.test$test_var$fn__9898 invoke "test.clj" 717]
+  [clojure.test$test_var invokeStatic "test.clj" 717]
+  [clojure.test$test_var invoke "test.clj" 708]
+  [clojure.test$test_vars$fn__9924$fn__9929 invoke "test.clj" 735]
+  [clojure.test$default_fixture invokeStatic "test.clj" 687]
+  [clojure.test$default_fixture invoke "test.clj" 683]
+  [clojure.test$test_vars$fn__9924 invoke "test.clj" 735]
+  [clojure.test$default_fixture invokeStatic "test.clj" 687]
+  [clojure.test$default_fixture invoke "test.clj" 683]
+  [clojure.test$test_vars invokeStatic "test.clj" 731]
+  [clojure.test$test_all_vars invokeStatic "test.clj" 737]
+  [clojure.test$test_ns invokeStatic "test.clj" 758]
+  [clojure.test$test_ns invoke "test.clj" 743]
+  [clojure.core$map$fn__5956 invoke "core.clj" 2774]
+  [clojure.lang.LazySeq force "LazySeq.java" 50]
+  [clojure.lang.LazySeq realize "LazySeq.java" 87]
+  [clojure.lang.LazySeq seq "LazySeq.java" 104]
+  [clojure.lang.Cons next "Cons.java" 41]
+  [clojure.lang.RT boundedLength "RT.java" 1810]
+  [clojure.lang.RestFn applyTo "RestFn.java" 133]
+  [clojure.core$apply invokeStatic "core.clj" 669]
+  [clojure.test$run_tests invokeStatic "test.clj" 768]
+  [clojure.test$run_tests doInvoke "test.clj" 768]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.lang.Var applyTo "Var.java" 707]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [user$eval134 invokeStatic "NO_SOURCE_FILE" 25]
+  [user$eval134 invoke "NO_SOURCE_FILE" 1]
+  [clojure.lang.Compiler eval "Compiler.java" 7757]
+  [clojure.lang.Compiler eval "Compiler.java" 7712]
+  [clojure.core$eval invokeStatic "core.clj" 3236]
+  [clojure.main$eval_opt invokeStatic "main.clj" 489]
+  [clojure.main$eval_opt invoke "main.clj" 483]
+  [clojure.main$initialize invokeStatic "main.clj" 509]
+  [clojure.main$null_opt invokeStatic "main.clj" 543]
+  [clojure.main$null_opt invoke "main.clj" 540]
+  [clojure.main$main invokeStatic "main.clj" 665]
+  [clojure.main$main doInvoke "main.clj" 617]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.lang.Var applyTo "Var.java" 707]
+  [clojure.main main "main.java" 40]]}, :result-data #:clojure.test.check.properties{:error #error {
+ :cause "seon.cluster.run/open-tx awaits its N2 implementation."
+ :data #:seon.cluster.run{:contract :seon.cluster.run/open-tx}
+ :via
+ [{:type clojure.lang.ExceptionInfo
+   :message "seon.cluster.run/open-tx awaits its N2 implementation."
+   :data #:seon.cluster.run{:contract :seon.cluster.run/open-tx}
+   :at [seon.cluster.run$open_tx invokeStatic "run.cljc" 149]}]
+ :trace
+ [[seon.cluster.run$open_tx invokeStatic "run.cljc" 149]
+  [seon.cluster.run$open_tx invoke "run.cljc" 138]
+  [seon.cluster.run_test$open_run_BANG_ invokeStatic "run_test.clj" 66]
+  [seon.cluster.run_test$open_run_BANG_ invoke "run_test.clj" 63]
+  [seon.cluster.run_test$fn__94279$fn__94280$fn__94281 invoke "run_test.clj" 137]
+  [clojure.lang.AFn applyToHelper "AFn.java" 156]
+  [clojure.lang.AFn applyTo "AFn.java" 144]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [clojure.test.check.properties$apply_gen$fn__94140$fn__94141 invoke "properties.cljc" 31]
+  [clojure.test.check.properties$apply_gen$fn__94140 invoke "properties.cljc" 30]
+  [clojure.test.check.rose_tree$fmap invokeStatic "rose_tree.cljc" 77]
+  [clojure.test.check.rose_tree$fmap invoke "rose_tree.cljc" 73]
+  [clojure.test.check.rose_tree$fmap$fn__93437 invoke "rose_tree.cljc" 77]
+  [clojure.core$map$fn__5956 invoke "core.clj" 2776]
+  [clojure.lang.LazySeq force "LazySeq.java" 50]
+  [clojure.lang.LazySeq realize "LazySeq.java" 87]
+  [clojure.lang.LazySeq seq "LazySeq.java" 104]
+  [clojure.lang.RT seq "RT.java" 555]
+  [clojure.core$seq__5488 invokeStatic "core.clj" 139]
+  [clojure.core$empty_QMARK_ invokeStatic "core.clj" 6335]
+  [clojure.core$empty_QMARK_ invoke "core.clj" 6328]
+  [clojure.test.check$shrink_loop invokeStatic "check.cljc" 263]
+  [clojure.test.check$shrink_loop invoke "check.cljc" 242]
+  [clojure.test.check$failure invokeStatic "check.cljc" 314]
+  [clojure.test.check$failure invoke "check.cljc" 297]
+  [clojure.test.check$quick_check invokeStatic "check.cljc" 228]
+  [clojure.test.check$quick_check doInvoke "check.cljc" 59]
+  [clojure.lang.RestFn invoke "RestFn.java" 467]
+  [seon.cluster.run_test$fn__94279$fn__94280 invoke "run_test.clj" 132]
+  [seon.cluster.run_test$with_model_database invokeStatic "run_test.clj" 54]
+  [seon.cluster.run_test$with_model_database invoke "run_test.clj" 47]
+  [seon.cluster.run_test$fn__94279 invokeStatic "run_test.clj" 129]
+  [seon.cluster.run_test$fn__94279 invoke "run_test.clj" 128]
+  [clojure.test$test_var$fn__9898 invoke "test.clj" 717]
+  [clojure.test$test_var invokeStatic "test.clj" 717]
+  [clojure.test$test_var invoke "test.clj" 708]
+  [clojure.test$test_vars$fn__9924$fn__9929 invoke "test.clj" 735]
+  [clojure.test$default_fixture invokeStatic "test.clj" 687]
+  [clojure.test$default_fixture invoke "test.clj" 683]
+  [clojure.test$test_vars$fn__9924 invoke "test.clj" 735]
+  [clojure.test$default_fixture invokeStatic "test.clj" 687]
+  [clojure.test$default_fixture invoke "test.clj" 683]
+  [clojure.test$test_vars invokeStatic "test.clj" 731]
+  [clojure.test$test_all_vars invokeStatic "test.clj" 737]
+  [clojure.test$test_ns invokeStatic "test.clj" 758]
+  [clojure.test$test_ns invoke "test.clj" 743]
+  [clojure.core$map$fn__5956 invoke "core.clj" 2774]
+  [clojure.lang.LazySeq force "LazySeq.java" 50]
+  [clojure.lang.LazySeq realize "LazySeq.java" 87]
+  [clojure.lang.LazySeq seq "LazySeq.java" 104]
+  [clojure.lang.Cons next "Cons.java" 41]
+  [clojure.lang.RT boundedLength "RT.java" 1810]
+  [clojure.lang.RestFn applyTo "RestFn.java" 133]
+  [clojure.core$apply invokeStatic "core.clj" 669]
+  [clojure.test$run_tests invokeStatic "test.clj" 768]
+  [clojure.test$run_tests doInvoke "test.clj" 768]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.lang.Var applyTo "Var.java" 707]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [user$eval134 invokeStatic "NO_SOURCE_FILE" 25]
+  [user$eval134 invoke "NO_SOURCE_FILE" 1]
+  [clojure.lang.Compiler eval "Compiler.java" 7757]
+  [clojure.lang.Compiler eval "Compiler.java" 7712]
+  [clojure.core$eval invokeStatic "core.clj" 3236]
+  [clojure.main$eval_opt invokeStatic "main.clj" 489]
+  [clojure.main$eval_opt invoke "main.clj" 483]
+  [clojure.main$initialize invokeStatic "main.clj" 509]
+  [clojure.main$null_opt invokeStatic "main.clj" 543]
+  [clojure.main$null_opt invoke "main.clj" 540]
+  [clojure.main$main invokeStatic "main.clj" 665]
+  [clojure.main$main doInvoke "main.clj" 617]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.lang.Var applyTo "Var.java" 707]
+  [clojure.main main "main.java" 40]]}}, :time-shrinking-ms 2, :smallest [2 0]}, :failed-after-ms 4, :num-tests 1, :seed 20260726, :fail [3 0], :result #error {
+ :cause "seon.cluster.run/open-tx awaits its N2 implementation."
+ :data #:seon.cluster.run{:contract :seon.cluster.run/open-tx}
+ :via
+ [{:type clojure.lang.ExceptionInfo
+   :message "seon.cluster.run/open-tx awaits its N2 implementation."
+   :data #:seon.cluster.run{:contract :seon.cluster.run/open-tx}
+   :at [seon.cluster.run$open_tx invokeStatic "run.cljc" 149]}]
+ :trace
+ [[seon.cluster.run$open_tx invokeStatic "run.cljc" 149]
+  [seon.cluster.run$open_tx invoke "run.cljc" 138]
+  [seon.cluster.run_test$open_run_BANG_ invokeStatic "run_test.clj" 66]
+  [seon.cluster.run_test$open_run_BANG_ invoke "run_test.clj" 63]
+  [seon.cluster.run_test$fn__94279$fn__94280$fn__94281 invoke "run_test.clj" 137]
+  [clojure.lang.AFn applyToHelper "AFn.java" 156]
+  [clojure.lang.AFn applyTo "AFn.java" 144]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [clojure.test.check.properties$apply_gen$fn__94140$fn__94141 invoke "properties.cljc" 31]
+  [clojure.test.check.properties$apply_gen$fn__94140 invoke "properties.cljc" 30]
+  [clojure.test.check.rose_tree$fmap invokeStatic "rose_tree.cljc" 77]
+  [clojure.test.check.rose_tree$fmap invoke "rose_tree.cljc" 73]
+  [clojure.test.check.generators$fmap$fn__93566 invoke "generators.cljc" 104]
+  [clojure.test.check.generators$gen_fmap$fn__93540 invoke "generators.cljc" 59]
+  [clojure.test.check.generators$call_gen invokeStatic "generators.cljc" 43]
+  [clojure.test.check.generators$call_gen invoke "generators.cljc" 39]
+  [clojure.test.check$quick_check invokeStatic "check.cljc" 211]
+  [clojure.test.check$quick_check doInvoke "check.cljc" 59]
+  [clojure.lang.RestFn invoke "RestFn.java" 467]
+  [seon.cluster.run_test$fn__94279$fn__94280 invoke "run_test.clj" 132]
+  [seon.cluster.run_test$with_model_database invokeStatic "run_test.clj" 54]
+  [seon.cluster.run_test$with_model_database invoke "run_test.clj" 47]
+  [seon.cluster.run_test$fn__94279 invokeStatic "run_test.clj" 129]
+  [seon.cluster.run_test$fn__94279 invoke "run_test.clj" 128]
+  [clojure.test$test_var$fn__9898 invoke "test.clj" 717]
+  [clojure.test$test_var invokeStatic "test.clj" 717]
+  [clojure.test$test_var invoke "test.clj" 708]
+  [clojure.test$test_vars$fn__9924$fn__9929 invoke "test.clj" 735]
+  [clojure.test$default_fixture invokeStatic "test.clj" 687]
+  [clojure.test$default_fixture invoke "test.clj" 683]
+  [clojure.test$test_vars$fn__9924 invoke "test.clj" 735]
+  [clojure.test$default_fixture invokeStatic "test.clj" 687]
+  [clojure.test$default_fixture invoke "test.clj" 683]
+  [clojure.test$test_vars invokeStatic "test.clj" 731]
+  [clojure.test$test_all_vars invokeStatic "test.clj" 737]
+  [clojure.test$test_ns invokeStatic "test.clj" 758]
+  [clojure.test$test_ns invoke "test.clj" 743]
+  [clojure.core$map$fn__5956 invoke "core.clj" 2774]
+  [clojure.lang.LazySeq force "LazySeq.java" 50]
+  [clojure.lang.LazySeq realize "LazySeq.java" 87]
+  [clojure.lang.LazySeq seq "LazySeq.java" 104]
+  [clojure.lang.Cons next "Cons.java" 41]
+  [clojure.lang.RT boundedLength "RT.java" 1810]
+  [clojure.lang.RestFn applyTo "RestFn.java" 133]
+  [clojure.core$apply invokeStatic "core.clj" 669]
+  [clojure.test$run_tests invokeStatic "test.clj" 768]
+  [clojure.test$run_tests doInvoke "test.clj" 768]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.lang.Var applyTo "Var.java" 707]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [user$eval134 invokeStatic "NO_SOURCE_FILE" 25]
+  [user$eval134 invoke "NO_SOURCE_FILE" 1]
+  [clojure.lang.Compiler eval "Compiler.java" 7757]
+  [clojure.lang.Compiler eval "Compiler.java" 7712]
+  [clojure.core$eval invokeStatic "core.clj" 3236]
+  [clojure.main$eval_opt invokeStatic "main.clj" 489]
+  [clojure.main$eval_opt invoke "main.clj" 483]
+  [clojure.main$initialize invokeStatic "main.clj" 509]
+  [clojure.main$null_opt invokeStatic "main.clj" 543]
+  [clojure.main$null_opt invoke "main.clj" 540]
+  [clojure.main$main invokeStatic "main.clj" 665]
+  [clojure.main$main doInvoke "main.clj" 617]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.lang.Var applyTo "Var.java" 707]
+  [clojure.main main "main.java" 40]]}, :result-data #:clojure.test.check.properties{:error #error {
+ :cause "seon.cluster.run/open-tx awaits its N2 implementation."
+ :data #:seon.cluster.run{:contract :seon.cluster.run/open-tx}
+ :via
+ [{:type clojure.lang.ExceptionInfo
+   :message "seon.cluster.run/open-tx awaits its N2 implementation."
+   :data #:seon.cluster.run{:contract :seon.cluster.run/open-tx}
+   :at [seon.cluster.run$open_tx invokeStatic "run.cljc" 149]}]
+ :trace
+ [[seon.cluster.run$open_tx invokeStatic "run.cljc" 149]
+  [seon.cluster.run$open_tx invoke "run.cljc" 138]
+  [seon.cluster.run_test$open_run_BANG_ invokeStatic "run_test.clj" 66]
+  [seon.cluster.run_test$open_run_BANG_ invoke "run_test.clj" 63]
+  [seon.cluster.run_test$fn__94279$fn__94280$fn__94281 invoke "run_test.clj" 137]
+  [clojure.lang.AFn applyToHelper "AFn.java" 156]
+  [clojure.lang.AFn applyTo "AFn.java" 144]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [clojure.test.check.properties$apply_gen$fn__94140$fn__94141 invoke "properties.cljc" 31]
+  [clojure.test.check.properties$apply_gen$fn__94140 invoke "properties.cljc" 30]
+  [clojure.test.check.rose_tree$fmap invokeStatic "rose_tree.cljc" 77]
+  [clojure.test.check.rose_tree$fmap invoke "rose_tree.cljc" 73]
+  [clojure.test.check.generators$fmap$fn__93566 invoke "generators.cljc" 104]
+  [clojure.test.check.generators$gen_fmap$fn__93540 invoke "generators.cljc" 59]
+  [clojure.test.check.generators$call_gen invokeStatic "generators.cljc" 43]
+  [clojure.test.check.generators$call_gen invoke "generators.cljc" 39]
+  [clojure.test.check$quick_check invokeStatic "check.cljc" 211]
+  [clojure.test.check$quick_check doInvoke "check.cljc" 59]
+  [clojure.lang.RestFn invoke "RestFn.java" 467]
+  [seon.cluster.run_test$fn__94279$fn__94280 invoke "run_test.clj" 132]
+  [seon.cluster.run_test$with_model_database invokeStatic "run_test.clj" 54]
+  [seon.cluster.run_test$with_model_database invoke "run_test.clj" 47]
+  [seon.cluster.run_test$fn__94279 invokeStatic "run_test.clj" 129]
+  [seon.cluster.run_test$fn__94279 invoke "run_test.clj" 128]
+  [clojure.test$test_var$fn__9898 invoke "test.clj" 717]
+  [clojure.test$test_var invokeStatic "test.clj" 717]
+  [clojure.test$test_var invoke "test.clj" 708]
+  [clojure.test$test_vars$fn__9924$fn__9929 invoke "test.clj" 735]
+  [clojure.test$default_fixture invokeStatic "test.clj" 687]
+  [clojure.test$default_fixture invoke "test.clj" 683]
+  [clojure.test$test_vars$fn__9924 invoke "test.clj" 735]
+  [clojure.test$default_fixture invokeStatic "test.clj" 687]
+  [clojure.test$default_fixture invoke "test.clj" 683]
+  [clojure.test$test_vars invokeStatic "test.clj" 731]
+  [clojure.test$test_all_vars invokeStatic "test.clj" 737]
+  [clojure.test$test_ns invokeStatic "test.clj" 758]
+  [clojure.test$test_ns invoke "test.clj" 743]
+  [clojure.core$map$fn__5956 invoke "core.clj" 2774]
+  [clojure.lang.LazySeq force "LazySeq.java" 50]
+  [clojure.lang.LazySeq realize "LazySeq.java" 87]
+  [clojure.lang.LazySeq seq "LazySeq.java" 104]
+  [clojure.lang.Cons next "Cons.java" 41]
+  [clojure.lang.RT boundedLength "RT.java" 1810]
+  [clojure.lang.RestFn applyTo "RestFn.java" 133]
+  [clojure.core$apply invokeStatic "core.clj" 669]
+  [clojure.test$run_tests invokeStatic "test.clj" 768]
+  [clojure.test$run_tests doInvoke "test.clj" 768]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.lang.Var applyTo "Var.java" 707]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [user$eval134 invokeStatic "NO_SOURCE_FILE" 25]
+  [user$eval134 invoke "NO_SOURCE_FILE" 1]
+  [clojure.lang.Compiler eval "Compiler.java" 7757]
+  [clojure.lang.Compiler eval "Compiler.java" 7712]
+  [clojure.core$eval invokeStatic "core.clj" 3236]
+  [clojure.main$eval_opt invokeStatic "main.clj" 489]
+  [clojure.main$eval_opt invoke "main.clj" 483]
+  [clojure.main$initialize invokeStatic "main.clj" 509]
+  [clojure.main$null_opt invokeStatic "main.clj" 543]
+  [clojure.main$null_opt invoke "main.clj" 540]
+  [clojure.main$main invokeStatic "main.clj" 665]
+  [clojure.main$main doInvoke "main.clj" 617]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.lang.Var applyTo "Var.java" 707]
+  [clojure.main main "main.java" 40]]}}, :failing-size 0, :pass? false}
+expected: (true? (:result check))
+  actual: (not (true? #error {
+ :cause "seon.cluster.run/open-tx awaits its N2 implementation."
+ :data #:seon.cluster.run{:contract :seon.cluster.run/open-tx}
+ :via
+ [{:type clojure.lang.ExceptionInfo
+   :message "seon.cluster.run/open-tx awaits its N2 implementation."
+   :data #:seon.cluster.run{:contract :seon.cluster.run/open-tx}
+   :at [seon.cluster.run$open_tx invokeStatic "run.cljc" 149]}]
+ :trace
+ [[seon.cluster.run$open_tx invokeStatic "run.cljc" 149]
+  [seon.cluster.run$open_tx invoke "run.cljc" 138]
+  [seon.cluster.run_test$open_run_BANG_ invokeStatic "run_test.clj" 66]
+  [seon.cluster.run_test$open_run_BANG_ invoke "run_test.clj" 63]
+  [seon.cluster.run_test$fn__94279$fn__94280$fn__94281 invoke "run_test.clj" 137]
+  [clojure.lang.AFn applyToHelper "AFn.java" 156]
+  [clojure.lang.AFn applyTo "AFn.java" 144]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [clojure.test.check.properties$apply_gen$fn__94140$fn__94141 invoke "properties.cljc" 31]
+  [clojure.test.check.properties$apply_gen$fn__94140 invoke "properties.cljc" 30]
+  [clojure.test.check.rose_tree$fmap invokeStatic "rose_tree.cljc" 77]
+  [clojure.test.check.rose_tree$fmap invoke "rose_tree.cljc" 73]
+  [clojure.test.check.generators$fmap$fn__93566 invoke "generators.cljc" 104]
+  [clojure.test.check.generators$gen_fmap$fn__93540 invoke "generators.cljc" 59]
+  [clojure.test.check.generators$call_gen invokeStatic "generators.cljc" 43]
+  [clojure.test.check.generators$call_gen invoke "generators.cljc" 39]
+  [clojure.test.check$quick_check invokeStatic "check.cljc" 211]
+  [clojure.test.check$quick_check doInvoke "check.cljc" 59]
+  [clojure.lang.RestFn invoke "RestFn.java" 467]
+  [seon.cluster.run_test$fn__94279$fn__94280 invoke "run_test.clj" 132]
+  [seon.cluster.run_test$with_model_database invokeStatic "run_test.clj" 54]
+  [seon.cluster.run_test$with_model_database invoke "run_test.clj" 47]
+  [seon.cluster.run_test$fn__94279 invokeStatic "run_test.clj" 129]
+  [seon.cluster.run_test$fn__94279 invoke "run_test.clj" 128]
+  [clojure.test$test_var$fn__9898 invoke "test.clj" 717]
+  [clojure.test$test_var invokeStatic "test.clj" 717]
+  [clojure.test$test_var invoke "test.clj" 708]
+  [clojure.test$test_vars$fn__9924$fn__9929 invoke "test.clj" 735]
+  [clojure.test$default_fixture invokeStatic "test.clj" 687]
+  [clojure.test$default_fixture invoke "test.clj" 683]
+  [clojure.test$test_vars$fn__9924 invoke "test.clj" 735]
+  [clojure.test$default_fixture invokeStatic "test.clj" 687]
+  [clojure.test$default_fixture invoke "test.clj" 683]
+  [clojure.test$test_vars invokeStatic "test.clj" 731]
+  [clojure.test$test_all_vars invokeStatic "test.clj" 737]
+  [clojure.test$test_ns invokeStatic "test.clj" 758]
+  [clojure.test$test_ns invoke "test.clj" 743]
+  [clojure.core$map$fn__5956 invoke "core.clj" 2774]
+  [clojure.lang.LazySeq force "LazySeq.java" 50]
+  [clojure.lang.LazySeq realize "LazySeq.java" 87]
+  [clojure.lang.LazySeq seq "LazySeq.java" 104]
+  [clojure.lang.Cons next "Cons.java" 41]
+  [clojure.lang.RT boundedLength "RT.java" 1810]
+  [clojure.lang.RestFn applyTo "RestFn.java" 133]
+  [clojure.core$apply invokeStatic "core.clj" 669]
+  [clojure.test$run_tests invokeStatic "test.clj" 768]
+  [clojure.test$run_tests doInvoke "test.clj" 768]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.lang.Var applyTo "Var.java" 707]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [user$eval134 invokeStatic "NO_SOURCE_FILE" 25]
+  [user$eval134 invoke "NO_SOURCE_FILE" 1]
+  [clojure.lang.Compiler eval "Compiler.java" 7757]
+  [clojure.lang.Compiler eval "Compiler.java" 7712]
+  [clojure.core$eval invokeStatic "core.clj" 3236]
+  [clojure.main$eval_opt invokeStatic "main.clj" 489]
+  [clojure.main$eval_opt invoke "main.clj" 483]
+  [clojure.main$initialize invokeStatic "main.clj" 509]
+  [clojure.main$null_opt invokeStatic "main.clj" 543]
+  [clojure.main$null_opt invoke "main.clj" 540]
+  [clojure.main$main invokeStatic "main.clj" 665]
+  [clojure.main$main doInvoke "main.clj" 617]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.lang.Var applyTo "Var.java" 707]
+  [clojure.main main "main.java" 40]]}))
+
+FAIL in (recovery-marks-interrupted-and-releases-the-dead) (run_test.clj:284)
+recovery property failed: {:shrunk {:total-nodes-visited 4, :depth 3, :pass? false, :result #error {
+ :cause "seon.cluster.run/open-tx awaits its N2 implementation."
+ :data #:seon.cluster.run{:contract :seon.cluster.run/open-tx}
+ :via
+ [{:type clojure.lang.ExceptionInfo
+   :message "seon.cluster.run/open-tx awaits its N2 implementation."
+   :data #:seon.cluster.run{:contract :seon.cluster.run/open-tx}
+   :at [seon.cluster.run$open_tx invokeStatic "run.cljc" 149]}]
+ :trace
+ [[seon.cluster.run$open_tx invokeStatic "run.cljc" 149]
+  [seon.cluster.run$open_tx invoke "run.cljc" 138]
+  [seon.cluster.run_test$open_run_BANG_ invokeStatic "run_test.clj" 66]
+  [seon.cluster.run_test$open_run_BANG_ invoke "run_test.clj" 63]
+  [seon.cluster.run_test$fn__94327$fn__94328$fn__94329 invoke "run_test.clj" 229]
+  [clojure.lang.AFn applyToHelper "AFn.java" 160]
+  [clojure.lang.AFn applyTo "AFn.java" 144]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [clojure.test.check.properties$apply_gen$fn__94140$fn__94141 invoke "properties.cljc" 31]
+  [clojure.test.check.properties$apply_gen$fn__94140 invoke "properties.cljc" 30]
+  [clojure.test.check.rose_tree$fmap invokeStatic "rose_tree.cljc" 77]
+  [clojure.test.check.rose_tree$fmap invoke "rose_tree.cljc" 73]
+  [clojure.test.check.rose_tree$fmap$fn__93437 invoke "rose_tree.cljc" 77]
+  [clojure.core$map$fn__5956 invoke "core.clj" 2776]
+  [clojure.lang.LazySeq force "LazySeq.java" 50]
+  [clojure.lang.LazySeq realize "LazySeq.java" 87]
+  [clojure.lang.LazySeq seq "LazySeq.java" 104]
+  [clojure.lang.RT seq "RT.java" 555]
+  [clojure.core$seq__5488 invokeStatic "core.clj" 139]
+  [clojure.core$seq__5488 invoke "core.clj" 139]
+  [clojure.test.check$shrink_loop invokeStatic "check.cljc" 293]
+  [clojure.test.check$shrink_loop invoke "check.cljc" 242]
+  [clojure.test.check$failure invokeStatic "check.cljc" 314]
+  [clojure.test.check$failure invoke "check.cljc" 297]
+  [clojure.test.check$quick_check invokeStatic "check.cljc" 228]
+  [clojure.test.check$quick_check doInvoke "check.cljc" 59]
+  [clojure.lang.RestFn invoke "RestFn.java" 467]
+  [seon.cluster.run_test$fn__94327$fn__94328 invoke "run_test.clj" 222]
+  [seon.cluster.run_test$with_model_database invokeStatic "run_test.clj" 54]
+  [seon.cluster.run_test$with_model_database invoke "run_test.clj" 47]
+  [seon.cluster.run_test$fn__94327 invokeStatic "run_test.clj" 219]
+  [seon.cluster.run_test$fn__94327 invoke "run_test.clj" 218]
+  [clojure.test$test_var$fn__9898 invoke "test.clj" 717]
+  [clojure.test$test_var invokeStatic "test.clj" 717]
+  [clojure.test$test_var invoke "test.clj" 708]
+  [clojure.test$test_vars$fn__9924$fn__9929 invoke "test.clj" 735]
+  [clojure.test$default_fixture invokeStatic "test.clj" 687]
+  [clojure.test$default_fixture invoke "test.clj" 683]
+  [clojure.test$test_vars$fn__9924 invoke "test.clj" 735]
+  [clojure.test$default_fixture invokeStatic "test.clj" 687]
+  [clojure.test$default_fixture invoke "test.clj" 683]
+  [clojure.test$test_vars invokeStatic "test.clj" 731]
+  [clojure.test$test_all_vars invokeStatic "test.clj" 737]
+  [clojure.test$test_ns invokeStatic "test.clj" 758]
+  [clojure.test$test_ns invoke "test.clj" 743]
+  [clojure.core$map$fn__5956 invoke "core.clj" 2774]
+  [clojure.lang.LazySeq force "LazySeq.java" 50]
+  [clojure.lang.LazySeq realize "LazySeq.java" 87]
+  [clojure.lang.LazySeq seq "LazySeq.java" 104]
+  [clojure.lang.Cons next "Cons.java" 41]
+  [clojure.lang.RT boundedLength "RT.java" 1810]
+  [clojure.lang.RestFn applyTo "RestFn.java" 133]
+  [clojure.core$apply invokeStatic "core.clj" 669]
+  [clojure.test$run_tests invokeStatic "test.clj" 768]
+  [clojure.test$run_tests doInvoke "test.clj" 768]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.lang.Var applyTo "Var.java" 707]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [user$eval134 invokeStatic "NO_SOURCE_FILE" 25]
+  [user$eval134 invoke "NO_SOURCE_FILE" 1]
+  [clojure.lang.Compiler eval "Compiler.java" 7757]
+  [clojure.lang.Compiler eval "Compiler.java" 7712]
+  [clojure.core$eval invokeStatic "core.clj" 3236]
+  [clojure.main$eval_opt invokeStatic "main.clj" 489]
+  [clojure.main$eval_opt invoke "main.clj" 483]
+  [clojure.main$initialize invokeStatic "main.clj" 509]
+  [clojure.main$null_opt invokeStatic "main.clj" 543]
+  [clojure.main$null_opt invoke "main.clj" 540]
+  [clojure.main$main invokeStatic "main.clj" 665]
+  [clojure.main$main doInvoke "main.clj" 617]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.lang.Var applyTo "Var.java" 707]
+  [clojure.main main "main.java" 40]]}, :result-data #:clojure.test.check.properties{:error #error {
+ :cause "seon.cluster.run/open-tx awaits its N2 implementation."
+ :data #:seon.cluster.run{:contract :seon.cluster.run/open-tx}
+ :via
+ [{:type clojure.lang.ExceptionInfo
+   :message "seon.cluster.run/open-tx awaits its N2 implementation."
+   :data #:seon.cluster.run{:contract :seon.cluster.run/open-tx}
+   :at [seon.cluster.run$open_tx invokeStatic "run.cljc" 149]}]
+ :trace
+ [[seon.cluster.run$open_tx invokeStatic "run.cljc" 149]
+  [seon.cluster.run$open_tx invoke "run.cljc" 138]
+  [seon.cluster.run_test$open_run_BANG_ invokeStatic "run_test.clj" 66]
+  [seon.cluster.run_test$open_run_BANG_ invoke "run_test.clj" 63]
+  [seon.cluster.run_test$fn__94327$fn__94328$fn__94329 invoke "run_test.clj" 229]
+  [clojure.lang.AFn applyToHelper "AFn.java" 160]
+  [clojure.lang.AFn applyTo "AFn.java" 144]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [clojure.test.check.properties$apply_gen$fn__94140$fn__94141 invoke "properties.cljc" 31]
+  [clojure.test.check.properties$apply_gen$fn__94140 invoke "properties.cljc" 30]
+  [clojure.test.check.rose_tree$fmap invokeStatic "rose_tree.cljc" 77]
+  [clojure.test.check.rose_tree$fmap invoke "rose_tree.cljc" 73]
+  [clojure.test.check.rose_tree$fmap$fn__93437 invoke "rose_tree.cljc" 77]
+  [clojure.core$map$fn__5956 invoke "core.clj" 2776]
+  [clojure.lang.LazySeq force "LazySeq.java" 50]
+  [clojure.lang.LazySeq realize "LazySeq.java" 87]
+  [clojure.lang.LazySeq seq "LazySeq.java" 104]
+  [clojure.lang.RT seq "RT.java" 555]
+  [clojure.core$seq__5488 invokeStatic "core.clj" 139]
+  [clojure.core$seq__5488 invoke "core.clj" 139]
+  [clojure.test.check$shrink_loop invokeStatic "check.cljc" 293]
+  [clojure.test.check$shrink_loop invoke "check.cljc" 242]
+  [clojure.test.check$failure invokeStatic "check.cljc" 314]
+  [clojure.test.check$failure invoke "check.cljc" 297]
+  [clojure.test.check$quick_check invokeStatic "check.cljc" 228]
+  [clojure.test.check$quick_check doInvoke "check.cljc" 59]
+  [clojure.lang.RestFn invoke "RestFn.java" 467]
+  [seon.cluster.run_test$fn__94327$fn__94328 invoke "run_test.clj" 222]
+  [seon.cluster.run_test$with_model_database invokeStatic "run_test.clj" 54]
+  [seon.cluster.run_test$with_model_database invoke "run_test.clj" 47]
+  [seon.cluster.run_test$fn__94327 invokeStatic "run_test.clj" 219]
+  [seon.cluster.run_test$fn__94327 invoke "run_test.clj" 218]
+  [clojure.test$test_var$fn__9898 invoke "test.clj" 717]
+  [clojure.test$test_var invokeStatic "test.clj" 717]
+  [clojure.test$test_var invoke "test.clj" 708]
+  [clojure.test$test_vars$fn__9924$fn__9929 invoke "test.clj" 735]
+  [clojure.test$default_fixture invokeStatic "test.clj" 687]
+  [clojure.test$default_fixture invoke "test.clj" 683]
+  [clojure.test$test_vars$fn__9924 invoke "test.clj" 735]
+  [clojure.test$default_fixture invokeStatic "test.clj" 687]
+  [clojure.test$default_fixture invoke "test.clj" 683]
+  [clojure.test$test_vars invokeStatic "test.clj" 731]
+  [clojure.test$test_all_vars invokeStatic "test.clj" 737]
+  [clojure.test$test_ns invokeStatic "test.clj" 758]
+  [clojure.test$test_ns invoke "test.clj" 743]
+  [clojure.core$map$fn__5956 invoke "core.clj" 2774]
+  [clojure.lang.LazySeq force "LazySeq.java" 50]
+  [clojure.lang.LazySeq realize "LazySeq.java" 87]
+  [clojure.lang.LazySeq seq "LazySeq.java" 104]
+  [clojure.lang.Cons next "Cons.java" 41]
+  [clojure.lang.RT boundedLength "RT.java" 1810]
+  [clojure.lang.RestFn applyTo "RestFn.java" 133]
+  [clojure.core$apply invokeStatic "core.clj" 669]
+  [clojure.test$run_tests invokeStatic "test.clj" 768]
+  [clojure.test$run_tests doInvoke "test.clj" 768]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.lang.Var applyTo "Var.java" 707]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [user$eval134 invokeStatic "NO_SOURCE_FILE" 25]
+  [user$eval134 invoke "NO_SOURCE_FILE" 1]
+  [clojure.lang.Compiler eval "Compiler.java" 7757]
+  [clojure.lang.Compiler eval "Compiler.java" 7712]
+  [clojure.core$eval invokeStatic "core.clj" 3236]
+  [clojure.main$eval_opt invokeStatic "main.clj" 489]
+  [clojure.main$eval_opt invoke "main.clj" 483]
+  [clojure.main$initialize invokeStatic "main.clj" 509]
+  [clojure.main$null_opt invokeStatic "main.clj" 543]
+  [clojure.main$null_opt invoke "main.clj" 540]
+  [clojure.main$main invokeStatic "main.clj" 665]
+  [clojure.main$main doInvoke "main.clj" 617]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.lang.Var applyTo "Var.java" 707]
+  [clojure.main main "main.java" 40]]}}, :time-shrinking-ms 4, :smallest [[:running] false 0]}, :failed-after-ms 15, :num-tests 1, :seed 20260726, :fail [[:running :done :error] true 0], :result #error {
+ :cause "seon.cluster.run/open-tx awaits its N2 implementation."
+ :data #:seon.cluster.run{:contract :seon.cluster.run/open-tx}
+ :via
+ [{:type clojure.lang.ExceptionInfo
+   :message "seon.cluster.run/open-tx awaits its N2 implementation."
+   :data #:seon.cluster.run{:contract :seon.cluster.run/open-tx}
+   :at [seon.cluster.run$open_tx invokeStatic "run.cljc" 149]}]
+ :trace
+ [[seon.cluster.run$open_tx invokeStatic "run.cljc" 149]
+  [seon.cluster.run$open_tx invoke "run.cljc" 138]
+  [seon.cluster.run_test$open_run_BANG_ invokeStatic "run_test.clj" 66]
+  [seon.cluster.run_test$open_run_BANG_ invoke "run_test.clj" 63]
+  [seon.cluster.run_test$fn__94327$fn__94328$fn__94329 invoke "run_test.clj" 229]
+  [clojure.lang.AFn applyToHelper "AFn.java" 160]
+  [clojure.lang.AFn applyTo "AFn.java" 144]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [clojure.test.check.properties$apply_gen$fn__94140$fn__94141 invoke "properties.cljc" 31]
+  [clojure.test.check.properties$apply_gen$fn__94140 invoke "properties.cljc" 30]
+  [clojure.test.check.rose_tree$fmap invokeStatic "rose_tree.cljc" 77]
+  [clojure.test.check.rose_tree$fmap invoke "rose_tree.cljc" 73]
+  [clojure.test.check.generators$fmap$fn__93566 invoke "generators.cljc" 104]
+  [clojure.test.check.generators$gen_fmap$fn__93540 invoke "generators.cljc" 59]
+  [clojure.test.check.generators$call_gen invokeStatic "generators.cljc" 43]
+  [clojure.test.check.generators$call_gen invoke "generators.cljc" 39]
+  [clojure.test.check$quick_check invokeStatic "check.cljc" 211]
+  [clojure.test.check$quick_check doInvoke "check.cljc" 59]
+  [clojure.lang.RestFn invoke "RestFn.java" 467]
+  [seon.cluster.run_test$fn__94327$fn__94328 invoke "run_test.clj" 222]
+  [seon.cluster.run_test$with_model_database invokeStatic "run_test.clj" 54]
+  [seon.cluster.run_test$with_model_database invoke "run_test.clj" 47]
+  [seon.cluster.run_test$fn__94327 invokeStatic "run_test.clj" 219]
+  [seon.cluster.run_test$fn__94327 invoke "run_test.clj" 218]
+  [clojure.test$test_var$fn__9898 invoke "test.clj" 717]
+  [clojure.test$test_var invokeStatic "test.clj" 717]
+  [clojure.test$test_var invoke "test.clj" 708]
+  [clojure.test$test_vars$fn__9924$fn__9929 invoke "test.clj" 735]
+  [clojure.test$default_fixture invokeStatic "test.clj" 687]
+  [clojure.test$default_fixture invoke "test.clj" 683]
+  [clojure.test$test_vars$fn__9924 invoke "test.clj" 735]
+  [clojure.test$default_fixture invokeStatic "test.clj" 687]
+  [clojure.test$default_fixture invoke "test.clj" 683]
+  [clojure.test$test_vars invokeStatic "test.clj" 731]
+  [clojure.test$test_all_vars invokeStatic "test.clj" 737]
+  [clojure.test$test_ns invokeStatic "test.clj" 758]
+  [clojure.test$test_ns invoke "test.clj" 743]
+  [clojure.core$map$fn__5956 invoke "core.clj" 2774]
+  [clojure.lang.LazySeq force "LazySeq.java" 50]
+  [clojure.lang.LazySeq realize "LazySeq.java" 87]
+  [clojure.lang.LazySeq seq "LazySeq.java" 104]
+  [clojure.lang.Cons next "Cons.java" 41]
+  [clojure.lang.RT boundedLength "RT.java" 1810]
+  [clojure.lang.RestFn applyTo "RestFn.java" 133]
+  [clojure.core$apply invokeStatic "core.clj" 669]
+  [clojure.test$run_tests invokeStatic "test.clj" 768]
+  [clojure.test$run_tests doInvoke "test.clj" 768]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.lang.Var applyTo "Var.java" 707]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [user$eval134 invokeStatic "NO_SOURCE_FILE" 25]
+  [user$eval134 invoke "NO_SOURCE_FILE" 1]
+  [clojure.lang.Compiler eval "Compiler.java" 7757]
+  [clojure.lang.Compiler eval "Compiler.java" 7712]
+  [clojure.core$eval invokeStatic "core.clj" 3236]
+  [clojure.main$eval_opt invokeStatic "main.clj" 489]
+  [clojure.main$eval_opt invoke "main.clj" 483]
+  [clojure.main$initialize invokeStatic "main.clj" 509]
+  [clojure.main$null_opt invokeStatic "main.clj" 543]
+  [clojure.main$null_opt invoke "main.clj" 540]
+  [clojure.main$main invokeStatic "main.clj" 665]
+  [clojure.main$main doInvoke "main.clj" 617]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.lang.Var applyTo "Var.java" 707]
+  [clojure.main main "main.java" 40]]}, :result-data #:clojure.test.check.properties{:error #error {
+ :cause "seon.cluster.run/open-tx awaits its N2 implementation."
+ :data #:seon.cluster.run{:contract :seon.cluster.run/open-tx}
+ :via
+ [{:type clojure.lang.ExceptionInfo
+   :message "seon.cluster.run/open-tx awaits its N2 implementation."
+   :data #:seon.cluster.run{:contract :seon.cluster.run/open-tx}
+   :at [seon.cluster.run$open_tx invokeStatic "run.cljc" 149]}]
+ :trace
+ [[seon.cluster.run$open_tx invokeStatic "run.cljc" 149]
+  [seon.cluster.run$open_tx invoke "run.cljc" 138]
+  [seon.cluster.run_test$open_run_BANG_ invokeStatic "run_test.clj" 66]
+  [seon.cluster.run_test$open_run_BANG_ invoke "run_test.clj" 63]
+  [seon.cluster.run_test$fn__94327$fn__94328$fn__94329 invoke "run_test.clj" 229]
+  [clojure.lang.AFn applyToHelper "AFn.java" 160]
+  [clojure.lang.AFn applyTo "AFn.java" 144]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [clojure.test.check.properties$apply_gen$fn__94140$fn__94141 invoke "properties.cljc" 31]
+  [clojure.test.check.properties$apply_gen$fn__94140 invoke "properties.cljc" 30]
+  [clojure.test.check.rose_tree$fmap invokeStatic "rose_tree.cljc" 77]
+  [clojure.test.check.rose_tree$fmap invoke "rose_tree.cljc" 73]
+  [clojure.test.check.generators$fmap$fn__93566 invoke "generators.cljc" 104]
+  [clojure.test.check.generators$gen_fmap$fn__93540 invoke "generators.cljc" 59]
+  [clojure.test.check.generators$call_gen invokeStatic "generators.cljc" 43]
+  [clojure.test.check.generators$call_gen invoke "generators.cljc" 39]
+  [clojure.test.check$quick_check invokeStatic "check.cljc" 211]
+  [clojure.test.check$quick_check doInvoke "check.cljc" 59]
+  [clojure.lang.RestFn invoke "RestFn.java" 467]
+  [seon.cluster.run_test$fn__94327$fn__94328 invoke "run_test.clj" 222]
+  [seon.cluster.run_test$with_model_database invokeStatic "run_test.clj" 54]
+  [seon.cluster.run_test$with_model_database invoke "run_test.clj" 47]
+  [seon.cluster.run_test$fn__94327 invokeStatic "run_test.clj" 219]
+  [seon.cluster.run_test$fn__94327 invoke "run_test.clj" 218]
+  [clojure.test$test_var$fn__9898 invoke "test.clj" 717]
+  [clojure.test$test_var invokeStatic "test.clj" 717]
+  [clojure.test$test_var invoke "test.clj" 708]
+  [clojure.test$test_vars$fn__9924$fn__9929 invoke "test.clj" 735]
+  [clojure.test$default_fixture invokeStatic "test.clj" 687]
+  [clojure.test$default_fixture invoke "test.clj" 683]
+  [clojure.test$test_vars$fn__9924 invoke "test.clj" 735]
+  [clojure.test$default_fixture invokeStatic "test.clj" 687]
+  [clojure.test$default_fixture invoke "test.clj" 683]
+  [clojure.test$test_vars invokeStatic "test.clj" 731]
+  [clojure.test$test_all_vars invokeStatic "test.clj" 737]
+  [clojure.test$test_ns invokeStatic "test.clj" 758]
+  [clojure.test$test_ns invoke "test.clj" 743]
+  [clojure.core$map$fn__5956 invoke "core.clj" 2774]
+  [clojure.lang.LazySeq force "LazySeq.java" 50]
+  [clojure.lang.LazySeq realize "LazySeq.java" 87]
+  [clojure.lang.LazySeq seq "LazySeq.java" 104]
+  [clojure.lang.Cons next "Cons.java" 41]
+  [clojure.lang.RT boundedLength "RT.java" 1810]
+  [clojure.lang.RestFn applyTo "RestFn.java" 133]
+  [clojure.core$apply invokeStatic "core.clj" 669]
+  [clojure.test$run_tests invokeStatic "test.clj" 768]
+  [clojure.test$run_tests doInvoke "test.clj" 768]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.lang.Var applyTo "Var.java" 707]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [user$eval134 invokeStatic "NO_SOURCE_FILE" 25]
+  [user$eval134 invoke "NO_SOURCE_FILE" 1]
+  [clojure.lang.Compiler eval "Compiler.java" 7757]
+  [clojure.lang.Compiler eval "Compiler.java" 7712]
+  [clojure.core$eval invokeStatic "core.clj" 3236]
+  [clojure.main$eval_opt invokeStatic "main.clj" 489]
+  [clojure.main$eval_opt invoke "main.clj" 483]
+  [clojure.main$initialize invokeStatic "main.clj" 509]
+  [clojure.main$null_opt invokeStatic "main.clj" 543]
+  [clojure.main$null_opt invoke "main.clj" 540]
+  [clojure.main$main invokeStatic "main.clj" 665]
+  [clojure.main$main doInvoke "main.clj" 617]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.lang.Var applyTo "Var.java" 707]
+  [clojure.main main "main.java" 40]]}}, :failing-size 0, :pass? false}
+expected: (true? (:result check))
+  actual: (not (true? #error {
+ :cause "seon.cluster.run/open-tx awaits its N2 implementation."
+ :data #:seon.cluster.run{:contract :seon.cluster.run/open-tx}
+ :via
+ [{:type clojure.lang.ExceptionInfo
+   :message "seon.cluster.run/open-tx awaits its N2 implementation."
+   :data #:seon.cluster.run{:contract :seon.cluster.run/open-tx}
+   :at [seon.cluster.run$open_tx invokeStatic "run.cljc" 149]}]
+ :trace
+ [[seon.cluster.run$open_tx invokeStatic "run.cljc" 149]
+  [seon.cluster.run$open_tx invoke "run.cljc" 138]
+  [seon.cluster.run_test$open_run_BANG_ invokeStatic "run_test.clj" 66]
+  [seon.cluster.run_test$open_run_BANG_ invoke "run_test.clj" 63]
+  [seon.cluster.run_test$fn__94327$fn__94328$fn__94329 invoke "run_test.clj" 229]
+  [clojure.lang.AFn applyToHelper "AFn.java" 160]
+  [clojure.lang.AFn applyTo "AFn.java" 144]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [clojure.test.check.properties$apply_gen$fn__94140$fn__94141 invoke "properties.cljc" 31]
+  [clojure.test.check.properties$apply_gen$fn__94140 invoke "properties.cljc" 30]
+  [clojure.test.check.rose_tree$fmap invokeStatic "rose_tree.cljc" 77]
+  [clojure.test.check.rose_tree$fmap invoke "rose_tree.cljc" 73]
+  [clojure.test.check.generators$fmap$fn__93566 invoke "generators.cljc" 104]
+  [clojure.test.check.generators$gen_fmap$fn__93540 invoke "generators.cljc" 59]
+  [clojure.test.check.generators$call_gen invokeStatic "generators.cljc" 43]
+  [clojure.test.check.generators$call_gen invoke "generators.cljc" 39]
+  [clojure.test.check$quick_check invokeStatic "check.cljc" 211]
+  [clojure.test.check$quick_check doInvoke "check.cljc" 59]
+  [clojure.lang.RestFn invoke "RestFn.java" 467]
+  [seon.cluster.run_test$fn__94327$fn__94328 invoke "run_test.clj" 222]
+  [seon.cluster.run_test$with_model_database invokeStatic "run_test.clj" 54]
+  [seon.cluster.run_test$with_model_database invoke "run_test.clj" 47]
+  [seon.cluster.run_test$fn__94327 invokeStatic "run_test.clj" 219]
+  [seon.cluster.run_test$fn__94327 invoke "run_test.clj" 218]
+  [clojure.test$test_var$fn__9898 invoke "test.clj" 717]
+  [clojure.test$test_var invokeStatic "test.clj" 717]
+  [clojure.test$test_var invoke "test.clj" 708]
+  [clojure.test$test_vars$fn__9924$fn__9929 invoke "test.clj" 735]
+  [clojure.test$default_fixture invokeStatic "test.clj" 687]
+  [clojure.test$default_fixture invoke "test.clj" 683]
+  [clojure.test$test_vars$fn__9924 invoke "test.clj" 735]
+  [clojure.test$default_fixture invokeStatic "test.clj" 687]
+  [clojure.test$default_fixture invoke "test.clj" 683]
+  [clojure.test$test_vars invokeStatic "test.clj" 731]
+  [clojure.test$test_all_vars invokeStatic "test.clj" 737]
+  [clojure.test$test_ns invokeStatic "test.clj" 758]
+  [clojure.test$test_ns invoke "test.clj" 743]
+  [clojure.core$map$fn__5956 invoke "core.clj" 2774]
+  [clojure.lang.LazySeq force "LazySeq.java" 50]
+  [clojure.lang.LazySeq realize "LazySeq.java" 87]
+  [clojure.lang.LazySeq seq "LazySeq.java" 104]
+  [clojure.lang.Cons next "Cons.java" 41]
+  [clojure.lang.RT boundedLength "RT.java" 1810]
+  [clojure.lang.RestFn applyTo "RestFn.java" 133]
+  [clojure.core$apply invokeStatic "core.clj" 669]
+  [clojure.test$run_tests invokeStatic "test.clj" 768]
+  [clojure.test$run_tests doInvoke "test.clj" 768]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.lang.Var applyTo "Var.java" 707]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [user$eval134 invokeStatic "NO_SOURCE_FILE" 25]
+  [user$eval134 invoke "NO_SOURCE_FILE" 1]
+  [clojure.lang.Compiler eval "Compiler.java" 7757]
+  [clojure.lang.Compiler eval "Compiler.java" 7712]
+  [clojure.core$eval invokeStatic "core.clj" 3236]
+  [clojure.main$eval_opt invokeStatic "main.clj" 489]
+  [clojure.main$eval_opt invoke "main.clj" 483]
+  [clojure.main$initialize invokeStatic "main.clj" 509]
+  [clojure.main$null_opt invokeStatic "main.clj" 543]
+  [clojure.main$null_opt invoke "main.clj" 540]
+  [clojure.main$main invokeStatic "main.clj" 665]
+  [clojure.main$main doInvoke "main.clj" 617]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.lang.Var applyTo "Var.java" 707]
+  [clojure.main main "main.java" 40]]}))
+
+ERROR in (interrupted-warning-is-one-derived-value) (run.cljc:130)
+clean receipts derive no warning at all
+expected: (nil? (run/interrupted-warning forms [#:seon.cluster.eval{:ordinal 0, :status :done}]))
+  actual: clojure.lang.ExceptionInfo: seon.cluster.run/interrupted-warning awaits its N2 implementation.
+#:seon.cluster.run{:contract :seon.cluster.run/interrupted-warning}
+ at seon.cluster.run$interrupted_warning.invokeStatic (run.cljc:130)
+    seon.cluster.run$interrupted_warning.invoke (run.cljc:120)
+    seon.cluster.run_test$fn__94265$fn__94266.invoke (run_test.clj:109)
+    seon.cluster.run_test$fn__94265.invokeStatic (run_test.clj:108)
+    seon.cluster.run_test/fn (run_test.clj:104)
+    clojure.test$test_var$fn__9898.invoke (test.clj:717)
+    clojure.test$test_var.invokeStatic (test.clj:717)
+    clojure.test$test_var.invoke (test.clj:708)
+    clojure.test$test_vars$fn__9924$fn__9929.invoke (test.clj:735)
+    clojure.test$default_fixture.invokeStatic (test.clj:687)
+    clojure.test$default_fixture.invoke (test.clj:683)
+    clojure.test$test_vars$fn__9924.invoke (test.clj:735)
+    clojure.test$default_fixture.invokeStatic (test.clj:687)
+    clojure.test$default_fixture.invoke (test.clj:683)
+    clojure.test$test_vars.invokeStatic (test.clj:731)
+    clojure.test$test_all_vars.invokeStatic (test.clj:737)
+    clojure.test$test_ns.invokeStatic (test.clj:758)
+    clojure.test$test_ns.invoke (test.clj:743)
+    clojure.core$map$fn__5956.invoke (core.clj:2774)
+    clojure.lang.LazySeq.force (LazySeq.java:50)
+    clojure.lang.LazySeq.realize (LazySeq.java:87)
+    clojure.lang.LazySeq.seq (LazySeq.java:104)
+    clojure.lang.Cons.next (Cons.java:41)
+    clojure.lang.RT.boundedLength (RT.java:1810)
+    clojure.lang.RestFn.applyTo (RestFn.java:133)
+    clojure.core$apply.invokeStatic (core.clj:669)
+    clojure.test$run_tests.invokeStatic (test.clj:768)
+    clojure.test$run_tests.doInvoke (test.clj:768)
+    clojure.lang.RestFn.applyTo (RestFn.java:140)
+    clojure.lang.Var.applyTo (Var.java:707)
+    clojure.core$apply.invokeStatic (core.clj:667)
+    clojure.core$apply.invoke (core.clj:662)
+    user$eval134.invokeStatic (NO_SOURCE_FILE:25)
+    user$eval134.invoke (NO_SOURCE_FILE:1)
+    clojure.lang.Compiler.eval (Compiler.java:7757)
+    clojure.lang.Compiler.eval (Compiler.java:7712)
+    clojure.core$eval.invokeStatic (core.clj:3236)
+    clojure.main$eval_opt.invokeStatic (main.clj:489)
+    clojure.main$eval_opt.invoke (main.clj:483)
+    clojure.main$initialize.invokeStatic (main.clj:509)
+    clojure.main$null_opt.invokeStatic (main.clj:543)
+    clojure.main$null_opt.invoke (main.clj:540)
+    clojure.main$main.invokeStatic (main.clj:665)
+    clojure.main$main.doInvoke (main.clj:617)
+    clojure.lang.RestFn.applyTo (RestFn.java:140)
+    clojure.lang.Var.applyTo (Var.java:707)
+    clojure.main.main (main.java:40)
+
+ERROR in (interrupted-warning-is-one-derived-value) (run.cljc:130)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: clojure.lang.ExceptionInfo: seon.cluster.run/interrupted-warning awaits its N2 implementation.
+#:seon.cluster.run{:contract :seon.cluster.run/interrupted-warning}
+ at seon.cluster.run$interrupted_warning.invokeStatic (run.cljc:130)
+    seon.cluster.run$interrupted_warning.invoke (run.cljc:120)
+    seon.cluster.run_test$fn__94265.invokeStatic (run_test.clj:115)
+    seon.cluster.run_test/fn (run_test.clj:104)
+    clojure.test$test_var$fn__9898.invoke (test.clj:717)
+    clojure.test$test_var.invokeStatic (test.clj:717)
+    clojure.test$test_var.invoke (test.clj:708)
+    clojure.test$test_vars$fn__9924$fn__9929.invoke (test.clj:735)
+    clojure.test$default_fixture.invokeStatic (test.clj:687)
+    clojure.test$default_fixture.invoke (test.clj:683)
+    clojure.test$test_vars$fn__9924.invoke (test.clj:735)
+    clojure.test$default_fixture.invokeStatic (test.clj:687)
+    clojure.test$default_fixture.invoke (test.clj:683)
+    clojure.test$test_vars.invokeStatic (test.clj:731)
+    clojure.test$test_all_vars.invokeStatic (test.clj:737)
+    clojure.test$test_ns.invokeStatic (test.clj:758)
+    clojure.test$test_ns.invoke (test.clj:743)
+    clojure.core$map$fn__5956.invoke (core.clj:2774)
+    clojure.lang.LazySeq.force (LazySeq.java:50)
+    clojure.lang.LazySeq.realize (LazySeq.java:87)
+    clojure.lang.LazySeq.seq (LazySeq.java:104)
+    clojure.lang.Cons.next (Cons.java:41)
+    clojure.lang.RT.boundedLength (RT.java:1810)
+    clojure.lang.RestFn.applyTo (RestFn.java:133)
+    clojure.core$apply.invokeStatic (core.clj:669)
+    clojure.test$run_tests.invokeStatic (test.clj:768)
+    clojure.test$run_tests.doInvoke (test.clj:768)
+    clojure.lang.RestFn.applyTo (RestFn.java:140)
+    clojure.lang.Var.applyTo (Var.java:707)
+    clojure.core$apply.invokeStatic (core.clj:667)
+    clojure.core$apply.invoke (core.clj:662)
+    user$eval134.invokeStatic (NO_SOURCE_FILE:25)
+    user$eval134.invoke (NO_SOURCE_FILE:1)
+    clojure.lang.Compiler.eval (Compiler.java:7757)
+    clojure.lang.Compiler.eval (Compiler.java:7712)
+    clojure.core$eval.invokeStatic (core.clj:3236)
+    clojure.main$eval_opt.invokeStatic (main.clj:489)
+    clojure.main$eval_opt.invoke (main.clj:483)
+    clojure.main$initialize.invokeStatic (main.clj:509)
+    clojure.main$null_opt.invokeStatic (main.clj:543)
+    clojure.main$null_opt.invoke (main.clj:540)
+    clojure.main$main.invokeStatic (main.clj:665)
+    clojure.main$main.doInvoke (main.clj:617)
+    clojure.lang.RestFn.applyTo (RestFn.java:140)
+    clojure.lang.Var.applyTo (Var.java:707)
+    clojure.main.main (main.java:40)
+
+Testing seon.condemned-paths-test
+
+Testing seon.config-protective-limits-test
+
+Testing seon.config-resolve-test
+
+Testing seon.config.resolve-web-render-test
+
+Testing seon.db.backend-test
+
+Testing seon.db.branch-test
+
+Testing seon.db.codec-totality-test
+
+Testing seon.db.database-value-test
+
+Testing seon.db.datahike.schema-test
+2026-07-26T23:32:15.760443Z :error datahike.db.transaction [49 11] Bad entity value "not-a-uuid" at [nil nil :seon.db.datahike.schema-test/id "not-a-uuid" nil], value does not match schema definition. Must be conform to: uuid? 
+  data: {:error :transact/schema, :value "not-a-uuid", :attribute :seon.db.datahike.schema-test/id, :schema #:db{:unique :db.unique/identity, :valueType :db.type/uuid, :cardinality :db.cardinality/one, :ident :seon.db.datahike.schema-test/id}}
+
+Testing seon.db.executor-test
+2026-07-26T23:32:15.834Z seans-m5-macbook-pro ERROR [seon.db.executor:369] - database executor completion failed {:seon.db.executor/job-id "callback/throws", :seon.db.executor/request-id nil}
+                 java.lang.Thread.run        Thread.java: 1516
+                                  ...                        
+        seon.db.executor/start!/fn/fn       executor.clj:  512
+         seon.db.executor/run-worker!       executor.clj:  476
+           seon.db.executor/run-work!       executor.clj:  468
+     seon.db.executor/finish-outcome!       executor.clj:  446
+ seon.db.executor/publish-completion!       executor.clj:  365
+seon.db.executor-test/start-worker/fn  executor_test.clj:   34
+          seon.db.executor-test/fn/fn  executor_test.clj:  404
+clojure.lang.ExceptionInfo: injected completion failure
+
+
+
+Testing seon.db.generated-id-transaction-test
+
+Testing seon.db.host-interest-test
+
+Testing seon.db.id-test
+
+Testing seon.db.portable-test
+
+Testing seon.db.program-test
+
+Testing seon.db.protocol-test
+
+Testing seon.db.registry-routing-test
+
+Testing seon.db.registry-test
+2026-07-26T23:32:17.239465Z :error datahike.connector [177 7] Configuration does not match stored configuration. In some cases this check is too restrictive. If you are sure you are loading the right database with the right configuration then you can disable this check by setting :allow-unsafe-config to true in your config. 
+  data: {:type :config-does-not-match-stored-db, :config {:keep-history? true, :fuse-index-roots? true, :index :datahike.index/persistent-set, :attribute-refs? false, :crypto-hash? false, :schema-flexibility :write, :branch :db}, :stored-config {:keep-history? true, :index :datahike.index/persistent-set, :attribute-refs? false, :crypto-hash? false, :schema-flexibility :write, :branch :db}, :diff ({:fuse-index-roots? true} nil {:branch :db, :schema-flexibility :write, :crypto-hash? false, :attribute-refs? false, :index :datahike.index/persistent-set, :keep-history? true})}
+2026-07-26T23:32:17.284Z seans-m5-macbook-pro ERROR [seon.db.registry:2010] - release-database!: connection release failed #:seon.db.registry{:database-name :registry/delete-release-failure}
+                 clojure.main/null-opt           main.clj:  543
+               clojure.main/initialize           main.clj:  509
+                 clojure.main/eval-opt           main.clj:  489
+                     clojure.core/eval           core.clj: 3236
+                                   ...                        
+                          user/eval134         REPL Input:     
+                    clojure.core/apply           core.clj:  667
+                                   ...                        
+                clojure.test/run-tests           test.clj:  768 (repeats 2 times)
+                    clojure.core/apply           core.clj:  669
+                                   ...                        
+               clojure.core/merge-with           core.clj: 3079
+               clojure.core/merge-with           core.clj: 3087
+                  clojure.core/reduce1           core.clj:  936
+                  clojure.core/reduce1           core.clj:  944
+               clojure.core/chunk-next           core.clj:  710
+                                   ...                        
+                   clojure.core/map/fn           core.clj: 2774
+                  clojure.test/test-ns           test.clj:  758
+            clojure.test/test-all-vars           test.clj:  737
+                clojure.test/test-vars           test.clj:  731
+          clojure.test/default-fixture           test.clj:  687
+             clojure.test/test-vars/fn           test.clj:  735
+      clojure.test/compose-fixtures/fn           test.clj:  694
+          clojure.test/default-fixture           test.clj:  687
+   clojure.test/compose-fixtures/fn/fn           test.clj:  694
+seon.db.registry-test/isolate-registry  registry_test.clj:   17
+          clojure.test/test-vars/fn/fn           test.clj:  735
+                 clojure.test/test-var           test.clj:  717
+              clojure.test/test-var/fn           test.clj:  717
+              seon.db.registry-test/fn  registry_test.clj:  493
+           clojure.core/with-redefs-fn           core.clj: 7710
+           seon.db.registry-test/fn/fn  registry_test.clj:  499
+     seon.db.registry/delete-database!       registry.clj: 2049
+    seon.db.registry/release-database!       registry.clj: 2003
+           seon.db.registry-test/fn/fn  registry_test.clj:  495
+clojure.lang.ExceptionInfo: cannot prove release
+
+
+2026-07-26T23:32:17.304Z seans-m5-macbook-pro ERROR [seon.db.registry:842] - database connection release failed #:seon.db.registry{:database-name :registry/final-drain-failure}
+                         clojure.main/null-opt           main.clj:  543
+                       clojure.main/initialize           main.clj:  509
+                         clojure.main/eval-opt           main.clj:  489
+                             clojure.core/eval           core.clj: 3236
+                                           ...                        
+                                  user/eval134         REPL Input:     
+                            clojure.core/apply           core.clj:  667
+                                           ...                        
+                        clojure.test/run-tests           test.clj:  768 (repeats 2 times)
+                            clojure.core/apply           core.clj:  669
+                                           ...                        
+                       clojure.core/merge-with           core.clj: 3079
+                       clojure.core/merge-with           core.clj: 3087
+                          clojure.core/reduce1           core.clj:  936
+                          clojure.core/reduce1           core.clj:  944
+                       clojure.core/chunk-next           core.clj:  710
+                                           ...                        
+                           clojure.core/map/fn           core.clj: 2774
+                          clojure.test/test-ns           test.clj:  758
+                    clojure.test/test-all-vars           test.clj:  737
+                        clojure.test/test-vars           test.clj:  731
+                  clojure.test/default-fixture           test.clj:  687
+                     clojure.test/test-vars/fn           test.clj:  735
+              clojure.test/compose-fixtures/fn           test.clj:  694
+                  clojure.test/default-fixture           test.clj:  687
+           clojure.test/compose-fixtures/fn/fn           test.clj:  694
+        seon.db.registry-test/isolate-registry  registry_test.clj:   17
+                  clojure.test/test-vars/fn/fn           test.clj:  735
+                         clojure.test/test-var           test.clj:  717
+                      clojure.test/test-var/fn           test.clj:  717
+                      seon.db.registry-test/fn  registry_test.clj:  403
+seon.db.registry/release-database-acquisition!       registry.clj:  923
+        seon.db.registry/finish-final-release!       registry.clj:  861
+                   seon.db.registry-test/fn/fn  registry_test.clj:  408
+clojure.lang.ExceptionInfo: injected final drain failure
+
+
+2026-07-26T23:32:17.373Z seans-m5-macbook-pro ERROR [seon.db.registry:2010] - release-database!: connection release failed #:seon.db.registry{:database-name :registry/release-failure}
+                 clojure.main/null-opt           main.clj:  543
+               clojure.main/initialize           main.clj:  509
+                 clojure.main/eval-opt           main.clj:  489
+                     clojure.core/eval           core.clj: 3236
+                                   ...                        
+                          user/eval134         REPL Input:     
+                    clojure.core/apply           core.clj:  667
+                                   ...                        
+                clojure.test/run-tests           test.clj:  768 (repeats 2 times)
+                    clojure.core/apply           core.clj:  669
+                                   ...                        
+               clojure.core/merge-with           core.clj: 3079
+               clojure.core/merge-with           core.clj: 3087
+                  clojure.core/reduce1           core.clj:  936
+                  clojure.core/reduce1           core.clj:  944
+               clojure.core/chunk-next           core.clj:  710
+                                   ...                        
+                   clojure.core/map/fn           core.clj: 2774
+                  clojure.test/test-ns           test.clj:  758
+            clojure.test/test-all-vars           test.clj:  737
+                clojure.test/test-vars           test.clj:  731
+          clojure.test/default-fixture           test.clj:  687
+             clojure.test/test-vars/fn           test.clj:  735
+      clojure.test/compose-fixtures/fn           test.clj:  694
+          clojure.test/default-fixture           test.clj:  687
+   clojure.test/compose-fixtures/fn/fn           test.clj:  694
+seon.db.registry-test/isolate-registry  registry_test.clj:   17
+          clojure.test/test-vars/fn/fn           test.clj:  735
+                 clojure.test/test-var           test.clj:  717
+              clojure.test/test-var/fn           test.clj:  717
+              seon.db.registry-test/fn  registry_test.clj:  424
+           clojure.core/with-redefs-fn           core.clj: 7710
+           seon.db.registry-test/fn/fn  registry_test.clj:  428
+    seon.db.registry/release-database!       registry.clj: 2003
+           seon.db.registry-test/fn/fn  registry_test.clj:  426
+clojure.lang.ExceptionInfo: injected release failure
+    registry-test/failure: true
+
+
+
+Testing seon.db.remote-contract-test
+
+Testing seon.db.request-receipt-test
+
+Testing seon.db.restore-admin-test
+2026-07-26T23:32:19.658422Z :warn proximum.hnsw :proximum/connect Filesystem does not support reflink (copy-on-write) 
+  data: {:hint "Branch operations will use full file copies. Consider Btrfs, XFS, or ZFS for O(1) branching.", :mmap-dir "tmp/restore-admin-1b994af0-7189-419a-ab4e-6331bc15d693/embedding-index-mmap"}
+
+Testing seon.db.server-test
+2026-07-26T23:32:22.819Z  INFO  [seon.db.server] booting pid= 35776
+2026-07-26T23:32:22.821Z  INFO  [seon.db.server] request socket: /var/folders/d6/78_m9wb92wg1f3qbt85s1r400000gn/T/seon-writer-envelope15411584271843676351/request.sock
+2026-07-26T23:32:22.821Z  INFO  [seon.db.server] launch limits: {:seon.config.database.read/max-results :enforced, :seon.config.database.transport/codec-worker-queue-capacity :enforced, :seon.config.database.executor.delivery/maximum-queued :enforced, :seon.config.database.executor.read/maximum-queued-by-database :enforced, :seon.config.database.transport/maximum-session-response-slots :enforced, :seon.config.database.executor.knn/maximum-queued-by-database :enforced, :seon.config.database.executor.read/maximum-queued :enforced, :seon.config.database.executor.hnsw/maximum-active :enforced, :seon.config.database.executor/maximum-queued-request-bytes :enforced, :seon.config.database.transport/maximum-connections :enforced, :seon.config.database.transport/maximum-frame-bytes :enforced, :seon.config.database.executor.mutation/maximum-active :enforced, :seon.config.database.executor.provider/maximum-queued-by-database :enforced, :seon.config.database.executor.hnsw/maximum-queued :enforced, :seon.config.database.transport/maximum-input-bytes :enforced, :seon.config.database.read/max-result-weight :enforced, :seon.config.database.transport/maximum-session-output-bytes :enforced, :seon.config.database.executor.delivery/maximum-queued-by-database :enforced, :seon.config.database.executor.provider/maximum-active :enforced, :seon.config.database.executor.provider/maximum-queued :enforced, :seon.config/on-core-error :enforced, :seon.config.database.executor.mutation/maximum-queued-by-database :enforced, :seon.config.database.executor.read/maximum-active :enforced, :seon.config.database.transport/shutdown-timeout-ms :enforced, :seon.config.database.executor.delivery/maximum-active :enforced, :seon.config.database.transport/codec-workers :enforced, :seon.config.database.executor/selected-processors :enforced, :seon.config.database.transport/maximum-output-bytes :enforced, :seon.config.database.executor.hnsw/maximum-queued-by-database :enforced, :seon.config.database.executor.mutation/maximum-queued :enforced, :seon.config.database.read/max-work :enforced, :seon.config.database.transport/maximum-response-slots :enforced, :seon.config.database.executor.knn/maximum-active :enforced, :seon.config.database.executor.knn/maximum-queued :enforced, :seon.config.database.read/deadline-ms :enforced, :seon.config.database.initialization/page-rows :enforced, :seon.config.database.writer/jvm-heap-mb :enforced}
+2026-07-26T23:32:22.821Z  INFO  [seon.db.server] enforced launch capacity: {:seon.config.database.read/max-results 302, :seon.config.database.transport/codec-worker-queue-capacity 208, :seon.config.database.executor.delivery/maximum-queued 115, :seon.config.database.executor.read/maximum-queued-by-database 104, :seon.config.database.transport/maximum-session-response-slots 201, :seon.config.database.executor.knn/maximum-queued-by-database 107, :seon.config.database.executor.read/maximum-queued 103, :seon.config.database.executor.hnsw/maximum-active 117, :seon.config.database.executor/maximum-queued-request-bytes 65540, :seon.config.database.transport/maximum-connections 210, :seon.config.database.transport/maximum-frame-bytes 65536, :seon.config.database.executor.mutation/maximum-active 111, :seon.config.database.executor.provider/maximum-queued-by-database 110, :seon.config.database.executor.hnsw/maximum-queued 118, :seon.config.database.transport/maximum-input-bytes 65540, :seon.config.database.read/max-result-weight 60000, :seon.config.database.transport/maximum-session-output-bytes 65537, :seon.config.database.executor.delivery/maximum-queued-by-database 116, :seon.config.database.executor.provider/maximum-active 108, :seon.config.database.executor.provider/maximum-queued 109, :seon.config/on-core-error :gate, :seon.config.database.executor.mutation/maximum-queued-by-database 113, :seon.config.database.executor.read/maximum-active 102, :seon.config.database.transport/shutdown-timeout-ms 206, :seon.config.database.executor.delivery/maximum-active 114, :seon.config.database.transport/codec-workers 207, :seon.config.database.executor/selected-processors 7, :seon.config.database.transport/maximum-output-bytes 65538, :seon.config.database.executor.hnsw/maximum-queued-by-database 119, :seon.config.database.executor.mutation/maximum-queued 112, :seon.config.database.read/max-work 301, :seon.config.database.transport/maximum-response-slots 202, :seon.config.database.executor.knn/maximum-active 105, :seon.config.database.executor.knn/maximum-queued 106, :seon.config.database.read/deadline-ms 304, :seon.config.database.initialization/page-rows 1, :seon.config.database.writer/jvm-heap-mb 2}
+2026-07-26T23:32:22.821Z  INFO  [seon.db.server] ready
+2026-07-26T23:32:22.826Z  INFO  [seon.db.server] booting pid= 35776
+2026-07-26T23:32:22.841Z  INFO  [seon.db.server] dev REPL: 127.0.0.1:60288 port-file: /var/folders/d6/78_m9wb92wg1f3qbt85s1r400000gn/T/seon-writer-prepl2427506932187143683/writer.port
+2026-07-26T23:32:22.842Z  INFO  [seon.db.server] request socket: /var/folders/d6/78_m9wb92wg1f3qbt85s1r400000gn/T/seon-writer-prepl2427506932187143683/request.sock
+2026-07-26T23:32:22.842Z  INFO  [seon.db.server] launch limits: {:seon.config.database.read/max-results :enforced, :seon.config.database.transport/codec-worker-queue-capacity :enforced, :seon.config.database.executor.delivery/maximum-queued :enforced, :seon.config.database.executor.read/maximum-queued-by-database :enforced, :seon.config.database.transport/maximum-session-response-slots :enforced, :seon.config.database.executor.knn/maximum-queued-by-database :enforced, :seon.config.database.executor.read/maximum-queued :enforced, :seon.config.database.executor.hnsw/maximum-active :enforced, :seon.config.database.executor/maximum-queued-request-bytes :enforced, :seon.config.database.transport/maximum-connections :enforced, :seon.config.database.transport/maximum-frame-bytes :enforced, :seon.config.database.executor.mutation/maximum-active :enforced, :seon.config.database.executor.provider/maximum-queued-by-database :enforced, :seon.config.database.executor.hnsw/maximum-queued :enforced, :seon.config.database.transport/maximum-input-bytes :enforced, :seon.config.database.read/max-result-weight :enforced, :seon.config.database.transport/maximum-session-output-bytes :enforced, :seon.config.database.executor.delivery/maximum-queued-by-database :enforced, :seon.config.database.executor.provider/maximum-active :enforced, :seon.config.database.executor.provider/maximum-queued :enforced, :seon.config/on-core-error :enforced, :seon.config.database.executor.mutation/maximum-queued-by-database :enforced, :seon.config.database.executor.read/maximum-active :enforced, :seon.config.database.transport/shutdown-timeout-ms :enforced, :seon.config.database.executor.delivery/maximum-active :enforced, :seon.config.database.transport/codec-workers :enforced, :seon.config.database.executor/selected-processors :enforced, :seon.config.database.transport/maximum-output-bytes :enforced, :seon.config.database.executor.hnsw/maximum-queued-by-database :enforced, :seon.config.database.executor.mutation/maximum-queued :enforced, :seon.config.database.read/max-work :enforced, :seon.config.database.transport/maximum-response-slots :enforced, :seon.config.database.executor.knn/maximum-active :enforced, :seon.config.database.executor.knn/maximum-queued :enforced, :seon.config.database.read/deadline-ms :enforced, :seon.config.database.initialization/page-rows :enforced, :seon.config.database.writer/jvm-heap-mb :enforced}
+2026-07-26T23:32:22.842Z  INFO  [seon.db.server] enforced launch capacity: {:seon.config.database.read/max-results 1, :seon.config.database.transport/codec-worker-queue-capacity 1, :seon.config.database.executor.delivery/maximum-queued 1, :seon.config.database.executor.read/maximum-queued-by-database 1, :seon.config.database.transport/maximum-session-response-slots 1, :seon.config.database.executor.knn/maximum-queued-by-database 1, :seon.config.database.executor.read/maximum-queued 1, :seon.config.database.executor.hnsw/maximum-active 1, :seon.config.database.executor/maximum-queued-request-bytes 1, :seon.config.database.transport/maximum-connections 2, :seon.config.database.transport/maximum-frame-bytes 65536, :seon.config.database.executor.mutation/maximum-active 1, :seon.config.database.executor.provider/maximum-queued-by-database 1, :seon.config.database.executor.hnsw/maximum-queued 1, :seon.config.database.transport/maximum-input-bytes 1, :seon.config.database.read/max-result-weight 60000, :seon.config.database.transport/maximum-session-output-bytes 1, :seon.config.database.executor.delivery/maximum-queued-by-database 1, :seon.config.database.executor.provider/maximum-active 1, :seon.config.database.executor.provider/maximum-queued 1, :seon.config/on-core-error :gate, :seon.config.database.executor.mutation/maximum-queued-by-database 1, :seon.config.database.executor.read/maximum-active 1, :seon.config.database.transport/shutdown-timeout-ms 1, :seon.config.database.executor.delivery/maximum-active 1, :seon.config.database.transport/codec-workers 1, :seon.config.database.executor/selected-processors 3, :seon.config.database.transport/maximum-output-bytes 1, :seon.config.database.executor.hnsw/maximum-queued-by-database 1, :seon.config.database.executor.mutation/maximum-queued 1, :seon.config.database.read/max-work 1, :seon.config.database.transport/maximum-response-slots 1, :seon.config.database.executor.knn/maximum-active 1, :seon.config.database.executor.knn/maximum-queued 1, :seon.config.database.read/deadline-ms 1, :seon.config.database.initialization/page-rows 1, :seon.config.database.writer/jvm-heap-mb 2}
+2026-07-26T23:32:22.842Z  INFO  [seon.db.server] ready
+2026-07-26T23:32:22.869Z  INFO  [seon.db.server] booting pid= 35776
+2026-07-26T23:32:22.882Z  INFO  [seon.db.server] request socket: /var/folders/d6/78_m9wb92wg1f3qbt85s1r400000gn/T/seon-writer-stop7670082603960069316/request.sock
+2026-07-26T23:32:22.882Z  INFO  [seon.db.server] launch limits: {:seon.config.database.read/max-results :enforced, :seon.config.database.transport/codec-worker-queue-capacity :enforced, :seon.config.database.executor.delivery/maximum-queued :enforced, :seon.config.database.executor.read/maximum-queued-by-database :enforced, :seon.config.database.transport/maximum-session-response-slots :enforced, :seon.config.database.executor.knn/maximum-queued-by-database :enforced, :seon.config.database.executor.read/maximum-queued :enforced, :seon.config.database.executor.hnsw/maximum-active :enforced, :seon.config.database.executor/maximum-queued-request-bytes :enforced, :seon.config.database.transport/maximum-connections :enforced, :seon.config.database.transport/maximum-frame-bytes :enforced, :seon.config.database.executor.mutation/maximum-active :enforced, :seon.config.database.executor.provider/maximum-queued-by-database :enforced, :seon.config.database.executor.hnsw/maximum-queued :enforced, :seon.config.database.transport/maximum-input-bytes :enforced, :seon.config.database.read/max-result-weight :enforced, :seon.config.database.transport/maximum-session-output-bytes :enforced, :seon.config.database.executor.delivery/maximum-queued-by-database :enforced, :seon.config.database.executor.provider/maximum-active :enforced, :seon.config.database.executor.provider/maximum-queued :enforced, :seon.config/on-core-error :enforced, :seon.config.database.executor.mutation/maximum-queued-by-database :enforced, :seon.config.database.executor.read/maximum-active :enforced, :seon.config.database.transport/shutdown-timeout-ms :enforced, :seon.config.database.executor.delivery/maximum-active :enforced, :seon.config.database.transport/codec-workers :enforced, :seon.config.database.executor/selected-processors :enforced, :seon.config.database.transport/maximum-output-bytes :enforced, :seon.config.database.executor.hnsw/maximum-queued-by-database :enforced, :seon.config.database.executor.mutation/maximum-queued :enforced, :seon.config.database.read/max-work :enforced, :seon.config.database.transport/maximum-response-slots :enforced, :seon.config.database.executor.knn/maximum-active :enforced, :seon.config.database.executor.knn/maximum-queued :enforced, :seon.config.database.read/deadline-ms :enforced, :seon.config.database.initialization/page-rows :enforced, :seon.config.database.writer/jvm-heap-mb :enforced}
+2026-07-26T23:32:22.883Z  INFO  [seon.db.server] enforced launch capacity: {:seon.config.database.read/max-results 1, :seon.config.database.transport/codec-worker-queue-capacity 1, :seon.config.database.executor.delivery/maximum-queued 1, :seon.config.database.executor.read/maximum-queued-by-database 1, :seon.config.database.transport/maximum-session-response-slots 1, :seon.config.database.executor.knn/maximum-queued-by-database 1, :seon.config.database.executor.read/maximum-queued 1, :seon.config.database.executor.hnsw/maximum-active 1, :seon.config.database.executor/maximum-queued-request-bytes 1, :seon.config.database.transport/maximum-connections 2, :seon.config.database.transport/maximum-frame-bytes 65536, :seon.config.database.executor.mutation/maximum-active 1, :seon.config.database.executor.provider/maximum-queued-by-database 1, :seon.config.database.executor.hnsw/maximum-queued 1, :seon.config.database.transport/maximum-input-bytes 1, :seon.config.database.read/max-result-weight 60000, :seon.config.database.transport/maximum-session-output-bytes 1, :seon.config.database.executor.delivery/maximum-queued-by-database 1, :seon.config.database.executor.provider/maximum-active 1, :seon.config.database.executor.provider/maximum-queued 1, :seon.config/on-core-error :gate, :seon.config.database.executor.mutation/maximum-queued-by-database 1, :seon.config.database.executor.read/maximum-active 1, :seon.config.database.transport/shutdown-timeout-ms 1, :seon.config.database.executor.delivery/maximum-active 1, :seon.config.database.transport/codec-workers 1, :seon.config.database.executor/selected-processors 2, :seon.config.database.transport/maximum-output-bytes 1, :seon.config.database.executor.hnsw/maximum-queued-by-database 1, :seon.config.database.executor.mutation/maximum-queued 1, :seon.config.database.read/max-work 1, :seon.config.database.transport/maximum-response-slots 1, :seon.config.database.executor.knn/maximum-active 1, :seon.config.database.executor.knn/maximum-queued 1, :seon.config.database.read/deadline-ms 1, :seon.config.database.initialization/page-rows 1, :seon.config.database.writer/jvm-heap-mb 2}
+2026-07-26T23:32:22.883Z  INFO  [seon.db.server] ready
+2026-07-26T23:32:22.887Z  ERROR [seon.db.registry] release-database!: connection release failed #:seon.db.registry{:database-name :server-release-failure-47f5d5ac-0685-4bd0-ac88-e0e2830de737} clojure.lang.ExceptionInfo: server release failed {}
+
+Testing seon.db.transport-uds-test
+
+Testing seon.db.writer-initialization-test
+
+Testing seon.db.writer-integration-test
+2026-07-26T23:32:35.672Z  ERROR [seon.db.registry] release-database!: connection release failed #:seon.db.registry{:database-name :writer-release-failure-f2569fbb-dc81-40f2-9354-9d282f77b0fa} clojure.lang.ExceptionInfo: writer release failed {}
+2026-07-26T23:32:35.842091Z :warn proximum.hnsw :proximum/connect Filesystem does not support reflink (copy-on-write) 
+  data: {:hint "Branch operations will use full file copies. Consider Btrfs, XFS, or ZFS for O(1) branching.", :mmap-dir "tmp/writer-proximum-811e3fe1-3a1c-4bbd-abbc-9efc2c82933e/embedding-index-mmap"}
+2026-07-26T23:32:36.689Z  ERROR [seon.db.writer] Database request server did not stop; retaining database authority #:seon.db.transport.uds{:graceful? false, :forced-connections 1, :selector-stopped? true, :workers-stopped? false, :cleanup-stopped? true}
+
+Testing seon.db.writer-interest-test
+
+Testing seon.db.writer-mutation-concurrency-test
+
+Testing seon.db.writer-mutation-recovery-test
+
+Testing seon.db.writer-query-admission-test
+2026-07-26T23:33:19.846Z  ERROR [seon.db.writer] database value release failed clojure.lang.ExceptionInfo: injected release failure {}
+
+Testing seon.db.writer-read-ceiling-test
+
+Testing seon.db.writer-read-spend-test
+
+Testing seon.embed-writer-test
+
+Testing seon.error-classification-test
+
+Testing seon.eval.receipt-test
+
+Testing seon.flow-test
+
+--------------------------------
+- Visit: http://localhost:60335/index.html
+--------------------------------
+
+
+--------------------------------
+- Visit: http://localhost:60336/index.html
+--------------------------------
+
+
+Testing seon.flow.custody-window-test
+
+Testing seon.flow.indexer-test
+
+--------------------------------
+- Visit: http://localhost:60338/index.html
+--------------------------------
+
+
+Testing seon.flow.loop-test
+
+Testing seon.host-error-sci-writer-test
+
+Testing seon.host-pool-writer-test
+SEON-CORE-FAULT A database writer call reached its completion backstop. {:seon.error/kind :core-bug, :seon.db.host/config-key :seon.db.host/call-deadline-ms, :seon.db.protocol/request-id "pool/active-conflict", :seon.db.host/call-deadline-ms 100}
+SEON-CORE-FAULT A database pool wait reached its completion backstop. {:seon.error/kind :core-bug, :seon.db.host/config-key :seon.db.host/pool-wait-timeout-ms, :seon.db.host/pool-wait-timeout-ms 50}
+Ping loop stopped
+
+Testing seon.ns.source-test
+
+Testing seon.program-edge-test
+
+Testing seon.program-indexer-test
+Ping loop stopped
+
+Testing seon.render-portability-test
+
+Testing seon.render-portability-writer-test
+
+Testing seon.render.value-writer-test
+
+Testing seon.repl.parse-test
+
+Testing seon.repl.parse.repair-test
+
+Testing seon.runtime.lifecycle-test
+
+Testing seon.schema-collection-order-test
+
+Testing seon.schema-concurrency-writer-test
+
+Testing seon.schema-projection-writer-test
+
+Testing seon.sci.computed-binding-test
+
+Testing seon.sci.eval-test
+
+Testing seon.sci.interrupt-test
+
+Testing seon.ui.html-test
+
+Testing seon.web.server-test
+
+Testing seon.writer-standalone-schema-test
+
+Ran 592 tests containing 4074 assertions.
+2 failures, 13 errors.

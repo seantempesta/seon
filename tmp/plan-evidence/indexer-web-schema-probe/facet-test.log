@@ -1,0 +1,7 @@
+WARNING: Using incubator modules: jdk.incubator.vector
+Warning: environ value /opt/homebrew/opt/openjdk/libexec/openjdk.jdk/Contents/Home for key :java-home has been overwritten with /opt/homebrew/Cellar/openjdk/26.0.1/libexec/openjdk.jdk/Contents/Home
+
+Testing seon.program-indexer-test
+
+Ran 2 tests containing 3 assertions.
+0 failures, 0 errors.
