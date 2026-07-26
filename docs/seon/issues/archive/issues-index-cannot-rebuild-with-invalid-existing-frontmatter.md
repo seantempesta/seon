@@ -5,6 +5,8 @@ severity: friction
 tags: [issue, tooling]
 ---
 
+Terminology: this note records evidence from before the rename; the process holding a run is now `:seon.agent.run/process`.
+
 # Repair invalid existing issue frontmatter
 
 ## Problem

@@ -71,7 +71,7 @@ Every file in this section now carries its owning unit in the issue note.
 | `multi-form-eval-order-is-not-durable.md` | Position becomes claimed run-step/attempt data. |
 | `namespace-addressed-resident-agents.md` | Warm-child residency and generated-DAG dispatch are cutover topology. |
 | `persisted-program-error-prevents-agent-repair.md` | Remaining diagnostic is tied to self-host program preparation. |
-| `plan-reopen-cross-agent-authority.md` | Claimant-owned capability stamping supplies the actor fence. |
+| `plan-reopen-cross-agent-authority.md` | Process holding the run-owned capability stamping supplies the actor fence. |
 | `planner-home-ns-step-blocks-on-self-recipient.md` | Generated namespace-DAG dispatch is outgoing scheduler behavior. |
 | `planner-self-done-bypasses-generated-terminal-delivery.md` | Fresh terminal delivery becomes a claimed-run transition. |
 | `rendering-and-turns-collided-in-one-execution-child.md` | The collision exists in the child U9 deletes. |
@@ -237,7 +237,7 @@ them deliberate specialist dispatches, not filler lanes.
 | `datahike-cljs-cardinality-many-collapses-large-bigints.md` | Guarantee native BigInt beyond safe integer range? | Yes, but schedule a grounded Datahike equality/hash repair after the spine. |
 | `datahike-http-remote-connection-identity-mismatch.md` | Is the unused HTTP transport maintained? | Declare unsupported unless a consumer is named; otherwise fix one canonical identity. |
 | `generated-root-has-no-planner-retry-path.md` | Retry planner assignment or immediately close blocked? | Retry once, then record an addressed `:blocked` terminal. |
-| `inspect-concurrent-agent-messages.md` | Retain this evaluation after cutover? | Yes, rewritten against ordinary claimants and run after U9. |
+| `inspect-concurrent-agent-messages.md` | Retain this evaluation after cutover? | Yes, rewritten against ordinary processes holding runs and run after U9. |
 | `inspect-model-transport-evidence-is-incomplete.md` | Is local-model comparison a graduation claim? | Defer until a maintained immutable local worker exists. |
 | `kimi-k3-continuation-compatibility.md` | Is provider-native tool continuation supported? | Claim only single-response compatibility until product-required. |
 | `plan-completion-verification-evidence.md` | Which verifier/evidence forms may close a step? | Start with schema-owned verifiers plus immutable database/eval refs and CAS; never prose self-attestation. |
@@ -251,7 +251,7 @@ them deliberate specialist dispatches, not filler lanes.
 | `tailwind-node-module-register-deprecation.md` | Is Node 26 supported now? | Retain Node 26 and take the smallest upstream Tailwind fix; do not suppress warnings globally. |
 | `temporal-query-work-is-not-shared.md` | What perf/retention threshold graduates the cache? | Derive it from the expected historical-query workload first. |
 | `transcript-decay-does-not-bound-total-context.md` | Which measured Inspect schedule becomes policy? | Keep the mechanically bounded current scheme until the plateau evaluation selects a winner. |
-| `turn-retries-reread-provider-inputs.md` | Which permitted unit owns frozen-step byte identity? | Add it to U9 claimant-cutover proof rather than patching the outgoing retry path. |
+| `turn-retries-reread-provider-inputs.md` | Which permitted unit owns frozen-step byte identity? | Add it to U9 cluster JVM cutover proof rather than patching the outgoing retry path. |
 | `unbounded-runtime-acquisitions-exceed-frame.md` | Is the old 64-KiB synthetic floor still required? | Supersede it with the supported negotiated ceiling and assign surviving context proof to U9/R45. |
 | `wake-and-replay-can-drive-the-same-open-run.md` | Should U9 own the no-double-driver gate? | Yes; make one claimed driver across restart a U9 graduation condition. |
 | `worktree-edit-hook-checkout-drift.md` | Support dynamic rerooting or task-start binding? | Declare task-start binding; keep mid-task worktree moves unsupported until hooks reroot atomically. |

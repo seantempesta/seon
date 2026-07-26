@@ -4,27 +4,29 @@ status: open
 tags: [sci, containment, runtime, host]
 ---
 
-# Core HOF forms bypass the guard safepoint entirely
+Terminology: the first measurement retains its historical labels; current terms are `:interrupt-fn`, `interrupt!`, `time-limit`, and every `fn` body entrance.
+
+# Core HOF forms can run between `:interrupt-fn` calls
 
 ## Observed
 
 SCI's `:interrupt-fn` fires at interpreted fn entry and `recur`
 (`reference-code/sci/src/sci/impl/fns.cljc:52`). A form whose work happens
-inside a *compiled host* higher-order function therefore charges **zero**
-safepoints, so `seon.host.guard/check-holder!`
+inside a *compiled host* higher-order function therefore records **zero**
+`fn` body entrances, so `seon.host.guard/check-holder!`
 (`src/seon/host/guard.cljc:194-205`) never runs.
 
 Measured on JDK 26 (`clojure -M:writer:host`), counting `:interrupt-fn`
 invocations directly:
 
-| form | safepoints |
+| form | historical entry count |
 |---|---|
 | `(loop [i 0 a 0] (if (< i 1000000) (recur (inc i) (+ a i)) a))` | 1000001 |
 | `(defn f [x] (+ x 1))` + 1e6 loop calling `f` | 2000001 |
 | `(reduce + (map inc (range 1000000)))` | **0** |
 
-With the production guard armed at `::guard/mode :enforce` and an
-`interpreter-step-budget` of **1000**, plus
+With the historical production policy armed at `::guard/mode :enforce` and its
+retired `interpreter-step-budget` set to **1000**, plus
 `install-interrupted!` bound to `(.isInterrupted (Thread/currentThread))`:
 
 ```
@@ -36,7 +38,7 @@ after 1.5s with budget=1000 steps : STILL RUNNING (budget never charged)
 `(reduce + (map inc (range 400000000)))` is not stopped by the budget and not
 stopped by the deadline watchdog's `Thread.interrupt`
 (`src/seon/host/invoke.clj:37-44`), because the interrupt predicate is only
-*polled* at a safepoint that never occurs.
+*polled* through `:interrupt-fn` at a `fn` body entrance that never occurs.
 
 ## CORRECTION 2026-07-25 — measured against the wrong base; the hole is much narrower
 
@@ -80,8 +82,9 @@ and it is the reason the process boundary is the only hard bound.
 ## Why it matters
 
 This is not an edge case. `reduce`/`map`/`filter`/`into`/`sort` is the style
-`CLAUDE.md` §Data-oriented Clojure rules requires agents to write. The guard is
-described as the in-process bound on agent evaluation; for idiomatic agent code
+`CLAUDE.md` §Data-oriented Clojure rules requires agents to write.
+`:interrupt-fn` is described as the in-process interruption mechanism; for
+idiomatic agent code
 there is no in-process bound at all. The only real kill is the process boundary.
 
 ## Acceptance criteria
@@ -89,7 +92,7 @@ there is no in-process bound at all. The only real kill is the process boundary.
 - A form whose work is entirely inside compiled host HOFs is either charged
   against a bound or provably attributed to the process boundary as the only
   containment, stated as such in `src/seon/host/AGENTS.md`.
-- Any design that deletes the deadline watchdog or merges the claimant into the
+- Any design that deletes the deadline watchdog or merges the process into the
   process owning the Datahike connection must first answer this case, since the
   process kill is currently the sole backstop.
 

@@ -10,12 +10,12 @@ tags: [research, runtime]
 
 | Question | Result |
 |---|---|
-| Did the isolated `runtimecost` cluster reach a runnable all-JVM topology? | No. The fresh reset did not complete within the bounded 286-second observation window. It remained in artifact construction and never launched a writer, claimant, web-render JVM, or steady-state Bun pod. |
+| Did the isolated `runtimecost` cluster reach a runnable all-JVM topology? | No. The fresh reset did not complete within the bounded 286-second observation window. It remained in artifact construction and never launched a writer, run-holding process, web-render JVM, or steady-state Bun pod. |
 | Was the artifact a stable source snapshot? | No. At least two source files became newly modified while the reset was running, and the watcher repeatedly compiled warnings characteristic of an in-progress cross-file refactor. |
 | Was a 10–15-agent load started? | No. Zero agents were launched because there was no ready runtime against which a result would be valid. |
 | Are the requested latency, throughput, queue, GC, allocation, runtime RSS, post-load, and 100-agent figures available? | No. They are **unmeasured**, not zero. |
 | Why stop? | A cost ledger from a build-only Bun process or a mixed-source artifact would not measure the owner’s question. Stopping at the failed prerequisite avoids manufacturing a benchmark from unrelated work. |
-| Cleanup | Complete. `bin/seon down` reports writer, claimant host, web-render, and pod absent; the stale watcher containment was forced down. Final target state is `down` with `missing-artifact`. |
+| Cleanup | Complete. `bin/seon down` reports writer, cluster JVM, web-render, and pod absent; the stale watcher containment was forced down. Final target state is `down` with `missing-artifact`. |
 
 This report records the attempted measurement, the raw evidence, the intended
 database derivation, and the exact retry gate. It does not make steady-state
@@ -50,7 +50,7 @@ recommendations:
 | Process | Current requested heap ceiling | Derivation |
 |---|---:|---|
 | Writer JVM | 4096 MiB | The writer default is `min(4096, max(512, system-MiB / 16))` in `src/seon/config/resolve.cljc`; this 128-GiB host resolves to 4096 MiB. |
-| Claimant host JVM | 4096 MiB | `:seon.config.claim-driver/jvm-heap-mb` in `config/system.edn`; passed by `script/seon/dev/process.clj`. |
+| Process holding the run host JVM | 4096 MiB | `:seon.config.claim-driver/jvm-heap-mb` in `config/system.edn`; passed by `script/seon/dev/process.clj`. |
 | Web-render JVM | 512 MiB | It starts with `-M:writer:host`, whose base `:jvm-opts` has `-Xmx512m` in `deps.edn`; no process launched to confirm the effective command. |
 | Bun pod | Not a JVM heap | Bun/JavaScriptCore needs RSS and `process.memoryUsage()` measurements rather than `jstat`. |
 
@@ -66,7 +66,7 @@ provides `:seon.eval/at` and `:seon.eval/duration-ms` from
 
 | Requested column | Start | End | Computation |
 |---|---|---|---|
-| Initial claim-to-render | transaction that installs claimant and epoch | first `:rendered` phase transaction | First-turn-only acquisition cost; report separately from recurring turn cost |
+| Initial claim-to-render | transaction that installs run-holding process and epoch | first `:rendered` phase transaction | First-turn-only acquisition cost; report separately from recurring turn cost |
 | Render/open | `:rendered` | `:attempt-open` | Receipt/phase transaction timestamp difference |
 | LLM API | `:attempt-open` | `:reply-ready` | Provider wait isolated as its own column |
 | Parse and eval-dispatch | `:reply-ready` | `:evaling` | Receipt/phase transaction timestamp difference |
@@ -170,7 +170,7 @@ revision.
 | Writer transaction rate | 0 runtime windows | Unmeasured | Writer never launched |
 | Writer queue depth | 0 samples | Unmeasured | Writer never launched |
 | Writer JVM GC/allocation | 0 `jstat` samples | Unmeasured | Writer never launched |
-| Claimant JVM GC/allocation | 0 `jstat` samples | Unmeasured | Claimant never launched |
+| Process holding the run JVM GC/allocation | 0 `jstat` samples | Unmeasured | Process holding the run never launched |
 | Web-render JVM GC/allocation | 0 `jstat` samples | Unmeasured | Web-render never launched |
 | Bun steady-state memory and GC proxy | 0 runtime samples | Unmeasured | Steady-state pod never launched |
 | Fleet RSS at idle | 0 ready-process snapshots | Unmeasured | No ready fleet |
@@ -190,7 +190,7 @@ or RSS.
 |---|---|
 | Web-render JVM | `absent` |
 | Bun pod | `absent` |
-| Claimant host JVM | `absent` |
+| Process holding the run host JVM | `absent` |
 | Writer JVM | `absent` |
 | Watcher | `forced reason=dead-stale` |
 | Target | `status=down`, `failure=missing-artifact`, `branches=[]` |
@@ -215,11 +215,11 @@ or RSS.
 |---|---|
 | Frozen revision | Record one commit and source-input digest; no build input changes from reset start through the final post-load sample |
 | Fresh cluster | Reset only `runtimecost`; retain cluster-qualified directories, sockets, ports, and logs |
-| Ready topology | Writer, claimant host, web-render, and Bun pod each pass operator readiness |
+| Ready topology | Writer, cluster JVM, web-render, and Bun pod each pass operator readiness |
 | Workload | Launch 12 case-file agents with at least three turns and a later-turn database query/pull of earlier facts |
 | Latency | Export every phase-history transaction timestamp and eval receipt; preserve both per-turn raw rows and percentile summaries |
 | Writer pressure | Sample transaction-count delta and writer queue depth at one-second cadence |
-| JVM pressure | Run `jstat -gc` or JFR at one-second cadence for writer, claimant, and web-render; report allocation estimate, collection counts, and pause durations |
+| JVM pressure | Run `jstat -gc` or JFR at one-second cadence for writer, run-holding process, and web-render; report allocation estimate, collection counts, and pause durations |
 | RSS | Sample every managed PID at idle, throughout load, and for a fixed cool-down interval after all runs close |
 | Bun | Record `ps` RSS plus `process.memoryUsage()` for the steady-state pod surfaces only |
 | Extrapolation | Separate fixed fleet cost from measured per-active-agent slope; label the 100-agent result as extrapolated and retain confidence limits |

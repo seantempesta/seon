@@ -9,10 +9,11 @@ tags: [issue, agent, database, flow]
 
 ## Problem
 
-The guarded eval door's deadline is delivered exactly once, as a
+The SCI `time-limit` is delivered exactly once through `:interrupt-fn`, as a
 `Thread.interrupt` on the eval-pool worker, and it is observed only through
 `Thread.isInterrupted`. A database round-trip in flight at that moment consumes
-the interrupt and clears the flag, so no SCI safepoint ever fires `stop!` and
+the interrupt and clears the flag, so no later `fn` body entrance calls
+`interrupt!` and
 the form runs to completion past its deadline.
 
 Path:
@@ -20,7 +21,8 @@ Path:
 - `seon.host.invoke/arm-deadline!` schedules ONE watchdog task and installs the
   platform interrupt predicate `#(.isInterrupted ^Thread worker)`
   (`src/seon/host/invoke.clj:37-44`). There is no re-delivery.
-- `seon.host.guard/check-holder!` reads that predicate at each SCI safepoint and
+- the current `seon.host.guard/check-holder!` reads that predicate through
+  `:interrupt-fn` at every SCI `fn` body entrance and
   calls `stop!` only while it returns true (`src/seon/host/guard.cljc:202-204`).
 - An agent `seon.db/transact!`/`query` blocks the same worker in
   `(deref task (long deadline-ms) timeout)` inside
@@ -35,7 +37,7 @@ Path:
   now-uninterrupted thread.
 
 After that point `(.isInterrupted worker)` is false forever, so every later
-safepoint passes. Only the interpreter-step budget can still stop the form.
+`fn` body entrance occurs. Only `time-limit` can stop the form.
 
 The eval is still *reported* as interrupted, because
 `seon.host.eval/finish-evaluation!` reads the separate
@@ -47,14 +49,14 @@ overrun of `:seon.config.guard/deadline-ms`, not a wrong envelope.
 
 Evaluate a form that performs one `seon.db/query` and then spins in a long pure
 loop, with `:seon.config.guard/deadline-ms` set below the query latency plus
-loop time, and the interpreter-step budget set high enough not to fire. Expected
+loop time, with `time-limit` set high enough not to fire. Expected
 under the current code: the batch returns `:seon.eval/interrupted? true` only
 after the loop finishes naturally, with wall time far exceeding the deadline.
 
 ## Owner and acceptance
 
 Owner: `src/seon/host/invoke.clj` (deadline arming) with
-`src/seon/host/guard.cljc` (safepoint predicate).
+`src/seon/host/guard.cljc` (current `:interrupt-fn` implementation).
 
 Acceptance: the deadline is observed through state that a blocking call cannot
 consume — the existing `::session/interrupt-fired?` atom is already that state,

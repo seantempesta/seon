@@ -399,14 +399,14 @@ the reason a hostile eval cannot stall drivers).
 
 **Executor choice.** One process-lifetime `Thread/ofVirtual` builder with a
 name template (`.name "seon-driver-" 0`) — a per-claim
-`(.start builder driver-fn)` returns the `Thread` handle the claimant
+`(.start builder driver-fn)` returns the `Thread` handle the run-holding process
 retains. `newVirtualThreadPerTaskExecutor` is equivalent; the explicit
 builder keeps the interruptible handle first-class, which the kill lane
 wants. The sci eval-pool stays `newFixedThreadPool` (platform, §4).
 
 **Claim → thread lifecycle.**
 
-1. Claimant wins the epoch CAS (loop design §2) and starts one vthread
+1. Process holding the run wins the epoch CAS (loop design §2) and starts one vthread
    running the plain-sync step loop (render → LLM → eval-dispatch → write),
    heartbeating between steps.
 2. Blocking anywhere — `HttpClient.send` (interruptible,

@@ -4,6 +4,8 @@ status: active
 tags: [research, agent, runtime, architecture]
 ---
 
+Terminology: this note records evidence from before the rename; the process holding a run is now `:seon.agent.run/process`.
+
 # Loop → portable CLJC + sci design (P4 loop-migration slice) — 2026-07-23
 
 Owner-directed fresh-eyes design: move the turn driver itself — not just
@@ -215,17 +217,17 @@ Claim transitions, all plain Datahike CAS compositions
 - **Acquire** (first claim on an open run): one tx
   `[cas run :seon.agent.run/claimant nil <me>]` +
   `[cas run :seon.agent.run/claim-epoch nil 1]` + beat. Two racing
-  claimants: writer serialization (LocalWriter's single processing
+  processes holding runs: writer serialization (LocalWriter's single processing
   thread) guarantees exactly one wins; the loser receives the direct
   `:transact/cas` error value it already knows how to read
   (run.cljs:382-387 comment block).
 - **Renew/beat**: the existing `beat!` (run.cljs:777-789), with the
   fence extended (2b). Heartbeat cadence stays the loop's per-turn beat;
   the watchdog threshold stays the one config fact.
-- **Release** (clean): retract claimant in the same tx as the run close
+- **Release** (clean): retract run-holding process in the same tx as the run close
   or the pause (`close-tx-data` and `pause!` gain the retract; epoch is
   never retracted — it is the run's monotonic history of ownership).
-- **Steal** (expired lease): the claimant observed stale at db value t
+- **Steal** (expired lease): the run-holding process observed stale at db value t
   issues one tx: `[cas run :seon.agent.run/last-beat-at
   <observed-stale-beat> <observed-stale-beat>]` (assert the beat did NOT
   advance since the staleness observation — closes the read→steal race
@@ -274,13 +276,13 @@ covers an unconsumed message" hazard the audit flagged
 | `:open`/`:closed` + 11 closed-reasons (run.cljs:51-54) | Unchanged. `:superseded`, `:terminated`, `:waited`, `:completed`, bounds — all keep their close paths. |
 | `:crashed` + heartbeat watchdog (run.cljs:1008-1074) | Split: a stale CLAIM is now first a steal-and-resume (2a); `close-stale-runs!` closes `:crashed` only when takeover is impossible (no resumable phase, ambiguous external effect, or repeated steal churn). Same scan, same ticker, one added branch. |
 | Turn `:running/:done/:error/:interrupted` (turn.cljs:51-54) | Unchanged; `:interrupted` remains recovery-only. Phase cursor (3) is a separate attribute — status stays the coarse outcome. |
-| `recover!` unconditional cluster repair (recovery.cljs:429-532) | Becomes lease-aware (VA-6): live claim (fresh beat, other claimant) → untouched; expired claim → steal + resume from the phase cursor; irrecoverably ambiguous → today's behavior (interrupt receipts, close `:crashed`, anchor). Strengthened in place — `compile-recovery`'s fences/retractions/anchor all survive as the fallback arm. |
+| `recover!` unconditional cluster repair (recovery.cljs:429-532) | Becomes lease-aware (VA-6): live claim (fresh beat, other run-holding process) → untouched; expired claim → steal + resume from the phase cursor; irrecoverably ambiguous → today's behavior (interrupt receipts, close `:crashed`, anchor). Strengthened in place — `compile-recovery`'s fences/retractions/anchor all survive as the fallback arm. |
 | Admission (admission.cljs) | Unchanged and stays process-local: it gates whether THIS process may claim, never who owns a run. |
 | `!run-loop-promises`, `!loop-input`, invocation tails | Demoted to per-process optimizations (audit verdict "MISPLACED-DURABLE as the correctness serializer"); the claim is the correctness serializer. `!loop-input` stops being a drive prerequisite: a scheduler resolves the llm-fn AFTER winning a claim whose next phase needs it. |
 
 ## 3. Step granularity: the turn phase cursor
 
-Whole-turn claims would force every claimant tier to own every leaf
+Whole-turn claims would force every execution tier to own every leaf
 (render + LLM + eval). Sub-STEP claims (a claim entity per phase) would
 be a second claim mechanism. The design takes the middle that needs no
 new mechanism: **the claim stays RUN-scoped; the TURN carries a durable
@@ -309,7 +311,7 @@ already exist:
 
 Each advance is one tx: `[cas turn :seon.agent.turn/phase old new]` +
 the run epoch fence + the phase's own facts. On takeover the new
-claimant reads the cursor and resumes at the exact boundary; it never
+the process reads the cursor and resumes at the exact boundary; it never
 infers progress from a recreated sci context (crashproof §5D rule).
 Effect-class replay at each boundary (ruling 19b + wiki): a receipt
 with a committed terminal is done; a `:running` receipt at takeover is
@@ -430,7 +432,7 @@ fetch; anthropic.cljs likewise); `seon.ai.provider` is already .cljc.
 Two honest options:
 
 - **(i) Pod-only LLM service (near term, recommended for L1-L3):** the
-  LLM phase is executed only by LLM-capable claimants — i.e. the pod.
+  LLM phase is executed only by LLM-capable processes holding runs — i.e. the pod.
   With the phase cursor + attempt receipts, a dead pod's turn parks at
   `:attempt-open`/`:rendered` and resumes on pod restart; the JVM
   meanwhile advances any run whose next phase is eval. This matches the
@@ -467,7 +469,7 @@ claim" — a pure query):
   2. **Poll**: a host-side tick running the same portable claimable-run
      scan. Honest, ~zero code beyond the portable core + one timer, at
      the cost of tick-latency (30 s default cadence,
-     loop.cljs:1194-1198). Acceptable for the first JVM-claimant slice;
+     loop.cljs:1194-1198). Acceptable for the first cluster JVM slice;
      replaced by (1), not layered on it.
 - Datahike-native alternatives considered and rejected: `core/listen!`
   is process-local (core.cljc:199-217) and lives inside the writer
@@ -534,7 +536,8 @@ unconditional cold recovery).
 
 Ordered so every slice is independently landable and the U12 drill
 arrives as early as truth allows. Slices L0-L2 are pod-only durability
-work (no new JVM capability); L3 is the first cross-process claimant.
+work (no new JVM capability); L3 is the first cross-process cluster JVM
+boundary.
 
 - **L0 — claim epoch + fence + consumption edge** (owner: run.cljs +
   turn.cljs fence call sites + host/eval.clj fence map + loop wake path).
@@ -563,7 +566,7 @@ work (no new JVM capability); L3 is the first cross-process claimant.
   completes with zero lost/doubled effects** — proven from receipts
   (one consumed-input edge, one turn identity, ≤1 terminal attempt per
   ordinal, every effect receipt settled exactly once).
-- **L3 — portable step core + first JVM claimant (eval phase)**
+- **L3 — portable step core + first cluster JVM (eval phase)**
   (owners: run/loop/turn/recovery cores → .cljc per 5b; a host-side
   driver; host noticing via poll first).
   Falsifier: kill the pod after `:reply-ready`; WITH the pod still
@@ -604,14 +607,14 @@ anchor same-turn (standing rules).
    `render-prompt!`'s current home (the Bun child). Options: (a) run
    render in-pod-process (small move, keeps .cljs); (b) the full
    ctx/render family port to .cljc (~8.5k lines + the seon.eval
-   re-seam, 5c) so any claimant renders. (a) then (b) is the honest
+   re-seam, 5c) so any run-holding process renders. (a) then (b) is the honest
    order; (b)'s timing is the decision.
 5. **Watchdog steal semantics.** A stale claim now yields
    steal-and-resume instead of close-`:crashed` + parent notice.
    Confirm the notice policy: notify on STEAL (noisy) or only on the
    eventual honest close (recommended — the parent cares about
    outcomes, not custody changes).
-6. **Claimant identity shape.** Recommended: the WP-S2 process identity
+6. **Process holding the run identity shape.** Recommended: the WP-S2 process identity
    pair (pid, start-instant — process.clj vocabulary; pid alone lies,
    wiki) rendered as one string; alternative: launch
    generation ids. Implementation-level, but it is the value in every

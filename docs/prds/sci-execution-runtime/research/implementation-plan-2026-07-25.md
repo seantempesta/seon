@@ -125,7 +125,7 @@ buffer will be dropped", `async.clj:125-129`), never a dropping buffer
 **Performance is not the problem.** One 7-step turn measured ~104 ms/step of
 which SCI eval is 0-5 ms, across 12 transactions per turn, before an LLM call
 that dwarfs everything (`flow-prototype:129-131`). SCI is ~5% of a turn, so the
-JIT, graduation, and every compiled-tier proposal optimize 5%. The only real
+JIT, accretion, and every compiled-tier proposal optimize 5%. The only real
 performance problem is boot, which is orthogonal to the architecture. Write this
 sentence down or the numbers read as an argument *for* a compile tier.
 
@@ -144,18 +144,18 @@ Named, not numbered. Status column: `settled` = evidence exists;
 
 | Name | Decision | Kills | Status |
 |---|---|---|---|
-| one-tier | Agent code runs **only** on the claimant JVM. | the pod as agent loop; `loop.cljs`/`run.cljs`/`turn.cljs` | settled |
+| one-tier | Agent code runs **only** on the cluster JVM. | the pod as agent loop; `loop.cljs`/`run.cljs`/`turn.cljs` | settled |
 | two-mechanisms | Containment is one `:interrupt-fn` (time) + process replacement. | step budget, watchdog, interrupt predicate, cancel dance — 5 of 7 | settled |
 | time-only | `time-limit` is the only limit. `:seon.eval/fn-entries` is a **recorded diagnostic**; there is no fn-entry limit. Long computations are declared. | `interpreter-step-budget` and its calibration problem | settled |
 | allocation-diagnostic | `:seon.eval/allocated-bytes` is recorded, **not enforced**. D14 proved the metric measures cumulative throughput, anti-correlated with the heap risk it appears to bound. | the memory "limit" implied by `flow-design`'s Monitoring section | **blocked O4** |
 | platform-eval | The SCI eval runs on a **platform** thread; the *fixed count* becomes a semaphore. | `default-eval-threads 10` (`src/seon/host.clj:61`) as a hard cluster ceiling | settled on justification (b); see O4 |
-| one-writer | One write connection per store. Claimants forward writes. The unsafe configuration **refuses to open**. | the silent multi-writer corruption of D1 | **blocked O2** |
+| one-writer | One write connection per store. Cluster JVM forward writes. The unsafe configuration **refuses to open**. | the silent multi-writer corruption of D1 | **blocked O2** |
 | no-placement | No placement derivation. Every package runs in a leaf. | `plan-execution`, `execution-plan-disposition`, the package-prefix hand list | settled |
 | result-symbols | Tier-local values cross as result symbols named by `(pid, start-instant)`. | all crash-recovery code for handles — dead by construction | settled; interacts with O3 |
 | one-wire-predicate | One predicate. `ordinary-wire-value?` fixed, `persisted-value?` merged into it. | the `pr-str` degradation path, the dead `try/catch` encode predicates | settled |
 | one-convention | `(ns/fn {namespaced-map})` → one response shape; `seon.result/ok?` to `.cljc`, total. | 27 discriminators, 4 failure conventions | settled |
 | accretion | Availability derives from test evidence at a source fingerprint. **A fast tier never removes the `:interrupt-fn`.** | `:nursery`/`:graduated`; `:seon.fn/execution-tier` — **but see the same-commit companion in Wave 5** | settled in principle, substrate blocked |
-| graduation-is-interning | "A proven fn becomes available to every agent" = **which namespace the var is interned in**. Ordinary Clojure. Compiling agent code to a native JVM fn deletes the `:interrupt-fn` and must never happen. | the speed framing of graduation | settled (owner) |
+| accretion-is-interning | "A proven fn becomes available to every agent" = **which namespace the var is interned in**. Ordinary Clojure. Compiling agent code to a native JVM fn deletes the `:interrupt-fn` and must never happen. | the speed framing of accretion | settled (owner) |
 | ownership | `:seon.ns/owner` assigns **responsibility for failures**, not write access. Proposals evaluate everywhere immediately. | the write-lock design that conflicted with cross-namespace proposals | settled; **note the attribute does not exist yet** (`src/seon/ns/source.cljc:17,:19-37,:45,:46`) |
 | waiting | A waiting run is an **open, unclaimed** run; readiness is a clause of `eligible?`. | correlation attributes, counters, the concurrent-owner race | settled |
 | sci-namespaces | `seon.sci.interrupt` / `seon.sci.ctx` / `seon.sci.eval`. | `seon.host.guard` and its vocabulary | settled |
@@ -204,8 +204,8 @@ retention is unproven and is bounded by no in-process metric.*
 isolation, per `reference-code/sci/doc/interrupt.md:85`.* Blocks: nothing
 directly; it is the honest framing O4 depends on.
 
-**O2 — Horizontal claimant topology.** `architecture.md:242-246` promises
-interchangeable claimants. Two live JVMs on one file store both won the same
+**O2 — Horizontal cluster JVM topology.** `architecture.md:242-246` promises
+interchangeable cluster JVM. Two live JVMs on one file store both won the same
 epoch CAS and **40 of 40 of the parent's successfully-returned commits vanished**
 with zero transact errors and a store that looked pristine on reopen (D1).
 *Recommendation: change `architecture.md`, make the unsafe configuration refuse
@@ -216,8 +216,8 @@ Datahike's own `listen` is declared `:supports-remote? false`
 (`api/specification.cljc:1073`).* Not new machinery; it is what the pod already
 uses. Blocks: Wave 2's `one-writer` item.
 
-**O3 — Replace the coinage "claimant" with `:seon.agent.run/process`?**
-"claimant" has zero hits in the vendored Datahike checkout against 25 files
+**O3 — Replace the coinage "cluster JVM" with `:seon.agent.run/process`?**
+"cluster JVM" has zero hits in the vendored Datahike checkout against 25 files
 under `src/`. `:seon.agent.run/process` is grounded on both sides:
 `script/seon/dev/process.clj` already carries a process record with
 `(pid, start-instant)` and a generation, matching JDK `ProcessHandle`.
@@ -236,7 +236,7 @@ JVM. If no allocation limit is authorized, the platform thread buys only the
 readable on any thread. *Recommendation: keep allocation as a recorded
 diagnostic, delete it as a limit, and still keep the platform thread on the
 second, independent justification: agent code on a platform thread has no
-carrier-pinning surface (verified with `parallelism=1` and 8 claimants wedged
+carrier-pinning surface (verified with `parallelism=1` and 8 cluster JVM wedged
 inside evals, an unrelated virtual thread still completed 5/5 steps in 902 ms).*
 State the consequence loudly: at the default cap **every** interpreted runaway
 is currently reported `:memory` in ~12 ms, which makes ":time with few fn
@@ -318,9 +318,9 @@ parallel.
 | **`:interrupt-fn` cost fix.** Closure over a `long-array` plus **one volatile read**, not a map re-destructure and not `sci.ctx-store/get-ctx`. Owners are BOTH `src/seon/host/guard.cljc` and `src/seon/host/context.clj:1410-1413`. | Re-measure in situ over ≥3M real SCI fn entries and quote the *agent-fork* path, which is the one agents pay. Any report quoting 44× fails; any report that does not distinguish the two `:interrupt-fn` shapes fails (see below). |
 | **Clojure 1.12.0 → 1.12.5.** `deps.edn:6,20` pins 1.12.0; the writer classpath resolves 1.12.0; `1.12.5` is present in the local maven repository so the bump resolves offline. **`[UNVERIFIED]`: no document in this session records a measured benefit.** | `bin/test-writer` green at 1.12.5 **and** a re-run of the boot breakdown at the same flags. If neither moves, record it as hygiene, not as a lever — claiming a boot win from it without the pair of numbers is the port failure. |
 | **Zero-caller deletions — re-verify each unit today.** The previous revision's "~1,160 lines, zero `src`/`test` callers" is **wrong for at least two of its three units**: `seon.runtime.recovery` is required by `src/seon/client.cljs:102` and two tests, and `loop.cljs`'s `transitions` has an in-file caller at `:62`. | For each unit, `rg` shows no caller **before** the cut and the suites stay green **after**. A wave that deletes on the strength of a stale list fails; these two ride the pod cut in Wave 4 instead. |
-| **Delete the broken recovery arm** (5-arg call to a 7-arg `run-eval-batch!`, `storage-view` in the `run` position, `driver/host.clj` ~700). Filed: `settle-eval-replay-arity-mismatch.md`. | Kill a claimant after `:reply-ready → :evaling` with zero receipts and observe a second claimant replay. Deleting the arm without that observation is the port failure — the arm exists for a case nobody has run. |
+| **Delete the broken recovery arm** (5-arg call to a 7-arg `run-eval-batch!`, `storage-view` in the `run` position, `driver/host.clj` ~700). Filed: `settle-eval-replay-arity-mismatch.md`. | Kill a cluster JVM after `:reply-ready → :evaling` with zero receipts and observe a second cluster JVM replay. Deleting the arm without that observation is the port failure — the arm exists for a case nobody has run. |
 | **Correct `src/seon/agent/AGENTS.md`**, which still documents the dead FSM as the loop core. | The file describes `driver.cljc` and names no `transitions` table. |
-| **File the three unfiled findings** (see section 7): the claimant's `:all` listener, the fixed-pool drain, and the release-path AppCDS hole. Update `docs/seon/issues/index.md`, which lists 133 of ~146 real issue files. | The index names every 2026-07-25 finding. |
+| **File the three unfiled findings** (see section 7): the cluster JVM's `:all` listener, the fixed-pool drain, and the release-path AppCDS hole. Update `docs/seon/issues/index.md`, which lists 133 of ~146 real issue files. | The index names every 2026-07-25 finding. |
 
 Measured for the first two items, so the wave has a baseline:
 
@@ -390,8 +390,8 @@ worth:
 
 | Item | Ruling | Falsifier a port would fail |
 |---|---|---|
-| **D1 — one write connection per store; the unsafe configuration refuses to open.** Two live JVMs on one file store both won the same epoch CAS; **40 of 40** of the parent's successfully-returned commits vanished with zero transact errors and a pristine-looking store. Restate the physics item too: `create-writer`'s defmulti is at `writer.cljc:282` with `:self` at `:286` **and** `:datahike-server` exists at `http/writer.clj:35` — "ships only `:self`" is false as written. | `[OWNER:O2]` | Start two claimants against one file store; the second **refuses to open**. A port that documents the constraint without enforcing it fails — D1's failure was silent and left a pristine store. |
-| **D5 — the wake path is a positive feedback loop.** `[HEAD]` `scan!` commits; every commit fires `listen!`; every `listen!` submits a new `scan!`. Measured commits/useful-run **7.0 → 14.4 → 124.8**, lost CAS claims **5 → 157 → 10,343**, OOM at n=20 after 2,555 scans. **The fix is a parameter of the existing mechanism**: `seon.db.host/listen!` already accepts `::protocol/datom-patterns` (e/a/v/added?, max 64, `src/seon/db/protocol.cljc:595-601`) and the writer maintains a `::by-attribute` interest index (`src/seon/db/writer.clj:2860-2878`, `:2900-2905`); the claimant passes the worst option, `:datahike.read/dependency-plan :all` with `(fn [_] (scan!))` (`src/seon/agent/driver/host.clj:809-814`). | `[READY]` | Commits per useful run is O(1) in agent count. **R-16 loses its "done" status and `flow-design:100-103` loses "No ticker, no polling"** — a port that cites `driver/host.clj:807-815` as already-correct fails by citation. |
+| **D1 — one write connection per store; the unsafe configuration refuses to open.** Two live JVMs on one file store both won the same epoch CAS; **40 of 40** of the parent's successfully-returned commits vanished with zero transact errors and a pristine-looking store. Restate the physics item too: `create-writer`'s defmulti is at `writer.cljc:282` with `:self` at `:286` **and** `:datahike-server` exists at `http/writer.clj:35` — "ships only `:self`" is false as written. | `[OWNER:O2]` | Start two cluster JVM against one file store; the second **refuses to open**. A port that documents the constraint without enforcing it fails — D1's failure was silent and left a pristine store. |
+| **D5 — the wake path is a positive feedback loop.** `[HEAD]` `scan!` commits; every commit fires `listen!`; every `listen!` submits a new `scan!`. Measured commits/useful-run **7.0 → 14.4 → 124.8**, lost CAS claims **5 → 157 → 10,343**, OOM at n=20 after 2,555 scans. **The fix is a parameter of the existing mechanism**: `seon.db.host/listen!` already accepts `::protocol/datom-patterns` (e/a/v/added?, max 64, `src/seon/db/protocol.cljc:595-601`) and the writer maintains a `::by-attribute` interest index (`src/seon/db/writer.clj:2860-2878`, `:2900-2905`); the cluster JVM passes the worst option, `:datahike.read/dependency-plan :all` with `(fn [_] (scan!))` (`src/seon/agent/driver/host.clj:809-814`). | `[READY]` | Commits per useful run is O(1) in agent count. **R-16 loses its "done" status and `flow-design:100-103` loses "No ticker, no polling"** — a port that cites `driver/host.clj:807-815` as already-correct fails by citation. |
 | **D2 — a stale lease is structurally undeliverable by the commit feed.** `[HEAD]` Datahike's `listen` fires "on each transact" only (`api/specification.cljc:1076`), so a lease going stale — which is not a commit — can never be delivered, and the moment it matters is exactly when the feed goes silent (measured: stranded four lease periods until an unrelated commit arrived). Compounding: **the lease is never renewed during a drive** — `beat-tx-data` (`src/seon/agent/run/core.cljc:160-170`) is reachable only through `claim-plan`'s `:held` arm (`:138-142`), and `drive-claim!` (`src/seon/agent/driver.cljc:517-594`) never beats. With `stale-ms` 1,200,000 (`config/system.edn:619`) a healthy run driving > 20 min is stealable. | `[READY]` | Prefer changing the interface so the claim **publishes its own liveness**. This is the legitimate case for a loud last-resort backstop whose firing is itself a bug report; a design that keeps a bare periodic scan as the primary path fails. |
 | **D3/D4 — position, fencing, and duplicate detection.** `[BOTH, inverted symptoms]` D4 is **prototype-only**: `run-fence` (`src/seon/agent/run/core.cljc:38-47`) already emits the epoch CAS plus the agent-pointer CAS on every phase/work transaction. D3's *mechanism* is prototype-only too — HEAD's terminal transition is CAS-fenced `:running → :running` (`src/seon/eval/receipt.cljc:90-100`) so double *recording* is prevented. **HEAD's symptom is the inverse and equally bad**: `:seon.eval/id` is a generated `::db.id/compact-value` (`receipt.cljc:48`), so HEAD cannot destroy a receipt **and cannot detect a duplicate execution either**, having no index at all. | `[READY]` | "Form 3 of 7" is answerable by query, and a step with a terminal receipt at its index is never re-executable. A port that keeps a generated eval id fails both halves. |
 | **The committed ordered step plan, with its race fixed in the same design.** The step plan is the only *proven* variant: it modelled preflight splicing (6 emitted entries → 7 executed forms) and answered "total 7" throughout where a reply re-parse answers 6; resume was correct at six kill positions plus a double kill (converged at epoch 3), one re-execution per crash (8 evals for 7 steps); SIGKILL inside `d/transact` at 8 points over 200-datom transactions produced **zero** torn transactions. **D11 is a mandatory companion, not a separate defect**: `start-run!` is check-then-act and spliced two model replies into one 7-step plan `BBBBAAA` in 3 of 12 trials, the window being the model call. | `[READY]` | Gate the insert on a `:db/cas` or write the plan as one cardinality-one value. **Reject** the per-receipt remaining vector (no race, but rewrites the tail every step). **`:seon.eval/position` is SUPERSEDED, not to be implemented** — the repo already owns three ordering idioms (`:seon.error.frame/index`; the terminal status datom's transaction id; `(juxt :seon.eval/at :db/id)`) and a fourth is the banned parallel mechanism. The design's `:seon.eval/index` + `:seon.eval/total` is the same fact under a different name; **reconcile the name**. |
@@ -437,7 +437,7 @@ wire-only.
 | **`graduate.clj` splits by caller; it is not a unit.** `trust-gate?` has **zero production callers** (defn at `:108`; the only other hit is `test/seon/host_graduate_writer_test.clj:102-111`), so "keep and repoint" preserves dead code. `install-nursery!` and `rebuild!` **are live** (`src/seon/host/eval.clj:321`, `src/seon/host.clj:319`), so whole-file deletion breaks the corpus install path. **The live gate none of the three documents names is `my.plan.internal/green-tested?`** (`src/my/plan/internal.cljc:842-849`), namespace-granular, feeding `compile-namespace-dag`'s diff — a one-mechanism violation sitting directly on the accretion gate's input. | `[READY]` | After the split, exactly one evidence gate exists and it has a production caller. |
 | **Deleting `:seon.fn/execution-tier` is not free — same-commit companion required.** `src/seon/host/record.clj:150` writes `:nursery` on every eval-teed fn; first-party rows never carry it; `rebuild!`'s corpus query selects on its **presence** as its only where-clause (`src/seon/host/graduate.clj:90-100`, verified: `:where [?fn :seon.fn/execution-tier]`). Delete it alone and `rebuild!` installs **nothing** at the next boot. | `[READY]` | The replacement is presence-plus-provenance — `[?fn :seon.fn/source]` minus the boot-process join `seon.db.program` already uses (`program.clj:40-45`) — i.e. the one-corpus ruling expressed as a query. Falsifier: after the cut, a boot rebuild installs the same corpus function count as before. |
 | Wire up the diff — already computed and discarded. `compile-namespace-dag` returns `::diff` (`internal.cljc:1016-1023`), `publish-generated-program!` propagates it (`my/plan.cljc:1319-1322`), `:my.plan/diff` is a registered public shape (`:220-222`), and `turn.cljs:771-784` tests only `(false? (:my.plan/ok? publication))` and never reads it again. | `[READY]` | The caller of `generate-code!` receives a **function-granularity** diff. Note `turn.cljs` is on the deletion list in three documents, so the only pointer to the discard site goes with it. |
-| Fix discovery. Three paths are dead on the claimant: `seon.embed/enabled?` is `(constantly false)` with `search-pull` a fixed `:user-input` error (`context.clj:729-739`); `grep-graph` is CLJS-only (`src/seon/agent/search.cljs:303`) and not among the 24 host `::lib` registrations; `my.ns` is excluded — **and the recorded reason is wrong**: `my.ns/functions` is written `^{:async true}`, which does not match `pure-block?`'s literal `\^:async` alternative (`context.clj:1060-1065`); it is excluded because its body contains `(await`, `db/query` and `db/pull` (`src/my/ns.cljs:71`, `:76`, `:96`) — **database markers whose reason is void on the JVM, where `db/query` is synchronous.** This is the strongest single instance of R-14 and it is currently recorded with the wrong cause. An agent's reachable surface without discovery is **five** namespaces (`src/seon/agent/home.cljc:95-112`). | `[READY]` | A small model finds and calls a corpus fn that no home `require` names. Sizing for the advertising decision: one compact card median **41** est. tokens; the whole public schema-complete surface at 474 rows **21,659**; one catalog line median **20**; the catalog for all 206 namespaces **4,078**. Cards break first at ~500 functions; search precision fails first at ~5,000 — and both searches are off. **`[UNVERIFIED]`: no reproduction command is recorded with these token figures.** |
+| Fix discovery. Three paths are dead on the cluster JVM: `seon.embed/enabled?` is `(constantly false)` with `search-pull` a fixed `:user-input` error (`context.clj:729-739`); `grep-graph` is CLJS-only (`src/seon/agent/search.cljs:303`) and not among the 24 host `::lib` registrations; `my.ns` is excluded — **and the recorded reason is wrong**: `my.ns/functions` is written `^{:async true}`, which does not match `pure-block?`'s literal `\^:async` alternative (`context.clj:1060-1065`); it is excluded because its body contains `(await`, `db/query` and `db/pull` (`src/my/ns.cljs:71`, `:76`, `:96`) — **database markers whose reason is void on the JVM, where `db/query` is synchronous.** This is the strongest single instance of R-14 and it is currently recorded with the wrong cause. An agent's reachable surface without discovery is **five** namespaces (`src/seon/agent/home.cljc:95-112`). | `[READY]` | A small model finds and calls a corpus fn that no home `require` names. Sizing for the advertising decision: one compact card median **41** est. tokens; the whole public schema-complete surface at 474 rows **21,659**; one catalog line median **20**; the catalog for all 206 namespaces **4,078**. Cards break first at ~500 functions; search precision fails first at ~5,000 — and both searches are off. **`[UNVERIFIED]`: no reproduction command is recorded with these token figures.** |
 | **`:seon.fn/private?` presence law.** `[HEAD]` R39 says presence means private, absence means public, and the boot index obeys it; the authored tee writes the attribute unconditionally as a boolean (`record.clj:154`), so every public authored row carries `false` and the corpus carries **two encodings of one fact**. Under the one-corpus ruling advertising is filtered by attributes, so a presence query and a truthiness query now give different answers on the two halves of the one corpus — the defect moves from cosmetic to functional. | `[READY]` | Emit the attribute only when the form is `defn-`. Keep the attribute; it is Clojure's own visibility word. |
 
 ### Wave 6 — the acceptance test
@@ -470,7 +470,7 @@ Two subtractions must travel with the ratio or it becomes a lie:
 - **~3,650 wire lines SURVIVE** for web-render (R-8b). Never counted as saved.
 
 Deletions that are **not** free: `:seon.fn/execution-tier` (the corpus-membership
-where-clause) and the eval pool's *thread kind* (only its fixed count dies).
+where-clause) and `:compute`'s *thread arrangement* (only its fixed count dies).
 Deletions that **are** free, verified: `::mailbox-depth` across
 `config/system.edn:171`, `config/resolve.cljc:284`/`:1134-1135`/`:2055-2056` and
 `web/server.clj:21,33,293` — `.clear` before every `.offer` makes depth > 1
@@ -589,12 +589,12 @@ A plan that hides its own reversals is worthless.
   boot indexer reads the admitted artifact; the JVM host base reads `src/my` from
   the **process working directory** via a relative `io/file` file-seq
   (`context.clj:1017`); `graduate/rebuild!` replays `:seon.fn/source` from the
-  database. Reader (2) makes the claimant depend on a source tree at its working
+  database. Reader (2) makes the cluster JVM depend on a source tree at its working
   directory rather than on the corpus, directly contradicting the
   corpus-is-the-authority model.
 - `:seon.agent.message/to` is registered through a `#?(:cljs … :clj nil)` helper,
   so **the message schema does not exist on the JVM**. Invisible today; a hard
-  blocker the moment messaging moves to the claimant, and the structural reason
+  blocker the moment messaging moves to the cluster JVM, and the structural reason
   the JVM invariant test can never see the attribute.
 - The one surviving `:seon.agent.turn/evals` order consumer is `no-progress-streak`
   (`src/seon/agent/loop/core.cljc:26-48` → `driver.cljc:168-169`) and its failure

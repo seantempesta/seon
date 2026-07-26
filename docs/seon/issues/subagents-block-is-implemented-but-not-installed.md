@@ -32,8 +32,8 @@ fleet mechanism.
 ## Acceptance
 
 - Source and architecture state clearly that the renderer is dormant pending
-  solo-agent graduation.
-- After solo graduation, Inspect compares no fleet context with a compact
+  solo-agent system proof.
+- After the solo proof closes, Inspect compares no fleet context with a compact
   direct-child view in the free dynamic tail.
 - Child outcomes remain database-derived facts that survive restart; only
   heartbeat age is ephemeral.

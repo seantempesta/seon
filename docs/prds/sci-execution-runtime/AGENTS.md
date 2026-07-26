@@ -98,16 +98,16 @@ owner and deleted spec instead of building it — that is the bar).
     the `:seon.eval/id` generator policy, and one assertion probe (see
     `test/seon/host_registry_writer_test.clj` corpus-schema-rows and
     the drill client's Phase 0).
-16. A replay-created SCI var is private to its fork. Graduation must
+16. A replay-created SCI var is private to its fork. Accretion must
     replay first, then link the U2 registry's exact cached var with
     `sci/add-namespace!`; linking before replay lets `defn` globally
     overwrite the compiled root, while registering without linking never
     reaches the private call site. Once linked, a source edit safely
-    rebinds the shared var to nursery and bumps the epoch.
+    rebinds the shared var to the interpreted form and bumps the epoch.
 17. The Malli→Datahike bridge rejects a database attribute whose stored
     canonical form references the regex content-digest schema. Persist a
     source fingerprint as Datahike `:string`; derive and validate its
-    64-hex content-hash shape at the graduation boundary.
+    64-hex content-hash shape at the accretion boundary.
 18. `my.blob` uses Node crypto for both hashing and temporary-file UUIDs.
     Extracting the hash owner does not remove the namespace's crypto
     dependency while `.randomUUID` remains.
@@ -146,10 +146,10 @@ conditional source. JS-bound private helpers and their callers are exclusions
 with dependency reasons. Gate: zero portable failures, both boot ledgers in the
 kill drill, full writer + CLJS suites, and drill PASS.
 
-U3 graduation skeleton is historical evidence only. R48 closes its
+U3 accretion skeleton is historical evidence only. R48 closes its
 tests-pass native escape: `graduate!` refuses until P4/R33 proves the exact
 transitive call graph pure, capability-free, and door-equivalent; matching
-legacy `:graduated` rows rebuild as nursery SCI functions. Keep the
+legacy `:graduated` rows rebuild as interpreted SCI functions. Keep the
 differential test as a sanity check for the future P4 gate, never as native
 admission by itself.
 
@@ -181,7 +181,7 @@ U11 cutover: children retire per-agent (tier data flip), then delete
 architecture docs + one-mechanism table updated IN THE SAME SERIES.
 The pod-term stage-2 rename freeze composes here if not already done.
 
-U12 graduation demo: N=100 live agents, real work (defs + db +
+U12 final system demo: N=100 live agents, real work (defs + db +
 capability + canvas), host kill mid-load + pod restart, zero fact loss,
 no operator intervention. This is the program's exit.
 

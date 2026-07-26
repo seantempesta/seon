@@ -5,6 +5,8 @@ severity: blocker
 tags: [issue, agent, runtime]
 ---
 
+Terminology: this note records evidence from before the rename; the process holding a run is now `:seon.agent.run/process`.
+
 # Keep pod republication's reusable projection inside its contract
 
 ## Problem

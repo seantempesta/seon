@@ -5,11 +5,13 @@ severity: blocker
 tags: [issue, agent, runtime, database]
 ---
 
-# Prevent JVM claimant identity allocation from dereferencing a null Future
+Terminology: this note records evidence from before the rename; the process holding a run is now `:seon.agent.run/process`.
+
+# Prevent cluster JVM identity allocation from dereferencing a null Future
 
 ## Problem
 
-The JVM claimant can fail before opening an LLM attempt because identity
+The cluster JVM can fail before opening an LLM attempt because identity
 allocation returns the core error
 `Cannot invoke "java.util.concurrent.Future.get()" because "fut" is null`.
 The flat error data classifies the failure as
@@ -24,7 +26,7 @@ The isolated `claimantpath` live drive created agent
 `t2we0v3ww65y` at epoch `1`; after narrow host reconciliation, JVM host
 workload PID `23197` acquired it at epoch `2`.
 
-The claimant produced no `:seon.ai.attempt/id`. Fault entity `6534` persisted
+The run-holding process produced no `:seon.ai.attempt/id`. Fault entity `6534` persisted
 `:seon.error/fault :core`, `:seon.error/kind :core-bug`, the null-Future
 message, and data
 `#:seon.db.id{:error :seon.db.id.error/allocation-failed}`. The stack starts at
@@ -55,7 +57,7 @@ fault exists on the run. Evidence:
 
 ## Owner
 
-`seon.db.id/allocate!` and the JVM claimant's configured serialized-writer
+`seon.db.id/allocate!` and the cluster JVM's configured serialized-writer
 allocation leaf own the allocation result. Diagnosis must preserve the
 originating Throwable stack before the allocation catch flattens it and find
 which Future-producing writer call can return nil; the phase driver is only
@@ -63,7 +65,7 @@ the consumer.
 
 ## Acceptance
 
-- The claimant allocates every identity needed to open an attempt without a
+- The run-holding process allocates every identity needed to open an attempt without a
   null Future.
 - A failed allocation retains a bounded originating cause and owner frame in
   its flat error value.

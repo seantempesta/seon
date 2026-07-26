@@ -26,7 +26,7 @@ The audit covered:
 
 There is not one auditable agent SCI surface today. There are three distinct execution mechanisms:
 
-1. **JVM claimant SCI:** one shared SCI base plus retained per-agent forks. Its explicit wrapper inventory is mostly intentional, but it contains accidental filesystem helpers, management bindings, regex-selected private `my.*` helpers, unguarded reconstruction, and a native JVM graduation escape.
+1. **cluster JVM SCI:** one shared SCI base plus retained per-agent forks. Its explicit wrapper inventory is mostly intentional, but it contains accidental filesystem helpers, management bindings, regex-selected private `my.*` helpers, unguarded reconstruction, and a native JVM graduation escape.
 
 2. **Malli’s hidden SCI evaluator:** Malli dynamically creates and forks independent SCI contexts for schema code. These contexts do not use Seon’s guard holder, policy, output cap, or eval pool.
 
@@ -38,7 +38,7 @@ The strongest findings are:
 - **Critical, verified:** the maintained Bun agent path executes native JavaScript with inherited process, filesystem, network, module-loader, Bun, and artifact-global reach.
 - **High, verified:** stored agent definitions and graduation tests execute outside the guard door and eval pool.
 - **High, verified:** Malli constructs a second, unguarded SCI environment for schema code.
-- **High, verified:** the JVM result surface does not implement R32; direct claimant batches discard their retained-value map and never bind `result/<id>` in SCI.
+- **High, verified:** the JVM result surface does not implement R32; direct run-holding process batches discard their retained-value map and never bind `result/<id>` in SCI.
 - **High, verified:** `seon.agent.ctx/read-file-text` and `list-skill-files` bypass the filesystem grant.
 - **High, verified:** break #8’s data-to-code construction remains in several test fixtures.
 
@@ -131,7 +131,7 @@ Each retained agent context is exactly a `sci/fork` of the base plus a fresh gua
 Contexts are cached per agent by:
 
 - UDS startup: `src/seon/host.clj:106-134`;
-- in-process claimant startup: `src/seon/agent/driver/host.clj:127-143`.
+- cluster JVM driver startup: `src/seon/agent/driver/host.clj:127-143`.
 
 Fresh authored namespaces receive:
 
@@ -286,7 +286,7 @@ Most are harmless pure support. Their direct reachability is nevertheless uninte
 
 `seon.agent.ctx/read-file-text` and `list-skill-files` accept arbitrary paths and use `io/file`, `slurp`, and directory listing directly (`src/seon/host/context.clj:828-874`). They do not use `seon.agent.fs`’s root, read-only, or lock checks.
 
-Blast radius: any process-readable UTF-8 file and skill-shaped directory names visible to the claimant JVM.
+Blast radius: any process-readable UTF-8 file and skill-shaped directory names visible to the cluster JVM.
 
 ### Conditional management exposure
 
@@ -386,7 +386,7 @@ The supervisor tracks recent eval IDs in the process-local `!host` state and rej
 This is internally coherent but lacks:
 
 - database lifecycle facts;
-- claimant `(pid,start-instant)` identity;
+- run-holding process `(pid,start-instant)` identity;
 - durable tier ownership;
 - transactional removal on process restart;
 - support for opaque tier-local objects, which are replaced by descriptors.
@@ -400,10 +400,10 @@ It does not:
 - create a `result` SCI namespace;
 - bind `result/<id>`;
 - record eval-id ownership as database facts;
-- associate the value with a claimant process identity;
-- keep direct claimant values across batches.
+- associate the value with a process identity;
+- keep direct run-holding process values across batches.
 
-The direct claimant constructs a fresh live-values atom for each batch (`src/seon/agent/driver/host.clj:145-162,272-290`). Values retained during that batch are unreachable immediately after it returns. This is a verified structural gap; a live later-batch `result/<id>` probe was not run.
+The direct run-holding process constructs a fresh live-values atom for each batch (`src/seon/agent/driver/host.clj:145-162,272-290`). Values retained during that batch are unreachable immediately after it returns. This is a verified structural gap; a live later-batch `result/<id>` probe was not run.
 
 Opaque JVM values are either rejected from retention or projected as text. Host eval recursively falls back to `pr-str` for non-Transit leaves (`src/seon/host/eval.clj:117-151`). That prevents raw objects crossing, but it is neither an R32 handle nor R41’s loud development failure.
 
@@ -412,7 +412,7 @@ Opaque JVM values are either rejected from retention or projected as text. Host 
 The result owner must be database data keyed by:
 
 - eval ID;
-- exact claimant process identity `(pid,start-instant)`;
+- exact process identity `(pid,start-instant)`;
 - execution tier;
 - live generation.
 
@@ -429,7 +429,7 @@ Both JVM and Bun must consume the same ownership facts until Bun agent execution
 | Path | Pool | Guard | Verdict |
 |---|---:|---:|---|
 | UDS JVM agent eval | Yes | Yes | Covered |
-| Direct claimant JVM eval | Yes | Yes | Covered after context restoration |
+| Direct cluster JVM eval | Yes | Yes | Covered after context restoration |
 | JVM authored function/render call | Yes | Yes | Covered |
 | Pinned materialization during authored call | Outer pool | Outer guard | Covered transitively |
 | Preflight analysis during eval | Outer pool | Outer guard | Covered transitively |
@@ -444,7 +444,7 @@ Both JVM and Bun must consume the same ownership facts until Bun agent execution
 | B2 experimental SCI | No common pool | Ad hoc deadline only | Non-production bypass |
 | Diffusion generated code | Worker/V8 timeout | No SCI guard | Separate mechanism |
 
-Production UDS work enters the pool at `src/seon/host/invoke.clj:220-268`. Claimant work enters it at `src/seon/agent/driver/host.clj:272-290`. Both reach `guard/call!` through `execute-invocation!` (`src/seon/host/invoke.clj:106-194`).
+Production UDS work enters the pool at `src/seon/host/invoke.clj:220-268`. Process holding the run work enters it at `src/seon/agent/driver/host.clj:272-290`. Both reach `guard/call!` through `execute-invocation!` (`src/seon/host/invoke.clj:106-194`).
 
 The retained context holder is inert until `guard/reset!` installs an enforcing policy (`src/seon/host/guard.cljc:47-72,210-221`). Restoration calls raw SCI before that reset.
 
@@ -476,7 +476,7 @@ At audit time, 8,227 compiled functions across 367 namespaces were present, incl
 
 ### F4 — High, verified: stored corpus reconstruction bypasses pool and door
 
-`restore-context-defs!` calls raw replay (`src/seon/host/context.clj:1326-1345,1371-1387`). UDS and claimant startup invoke it before readiness/pool admission (`src/seon/host.clj:106-134`; `src/seon/agent/driver/host.clj:127-143`).
+`restore-context-defs!` calls raw replay (`src/seon/host/context.clj:1326-1345,1371-1387`). UDS and run-holding process startup invoke it before readiness/pool admission (`src/seon/host.clj:106-134`; `src/seon/agent/driver/host.clj:127-143`).
 
 Graduation reconstruction and inline tests have the same problem (`src/seon/host/graduate.clj:170-210`).
 
@@ -502,7 +502,7 @@ The portable-base classifier is textual, admits private helpers, and is not base
 
 ### F8 — High, verified: R32 ownership/lifecycle is missing
 
-JVM handles disappear between direct claimant batches; Bun ownership is process-local; opaque objects become descriptors; no database lifecycle facts exist.
+JVM handles disappear between direct run-holding process batches; Bun ownership is process-local; opaque objects become descriptors; no database lifecycle facts exist.
 
 **Fix:** implement P6’s one database-backed result-symbol lifecycle registry (`docs/prds/sci-execution-runtime/unified-plan-2026-07-23.md:244-255`).
 
@@ -652,7 +652,7 @@ Guard-specific tests intentionally construct local doors. Registry/instrumentati
 - Bun executes native JavaScript against inherited global/runtime state;
 - exact current artifact inventory: 8,227 functions across 367 namespaces;
 - JVM and Bun R32 lifecycle gaps;
-- JVM direct claimant live-result loss;
+- JVM direct run-holding process live-result loss;
 - no JVM `result/<id>` SCI binding;
 - unselectable plan guard policy;
 - test-only break-8 splicing class;

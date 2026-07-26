@@ -331,7 +331,7 @@ already served by the base-context + `sci/fork` structure-sharing design
 
 ## 4. Startup sequence — the ≤10s budget
 
-Topology: target R26 (writer JVM · web-render JVM · claimant JVM(s) · Bun
+Topology: target R26 (writer JVM · web-render JVM · cluster JVM(s) · Bun
 leaf). The Bun pod's 25s bundle-require and self-host machinery die at U9;
 budget below is the target topology, with the interim pod noted. ALL
 per-phase numbers are ESTIMATED unless marked measured; unit S6 makes them
@@ -344,10 +344,10 @@ for CPU, vthreads for I/O):
 |---|---|---:|---|
 | 1 | JVM spawn + clojure load | 2–4s | writer "booting→ready 0.2s" is post-load; JVM+deps load dominates (ESTIMATED; measure) |
 | 2 | Writer: open store + verify applied identity (3 facts read) | <0.5s | store open instant on measured run; identity read is one entity |
-| 3 | Claimant/web-render: attach session + read applied identity + read the divergence cache entity (row 5) + compose over the release-file base (row 4) | <1s | O(divergence): one cache-entity read + hash checks vs today's 2,373+925-row full acquisition (7.5s measured); full rows re-read only on key mismatch; fresh cluster divergence = ∅ |
+| 3 | Process holding the run/web-render: attach session + read applied identity + read the divergence cache entity (row 5) + compose over the release-file base (row 4) | <1s | O(divergence): one cache-entity read + hash checks vs today's 2,373+925-row full acquisition (7.5s measured); full rows re-read only on key mismatch; fresh cluster divergence = ∅ |
 | 4 | Materialize Malli registry over the composed population (linear compile, platform fold across cores) | 1–3s | Pass-3-only compile; 0.37s instrumentation evidence for warm per-item cost; ESTIMATED |
 | 5 | Instrument | 0.4s | MEASURED |
-| 6 | sci base build from the precomputed load plan (claimant only; overlaps 3–5 on its own platform thread) | 1–3s | UNMEASURED today — S6's first job; precompiled-builder fallback if over budget |
+| 6 | sci base build from the precomputed load plan (run-holding process only; overlaps 3–5 on its own platform thread) | 1–3s | UNMEASURED today — S6's first job; precompiled-builder fallback if over budget |
 | 7 | Advertise ready; agent forks/replays happen lazily per claim | ~0 | row 12 |
 
 Total: **≈5–9s** per process, processes in parallel under the operator.
@@ -365,7 +365,7 @@ isolated `s4startgate`):**
 | Bun `cluster open`, complete operator wall including immutable-package verification | 9.21s | PASS |
 | Writer JVM, containment owner start → writer `ready` | 13.88s | **FAIL** |
 | Writer JVM, post-class-load `booting` → `ready` | 0.07s | diagnostic only |
-| Claimant JVM | not measured | target process is not owned by the current release package |
+| Process holding the run JVM | not measured | target process is not owned by the current release package |
 | Web-render JVM | not measured | target process is not owned by the current release package |
 
 The Bun result closes S4's population-work hypothesis: its divergent restart
@@ -380,7 +380,7 @@ The overall ≤10s target is therefore **not yet graduated**. S4 removed the
 population-scale work and proves the current per-cluster Bun START below the
 budget, but the first honest writer measurement falsifies phase 1's 2–4s
 estimate, and the two target JVM consumers are still unmeasured. S6 now owns
-the remaining writer/class-load investigation plus claimant/web-render
+the remaining writer/class-load investigation plus run-holding process/web-render
 measurements; no S4 result may relabel the 13.88s writer start as a pass.
 
 What made this possible is subtraction, not optimization: phases that no
@@ -614,7 +614,7 @@ S1 is the already-dispatched bootfast lane, restated for completeness.
    with measured numbers.
    **S4 checkpoint:** implementation, Bun live proof, divergence equivalence,
    and old/new mismatch refusal are complete. Graduation remains open because
-   the writer measured 13.88s and the claimant/web-render JVM processes remain
+   the writer measured 13.88s and the run-holding process/web-render JVM processes remain
    unmeasured; see §4.
 5. **S5 maintain:** agent registration/durable-defn tx carries the row-5
    divergence-cache delta in the same transaction; hot-reload publication

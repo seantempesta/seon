@@ -4,6 +4,8 @@ status: active
 tags: [research, testing, runtime]
 ---
 
+Terminology: this note records evidence from before the rename; the process holding a run is now `:seon.agent.run/process`.
+
 # CLJC test-parity audit — where the tests stopped following the code (2026-07-23)
 
 Read-only audit of every namespace promoted to portable `.cljc` (or newly
@@ -47,8 +49,8 @@ re-arms most of the "missing" coverage at zero test-writing cost.
    operator's `test/seon/dev` root and any genuinely CLJS-coupled residue),
    THEN add the computed rule (§3.1) to `test/seon/dev/test_roots_test.clj`
    so no future file can be invisible to all surfaces. No fourth runner.
-2. **Claimant-tier schema validation regression** (M; prevents: a JVM
-   claimant persisting datoms that violate the registered Malli shapes,
+2. **Process holding the run-tier schema validation regression** (M; prevents: a JVM
+   run-holding process persisting datoms that violate the registered Malli shapes,
    poisoning every later reader). `src/seon/agent/driver/host.clj:32-37`
    builds its database context with
    `:seon.db.leaf/schema-validation? (constantly false)` and a nil
@@ -59,7 +61,7 @@ re-arms most of the "missing" coverage at zero test-writing cost.
    (`src/seon/agent/turn.cljs:54`) — are enforced only on the pod tier.
    The bound-committed-projection mechanism already exists
    (`src/seon/host/context.clj:236`, wiki recipe). Wire it into the
-   claimant leaf and land ONE regression: a JVM transact of an
+   cluster JVM leaf and land ONE regression: a JVM transact of an
    out-of-enum turn phase / zero epoch fails as a flat error value.
    Proposed: `test/seon/db/claimant_validation_test.clj` (under the
    discovered root even before fix #1 lands).
@@ -119,7 +121,7 @@ planned unit (§1, §4).
 
 ## §1 Moved-piece ledger
 
-Tier legend: **W** writer JVM, **C** claimant JVM (host), **R** web-render
+Tier legend: **W** writer JVM, **C** cluster JVM (host), **R** web-render
 JVM (end state), **P** Bun pod (leaf after U9). "Disc?" = visible to the
 full writer gate today.
 
@@ -159,7 +161,7 @@ full writer gate today.
    retained JVM test can transact them without seeding, and none does
    (grep: only `host_conformance` touches `claim-epoch`, via raw CAS on an
    already-seeded fixture). Combined with §0.2 (validation off at the
-   claimant leaf), the tier that will own these writes end-state validates
+   cluster JVM leaf), the tier that will own these writes end-state validates
    nothing beyond Datahike native types. Gap statement: NO JVM test proves
    claim/phase/attempt round-trip register→install→pull→decode→validate.
    Close via §0.2's regression (which requires seeding the rows, proving
@@ -177,7 +179,7 @@ full writer gate today.
 5. **Prompt-artifact cursor resume** (wiki: "Cursor resume must consume
    the persisted artifact"). Mechanism landed
    (`src/seon/agent/turn.cljs:883-931` `split-persisted-prompt` +
-   `prompt-blob`). Tier: pod today, claimant after U6b/U7. No retained
+   `prompt-blob`). Tier: pod today, run-holding process after U6b/U7. No retained
    test names `split-persisted-prompt`; the U12 drill is the intended
    proof. Verdict: acceptable — drill-owned; flag only if U2's drill
    report omits a resumed-attempt byte assertion.
@@ -201,7 +203,7 @@ full writer gate today.
    two constraints already half-exist: Datahike `:schema-flexibility
    :write` (installed-schema totality — structural, no test needed beyond
    the existing bridge suite) and bound-committed-projection validation
-   (`host/context.clj:236`) extended to the claimant database leaf
+   (`host/context.clj:236`) extended to the run-holding process database leaf
    (§0.2). One regression each; no hand-maintained attr list anywhere.
 4. **Vacuous config-policy validation** — the `every?`-over-empty scar is
    already fixed with the require-complete-row rule (wiki; U2). Its
@@ -242,7 +244,7 @@ full writer gate today.
   next appended (it is what let the orphans accumulate unnoticed).
 - CLJS discovery: `shadow-cljs.edn:301` `:ns-regexp "-test$"` — all dual
   `.cljc` tests DO run on the CLJS side; the hole is one-sided (JVM).
-- Claimant validation stub: `src/seon/agent/driver/host.clj:32-37`.
+- Process holding the run validation stub: `src/seon/agent/driver/host.clj:32-37`.
 - Focused-only proof pattern: e.g. u6a ran
   `tmp/orchestrator/u6a-gate-portable-jvm.log` via explicit selector;
   U1's suite likewise (`u1-focused-guard-writer-6.log`). Green focused

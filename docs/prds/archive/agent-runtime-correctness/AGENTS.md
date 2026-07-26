@@ -30,6 +30,6 @@ compatibility namespace, or mutable lifecycle authority. Hard containment must
 be measured at a real process boundary and must preserve the database receipt/
 recovery contract.
 
-Research belongs in `research/`; current source/gap/order and graduation proof
+Research belongs in `research/`; current source/gap/order and system proof
 belong in [[roadmap]]. Paid model calls and ACME coordination are outside the
 initial source audit.

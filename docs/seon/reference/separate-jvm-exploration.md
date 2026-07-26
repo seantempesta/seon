@@ -21,7 +21,7 @@ The original plan identified three hard problems with namespace cloning in a sha
 | Problem | Shared JVM Solution (Complex) | Separate JVM Solution (Free) |
 |---------|-------------------------------|------------------------------|
 | `::keyword` resolves to instance namespace | AST walk + rewrite via edamame | Doesn't happen — each JVM IS the real namespace |
-| Malli global registry conflicts | Per-instance local registries, merge on graduation | Each JVM has its own registry. No conflicts. |
+| Malli global registry conflicts | Per-instance local registries, merge on accretion | Each JVM has its own registry. No conflicts. |
 | `defn` clobbering between agents | Namespace clones via `create-ns` + `refer` | Separate memory spaces. Impossible to clobber. |
 | Agent crashes orchestrator | Can't prevent OOM/infinite loop/System.exit | OS-level isolation. Agent crash = process dies. |
 | Privilege separation | Not possible — all code on same classpath | Agent JVM only has its namespace's deps. Can't access web server, database, orchestrator code. |
@@ -155,7 +155,7 @@ The Super REPL plan should be updated to reflect:
    - Sends them to the right agent JVM via nREPL
    - Stores them in Datahike (knowledge graph)
    - Runs clj-kondo analysis (stdin, no files needed)
-   - On graduation: writes forms to disk as real `.clj` files, git commits
+   - On accretion: writes forms to disk as real `.clj` files, git commits
 
 5. **Privilege separation** — Agent JVMs can't access orchestrator code, web server, or other namespaces' databases. They only have their namespace's deps.
 
@@ -171,7 +171,7 @@ The Super REPL plan should be updated to reflect:
 
 4. **Inter-Agent Messaging (Phase 5)** — Messages via Datahike + flow channels in orchestrator.
 
-5. **Graduation** — Generate namespace file from Datahike forms, git commit, verify tests.
+5. **Accretion** — Generate namespace file from Datahike forms, git commit, verify tests.
 
 6. **Eval-only model** — Agents get code via eval (Super REPL), not file editing. Forms stored in Datahike.
 

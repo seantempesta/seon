@@ -130,7 +130,7 @@ value proposition at the process level, plus what integrant lacks:
 
 ### (c) Cross-process, crash-tolerant coordination (the database)
 
-Runs are claimable database state: claimant + `:seon.agent.run/claim-epoch`
+Runs are claimable database state: run-holding process + `:seon.agent.run/claim-epoch`
 CAS, heartbeat lease (20-min `stale-ms`, census C), turn phase cursor,
 durable attempt/eval receipts; any process may die and a survivor
 resumes from receipts (CLAUDE.md §Current runtime; agent-runtime.md).
@@ -145,8 +145,8 @@ For each census top wedge class: would integrant have **prevented** it,
 
 | Wedge class (census) | Layer | Actual missing signal | Integrant verdict |
 |---|---|---|---|
-| Claimant vthread death (C rank 1; exhibit NPE detected only at 900s) | (a), but per-*run* task, not component | `dispatch!`'s vthread `finally` (driver/host.clj:601-606) removes the handle without joining completion or settling the phase; the NPE escaped before any turn error/release transacted | **Irrelevant.** Integrant manages singleton init/halt; it has no post-init observation of anything, let alone per-run virtual threads. The fix is a completion join + atomic phase settlement, which no integrant key expresses. |
-| Claim lease 1,200,000ms as primary detector (C) | (c) | Local vthread completion / claimant `ProcessHandle.onExit` should trigger immediate scan/release; lease stays a distributed survivor backstop | **Irrelevant.** Explicitly cross-process; integrant's source has no cross-process concept. |
+| Process holding the run vthread death (C rank 1; exhibit NPE detected only at 900s) | (a), but per-*run* task, not component | `dispatch!`'s vthread `finally` (driver/host.clj:601-606) removes the handle without joining completion or settling the phase; the NPE escaped before any turn error/release transacted | **Irrelevant.** Integrant manages singleton init/halt; it has no post-init observation of anything, let alone per-run virtual threads. The fix is a completion join + atomic phase settlement, which no integrant key expresses. |
+| Claim lease 1,200,000ms as primary detector (C) | (c) | Local vthread completion / run-holding process `ProcessHandle.onExit` should trigger immediate scan/release; lease stays a distributed survivor backstop | **Irrelevant.** Explicitly cross-process; integrant's source has no cross-process concept. |
 | Run/API settlement — 900s serve deadline + 10ms quiescence rereads (C) | (a)/(c) | Database interest over run/turn terminal datoms (`reactive/observe!`) instead of polling and outer clocks | **Irrelevant.** Request-scoped settlement, not component lifecycle. |
 | DB receipt delivery — 250ms deadline scans, 10ms conflict loops, ambiguous-write retry (B/C) | (a) transport internals | Promise/receipt/disconnect delivery on every terminal transport path | **Irrelevant.** Integrant has no async or completion story at all. |
 | Operator readiness polling — 200ms `wait-ready!`, 25ms/10ms process polls (B) | (b) | `ProcessHandle.onExit`, `WatchService`, selector readiness, readiness *publication* by the child | **Irrelevant** — and partially **redundant**: the ordering half of this layer (topo start, reverse halt, cycle detection) the operator already has; the missing half (event-driven readiness) integrant does not provide either. |
@@ -273,7 +273,7 @@ mechanism, zero new deps) rather than importing a framework.
 
 ### Falsifiable acceptance criteria for Option B
 
-1. **Claimant settlement (W-R50-1/2):** re-inject the exhibit's
+1. **Process holding the run settlement (W-R50-1/2):** re-inject the exhibit's
    planner NPE; the run reaches turn `:error` + claim release in the
    completion-join transaction, with no dependence on the 900s deadline
    or the 20-min lease; a fault datom names the thrown cause. Falsified

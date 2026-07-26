@@ -5,11 +5,13 @@ severity: blocker
 tags: [issue, agent, runtime]
 ---
 
-# Deliver a formless claimant reply through the transcript
+Terminology: this note records evidence from before the rename; the process holding a run is now `:seon.agent.run/process`.
+
+# Deliver a formless cluster JVM reply through the transcript
 
 ## Problem
 
-The JVM claimant now advances an error-free reply with no dispatchable forms
+The cluster JVM now advances an error-free reply with no dispatchable forms
 directly from `:reply-ready` to `:evaled`, and publication closes its turn
 `:done`. That reply is durable only as the turn's
 `:seon.agent.turn/reply-blob`; it does not become a
@@ -72,7 +74,7 @@ re-drive remains required even after the writer regression passes.
 
 The rebuilt default cluster carried `83fd9792d`, `87b7637bd`, and
 `e74cae74a` at HEAD `ab0913794`. The first fresh agent failed closed before a
-model call because the new claimant timeout fact had not been applied to the
+model call because the new run-holding process timeout fact had not been applied to the
 config singleton. `bin/seon config apply config/system.edn` reconciled the
 published configuration without a reset or restart, and a second fresh agent,
 `bright-candies-relax`, began the clean acceptance run.
@@ -103,7 +105,7 @@ The intervening planner exception is corrected at its class boundary:
 unresolved value symbols now become `:unresolved-symbol` steering data, and a
 claimed phase throw now enters the one immediate fenced settlement path. The
 focused portable planner gate passes 17 tests / 82 assertions, and the
-claimant writer gate passes 11 tests / 56 assertions, including terminal
+run-holding process writer gate passes 11 tests / 56 assertions, including terminal
 turn/run/custody/fault datoms in the same drive call (`7f49d4674`).
 
 This does not close the delivery issue. Its source correction still requires
@@ -118,6 +120,6 @@ delivered once through the ordinary message/transcript path.
   `:evaling`, and closes terminal `:done` without an error.
 - The exact synthesis is delivered once as an agent-to-user message and
   appears in both the ordinary transcript and `/agents/run` final reply.
-- The run closes without a current-run ref, claimant, running turn, or open
+- The run closes without a current-run ref, run-holding process, running turn, or open
   attempt.
 - A genuinely unresolved executable form remains fail-closed.

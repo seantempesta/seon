@@ -4,13 +4,15 @@ status: active
 tags: [research, agent, runtime, architecture]
 ---
 
-# JVM claimant LLM diagnostic-loss audit (2026-07-24)
+Terminology: this note records evidence from before the rename; the process holding a run is now `:seon.agent.run/process`.
+
+# cluster JVM LLM diagnostic-loss audit (2026-07-24)
 
 ## Scope and ownership
 
 This audit covers only the diagnostic path named by
 [[../../../seon/issues/jvm-claimant-provider-errors-drop-the-diagnostic-cause]].
-It traces the JVM HTTP leaf's error value through the claimant deadline wrapper
+It traces the JVM HTTP leaf's error value through the run-holding process deadline wrapper
 and durable attempt projection. It does not diagnose or change the underlying
 long-lived transport failure.
 
@@ -98,7 +100,7 @@ currently available normalized non-secret vocabulary is registered at
 | `:seon.ai/raw-body` | HTTP response body | Produced by non-2xx `status-failure` |
 | `:seon.ai/timeout?` | adapter/request timeout classification | Produced for `HttpTimeoutException` |
 | `:seon.ai/retry-after-ms` | parsed provider retry delay | Produced by `status-failure` when present |
-| `:seon.ai/outer-timeout?` | claimant deadline classification | Produced by `bounded-llm-transport!`; not yet registered in `:seon.ai/error` |
+| `:seon.ai/outer-timeout?` | run-holding process deadline classification | Produced by `bounded-llm-transport!`; not yet registered in `:seon.ai/error` |
 
 Exception class is available at every JVM catch as
 `(.getName ^Class (class throwable))`, an idiom already used at
@@ -142,7 +144,7 @@ path without URI user info (`src/seon/ai/core.cljc:101-135`).
 at `src/seon/ai/anthropic/core.cljc:110-155`. Neither is a diagnostic loss
 point.
 
-### 3. Claimant deadline wrapper preserves ordinary leaf failures
+### 3. Process holding the run deadline wrapper preserves ordinary leaf failures
 
 `seon.agent.driver.host/bounded-llm-transport!` at
 `src/seon/agent/driver/host.clj:98-125` invokes the installed leaf directly. It
@@ -256,7 +258,7 @@ credential value, whole configuration, or a serialized nested error map.
      observability of the same receipt, not a second diagnostic store.
 
 No change is needed in `terminal-attempt-tx-data`, retry classification, the
-attempt CAS, claimant dispatch, or provider cores.
+attempt CAS, run-holding process dispatch, or provider cores.
 
 ## Regression design
 
@@ -311,14 +313,14 @@ Diagnostics are restored when all of the following are observed:
 - the portable projection regression is green on both JVM and CLJS runners;
 - the real-socket JVM matrix distinguishes all six requested failure classes
   without exposing a credential or header;
-- a real claimant attempt persists a non-success component receipt containing
+- a real cluster JVM attempt persists a non-success component receipt containing
   its bounded flat cause and applicable classification;
 - an HTTP failure retains status and bounded body, while a transport failure
   has no invented status;
 - adapter and outer timeouts retain both their outcome and the already-frozen
   timeout layer values; and
 - the next live DeepSeek attempt exposes a concrete cause from the long-lived
-  claimant, enabling the separate transport-root-cause unit.
+  run-holding process, enabling the separate transport-root-cause unit.
 
 The final provider success and multi-turn alive proof belong to the parent
-claimant-transport blocker, not to this diagnostics-only audit.
+cluster JVM transport blocker, not to this diagnostics-only audit.

@@ -20,6 +20,6 @@ protocol in place. Do not add a second registry, manifest authority, replay
 engine, lifecycle state machine, physical-copy history mechanism, or transport-
 specific semantic branch. Runtime projections reconstruct from committed facts.
 
-Research goes in `research/`; current state, gaps, order, and graduation proof
+Research goes in `research/`; current state, gaps, order, and system proof
 stay in [[roadmap]]. Implementation begins only after the current
 runtime-reliability branch graduates.

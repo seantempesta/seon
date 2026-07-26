@@ -5,11 +5,13 @@ severity: blocker
 tags: [issue, agent, runtime]
 ---
 
-# Plan a visible JVM claimant reply on an inspected tier
+Terminology: this note records evidence from before the rename; the process holding a run is now `:seon.agent.run/process`.
+
+# Plan a visible cluster JVM reply on an inspected tier
 
 ## Problem
 
-The JVM claimant can persist a successful model response containing valid
+The cluster JVM can persist a successful model response containing valid
 agent forms, then reject the parsed reply because no inspected tier yields an
 exact execution plan. The run closes visibly and releases custody, but no eval
 receipt is admitted.
@@ -23,13 +25,13 @@ the requested message and completion forms. The attempt is `:success`; the
 turn then closed `:error` with:
 `The parsed reply has no exact execution plan on an inspected tier.`
 
-No eval receipt exists. The run is closed and claimant/current-run custody is
+No eval receipt exists. The run is closed and run-holding process/current-run custody is
 absent, so this is not a wedge. Exact database values, claim/phase histories,
 and verbatim reply evidence are in
 `tmp/orchestrator/claimant2-gate.log`.
 
 The source-frozen `planschema` run `q5ddb6i4pp4z` narrows the remaining class.
-The same JVM claimant successfully executed six preceding forms, including
+The same cluster JVM successfully executed six preceding forms, including
 `my.plan/plan!`, three schema registrations, a transaction, and its read-back.
 The final single registered form
 `(seon.agent.lifecycle/complete "PLANSCHEMA_ALIVE")` alone produced the same
@@ -73,7 +75,7 @@ That reply contained a prose lead-in followed by the valid form
 While specializing the parsed roots, `seon.program.edge/resolved-target`
 passed an unresolved unqualified prose symbol through
 `canonical-target`. `canonical-target` called `clojure.core/namespace` on nil,
-raising an uncaught `NullPointerException`. The exception escaped the claimant
+raising an uncaught `NullPointerException`. The exception escaped the run-holding process
 virtual thread instead of becoming the existing flat steering error.
 
 Exact retained datoms at basis transaction `536874862`, before the request
@@ -86,23 +88,23 @@ deadline:
   200; and
 - the agent had a current-run ref to entity `8929`.
 
-The claimant wrote no error or later receipt after the exception. At the
+The run-holding process wrote no error or later receipt after the exception. At the
 900-second `/agents/run` deadline, transaction `536874863` eventually closed
-the run `:superseded`, retracted claimant/current-run custody, and published
+the run `:superseded`, retracted run-holding process/current-run custody, and published
 the turn `:interrupted` with error
 `The run closed :superseded before the active turn published.` This leaves no
-permanent claimant residue, but the claimant was stuck until the outer request
+permanent process residue, but the process was stuck until the outer request
 deadline and never returned the existing steering value. That directly
 falsifies Acceptance. Full evidence is appended to
 `tmp/orchestrator/lifecycle-redrive-gate.log`.
 
-## 2026-07-24 claimant NPE class correction
+## 2026-07-24 run-holding process NPE class correction
 
 The analyzer now keeps an absent unqualified resolution as nil and classifies
 an unresolved value symbol as the existing `:unresolved-symbol` edge
 uncertainty. Thus the real parenthetical prose shape `(not forms)` remains a
 parsed list—there is no prose regex or second classifier—but
-`plan-execution` returns the ordinary unplannable result that the claimant
+`plan-execution` returns the ordinary unplannable result that the run-holding process
 maps to flat steering data.
 
 The portable driver now also catches any throw or rejected async result at the
@@ -110,11 +112,11 @@ claimed `execute-step!` call itself, converts it to a flat core-bug value, and
 passes that value through the existing terminal-or-displaced and fenced
 phase-error settlement owner. The serialized-writer regression makes an eval
 phase throw from `:reply-ready` and observes, before `drive-claim!` returns,
-the turn at `:published/:error`, the run closed `:error`, claimant/current-run
+the turn at `:published/:error`, the run closed `:error`, run-holding process/current-run
 custody absent, and one core fault datom.
 
 Focused JVM proof is green: portable edge/planner coverage is 17 tests and 82
-assertions; the claimant writer namespace is 11 tests and 56 assertions. The
+assertions; the run-holding process writer namespace is 11 tests and 56 assertions. The
 correction is commit `7f49d4674`; the default cluster was not touched. The
 source-frozen live re-drive remains the acceptance gate for the two registered
 lifecycle forms.
@@ -140,10 +142,10 @@ value that reached `case` was:
  :seon.execution/selected-tier :jvm}
 ```
 
-The claimant therefore recorded the core fault
+The run-holding process therefore recorded the core fault
 `No matching clause: {:seon.agent.driver/disposition :execute,
 :seon.execution/selected-tier :jvm}` instead of executing the valid form.
-Transaction `536871128` closed the run `:error`, retracted both claimant and
+Transaction `536871128` closed the run `:error`, retracted both run-holding process and
 agent current-run custody, and terminalized the turn
 `:published`/`:error`. No eval receipt, requested plan, memory fact, or final
 message exists. Full request/response and datom evidence is in
@@ -161,7 +163,7 @@ from the same map.
 The existing exact-plan writer test now passes real `parsed-reply-plan` output
 through `eval-step!`, observes the `:execute`/`:jvm` plan reaching the eval
 batch, and asserts the durable `:reply-ready → :evaling` transition. It no
-longer stubs across the producer/consumer shape boundary. The claimant writer
+longer stubs across the producer/consumer shape boundary. The run-holding process writer
 namespace passes 11 tests and 63 assertions against the current v14 compiled
 program rows. The ordinary `bin/test-writer` wrapper remains blocked by the
 separately recorded stale fixture check that accepts only artifact v11.
@@ -178,7 +180,7 @@ The source-frozen default-cluster proof used fresh agent
   transaction `536871145`; the turn advanced through `:evaling` at
   transaction `536871142`, `:evaled` at `536871147`, and
   `:published`/`:done` at `536871150`;
-- isolated no-dispatch run `vxb58jqeb91u` closed `:no-forms`, with claimant
+- isolated no-dispatch run `vxb58jqeb91u` closed `:no-forms`, with run-holding process
   absent and the agent's current-run ref absent;
 - formless turns `tzc1rmbkgxnk`, `zxa4zjrffh3c`, and `bi3ph8h3eqpv` are all
   `:published`/`:done` with no eval refs; and
@@ -199,10 +201,10 @@ and both required disposition settlements.
 ## Acceptance
 
 - The same two visible registered forms derive one exact JVM execution plan.
-- The claimant writes two terminal successful eval receipts and completes the
+- The run-holding process writes two terminal successful eval receipts and completes the
   run.
 - `parsed-reply-plan` and `eval-step!` agree on one disposition shape; an
-  end-to-end claimant regression drives the real `:execute`/`:jvm` result
+  end-to-end run-holding process regression drives the real `:execute`/`:jvm` result
   through `eval-step!` and records a successful receipt.
 - A genuinely unavailable or unresolved function still returns the existing
   flat steering error and releases custody.

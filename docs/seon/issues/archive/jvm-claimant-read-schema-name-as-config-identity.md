@@ -5,7 +5,9 @@ severity: blocker
 tags: [issue, agent, runtime, database]
 ---
 
-# Read claimant limits from the config singleton identity
+Terminology: this note records evidence from before the rename; the process holding a run is now `:seon.agent.run/process`.
+
+# Read cluster JVM limits from the config singleton identity
 
 ## Problem
 
@@ -19,13 +21,13 @@ claim-driver limits were absent.
 
 The first claimant2 transport-success run persisted a status-200 attempt and
 reply blob, then faulted:
-`The JVM claimant limit :seon.config.claim-driver/invocation-deadline-ms is
+`The cluster JVM limit :seon.config.claim-driver/invocation-deadline-ms is
 unavailable`. A database query found the only config identity as `"cluster"`.
 The source pull used the schema name as the lookup value.
 
 ## Owner
 
-`seon.agent.driver.host/invocation-configuration!` owns the JVM claimant's
+`seon.agent.driver.host/invocation-configuration!` owns the cluster JVM's
 per-eval config acquisition.
 
 ## Resolution
@@ -38,5 +40,5 @@ later exact-execution-plan boundary. The combined focused writer proof is
 
 ## Acceptance
 
-- The JVM claimant reads both required limits from the config singleton.
+- The cluster JVM reads both required limits from the config singleton.
 - Missing limits still return the existing loud flat error.

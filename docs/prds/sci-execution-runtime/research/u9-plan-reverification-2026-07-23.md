@@ -12,7 +12,9 @@ Re-verified the U9 deletion plan’s baseline `fe4bfed0c` against current HEAD `
 
 - **Slice S0a is dependency-ready but not implemented.** B1 is byte-for-byte unchanged: `/agent/{id}` still invokes the dying child renderer through `src/seon/web/datastar.cljs:1074,1093-1096`, and compiled view calls still enter `child-lane` at `src/seon/execution/host.cljs:997-999`.
 - **S1 is not ready.** S0a remains mandatory; scheduled functions remain broken; compiled-symbol resolution acquired an additional `seon.eval` consumer.
-- **B2’s uncertainty is resolved, not its implementation.** The live probe and R46 settled the JVM-claimant design, but current source still discards a tierless invocation error and falsely closes the scheduled turn.
+- **B2’s uncertainty is resolved, not its implementation.** The live probe and
+  R46 settled the cluster JVM design, but current source still discards a
+  tierless invocation error and falsely closes the scheduled turn.
 - **B3 expanded rather than shrank.** R43 separated provenance-based trust classification from resolution, but the new compiled renderer resolver still delegates to `seon.eval/lookup-value`.
 - **S4 is not ready.** The census contains exactly 18 pending rows, not approximately 17, and none closed tonight.
 
@@ -66,7 +68,7 @@ Re-verified the U9 deletion plan’s baseline `fe4bfed0c` against current HEAD `
 | Blocker | Verdict | Delta |
 |---|---|---|
 | B1 — agent-view child render | **Still unresolved** | No post-plan commit changed `src/seon/web/datastar.cljs:1074,1093-1096` or `src/seon/execution/host.cljs:977-1026`. S0a remains mandatory. |
-| B2 — scheduled functions | **Implementation unchanged; investigation resolved** | Broken path remains `src/seon/agent/loop.cljs:515-558,654-669`, `src/seon/agent/turn.cljs:535-554`, and rejection at `src/seon/execution/host.cljs:983-989`. The live falsifier proved a discarded error and false `:done`; R46 settled the durable eval-ready turn/JVM-claimant design at `docs/prds/sci-execution-runtime/program-synthesis-2026-07-21.md:1545-1564`. |
+| B2 — scheduled functions | **Implementation unchanged; investigation resolved** | Broken path remains `src/seon/agent/loop.cljs:515-558,654-669`, `src/seon/agent/turn.cljs:535-554`, and rejection at `src/seon/execution/host.cljs:983-989`. The live falsifier proved a discarded error and false `:done`; R46 settled the durable eval-ready turn/cluster JVM design at `docs/prds/sci-execution-runtime/program-synthesis-2026-07-21.md:1545-1564`. |
 | B3 — compiled lookup | **Scope expanded** | Original consumers remain `src/seon/agent/turn.cljs:413-420`, `src/seon/web/router.cljs:169-181`, and `src/seon/web/serve.cljs:497-518,1817-1821`. R43 added `resolve-compiled`, whose CLJS branch still uses `eval/lookup-value`, at `src/seon/render/core.cljc:17-24`; general render and warning consumers now enter it at `src/seon/render.cljc:63-72,756-769,1067-1077` and `src/seon/warn.cljc:805-812`. |
 
 R43 therefore did **not** shrink B3. It removed trust classification from the static table but left resolution dependent on the self-host engine: `src/seon/render/core.cljc:2-7,17-42`. S0c must cover four groups—prompt, route, controls, and general render/warning resolution—not the plan’s original three.
@@ -120,7 +122,7 @@ Its natural owner remains the existing view acquisition/render machinery in `src
 | Lane/boundary | Exclusive paths |
 |---|---|
 | **U9 S0a** | `src/seon/agent/ctx/driver.cljs`; `src/seon/web/datastar.cljs:1074-1104`; `src/seon/execution/runtime.cljs:79-227`; retained view coverage from `test/seon/execution/runtime_test.cljs`. |
-| **Schedfix / R46** | `src/seon/agent/loop.cljs`; `src/seon/agent/schedule.cljs`; `src/seon/agent/turn.cljs:535-587`; `src/seon/agent/driver.cljc`; claimant schedule additions; `test/seon/agent/{schedule,ticker}_test.cljs`. U9 must not independently implement its old S0b while this lane owns the accepted design. |
+| **Schedfix / R46** | `src/seon/agent/loop.cljs`; `src/seon/agent/schedule.cljs`; `src/seon/agent/turn.cljs:535-587`; `src/seon/agent/driver.cljc`; run-holding process schedule additions; `test/seon/agent/{schedule,ticker}_test.cljs`. U9 must not independently implement its old S0b while this lane owns the accepted design. |
 | **U9 S0c** | `src/seon/agent/turn.cljs:413-430`; `src/seon/web/router.cljs:169-181`; `src/seon/web/serve.cljs:497-518,1817-1821`; `src/seon/render/core.cljc`; `src/seon/render.cljc`; `src/seon/warn.cljc`; corresponding turn, serve, render portability/block, schema, and warning tests. |
 | **U9 S0d** | `src/seon/eval.cljs:187-239`; `src/seon/agent/turn.cljs:741-776`; `test/seon/eval/race_timeout_test.cljs`. |
 | **U9 S0e** | `src/seon/eval/bootstrap_cache.cljs`; `src/seon/diffusion/worker/eval.cljs`; diffusion build/test owners. |

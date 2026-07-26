@@ -50,7 +50,7 @@ The source mismatch is direct:
 - `src/seon/agent/turn.cljs:344-353` still requires
   `:seon.config/repl-mode` in `::rendered-prompt`.
 
-The run remained open with the dead pod claimant, no current turn, and no
+The run remained open with the dead pod run-holding process, no current turn, and no
 receipts at writer basis transaction 536871709.
 
 The dependency boundary is Malli 0.20.0, pinned in `deps.edn`; its maintained

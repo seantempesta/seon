@@ -5,11 +5,11 @@ severity: blocker
 tags: [issue, agent, runtime, operator]
 ---
 
-# Claimant host drains after clean restart
+# Process holding the run host drains after clean restart
 
 ## Problem
 
-A clean `bin/seon restart` reconstructed the claimant host against an existing
+A clean `bin/seon restart` reconstructed the cluster JVM against an existing
 paged database, but the host then drained. The recovered report appeared to
 contain successful schema rows and made an opaque forward-reference failure
 look likely.
@@ -50,13 +50,13 @@ Focused proof:
 
 ## Owner
 
-Claimant host admission in `seon.host.context`, using the one portable
+Process holding the run host admission in `seon.host.context`, using the one portable
 `seon.db` query and index-page mechanism, and complete-projection validation in
 `seon.schema`.
 
 ## Acceptance
 
-- A clean restart keeps the claimant host alive and ready.
+- A clean restart keeps the cluster JVM alive and ready.
 - Committed acquisition is complete at one immutable database value without
   an aggregate corpus-size response.
 - Read failures name their exact acquisition population and stage.

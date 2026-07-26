@@ -17,7 +17,7 @@ contract.
 
 Datahike query/pull execution and retained eval values now have synchronous
 budgets, but arbitrary JavaScript or dependency code can still allocate between
-runtime checkpoints. The CLJS sandbox catches model mistakes; it is not a
+runtime checkpoints. The CLJS `ctx` catches model mistakes; it is not a
 security or hard memory boundary. A pathological predicate or direct JS form
 can therefore exhaust the pod process even though it cannot exhaust the sole
 writer through the bounded database API.
@@ -47,7 +47,7 @@ Node `v26.4.0` explicitly excludes `ArrayBuffer`/external data from worker
 are rejected. The selected contract is a pod-owned, non-multiplexed disposable
 Node child with parent-owned receipts, capabilities, TERM/KILL/reap, and
 reconstruction. A child alone is not the hard numeric ceiling: Darwin rejected
-`RLIMIT_AS` in the audit, so hostile-memory graduation requires a measured
+`RLIMIT_AS` in the audit, so hostile-memory proof requires a measured
 per-child OS/container limit rather than V8 old-space flags or RSS polling.
 
 The retained synthetic-gate audit at

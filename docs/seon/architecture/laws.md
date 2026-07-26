@@ -43,15 +43,16 @@ sample sizes, and acceptance evidence belong in PRD research and roadmaps.
 
 ## Runtime
 
-- **Process jobs stay narrow.** The writer performs transactions and emits the
-  committed feed; it never executes agent code or serves HTTP. The web-render
-  process performs trusted database-value derivation and HTTP/SSE delivery; it
-  never executes agent code. Claimants execute agent work. The Bun leaf host is
+- **Process jobs stay narrow.** The cluster JVM performs transactions, emits
+  the committed feed, and executes agent work for its one store; it never
+  serves HTTP. The web-render JVM performs trusted database-value derivation
+  and HTTP/SSE delivery; it never executes agent code. Leaf runtimes are
   disposable native-effect capacity. Process replacement does not broaden a
   role.
-- **Claims and receipts outrank process memory.** A run's claimant, epoch, and
-  heartbeat establish custody; the turn phase and attempt/eval receipts
-  establish admitted and completed work. Recovery derives from those facts.
+- **Claims and receipts outrank process memory.** A run's
+  `:seon.agent.run/process`, epoch, and heartbeat establish custody; the turn
+  phase and attempt/eval receipts establish admitted and completed work.
+  Recovery derives from those facts.
 - **Same source or same artifact.** Cross-runtime policy is one portable
   `.cljc` core or one shared compiled artifact. Each tier adds one native leaf,
   with reader conditionals only at entry expressions. Hand-mirrored wrappers

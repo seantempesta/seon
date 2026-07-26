@@ -10,7 +10,7 @@ tags: [issue, runtime, architecture]
 ## Evidence
 
 `seon.capability/installed-leaf-inventory` accepted a tier but discarded it.
-The landed P5 claimant keyed `:seon.execution/tier-inventories` from the
+The landed P5 run-holding process keyed `:seon.execution/tier-inventories` from the
 missing `:seon.execution.inventory/tier` field, producing a `nil` tier and
 preventing exact JVM placement.
 
@@ -25,6 +25,6 @@ preventing exact JVM placement.
 ## Resolution
 
 Commit `a332ecb5f` retains the tier on the canonical installer inventory,
-projects the JVM claimant inventory from that one registry enumerator, and
+projects the cluster JVM inventory from that one registry enumerator, and
 passes the inventory to planner acquisition. The dual-tier planner regression
 places real compiled-only terminals exactly on both JVM and Bun inventories.

@@ -10,10 +10,11 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (51)
+## Blocker (52)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [A deps-ecosystem package install cannot reach an active cluster JVM](deps-package-install-cannot-reach-a-running-claimant.md) | blocker | general |
 | [Arbitrary database results collide with the error shape](arbitrary-database-results-collide-with-error-shape.md) | blocker | Core |
 | [Arbitrary eval allocation lacks hard process memory containment](eval-process-isolation-memory-containment.md) | blocker | agent |
 | [Capture dependencies when a lazy view unit activates](lazy-view-unit-activation-drops-read-observations.md) | blocker | UI |
@@ -21,7 +22,7 @@ See `README.md` for the convention.
 | [Content-pin the Inspect source dependency](inspect-source-dependency-is-not-content-pinned.md) | blocker | agent |
 | [Contract predicate transitive purity awaits execution planner](contract-predicate-transitive-purity-awaits-execution-planner.md) | blocker | Core |
 | [Datahike force branch does not preserve secondary root](datahike-force-branch-does-not-preserve-secondary-root.md) | blocker | Core |
-| [Deliver a formless claimant reply through the transcript](formless-claimant-reply-is-not-delivered-to-the-transcript.md) | blocker | agent |
+| [Deliver a formless cluster JVM reply through the transcript](formless-claimant-reply-is-not-delivered-to-the-transcript.md) | blocker | agent |
 | [Derive read dependencies from Datahike's parsed semantics](datahike-read-dependencies-miss-valid-query-and-pull-inputs.md) | blocker | UI |
 | [Fence accepted writes before retained-head preparation](restore-intent-lacks-exclusive-writer-fence.md) | blocker | Core |
 | [Freeze one turn input across provider retries](turn-retries-reread-provider-inputs.md) | blocker | agent |
@@ -37,15 +38,15 @@ See `README.md` for the convention.
 | [Let the common Inspect pod solver address an existing agent](inspect-pod-solver-cannot-address-existing-agent.md) | blocker | agent |
 | [Make the downstream runtime package self-contained](downstream-runtime-package-is-not-self-contained.md) | blocker | Core |
 | [Make writer drain proof consumable by the operator](planned-restart-cannot-observe-writer-drain-result.md) | blocker | Core |
-| [Plan a visible JVM claimant reply on an inspected tier](jvm-claimant-rejects-visible-reply-without-exact-execution-plan.md) | blocker | agent |
+| [Plan a visible cluster JVM reply on an inspected tier](jvm-claimant-rejects-visible-reply-without-exact-execution-plan.md) | blocker | agent |
 | [Pod remains ready after losing its web listener](pod-remains-ready-after-web-listener-loss.md) | blocker | UI |
 | [Preserve context identity in the in-pod agent view](in-pod-agent-view-omits-context-name.md) | blocker | UI |
 | [Private-function presence law is incomplete outside core indexing](private-function-presence-law-incomplete.md) | blocker | general |
 | [Project a turn's rendered transaction ref as its basis transaction](turn-debug-must-project-rendered-transaction-ref.md) | blocker | agent |
 | [Projected map keys are not drill paths](projected-map-keys-are-not-drill-paths.md) | blocker | UI |
-| [Pull JVM claimant limits from the cluster config identity](jvm-claimant-pulls-config-with-wrong-identity.md) | blocker | agent |
+| [Pull cluster JVM limits from the cluster config identity](jvm-claimant-pulls-config-with-wrong-identity.md) | blocker | agent |
 | [Read-side attribute admission fails open (silent empty results, :all fallback)](read-side-attribute-admission-fails-open.md) | blocker | Core |
-| [Reconcile the JVM claimant for named clusters](named-cluster-open-does-not-reconcile-jvm-host.md) | blocker | agent |
+| [Reconcile the cluster JVM for named clusters](named-cluster-open-does-not-reconcile-jvm-host.md) | blocker | agent |
 | [Reduce retained memory in each execution child](execution-children-retain-hundreds-of-megabytes.md) | blocker | agent |
 | [Restore writer admin transition is unimplemented](restore-writer-admin-transition-is-unimplemented.md) | blocker | Core |
 | [Retain complete model transport evidence in Inspect logs](inspect-model-transport-evidence-is-incomplete.md) | blocker | agent |

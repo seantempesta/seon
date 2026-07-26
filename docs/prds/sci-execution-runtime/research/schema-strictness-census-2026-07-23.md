@@ -6,7 +6,7 @@ tags: [research, runtime, database]
 
 # Schema strictness census — :any/:maybe usage + guarded polymorphism + coercion policy (2026-07-23)
 
-# Read-only schema completeness audit
+## Read-only schema completeness audit
 
 No files were changed; no builds, tests, or REPL calls were run.
 
@@ -133,7 +133,7 @@ Therefore the safe design is:
 
 - Core-authored predicates may be compiled in trusted executable projections.
 - Agent contracts may reference a core-admitted predicate schema.
-- Agent-authored predicates must not be evaluated in the writer. Supporting them requires separating pure structural admission/persistence from claimant-side executable schema compilation.
+- Agent-authored predicates must not be evaluated in the writer. Supporting them requires separating pure structural admission/persistence from process side executable schema compilation.
 - Admission is decided from source provenance and schema structure, never a symbol allowlist.
 
 That makes the robust `[:fn]` escape an M mechanism, not the S change suggested in the earlier research.
@@ -184,7 +184,7 @@ Reject:
   - `:gen/schema`, `:gen/elements`, or another bounded generator;
   - a boolean, total, side-effect-free validator contract.
 
-Agent-authored `[:fn]` predicates may execute only in a guarded claimant, never the writer. Until structural/executable projections are split, agents may reference only core-admitted predicate schemas.
+Agent-authored `[:fn]` predicates may execute only in a guarded run-holding process, never the writer. Until structural/executable projections are split, agents may reference only core-admitted predicate schemas.
 
 ### Core contracts
 

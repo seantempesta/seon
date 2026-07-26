@@ -46,7 +46,7 @@ fixtures now need the same shared complete-policy treatment as the archived
 value-sampling-policy repair, while production stays fail-closed.
 
 On 2026-07-24, `bin/test-writer` rejected the current published artifact before
-running a focused claimant regression. The artifact is valid manifest version
+running a focused run-holding process regression. The artifact is valid manifest version
 12, while `test/seon/db/writer_test_support.clj` still hard-requires version
 11 and reports “no valid program rows.” The regression was proven against an
 otherwise byte-identical temporary manifest with only that stale fixture

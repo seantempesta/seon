@@ -80,7 +80,7 @@ always renders:
   most salient standing frame in the prompt wins by default — so evergreen
   advice ("after a restart, resume your plan") is **conditional/derived**,
   rendered only when its condition actually holds, never planted every turn.
-  A self-healing claimant replacement is one such condition: the next
+  A self-healing cluster JVM replacement is one such condition: the next
   turn names the interrupted eval and process failure, confirms that current
   functions/schemas/tests were reconstructed from database program facts, and
   states that live `result/<id>` values and other process-local state
@@ -505,8 +505,8 @@ code becomes the majority of its context — self-reinforcing, cheap, cached.
 
 Two derived sections make the spawn tree visible without any registry or
 notification state (both vanish when their query is empty). Their renderer and
-tests exist, but the general block remains dormant until solo-agent drives
-graduate; multi-agent visibility must not obscure the solo navigation signal:
+tests exist, but the general block remains dormant until the solo-agent proof
+closes; multi-agent visibility must not obscure the solo navigation signal:
 
 - **`:subagents`** (general agent-context, volatile tail near the transcript) —
   the **direct** children the rendering agent spawned (`:seon.agent/parent` =
@@ -517,7 +517,7 @@ graduate; multi-agent visibility must not obscure the solo navigation signal:
   succeeded). A breaker-tripped child shows it. This is the parent's monitoring
   surface: completion is a **fact in the DB**, so a parent that was mid-turn or
   restarted still sees every child result — no acknowledgement, nothing to clear.
-  After solo graduation, childless agents render empty → it costs them zero;
+  After that proof closes, childless agents render empty → it costs them zero;
   the compact running-progress view occupies the free dynamic tail while
   persisted outcomes remain in the database-derived body.
 - **`:orphaned-agents`** (root-only, config-injected via
@@ -592,8 +592,8 @@ escape hatch) → the singleton's `:seon.config/system-text` datom (seeded from
 the manifest key; absent from the default manifest, so the default cluster is
 byte-identical) → the shipped `seon.agent.ctx/system-text`. A cluster owns its
 whole instruction floor from its own manifest file — `config/minimal.edn` is
-the worked example: it `#include`s `system.edn` and INHERITS the graduated
-v3.1 system-text (the one source `system.edn` carries), supplying only a
+the worked example: it `#include`s `system.edn` and INHERITS the current v3.1
+system-text (the one source `system.edn` carries), supplying only a
 minimal block tree (namespaces + transcript) — the base the `repl` capability
 milestone measures from. Its companion rule:
 **a manifest that supplies an explicit `:seon.agent/ctx` declares the COMPLETE

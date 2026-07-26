@@ -5,11 +5,13 @@ severity: blocker
 tags: [issue, agent, runtime, schema]
 ---
 
-# Preserve plan request definitions in JVM claimant schema projection
+Terminology: this note records evidence from before the rename; the process holding a run is now `:seon.agent.run/process`.
+
+# Preserve plan request definitions in cluster JVM schema projection
 
 ## Problem
 
-A live JVM-claimant eval called `my.plan/plan!` with the registered
+A live cluster JVM eval called `my.plan/plan!` with the registered
 `:my.plan/plan-request` keys `:my.plan/title`, `:my.plan/goal`,
 `:my.plan/pace`, and `:my.plan/children`. The call reached the toolkit
 function but its schema-derived unknown-key guard returned:
@@ -19,7 +21,7 @@ plan!: unknown key :my.plan/title Accepted my.plan keys: .
 
 ```
 
-The empty accepted-key list means the claimant's active schema projection did
+The empty accepted-key list means the run-holding process's active schema projection did
 not supply the request definition to `my.plan.internal/schema-map-keys`.
 Consequently a valid durable plan cannot be created through the maintained
 `my.plan/plan!` mechanism.
@@ -31,7 +33,7 @@ The default-cluster drive7 live drive on 2026-07-24 used agent
 
 - Run `ku09qo4q6u57` opened after a prior parser-visible fault had closed and
   released cleanly.
-- Turn `httr4snax2fr` reached the full claimant cursor through `:evaling`,
+- Turn `httr4snax2fr` reached the full run-holding process cursor through `:evaling`,
   `:evaled`, and `:published`, then closed `:done`.
 - Eval receipt `fh304565fe3p` is terminal `:done` with
   `:seon.eval/ok? true`. Its exact source is a valid
@@ -51,16 +53,16 @@ The defining source path is:
 - `src/my/plan/internal.cljc` derives accepted keys by walking
   `(seon.schema/schema-definition :my.plan/plan-request)`.
 - `test/my/plan_test.cljs` proves the same derivation in the CLJS test
-  projection, but there is no equivalent live JVM-claimant proof.
+  projection, but there is no equivalent live cluster JVM proof.
 
 The exact live datoms and reply/eval evidence are retained in
 `tmp/orchestrator/drive7-gate.log`.
 
 ## Resolution
 
-The corpus and paged committed acquisition were complete; the JVM claimant's
+The corpus and paged committed acquisition were complete; the cluster JVM's
 fact-first namespace loader deliberately replays stored definitions without
-executing top-level `schema/register!` forms. The claimant wrapper for
+executing top-level `schema/register!` forms. The run-holding process wrapper for
 `seon.schema/schema-definition` nevertheless consulted the JVM process-local
 candidate registry, which therefore had no `my.plan` registrations.
 
@@ -72,11 +74,11 @@ regression proves the `:my.plan/plan-request` key set and an unrelated
 The first isolated drive then reached plan persistence and exposed a second
 stale host-only allocation implementation. It treated the allocation builder's
 transaction request map as transaction data. Commit `3fd9137f6` deletes that
-duplicate and binds the claimant wrapper to the portable
+duplicate and binds the run-holding process wrapper to the portable
 `seon.db.id/allocate!` contract. The real SCI-wrapper/serialized-writer
 regression passes 1 test / 19 assertions.
 
-On the rebuilt isolated `planschema` cluster, JVM claimant
+On the rebuilt isolated `planschema` cluster, cluster JVM
 `99081@2026-07-24T10:21:35.424583Z` evaluated the nested `plan!` call
 successfully:
 
@@ -97,21 +99,21 @@ transaction, and clean-shutdown evidence is in
 
 ## Owner
 
-The schema acquisition and binding-table owner for the JVM claimant must make
+The schema acquisition and binding-table owner for the cluster JVM must make
 the same registered request definition visible to
 `seon.schema/schema-definition` that the CLJS runtime and tests observe.
 `my.plan` must continue deriving its accepted key set from that one schema;
-do not add a hand-maintained key list or a claimant-only bypass.
+do not add a hand-maintained key list or a bypass only for the cluster JVM.
 
 ## Acceptance
 
-- A focused JVM claimant test calls `my.plan.internal/schema-map-keys` for
+- A focused cluster JVM test calls `my.plan.internal/schema-map-keys` for
   `:my.plan/plan-request` and obtains the registered keys including
   `:my.plan/title`, `:my.plan/goal`, `:my.plan/pace`, and
   `:my.plan/children`.
 - A host-tier `my.plan/plan!` call with nested labelled children returns
   `{:my.plan/ok? true ...}` and persists the root plus every child.
 - A rebuilt isolated-cluster DeepSeek drive creates the persistent nested plan
-  and writes and later reads a schema-backed fact through the JVM claimant.
+  and writes and later reads a schema-backed fact through the cluster JVM.
 - The default-cluster cross-turn memory re-drive remains the program's final
   integration gate, not an unresolved schema-acquisition defect.

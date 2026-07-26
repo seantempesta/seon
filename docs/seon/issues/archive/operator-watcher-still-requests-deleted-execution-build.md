@@ -33,7 +33,7 @@ protected `script/seon/dev/**` owner.
 - The operator derives its watch vector only from surviving flavor-owned
   builds and never names the deleted `execution` build.
 - `bin/seon up` publishes a current artifact after the surviving build flush,
-  then starts the writer, claimant host, pod leaf, and web-render processes.
+  then starts the writer, cluster JVM, pod leaf, and web-render processes.
 - `bin/test-writer` accepts that current artifact without a manual fixture
   manifest.
 

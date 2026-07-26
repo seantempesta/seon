@@ -9,11 +9,11 @@ tags: [decision, architecture, database, runtime]
 
 ## Context
 
-One writer owns each database's ordered transactions and committed-report
-source. Claimant and web-render JVMs read process-local immutable replicas and
-forward writes to that writer. Disposable leaf hosts are clients of the
-capability and database seams but own no durable database state. Transport details may
-differ locally and remotely without changing database semantics.
+One cluster JVM owns each store's ordered transactions, committed-report
+source, and agent evals. The web-render JVM reads a process-local immutable
+replica and forwards writes to that cluster JVM. Disposable leaf runtimes are
+clients of capability seams but own no durable database state. Transport
+details may differ locally and remotely without changing database semantics.
 
 ## Decision
 
@@ -58,7 +58,7 @@ and Promise values remain inside their host owners.
 
 ## Related
 
-- [[architecture]] — writer, claimant, web-render, leaf-host, and browser topology.
+- [[architecture]] — cluster JVM, web-render, leaf-runtime, and browser topology.
 - [[data-model]] — transaction provenance and database values.
 - [[agent-runtime]] — CAS fences and lifecycle transitions.
 - [[observability]] — replay and forensic database values.

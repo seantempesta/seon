@@ -166,7 +166,7 @@ near-zero wall win), the self-host engine + bootstrap cache, and the child
 release plumbing. None of the four measured pigs above is doomed code:
 
 - `schema.cljc`/`build-projection` is portable `.cljc` and is the R29
-  acquisition path every future JVM claimant/web-render tier runs — fixing
+  acquisition path every future cluster JVM/web-render tier runs — fixing
   it pays on all tiers forever.
 - The corpus rows themselves survive (the database program population); the
   interim producer (`index-core!` in the Bun client) eventually moves

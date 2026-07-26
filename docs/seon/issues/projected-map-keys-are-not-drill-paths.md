@@ -58,6 +58,6 @@ codec.
 
 ## Triage — 2026-07-23
 
-DISSOLVES into the post-cutover U10 value-drill graduation unit: current
+DISSOLVES into the post-cutover U10 value-drill system unit: current
 `src/seon/render/value.cljc:557-570,742-743` closes the sampler half, while
 U10 owns the remaining route/UI no-drill proof.

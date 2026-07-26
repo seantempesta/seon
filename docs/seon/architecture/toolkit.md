@@ -178,7 +178,7 @@ its caller and data invariants.
 
 ### Tests
 
-Code correctness uses the existing claimant, writer, and operator runners.
+Code correctness uses the existing cluster JVM, writer, and operator runners.
 Agent/model behavior uses Inspect AI. A toolkit function may request the public
 test operation, but it does not own another test registry, result history, or
 runner.
@@ -296,8 +296,8 @@ identity fields alongside those keys, but does not nest the error under
 
 Optional diagnostic categories may refine a record, but do not replace this
 axis. Core publication/readiness failures follow the configured escalation at
-their transition; ordinary agent mistakes remain values and do not wedge a
-claimant.
+their transition; ordinary agent mistakes remain values and do not wedge the
+cluster JVM.
 
 ## See also
 

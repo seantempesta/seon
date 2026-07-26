@@ -119,11 +119,11 @@ would be the pattern, not the fix.
 Take the *discipline* — pure `transform` steps that do not know they are in a
 loop — and skip the framework.
 
-**No compile tier, no JIT, no graduation-as-speed.** Measured: one 7-step turn
+**No compile tier, no JIT, no accretion-as-speed.** Measured: one 7-step turn
 ran **~104 ms/step of which SCI eval is 0-5 ms**, across 12 transactions per
 turn, before an LLM call that dwarfs everything
 (`flow-prototype-2026-07-25.md:129-131`). **SCI is ~5% of a turn.** The commit
-path is the cost centre. A JIT, a compiled tier and speed-motivated graduation
+path is the cost centre. A JIT, a compiled tier and speed-motivated accretion
 all optimize that 5%. Separately, the JVM SCI JIT has **no substrate**: on
 `:clj`, `->Node` expands to a bare `reify` that never references its `ast`
 argument and `attach-ast` is the identity, with SCI's own comment reading "the
@@ -341,7 +341,7 @@ only the second is unconditional:
    **This reason buys only the diagnostic unless an allocation limit is
    authorized — see O4.**
 2. **Agent code on a platform thread has no carrier-pinning surface.** Verified
-   with `jdk.virtualThreadScheduler.parallelism=1` and 8 claimants wedged
+   with `jdk.virtualThreadScheduler.parallelism=1` and 8 cluster JVM wedged
    inside evals: an unrelated virtual thread still completed 5/5 steps in
    902 ms. `Semaphore.acquire` and `Future.get` both unmount.
 
@@ -391,7 +391,7 @@ preserves the leak by citation and must be corrected.
 Filed:
 `docs/seon/issues/retained-agent-contexts-are-never-evicted-and-share-one-holder.md`.
 
-**Graduation, under this model.** It splits in two (owner ruling):
+**Accretion, under this model.** It splits in two (owner ruling):
 
 - Compiling agent code to a native JVM fn **deletes the `:interrupt-fn` and
   must never happen**.
@@ -436,7 +436,7 @@ Three rules the prototype's version lacked:
    rather than to zero (D9). Without this rule the design uses core.async's word
    `:compute` against core.async's stated meaning — see §9.
 3. **Never re-execute blindly.** The receipt already carries index, `:running`
-   and the epoch, so a pure query answers "this step has wedged N claimants"
+   and the epoch, so a pure query answers "this step has wedged N cluster JVM"
    and fails the run (D9).
 
 **The tree's version of D9 is different and worse in one way.** There is no
@@ -480,18 +480,18 @@ Two live JVMs on one file store **both won the same epoch CAS**, and **40 of 40
 of the parent's successfully-returned commits vanished** with zero transact
 errors, leaving a store that looked pristine on reopen. The `:self` writer
 backend is process-local (`reference-code/datahike/src/datahike/writer.cljc:282`
-defmulti, `:286` `:self`). Claimants forward writes. **The unsafe configuration
+defmulti, `:286` `:self`). Cluster JVM forward writes. **The unsafe configuration
 must REFUSE TO OPEN** — D1's failure was silent.
 
 Note the correction: "`create-writer` ships only `:self`" is **false as
 written**. The `:datahike-server` HTTP writer backend exists at
 `reference-code/datahike/src/datahike/http/writer.clj:35`. The concrete exit
-for horizontal claimants is `:datahike-server` for **writes** plus the existing
+for horizontal cluster JVM is `:datahike-server` for **writes** plus the existing
 `seon.db.host` interest transport for **wake** — necessary because Datahike's
 own `listen` is declared `:supports-remote? false`
 (`api/specification.cljc:1073`). Not new machinery; it is what the pod already
 uses. `docs/seon/architecture/architecture.md:242-246` promises interchangeable
-claimants and is unsafe as written — see O2.
+cluster JVM and is unsafe as written — see O2.
 
 ### The ordered step plan is committed once, CAS-gated (D11)
 
@@ -544,7 +544,7 @@ issue's triage.
 ### Every step transaction carries the epoch fence (D4)
 
 `[:db.fn/cas run-ref :seon.agent.run/claim-epoch e e]` plus the agent-pointer
-CAS, in **every** phase and work transaction. A stale claimant's next commit
+CAS, in **every** phase and work transaction. A stale cluster JVM's next commit
 fails and it stops. In the real system every step is a model or capability call
 longer than any plausible lease, so an unfenced overrun is the **normal path**,
 not an edge case.
@@ -633,14 +633,14 @@ solution.**
 `::protocol/datom-patterns` (e/a/v/added?, max 64,
 `src/seon/db/protocol.cljc:594-601`), and the writer already maintains a
 `::by-attribute` interest index (`src/seon/db/writer.clj:2860-2878`,
-`:2900-2905`). The claimant passes the **worst available option** —
+`:2900-2905`). The cluster JVM passes the **worst available option** —
 `:datahike.read/dependency-plan :all` with `(fn [_] (scan!))`
 (`src/seon/agent/driver/host.clj:809-814`) — a full open-runs query inline in
 the callback for **every cluster commit**. Pass attribute-scoped patterns; add
 equality suppression and a single-slot latest-wins pending scan. No
 scan-per-commit.
 
-This claimant-side `:all` listener is currently **unfiled**; the nearest issue
+This cluster JVM-side `:all` listener is currently **unfiled**; the nearest issue
 scopes itself to the web tier.
 
 **D2, the strand — this is structural.** Datahike's `listen` callback fires "on
@@ -936,12 +936,12 @@ Two entries needing care:
   `docs/seon/issues/output-map-closedness-decides-accretion-legality.md:15-16`
   already asserts it as fact in the committed tree, which defeats this marker
   unless corrected in the same pass.
-- **"claimant" is a Seon COINAGE — UNRATIFIED REPLACEMENT PENDING.** Zero files
+- **"cluster JVM" is a Seon COINAGE — UNRATIFIED REPLACEMENT PENDING.** Zero files
   in the vendored Datahike checkout contain it, against 25 files under `src/`.
   Proposed: **`:seon.agent.run/process`**, grounded on both sides —
   `script/seon/dev/process.clj` already carries the process record with
   `(pid, start-instant)` and generation, matching JDK `ProcessHandle`. See O3.
-  This document uses "claimant" only because the replacement is not ratified.
+  This document uses "cluster JVM" only because the replacement is not ratified.
 
 ## 16. What is measured, and what is not
 
@@ -973,7 +973,7 @@ probe reproduced in the reconciliation pass.
   unoptimised, unmeasured at length.
 - **The fork base invariant is unenforced** — prose plus one demo line.
 - **Only the `:file` backend was exercised.** No cloud store, no remote writer,
-  no replica session, no web-render reader concurrent with claimants.
+  no replica session, no web-render reader concurrent with cluster JVM.
 - **No reset-boundary live proof.** Per the repo's own testing rule, schema,
   acquisition and process behaviour at a cluster reset is a different failure
   class than any fixture or prototype can see.
@@ -1000,15 +1000,15 @@ removing (execution children measured at 650 MB idle). Home:
 `docs/seon/issues/eval-process-isolation-memory-containment.md` — **update it**
 (it is written in the CLJS-pod framing); do not file a second note.
 
-**O2 — Horizontal claimant topology.** `architecture.md:242-246` promises
-interchangeable claimants; D1 destroyed 40 of 40 commits silently.
+**O2 — Horizontal cluster JVM topology.** `architecture.md:242-246` promises
+interchangeable cluster JVM; D1 destroyed 40 of 40 commits silently.
 *Recommendation:* change `architecture.md`, make the unsafe configuration refuse
 to open, and record the concrete exit (`:datahike-server` for writes +
 `seon.db.host` interest transport for wake). Adjacent evidence: four databases
 in one writer process measured 1.96x/1.55x/1.55x rather than 4x, so "more writer
 processes" does not obviously buy throughput either.
 
-**O3 — Replace the coinage "claimant" with `:seon.agent.run/process`?**
+**O3 — Replace the coinage "cluster JVM" with `:seon.agent.run/process`?**
 *Recommendation:* ratify. 25 files under `src/`, plus tests and docs — a
 mechanical shared-tree rename the top level must do atomically. Ratify in the
 **same change** as the result-symbol identity decision, so one word covers

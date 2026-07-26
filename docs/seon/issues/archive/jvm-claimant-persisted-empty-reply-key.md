@@ -5,11 +5,13 @@ severity: blocker
 tags: [issue, agent, runtime]
 ---
 
+Terminology: this note records evidence from before the rename; the process holding a run is now `:seon.agent.run/process`.
+
 # Persist the adapter's namespaced reply text
 
 ## Problem
 
-The durable claimant settlement read `:text` from a response whose maintained
+The durable run-holding process settlement read `:text` from a response whose maintained
 adapter contract returns `:seon.ai/text`. A successful provider response
 therefore linked the SHA-256 blob for zero bytes.
 

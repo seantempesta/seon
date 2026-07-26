@@ -14,7 +14,7 @@ Found by the fresh-eyes runtime review (2026-07-24), see
 
 `seon.agent.driver.host/settle-eval-step!`
 (`src/seon/agent/driver/host.clj`, ~line 700) handles the
-claimant-died-after-`:evaling`-before-first-receipt case by replaying the
+run-holding process died-after-`:evaling`-before-first-receipt case by replaying the
 batch:
 
 ```clojure
@@ -38,13 +38,13 @@ site today.
 
 ## Owner
 
-`seon.agent.driver.host` (JVM claimant leaf).
+`seon.agent.driver.host` (cluster JVM leaf).
 
 ## Acceptance
 
 - `settle-eval-step!` replays an empty-receipt `:evaling` turn through the
   same parse/plan/configure path `eval-step!` uses (or the two arms share one
   function), compiling and running cleanly.
-- A test kills/simulates a claimant after the `:reply-ready→:evaling`
-  transition with zero committed receipts and proves a second claimant
+- A test kills/simulates a run-holding process after the `:reply-ready→:evaling`
+  transition with zero committed receipts and proves a second run-holding process
   replays the batch exactly and settles the turn.

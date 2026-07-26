@@ -5,6 +5,8 @@ severity: bug
 tags: [issue, runtime, architecture]
 ---
 
+Terminology: this note records evidence from before the rename; the process holding a run is now `:seon.agent.run/process`.
+
 # The per-reply execution plan makes no reachable placement decision
 
 Found by the 2026-07-25 placement grounding pass. Extends WTF item 3
@@ -16,7 +18,7 @@ with the reachability proof and two findings neither recorded.
 ## Problem
 
 `plan-execution` + `execution-plan-disposition` run on every reply. In the
-shipped single-tier claimant, every branch that would move work is
+shipped single-tier run-holding process, every branch that would move work is
 unreachable, every consistency check compares a value with itself, and the
 only arms that can fire are a refusal (`:steering`), an emptiness test
 (`:no-dispatch`) computable without any of it, and one misclassified

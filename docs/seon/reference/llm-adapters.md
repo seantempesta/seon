@@ -299,7 +299,7 @@ checked 2026-07-19. Capability/config source:
 
 | Model | Context | Completion limit | Notes |
 |---|---:|---:|---|
-| ✔ `kimi-k3` | 1M | 131,072 default; 1,048,576 max | Flagship long-horizon coding/knowledge model. Thinking is always enabled; as of 2026-07-19, `reasoning_effort` accepts only `max` (also the default). Sampling values are fixed, so omit temperature/top-p rather than sending them. Automatic prefix caching is available. The check means live single-response transport, not full task-quality graduation. |
+| ✔ `kimi-k3` | 1M | 131,072 default; 1,048,576 max | Flagship long-horizon coding/knowledge model. Thinking is always enabled; as of 2026-07-19, `reasoning_effort` accepts only `max` (also the default). Sampling values are fixed, so omit temperature/top-p rather than sending them. Automatic prefix caching is available. The check means live single-response transport, not full task-quality proof. |
 
 Kimi uses the conventional `MOONSHOT_API_KEY` name and the existing generic
 adapter; no Kimi-specific provider or retry path is needed:

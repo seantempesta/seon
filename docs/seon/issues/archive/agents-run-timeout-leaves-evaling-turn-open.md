@@ -10,7 +10,7 @@ tags: [issue, agent, runtime, web]
 ## Problem
 
 When `POST /agents/run` reached its request timeout during a healthy
-multi-turn run, the run closed as `:superseded` and released claimant/current
+multi-turn run, the run closed as `:superseded` and released run-holding process/current
 run custody, but its active turn remained durably
 `:seon.agent.turn/status :running` and
 `:seon.agent.turn/phase :evaling`.
@@ -36,12 +36,12 @@ The default-cluster drive7 live drive on 2026-07-24 used agent
   `timed_out=true`, `closed_reason="timeout"`, eight turns, and eight evals.
 - Transaction `536874097` retracts the run's `:open` status, asserts
   `:closed`, asserts `:seon.agent.run/closed-reason :superseded`, retracts
-  claimant custody, and retracts the agent's current-run ref.
+  process custody, and retracts the agent's current-run ref.
 - The current database value at transaction `536874098` (commit ID
   `6a632d80-3617-52b1-ba7e-3bcd802d3169`) has run
   `psqzapw9ha40` closed with
   `:seon.agent.run/closed-reason :superseded`. The agent has no
-  `:seon.agent/run` ref and the run has no claimant.
+  `:seon.agent/run` ref and the run has no run-holding process.
 - In that same current value, turn `amxh80vcpebv` remains
   `:seon.agent.turn/status :running` and
   `:seon.agent.turn/phase :evaling`. It has no terminal error and never
@@ -62,23 +62,23 @@ The exact lifecycle, attempt, and eval datoms are retained in
 Commit `f6dd94682` makes observation-timeout settlement one fenced database
 transition. It begins with the agent current-run CAS, run claim-epoch CAS, and
 active turn phase CAS; then it publishes the turn as `:interrupted`, closes the
-run as `:superseded`, and retracts claimant and current-run custody together.
+run as `:superseded`, and retracts run-holding process and current-run custody together.
 There is no web-only run close.
 
 The portable driver also refreshes the minimal durable run authority after a
-late phase write loses its fence. A claimant displaced by the timeout therefore
+late phase write loses its fence. A run-holding process displaced by the timeout therefore
 observes the already-closed run and does not attempt a second stale settlement
 CAS or record a core fault.
 
 Focused proof covers the exact active-turn timeout transaction and the
-late-claimant refresh path: the writer selection is 7 tests / 39 assertions and
+late-run-holding process refresh path: the writer selection is 7 tests / 39 assertions and
 the CLJS selection is 14 tests / 64 assertions; the artifact-backed exact
 selections are 2 tests / 14 assertions on the writer and 2 / 11 in CLJS.
 
 The later isolated `planschema` run `q5ddb6i4pp4z` supplied an independent live
 terminality check after six successful evals and one separate planner refusal:
 all seven turns are `:published` and terminal, the run is closed, and both the
-agent current-run and run claimant queries are empty. Evidence is in
+agent current-run and run run-holding process queries are empty. Evidence is in
 `tmp/orchestrator/planschema-gate.log`.
 
 ## Owner
@@ -86,7 +86,7 @@ agent current-run and run claimant queries are empty. Evidence is in
 The `/agents/run` request-settlement timeout and run-supersession owner must
 terminalize the active turn using the same epoch/phase-fenced lifecycle
 transition that ordinary completion and visible phase errors use. Run close,
-turn close/publication, claimant release, and current-run retraction must form
+turn close/publication, run-holding process release, and current-run retraction must form
 one consistent transition; no web-only cleanup path may close only the run.
 
 ## Acceptance
@@ -95,7 +95,7 @@ one consistent transition; no web-only cleanup path may close only the run.
   successful eval receipt but has not yet published.
 - The resulting transaction leaves the run closed, the active turn terminal
   and published with an explicit timeout/supersession outcome, and retracts
-  both claimant and agent current-run custody.
+  both run-holding process and agent current-run custody.
 - The settlement path performs no stale second CAS after the terminal
   transition and persists no core fault.
 - No current or history query can observe a terminal run with a

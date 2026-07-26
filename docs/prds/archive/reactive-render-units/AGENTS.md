@@ -34,5 +34,5 @@ closed registrations do no query, SCI, Hiccup, serialization, or token work
 and must not pin obsolete database values. Clojure `=` is semantic equality;
 hashes are accelerators only.
 
-Research belongs in `research/`; current source/gap/order and graduation proof
+Research belongs in `research/`; current source/gap/order and system proof
 belong in [[roadmap]]. Default-cluster proof precedes any ACME coordination.

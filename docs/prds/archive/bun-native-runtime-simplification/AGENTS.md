@@ -23,4 +23,4 @@ the same cut. A smaller diff is not success unless behavior, cancellation,
 bounded memory, shutdown, and live browser/database evidence remain green.
 
 Research and retained measurements belong in `research/`; current state, order,
-deletion ledger, and graduation evidence belong in [[roadmap]].
+deletion ledger, and system evidence belong in [[roadmap]].

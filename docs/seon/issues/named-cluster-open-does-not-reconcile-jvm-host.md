@@ -5,17 +5,19 @@ severity: blocker
 tags: [issue, agent, runtime, operator]
 ---
 
-# Reconcile the JVM claimant for named clusters
+Terminology: this note records evidence from before the rename; the process holding a run is now `:seon.agent.run/process`.
+
+# Reconcile the cluster JVM for named clusters
 
 ## Problem
 
 `bin/seon cluster open <name>` reconciles only the target pod. A named
 source-checkout cluster therefore has no target-specific long-lived JVM
-claimant or web-render process even though its derived launch descriptor and
+run-holding process or web-render process even though its derived launch descriptor and
 process graph include both members.
 
-This blocks isolated live proof of JVM claimant behavior. Sending a provider
-request would not exercise a claimant owned by the named cluster.
+This blocks isolated live proof of cluster JVM behavior. Sending a provider
+request would not exercise a run-holding process owned by the named cluster.
 
 ## Evidence
 
@@ -66,5 +68,5 @@ authority.
   and ready and the external watcher/writer owners are ready.
 - `cluster close` and `cluster restart` stop or replace every target-owned
   member in dependency order without changing the source cluster generations.
-- A fresh named-cluster run persists a claimant identity whose PID matches its
+- A fresh named-cluster run persists a `:seon.agent.run/process` whose PID matches its
   target host workload PID.

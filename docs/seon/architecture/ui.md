@@ -22,8 +22,8 @@ primitives, with zero `src/seon` edits.
 
 The web UI runs in the independent **web-render JVM**. It serves HTTP through
 http-kit, frames SSE through the Datastar Clojure SDK, and reads through its own
-immutable replica and database session. It never executes agent-authored code. Claimants evaluate
-authored renders behind the guarded execution door and commit or return ordinary
+immutable replica and database session. It never executes agent-authored code.
+The cluster JVM evaluates authored renders with the one `:interrupt-fn` and commits or returns ordinary
 render data; the web-render process performs only trusted pure derivation.
 
 ## Interactions are database transactions
@@ -33,7 +33,7 @@ arguments. The route validates the handler's exact committed schema and source
 identity, transacts one pending interaction/run fact, and acknowledges
 immediately. The HTTP response is never an execution-result channel.
 
-The existing claimant machinery acquires and executes the interaction. Its
+The cluster JVM's driver acquires and executes the interaction. Its
 result or flat error becomes committed interaction facts. A normal HTML block
 queries the latest terminal outcome for the page's agent and returns no render
 when no such fact exists. The existing database interest, equality
@@ -158,8 +158,9 @@ technical surface wraps or horizontally scrolls, and the canvas has a bounded
 default height. Scale is handled by disclosure and windowing, never smaller
 unbounded text.
 
-**Capability + cache.** A claimant acquires authored program and ordinary inputs
-at one immutable database value, invokes authored code through the guarded SCI
+**Capability + cache.** The cluster JVM acquires authored program and ordinary
+inputs at one immutable database value, invokes authored code with the one
+`:interrupt-fn`,
 door, and exposes only ordinary data to trusted render functions. Agent-authored
 renders, layouts, and route handlers never run inside the web-render process or
 perform leaf RPCs. The byte-stable cache prefix at low priority is preserved
@@ -299,7 +300,8 @@ render-unit, routing, and live-morph mechanism in one route tree:
   other live page, not a provenance-routed debug interest. With no open page it
   owns no database interest or render work.
 - **app** (`/agent/{id}/app/{x}`) — an agent-authored sub-page; its route handler
-  is an agent layout symbol executed by a claimant through the guarded door.
+  is an agent layout symbol executed by the cluster JVM with the one
+  `:interrupt-fn`.
 
 ## The persistent header — one shared render unit
 
@@ -366,8 +368,9 @@ registered per [[data-model]].)
   Public agent-authored functions are shared
   cluster capabilities: the caller and original author may differ, and the
   function may live in any allowed application namespace;
-  refusal precedes any invoke; args stay data; the call runs in a claimant
-  through the guarded door → it transacts → the page re-derives and the stream morphs.
+  refusal precedes any invoke; args stay data; the call runs in the cluster JVM
+  with the one `:interrupt-fn` → it transacts → the page re-derives and the
+  stream morphs.
   reitit replaces the FRAGILE dispatch, not the SECURE gate.
 - **Interactivity is plain Clojure.** Agents author fn-calls in handler slots; a
   render-time server-side postwalk rewrites a fn-call `(cancel-order! id)` or a
@@ -558,12 +561,12 @@ transacts datoms; it never opens or writes a stream.
   replay across lineages.
 - **The hard invariant: no agent code ever touches an SSE connection.** Agent →
   datom → committed `:db-after` value → selective derivation → morph, one way; actions
-  reverse it (a browser POST → a claimant's guarded door for the owning
+  reverse it (a browser POST → the cluster JVM's `:interrupt-fn` for the owning
   agent → result datoms → selective derivation → morph). The database is the bus both ways.
 
 Each authored invocation owns one immutable input and guarded deadline. No
 process-global input or deadline cell can be overwritten by a nested or future
-render. The claimant's phase and epoch fences prevent a late result from
+render. The run's process and epoch fences prevent a late result from
 entering a newer turn. Repeated failure recording is bounded and cannot retain
 an unbounded set of broken symbols.
 

@@ -4,6 +4,8 @@ status: active
 tags: [research, runtime]
 ---
 
+Terminology: this note records evidence from before the rename; the process holding a run is now `:seon.agent.run/process`.
+
 # Flow prototype verdict: what the running code proved and what it broke (2026-07-25)
 
 Subject under review: `docs/prds/sci-execution-runtime/research/flow-design-2026-07-25.md`.
@@ -168,7 +170,7 @@ The design's loop sentence — `claim (CAS) -> acquire database value -> transfo
 writer JVM owns transactions and that other processes forward writes. The prototype
 violated that rule and the file store is last-writer-wins at the branch head.
 
-Fix: one writer connection per store; claimants forward writes. The unsafe configuration
+Fix: one writer connection per store; cluster JVM forward writes. The unsafe configuration
 must **refuse to open** rather than silently corrupt. Every clean crash-resume result in
 section 1 was single-writer or strictly sequential JVMs; none of them is evidence for the
 multi-writer configuration.
@@ -197,21 +199,21 @@ Real wake path, 10 agents, one 1-step run each, correct end state all counters 1
 counters `{z0 1, z1 1, z2 1, z3 35, z4 704, z6 721, ...}` with receipts `([:ok 10])` —
 exactly one clean `:ok` per run. **One step ran 704 times and the entire observability
 surface shows no trace of it.** `:seon.eval/id` is a unique identity keyed by
-(run, index), so a second claimant's `:running` receipt **overwrites** the first's
+(run, index), so a second cluster JVM's `:running` receipt **overwrites** the first's
 terminal `:ok`; resume then reads that `:running` as in-flight and resets the cursor, so
-two claimants mutually re-run the same step.
+two cluster JVM mutually re-run the same step.
 
 This also silently destroyed the only evidence of the double execution in D4 (receipts
 read a pristine `[0..5 all :ok]`).
 
-Fix: key the receipt by (run, index, epoch) so a fenced claimant's write is
+Fix: key the receipt by (run, index, epoch) so a fenced cluster JVM's write is
 distinguishable rather than destructive; resume counts **terminal** receipts only, and a
 `:running` receipt from a foreign epoch is abandoned, not in flight. A step with a terminal
 receipt at its index must never be re-executable.
 
 ### D4 — No epoch fence after the claim (serious, design-level)
 
-Single writer, real CAS: claimant A holds a 500ms lease, blocks 4s inside a host call, a
+Single writer, real CAS: cluster JVM A holds a 500ms lease, blocks 4s inside a host call, a
 survivor legitimately steals the run (epoch 1→2). Both executed index 2. **A, never told
 it was fired, went on to commit indices 3, 4, 5 and closed the run.** Final counter 3
 where 6 was correct. `drive-run!` validates the claim once at the top and folds every step
@@ -221,7 +223,7 @@ In the real system every step is a model or capability call longer than any plau
 lease, so an unfenced overrun is the normal path, not an edge case.
 
 Fix: include `[:db/cas run-eid :run/epoch e e]` in every step transaction. The stale
-claimant's next commit fails and it stops. Renew the lease on a schedule owned by the
+cluster JVM's next commit fails and it stops. Renew the lease on a schedule owned by the
 claim — while a step is in flight and while queued — not only at step boundaries.
 
 ### D5 — Wake is a positive feedback loop that kills the process (fatal, design-level)
@@ -237,7 +239,7 @@ The design points at the existing `listen!` → `scan!` wiring
 (`driver/host.clj:807-815`) as already done. It is the defect, not the solution.
 
 Fix is the repo's own stated live-update chain, applied here: attribute-indexed interest
-(wake only on `:message/to` and `:run/open?` datoms this claimant did not author) →
+(wake only on `:message/to` and `:run/open?` datoms this cluster JVM did not author) →
 equality suppression → a single-slot latest-wins pending scan. No scan-per-commit.
 
 ### D6 — The pure transform's read-modify-write loses updates with no failure at all (fatal, design-level)
@@ -312,7 +314,7 @@ Fix, three parts, all from data the design already commits: (1) bound the caller
 `.get(deadline + slack)` and `Thread.interrupt` the compute thread so host calls that
 honour interruption unwind; (2) never re-execute blindly — the receipt already carries
 index, `:running` and the epoch, so a pure query answers "this step has wedged N
-claimants" and fails the run; (3) a wedged thread must leave the permit pool so capacity
+cluster JVM" and fails the run; (3) a wedged thread must leave the permit pool so capacity
 degrades by one rather than to zero.
 
 Related, same fix: `try`/`finally` outlives the kill. `(try <runaway> (finally (host/block 3000)))`
@@ -432,7 +434,7 @@ Reporting a failed attack honestly — merge the namespace on principle, no expl
   limit exists.
 - **The un-interruptible host call ceiling.** `Thread.stop` is gone, so a host call that
   ignores interruption can only be escaped by killing the process. D9's fix bounds the
-  *claimant* and the *permit*, not the call. That ceiling should be stated as the system's
+  *cluster JVM* and the *permit*, not the call. That ceiling should be stated as the system's
   limit, in the agent-facing docs, rather than left implied.
 
 ## 3. What is still unproven
@@ -440,7 +442,7 @@ Reporting a failed attack honestly — merge the namespace on principle, no expl
 Be suspicious of anything not on the section 1 list. Specifically:
 
 - **No LLM, no real capability calls.** No fs, web, shell, or agent-authored `db` write
-  passed through the door. No `:mixed` workload. No streaming. The agent's "reply" is a
+  passed through `:interrupt-fn`. No `:mixed` workload. No streaming. The agent's "reply" is a
   pure function. Every eval was CPU-only or a deliberate host block. Every timing number
   for a turn is therefore a lower bound by the cost of a model call.
 - **Lease renewal while parked on the semaphore is not implemented.** Renewal happens only

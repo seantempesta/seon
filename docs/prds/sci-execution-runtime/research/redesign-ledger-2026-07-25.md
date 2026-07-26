@@ -4,6 +4,8 @@ status: active
 tags: [research, runtime]
 ---
 
+Terminology: this note records evidence from before the rename; the process holding a run is now `:seon.agent.run/process`.
+
 # Redesign ledger: what must be deleted, and the test a port would fail (2026-07-25)
 
 Owner instruction, 2026-07-25: the previous conversion lane was told to remove
@@ -61,7 +63,7 @@ Companion documents:
   (L333), `install-wake-trigger!` (L484), `uninstall-all-wake-triggers!`
   (L545), `install-ticker!` (L596), `default-tick-ms` (L571).
 - `src/seon/agent/turn.cljs:673` — a section headed
-  `;;; CLAIM-NATIVE POD PHASE LEAF`, i.e. the pod acting as a second claimant
+  `;;; CLAIM-NATIVE POD PHASE LEAF`, i.e. the pod acting as a second cluster JVM
   beside the real one.
 - Already recorded as WTF item 5 (superseded stack alive next to replacement)
   with concrete duplications: two turn-row constructions, two reply parses per
@@ -69,7 +71,7 @@ Companion documents:
 
 **Why it is a ported shape.** A ticker plus a wake-trigger registry is how you
 drive work in a single-threaded event-loop runtime that cannot block. On a JVM
-claimant, a virtual thread blocks on the transaction feed and the ticker has no
+cluster JVM, a virtual thread blocks on the transaction feed and the ticker has no
 job. The FSM in `loop.cljs` is a second copy of a state machine whose authority
 is the durable phase cursor.
 
@@ -111,10 +113,12 @@ around it with different vocabularies and different failure semantics.
 
 **Evidence.**
 
-- The primitive: `:interrupt-fn`, fired at every fn entry and every `recur`
+- The primitive: `:interrupt-fn`, fired at every `fn` body entrance and every
+  `recur`
   (`reference-code/sci/src/sci/impl/fns.cljc:52`), plus
   `sci.interrupt/interrupt!` for an uncatchable marker.
-- Step budget — `src/seon/host/guard.cljc` (`check-holder!`, a `long-array`).
+- Time-limit implementation — `src/seon/host/guard.cljc` (`check-holder!`, a
+  `long-array`).
 - Platform interrupt predicate — `src/seon/host/invoke.clj:39`.
 - Watchdog thread interrupt — `src/seon/host/invoke.clj:37`.
 - Output cap — `src/seon/host/eval.clj:217`.
@@ -123,45 +127,48 @@ around it with different vocabularies and different failure semantics.
 - Process `destroyForcibly` — `script/seon/dev/process.clj:2085`.
 
 **Why it is a ported shape.** All of it is cooperative, and modern JDKs removed
-`Thread.stop`, so none of it can stop a runaway that reaches no safepoint.
+`Thread.stop`, so none of it can stop a runaway that reaches no `fn` body
+entrance.
 `cancel-active!` admits this: it settles the frame, interrupts, waits 2s, and
 walks away leaving the thread running (`invoke.clj:280-283`). The layers exist
-because the door is being asked to deliver a guarantee only a process boundary
-can deliver.
+because `:interrupt-fn` is being asked to deliver a guarantee only a process
+boundary can deliver.
 
 **Falsifier.** The surviving design states, in one sentence, which mechanism
 owns "runaway but stoppable" and which owns "wedged and unstoppable", and the
-count of mechanisms drops. Specifically: the door promises only what a
-safepoint can enforce, and the wedged case is owned by the claim lease plus
-process replacement. A port that keeps all seven and merely relocates them
-fails.
+count of mechanisms drops. Specifically: `:interrupt-fn` promises only what its
+calls at `fn` body entrances can enforce, and the wedged case is owned by the
+claim lease plus process replacement. A port that keeps all seven and merely
+relocates them fails.
 
 ---
 
-## R-4 — Graduation was built, then disabled; the gate tests the wrong property
+## R-4 — Accretion was built, then disabled; the gate tests the wrong property
 
 **Symptom.** The tiering machinery the owner wants already exists and is
 switched off.
 
 **Evidence.** `src/seon/host/graduate.clj` — `trust-gate?` requires
-schema-valid ∧ test-covered ∧ fingerprint match ∧ nursery test green ∧ compiled
-test green ∧ identical results across tiers. Then `effective-tier` hardcodes
-`:nursery` for every row, and `graduate!` refuses outright and records a core
-fault citing owner ruling R48 pending P4 pure-call-graph admission.
+schema-valid ∧ test-covered ∧ fingerprint match ∧ interpreted-SCI test green ∧
+compiled test green ∧ identical results across tiers. Then `effective-tier`
+hardcodes the retired literal `:nursery` for every row, and `graduate!` refuses
+outright and records a core fault citing owner ruling R48 pending P4
+pure-call-graph admission.
 
 **Why it is a ported shape.** The gate measures *correctness* (spec'd, tested,
 differentially equal) and is being used to authorize *removal of containment* —
-a graduated fn is a real JVM fn with no safepoint at all. Tests cannot
+an accreted function is a real JVM function with no `:interrupt-fn` at all.
+Tests cannot
 establish termination. `(defn count-to [n] (loop [i 0] (if (= i n) i (recur (inc i)))))`
 passes every generative test Malli can produce and wedges the process forever on
 `(count-to -1)`. R48 was right to refuse; the design error is asking a
 correctness gate to make a containment decision.
 
-**Falsifier.** The surviving fast tier keeps a safepoint. Concretely: a
-graduated/compiled function, given an input that makes it loop forever, still
-trips the budget and returns a flat `:seon/error` — demonstrated by an actual
-test, not by argument. A port that re-enables `graduate!` to produce bare
-`clojure.core/eval` fns fails this by construction.
+**Falsifier.** The surviving fast tier keeps the `:interrupt-fn`. Concretely:
+an accreted compiled function, given an input that makes it loop forever, still
+trips the `time-limit` and returns a flat `:seon/error` — demonstrated by an
+actual test, not by argument. A port that re-enables `graduate!` to produce
+bare `clojure.core/eval` functions fails this by construction.
 
 ---
 
@@ -173,12 +180,13 @@ fast is ClojureScript-only.
 **Evidence.** `reference-code/sci/src/sci/impl/jit.cljs` (36KB) — codegen on
 first call via `js/Function`, ~20x on tight loops per the fork's CHANGELOG
 0.15.56. There is no `jit.clj`; `ls src/sci/impl | grep jit` returns one file.
-It preserves the safepoint (`jit.cljs:772` emits `if(INT!==null)INT();` at the
-head of the recur trampoline) and escapes unsupported subtrees back to the
-interpreter through `H.ev` sharing the invocation array.
+It preserves the `:interrupt-fn` call (`jit.cljs:772` emits
+`if(INT!==null)INT();` at the head of the recur trampoline) and escapes
+unsupported subtrees back to the interpreter through `H.ev` sharing the
+invocation array.
 
 **Why it is a ported shape.** The performance story was inherited from the Bun
-tier. Under the all-JVM target, claimants get the tree-walking interpreter and
+tier. Under the all-JVM target, cluster JVM get the tree-walking interpreter and
 HotSpot compiling *the interpreter*, not the program.
 
 **Falsifier.** A measured number, on the JVM, for a representative long
@@ -211,9 +219,9 @@ deletion wave can close them.
 | # | Symptom | Falsifier |
 |---|---|---|
 | 6a | One turn spans three processes with two full claim-arbitration bounces (render/publish on the pod, llm/eval on the JVM) | One turn = one claim, one process, zero handoffs. Count the claim transitions per turn; the number is 1. |
-| 6b | Two IPC mechanisms invoke agent code on the JVM in one turn — the claim cursor and a UDS frame protocol (`seon.host.clj` server, `session.leaf` client) | Exactly one way to invoke agent-authored code under the guard. `rg` for the frame/session/channel vocabulary returns nothing. |
+| 6b | Two IPC mechanisms invoke agent code on the JVM in one turn — the claim cursor and a UDS frame protocol (`seon.host.clj` server, `session.leaf` client) | Exactly one way to invoke agent-authored code under `:interrupt-fn`. `rg` for the frame/session/channel vocabulary returns nothing. |
 | 6c | Per-reply plan/disposition reifies the whole program graph + schema corpus, then re-checks manifests against the projection they came from; `observed-generation` is assigned from `planned-generation` (vacuous); `cache-key` computed and never used | Placement, if it survives at all, is a set-membership test at resolution time. No unbounded query on the per-reply hot path. |
-| 6d | The crash-recovery arm the six-phase cursor exists for does not compile-check: `settle-eval-step!` calls `run-eval-batch!` with 5 args against a 7-arg signature, `storage-view` in the `run` position | The recovery path has an executing test that kills a claimant mid-`:evaling` and observes resumption. Already filed: `docs/seon/issues/settle-eval-replay-arity-mismatch.md`. |
+| 6d | The crash-recovery arm the six-phase cursor exists for does not compile-check: `settle-eval-step!` calls `run-eval-batch!` with 5 args against a 7-arg signature, `storage-view` in the `run` position | The recovery path has an executing test that kills a cluster JVM mid-`:evaling` and observes resumption. Already filed: `docs/seon/issues/settle-eval-replay-arity-mismatch.md`. |
 | 6e | Fence ceremony: a standalone probe tx before each batch, three separate fence builders, and 8+ independent pulls of the one config singleton per turn | One config acquisition per turn, passed as an ordinary value. One fence builder. No probe tx. |
 | 6f | Vocabulary drift across one call stack: `:seon.repl/*` → `:seon.execution/*` → `:seon.agent.driver/*` → `:seon.host/*` → `::session/*` → `:seon.eval/*` for one logical operation | One turn has one vocabulary. Any surviving boundary term names the producing and consuming source on both sides, per the CLAUDE.md vocabulary rule. |
 
@@ -223,14 +231,14 @@ Recorded so the cut wave does not overshoot. From `wtf-review-2026-07-24.md`:
 
 - `seon.agent.run.core` (~190 lines) — the claim/epoch/lease/steal algebra.
   Tight, pure, and exactly what crash tolerance needs. Keep verbatim.
-- `seon.host.guard` — step budget + deadline + output cap through one
-  array-backed safepoint, including the retained-trip trick that stops a
-  dependency from downgrading a policy stop. Proportionate.
+- `seon.host.guard` — the time-limit + output cap through one array-backed
+  check at every `fn` body entrance, including the retained-trip trick that
+  stops a dependency from downgrading a policy stop. Proportionate.
 - Receipt-before-run and the fn/ns/schema tee in `seon.host.eval` — the code
   corpus as data is the product.
 - The UI path: facts → reactive derivation → SSE morph.
 
-Additionally, from the 2026-07-25 session: the graduation *gate* in
+Additionally, from the 2026-07-25 session: the accretion evidence gate in
 `graduate.clj` (`trust-gate?`) is good evidence-gathering pointed at the wrong
 decision. Repoint it; do not delete it.
 
@@ -309,7 +317,7 @@ path.
 `src/seon/web/server.clj:10,12` requires `seon.db.host` and
 `seon.db.transport.uds`; `:89-167` opens a UDS session for replica reads;
 `:269-273` builds a `db.host/writer-session`. ~3,650 lines must survive unless
-web-render moves into the claimant heap, which worsens the OOM blast radius.
+web-render moves into the cluster JVM heap, which worsens the OOM blast radius.
 Two of three designs claimed this deletion. Falsifier: name where web-render
 reads from before counting those lines.
 
@@ -324,7 +332,7 @@ simplification, not by relocation.**
 
 **8d — The lease is never renewed during a drive.** Written at claim time only;
 with `stale-ms` = 1,200,000 any run driving longer than 20 minutes is stealable
-from a *healthy* claimant. Directly contradicts the long-computation goal.
+from a *healthy* cluster JVM. Directly contradicts the long-computation goal.
 
 **8e — `:seon.agent.turn/evals` is cardinality-many, hence unordered.** "Form 3
 of 7" is unanswerable today. And a form count derived from re-parsing the reply
@@ -339,13 +347,14 @@ Recorded because a ledger that hides its own errors is worthless.
 
 - **"Seon's `interrupt/clojure-core` is a hand list of nine that leaves most
   code unmetered" — WRONG in effect.** Measured against Seon's real base:
-  `(reduce + (map inc (range 5e6)))` fires 9,999,999 safepoints;
+  `(reduce + (map inc (range 5e6)))` enters interpreted function bodies
+  9,999,999 times;
   `(count (filter even? (range 5e6)))` 7,500,000; `(sort (vec (range 3e6)))`
   3,000,000; `frequencies`, `group-by`, `distinct`, `clojure.string/join` all
   metered. Because `sci-range` produces an interrupt-aware lazy seq, any
   consumer of it is metered. The real hole is narrower: a single host call over
-  already-materialized data is a safepoint-free window, bounded by data the
-  agent already paid safepoints to build.
+  already-materialized data is a window without a `:interrupt-fn` call,
+  bounded by data the agent already paid `:interrupt-fn` calls to build.
 - **The capability annotations DO exist.** `context.clj:745-812` annotates
   fs write/edit/replace!/insert!, shell run/run-bg!/job-stop!, web fetch/search
   as `:external`. This makes effect receipts much cheaper than assumed.
@@ -423,7 +432,7 @@ These are not backlog items. Any design that appears to solve one is wrong.
    `:datahike-server` HTTP writer backend at `http/writer.clj:35`. The correct
    statement is *"the `:self` backend is process-local, so one WRITE CONNECTION
    per store for that backend."* **Corollary needing an owner ruling (O2):
-   `architecture.md:242-246` promises interchangeable claimants and is UNSAFE as
+   `architecture.md:242-246` promises interchangeable cluster JVM and is UNSAFE as
    written** — D1 measured two live JVMs on one file store both winning the same
    epoch CAS, with **40 of 40** of the parent's successfully-returned commits
    vanishing, zero transact errors, and a store that looked pristine on reopen.
@@ -550,7 +559,7 @@ statistical: `(defn f [xs] (map inc xs))` → `:value-passed-pattern`;
 
 **Why it matters beyond placement.** `:seon.schema/pure-predicate-symbols` and
 the P4 pure-call-graph admission gate — the stated reason R48 refused native
-graduation — both consume this substrate. If purity is universally `:external`,
+accretion — both consume this substrate. If purity is universally `:external`,
 that gate can never open on its current input.
 
 **Falsifier.** `(defn add [a b] (+ a b))` derives as pure.
@@ -567,8 +576,9 @@ that gate can never open on its current input.
 
 1. **A corpus function authored in an eval — ZERO `src/` diff.** `tee-tx-data`
    writes the `:seon.fn` row, `install-recorded-function!` (`eval.clj:311`)
-   hands it to `install-nursery!`, `registry-load-fn` (`context.clj:613`) serves
-   it to every other ctx on first `require`. Genuinely data-only.
+   hands it to the source-named `install-nursery!`, `registry-load-fn`
+   (`context.clj:613`) serves it to every other `ctx` on first `require`.
+   Genuinely data-only.
 2. **A new `my.*` toolkit namespace — the MOST expensive.** A `src` file, a hand
    `require` in `client.cljs` (L140-197), passage of the `pure-block?` **source
    regex** (`context.clj:1060`), and — if effectful — hand entries in BOTH
@@ -585,10 +595,10 @@ function, and no hand list is edited.
 
 ## R-15 — The demo breaks on DISCOVERY, not execution
 
-**Symptom.** A small model on the claimant can only call what its five home
+**Symptom.** A small model on the cluster JVM can only call what its five home
 `require`s already name.
 
-**Evidence.** Four discovery paths exist; on the surviving claimant JVM **three
+**Evidence.** Four discovery paths exist; on the surviving cluster JVM **three
 are dead**:
 
 - `grep-graph` — unregistered and CLJS-only;
@@ -661,7 +671,7 @@ solution.** Two independent measurements:
 - **D5, the stampede.** `scan!` commits; every commit fires `listen!`; every
   `listen!` submits a whole new `scan!`. Measured commits per useful run
   **7.0 → 14.4 → 124.8**; lost CAS claims **5 → 157 → 10,343**;
-  `OutOfMemoryError` at n=20 after 2,555 scans. The claimant passes the **worst
+  `OutOfMemoryError` at n=20 after 2,555 scans. The cluster JVM passes the **worst
   available option** — `:datahike.read/dependency-plan :all` with
   `(fn [_] (scan!))` (`src/seon/agent/driver/host.clj:809-814`) — a full
   open-runs query inline in the callback for **every cluster commit**. The fix
@@ -670,7 +680,7 @@ solution.** Two independent measurements:
   `::protocol/datom-patterns` (e/a/v/added?, max 64,
   `src/seon/db/protocol.cljc:600-601`) and the writer already maintains a
   `::by-attribute` interest index (`src/seon/db/writer.clj:2860-2878`,
-  `:2900-2905`). **This claimant-side `:all` listener is currently UNFILED.**
+  `:2900-2905`). **This cluster JVM-side `:all` listener is currently UNFILED.**
 - **D2, the strand — structural.** Datahike's `listen` callback fires "on each
   transact" **only** (`api/specification.cljc:1076`), so a lease going stale —
   which is not a commit — can **never** be delivered by the
@@ -720,7 +730,7 @@ function-granularity.
 
 ---
 
-## R-18 — MEASURED: the guard works, but only on a platform thread
+## R-18 — MEASURED: `:interrupt-fn` works, but only on a platform thread
 
 Prototype run 2026-07-25 (`clojure -M:writer:host`, JDK 26.0.1, `-Xmx2g`),
 one shared `sci/init` base forked per agent, one `:interrupt-fn` checking a
@@ -749,7 +759,7 @@ while parked. The SCI eval itself runs on a **platform thread**, where
 allocation is measurable and killable.
 
 **NEAR MISS — record this.** The Wave-2 audit recommended deleting the "fixed
-10-thread platform eval pool + virtual→platform handoff", replaced by "the run's
+10-thread platform `:compute` executor + virtual→platform handoff", replaced by "the run's
 own virtual thread". That deletion would have **silently removed memory
 enforcement**, because the property depends on the thread kind. The existing pool
 has the right shape for a reason nobody wrote down. The audit's other complaint
@@ -768,7 +778,7 @@ is conditional.**
    thread.
 2. **Independent and unconditional: agent code on a platform thread has no
    carrier-pinning surface.** Verified with
-   `jdk.virtualThreadScheduler.parallelism=1` and 8 claimants wedged inside
+   `jdk.virtualThreadScheduler.parallelism=1` and 8 cluster JVM wedged inside
    evals — an unrelated virtual thread still completed 5/5 steps in 902 ms;
    `Semaphore.acquire` and `Future.get` both unmount.
 
@@ -784,8 +794,9 @@ platform −7.3 ms. Noise on both. Delete that argument wherever it appears.
 COMPUTE THREAD, not by the `:io` caller. Arming on the caller reported 183 KB for
 a run that allocated ~67 MB and misattributed a `:memory` kill as `:time`.
 
-**Correction to an earlier claim.** The predicted "host calls have no safepoint
-so allocation there is uncatchable" is mostly wrong: `sci.interrupt`'s overridden
+**Correction to an earlier claim.** The prediction that host calls make no
+`:interrupt-fn` call, leaving allocation there uncatchable, is mostly wrong:
+`sci.interrupt`'s overridden
 `doall`/`repeatedly` fire the interrupt-fn per element, so the allocation was
 caught at the cap. The hole is narrower than stated — a *single* huge allocation
 inside one un-overridden host call.
@@ -844,8 +855,9 @@ because the lease resumes the work. Measured basis: an agent OOM did not take
 the writer down (0 failed transactions, store consistent on reopen, one 180ms
 latency spike against a 33ms median).
 
-**O2. The wedge is a process kill.** The door promises only what a safepoint
-can enforce. A CPU-bound host call reaches no interpreted fn body, the
+**O2. The wedge is a process kill.** `:interrupt-fn` promises only what its
+calls at every `fn` body entrance can enforce. A CPU-bound host call reaches
+no interpreted fn body, the
 `:interrupt-fn` never fires, and `Thread.stop` is gone — so a wedged eval is
 detected by lease expiry and the process is replaced, with the run resuming
 from receipts. State the hole; never imply the limits bound it. Benefit: the
@@ -920,7 +932,8 @@ exactly how the previous conversion became a port.
 
 Consequences:
 
-- The sixteen defects D1-D16 are fixed **in `src/`**, not in a sandbox first.
+- The sixteen defects D1-D16 are fixed **in `src/`**, not in a parallel
+  staging area first.
   CUT FIRST, SEAM-FIX SECOND already rules this: a discovered seam defect gets
   a one-line issue and the cutting continues.
 - The attack suite becomes real tests under `test/`, not a parallel harness.
@@ -963,23 +976,22 @@ the committed tree** at
 which defeats this marker unless that line is marked in the same pass. **That
 line was still unmarked at the time of this audit.**
 
-**"claimant" is a Seon COINAGE, not ratified vocabulary.** `rg -i claimant
+**"claimant" is a retired Seon coinage.** `rg -i claimant
 reference-code/datahike/ -l` → **0 files**, against `rg -c claimant src/` → **25
-files**. Proposed replacement `:seon.agent.run/process`, grounded on both sides
+files**. The ratified replacement is `:seon.agent.run/process`, grounded on both sides
 (`script/seon/dev/process.clj:95, :910, :918, :929-938` carries the process
 record with `(pid, start-instant)` and generation ↔ JDK `ProcessHandle`).
-**UNRATIFIED — open ruling O3**, to be decided in the same change as the
-result-symbol identity (R-11) so one word covers process identity in both places.
+This replacement is ratified; historical source attributes and evidence keep
+their original spelling until their owning source cut lands.
 
 **`:seon.ns/owner` DOES NOT EXIST in source.** Registered `:seon.ns` attributes
 are name, source, doc, summary, require-edges (`src/seon/ns/source.cljc:17`,
 `:19-37`, `:45`, `:46`). Any design naming it is proposing a **new** attribute,
 not a repoint.
 
-**Vocabulary debt in this file.** Rows R-1..R-18 above were written before the
-ban and still use **"safepoint"** for what SCI calls **"every `fn` body
-entrance"** (`sci/doc/interrupt.md:50`). Read them with that substitution; do not
-propagate the word into new text.
+**Vocabulary history in this file.** Quoted historical labels and source
+identifiers retain their spelling. Forward-looking prose uses SCI's phrase
+**"every `fn` body entrance"** (`sci/doc/interrupt.md:50`).
 
 ### Why `interpreter-step-budget` was wrong
 
@@ -1045,7 +1057,7 @@ the corpus distinguishes boot rows from authored rows by provenance alone — no
 attribute encodes "which kind of code this is". A port that adds an eviction
 policy to `:seon.host/contexts` fails: the retention *is* the rejected model.
 
-### 19b — Graduation splits in two (owner ruling)
+### 19b — Accretion splits in two (owner ruling)
 
 - Compiling agent code to a native JVM fn **deletes the `:interrupt-fn` and must
   never happen.** This supersedes any reading of R-4 that treats a compiled tier
@@ -1148,7 +1160,7 @@ itself.
 
 One 7-step turn measured **~104 ms/step of which SCI eval is 0-5 ms**, across 12
 transactions per turn, **before an LLM call that dwarfs everything**. **SCI is
-~5% of a turn.** The JIT, graduation-as-speed and every compiled-tier proposal
+~5% of a turn.** The JIT, accretion-as-speed and every compiled-tier proposal
 optimize that 5%. The only real performance problem is the ~10 s JVM boot, and it
 is **orthogonal to this architecture**. Write this down or the numbers read as an
 argument *for* a compile tier.
@@ -1224,7 +1236,7 @@ owners.
 ### 19k — Open owner rulings this ledger is waiting on
 
 O1 co-located writer heap blast radius (and the un-interruptible single host call
-that no in-process metric can bound — physics item 2); O2 horizontal claimant
+that no in-process metric can bound — physics item 2); O2 horizontal cluster JVM
 topology vs `architecture.md:242-246` (physics item 7); O3 replace the coinage
 "claimant"; O4 **is there an allocation LIMIT at all** (decides the eval thread
 kind, R-18); O5 which tuple trigger survives the bridge reconciliation; O6 which

@@ -390,8 +390,8 @@ the transaction.
 **Registration authority is the committed facts, on every tier.** A
 registration is a committed `:seon.schema` fact, global by construction.
 Loading a namespace publishes nothing: a colocated `register!` form is a pure
-declaration whose authority is its transaction. Every tier — writer, claimant,
-web-render, leaf — acquires the committed projection at a database value and
+declaration whose authority is its transaction. Every tier — cluster JVM,
+web-render JVM, leaf runtime — acquires the committed projection at a database value and
 never re-runs `register!` to reconstruct it. Admission is symmetrical across
 reads and writes: a transaction may name only registered attributes, and a
 pull pattern's keys validate against the same committed projection, with
@@ -499,7 +499,7 @@ is produced (§3).
 | `:seon.agent.run/turn-limit` | `:int` | long / one | work bound (bumpable) |
 | `:seon.agent.run/deadline` | `:inst` | instant / one | absolute clock bound |
 | `:seon.agent.run/last-beat-at` | `:inst` | instant / one | heartbeat |
-| `:seon.agent.run/claimant` | `[:string {:min 1}]` | string / one | optional current process-instance custody; absence means released |
+| `:seon.agent.run/process` | `:seon.db/ref` | ref / one | optional process record for the cluster JVM holding the run; absence means released |
 | `:seon.agent.run/claim-epoch` | `[:int {:min 1}]` | long / one | optional on first acquisition, then monotonic; every held-run mutation fences on the observed value |
 | `:seon.agent.run/paused-at` | `:inst` | instant / one | presence ⇒ derived `:paused` |
 | `:seon.agent.run/remaining-ms` | `:int` | long / one | banked at pause, re-extends deadline at resume |
@@ -509,11 +509,11 @@ is produced (§3).
 | `:seon.agent.run/result-ref` | `:seon.db/ref` | ref / one | optional addressable work product |
 | `:seon.agent.run/closed-at` | `:inst` | instant / one | present when the run closes |
 
-Claim expiry is not stored. It is derived from open/unpaused state, claimant,
-epoch, `last-beat-at`, the observation instant, and the configured stale
-interval. Claimant identifies custody; epoch fences authority. `turn-count` /
-`now` / `snapshot` are also derived-read scalars, not stored datoms. The claim
-and run model lives in [[agent-runtime]].
+Claim expiry is not stored. It is derived from open/unpaused state,
+`:seon.agent.run/process`, epoch, `last-beat-at`, the observation instant, and
+the configured stale interval. The process record identifies custody; epoch
+fences authority. `turn-count` / `now` / `snapshot` are also derived-read
+scalars, not stored datoms. The claim and run model lives in [[agent-runtime]].
 
 #### Interaction run facts — `:seon.agent.interaction/*`
 
@@ -655,16 +655,16 @@ agent fact, does not identify an entity class, and cannot retune an existing
 namespace resident. A stale write reacquires configuration and resolves the
 name again before retrying.
 
-### 4.5 claimant-session recovery — `:seon.runtime.recovery/*`
+### 4.5 process replacement recovery — `:seon.runtime.recovery/*`
 
 Claim recovery is already represented by claim epochs, the turn phase, and
-attempt/eval receipts. Recovery adds one small claimant-session-loss anchor
+attempt/eval receipts. Recovery adds one small process-loss anchor
 without becoming a second recovery state machine:
 
 | attribute | malli | datahike facet | notes |
 |---|---|---|---|
 | `:seon.runtime.recovery/id` | `[:and {:seon.db/identity true :seon.db.id/generator :seon.db.id.generator/compact} :seon.db.id/compact-value]` | string / one / identity | frozen operation identity; retry upserts the same anchor |
-| `:seon.runtime.recovery/reason` | `[:enum :claimant-session-loss]` | keyword / one | the observed durable cause |
+| `:seon.runtime.recovery/reason` | `[:enum :process-loss]` | keyword / one | the observed durable cause |
 | `:seon.runtime.recovery/detail` | `[:string {:max 2048}]` | string / one | optional bounded diagnostic only when it is not derivable from transaction facts |
 | `:seon.runtime.recovery/eval` | `:seon.db/ref` | ref / one | optional interrupted eval receipt connected to the anchor |
 
@@ -1096,10 +1096,10 @@ are visible until that next apply.
 The real manifest carries a dial per config concern (not just seeds) — a new
 concern = ONE `:seon.config/<section>` schema + one resolver fn + one key here:
 
-Resource ceilings are **circuit-breaker facts**, never hidden governors. Guard
-interpreter-step/deadline/output caps, claimant heap and pool waits, database
+Resource ceilings are **circuit-breaker facts**, never hidden governors. SCI
+`time-limit`, cluster JVM heap and `:compute` / `:io` demand, database
 mutation-admission bounds, web-render connection/mailbox/pool/body bounds, and
-future limits each have:
+future bounds each have:
 
 - a closed Malli schema and database attribute with explicit units;
 - a docstring stating the protected resource and what firing means;
@@ -1164,7 +1164,7 @@ unioned with the ordinary agent workbench.
 - `SEON_CONFIG=config/test.edn bin/test-cljs` — a test run loads its own
   context / routes / render caps (pins `:batch`).
 - `bin/seon restart --config config/minimal.edn` — the minimal-tree
-  variant (`#include`s `system.edn`, inherits the graduated system-text).
+  variant (`#include`s `system.edn`, inherits the current system-text).
 - A downstream repository selects its own manifest and curates its cluster
   independently; consumer-specific paths and launch commands stay downstream.
 

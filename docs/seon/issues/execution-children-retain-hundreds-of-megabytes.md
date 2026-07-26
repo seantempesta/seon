@@ -81,7 +81,7 @@ the process boundary.
 - The child retains only state required for its persistent namespace and
   evaluation contract; shared immutable program/package data is not copied
   unnecessarily per child.
-- Several simultaneous children fit the modest-hardware graduation profile
+- Several simultaneous children fit the modest-hardware target profile
   without losing process isolation, hot code application, or first-turn tools.
 - A warm ready child should use at most 200 MiB physical memory and an active
   evaluated child at most 300 MiB. The current measured values are 208.6 and

@@ -4,6 +4,8 @@ status: active
 tags: [prd, agent, runtime, architecture]
 ---
 
+Terminology: this note records evidence from before the rename; the process holding a run is now `:seon.agent.run/process`.
+
 # Program anchor — all-JVM sci runtime (pruned 2026-07-23)
 
 This file was a 2,640-line session diary; it is now the COMPACT
@@ -70,12 +72,12 @@ identities, and prescribed exactly `bin/seon cluster apply s4startgate`.
 
 S4 is **not graduated under its complete budget acceptance**: the shared
 writer JVM measured **13.88s** from containment-owner start to ready
-(`booting` → ready itself was 0.07s), and the claimant/web-render JVM processes
+(`booting` → ready itself was 0.07s), and the cluster JVM/web-render JVM processes
 remain unmeasured in the current release topology. Earliest unsettled contract
 is therefore the S4/S6 target-topology budget proof, while S5 same-transaction
 divergence maintenance is dependency-ready because the start gate and compose
 contract are settled. The next refill is S5 maintenance; S6 must investigate
-writer class load and measure claimant/web-render without relabeling the writer
+writer class load and measure cluster JVM/web-render without relabeling the writer
 failure. Final graduation remains U12's 100-agent kill/restart demonstration.
 
 U9 S0a SOURCE INTEGRATED (09:09; R45 publisher block cleared at 09:58):
@@ -144,7 +146,7 @@ Weakness queue (owner package + WHEN):
 - W-attempt-timeout-config: `SEON_LLM_ATTEMPT_TIMEOUT_MS`
   System/getenv at claim time → config fact through manifest apply
   (WHEN: with W-no-roots-arm, same driver/host.clj owner).
-- W-claimant-acquisition-contract: no single claimant acquisition
+- W-cluster JVM-acquisition-contract: no single cluster JVM acquisition
   contract exists (per-fact-family choke points only) — fold into
   S4 startgate's acquisition work, verify there.
 
@@ -167,7 +169,7 @@ condition now maps to the driver's `:no-dispatch` disposition;
 `no-dispatch-reply?` is deleted. The disposition delivers the exact reply
 through `message-transaction-for` + generated ID allocation in the same
 fenced transaction as `:reply-ready → :evaled`; ordinary publication remains
-the only `:evaled → :published`/`:done` owner. The claimant attempt timeout is
+the only `:evaled → :published`/`:done` owner. The cluster JVM attempt timeout is
 now a reconciled config-singleton fact; claim-time `System/getenv` is gone.
 Portable focused proof: 29 tests, 176 assertions, zero failures. The focused
 writer regression is defined but `bin/test-writer` currently refuses because
@@ -246,7 +248,7 @@ TIMEOUT CENSUS ACCEPTED (~11:00, research/timeout-census-2026-07-24.md):
 81 constants — 10 legit backstops / 17 poll-where-event-exists /
 21 clock-masking-missing-signal / 33 tuned guesses. R50 fix queue
 (ranked lanes 1-10 in the report; WHENs):
-- W-R50-1 claimant vthread-completion settlement (dispatch! finally
+- W-R50-1 cluster JVM vthread-completion settlement (dispatch! finally
   discards the death event; npefix closed the in-phase catch, the
   handle-join residual remains) — WHEN: after re-drive-3 proves npefix
   live; fold with W-R50-2 lease/process-death signalling.
@@ -294,7 +296,7 @@ Naming watch: :seon.r45s4/* seen in s4 transcript is NOT in the tree
 R45-S4 LANDED (~13:20, 13ebc881d+774cecd90) — MEASURED: Bun start
 2.03s empty / 2.46s divergent (was 300+s); cluster open 9.21s (≤10s
 PASS); writer JVM 13.88s FAIL = raw JVM classload (booting→ready
-0.07s) → S6 owns (AOT/CDS candidates); claimant/web-render measures
+0.07s) → S6 owns (AOT/CDS candidates); cluster JVM/web-render measures
 = S6. Zero derivation lines on start; compose byte-equal cold;
 mismatch refusal with remedy proven; naming clean (rg r45s4 = 0).
 CAVEAT: default WATCH build breaks in publish-base-projection! —
@@ -346,7 +348,7 @@ cache row and `SEON-CORE-FAULT divergence cache delta-only repair` marker.
 OWNER AWAY WINDOW (~15:00-19:00, rulings before leaving): default
 reset FREELY authorized if apply cannot converge; Sol-dry fallback =
 Fable lanes (report spend); window queue as planned = writerready
-green boot → s4 final measure → re-drive-3 → W-R50-1/2 claimant
+green boot → s4 final measure → re-drive-3 → W-R50-1/2 cluster JVM
 settlement → S6 JVM classload → next U9 slice; s5maintain continues;
 reviews/anchor per landing; 15-min clock stays on.
 
@@ -397,7 +399,7 @@ build otherwise compiles mid-churn). s6: AOT isolated behind opt-in
 PROVISIONAL RULING R52 (~16:50, NEEDS OWNER RATIFICATION):
 interactions are TRANSACTIONS. web.reactive.call synchronous
 interaction contract dies with the child era: handler = validate +
-transact interaction fact + ack; execution = existing claimant
+transact interaction fact + ack; execution = existing cluster JVM
 machinery; result = committed facts; UI updates via the one
 interest→reactive→morph chain (reconnect = repaint). Rationale: the
 documented one-database-path law; no request-correlated sync results
@@ -423,7 +425,7 @@ interaction entity is also one open `:interaction` run. Submission
 validates the exact committed handler schema/source fingerprint,
 commits the generated interaction/run identities with tx
 user+process provenance, and acknowledges without awaiting authored
-code. The existing claimant scan attaches an idle agent, CASes
+code. The existing cluster JVM scan attaches an idle agent, CASes
 `pending→running`, invokes through the bounded JVM guard/eval pool,
 and atomically closes the run with ordinary result or flat error
 facts. A takeover of a durable `running` receipt records
@@ -457,7 +459,7 @@ earliest unsettled integration contract is now operator publication
 of the surviving build vector; its proof is a current artifact plus
 green `bin/test-writer`. The dependency-ready portfolio remains U9
 host-lane/pod deletion convergence, and the final graduation gate is
-the reset default cluster with claimant interaction outcome visible
+the reset default cluster with cluster JVM interaction outcome visible
 through the live page/feed.
 
 R45-S6 MEASURED (~17:50, lane landed+accepted): writer JVM load
@@ -520,7 +522,7 @@ Default remains down. Earliest unsettled contract is now one transaction
 normalization representation at validation, whose integrated proof is fresh
 apply plus pod and web-render readiness. Next dependency-ready refill after it
 is S6 cutover checkpoint, then re-drive-3. Final graduation remains the reset
-default cluster with claimant interaction outcome visible through the live
+default cluster with cluster JVM interaction outcome visible through the live
 page/feed.
 
 EXECBUILDRETIRE LANDED (~17:45, 41d911add + a6ba6e1d8, accepted):
@@ -567,7 +569,7 @@ is stable artifact publication plus apply-owned process cleanup; proof is
 reset → apply → five-ready with one unchanged release digest. Dependency-ready
 parallel portfolio remains S5 write-through/artifact determinism and operator
 reset/apply lifecycle. Next refill is the release-digest owner first because
-it blocks every startup; final graduation remains the live claimant
+it blocks every startup; final graduation remains the live cluster JVM
 interaction outcome through the page/feed after reset.
 
 APPLY GREEN (~19:00): rootslotnil ACCEPTED — double-decode root
@@ -622,25 +624,25 @@ with custody released.
 R53 RULED (~22:50, owner): LIFECYCLE COMPLETION IS NOT A CAPABILITY.
 `seon.agent.lifecycle/complete` is a PURE function returning a schema'd
 terminal lifecycle VALUE. Guarded eval has no lifecycle/message/database
-leaves or writes. The claimant driver interprets that value and performs
+leaves or writes. The cluster JVM driver interprets that value and performs
 settlement through its existing canonical formless-reply delivery path plus
 terminal-close transaction data. The leaf-parity patch is dissolved and its
 wiring must be reverted, not extended.
 
 EARLIEST UNSETTLED CONTRACT: an eval returning the terminal lifecycle value is
-recognized by the claimant and yields, in the driver's settlement, a transcript
+recognized by the cluster JVM and yields, in the driver's settlement, a transcript
 message plus closed result/custody facts and a `:published/:done` turn. The
 integrated proof is the real-driver writer regression with zero capability
 bindings in the eval context, followed by one fresh default-cluster run ending
 in `(seon.agent.lifecycle/complete "ALIVE_GATE_FINAL: ...")`. That one run
 must yield the message entity and `:done` datoms; combined with alivegate2's
 already-proven plan/memory/later-read evidence it clears the caveat. Next
-dependency-ready refill is the claimant terminal-value implementation; final
+dependency-ready refill is the cluster JVM terminal-value implementation; final
 graduation remains U12's 100-agent kill/restart demonstration.
 
 R53-FINAL (owner, ~23:30, supersedes the value-relay form): the sci
 door is the ONLY containment; complete is CORE code that transacts
-settlement DIRECTLY on the claimant using ambient claim context
+settlement DIRECTLY on the cluster JVM using ambient claim context
 (agent/run/epoch/turn bound by the door, like ambient db), through
 the one terminal-close + message mechanism; claim-epoch CAS = plain
 concurrency control, NOT a boundary concept. Post-terminal reply
@@ -655,7 +657,7 @@ are these vetted fns — that is the whole isolation story.
 OWNER DECISION PENDING (the morning's first item, owner handles
 personally): the fresh-eyes WTF review
 (research/wtf-review-2026-07-24.md) — 12 hops/turn, 7 WTFs; minimal
-design = one claimant kind owns the whole turn (no mid-turn pod
+design = one cluster JVM kind owns the whole turn (no mid-turn pod
 handoffs, no second IPC), six phases → three checkpoints, plan layer
 → binding-presence check + background indexer. Owner explicitly NOT
 ratifying yet (even full-adoption felt wrong); design session when
@@ -922,7 +924,7 @@ MORNING ITEMS (accumulating):
   5. Newly-seen failures after widening — same lane triages; real
      defects → issues + stop for ruling; dead-legacy → delete with
      justification; fixture gaps → shared mechanism.
-  6. Claimant-tier Malli validation OFF (driver/host.clj:32-37
+  6. Cluster JVM-tier Malli validation OFF (driver/host.clj:32-37
      schema-validation? (constantly false)) — bug-chase lane
      (audit rank #2; wire the bound committed projection).
   7. Codec encode totality (uds.cljc:210-217 bare transit/write) —
@@ -1053,7 +1055,7 @@ MORNING ITEMS (accumulating):
   seantempesta/datahike.
 - U2 THE SPINE DISPATCHED (spec tmp/orchestrator/
   u2-claim-driver-spec.md, effort=high): both tiers run the one
-  portable claim-native driver as phase-limited claimants (pod:
+  portable claim-native driver as phase-limited cluster JVM (pod:
   render+LLM; JVM host: eval via U1's door); poll-first JVM noticing;
   attempt receipts + retry-decision relocation folded in; legacy Bun
   loop-driving path deletes; U12 drill is the gate. Preserves U4's
@@ -1114,7 +1116,7 @@ MORNING ITEMS (accumulating):
   exact one-turn closure PARKED per the drill pause (C9). U2 session
   resumed on a NEW focused unit: portable durable LLM phase
   (attempt CAS + reply publication seam + retry into the core; JVM
-  claimant :llm eligibility behind transport presence; vthread
+  cluster JVM :llm eligibility behind transport presence; vthread
   deadline composition) — unblocks the stopped U6b leaf lane (its
   stop report verified: the phase logic was pod-only).
 - TEST-INTEGRITY ACCEPTED (bbecdfc03): JVM discovery widened to one
@@ -1151,7 +1153,7 @@ MORNING ITEMS (accumulating):
   admission gains ONE computed rule: a predicate's call graph must be
   pure and capability-free (derived from the indexed program-graph
   edges — portability is DERIVED, never declared). Every tier
-  validates fully claimant-side; the writer's stance (structural-only
+  validates fully cluster JVM-side; the writer's stance (structural-only
   vs also core predicates) is downgraded from design constraint to a
   defense-in-depth policy knob — owner satisfied that SCI containment
   protects the database; R26's agent-code-never-in-writer stands for
@@ -1232,7 +1234,7 @@ MORNING ITEMS (accumulating):
   shared HttpClient, timeout/error mapping onto the one :seon.ai
   vocabulary, R27 facts, host installation; 6/23 green; the real
   attempt-CAS regression satisfies audit §0.6; seam issue resolved.
-  Paid live claimant proofs DEFERRED to the checkpoint — startup was
+  Paid live cluster JVM proofs DEFERRED to the checkpoint — startup was
   blocked by the schema-admission lane's in-flight schema.cljc edit
   (runtime symbol passed to cljs.core/resolve breaks CLJS compile —
   REVIEW FLAG for that lane's return: its dual-tier file needs a
@@ -1245,7 +1247,7 @@ MORNING ITEMS (accumulating):
   evaluation running unbiased) into PROVIDER DESCRIPTORS AS DATA
   (endpoint/auth/quirks/capabilities rows; adding a provider = a
   row) + richer normalized response metadata on attempt receipts.
-  (ii) UI STREAMING WITHOUT losing multi-form batch: claimant
+  (ii) UI STREAMING WITHOUT losing multi-form batch: cluster JVM
   consumes the full stream (recovers the usage chunk) while
   separately publishing partials; candidate shapes = coalesced
   latest-wins db writes (~2-3 tx/s per streaming agent vs the ~300
@@ -1270,7 +1272,7 @@ MORNING ITEMS (accumulating):
   ctx/admin.cljs; typeahead the experimental leaf; JVM requires +
   cross-tier byte assertion + authored-infinite-render guard green.
   Rendering is now tier-independent — the R26 web-render and
-  claimant tiers can render agent context. U9 (great deletion) is
+  cluster JVM tiers can render agent context. U9 (great deletion) is
   DEPENDENCY-READY (U2+U5+U7 all landed) behind the checkpoint;
   edge-bundle handoff #3 (execution.cljs artifact inventory) is
   UNBLOCKED — grant on that lane's return.
@@ -1424,7 +1426,7 @@ MORNING ITEMS (accumulating):
   behavioral proof = the lane's reset acceptance.
 - P1b stop RULED (2026-07-23 PM; review was 55min late — caught by
   owner progress question): (i) the wrapper/host-binding registry
-  IS the JVM claimant's artifact inventory, explicitly (one
+  IS the cluster JVM's artifact inventory, explicitly (one
   enumerator; classpath analysis only on proven gap); (ii)
   build/digest owners granted (shadow-cljs.edn, program_artifact/
   artifact.clj, release propagation); (iii) plan.cljc's hardcoded
@@ -1607,7 +1609,7 @@ MORNING ITEMS (accumulating):
   precedent); B2 scheduled-fns eval (loop.cljs:556 → child) is
   plausibly ALREADY BROKEN (invoke-now! rejects tier-less eval
   batches) — LIVE PROBE at the checkpoint drive + OWNER DECISION
-  pending (recommendation: fire = durable turn + wake, JVM claimant
+  pending (recommendation: fire = durable turn + wake, cluster JVM
   evals); B3 self-host lookup-value still backs route handlers/serve
   controls — one compiled-table mechanism, SEQUENCED WITH the staged
   R43 spec (shared trusted-table/classifier ownership). Audit drift
@@ -2018,7 +2020,7 @@ MORNING ITEMS (accumulating):
   completed run. Dependency-ready portfolio: the operator cluster
   lifecycle owner only; no provider transport change is justified.
   Next refill after that owner lands is the one-attempt
-  `claimantllm` runbook. Final graduation gate remains the full
+  `claimantllm` runbook. The final system gate remains the full
   provably-alive real-work re-drive. Evidence:
   `tmp/orchestrator/claimantllm-gate.log` and the three dated claimant
   LLM research reports.
@@ -2211,7 +2213,7 @@ MORNING ITEMS (accumulating):
   lane owns those paths; verify at the issue-triage lane's return
   whether it exceeded its docs-only write boundary (its spec said
   fix-tonight candidates go to the orchestrator, not self-fix).
-- BN LEDGER (running): #8 benchmark ✓ (ef0680725) · #9 claimant
+- BN LEDGER (running): #8 benchmark ✓ (ef0680725) · #9 cluster JVM
   arity + prose pins ✓ (0b3976ad0) · #11 transcript direct-call ✓
   (same commit; PRODUCTION IMPACT DEFINITIVELY NO — fixture-only) ·
   BN-5/10 lane dispatched (driver files freed by #9) · BN-1/9,
@@ -2544,9 +2546,9 @@ MORNING ITEMS (accumulating):
   fire = durable eval-only turn then ordinary LLM wake (agent reacts,
   incl. to failures); missed fires SKIP + record a visible miss fact;
   one ordered batch per agent/minute, all forms attempted, stable
-  schedule-id order; CLOCK = JVM CLAIMANT duty effective now (owner
+  schedule-id order; CLOCK = cluster JVM duty effective now (owner
   said "JVM side for sure", floated writer — orchestrator pushback
-  recorded: R26 keeps the writer tx+feed only; claimant creates
+  recorded: R26 keeps the writer tx+feed only; cluster JVM creates
   CAS-idempotent fire facts keyed schedule×nominal-minute, races
   safe; scheduled FUNCTION executes behind the guarded sci door;
   cron strings parsed as data by the core parser). Remaining 22
@@ -2603,14 +2605,14 @@ MORNING ITEMS (accumulating):
   discussion; 20d render: in-pod move first, port later.
 - R21 context DERIVED never stored: datoms carry refs/basis-t/
   counts only; bytes in blobs; render inputs must be db-derived.
-- R22 claimant identity self-derived (own pid + start instant).
-- R23 reacquire = claimant nil→me + epoch e→inc(e) + beat; pure
+- R22 cluster JVM identity self-derived (own pid + start instant).
+- R23 reacquire = cluster JVM nil→me + epoch e→inc(e) + beat; pure
   builders never manufacture authority.
 - R24 break-and-replace the driver: one claim-native portable
   driver; no fence retrofit into the legacy Bun loop.
 - R25 all-JVM core direction (fulfilled by the unified plan).
 - R26 topology: writer JVM (tx+feed ONLY, agent code NEVER) ·
-  web-render JVM (pure derivation, own process) · claimant JVMs ·
+  web-render JVM (pure derivation, own process) · cluster JVM ·
   disposable Bun js-package leaf host · static browser.
 - R27 limits are CIRCUIT BREAKERS never governors: every limit an
   aero config fact (schema+docstring+calibration provenance),

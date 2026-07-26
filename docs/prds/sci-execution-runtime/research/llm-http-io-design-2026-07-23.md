@@ -243,7 +243,7 @@ fake-leaf → interpret → attempt-row on both runners
 ### 1b. What stays out of the core deliberately
 
 - `generate-code!` and `seon.ai.dispatch`'s process-local provider
-  registry: dispatch stays a pod concern until a JVM claimant actually
+  registry: dispatch stays a pod concern until a cluster JVM actually
   executes the LLM phase; at that point registration is leaf
   installation through `seon.capability` (seam contract 5), not a
   second registry.
@@ -262,7 +262,7 @@ Adopted from loop design §4 verbatim, detailed here:
   `outcome` enum with `:open` so there is one status word, exactly as
   the run reuses its heartbeat as the lease). Committed BEFORE the leaf
   dispatches; the tx leads with the run's pointer+epoch fence, so a
-  displaced claimant cannot open attempts.
+  displaced the process cannot open attempts.
 - `attempt-terminal-tx`: CAS `outcome :open → <terminal>` + the
   response evidence fields + reply-blob link in the same tx (the eager
   reply-blob link at turn.cljs:700-710 folds in here). A CAS loser
@@ -293,14 +293,14 @@ multi-form turns. Proposal:
   `parse-forms` confirm) is ALREADY portable `seon.repl.parse` — the
   pod leaf keeps calling it per delta; a future JVM streaming leaf
   (`HttpClient` line-consumer over SSE) would call the same predicate.
-  Nothing new to design; explicitly NOT built until a JVM claimant
+  Nothing new to design; explicitly NOT built until a cluster JVM
   needs `:stream` mode.
 - Consequence for scheduling (loop design §3): a run whose agent
   resolves repl-mode `:stream` is LLM-phase-eligible only on the pod
   until then. That is policy data on the existing phase-eligibility
   rule, not a mechanism.
 
-### 1e. Idempotency, resume, and the claimant-death answer
+### 1e. Idempotency, resume, and the run-holding process death answer
 
 A model call is `:external`: no provider idempotency key is grounded
 for DeepSeek/OpenAI-compat (loop design §4 finding stands — the
@@ -310,7 +310,7 @@ Therefore:
 - op-id/`:seon.capability/op-id` does NOT apply to model calls. The
   attempt receipt is Seon-side identity only: `(turn-id, ordinal)`.
   There is nothing to replay; there is only honest accounting.
-- **Claimant dies mid-call:** the attempt stays `:open`. The lease
+- **Process holding the run dies mid-call:** the attempt stays `:open`. The lease
   expires (heartbeat + stale-ms); a stealer wins the epoch CAS, reads
   the phase cursor at `:attempt-open`, terminalizes the open attempt
   via the receipt CAS to outcome `:crashed` (new terminal enum member —
@@ -319,7 +319,7 @@ Therefore:
   if budget remains, else closes the turn `:error` through the normal
   path. Double-billing on kill-mid-request is possible and is recorded
   as two attempt rows — honest, visible, bounded by the retry budget.
-- **Same-process restart (pod restart, single-claimant world):**
+- **Same-process restart (pod restart, single-run-holding process world):**
   identical mechanics via lease-aware `recover!` (loop design §2c) —
   recovery terminalizes `:open` attempts exactly like `:running` eval
   receipts (recovery.cljs receipt CAS precedent), never re-runs them.
@@ -331,12 +331,12 @@ Therefore:
   turn.cljs:1003-1007). With L1, the terminal attempt receipt carries
   it (`:seon.ai.attempt/retry-after-ms`, one new optional attr), so
   "the provider told us to wait until T" is a database fact any
-  claimant can read.
+  the process can read.
 - **In-turn backoff stays in-process and bounded.** The sleep between
   attempts (≤20 s per wait, ≤60 s total) remains the executor's local
   wait — durable-parking every backoff as a schedule row would trade a
   bounded 60 s for tx churn and a second scheduling mechanism. The
-  bound is what makes this safe: a claimant can hold its lease through
+  bound is what makes this safe: the process can hold its lease through
   the entire worst-case retry envelope (60 s backoff + 5×2 min
   attempts) only if the heartbeat continues; the loop's per-turn beat
   already covers it. If the owner later wants cross-process backoff
@@ -458,7 +458,7 @@ control.
 | Render walker in web UI (pod, core-authored) | trusted core code; per-node catch; no authored code after (b) | value-walker realized-items/depth caps | value caps; SSE morphs are per-element | one request/feed; error banner value | acceptable: core renderer bugs are `:core` faults under the strict dial, not agent exposure |
 | Web fetch, pod leaf | timeout-ms (30 s default); redirect cap | preview token cap; full text streams to blob | preview cap + honest metadata | one Promise | landed (P2) |
 | Web fetch, JVM leaf (queued) | as LLM JVM leaf | as LLM JVM leaf | same core caps | one pool thread | same DNS-stall note |
-| Parallel claimant (any) | its own tier's bounds above | its own process | n/a | its own process; writes epoch-fenced | claimant death anywhere → lease expiry → steal → receipts terminalized; nothing waits on a corpse |
+| Parallel run-holding process (any) | its own tier's bounds above | its own process | n/a | its own process; writes epoch-fenced | run-holding process death anywhere → lease expiry → steal → receipts terminalized; nothing waits on a corpse |
 
 The containment claim in one sentence: **every authored-code execution
 site is either behind the sci interrupt (JVM) or behind a killable
@@ -472,8 +472,8 @@ interim) is explicitly supervised and explicitly temporary.**
 ## 4. Parallelism (question 4)
 
 - **Across runs:** the loop design's claim model is the whole story —
-  claimant + epoch CAS on the run entity, heartbeat lease, steal on
-  expiry. N claimants (pods, hosts) advance disjoint runs with zero
+  run-holding process + epoch CAS on the run entity, heartbeat lease, steal on
+  expiry. N processes holding runs (pods, hosts) advance disjoint runs with zero
   new coordination: Datahike's single-writer thread serializes every
   claim/fence tx (writer.cljc:42-76 grounding in the loop design §1);
   losers get direct CAS error values.
@@ -521,7 +521,7 @@ the LLM boundary).
 | Malformed/unparseable response body | interpreter yields envelope (no flags — never retried) | attempt terminal `:provider-error` + raw-body evidence (bounded) | turn `:error` with the message | non-retryable; surfaces immediately |
 | Empty visible text, thinking spillover | parse-completion diagnosis (openai_compat.cljs:281-289) | attempt `:success` + usage; turn-outcome guard re-prompts | next-turn steering | `:pure` re-derivation — no effect at risk |
 | Truncation at completion cap | finish_reason "length" (openai_compat.cljs:259, 292-296) | attempt truncated? + error when blank | error naming the completion limit | agent raises max-tokens via config facts |
-| Claimant death mid-LLM-call | lease expiry (beat + stale-ms) observed by any claimant | attempt CAS `:open → :crashed`; steal epoch bump; phase cursor unchanged | recovery notice derived from history; run RESUMES | `:external` — new ordinal, never replay; double-billing possible, recorded as two rows |
+| Process holding the run death mid-LLM-call | lease expiry (beat + stale-ms) observed by any run-holding process | attempt CAS `:open → :crashed`; steal epoch bump; phase cursor unchanged | recovery notice derived from history; run RESUMES | `:external` — new ordinal, never replay; double-billing possible, recorded as two rows |
 | Render fn throws | per-block invocation error / walker catch (runtime.cljs:157-161, render.cljs:360-371) | eval-lane receipt (host) or invocation error; `:agent` fault datom via `error/record!` | the block renders AS its error value naming the fn | `:pure` — next turn re-derives; agent fixes its fn |
 | Render infinite loop (JVM, stage b) | deadline watchdog → Thread.interrupt → sci interrupt | receipt terminal `:interrupted`, kind `:timeout` | error block naming the deadline | `:pure` — re-render next turn; repeated loops burn turn budget, run closes bounded |
 | Render infinite loop (Bun child, today) | invocation timer → cancel → child SIGKILL (host.cljs:1204-1219) | canceled-error + child-retired evidence | error block / turn `:error` | child respawns; run continues |
@@ -529,7 +529,7 @@ the LLM boundary).
 | Render output blowup | token-cap clip + value caps + result-limit-bytes | clipped block + honest cap markers | clipped text with cap notice | `:pure`; caps are config facts the agent can read |
 | Malformed hiccup | non-vector html → error-card (runtime.cljs:112-119) | `:agent` fault datom | error card on the surface, page 200 | agent fixes renderer |
 | Web fetch timeout/DNS/private-range | leaf maps onto family envelope (web.cljc) | capability receipt per effect metadata | flat error with steering | `:external` fetch — never auto-replayed; `:read` grants re-derivable |
-| Claimant death mid-eval | existing receipt CAS on takeover (recovery precedent) | receipt `:interrupted` | steering in next prompt | absent effect ⇒ `:external`, never redispatch (wiki, landed regression) |
+| Process holding the run death mid-eval | existing receipt CAS on takeover (recovery precedent) | receipt `:interrupted` | steering in next prompt | absent effect ⇒ `:external`, never redispatch (wiki, landed regression) |
 | Zero-attempt executable batch | loud write-back guard (turn.cljs:474-486) | `:core` fault + flat error | `:seon/error` value | core bug — fix the tier, never silent |
 
 The loud-failure invariant extension: L1 adds the mirror guard for LLM
@@ -553,10 +553,10 @@ rulings already opened.
   honest `:crashed` attempt row where the kill landed.
 - **L3 (portable cores) — carries 1a's core promotion** (retry
   decisions, builders/interpreters, `with-retry!` CLJ arm) WITHOUT the
-  JVM transport leaf: the JVM claimant advances eval phases; LLM
+  JVM transport leaf: the cluster JVM advances eval phases; LLM
   phases park for the pod (5d-i posture). Falsifier: dual-tier `.cljc`
   test builds+interprets the same request/response bytes on both
-  runners; JVM claimant completes an eval phase while the pod is dead.
+  runners; cluster JVM completes an eval phase while the pod is dead.
   **Break-and-replace (owner authorization, 2026-07-23):** the Bun
   loop side may BREAK during this port — the pod driver is rebound
   over the portable core in the same change and the superseded

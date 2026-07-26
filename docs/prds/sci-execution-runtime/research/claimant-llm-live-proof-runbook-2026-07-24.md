@@ -4,7 +4,9 @@ status: active
 tags: [research, agent, runtime, architecture]
 ---
 
-# JVM claimant LLM live-proof runbook
+Terminology: this note records evidence from before the rename; the process holding a run is now `:seon.agent.run/process`.
+
+# cluster JVM LLM live-proof runbook
 
 ## Executed result
 
@@ -29,12 +31,12 @@ closed. The preserved transcript is
 This is the shortest production-path falsifier for the remaining live blocker:
 one fresh agent, one batch DeepSeek request, zero retries, and two small forms
 that must become durable eval receipts. It drives the ordinary message wake
-path. The pod renders and publishes; the long-lived JVM claimant performs the
+path. The pod renders and publishes; the long-lived cluster JVM performs the
 LLM transport and eval phases.
 
 Use the already-running default cluster only when the orchestrator explicitly
 authorizes that proof. A source edit requires an isolated full-stack cluster,
-but the current named-cluster operator cannot yet reconcile its JVM claimant;
+but the current named-cluster operator cannot yet reconcile its cluster JVM;
 the executed result above is the blocking prerequisite. Never reset, restart,
 stop, or reconfigure `default` merely to work around that missing target
 member.
@@ -46,7 +48,7 @@ The ordered proof is:
 2. A fresh agent is configured for `:batch` and zero retries.
 3. One ordinary `/chat` message opens a run.
 4. Historical claim datoms show pod render → JVM LLM/eval → pod publish
-   custody, with the provider-owning claimant joined to the target host PID.
+   custody, with the provider-owning run-holding process joined to the target host PID.
 5. Exactly one attempt terminalizes `:success` with provider response identity.
 6. The turn carries a reply blob and terminal eval receipts for the requested
    message and completion forms.
@@ -60,20 +62,20 @@ localization.
 
 | Boundary | Selected source/version | Maintained source and demonstrated call site |
 |---|---|---|
-| Seon source under test | Record `git rev-parse HEAD` at gate start; checkout observed at `404bd02be0ff6f9d0de28166ade76ed304a56b86` during runbook preparation | `src/seon/agent/driver/host.clj` owns `bounded-llm-transport!`, claimant capability installation, and the long-lived call; `src/seon/ai/http.clj` owns the process-shared `HttpClient`, per-call credential lookup, request creation, status classification, and batch/SSE response consumption |
+| Seon source under test | Record `git rev-parse HEAD` at gate start; checkout observed at `404bd02be0ff6f9d0de28166ade76ed304a56b86` during runbook preparation | `src/seon/agent/driver/host.clj` owns `bounded-llm-transport!`, cluster JVM capability installation, and the long-lived call; `src/seon/ai/http.clj` owns the process-shared `HttpClient`, per-call credential lookup, request creation, status classification, and batch/SSE response consumption |
 | Portable attempt lifecycle | Same Seon source digest | `src/seon/agent/turn/llm.cljc` opens and terminalizes the attempt; `src/seon/agent/turn/core.cljc` supplies the run-epoch and phase CAS data; `src/seon/agent/driver.cljc` selects the next phase from durable state |
 | Durable receipt graph | Same Seon source digest | `src/seon/agent/run.cljs`, `src/seon/agent/turn.cljs`, and `src/seon/eval/receipt.cljc`; the production nested selector is `src/seon/agent/driver.cljc`'s `run-selector` |
 | Typed live read boundary | Same Seon source digest | `src/seon/web/serve.cljs` `product-evidence` reads one immutable database value and exposes the loopback-only `POST /_seon/operator/product-evidence`; the earlier live use is `tmp/orchestrator/redrive2-gate.log` |
 | Operator isolation | Same Seon source digest | `script/seon/dev/cli.clj` `reset-cluster!` verifies that the requested name equals the explicitly configured cluster; `script/seon/dev/config.clj` derives the cluster name from `SEON_CLUSTER_DIR`; `script/seon/dev/process.clj` owns the five-process graph and generation logs |
 | Datahike | `reference-code/datahike` at `caf526850084a9d5846ccd9ea34251fe411e0d6b` | Five-slot historical datoms and `?added` queries are exercised in `reference-code/datahike/test/datahike/test/query_planner_test.clj`; `reference-code/datahike/src/datahike/api/impl.cljc` owns the idempotent `history` database value |
 | Proximum | git SHA `9846d3e79e1aee48474bc876d3d563d7137209c6` in `deps.edn` | Selected by the maintained `:writer` basis; no direct query or transaction API is introduced here |
-| SCI | `reference-code/sci` at `8fac6e88f32d53a5fd82ebe80640881e317b84fd` | The claimant's two reply forms pass through the existing guarded host eval path; this runbook adds no interpreter entry |
+| SCI | `reference-code/sci` at `8fac6e88f32d53a5fd82ebe80640881e317b84fd` | The run-holding process's two reply forms pass through the existing guarded host eval path; this runbook adds no interpreter entry |
 | JVM HTTP | OpenJDK `26.0.1` observed during preparation | `java.net.http.HttpClient`, `HttpRequest`, and `HttpResponse` are used only through `src/seon/ai/http.clj`; no standalone leaf call counts as this proof |
 | Provider policy grounding | `reference-code/litellm-clj` at `14bcdd949c0207d6c4988a3db887a1a7fa1c5522` | `reference-code/litellm-clj/src/litellm/providers/deepseek.clj` grounds endpoint and DeepSeek request semantics; Seon's maintained provider row and portable core remain the production owners |
 
 The currently active program ledger names this as the earliest unsettled
 contract: the final 2026-07-24 redrive reached real provider attempts but
-recorded 11/11 `:provider-error` only on the long-lived claimant. The identical
+recorded 11/11 `:provider-error` only on the long-lived run-holding process. The identical
 persisted prompt succeeded through a fresh JVM leaf. See
 `program-synthesis-2026-07-21.md` and
 `docs/seon/issues/jvm-claimant-provider-errors-drop-the-diagnostic-cause.md`.
@@ -155,7 +157,7 @@ CLAIMANTLLM_AGENT_ID="$(
   curl -fsS -X POST \
     -H 'Content-Type: application/x-www-form-urlencoded' \
     --data-urlencode \
-    'purpose=Prove the long-lived JVM claimant DeepSeek transport and durable receipts.' \
+    'purpose=Prove the long-lived cluster JVM DeepSeek transport and durable receipts.' \
     "$CLAIMANTLLM_URL/agents"
 )"
 printf 'claimantllm agent: %s\n' "$CLAIMANTLLM_AGENT_ID"
@@ -205,7 +207,7 @@ jq -n \
 Expected result: one row `[0, false, ":batch"]`, plus database name
 `claimantllm`, its basis transaction, and commit ID.
 
-## Drive one production claimant attempt
+## Drive one production cluster JVM attempt
 
 This message asks the model for two explicit forms. A successful response must
 therefore advance beyond LLM transport into durable JVM eval receipts and
@@ -282,7 +284,7 @@ jq -n \
               :seon.agent.run/status
               :seon.agent.run/started-at
               :seon.agent.run/last-beat-at
-              :seon.agent.run/claimant
+              :seon.agent.run/process
               :seon.agent.run/claim-epoch
               :seon.agent.run/closed-reason
               :seon.agent.run/result
@@ -316,7 +318,7 @@ jq -n \
 Required current facts:
 
 - run: `:seon.agent.run/id`, `:status :closed`,
-  `:closed-reason :completed`, `:started-at`, and `:closed-at`; claimant is
+  `:closed-reason :completed`, `:started-at`, and `:closed-at`; the process is
   normally absent after clean close because custody is retracted, while the
   terminal claim epoch reflects each cross-tier handoff;
 - turn: `:seon.agent.turn/id`, `:status :done`, `:phase :published`,
@@ -353,20 +355,20 @@ credential, Throwable object, or nested error map may appear.
 
 ## Claim and phase history proof
 
-Current state retracts claimant custody on a clean close. Use the history
+Current state retracts process custody on a clean close. Use the history
 database value to prove which long-lived process performed the work and which
 transactions advanced the cursor.
 
 ```bash
 jq -n \
   --arg aid "$CLAIMANTLLM_AGENT_ID" \
-  --arg q '[:find ?run-id ?claimant ?epoch ?beat ?tx ?at
+  --arg q '[:find ?run-id ?process ?epoch ?beat ?tx ?at
             :in $ ?aid
             :where
             [?agent :seon.agent/id ?aid]
             [?run :seon.agent.run/agent ?agent]
             [?run :seon.agent.run/id ?run-id]
-            [?run :seon.agent.run/claimant ?claimant ?tx true]
+            [?run :seon.agent.run/process ?process ?tx true]
             [?run :seon.agent.run/claim-epoch ?epoch ?tx true]
             [?run :seon.agent.run/last-beat-at ?beat ?tx true]
             [?tx :db/txInstant ?at]]' \
@@ -380,9 +382,9 @@ jq -n \
 ```
 
 Expected: ordered added claim rows for pod render, JVM LLM/eval, and pod
-publish, normally epochs `1`, `2`, and `3`. Join the middle claimant's
+publish, normally epochs `1`, `2`, and `3`. Join the middle run-holding process's
 PID/start instant to the exact target host generation, and join the first and
-last to the target pod generation. A single claimant row or a host PID from
+last to the target pod generation. A single run-holding process row or a host PID from
 another cluster fails the proof.
 
 ```bash
@@ -469,7 +471,7 @@ The pre-fix observability distinction was:
 
 - `src/seon/ai/http.clj` accepts success only when
   `200 <= HttpResponse.statusCode <= 299`, so a durable `:success` plus response
-  identity proves a real provider 2xx on the long-lived claimant; but
+  identity proves a real provider 2xx on the long-lived run-holding process; but
 - the old success branch discarded the exact status code, so it could not prove
   literal HTTP 200 rather than another 2xx.
 
@@ -532,10 +534,10 @@ isolated operator coordinates.
 | Ready fails before the wake | Startup/acquisition defect, not an LLM transport result | Capture isolated process logs and stop; do not call DeepSeek |
 | Policy proof is not `[0 false :batch]` | More than one paid attempt or streaming could occur | Stop before `/chat`; fix the test setup |
 | HTTP 204 but no run opens | Message wake/claim defect precedes LLM transport | Capture database value and process logs; do not retry |
-| Attempt is `:provider-error` with bounded cause | The desired root-cause reproduction succeeded | Stop immediately; preserve cause message/class/status/body and compare the claimant generation to the fresh-leaf control |
+| Attempt is `:provider-error` with bounded cause | The desired root-cause reproduction succeeded | Stop immediately; preserve cause message/class/status/body and compare the run-holding process generation to the fresh-leaf control |
 | Attempt is `:provider-error` without bounded cause | Diagnostics restoration is incomplete | Reopen Step 1; logs do not substitute for receipt data |
-| Cause says shared client connect timeout changed | `process-client` retained a different timeout | Fix the one process-shared client owner or make configuration immutable at claimant admission; do not add another client |
-| Cause is connection reuse/closed-channel/EOF | Long-lived `HttpClient` connection state is implicated | Reproduce against the same client with two sequential requests, then fix retry/reuse at `seon.ai.http`; do not create a claimant-only transport |
+| Cause says shared client connect timeout changed | `process-client` retained a different timeout | Fix the one process-shared client owner or make configuration immutable at run-holding process admission; do not add another client |
+| Cause is connection reuse/closed-channel/EOF | Long-lived `HttpClient` connection state is implicated | Reproduce against the same client with two sequential requests, then fix retry/reuse at `seon.ai.http`; do not create a cluster JVM-only transport |
 | Cause is missing credential | Long-lived process environment/config acquisition differs | Compare the non-secret credential source/class and process generation; never print the key |
 | HTTP error | Provider reached; status and bounded body decide auth, request, quota, or provider failure | Stop on 402. Otherwise fix request/config evidence at the existing owner |
 | `:success` without response identity or reply blob | Transport returned, but durable settlement is incomplete | Treat as receipt/settlement failure, not alive |

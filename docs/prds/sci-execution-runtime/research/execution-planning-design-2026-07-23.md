@@ -27,7 +27,7 @@ Add one derived, basis-fenced execution plan over the program graph:
 
 That function becomes the sole placement authority. Contract-predicate admission, drivers, and the legacy mixed-tier router consume its result; none independently rediscover locality, purity, or requirements.
 
-“Anywhere” means portable across every admitted claimant execution tier—not the writer or web-render processes excluded by R26—and is semantic, not “all tiers currently happen to possess this capability.” R26 fixes those process roles; R33 requires derived, capability-free portability. [program-synthesis:378](/Users/sean/src/seon/docs/prds/sci-execution-runtime/program-synthesis-2026-07-21.md:378) [program-synthesis:423](/Users/sean/src/seon/docs/prds/sci-execution-runtime/program-synthesis-2026-07-21.md:423)
+“Anywhere” means portable across every admitted run-holding process execution tier—not the writer or web-render processes excluded by R26—and is semantic, not “all tiers currently happen to possess this capability.” R26 fixes those process roles; R33 requires derived, capability-free portability. [program-synthesis:378](/Users/sean/src/seon/docs/prds/sci-execution-runtime/program-synthesis-2026-07-21.md:378) [program-synthesis:423](/Users/sean/src/seon/docs/prds/sci-execution-runtime/program-synthesis-2026-07-21.md:423)
 
 ## 1. Graph additions
 
@@ -81,7 +81,9 @@ Version one should fail closed on unresolved edges. An invocation planner may sp
 
 1. An ordinary corpus function contributes its call edges, contract/schema edges and typed attribute edges.
 2. A pure primitive contributes no placement restriction.
-3. A capability call contributes its effect and required leaf/binding. Eligible claimant tiers are those whose inventory can provide that binding locally or through the defined remote seam.
+3. A capability call contributes its effect and required leaf/binding. Eligible
+   execution tiers are those whose inventory can provide that binding locally
+   or through the defined remote seam.
 4. A package call derives native locality from its namespace:
    - JavaScript native package leaf → Bun.
    - JVM native package leaf → JVM.
@@ -92,7 +94,7 @@ Version one should fail closed on unresolved edges. An invocation planner may sp
 
 Purity is deliberately conservative. The analyzer does not prove arbitrary semantic purity; purity is derived from trusted terminal descriptors plus the transitive call graph. An undeclared terminal is external, not optimistically pure.
 
-Phase eligibility remains a separate scheduler policy: phase capabilities decide who may claim a phase; the execution plan further decides whether that claimant can run this particular work. [core.cljc:50](/Users/sean/src/seon/src/seon/agent/loop/core.cljc:50) [driver.cljc:217](/Users/sean/src/seon/src/seon/agent/driver.cljc:217)
+Phase eligibility remains a separate scheduler policy: phase capabilities decide who may claim a phase; the execution plan further decides whether that the process can run this particular work. [core.cljc:50](/Users/sean/src/seon/src/seon/agent/loop/core.cljc:50) [driver.cljc:217](/Users/sean/src/seon/src/seon/agent/driver.cljc:217)
 
 This absorbs the router’s present syntactic reconstruction from executable symbols, loader forms, require edges and `seon.packages.js.*` scans. [host.cljs:817](/Users/sean/src/seon/src/seon/execution/host.cljs:817) [host.cljs:832](/Users/sean/src/seon/src/seon/execution/host.cljs:832) [host.cljs:1016](/Users/sean/src/seon/src/seon/execution/host.cljs:1016)
 
@@ -113,7 +115,7 @@ The existing projection already contains direct function-contract dependencies a
 
 ### Recommendation: verify full projection coverage
 
-For normal persistent claimant leaves:
+For normal persistent run-holding process leaves:
 
 - Acquire the complete committed R29 schema projection at the planned database value.
 - Verify that the manifest is covered by that projection and that its fingerprint matches the plan.
@@ -182,11 +184,11 @@ After parsing the proposed invocation but before transitioning `reply-ready → 
 
 1. Derive the plan at the claim database value.
 2. Verify schema coverage.
-3. Compare capability/export requirements with the claimant inventory.
+3. Compare capability/export requirements with the cluster JVM inventory.
 4. Provision permitted remote leaves.
 5. Only then enter the execution phase.
 
-If this claimant cannot satisfy the plan but another eligible claimant can, release the work unchanged for handoff. If no tier can satisfy it, return/persist a flat `:seon/error` steering value naming:
+If this the process cannot satisfy the plan but another eligible the process can, release the work unchanged for handoff. If no tier can satisfy it, return/persist a flat `:seon/error` steering value naming:
 
 - Root function/form and relevant callsite.
 - Missing capability leaves or exports.

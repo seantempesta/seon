@@ -1,7 +1,7 @@
 ---
 type: research
 status: active
-tags: [research, runtime, operator, process-management]
+tags: [research, runtime, operator]
 ---
 
 # Process management design — 2026-07-23
@@ -10,7 +10,7 @@ tags: [research, runtime, operator, process-management]
 
 The failure is a process-graph completeness bug, not merely a stale-file bug. Web-render is part of `all-process-ids`, the selected target graph, and the generated process specifications, but `clean-or-force!` filters requested targets through an older four-member shutdown list that omits web-render. Thus `down` and `reset` can request web-render, silently produce no result for it, and report success while its generation remains live and recorded (`script/seon/dev/process.clj:26-32,216-232,609-680,2146-2174`; `script/seon/dev/cli.clj:27-40,296-308,815-842`). This exactly explains the retained transcript: web-render was later blocked by the generic “managed process present” guard (`docs/seon/issues/predfix-web-render-record-survives-operator-down.md:11-25`; `script/seon/dev/process.clj:2481-2523`).
 
-The process record should remain, but only as an immutable descriptor of one exact managed generation: desired argv/artifact identity, log, containment generation, control paths, and the `(pid,start-instant)` identities required to control or disprove that generation. It must not be treated as stored liveness. Liveness is already derivable from the operating system using PID plus start instant (`script/seon/dev/process.clj:99-111`; `script/seon/dev/state.clj:11-26`). The record is therefore analogous to the claimant identity and epoch, not to a stored `alive?` flag: the identity says which process instance is meant, the generation fences commands, and current observation decides whether that identity still exists (`docs/seon/architecture/agent-runtime.md:35-39,49-69`; `docs/prds/sci-execution-runtime/program-synthesis-2026-07-21.md:882-896`).
+The process record should remain, but only as an immutable descriptor of one exact managed generation: desired argv/artifact identity, log, containment generation, control paths, and the `(pid,start-instant)` identities required to control or disprove that generation. It must not be treated as stored liveness. Liveness is already derivable from the operating system using PID plus start instant (`script/seon/dev/process.clj:99-111`; `script/seon/dev/state.clj:11-26`). The record is therefore analogous to the `:seon.agent.run/process` and epoch, not to a stored `alive?` flag: the identity says which process instance is meant, the generation fences commands, and current observation decides whether that identity still exists (`docs/seon/architecture/agent-runtime.md:35-39,49-69`; `docs/prds/sci-execution-runtime/program-synthesis-2026-07-21.md:882-896`).
 
 The one strengthened mechanism is:
 

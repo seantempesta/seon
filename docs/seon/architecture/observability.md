@@ -90,11 +90,11 @@ lives in the blob archive behind a datom ref. The DB is never a text dump.
 
 ### Receipts are the crash-forensics spine
 
-The run's claimant, claim epoch, heartbeat, turn phase, provider attempts, and
-eval rows form one causally ordered record. They answer four different
+The run's `:seon.agent.run/process`, claim epoch, heartbeat, turn phase,
+provider attempts, and eval rows form one causally ordered record. They answer four different
 questions without consulting process memory:
 
-- **Who held authority?** Query `:seon.agent.run/claimant` and
+- **Who held authority?** Query `:seon.agent.run/process` and
   `:seon.agent.run/claim-epoch` at the relevant database value.
 - **What step was admitted?** Read `:seon.agent.turn/phase` together with the
   attempt or eval receipt opened before dispatch.
@@ -113,7 +113,7 @@ crossed the execution door but did not terminalize. These distinctions govern
 recovery and remain visible to debug projections.
 
 Datahike temporal history supplies **claim archaeology**. An investigator can
-walk the run's claimant, epoch, and heartbeat changes; join each transition to
+walk the run's process ref, epoch, and heartbeat changes; join each transition to
 transaction provenance; inspect the cursor and receipts at the same database
 value; and identify the exact transaction that displaced a holder. Expiry
 itself is derived from the historical heartbeat and configured stale interval,
@@ -152,15 +152,15 @@ while linking the durable reply blob, and historical feeds never replay it —
 partial text is presentation, never evidence; the attempt receipt and reply
 blob remain the forensic truth.
 
-Claimant telemetry follows the same storage law. JVM thread handles, active
-deadline timers, and demanded CPU or heap samples remain transient in the
+Cluster-JVM telemetry follows the same storage law. JVM thread handles, active
+timers, and demanded CPU or heap samples remain transient in the
 owning process. Healthy sampling does not write transactions. A deadline,
 process exit, or explicit forensic capture may attach one bounded terminal
 projection and one `:diagnostic` blob, but neither replaces the claim, phase,
 and receipt facts.
 
 Stack attribution is evidence, not certainty. A thrown exception supplies a JVM
-stack; a non-responsive claimant may receive a bounded on-demand sample. Reports
+stack; a non-responsive cluster JVM may receive a bounded on-demand sample. Reports
 retain raw frames and sampling context so optimized, native, or blocked-system-
 call cases can state incomplete attribution rather than invent an exact source
 line.
@@ -285,10 +285,10 @@ the data model.
 Claim recovery retains two database values rather than inventing a rollback
 point: the value pinned for the interrupted phase and the current value at which
 takeover terminalizes or advances it. Their basis transactions and commit IDs
-show what the old claimant saw and what committed before replacement. Process
-diagnostics stay in operator logs. Database forensics retain the claimant,
-epoch, phase cursor, attempt/eval receipts, and the thin claimant-session-loss
-recovery fact. The next turn may state that replacement loaded the current
+show what the prior process saw and what committed before replacement. Process
+diagnostics stay in operator logs. Database forensics retain
+`:seon.agent.run/process`, epoch, phase cursor, attempt/eval receipts, and the
+thin process-loss recovery fact. The next turn may state that replacement loaded the current
 database program and that transient tier-local values were lost. It never
 claims committed effects were undone or silently retries an effect contrary
 to its class.
@@ -310,17 +310,17 @@ saw**, not by a human reading logs:
 - **Per-agent LLM config** selects a cheap reasoning model with thinking ON
   for these runs, so forensic passes are routine, not precious.
 
-This is a composition of existing mechanisms—claimant isolation, Datahike branch
+This is a composition of existing mechanisms—cluster isolation, Datahike branch
 roots, seed-copy ctx override via `install!`, as-of reconstruction,
 per-agent provider routing — not a new runtime. A forensic pass is cheap
 enough to run on every puzzling drive.
 
 ## Cluster lifecycle and the composition door
 
-Isolation is the CLUSTER: one shared database and its agents, supervised writer,
-web-render, claimant, and leaf-host processes. From
-inside a cluster there is ONE conn and ONE database — agents never know
-other clusters exist. Database enumeration, fork, release, and deletion are
+Isolation is the CLUSTER: one store, one cluster JVM, one web-render JVM, and
+disposable leaf runtimes. From inside a cluster there is ONE connection and
+ONE database — agents never know other clusters exist. Database enumeration,
+fork, release, and deletion are
 typed root/supervisor operations in `seon.db.registry`, never agent protocol
 operations. The supervisor owns the lifecycle:
 
@@ -334,7 +334,7 @@ operations. The supervisor owns the lifecycle:
 `POST /agents/run` is the one-shot composition door, built
 purely from the agent primitives: start-or-reuse an agent in the cluster's own
 cluster (optional `agent_id` — durable database, so the same agent can be
-driven again across a claimant restart), deliver the input through the real wake
+driven again across a cluster JVM restart), deliver the input through the real wake
 path, await the derived `:idle` of the run it woke, return the truthful
 reply plus termination metadata (turns/evals scoped to this request's
 window, closed-reason, timed-out), an ordered `eval_evidence` projection of
@@ -351,7 +351,7 @@ there is no in-process evaluator lifecycle. The answer key never enters the clus
 — scoring stays host-side. Benchmark vocabulary is harness-side only.
 
 An explicit `timeout_ms` is a caller-selected experiment bound. When it is
-absent, the door derives its wait duration from the same frozen database run
+absent, the boundary derives its wait duration from the same frozen database run
 policy and optional agent override that `open-run!` uses. The HTTP boundary
 never introduces a shorter literal deadline that can terminate an otherwise
 healthy database-owned run. Its response projects the effective duration and
@@ -402,7 +402,7 @@ native score history records who made the classification and why. Passing
 scores carry no manufactured failure label, infrastructure failures remain
 unscored, and no heuristic classifier becomes another evidence authority.
 Long-term planning is a cluster-backed Inspect task: one ephemeral cluster spans
-multiple interactions and a claimant restart, then host-side scoring reads the
+multiple interactions and a cluster JVM restart, then host-side scoring reads the
 resulting plan and eval facts. Offline good/bad fixtures exercise the same
 scorer without claiming to measure the cluster.
 

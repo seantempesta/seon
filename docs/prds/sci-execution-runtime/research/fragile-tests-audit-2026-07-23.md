@@ -4,6 +4,8 @@ status: active
 tags: [research, testing, runtime]
 ---
 
+Terminology: this note records evidence from before the rename; the process holding a run is now `:seon.agent.run/process`.
+
 # Fragile-tests audit — bad implementations protected by fragile tests (2026-07-23)
 
 Read-only audit of the full test surface (228 `*_test.*` files under
@@ -182,7 +184,7 @@ new to write.
 
 ### F2 (HIGH) Validation fail-open when the committed projection is absent
 
-VERIFIED. The C4 "claimant `(constantly false)`" defeat is gone
+VERIFIED. The C4 "run-holding process `(constantly false)`" defeat is gone
 (`src/seon/agent/driver/host.clj:39-53` now derives
 `:seon.db.leaf/schema-validation?` from the retained committed
 projection; `test/seon/db/claimant_validation_test.clj:36` proves the ON
@@ -193,7 +195,7 @@ skips `validate-attrs!`/`validate-values!` whenever the leaf's
 false exactly when the projection cache is EMPTY. The bootstrap escape
 is a ruled design (wiki: an empty bootstrap database disables domain
 validation until its declaration transaction) — but in production the
-same shape means "claimant with an unpopulated cache persists
+same shape means "run-holding process with an unpopulated cache persists
 unvalidated, silently". The class of C4 stays representable; the
 regression suite can only pin instances. **Constraint (C4
 completion):** make validation-off unrepresentable outside the explicit

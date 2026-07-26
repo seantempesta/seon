@@ -4,9 +4,11 @@ status: active
 tags: [prd, agent, architecture, database]
 ---
 
+Terminology: this note records evidence from before the rename; the process holding a run is now `:seon.agent.run/process`.
+
 # Sci execution runtime roadmap
 
-## The graduation gate (owner, 2026-07-25 night) — READ THIS FIRST
+## The final system gate (owner, 2026-07-25 night) — READ THIS FIRST
 
 This is what "done" means. Not a slogan: every line is falsifiable, and a
 session that cannot point at one of these is not finished, however green its
@@ -50,7 +52,7 @@ is equally complex, the model was ported, not applied.
 ## Program goal (owner, 2026-07-20 night)
 
 **Complete the transition: Seon runs fully on this architecture.** The
-graduation gate is a working system — every agent on a context/host, the
+final system gate is a working system — every agent on a `ctx` in the cluster JVM, the
 child fleet deleted, three suites green, the drills passing at
 integration level, and one live demonstration: a cluster of 100 agents
 doing real work (defs, db, capabilities, canvas) surviving a host kill
@@ -67,7 +69,7 @@ transition ledger.
 | U1.5 | pod dials the host: tier-as-data dispatch, one REAL turn end-to-end (pod renders, host evals) | **DONE** |
 | U4 | eval-record/receipt/corpus integration over the marked seams (subsumes register R2 — the program-row rejection diagnosis) | **DONE** |
 | U5 | toolkit port — corrected dependency loader → registry provisioning → stdlib shims shape | **DONE** `48b31f59`, `535e8c9d`, `f037cbbf`, `5ac8f0ef`, `67358be2` |
-| U3 | graduation walking skeleton; R48 interim containment refusal until P4/R33 pure-call-graph admission | **ESCAPE CLOSED** `3bb7c2d39`; native gate reopens only at P4 |
+| U3 | accretion walking skeleton; R48 interim containment refusal until P4/R33 pure-call-graph admission | **ESCAPE CLOSED** `3bb7c2d39`; native gate reopens only at P4 |
 | U6 | instrumentation over sci vars (B1 deferred item 5) | after U4 |
 | U7 | park/idle policy + warm spares (owner-ruled shape) | after U1.5 |
 | U8 | steering/context re-alignment: all agent-facing guidance teaches the sync idiom | before cutover |
@@ -75,7 +77,7 @@ transition ledger.
 | U10 | integration drills: host kill + pod restart with live agents, derived notices proven | gate |
 | U11 | children retirement, deletion commit, architecture docs + one-mechanism table | cutover |
 | U13 | agent package provisioning: `my.pkg/install` for :npm (pod host, `bun add` + wrapper gen) and :maven (JVM host, runtime classloader + allowlisted binding table), gated by config-fact policy with provenance, delivered through the U2 registry (lazy to all contexts, epoch-upgradeable wrappers). C2's admission guard steers js-form attempts toward the capability | after U4; demo-able before U11 |
-| U12 | graduation demo: N=100 live fleet, real work, kill + restart survival | **the gate** |
+| U12 | final system demo: N=100 live fleet, real work, kill + restart survival | **the gate** |
 
 Concurrent: outside agents complete the source-cleanup stages; the
 optional Bun sci tier (variant B) is decided at U11 with C2's js-bound
@@ -157,7 +159,7 @@ claimant persisted nested plan root `mft542256r45`, registered and transacted a
 schema-backed memory fact, and read back `CLAIMANT_MEMORY_ALIVE`. All turns are
 terminal and custody is absent. The final completion-form placement refusal
 remains the earliest U2 contract; default-cluster cross-turn memory and U12
-remain the graduation gates. Evidence:
+remain the system gates. Evidence:
 `tmp/orchestrator/planschema-gate.log`.
 
 [[../source-cleanup/research/sci-execution-child-feasibility-2026-07-20]]
@@ -553,7 +555,7 @@ capture (`:seon.eval/output` absent), result-edn is a capped `pr-str`
 sub-loop/preflight, renders stay pod-served, and `record-eval-terminal!`
 failures surface as `::record-error` on the envelope (batch continues).
 
-### U3 — graduation walking skeleton — DONE (2026-07-20)
+### U3 — accretion walking skeleton — DONE (2026-07-20)
 
 R48 containment ruling (2026-07-24) supersedes the native-execution claims
 below. The original walking skeleton remains historical differential-test and
@@ -562,17 +564,18 @@ registry-link evidence, but tests-pass no longer admits native code.
 no host eval or tier transaction, and matching legacy `:graduated` rows derive
 `:nursery` and rebuild through SCI (`3bb7c2d39`). Native compilation may reopen
 only after P4/R33 proves the exact transitive call graph pure,
-capability-free, and door-equivalent. The original measurements below are not
-current execution behavior.
+capability-free, and `:interrupt-fn`-equivalent. The original measurements
+below are not current execution behavior.
 
 One real agent-authored corpus function now crosses the complete
-graduation pipeline. The host harness records `sum-squares` through U4
+accretion pipeline. The host harness records `sum-squares` through U4
 as a strict single `defn` with a Malli schema and inline `:test`; its
 `:seon.fn` row carries the verbatim source, exact UTF-8 SHA-256
-`:seon.fn/source-fingerprint`, and `:seon.fn/execution-tier :nursery`.
+`:seon.fn/source-fingerprint`, and the historical
+`:seon.fn/execution-tier :nursery` literal.
 Both the Bun tee and JVM host tee write those facts, so a source edit is
 one identity upsert that changes the fingerprint and returns the row to
-nursery without a stale optional fact.
+interpreted SCI without a stale optional fact.
 
 Dependency ledger:
 
@@ -604,17 +607,17 @@ The registry gained one link operation, not another binding path:
 `install-registered-wrappers!` merges the registry's exact cached vars
 into a context through sci's public `add-namespace!`. Restore order is
 replay first, link second. Consequently a later SCI `defn` edit reuses
-that linked var, bumps sci's var epoch, and immediately makes every
-linked caller nursery again; recording then makes the new fingerprint
-and nursery tier durable. Host startup queries those facts and derives
-all nursery/compiled roots before accepting sessions. Bytecode and vars
-remain process-local projections.
+that linked var, bumps sci's var epoch, and immediately makes every linked
+caller use interpreted SCI again; recording then makes the new fingerprint
+and interpreted tier durable. Host startup queries those facts and derives all
+interpreted/compiled roots before accepting sessions. Bytecode and vars remain
+process-local projections.
 
 Proof (`test/seon/host_graduate_writer_test.clj`):
 
 - focused U3: 2 tests / 29 assertions; U2/U4 registry focus: 6 / 43;
 - 10,000 calls through one already-required caller context, three
-  warmups and seven samples per tier: nursery ns
+  warmups and seven samples per tier: interpreted SCI ns
   `[21647167 21473500 19854375 23703000 19521291 20139250 22290250]`,
   compiled ns
   `[13220459 15487875 12909458 12145500 12927375 15586958 12496375]`;
@@ -623,23 +626,23 @@ Proof (`test/seon/host_graduate_writer_test.clj`):
   `e56c73843834c9cb7fabac76faa82e9869571cf0b00347ec11a6fb0c9d4d95e5`
   became
   `525a14c96b51ec833bfe494c7d39885849b4f944a706954a22298682c4653a57`;
-  the row and `effective-tier` were nursery and the linked caller
-  returned the edited SCI result before re-graduation;
-- fresh `host/stop!` + `host/start!` rebuilt exactly one graduated root
+  the row and `effective-tier` carried the historical `:nursery` value and the
+  linked caller returned the edited SCI result before re-accretion;
+- fresh `host/stop!` + `host/start!` rebuilt exactly one accreted root
   from facts and returned the edited result after replay/link;
 - full writer 263 tests / 2045 assertions and full CLJS 1349 / 6257,
   zero failures/errors; and
 - the existing 20-agent kill drill remained PASS: 20/20 EOF notices,
   20/20 replayed and verified, zero fact loss, 8.436 s kill-to-host-ready
   and 26.930 s kill-to-full-fleet-ready. The focused restart assertion,
-  not the ungraduated legacy drill corpus, proves graduated-state
+  not the pre-accretion legacy drill corpus, proves accreted-state
   reconstruction.
 
-Honest boundary: this skeleton graduates one self-contained pure
+Honest boundary: this skeleton accretes one self-contained pure
 function with one inline test. Cross-function compiled dependency
 loading, cooling-window policy, richer test refs, and canary promotion
-remain later graduation work; JVM eval is intentionally outside the SCI
-sandbox once the gate passes.
+remain later accretion work; JVM eval intentionally runs without SCI once the
+gate passes.
 
 ### U5 — dependency-ordered toolkit port — DONE (2026-07-20)
 

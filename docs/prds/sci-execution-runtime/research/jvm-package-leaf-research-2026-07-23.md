@@ -8,12 +8,12 @@ tags: [research, runtime]
 
 ## Recommendation
 
-Add one disposable, per-cluster **JVM package leaf host**, parallel to the Bun package leaf. Do not load cluster packages into the writer or claimant classpaths.
+Add one disposable, per-cluster **JVM package leaf host**, parallel to the Bun package leaf. Do not load cluster packages into the writer or run-holding process classpaths.
 
-The claimant retains the guarded SCI wrapper and a remote binding; the separate JVM leaf owns the package’s jars, Clojure namespaces, Java classes, static state, native libraries, and native calls. This preserves R16’s logical interface—`seon.packages.jvm.<pkg>` is the package leaf—while satisfying R26’s blast-radius rule.
+The the process retains the guarded SCI wrapper and a remote binding; the separate JVM leaf owns the package’s jars, Clojure namespaces, Java classes, static state, native libraries, and native calls. This preserves R16’s logical interface—`seon.packages.jvm.<pkg>` is the package leaf—while satisfying R26’s blast-radius rule.
 
 ```text
-claimant JVM
+cluster JVM
   guarded corpus wrapper / remote stub
           │ existing typed invocation seam
           ▼
@@ -21,7 +21,7 @@ per-cluster JVM package leaf
   DynamicClassLoader + cluster deps + native call
 ```
 
-The writer remains transactions/feed only. A claimant never executes third-party bytecode in its own process.
+The writer remains transactions/feed only. A run-holding process never executes third-party bytecode in its own process.
 
 ## What has already landed
 
@@ -55,9 +55,9 @@ It should:
 - Be disposable: deadline overrun, `System/exit`, native crash, poisoned classpath, or partial live-add means terminate and reconstruct it.
 - Publish readiness only after dependency basis, wrapper export inventory, and generation agree.
 
-The current operator already owns writer, claimant host, web-render, watcher, and pod processes in [`process.clj:26`](/Users/sean/src/seon/script/seon/dev/process.clj:26). The JVM package leaf should join that graph; claimant-owned ad hoc `ProcessBuilder` supervision would now be a second lifecycle mechanism.
+The current operator already owns writer, cluster JVM, web-render, watcher, and pod processes in [`process.clj:26`](/Users/sean/src/seon/script/seon/dev/process.clj:26). The JVM package leaf should join that graph; process-owned ad hoc `ProcessBuilder` supervision would now be a second lifecycle mechanism.
 
-A separate process is materially stronger than separate classloaders inside the claimant. Clojure namespaces, JVM system properties, native libraries, executor threads, and `DynamicClassLoader`’s static class cache remain process-global. Classloaders alone do not give honest cluster isolation.
+A separate process is materially stronger than separate classloaders inside the run-holding process. Clojure namespaces, JVM system properties, native libraries, executor threads, and `DynamicClassLoader`’s static class cache remain process-global. Classloaders alone do not give honest cluster isolation.
 
 ## Dependency lifecycle
 
@@ -116,11 +116,11 @@ Use one atomic corpus mechanism:
 3. Stamp every row with the ledger ref using the existing `stamp-corpus-rows`.
 4. Commit ledger and corpus rows through the writer in the normal provenance-bearing transaction.
 5. Reconstruct the JVM leaf from the committed manifest and wrapper generation.
-6. Register claimant-side remote implementations through the existing U2 registry, preserving corpus `:arglists`, documentation, schemas, and effect metadata.
+6. Register process side remote implementations through the existing U2 registry, preserving corpus `:arglists`, documentation, schemas, and effect metadata.
 7. Re-registration alters existing SCI var roots, so live contexts see the new generation without rebuilding their private contexts.
 8. Removal retracts stamped corpus entities and the ledger entity, removes inventory exports, then restarts the leaf.
 
-The package host should remain eval-free. Agent-authored composition stays in guarded claimant SCI; the leaf exposes a sealed package-call dispatcher. That dispatcher must validate the installed ledger namespace, generation, package coordinate, and declared export—it must not expose an unrestricted arbitrary-class/reflection API as an agent binding.
+The package host should remain eval-free. Agent-authored composition stays in guarded run-holding process SCI; the leaf exposes a sealed package-call dispatcher. That dispatcher must validate the installed ledger namespace, generation, package coordinate, and declared export—it must not expose an unrestricted arbitrary-class/reflection API as an agent binding.
 
 ## Planner integration
 
@@ -138,10 +138,10 @@ For each exported `seon.packages.jvm.<pkg>/fn`:
 
 - The program edge already yields a terminal whose required binding defaults to that function symbol.
 - The JVM package leaf publishes it in `:seon.execution.inventory/bindings`.
-- Claimants with the installed wire stub publish it in `:seon.execution.inventory/remote-bindings`.
+- Processes holding runs with the installed wire stub publish it in `:seon.execution.inventory/remote-bindings`.
 - The inventory digest covers package ledger generation, wrapper/program generation, effective basis digest, and exported function set.
 - Process PID should not affect the inventory digest; an equivalent restart should preserve capability identity.
-- The planner then constrains the native leaf to JVM while allowing a claimant to execute the surrounding graph through the remote binding.
+- The planner then constrains the native leaf to JVM while allowing a run-holding process to execute the surrounding graph through the remote binding.
 - P5 should provision/verify the leaf before entering `:evaling`; P6 owns the general local-implementation versus wire-stub installer. The package unit should extend those contracts, not recreate routing.
 
 ## Security and isolation posture
@@ -178,8 +178,8 @@ Overall: **L**, naturally split into four bounded units:
 
 4. **Protected fork test:** request a direct or transitive conflicting Datahike/Konserve/Clojure coordinate. Acceptance: the cluster package cannot replace root authority, and the rejection names the conflicting protected lib.
 
-5. **Inventory producer contract:** no production producer currently exists. Prove one package terminal appears native in the leaf inventory, remote in the claimant inventory, disappears on removal, and changes the planner cache key on wrapper/basis generation change.
+5. **Inventory producer contract:** no production producer currently exists. Prove one package terminal appears native in the leaf inventory, remote in the cluster JVM inventory, disappears on removal, and changes the planner cache key on wrapper/basis generation change.
 
-6. **Crash battery:** `System/exit`, infinite native call, partial live-add failure, and invalid wrapper export. Acceptance: writer and claimant survive, calls settle as values, the operator replaces the leaf, and durable package/corpus facts remain intact.
+6. **Crash battery:** `System/exit`, infinite native call, partial live-add failure, and invalid wrapper export. Acceptance: writer and run-holding process survive, calls settle as values, the operator replaces the leaf, and durable package/corpus facts remain intact.
 
 No files were written; no builds or REPL probes were run.

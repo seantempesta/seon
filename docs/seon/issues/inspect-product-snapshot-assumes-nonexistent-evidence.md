@@ -11,7 +11,7 @@ severity: friction
 
 **FOLD-INTO-UNIT — U9 deletion.** The current scorer joins outgoing
 execution-child failure/replacement evidence; U9 must rewrite it around
-claimant and leaf-host recovery.
+run-holding process and leaf-host recovery.
 
 ## Evidence
 

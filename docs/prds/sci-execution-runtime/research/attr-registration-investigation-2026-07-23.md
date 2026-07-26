@@ -24,7 +24,7 @@ parse/API admission → transaction/read
 writer remains final fail-closed authority
 ```
 
-A critical correction: the literal `:seon.agent.run/current-turn` drill failure was not a claimant transaction and no registration ever existed for that key. It was a manual JVM `db/pull` using a derived projection key as a database attribute. The broader `.cljs`-only run/turn registration defect is real, but it is a related class rather than the exact cause of that error.
+A critical correction: the literal `:seon.agent.run/current-turn` drill failure was not a run-holding process transaction and no registration ever existed for that key. It was a manual JVM `db/pull` using a derived projection key as a database attribute. The broader `.cljs`-only run/turn registration defect is real, but it is a related class rather than the exact cause of that error.
 
 No files, processes, builds, or databases were changed.
 
@@ -76,17 +76,17 @@ The new alias support from `0e1954cb6` correctly dereferences canonical qualifie
 
 The remaining boot weakness is [`agent-bootstrap-attrs`](/Users/sean/src/seon/src/seon/client.cljs:741): it is still partly a manually maintained installation list. The writer derives entity-map attributes as well, but the complete transactable population is not yet a single computed invariant.
 
-### Existing transaction admission—and its claimant hole
+### Existing transaction admission—and its run-holding process hole
 
 `seon.db/transact!` already extracts every transaction attribute and validates it against an explicitly bound projection ([db.cljc:446](/Users/sean/src/seon/src/seon/db.cljc:446)). Its existing error text already teaches “register, then retry unchanged” ([db/internal.cljc:332](/Users/sean/src/seon/src/seon/db/internal.cljc:332)).
 
-The general JVM host correctly supplies a database-scoped committed projection ([host/context.clj:245](/Users/sean/src/seon/src/seon/host/context.clj:245)). The claimant leaf explicitly defeats it:
+The general JVM host correctly supplies a database-scoped committed projection ([host/context.clj:245](/Users/sean/src/seon/src/seon/host/context.clj:245)). The cluster JVM leaf explicitly defeats it:
 
 - projection: `nil`
 - cache: no-op
 - validation: `false`
 
-See [agent/driver/host.clj:23](/Users/sean/src/seon/src/seon/agent/driver/host.clj:23). Thus Datahike still rejects an uninstalled attribute, but the claimant misses Malli validation and the earlier teaching surface.
+See [agent/driver/host.clj:23](/Users/sean/src/seon/src/seon/agent/driver/host.clj:23). Thus Datahike still rejects an uninstalled attribute, but the run-holding process misses Malli validation and the earlier teaching surface.
 
 ## Registration census and JVM use
 
@@ -158,7 +158,7 @@ What already exists:
 What must change:
 
 - No tier may validate ordinary work from incidental module-load candidates once the database is born.
-- The claimant must acquire and bind the committed projection.
+- The the process must acquire and bind the committed projection.
 - Boot/readiness must reconcile the complete database corpus and installed transactable attribute set before admitting claims.
 - A successful `register!` transition must always culminate in a committed schema row before functions using it are callable.
 
@@ -195,7 +195,7 @@ B alone is insufficient if its “reachable registrations” mean namespaces inc
 
 ### C. Parse/transact-time admission — required runtime totality and teaching
 
-Keep writer enforcement as the final authority, but bind every leaf—including the claimant—to its committed projection and fail before transport when possible.
+Keep writer enforcement as the final authority, but bind every leaf—including the run-holding process—to its committed projection and fail before transport when possible.
 
 Admission should distinguish:
 
@@ -232,7 +232,7 @@ D has no runtime cost and catches checked-in source drift early. It cannot prove
 - Remove the `.cljs` copies; one declaration only.
 - Move the shared attempt scalar aliases currently in `ai.cljs` into [src/seon/ai/core.cljc](/Users/sean/src/seon/src/seon/ai/core.cljc:1), so `turn/core.cljc` can resolve its complete schema graph on both tiers.
 - Keep run-only derived/function-slot shapes such as `turn-count` and `now` in the pod owner unless their functions become portable.
-- Bind the claimant leaf to `host.context`’s committed projection mechanism and enable validation.
+- Bind the cluster JVM leaf to `host.context`’s committed projection mechanism and enable validation.
 - Correct the bad `current-turn` pull and add the exact read/derived-key regression.
 
 This source move kills the known run/turn/attempt `.cljs` split, but not the general future class.

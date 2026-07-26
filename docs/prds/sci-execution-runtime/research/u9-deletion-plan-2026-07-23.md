@@ -20,7 +20,7 @@ Scope sentence: delete the per-agent Bun execution children, the `cljs.js`
 self-host eval engine, the child bands of `seon.execution*`, the child
 Shadow/operator/release plumbing, and the child/self-host tests — with the Bun
 pod surviving ONLY as the disposable js-package leaf host plus the interim
-phase-limited claimant (render/LLM/publish) and interim web server until web
+phase-limited run-holding process (render/LLM/publish) and interim web server until web
 slice 2.
 
 ## 1. Exact deletion inventory (refreshed against HEAD)
@@ -70,7 +70,7 @@ slice 2.
   child arms of `invoke-now!` :977-1027 (the `:bun` eval arm :991-995, the
   unconditional compiled→child arm :997-999 with its own docstring admission
   "Artifact-digest prompt/view rendering stays on the Bun child until its
-  claimant phase moves", the coordinate-absent child fallback in the `:else`
+  driver phase moves", the coordinate-absent child fallback in the `:else`
   arm), `invoke-compiled!` :1263-1283, `invoke-plans!` :1233-1261 (P5 deleted
   its prompt arm; remaining callers are TESTS ONLY —
   `execution/host_test.cljs:901`, `integration_driver.cljs:47` — verified;
@@ -176,7 +176,7 @@ actually does the job, and the status. VERIFIED = read at HEAD.
 
 | # | Deleted surface | Surviving owner | Evidence | Status |
 |---|---|---|---|---|
-| L1 | Child eval of agent turns | U2 claim driver, JVM claimant | `driver/host.clj:60-67` — `:eval` capability is unconditional; `eval-step!` → `:482` → `seon.host.invoke/execute-invocation!` → `host/eval.clj:336` `eval-batch-result` (sci + full corpus recording). Pod driver leaf advertises render/llm/publish ONLY (`driver/pod.cljs:60-67`). | VERIFIED |
+| L1 | Child eval of agent turns | U2 claim driver, cluster JVM | `driver/host.clj:60-67` — `:eval` capability is unconditional; `eval-step!` → `:482` → `seon.host.invoke/execute-invocation!` → `host/eval.clj:336` `eval-batch-result` (sci + full corpus recording). Pod driver leaf advertises render/llm/publish ONLY (`driver/pod.cljs:60-67`). | VERIFIED |
 | L2 | Child prompt render | U4/U7 in-pod + guarded door | `turn.cljs:465-505` renders in-pod via `ctx.driver/render-prompt!`; authored symbols go through `invoke-authored-render!` :399-417 → `execution.host/invoke!` → host-lane → JVM guarded door (`host/invoke.clj:144-150` authored arm). Spine door swap `cd7d3ebf8`. | VERIFIED |
 | L3 | Child agent-VIEW render (`/agent/{id}` live feed) | **nobody yet** | `web/datastar.cljs:1093-1096` still dispatches `'seon.execution.runtime/render-agent-view!` through `invoke-compiled!`; `invoke-now!` routes every compiled invocation to `child-lane` (:997-999); the JVM host REFUSES render symbols by design (`host/invoke.clj:174-180` — "prompt and view rendering stay on the pod"); web slice 2 (JVM /agent pages) is sequenced AFTER U9. | **BLOCKER B1 — U9 must do the in-pod move (S0a)** |
 | L4 | Child eval of scheduled fns | **nobody yet** | `agent/loop.cljs:556` (`exec-scheduled-fns!`) → `turn/eval-parsed!` → `invoke-compiled!` eval batch. Additionally `invoke-now!` :984-989 now errors any eval batch without a `:jvm`/`:bun` selected tier, and this path attaches none — the scheduled-fire path is plausibly ALREADY broken (R28 window). | **BLOCKER B2 — verify live, then re-point (S0b, decision D-U9-1)** |
@@ -184,7 +184,7 @@ actually does the job, and the status. VERIFIED = read at HEAD.
 | L6 | Child value sampling (drill) | host-lane sampling | `sample-owner` :1046-1053 already spans `[child-lane host-lane]`; host sessions serve `value-sample` frames. Child arm just disappears. | VERIFIED |
 | L7 | Cross-tier result references | P5 result-symbol ownership | retained runtime-local checks (`cross-tier-result-reference`), P5 scar "Route from `:seon.execution/selected-tier`". | VERIFIED |
 | L8 | Self-host symbol resolution for routes/controls/core prompts | **nobody yet** | `web/router.cljs:177`, `web/serve.cljs:509,1812`, `turn.cljs:425` all resolve through `seval/lookup-value` (the self-host compile-state env). U7's precedent is the static trusted table (`render/core.cljc:16-32`); R43's staged spec will make classification computed but not resolution. | **BLOCKER B3 — S0c + decision D-U9-2** |
-| L9 | LLM phase | U6 portable phase; pod stays interim claimant | pod driver `:open-attempt`/`:settle-attempt` → `turn/llm-phase!`; JVM claimant `:llm` when transport+blob leaves present (`driver/host.clj:60-67`). Needs only the §1.4 `race-timeout` extraction. | VERIFIED |
+| L9 | LLM phase | U6 portable phase; pod stays interim run-holding process | pod driver `:open-attempt`/`:settle-attempt` → `turn/llm-phase!`; cluster JVM `:llm` when transport+blob leaves present (`driver/host.clj:60-67`). Needs only the §1.4 `race-timeout` extraction. | VERIFIED |
 | L10 | `:bun`-tier package eval batches | **nobody until the JVM package leaf host unit (post-U9)** | `invoke-now!` :991-995 routes `:bun`-selected eval to the child; topology #4's wire-serving leaf host is a LATER queue unit. | **DECISION D-U9-3 (recommend fail-closed absence)** |
 | L11 | Child unexpected-exit recovery | recovery.cljs durable transition | mechanism is child-agnostic (fenced pointer/run/turn repair); only evidence projection bands are child-specific. | VERIFIED (trim in S4) |
 | L12 | Diffusion self-host bootstrap | quarantined diffusion owner | `diffusion/worker/eval.cljs` standalone Shadow main; `bootstrap_cache` relocation (S0e). | VERIFIED |
@@ -352,7 +352,7 @@ Verified surviving pod surfaces after S1-S4:
 - the interim web tier: `/`, `/agent/{id}`, debug, datastar SSE feeds,
   reactive registry, reactive calls (until web slice 2 — U5's JVM tier owns
   only `/data` + `/data/feed` today);
-- the phase-limited pod claimant: `driver.pod` leaf (render/LLM/publish),
+- the phase-limited pod run-holding process: `driver.pod` leaf (render/LLM/publish),
   `turn.cljs` render + LLM + publish phases, `loop.cljs` wake
   handling/ticker/scan (minus local scheduled eval);
 - host-lane dispatch (the S3 `seon.execution.dispatch`) — the pod's UDS
@@ -370,14 +370,14 @@ gate (all surviving Shadow builds compile), the S4 `rg` absence gates, and
 the S4 live boot — a pod that boots to readiness and completes a turn with
 `out/execution/` absent from disk proves no runtime edge into the deleted
 artifacts. The pod after U9 contains NO eval engine of any kind; every eval
-is a JVM claimant step.
+is a cluster JVM step.
 
 ## 5. Risk register (the dangerous cuts)
 
 | Risk | Shared plumbing | Falsifier |
 |---|---|---|
 | **R1 — live `/agent` page dies with the child.** The datastar agent-view feed is child-served TODAY (L3); web slice 2 is post-U9. Cutting S1 before S0a breaks the primary UI. | `web/datastar.cljs` ↔ `execution/host.cljs` ↔ child artifact | After S0a, before S1: load `/agent/{id}` on `u9del`, transact, observe the second morph server-side (gzip SSE recipe). After S1: same proof with `out/execution/` deleted from disk. |
-| **R2 — the eval-batch wire symbol spans dead and live code.** `'seon.execution.runtime/eval-batch!` names a namespace deleted in S1 but is the LIVE JVM wire contract (`host/eval.clj:336`, `host/invoke.clj:151`, `driver/host.clj:231`, `host_{conformance,registry,interrupt,cancel,hostile_battery}_writer_test`). | JVM host + claimant + writer suites + fixfixture-owned test files | `bin/test-writer` full after S1 (symbol untouched) and after S3 (decision executed): 559-test gate green; a live JVM eval turn on `u9del` produces receipts. |
+| **R2 — the eval-batch wire symbol spans dead and live code.** `'seon.execution.runtime/eval-batch!` names a namespace deleted in S1 but is the LIVE JVM wire contract (`host/eval.clj:336`, `host/invoke.clj:151`, `driver/host.clj:231`, `host_{conformance,registry,interrupt,cancel,hostile_battery}_writer_test`). | JVM host + run-holding process + writer suites + fixfixture-owned test files | `bin/test-writer` full after S1 (symbol untouched) and after S3 (decision executed): 559-test gate green; a live JVM eval turn on `u9del` produces receipts. |
 | **R3 — lane-generic correlation serves both lanes.** `receive!`, `settle-active!`, `exit-child!`, `mark-retiring!`, `same-child?` are parameterized by lane; deleting the child lane must not mutilate host-lane session lifecycle (ready/timeout/reconnect/retire). | `execution/host.cljs` :360-505 correlation core | Focused host-lane tests retained from `host_test` (ready, invoke, session-loss, reconnect) + live host-lane eval + value sample after S1. |
 | **R4 — artifact/operator digest chain.** Execution digest/inventory fields thread manifest → process readiness → release membership → P1b sidecar inventories; over-deletion breaks `bin/seon up` or the planner's export-inventory input; the whole tree is predfix-protected. | `script/seon/dev/{artifact,release,process}.clj`, `launch.cljc`, P1b sidecars | Operator gate (`bin/seon test operator`) + fresh `bin/seon up` on `u9del` + a planner run that still sees the client artifact's export inventory (placement of a compiled terminal exact — P1b's regression). |
 | **R5 — `:bun` package placement loses its only engine.** The planner emits `:bun` for `seon.packages.js.*` call graphs; post-S1 nothing serves it until the leaf-host unit. | `program/plan.cljc` policy ↔ `invoke-now!` `:bun` arm | Plan a js-package call on `u9del`: result is the loud named steering error (missing tier/leaf), never a hang or silent success. Confirm the default cluster carries zero package ledger rows before the cut (UNVERIFIED at design time). |

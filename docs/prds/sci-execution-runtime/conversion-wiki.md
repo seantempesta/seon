@@ -4,6 +4,8 @@ status: active
 tags: [reference, agent, architecture]
 ---
 
+Terminology: this note records evidence from before the rename; the process holding a run is now `:seon.agent.run/process`.
+
 # Conversion wiki — shared stumbling blocks and proven recipes
 
 EVERY lane working on the portable-core conversion, normalize series,
@@ -70,23 +72,23 @@ the anchor stays the state ledger.
 
 ## Async / platform portability
 
-- **A transport leaf cannot widen claimant phase ownership by itself.** The
+- **A transport leaf cannot widen cluster JVM phase ownership by itself.** The
   portable eligibility predicate already recognizes `:llm`, but the JVM
-  claimant advertises only `:eval` and dispatches only eval steps
+  cluster JVM advertises only `:eval` and dispatches only eval steps
   (`src/seon/agent/{loop/core.cljc:56-67,driver/host.clj:252-300}`).
   Durable attempt orchestration, prompt-blob recovery, reply-blob publication,
   and cursor advancement still live in the pod turn leaf
   (`src/seon/agent/turn.cljs:947-1114`). Also, the existing watchdog arms only
   inside `seon.host.invoke/execute-invocation!`; a provider call placed directly
-  on the claimant vthread would not inherit it
+  on the run virtual thread would not inherit it
   (`src/seon/host/invoke.clj:29-43,106-134`). Before implementing an isolated
   JVM HTTP adapter, first assign one owner to expose the durable portable LLM
-  phase plus the existing deadline ceremony at the claimant step boundary;
+  phase plus the existing deadline ceremony at the cluster JVM step boundary;
   otherwise the adapter is unreachable and its interrupt proof is vacuous.
 - **A portable SCI guard needs an actual SCI installation on every claimed
   tier.** The production Bun eval path still calls `cljs.js/eval-str`
   (`src/seon/eval.cljs:1185-1292`), so there is no `:interrupt-fn` installation
-  site and a synchronous loop cannot be interpreter-step-preempted there. The
+  site and a synchronous loop cannot be interrupted by SCI there. The
   retired B2
   probe under `tmp/sci-probe/exec-src/` is not a production seam, and C2 ruled
   out the Bun SCI tier. Specify whether “Bun proof” means a direct portable SCI
@@ -121,7 +123,7 @@ the anchor stays the state ledger.
   renderer leaves still pass through `prepare-invocations!` and
   `execution.host/invoke!`. Forward the host result's
   `:seon.db/read-evidence` into the projection; otherwise the reactive feed can
-  suppress a dependency that was read behind the guarded door
+  suppress a dependency read during an invocation governed by `:interrupt-fn`
   (`src/seon/agent/ctx/driver.cljs`,
   `src/seon/web/datastar.cljs`).
 - **A scalar success with a ruled error-value failure needs an explicit union.**
@@ -420,7 +422,7 @@ the anchor stays the state ledger.
   Preserve that log as interference evidence, finish pure/compile proofs, and
   rerun the integration gate only after the writer owner reaches a coherent
   commit; never weaken the host assertion or attribute the setup failure to the
-  guarded door.
+  `:interrupt-fn`.
 - **Path-limited commits always**; add new untracked owned files
   explicitly in the same commit (a missing test-support file made every
   intermediate writer gate unreproducible for a day).
@@ -536,7 +538,7 @@ the anchor stays the state ledger.
   identity-check cleanup (`seon.agent.driver.host/start!`).
 - **Validate config-query cardinality before `every?`.** `every?` over the
   empty values of a missing policy is true. The guard door then receives nil
-  interpreter-step budget and collapses every host invocation with an
+  `time-limit` and collapses every host invocation with an
   implementation NPE. Require
   the complete five-field row before validating positive values; remain loud
   when the database lacks the config facts
@@ -616,10 +618,10 @@ the anchor stays the state ledger.
 ## U2 claim-driver falsifier scars (2026-07-23)
 
 - **A process claim does not serialize fibers inside that process.** The
-  `:held` claim transition must accept the same claimant identity so a retained
+  `:held` claim transition must accept the same cluster JVM identity so a retained
   driver can renew its lease. Consequently, a wake listener and scan listener
   in one pod can both pass the durable fence and create distinct turns at the
-  same epoch unless the claimant retains one addressable local handle per run.
+  same epoch unless the cluster JVM retains one addressable local handle per run.
   Keep that Promise/thread map strictly process-local; database claim and cursor
   facts remain authority. Both pod and JVM leaves now implement this R1 rule
   (`seon.agent.driver.pod/dispatch-run!`,
@@ -655,13 +657,13 @@ the anchor stays the state ledger.
   that capability fails, the attempt remains `:open`; takeover records it
   `:crashed` and advances the ordinal. Committing `:success` without a reply
   link would strand the cursor and falsely claim durable evidence.
-- **JVM LLM eligibility is the intersection of installed leaves.** A claimant
+- **JVM LLM eligibility is the intersection of installed leaves.** A cluster JVM
   advertises `:llm` only when both a real transport function and the JVM blob
   leaf are present. Absence is scheduler policy data, not a transport stub.
-- **Compose HTTP and custody deadlines at the claimant boundary.** The
+- **Compose HTTP and custody deadlines at the cluster JVM boundary.** The
   portable phase derives the minimum of the run deadline and frozen attempt
   horizon. A JVM transport must apply the resulting milliseconds to
-  `HttpRequest.Builder.timeout`; the claimant independently schedules an
+  `HttpRequest.Builder.timeout`; the cluster JVM independently schedules an
   interrupt of its retained driver virtual thread. The eval session watchdog
   is invocation-private and is not reused for provider I/O.
 
@@ -681,14 +683,14 @@ the anchor stays the state ledger.
   returned. This keeps Transit admission in one mechanism and turns a nested
   `clojure.core$_STAR_` value into a flat tier-local error without closing the
   execution session.
-- **A protective portable literal graduates through all four config layers.**
+- **A protective portable literal accretes through all four config layers.**
   Register one described leaf shape, reference it from a closed concern
   section, reference it from the singleton entity, and resolve the manifest
   value into a flat fact. The consumer acquires that fact and carries no
   numeric fallback. Descriptions record units, retained-policy provenance, the
   protected resource, and the exact key surfaced when the limit is absent or
   fires. This applies equally to retry waits, capability defaults, parser
-  ceilings, and JVM claimant invocation bounds.
+  ceilings, and cluster JVM invocation bounds.
 
 ## U7 render and ctx portability scars (2026-07-23)
 
@@ -700,8 +702,8 @@ the anchor stays the state ledger.
 - **A guard steering error is the render-slot value.** Do not stringify
   `:budget`/`:timeout` into ordinary prose inside the walker. Carry the flat
   error value through the slot so the caller retains kind, config key,
-  interpreter-step, and invocation-class evidence; view formatting happens
-  outside the door.
+  `fn`-entry and invocation-class evidence; view formatting happens outside
+  the SCI invocation.
 - **Port config reads as reads of the threaded singleton.** The JVM render
   path reads immutable configuration map facts with the same shipped defaults.
   A CLJS compatibility call may retain the existing accessor for redefinition
@@ -746,7 +748,7 @@ the anchor stays the state ledger.
 
 ## U6b JVM LLM HTTP leaf scars (2026-07-23)
 
-- **A claimant label is not a process tier.** Join the persisted
+- **A cluster JVM label is not a process tier.** Join the persisted
   `:seon.agent.run/claimant` PID/start instant to the operator's exact workload
   record before attributing a provider receipt to Bun or the JVM. The claim
   driver retains an epoch while its leaf remains eligible, so leaving
@@ -760,7 +762,7 @@ the anchor stays the state ledger.
   `HttpClient.send` declares `InterruptedException`, but an SSE
   `InputStream.read` may instead surface `IOException` while retaining the
   thread's interrupted flag. Check that flag and rethrow
-  `InterruptedException`; otherwise the claimant watchdog's deadline becomes
+  `InterruptedException`; otherwise the cluster JVM watchdog's deadline becomes
   a generic transport failure instead of the one flat timeout envelope.
 - **SSE cancellation belongs at the portable parser predicate.** Fold decoded
   `data:` events into provider-shaped state and invoke the same
@@ -772,14 +774,14 @@ the anchor stays the state ledger.
 - **One process client makes its construction facts restart-bound.** Resolve
   connect timeout and response-byte ceiling as cluster config facts, but build
   the process-shared client only once. If a later request presents a different
-  connect timeout, fail loudly and require claimant restart rather than
+  connect timeout, fail loudly and require cluster JVM restart rather than
   silently creating a second client authority.
 - **A long-lived client is not evidence of stale credentials.** Before blaming
-  connection reuse or construction-time state, join the persisted claimant to
+  connection reuse or construction-time state, join the persisted cluster JVM to
   its exact process and trace which values the leaf actually freezes. The JVM
   HTTP leaf freezes only its connect timeout; credential resolution and the
   authorization header occur per request. The eleven apparent JVM failures
-  were pod-owned, while the rebuilt long-lived JVM claimant returned literal
+  were pod-owned, while the rebuilt long-lived cluster JVM returned literal
   HTTP 200 with the same provider configuration.
 - **Persist the adapter's namespaced response keys.** The OpenAI-compatible
   core returns `:seon.ai/text`; reading a bare `:text` silently turned a real
@@ -920,7 +922,7 @@ the anchor stays the state ledger.
   currently hardcodes batch reply parsing
   (`src/seon/agent/driver/host.clj:253-307`), and portable run accounting still
   branches on legacy `:seon.config/repl-mode`
-  (`src/seon/agent/driver.cljc:107-122`). The claimant must freeze
+  (`src/seon/agent/driver.cljc:107-122`). The cluster JVM must freeze
   `:seon.ai/reply-evaluation` on the attempt, the protected driver must pass
   that value to the existing reply-program path, and run bounds must count
   forms only for `:first-form`.
@@ -960,7 +962,7 @@ the anchor stays the state ledger.
   suppression prevents unrelated morphs. Attribute-level interest still
   recomputes the render: measured p50 was 1.094 ms for a representative
   50,558-byte page (p95 1.478 ms). Entity-scoped writer interest is recorded as
-  a later web-tier-slice-2/C10-adjacent unit, not a streaming graduation gate.
+  a later web-tier-slice-2/C10-adjacent unit, not a streaming system gate.
 - **Hosted descriptors and local workers are two named mechanisms.** Hosted
   rows are components of the config singleton and select only the fixed
   `:openai-compat` or `:anthropic` wire core. The compiled pod-only
@@ -990,15 +992,15 @@ the anchor stays the state ledger.
 
 ## P1b artifact-inventory verified-stop scar (2026-07-23)
 
-- **A CLJS build inventory does not define the JVM claimant inventory.**
+- **A CLJS build inventory does not define the cluster JVM inventory.**
   Shadow's flush state supplies both the exact `:build-sources` closure and
   `:compiler-env` analyzer definitions, so one derivation can publish public
   exports plus private internal terminals without adding private `:seon.fn`
-  rows. The JVM claimant currently runs source through `-M:writer:host`, while
+  rows. The cluster JVM currently runs source through `-M:writer:host`, while
   `writer-uber` deliberately copies source and avoids Clojure AOT; there is no
   corresponding JVM build-analysis state. Rule the JVM inventory authority
   before implementation rather than scanning source or mislabeling the writer
-  jar as a claimant artifact (`build.clj:58-82`,
+  jar as a cluster JVM artifact (`build.clj:58-82`,
   `script/seon/dev/process.clj:562-585`).
 - **Publishing a build artifact is not planner consumption.** The current
   acquisition path hardcodes artifact inventories unavailable, and
@@ -1023,7 +1025,7 @@ the anchor stays the state ledger.
   `:unplannable` with a named `:no-roots` unresolved entry; it is not a
   vacuously pure program.
 - **Tier selection is policy data derived after eligibility.** Prefer the
-  invoking claimant only when it is eligible, then an eligible handoff tier.
+  invoking cluster JVM only when it is eligible, then an eligible handoff tier.
   If neither is eligible the selected tier is absent so the caller releases
   the run instead of inventing placement.
 - **Installed-leaf inventories are captured by the installer.** Enumerate
@@ -1098,7 +1100,7 @@ the anchor stays the state ledger.
 - **Let each artifact’s existing enumerator publish its own truth.** Shadow’s
   flush hook selects exact `:build-sources` and delegates function
   classification to the client analyzer indexer; it does not reparse source.
-  The JVM claimant projects its already-captured installed wrapper inventory
+  The cluster JVM projects its already-captured installed wrapper inventory
   and preserves that enumerator’s digest exactly. A JVM classpath analyzer is
   justified only by proof that a reachable compiled terminal is absent from
   installed bindings.
@@ -1107,7 +1109,7 @@ the anchor stays the state ledger.
   output, include both inventory-artifact digests in the artifact manifest and
   application digest, and pass the
   planner-ready Bun projection through the host launch request. The host merges
-  that value with its claimant-local JVM inventory before planning.
+  that value with its cluster JVM-local JVM inventory before planning.
 - **Private is a presence fact, not an indexing exclusion.** First-party
   private functions retain real `:seon.fn` rows and source with
   `:seon.fn/private? true`; public rows omit the attribute. Default discovery
@@ -1268,7 +1270,7 @@ the anchor stays the state ledger.
 
 ## Source provenance and contract provenance are different facts
 
-## Guarded schema and graduation scars (2026-07-24)
+## SCI schema and accretion scars (2026-07-24)
 
 - **Malli options are not a guarded-context handoff.** Malli 0.20.0 consumes
   `::m/sci-options` by initializing its own SCI context, evaluating aliases,
@@ -1283,9 +1285,9 @@ the anchor stays the state ledger.
   it exactly once after a normal return or a replacement throw.
 - **Passing tests cannot prove native code door-equivalent.** Differential
   tests remain useful sanity evidence, but only the P4/R33 transitive call
-  graph can admit native compilation. Until that proof exists, graduation
+  graph can admit native compilation. Until that proof exists, accretion
   refuses loudly and every legacy `:graduated` row derives an effective
-  nursery tier. Deleting the host-eval path is the containment boundary; a
+  interpreted tier. Deleting the host-eval path is the containment boundary; a
   silent downgrade would falsely report promotion.
 
 A function contract row and its source row may have different asserting
@@ -1530,7 +1532,7 @@ the variable-weight values they select.
   sequence against `protocol/initialization-pages` of the same fixture value
   (`test/seon/db_remote_contract_test.cljs`).
 - **An opaque committed-projection acquisition failure is not evidence of a
-  forward reference.** The claimant host formerly sent schema, contract, and
+  forward reference.** The cluster JVM host formerly sent schema, contract, and
   whole-source queries as one `execute-many` request, then logged only the
   first two member results. On restart, the omitted source member exceeded the
   aggregate result-weight bound; replaying the complete successful
@@ -1542,13 +1544,13 @@ the variable-weight values they select.
   on both tiers (`c2c5faeff`,
   [[../../../seon/issues/archive/claimant-host-drains-after-clean-restart]]).
 
-## Claimant acquisition and phase-settlement scars (2026-07-24)
+## Cluster JVM acquisition and phase-settlement scars (2026-07-24)
 
 - **A singleton identity is one portable Datahike lookup ref, not a copied
   attribute/value pair.** Owning only the scalar value still lets another tier
   substitute a schema keyword or literal in the lookup-ref value. Define the
   complete lookup ref beside the identity registration in
-  `seon.config.resolve`, and make pod, claimant, execution, and web acquisition
+  `seon.config.resolve`, and make pod, cluster JVM, execution, and web acquisition
   pass that exact value. A focused consumer regression must assert the shared
   ref itself; matching literals do not prove acquisition consistency
   (`7b16ca694`).
@@ -1560,20 +1562,20 @@ the variable-weight values they select.
   `:seon.ai/text`, with a regression that captures the exact non-empty blob
   request (`fdba88aad`).
 - **An optional entity override must sit above one shared process fallback.**
-  Pod and JVM claimants must pass the same resolved process attempt timeout to
+  Pod and JVM cluster JVM must pass the same resolved process attempt timeout to
   `seon.ai.core/resolved-config-from-rows`; that resolver alone applies an
   optional `:seon.ai/agent-attempt-timeout-ms` override. Requiring the entity
-  attribute in one claimant turns ordinary inheritance into a tier-specific
+  attribute in one cluster JVM turns ordinary inheritance into a tier-specific
   configuration failure. Put environment parsing and shipped fallback in
   portable `seon.config.resolve`, and make every tier delegate to it
   (`094e7a7e6`).
 - **A process fallback becomes database configuration at manifest apply.**
   Parsing `SEON_LLM_ATTEMPT_TIMEOUT_MS` for every claimed turn makes the
-  claimant's behavior depend on process-local state that is absent from the
+  cluster JVM's behavior depend on process-local state that is absent from the
   immutable database value. Resolve the environment input once while applying
   the manifest, persist
   `:seon.config.claim-driver/llm-attempt-timeout-ms` on the config singleton,
-  and have the claimant pull that fact with its other configuration. Per-agent
+  and have the cluster JVM pull that fact with its other configuration. Per-agent
   timeout facts remain the only runtime override.
 - **No executable roots is a planner disposition, not a reply-parser
   shortcut.** `plan-execution` already represents a formless reply with the
@@ -1597,11 +1599,11 @@ the variable-weight values they select.
   thread-local value.** Under the held run epoch and observed turn phase, one
   transaction crashes every open attempt, clears partial presentation text,
   marks the turn `:published`/`:error`, closes the run `:error`, and retracts
-  both claimant custody and the agent's current-run connection. Record the
+  both cluster JVM custody and the agent's current-run connection. Record the
   same flat error as a fault datom after the transition; malformed leaf output
   uses this path too. A dispatch thread returning an error without this
   settlement recreates a heartbeat-only wedge (`094e7a7e6`).
-- **Fact-first namespace replay is not schema acquisition.** The JVM claimant
+- **Fact-first namespace replay is not schema acquisition.** The cluster JVM
   correctly reconstructs corpus definitions without executing top-level
   `schema/register!` side effects. Any toolkit schema introspection that then
   reads the process-local candidate registry sees an empty `my.*` world even
@@ -1610,15 +1612,15 @@ the variable-weight values they select.
   projection, and prove completeness with at least two unrelated toolkit
   namespaces; never repair one toolkit with a key list (`0ae0fda9e`).
 - **A platform wrapper may bind a portable owner; it must not reimplement its
-  contract.** The claimant's duplicate identity allocator mistook the pure
+  contract.** The cluster JVM's duplicate identity allocator mistook the pure
   builder's transaction request map for transaction data and had already
-  drifted from dependent-identity and collision semantics. Bind the claimant
+  drifted from dependent-identity and collision semantics. Bind the cluster JVM
   wrapper to portable `seon.db.id/allocate!` over the JVM database leaf and
   regression-test it through SCI plus the serialized writer (`3fd9137f6`).
 - **An observation timeout terminalizes the active turn in the run-close
   transaction.** Fence the agent current-run, claim epoch, and observed turn
   phase first; then publish the turn as interrupted, close the run, and retract
-  custody together. A claimant whose late phase write loses that fence must
+  custody together. A cluster JVM whose late phase write loses that fence must
   refresh durable run authority and stop when it observes the closed run,
   rather than issuing a second settlement CAS (`f6dd94682`).
 - **An unresolved value symbol is an analyzer uncertainty, not a nullable
@@ -1732,7 +1734,7 @@ the variable-weight values they select.
 - **A configured value becomes authoritative only when every consumer receives
   the acquired singleton projection.** Adding a manifest row and a
   `resolve-config-singleton` default is incomplete when a pull pattern, prompt
-  context, claimant invocation, or platform leaf can still omit the fact and
+  context, cluster JVM invocation, or platform leaf can still omit the fact and
   fall back locally. Register the attribute with units and provenance, reconcile
   it through `config/system.edn`, project it at the existing acquisition
   boundary, and fail with the missing key instead of retaining a leaf default.
@@ -1772,12 +1774,12 @@ the variable-weight values they select.
   scheduler now commits only the `:schedule` run. Database interest wakes the
   claim-native driver, which exclusively owns later phases. Deleting the
   injected scheduled-eval and pod-drive callbacks prevents a trigger source
-  from becoming a second claimant (`src/seon/agent/schedule.cljs`,
+  from becoming a second cluster JVM (`src/seon/agent/schedule.cljs`,
   `src/seon/agent/loop.cljs`).
 
 ## U9 S1 child-artifact retirement scar (2026-07-24)
 
-- **A wire symbol is data, not a load edge.** The JVM claimant may continue
+- **A wire symbol is data, not a load edge.** The cluster JVM may continue
   carrying the historical eval-batch symbol until its promoted protocol owner
   renames it in one cut. Deleting the Bun child composition root, its Shadow
   targets, and its measurement harness therefore removes executable reachability
@@ -1858,10 +1860,10 @@ the variable-weight values they select.
 
 - **A browser interaction is not a synchronous execution channel.** Validation
   pins the committed authored source and schema, then one transaction records
-  an interaction/run fact and the route acknowledges. The existing claimant
+  an interaction/run fact and the route acknowledges. The existing cluster JVM
   CASes the queued run onto an idle agent, records `:running` before guarded
   execution, and atomically closes it with ordinary result/error facts.
-- **A durable running receipt forbids blind replay.** If claimant custody is
+- **A durable running receipt forbids blind replay.** If cluster JVM custody is
   lost after `:pending → :running`, a replacement records `:interrupted`
   rather than executing an authored side effect twice. The page queries
   terminal facts and omits its surface when absent; it never reads an inline
@@ -1913,7 +1915,7 @@ the variable-weight values they select.
   manifest, and verifies the current source artifact. It preserves the
   byte-verified watcher generation, or drains and republishes through that one
   owner when verification fails. Explicit apply then owns initialization and
-  its completion receipt; only a later `up` may admit writer, host, claimant,
+  its completion receipt; only a later `up` may admit writer, host, cluster JVM,
   pod, and web-render processes.
 - **A source release is admitted with its producing watcher.** Re-entering
   Shadow's compiler for unchanged source can assign different compiler-local
@@ -1946,7 +1948,7 @@ the variable-weight values they select.
 - **A terminal request from authored code is data, not a platform capability.**
   `seon.agent.lifecycle/complete` returns one flat schema'd terminal value from
   guarded eval; it neither binds leaves nor writes a message on any tier. The
-  claimant recognizes that value and reuses the canonical formless-reply
+  cluster JVM recognizes that value and reuses the canonical formless-reply
   delivery plus terminal-close transaction path, so message/result/turn
   settlement remains in the driver. Do not repair a nested
   `message/*leaf*` binding for a function whose effectful implementation must
@@ -1954,16 +1956,16 @@ the variable-weight values they select.
   `src/seon/agent/driver/host.clj`,
   `docs/seon/issues/host-base-agent-surface-parity.md`).
 
-## D-list claimant-session cut scar (2026-07-24)
+## D-list cluster JVM-session cut scar (2026-07-24)
 
-- **Recovery facts describe lost claimant custody, never a retired child
+- **Recovery facts describe lost cluster JVM custody, never a retired child
   process.** The recovery transaction records the thin
   `:seon.runtime.recovery/reason :claimant-session-loss` anchor and connects
   it to the interrupted eval receipt while the same transaction closes the
   run and turn. PID, exit, signal, resource, stdout/stderr, diagnostic-blob,
   and child-artifact matching do not belong in this database mechanism
   (`src/seon/runtime/recovery.cljs`).
-- **The one agent-eval contract is the JVM claimant contract.** System
+- **The one agent-eval contract is the cluster JVM contract.** System
   teaching has no tier boolean or Bun/self-host/Promise arm; recorded
   definitions rebuild from database program facts and admitted work is not
   blindly replayed. Diffusion's isolated self-host compiler cache lives under

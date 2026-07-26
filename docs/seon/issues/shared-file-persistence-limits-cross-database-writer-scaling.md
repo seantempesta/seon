@@ -12,7 +12,7 @@ tags: [issue, database, flow, research]
 Four independent Datahike databases in one writer process do progress in
 parallel, but the shared file backend does not approach the research estimate
 of four times one-database throughput. The estimate cannot currently serve as
-a graduation gate without separating executor parallelism from persistence
+a system gate without separating executor parallelism from persistence
 device contention.
 
 ## Evidence
@@ -50,7 +50,7 @@ or weaken file durability to manufacture the expected ratio.
 - Run the same workload with isolated physical persistence devices or a
   controlled non-file backend to distinguish executor scheduling from shared
   file contention.
-- Replace the approximate 4x graduation threshold with measured hardware
+- Replace the approximate 4x system threshold with measured hardware
   envelopes, or document a deployment topology that actually satisfies it.
 - Preserve zero cross-database executor rejections and demonstrate concurrent
   running mutations for distinct databases.

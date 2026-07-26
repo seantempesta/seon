@@ -37,10 +37,10 @@ than a plausible binary length prefix. The next log line says
 
 Read-only operator inspection then showed:
 
-- watcher, writer, claimant host, and web-render processes alive;
+- watcher, writer, cluster JVM, and web-render processes alive;
 - pod process `11431` drained and not ready;
 - no live Shadow client runtime advertisement;
-- run `q8mrne0fdwvo` still open and fenced to claimant
+- run `q8mrne0fdwvo` still open and fenced to run-holding process
   `11431@2026-07-24T04:46:42.811Z`.
 
 The writer log has no matching transport-side failure and remained ready. The

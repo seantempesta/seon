@@ -70,7 +70,7 @@ results; a transaction report is a fixed shape and is not affected).
 ## Acceptance
 
 1. `my.kb/remember` returns `{:my.kb/id <eid>}` against a REAL writer
-   transaction, proven by a live claimant eval, not a stubbed transact fn.
+   transaction, proven by a live cluster JVM eval, not a stubbed transact fn.
 2. `test/my/kb_test.cljs` no longer fabricates a transact response shape; the
    fake returns exactly what `submit-transaction!` builds, or the test runs
    against a real in-memory writer.

@@ -4,7 +4,9 @@ status: active
 tags: [research, runtime, architecture]
 ---
 
-# Simplification design: one claimant, one thread, one loop (2026-07-25)
+Terminology: quoted measurements and source identifiers retain their historical spelling; current prose uses `ctx`, `fork`, `:interrupt-fn`, `interrupt!`, `time-limit`, every `fn` body entrance, `:compute`, `:io`, accretion, and breakage.
+
+# Simplification design: one cluster JVM, one thread, one loop (2026-07-25)
 
 Synthesis of seven source audits, three independent designs, and nine
 adversarial critiques, plus live probes run for this document. Written to be
@@ -20,16 +22,16 @@ re-priced below.
 
 > How I would explain the runtime to a new engineer, on one page.
 
-There is one process. It holds the database connection, one warm SCI base, and
+There is one process. It holds the database connection, one shared SCI `ctx`, and
 every running agent.
 
-A run is a row in the database with a claimant and an epoch. When a run becomes
+A run is a row in the database with `:seon.agent.run/process` and an epoch. When a run becomes
 claimable, the process starts **one virtual thread**, and that thread drives the
 run to close: derive the prompt, call the model, evaluate the reply's forms one
 at a time, publish. There are no phases and no handoffs, because there is no
 second process to hand off to.
 
-An agent's world is a `sci/fork` of the warm base — 2.1 microseconds, 539 bytes
+An agent's `fork` comes from the shared `ctx` — 2.1 microseconds, 539 bytes
 — plus a replay of that agent's own `:seon.fn/source` rows. That is the whole
 "start an agent" operation, and it is also the whole "recover an agent"
 operation, because a fork does not care whether the previous process died or
@@ -50,11 +52,12 @@ The database is not a runtime. Agent code does not run inside a transaction. The
 database is a database, SCI is an interpreter, the driver is a plain
 `loop`/`recur`.
 
-Containment is **one** primitive: SCI calls a function of ours at every function
-entry and every `recur` (`reference-code/sci/src/sci/impl/fns.cljc:52`). We
-charge a step there, check whether a stop was requested, and every 65,536 steps
-yield the carrier so a CPU-bound agent cannot starve its neighbours. That is the
-entire in-process safety story. It bounds **time**, and it bounds nothing else:
+Containment is **one** primitive: SCI calls the one `:interrupt-fn` at every
+`fn` body entrance (`reference-code/sci/doc/interrupt.md:50`). `time-limit` is
+the only execution limit, and expiry calls `interrupt!` uncatchably. SCI evals
+run on `:compute` platform threads; blocking calls use `:io` virtual threads.
+`:seon.eval/fn-entries` records diagnostic evidence but controls nothing. That
+is the entire in-process safety story. It bounds **time**, and nothing else:
 an agent that allocates a 10 GB vector kills the process, and no in-process
 mechanism can prevent that.
 
@@ -95,7 +98,8 @@ not the value behind it. The same blanket stamping also breaks
 
 **They already do.** `seon.db/transact!` is an ordinary host closure installed as
 a SCI var (`src/seon/host/context.clj:657-674`). SCI imposes nothing on it, and
-the guard never inspects it — there is no capability gate on a write.
+`:interrupt-fn` does not inspect it — capability authorization belongs to the
+database function boundary, not interruption.
 
 The problem is cost, not permission. One unpinned agent write today is:
 
@@ -129,7 +133,7 @@ failed on semantics, not on effort — see §3.
 
 | | SpacetimeDB | Seon |
 |---|---|---|
-| Bound | `Config::consume_fuel(true)`, meters **every WASM instruction incl. library internals**, traps unconditionally (`crates/core/src/host/wasmtime/mod.rs:94`) | `:interrupt-fn` at SCI fn entry / `recur` only |
+| Bound | `Config::consume_fuel(true)`, meters **every WASM instruction incl. library internals**, traps unconditionally (`crates/core/src/host/wasmtime/mod.rs:94`) | `time-limit` enforced by `:interrupt-fn` at every SCI `fn` body entrance |
 | Wall clock | Epoch interruption **logs and resumes** — no wall-clock kill (`wasmtime_module.rs:354-363`) | watchdog thread + `Thread.interrupt`, cooperative |
 | Isolation | `begin_mut_tx` takes a **database-global write lock** — Serializable by construction (`datastore.rs:908-940`) | snapshot isolation, write skew possible |
 | Interpreted path | V8 budget timer **commented out as undefined behaviour** (`crates/core/src/host/v8/budget.rs:23-41`) | — |
@@ -139,16 +143,15 @@ to SCI — a dynamic-language interpreter embedded in the database — and a
 well-resourced team has **not** landed budget enforcement for it. Do not copy the
 model.
 
-Seon partly compensates for the fuel gap in a way the input critiques missed:
+Seon partly compensates for that coverage difference in a way the input critiques missed:
 `sci.interrupt/clojure-core` overrides `range reduce into count iterate doall
 dorun repeat cycle` plus the regex and `clojure.string` fns, and those **are**
 merged into Seon's base (`src/seon/host/context.clj:1405-1406`). Measured (this
-document, §Corrections): `(reduce + (map inc (range 5000000)))` fires 9,999,999
-safepoints. The common "big lazy computation" case is metered.
+document, §Corrections): `(reduce + (map inc (range 5000000)))` records 9,999,999
+`fn` body entrances. The common "big lazy computation" case is interruptible.
 
-What is **not** metered is memory. Measured: an OOM after **4,068 safepoints** —
-0.004% of the configured 100,000,000 step budget
-(`config/system.edn:84`). No step budget can bound allocation.
+What is **not** bounded is memory. Measured: an OOM after **4,068 `fn` body
+entrances**. A `time-limit` cannot bound allocation.
 
 Datahike specifically forecloses the in-database option twice:
 
@@ -179,7 +182,7 @@ One primitive worth taking that only becomes available in-process:
 `:db.entity/preds` — a `:db.type/symbol` cardinality-many attribute resolved with
 `clojure.core/resolve` at transaction time and asserted against `db-after`
 (`reference-code/datahike/src/datahike/db/transaction.cljc:845-853`). That is the
-right eventual home for a graduated contract predicate: a write-time invariant
+right eventual home for an accreted contract predicate: a write-time invariant
 that makes an invalid fact unrepresentable, not a test.
 
 ### Can virtual threads keep everything parallel?
@@ -202,10 +205,9 @@ virtual threads on `parallelism=2` starved a latecomer for a full 3 s, while a
 platform thread was scheduled in 0 ms. `Thread/yield` and `Thread/sleep 0` do
 **not** release the carrier; only a genuine unmount does.
 
-Fix, in the safepoint we already own: `(LockSupport/parkNanos 1000)` every 65,536
-steps. Measured free on a virtual thread (69 ms vs 69 ms over 3M SCI iterations),
-and ~1.4 ms each on a *platform* thread — which is exactly why the fixed platform
-eval pool has to go with it.
+SCI therefore stays on `:compute` platform threads rather than occupying virtual
+thread carriers. The run's virtual thread parks while the `:compute` work runs;
+blocking provider and capability calls use `:io`.
 
 Two ceilings to state out loud rather than discover:
 
@@ -216,7 +218,7 @@ Two ceilings to state out loud rather than discover:
   `reference-code/datahike/src/datahike/http/writer.clj:35`, so the topology is
   not permanently locked — Seon's UDS wire is a hand-rolled version of it.)
 
-### Can the warm base be shared and agent start be near-instant?
+### Can the shared `ctx` be forked and agent start be near-instant?
 
 **Already true and already built. Do not redesign it — delete around it.**
 
@@ -248,13 +250,14 @@ base plus replay the agent's corpus defs ... a context is a cache of database
 facts"* (`src/seon/host.clj:141-146`; agent path at
 `src/seon/agent/driver/host.clj:136-152`).
 
-### Can graduation work?
+### Can accretion work?
 
 **The gate is built and correct; the ambition needs re-scoping.**
 
 `trust-gate?` (`src/seon/host/graduate.clj:108-126`) already requires spec-valid,
-test-covered, fingerprint match, nursery-green, compiled-green, and **identical
-results across tiers**. `effective-tier` hardcodes `:nursery`
+test-covered, fingerprint match, interpreted-green, compiled-green, and
+**identical results across tiers**. `effective-tier` still hardcodes the
+retired literal `:nursery`
 (`graduate.clj:128-134`) pending R48/P4.
 
 Two honest findings:
@@ -265,13 +268,14 @@ Two honest findings:
    `refer`, unqualified `slurp` and the `fn` macro are refused — but
    `clojure.core/slurp`, `System/exit`, `java.io.File.` and `Class/forName` all
    **compile**. Namespace hygiene is not a containment boundary on the JVM.
-2. **Compiled bytecode has no `:interrupt-fn` safepoint.** "Long, hard
-   computations" plus "graduated" equals "unkillable, unbudgetable, in-process".
+2. **Compiled bytecode has no `:interrupt-fn`.** "Long, hard computations" plus
+   native compilation equals "unkillable, unbounded, in-process".
    The trust gate needs an explicit answer to that before `effective-tier` ever
-   stops returning `:nursery`.
+   stops returning the retired literal `:nursery`.
 
-**Position:** graduation v1 = *sharing*, not *compiling*. A proven function moves
-from the agent's fork into the shared base — still SCI, still safepointed, but
+**Position:** accretion v1 = *sharing*, not *compiling*. A proven function moves
+from the agent's `fork` into the shared `ctx` — still SCI, still interruptible
+at every `fn` body entrance, and
 visible to every agent and no longer replayed per fork. Compilation to bytecode
 is a separate, later gate. Reject the corpus-native variant of this (see §3): it
 keys every agent's cache on the base's identity, so each promotion invalidates
@@ -282,7 +286,7 @@ The right containment argument for a future compile tier is **not** a purity
 proof — it is `jit.cljs`'s: compile the **analyzed** node graph with resolved
 callee **values** placed in a constants array
 (`reference-code/sci/src/sci/impl/jit.cljs:372-419`), so no agent symbol ever
-appears in generated code, and keep the safepoint
+appears in generated code, and keep the `:interrupt-fn` call
 (`if(INT!==null)INT();`, `jit.cljs:769-777`).
 
 ### Can we get a JIT for long computations?
@@ -298,9 +302,10 @@ appears in generated code, and keep the safepoint
   `reference-code/sci` fork, changing sci's hottest JVM node representation plus
   ~40 `attach-ast` sites, then an emitter, then class-lifetime management.
 - **Measured ceiling, so you can price it:** a sealed-compile prototype ran
-  fib(30) at **34.7 ms** with the production safepoint, **70.9 ms** interpreted,
-  and **7.0 ms** with no safepoint. Today the safepoint costs **4×** the compiled
-  body. So fix the guard first; a compile tier is then worth ~9×, not 20×.
+  fib(30) at **34.7 ms** with the production `:interrupt-fn`, **70.9 ms**
+  interpreted, and **7.0 ms** without interruption. Today the interruption
+  call costs **4×** the compiled body. Fix that call first; a compile tier is
+  then worth ~9×, not 20×.
 - **Do not port the hardest part.** `jit.cljs`'s `s`-register machinery
   (`jit.cljs:228-265, 539-577`) exists because JS has cheap mutable locals and
   expensive nested `try`/`catch`. Clojure is the reverse. Emit a real
@@ -308,13 +313,13 @@ appears in generated code, and keep the safepoint
   either (`vars.cljc:48-69` is CLJS-only; a JVM var deref is already a volatile
   read).
 
-**Honest ordering by measured leverage:** guard closure fix → AppCDS (9 s/boot) →
-graduation-as-sharing → *then* revisit a compile tier when a real workload demands
+**Honest ordering by measured leverage:** `:interrupt-fn` closure fix → AppCDS
+(9 s/boot) → accretion-as-sharing → *then* revisit a compile tier when a real workload demands
 it.
 
 ## 3. The position
 
-**Winner: "The Boring Claimant" (claim-native) — one process, one virtual thread
+**Winner: "The claim-native cluster JVM" (claim-native) — one process, one virtual thread
 per run, resume derived from committed facts — with its pure-eval step contract
 REMOVED, plus grafts from both runners-up.**
 
@@ -327,7 +332,7 @@ REMOVED, plus grafts from both runners-up.**
 - Keep `seon.agent.run.core` (189 lines of correct pure CAS algebra) **verbatim**;
   replace `last-beat-at` + a config read with an absolute
   `:seon.agent.run/lease-until`.
-- The guard fix and the parking safepoint.
+- The `:interrupt-fn` fix and `:compute` execution.
 
 ### What is grafted in
 
@@ -381,16 +386,17 @@ correct fail-safe for *placement* and the wrong polarity for a *segment boundary
 2. *The cache cannot hit on restart* — it holds **live SCI contexts** in a
    process-local LRU. Content addressing changes nothing about a fresh JVM.
 3. *Sharing a materialization is a containment disaster.* `fork-context` binds
-   **one** `guard/holder` per context (`src/seon/host/context.clj:1423-1430`).
-   Two agents on one ctx share the step counter and the interrupt cell, so agent
-   B's `guard/reset!` refills A's budget and B's `finally`
+   **one** historical `guard/holder` per context
+   (`src/seon/host/context.clj:1423-1430`). Two agents on one `ctx` share the
+   diagnostic counter and interrupt cell, so agent B's reset changes A's state
+   and B's `finally`
    (`install-interrupted! holder nil`, `src/seon/host/guard.cljc:250-252`) clears
    A's deadline predicate. A becomes unbudgeted and uncancellable.
 4. *Storing `:seon.fn/pure?` at tee time is unsound* — purity is a fixpoint over
    the transitive call graph (`src/seon/program/plan.cljc:402-440`), so defining
    `b` after `a` calls it leaves `a`'s stored purity stale forever, and that stale
-   fact then feeds the graduation gate.
-5. *Graduation-as-promotion is a thundering-herd invalidation* — the child key
+   fact then feeds the accretion gate.
+5. *Accretion-as-promotion is a thundering-herd invalidation* — the child key
    hashes the parent key, so one promotion invalidates every agent's layer. And
    `sci/fork` snapshots the namespace map, so a promoted var is simply **absent**
    from already-forked agents: "publishes to every other agent" is false.
@@ -446,14 +452,14 @@ that **cannot** be deleted as claimed.
 | `src/seon/db/transport/uds.cljs` 999, `src/seon/db/session.cljs` 770, `src/seon/db/fiber.cljs` 69 | ~1,838 | Dies with the pod. `binding` on a virtual thread replaces the three `AsyncLocalStorage` instances; `seon.host.context/database-context` already implements the leaf correctly. |
 | `src/seon/db/executor.clj` | 870 | Reads are pure functions over an immutable value in-process; writes are already serialized by Datahike. Keep Datahike's own `:datahike.resource/max-work` / `max-results` / `max-result-weight` — **thread them into the in-process leaf**, or unbounded queries become a new hole. |
 | Durable idempotency recovery in `writer.clj` (`committed-transaction`, `transaction-datoms`, `recovered-temporary-ids`, `recovered-generated-entity-ids`) | ~790 | Nothing on the in-process path — a call either returns or throws. Also stops writing extra receipt datoms on *every* transaction. Keep only if a remote writer backend is adopted. |
-| Deadline machinery: 2-thread `ScheduledExecutorService`, `interrupt-lock`, tri-state `worker-phase` atom, `interrupt-fired?`, `arm-deadline!`/`disarm!`, `cancel-active!`'s 2 s walk-away (`src/seon/host.clj:334`, `src/seon/host/invoke.clj:30-44, 263-284`) | ~250 | `Future.get(remaining, MILLISECONDS)` at the call site that already blocks (`driver/host.clj:396`) + the guard's polled cell. **Caveat:** keep `Thread.interrupt` as the unblocker for blocking host calls — a polled safepoint cannot wake a parked socket read. |
-| Fixed 10-thread platform eval pool (`src/seon/host.clj:332`) + virtual→platform handoff + per-invocation `driver-session` (7 atoms + monitor, `driver/host.clj:154-170`) | ~190 | The run's own virtual thread, made fair by the parking safepoint. Concurrency becomes a `Semaphore` sized from config. |
+| Deadline machinery: 2-thread `ScheduledExecutorService`, `interrupt-lock`, tri-state `worker-phase` atom, `interrupt-fired?`, `arm-deadline!`/`disarm!`, `cancel-active!`'s 2 s walk-away (`src/seon/host.clj:334`, `src/seon/host/invoke.clj:30-44, 263-284`) | ~250 | One `time-limit` observed by `:interrupt-fn`. **Caveat:** blocking host calls require their own observable completion or external-call backstop because `:interrupt-fn` cannot wake a parked socket read. |
+| Fixed 10-thread platform eval pool (`src/seon/host.clj:332`) + virtual→platform handoff + per-invocation `driver-session` (7 atoms + monitor, `driver/host.clj:154-170`) | ~190 | The one `:compute` executor with capacity derived from measured allocation and workload; the run's virtual thread parks for its result. |
 | Reply parsed twice + prompt round-tripped through a blob and re-split on `ai.core/system-boundary` (`turn/llm.cljc:162-170`) | ~150 | Values stay on one thread. Blob capture survives as observability. |
 | In-eval lifecycle transactions (`lifecycle/wait`, `complete`, `pause`, `terminate`) | ~250 | A returned disposition the driver interprets. This is the "leaf-bound lifecycle calls" residue the standing goal already names. |
 | `pure-block?` regex portability classifier (`context.clj:1060-1065`) + `load-host-toolkit-bindings!` fixed-point retry loop + `(def await identity)` shim | ~90 | `plan-execution`'s computed placement; toolkit source that no longer carries CLJS `await`. |
 | `src/seon/db/registry.clj` refcounting/lifecycle half | ~1,600 of 2,109 | `datahike.connections` (127 lines), which `registry.clj`'s own docstring concedes is the reference-count authority. Name→config stays as a ~50-line pure fn. |
 | Selective committed-report interests (`writer.clj:2735-4671`) | ~1,400 of 1,936 | `datahike.committed-report` (350 lines, commit-ordered, bounded, explicit `:gapped`) + the attribute-indexed interest **filter** as a pure projection. |
-| **[BLOCKED]** `src/seon/db/transport/uds.cljc` 1703, `src/seon/db/host.clj` 945, protocol envelope ~1,000 | ~3,650 | **Cannot delete while the web-render JVM exists.** `src/seon/web/server.clj:10,12` requires `seon.db.host` and `seon.db.transport.uds`; `:89-167` opens a UDS session for its replica reads; `:269-273` builds a `db.host/writer-session`. Deleting these breaks the web UI at namespace load. Either fold web-render into the claimant heap (worsening the OOM blast radius, §5) or keep one socket endpoint. |
+| **[BLOCKED]** `src/seon/db/transport/uds.cljc` 1703, `src/seon/db/host.clj` 945, protocol envelope ~1,000 | ~3,650 | **Cannot delete while the web-render JVM exists.** `src/seon/web/server.clj:10,12` requires `seon.db.host` and `seon.db.transport.uds`; `:89-167` opens a UDS session for its replica reads; `:269-273` builds a `db.host/writer-session`. Deleting these breaks the web UI at namespace load. Either fold web-render into the cluster JVM heap (worsening the OOM blast radius, §5) or keep one socket endpoint. |
 | **[BLOCKED]** `src/seon/db/id.cljc` propose/classify/allocation rounds | ~1,200 claimed | A JVM local-connection allocation path **already exists** (`allocate-jvm-attempt!`, `id.cljc:1478-1499`), so the wire is not what blocks this. Worse, `my.plan/reconcile!` and `publish-generated-program!` compute their **return value** from `::db.id/ids` off the write result (`plan.cljc:1636-1665, 1279-1318`), so removing the round trip is an agent-facing breaking change, not a deletion. |
 | **[BLOCKED]** Datahike value/report wire projection (`writer.clj:185-887`) ~700 | — | Same blocker as the wire itself. |
 
@@ -471,13 +477,14 @@ value. No new namespaces beyond `seon.effect` and `seon.db.local`.
 ## 5. What cannot be achieved — physics, not effort
 
 1. **No hard in-process kill.** `Thread.stop` is gone on modern JDKs.
-   Cancellation is cooperative through the guard's safepoint. This is the state
+   Cancellation is cooperative through `:interrupt-fn` at every `fn` body
+   entrance. This is the state
    of the art off WASM, and SpacetimeDB's own V8 memory guard says so out loud:
    *"V8 does not terminate execution immediately when requested so this mechanism
    is unfortunately not fool-proof"* (`crates/core/src/host/v8/mod.rs:1952-1969`).
-2. **No memory bound.** Measured: OOM after **4,068 safepoints**, 0.004% of the
-   configured budget. A step budget cannot bound allocation, because
-   allocation-per-step is unbounded. **This is the one genuine regression from
+2. **No memory bound.** Measured: OOM after **4,068 `fn` body entrances**.
+   `time-limit` cannot bound allocation because allocation per call is
+   unbounded. **This is the one genuine regression from
    co-locating the writer**, and it must be accepted explicitly: an agent OOM
    restarts the whole cluster. Committed data survives (Datahike's commit guard
    leaves the head naming the previous snapshot,
@@ -505,9 +512,9 @@ value. No new namespaces beyond `seon.effect` and `seon.db.local`.
    (`writer.cljc:286`) and `datahike.connections/*connections*` is a process-local
    atom (`connections.cljc:3`); konserve's only file locks are per-blob
    (`filestore.clj:223, 369, 431`). Two `:self` writers on one store diverge
-   silently. **Corollary: co-location forecloses horizontal claimant scaling**,
+   silently. **Corollary: co-location forecloses horizontal cluster JVM scaling**,
    which contradicts `docs/seon/architecture/architecture.md:242-246` ("more
-   capacity means more interchangeable claimants") and needs an owner ruling.
+   capacity means more interchangeable cluster JVM") and needs an owner ruling.
 8. **Snapshot isolation, not serializability.** Two agents can each read the same
    fact, decide differently, and both commit. SpacetimeDB avoids this only by
    holding a database-global write lock across the whole reducer — which for Seon
@@ -518,30 +525,31 @@ value. No new namespaces beyond `seon.effect` and `seon.db.local`.
    ms/commit and 3M rejected attempts at 64 threads, all `:transaction/stale-basis`
    with no logical conflict), and `my.plan` uses it on eleven paths with **no
    retry**. Per-datom CAS is the fix.
-9. **A compiled function has no safepoint.** Graduation to bytecode removes the
-   only containment primitive. This is why graduation v1 must be sharing, not
+9. **A compiled function has no `:interrupt-fn`.** Native compilation removes
+   the only containment primitive. This is why accretion v1 must be sharing, not
    compiling.
 10. **Content addressing cannot survive process death for live objects.** A cache
     of live SCI contexts is empty in a fresh JVM regardless of key scheme.
 
 ## 6. First moves, ordered — each independently valuable
 
-**1. Fix the guard safepoint.** In `src/seon/host/guard.cljc`, build `::check!`
-as a closure over `interpreter-step-counter` and `control-cell` inside `holder`
-(`:49-55`) instead of calling `check-holder!` (`:194-205`), which re-destructures
-the holder map on **every interpreter step** while the arrays it needs are
-allocated once and never change identity. Add `(LockSupport/parkNanos 1000)`
-every 65,536 steps. Split a `:resource` population out of
+**1. Fix the `:interrupt-fn` closure.** In the current
+`src/seon/host/guard.cljc`, build `::check!` as a closure over the `time-limit`
+state and diagnostic counter inside `holder` (`:49-55`) instead of calling
+`check-holder!` (`:194-205`), which re-destructures the holder map on every
+`fn` body entrance while the arrays it needs are allocated once and never
+change identity. Split a `:resource` population out of
 `:seon.error/fault` so a budget/deadline/output trip stops being reported as an
 agent coding mistake (`policy-error!` hardcodes `:agent` at `guard.cljc:149`; the
 message text at `:102-120` is already right).
 
-*Independently valuable:* ~10 lines, no policy change, ships alone, and it is the
-precondition for running SCI on a virtual thread.
+*Independently valuable:* ~10 lines, no policy change, ships alone, and it
+reduces the cost of SCI on `:compute`.
 
 *Honest caveat on the number:* the input measurements **disagree** — 44×, 8.6×
-and 2.4× on the safepoint alone, depending on whether the platform interrupt
-predicate was installed and whether the microbenchmark body was eliminated. The
+and 2.4× on what those reports historically called the safepoint alone,
+depending on whether the platform interrupt predicate was installed and
+whether the microbenchmark body was eliminated. The
 only in-situ figure (3M real SCI iterations through a real fork) is 71.2 ms →
 26.8 ms. **Measure it in situ before quoting a number**, and do not delete any
 clock on the strength of a tight-loop benchmark.
@@ -570,9 +578,9 @@ receipt in `src/seon/eval/receipt.cljc`. Add `:seon.agent.run/lease-until` and
 renew it on the transaction each phase step already commits — the current
 heartbeat is written **only** inside a claim transition and never renewed during
 a drive, so with `stale-ms` at 1,200,000 (`config/system.edn:619`) any run driving
-longer than 20 minutes is stealable from a healthy claimant. That directly
+longer than 20 minutes is stealable from a healthy cluster JVM. That directly
 contradicts the stated goal of long computations. Write `resume-plan` as a pure
-function and test it by killing the claimant at each boundary.
+function and test it by killing the cluster JVM at each boundary.
 
 **5. Add `seon.effect` receipts for `:external` capabilities only.** The
 annotations already exist on the JVM host — `fs/write-file`, `edit-file`,
@@ -585,7 +593,7 @@ predicate would put two extra transactions around every database read (~2.4 s of
 fsync on a form that pulls 50 entities), and `db/transact!` is `:idempotent`,
 which would make every write three transactions and regress infinitely.
 
-**6. Add `seon.db.local` as the claimant's in-process leaf.** Return the same
+**6. Add `seon.db.local` as the cluster JVM's in-process leaf.** Return the same
 `seon.db.leaf` key map the portable core already consumes
 (`src/seon/db.cljc:207-219` — the seam already exists), calling `datahike.api`
 directly. **Keep the writer process and the socket** at this step, for
@@ -601,7 +609,7 @@ sockets opened from the eval path.
 (`src/seon/host/context.clj:778-812`). Those capture sites must be re-plumbed to
 resolve the leaf per call. Land it as a seam fix, not as a blocker.
 
-**7. Collapse the turn into the claimant.** This is the real gate on deleting the
+**7. Collapse the turn into the cluster JVM.** This is the real gate on deleting the
 pod, and it is a **port, not a deletion**: ~1,273 CLJS-only lines of prompt
 rendering (`src/seon/agent/ctx/driver.cljs` 604, `ctx/typeahead_steps.cljs` 540,
 `ctx/admin.cljs` 129) plus `my.plan/publish-generated-program!` must move to the
@@ -611,7 +619,7 @@ those three files is already `.cljc`.
 
 **8. Only then decide the writer merge.** It is worth ~3,650 more lines and every
 remaining wire round-trip, and it costs the OOM blast radius (§5.2) and
-horizontal claimant scaling (§5.7). Both require an owner ruling and an
+horizontal cluster JVM scaling (§5.7). Both require an owner ruling and an
 architecture.md change. Do not bundle it with move 6.
 
 ### Deliberately not doing
@@ -619,20 +627,20 @@ architecture.md change. Do not bundle it with move 6.
 - A JVM JIT (§2, last question) — until a measured workload demands it.
 - Accumulate-then-commit-once / segments — killed in §3.
 - A second materialization cache — `ensure-context!` is the owner.
-- Enabling `effective-tier` beyond `:nursery` — until the no-safepoint-in-compiled-code
-  question has an explicit answer.
+- Enabling `effective-tier` beyond the retired literal `:nursery` — until the
+  missing-`:interrupt-fn` question in compiled code has an explicit answer.
 
 ## Corrections to the input material
 
 Two claims in the audits/critiques are wrong, and both are load-bearing.
 
-**A. "Idiomatic Clojure fires ZERO guard safepoints."** False for Seon's actual
-base. `sci.interrupt/clojure-core` and `clojure-string` **are** merged at
+**A. "Idiomatic Clojure calls `:interrupt-fn` ZERO times."** False for Seon's
+actual `ctx`. `sci.interrupt/clojure-core` and `clojure-string` **are** merged at
 `src/seon/host/context.clj:1405-1406`, and `sci-range` produces an
 interrupt-aware lazy seq, so *any* consumer of it is metered. Measured on JDK
 26.0.1 with exactly that configuration:
 
-| Form | Safepoints | ms |
+| Form | `fn` body entrances | ms |
 |---|---|---|
 | `(loop [i 0] (if (< i 1000000) (recur (inc i)) i))` | 1,000,001 | 27 |
 | `(reduce + (map inc (range 5000000)))` | 9,999,999 | 279 |
@@ -644,9 +652,10 @@ interrupt-aware lazy seq, so *any* consumer of it is metered. Measured on JDK
 
 The critique measured a bare `sci/init` without the overrides. **The real hole is
 narrower and different:** a single host call over an *already materialized*
-structure is a safepoint-free window (the `sort` above contributed 0 of its
-3,000,000 — they all came from `range`), and its duration is bounded by the size
-of data the agent already paid safepoints to build. The genuinely unbounded holes
+structure is a window with no `fn` body entrance (the `sort` above contributed
+0 of its 3,000,000 — they all came from `range`), and its duration is bounded
+by the size of data whose construction already invoked `:interrupt-fn`. The
+genuinely unbounded holes
 are blocking capability calls (which have their own leaf deadlines — e.g.
 `my.shell`'s `timeout-ms` + `destroyForcibly`, `shell/leaf.clj:95-119`) and heap.
 
@@ -665,17 +674,17 @@ clojure -M:writer:host -e '(require (quote [sci.core :as sci]) (quote [sci.inter
 ```
 
 The OOM probe (`(mapv (fn [_] (byte-array 1000000)) (range 100000))` under
-`-J-Xmx2g`) reported `safepoints=4068 out="Java heap space"`.
+`-J-Xmx2g`) historically reported `safepoints=4068 out="Java heap space"`.
 
 ## Open questions for the owner
 
 1. **Does an agent OOM restarting the cluster cost more than 3,650 lines and
    every wire round-trip is worth?** (§5.2, move 8.) There is no third option
    while Datahike ships only `:self`.
-2. **Is horizontal claimant scaling a real near-term requirement?**
+2. **Is horizontal cluster JVM scaling a real near-term requirement?**
    `architecture.md:242-246` says yes; co-location says no. One of them must
    change.
-3. **Should the web-render JVM fold into the claimant heap, or keep one socket
+3. **Should the web-render JVM fold into the cluster JVM heap, or keep one socket
    endpoint?** This decides ~3,650 lines and the OOM blast radius together.
-4. **Graduation-as-sharing now, compilation later — agreed?** It converts a
+4. **Accretion-as-sharing now, compilation later — agreed?** It converts a
    disabled subsystem into an immediate caching win with zero containment change.

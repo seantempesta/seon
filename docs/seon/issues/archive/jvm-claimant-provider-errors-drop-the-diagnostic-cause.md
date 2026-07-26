@@ -5,11 +5,13 @@ severity: blocker
 tags: [issue, agent, runtime]
 ---
 
-# Retain the cause of JVM claimant provider errors
+Terminology: this note records evidence from before the rename; the process holding a run is now `:seon.agent.run/process`.
+
+# Retain the cause of cluster JVM provider errors
 
 ## Problem
 
-The durable claimant path terminalizes immediate LLM failures only as
+The durable cluster JVM path terminalizes immediate LLM failures only as
 `:seon.ai.attempt/outcome :provider-error`. The durable attempt row drops the
 bounded `:seon.ai/msg` and transport classification from the response, so an
 operator cannot distinguish credential resolution, request construction,
@@ -40,7 +42,7 @@ None has `:seon.ai.attempt/error-status`, an error message, or a transport
 classification. Each open-to-terminal transition took about 0.30–0.34 seconds,
 far below the 60-second adapter and 120-second outer bounds.
 
-The failure is specific to the long-lived production claimant path, but not to
+The failure is specific to the long-lived production cluster JVM path, but not to
 the JVM transport:
 
 - a minimal authenticated request to the same endpoint/model returned HTTP
@@ -53,7 +55,7 @@ the JVM transport:
   `dp9w4r7dyq0t` succeeded through that leaf with DeepSeek request id
   `06cf85ab-7542-4f8f-9926-f9f4e846fe76`.
 
-The failing claimant identity was
+The failing `:seon.agent.run/process` was
 `35849@2026-07-24T05:21:05.189Z`. The contemporaneous operator records identify
 workload PID `35849` as the pod and PID `35766` as the JVM host. The pod still
 advertised LLM capability and therefore retained its render claim through the
@@ -71,10 +73,10 @@ Commit `e21c85417` retains bounded flat error message, exception class and
 message, transport/timeout classification, HTTP status/body, retry delay, and
 exact successful response status on the attempt receipt. The same change
 removed the pod's superseded LLM capability, so the one portable driver now
-hands model phases to the JVM claimant.
+hands model phases to the cluster JVM.
 
 The suspected long-lived `java.net.http` state defect was falsified. Historical
-claim datoms identify the eleven failures' claimant PID as the Bun pod, not the
+claim datoms identify the eleven failures' process PID as the Bun pod, not the
 JVM host. The maintained JVM leaf reads the credential and builds the
 authorization header per request; its one process client freezes only the
 configured connect timeout. No stale credential or idle-connection mechanism
@@ -99,7 +101,7 @@ Full immutable database values and histories are in
 
 `seon.agent.turn.llm/attempt-row` owns durable provider-attempt evidence.
 `seon.ai.http/request!` owns the bounded failure classification, and
-`seon.agent.driver.host/bounded-llm-transport!` owns the long-lived claimant
+`seon.agent.driver.host/bounded-llm-transport!` owns the long-lived cluster JVM
 call boundary.
 
 ## Acceptance
@@ -109,7 +111,7 @@ call boundary.
 - A focused long-lived-host regression distinguishes no credential, changed
   client configuration, invalid request, transport error, HTTP status, and
   invalid response.
-- A live isolated-cluster prompt reaches a production JVM claimant whose
+- A live isolated-cluster prompt reaches a production cluster JVM whose
   persisted PID matches that cluster's host workload and writes a successful
   attempt receipt with response identity, status 200, and a nonempty reply
   blob.

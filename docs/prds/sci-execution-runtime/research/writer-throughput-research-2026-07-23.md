@@ -138,7 +138,7 @@ turn commits, as separate fenced transactions unless stated:
 
 | # | Write | Cadence | Source |
 |---|---|---|---|
-| 1 | Claim acquire/reacquire (claimant CAS + epoch CAS + beat) | once per run open / steal, amortized ≪1 per turn | loop design §2a |
+| 1 | Claim acquire/reacquire (run-holding process CAS + epoch CAS + beat) | once per run open / steal, amortized ≪1 per turn | loop design §2a |
 | 2 | `open-turn!` allocation (turn row + pointer+epoch fence) | 1 per turn | turn.cljs:535-559; loop design §2b |
 | 3 | Phase `:rendered` (+ prompt blob ref + rendered-tx) | 1 | loop design §3 |
 | 4 | LLM attempt OPEN receipt | 1 per attempt (≥1) | llm-http-io §1c `attempt-open-tx` |
@@ -304,7 +304,7 @@ commits does not weaken a guarantee Seon actually has.
    every co-batched beat. Batching therefore requires either
    retry-with-exclusion at the ticker (no schema change, but a loop) or
    dropping the fence from pure beats and letting the staleness scan
-   tolerate a late beat from a displaced claimant (semantics change —
+   tolerate a late beat from a displaced run-holding process (semantics change —
    owner call). Do NOT silently choose.
 4. **Not a coalescing target:** eval receipt pairs (receipt-before-run
    is the durability point — merging open+terminal would delete the

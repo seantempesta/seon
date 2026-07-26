@@ -53,7 +53,7 @@ So one settled invocation burns roughly 1.4 ms of failing schema validation.
 `seon.host.eval/wire-safe-value` (`src/seon/host/eval.clj:133`) pays it again
 per evaluated form, as a try/catch probe.
 
-The in-process JVM claimant driver pays it too: `seon.agent.driver.host:401`
+The in-process cluster JVM driver pays it too: `seon.agent.driver.host:401`
 calls `session/bounded-result` on a value that never crosses a process
 boundary, purely to size it.
 

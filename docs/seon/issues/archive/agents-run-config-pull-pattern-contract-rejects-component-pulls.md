@@ -5,6 +5,8 @@ severity: blocker
 tags: [issue, agent, web, schema]
 ---
 
+Terminology: this note records evidence from before the rename; the process holding a run is now `:seon.agent.run/process`.
+
 # Accept component pulls in the model config pull-pattern contract
 
 ## Problem

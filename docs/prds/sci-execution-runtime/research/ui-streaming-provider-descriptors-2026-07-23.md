@@ -16,7 +16,7 @@ Read-only review complete on `codex/runtime-reliability-refactor`. No files, bui
 - Provider descriptors belong as component rows under the existing cluster config singleton. Hosted providers select one of two fixed wire cores, `:openai-compat` or `:anthropic`; provider identity never appears in dispatch code.
 - Kimi, Z.AI, OpenRouter, and DeepSeek fit descriptor rows. LiteLLM’s native Gemini implementation does not: it requires native request/response transforms and JSONL streaming. Gemini is row-only only if Google’s separate OpenAI-compatible surface passes qualification.
 
-# Part A — UI streaming with complete multi-form batch
+## Part A — UI streaming with complete multi-form batch
 
 ## A0. Shared transport contract
 
@@ -112,7 +112,7 @@ Each publication must:
 2. verify the attempt remains open;
 3. verify the current claim/epoch;
 4. assert the single partial attribute;
-5. make stale timers or prior claimants fail as values.
+5. make stale timers or prior processes holding runs fail as values.
 
 ### Terminal cleanup
 
@@ -155,7 +155,7 @@ Do not use Datastar signals. Signals are client/form state; the partial reply is
 The valid topology is:
 
 ```text
-claimant
+run-holding process
   → private typed web-render ingress
   → existing agent feed/socket
   → child-element Datastar patch
@@ -194,8 +194,8 @@ This is the same sort of deliberately isolated dynamic tail as readline/host tel
 
 - Reconnecting to the same live web-render process may receive its newest cached prefix.
 - After web-render restart or cache loss, canonical database state paints “generating” without replayed text.
-- The next claimant snapshot restores progress.
-- If the claimant finishes while disconnected, the terminal database transition paints the final reply.
+- The next run-holding process snapshot restores progress.
+- If the run-holding process finishes while disconnected, the terminal database transition paints the final reply.
 - Last consumer disconnect drops the cache.
 - Historical/as-of feeds never include it.
 
@@ -224,7 +224,7 @@ A whole-app canonical morph must either include the newest ephemeral overlay or 
 
 Use the database candidate now, conditional on the no-history bridge facet and physical-growth probe.
 
-It preserves one database-derived UI mechanism, current reconnect semantics, R26 ownership, selective interests, and terminal atomicity. The side channel adds a new claimant→web-render protocol and a priority-aware overlay path that the current JVM agent feed does not yet provide.
+It preserves one database-derived UI mechanism, current reconnect semantics, R26 ownership, selective interests, and terminal atomicity. The side channel adds a new run-holding process→web-render protocol and a priority-aware overlay path that the current JVM agent feed does not yet provide.
 
 Choose ephemeral at the deployment architecture level—not dynamically—when either condition holds:
 
@@ -241,7 +241,7 @@ At 2–3 partial transactions/s:
 
 Against the researched ~300 tx/s pipelined ceiling, 100 simultaneous streams clearly requires ephemeral delivery. Low tens favor the database mechanism, subject to load evidence.
 
-# Part B — provider descriptors as registered data
+## Part B — provider descriptors as registered data
 
 ## B1. Physical schema and ownership
 
@@ -353,7 +353,7 @@ Fallback selection independently resolves its provider descriptor through the ex
 
 LiteLLM’s shared compatible handler parses only integer Retry-After values: [openai_compatible.clj:223](/Users/sean/src/seon/reference-code/litellm-clj/src/litellm/providers/openai_compatible.clj:223). Seon already accepts fractional seconds and HTTP dates: [ai/core.cljc:215](/Users/sean/src/seon/src/seon/ai/core.cljc:215). Compatible descriptors should select that existing policy; retry authority remains in the turn layer.
 
-# Sizing
+## Sizing
 
 | Piece | Estimate |
 |---|---:|
@@ -372,7 +372,7 @@ LiteLLM’s shared compatible handler parses only integer Retry-After values: [o
 | Gemini via proven OpenAI-compatible surface | 1–2 days after proof |
 | Native Gemini third core, if ruled necessary | 5–9 days plus architecture ruling |
 
-# UNCLEARs and exact probes
+## UNCLEARs and exact probes
 
 1. **Complete-stream fixture:** Feed both consumers content containing at least two top-level forms, a choices-empty usage chunk, then `[DONE]`. Assert cumulative callbacks, byte-identical final text, both forms retained, provider usage not estimated, and no close before `[DONE]`.
 
@@ -388,9 +388,9 @@ LiteLLM’s shared compatible handler parses only integer Retry-After values: [o
 
 7. **Frame bounds:** Compare the largest permitted provider response with the database protocol’s actual UTF-8 transaction envelope. Any required maximum becomes a loud R27 fact.
 
-8. **Browser races:** Exercise slow client, reconnect, web-render restart, claimant crash/reacquire, late partial after terminal, and historical feed. Canonical terminal state must always win.
+8. **Browser races:** Exercise slow client, reconnect, web-render restart, run-holding process crash/reacquire, late partial after terminal, and historical feed. Canonical terminal state must always win.
 
-9. **Config acquisition parity:** From one immutable database value, run the pod and claimant acquisition paths and assert byte-identical primary/fallback resolutions. The pod currently merges a legacy AI row at [ctx/driver.cljs:300](/Users/sean/src/seon/src/seon/agent/ctx/driver.cljs:300), while the claimant pulls the cluster singleton at [driver/host.clj:67](/Users/sean/src/seon/src/seon/agent/driver/host.clj:67).
+9. **Config acquisition parity:** From one immutable database value, run the pod and run-holding process acquisition paths and assert byte-identical primary/fallback resolutions. The pod currently merges a legacy AI row at [ctx/driver.cljs:300](/Users/sean/src/seon/src/seon/agent/ctx/driver.cljs:300), while the run-holding process pulls the cluster singleton at [driver/host.clj:67](/Users/sean/src/seon/src/seon/agent/driver/host.clj:67).
 
 10. **Per-provider qualification:** For DeepSeek, Kimi, Z.AI, and OpenRouter, retain raw request/events and prove endpoint, auth, multi-form completion, terminal usage, cached-token spellings, Retry-After, timeout, and response-byte enforcement before setting `streaming-actually-works?`.
 

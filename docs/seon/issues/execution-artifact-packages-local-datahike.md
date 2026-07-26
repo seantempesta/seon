@@ -50,7 +50,7 @@ database API or cache.
   its process while a replacement can reuse the authority cache.
 - Existing `seon.db` callers and ordinary protocol fixtures remain unchanged.
 - Static Shadow reachability prevents an accidental local owner from returning,
-  but package size is not a graduation or performance metric.
+  but package size is not a system or performance metric.
 - The 1/4/16/32 density matrix uses the remote-only artifact when selecting the
   shipped child cap.
 

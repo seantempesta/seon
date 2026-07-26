@@ -151,7 +151,7 @@ child/self-host assertions disappear.
 | `test/seon/instrument_smoke_test.cljs:1` | 84 | Move relevant instrumentation proof to JVM host surface. | W5 host parity. |
 | `test/seon/eval/race_timeout_test.cljs:1` | 77 | Tests a pod timeout utility that may survive extraction. | Keep/migrate, not deletion. |
 | `test/seon/runtime/recovery_test.cljs:101,173-181` | 702-file LOC | `(js/process.exit 17)` models child death. Replace with host-session-loss/claim recovery evidence. | Loop migration + W5. |
-| `test/seon/agent_loop_test.cljs:436-469` | 1,048-file LOC | Asserts child pid/retired prose. Replace with claimant/dispatch state. | Loop migration + W5. |
+| `test/seon/agent_loop_test.cljs:436-469` | 1,048-file LOC | Asserts child pid/retired prose. Replace with run-holding process/dispatch state. | Loop migration + W5. |
 | `test/seon/ctx_test.cljs:230,275` | file mixed | Asserts retiring-child guidance. Replace when rendered guidance changes. | W5 teaching cleanup. |
 
 The five direct execution test files total **4,474 LOC**
@@ -173,7 +173,7 @@ the self-host candidate portion is 1,240 LOC.
 ### After loop migration
 
 1. Repoint pod-local loop/run/turn scheduling to durable claimed steps and
-   replace child-pid/retirement assertions with claimant/phase evidence.
+   replace child-pid/retirement assertions with run-holding process/phase evidence.
 2. Audit `agent/loop.cljs` bands against the landed driver. The current
    evidence does not authorize whole-namespace deletion.
 3. Remove the transcript result-handles compatibility dial after its

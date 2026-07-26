@@ -4,9 +4,11 @@ status: active
 tags: [prd, agent, runtime, architecture]
 ---
 
+Terminology: this note records evidence from before the rename; the process holding a run is now `:seon.agent.run/process`.
+
 # Unified plan — the all-JVM CLJC/sci runtime (2026-07-23)
 
-One plan from here to graduation. Synthesizes the accepted designs
+One plan from here to the final system gate. Synthesizes the accepted designs
 (capability seam · claim/lease loop · LLM/HTTP containment) and the
 four convergence research reports (JVM concurrency+interpreter steps ·
 web/SSE · writer throughput · render/ctx portability), under rulings 9–26.
@@ -21,30 +23,22 @@ it done.
 
 Per cluster, supervised by the one operator:
 
-1. **Writer JVM** — transactions + committed-tx feed ONLY.
-   **Agent-authored code NEVER executes here** (owner ruling,
-   absolute). No web serving in the end state. Escape ladder for
-   scale lives here (U3) but the process's job never grows.
+1. **Cluster JVM** — the one process for one store. It owns transactions, the
+   committed feed, the claim-native driver, model I/O, and every agent eval.
+   Reads are pointers into immutable database values and writes are function
+   calls. Scale by adding clusters, never by adding processes to one store.
 2. **Web/render JVM** (owner ruling, 2026-07-23: rendering is
    decoupled — pure derivation over a replica; NOTHING agent-
    controlled runs here, so nothing can take the UI down): the
    web/SSE tier (http-kit — multi-threaded as the old server was —
    with the vendored datastar-clojure adapter, vthread per
    connection) serving derived views from its db.host replica
-   session. Kill/restart/redeploy freely; no claimant fate-sharing.
-3. **Claimant JVM(s)** — the drivers (one vthread per claimed run,
-   plain-sync steps), sci evals AND authored renders behind the
-   guarded door on the bounded platform eval-pool (the CPU
-   bulkhead), LLM I/O. Reads via replica/db.host; writes over the
-   wire. Kill-anytime: claims + receipts make death invisible
-   (U12). Scale = more claimant processes.
-4. **Bun leaf host** — DISPOSABLE js-package runtime: serves
+   session. Kill/restart/redeploy freely; it never runs agent code.
+3. **Leaf runtimes** — DISPOSABLE package processes: serve
    seon.packages.js.* + the diffusion/typeahead worker over the
-   db-pattern wire. No durable state; kill/restart anytime;
-   in-flight calls die as flat error values and claimants retry per
-   effect class. (The current pod keeps running until U9 retires
-   it; interim breakage authorized.)
-5. **Browser** — static assets only (verified: no browser cljs
+   capability wire. No durable state; kill/restart anytime; in-flight calls
+   die as flat error values and recovery follows the effect class.
+4. **Browser** — static assets only (verified: no browser cljs
    exists; morphed HTML + vendored datastar.js).
 
 ## Ruling 27 — limits are circuit breakers, never governors
@@ -60,48 +54,41 @@ genuine runaway trips it. (c) Firing is always LOUD: fault datom +
 steering error value; never a silent slowdown or drop. (d) No
 numeric limit literal in runtime code — limits flow through config
 accessors only (the W1 config-facts sweep is the enforcement
-vehicle and folds into U1/U8 acceptance). Applies to interpreter-step
-budgets, deadlines, output caps, pool sizes, heap budgets, beat cadence
+vehicle and folds into U1/U8 acceptance). Applies to SCI `time-limit`,
+bounded projections, `:compute` / `:io` capacity, heap bounds, beat cadence
 (post-U3 a pure failover-UX dial), and every future dial.
 
 ## Units
 
-### U1 — Guarded eval door (S/M) — READY, no dependencies
+### U1 — SCI interruption (S/M) — READY, no dependencies
 
-Interpreter-step counter inside the existing `:interrupt-fn` safepoint closure
-(zero sci fork changes; ~1–3 ns/site), one portable `.cljc`
-guarded-eval entry: deadline where threads exist + interpreter-step
-budget everywhere + output caps + uniform steering error. Budgets are
-config facts;
-calibration = measured steps/ms per tier (counting-only guard
-first). Every sci invocation (agent eval, authored render, plan fn)
-passes through this one door. Grounding:
-`research/jvm-concurrency-research-2026-07-23.md` §guarded-door.
-Falsifier: a hostile `(loop [] (recur))` halts by its interpreter-step
-budget on a thread AND on a single-threaded host, with the steering value; overhead
-within the measured envelope on the full suite.
+Every SCI invocation installs the one `:interrupt-fn`, which SCI calls at
+every `fn` body entrance. `time-limit` is the only execution limit and expiry
+calls `interrupt!` uncatchably. `:seon.eval/fn-entries` is a diagnostic only.
+SCI work uses `:compute`; blocking calls use `:io`. Falsifier: a hostile
+`(loop [] (recur))` stops at its `time-limit`, returns the flat error value,
+and leaves sibling work unaffected.
 
 ### U2 — Claim-native driver (L) — READY after U1; THE SPINE
 
 Ruling 24 break-and-replace: the portable `.cljc` driver (claim →
 render → LLM → parse → eval-dispatch → write-back → advance) built
 once, claim/epoch/lease/phase-cursor native (loop design §1–3 +
-rulings 22/23: self-derived claimant identity, reacquire
+rulings 22/23: `:seon.agent.run/process`, reacquire
 nil→me + e→inc(e), retraction on close/pause). One vthread per
-claimed run (`Thread/ofVirtual`), evals submitted to the bounded
-platform eval-pool through U1's door; `Future.get` parks the
+claimed run (`Thread/ofVirtual`), evals submitted to `:compute` under U1's
+`:interrupt-fn`; `Future.get` parks the
 vthread. The legacy Bun loop-driving path is DELETED in the same
 change — no fence retrofit, no dual-driver compat. Runs in the Core
 JVM app (topology above); the pod stops driving turns (BREAKS Bun
 agent-driving until U5/U6 restore surfaces — authorized).
 Falsifiers (all from the accepted designs): two-driver race,
 pause/resume/reacquire, the five kill points, and **the U12 drill:
-kill the claimant mid-turn on the demo scenario, restart, the run
+kill the cluster JVM mid-turn on the demo scenario, restart, the run
 completes with zero lost/doubled effects**.
 Grounding: `research/loop-cljc-sci-design-2026-07-23.md` (whole),
 concurrency recipe §adoption. Gotchas pre-ruled: interrupt-during-
-UDS costs a pool member (accepted); re-budget heap (-Xmx is
-writer-sized); raise pool-wait-timeout for waiter counts.
+blocking UDS calls use `:io`; heap sizing is cluster-wide.
 
 Corrective checkpoint `094e7a7e6` (2026-07-24) closes the attempt-timeout
 acquisition split and the direct-phase-error lease wedge in this owner.
@@ -130,7 +117,7 @@ receipts plus a completed run from the retained reply. The dependency-ready
 parallel portfolio is
 [[../../seon/issues/pod-republication-passes-nil-reusable-projection]] and
 [[../../seon/issues/named-cluster-open-does-not-reconcile-jvm-host]]. The next
-U2 refill is the execution-plan acquisition/enforcement owner; final graduation
+U2 refill is the execution-plan acquisition/enforcement owner; the final system gate
 remains the rebuilt default-cluster real-work and database-memory redrive.
 
 ### U3 — Writer admission fix (M) — READY, parallel with U2
@@ -177,7 +164,7 @@ L1 attempt receipts (open/terminal, deletes the !attempts atom) +
 the portable adapter core (builders/interpreters/retry decisions —
 already ~80% stateless) ride now-ish; the JVM `java.net.http` leaf
 shape is designed but its implementation timing is the owner
-discussion (ruling 20c amended). Until it lands, claimants call LLM
+discussion (ruling 20c amended). Until it lands, cluster JVM call LLM
 through the pod service. Grounding:
 `research/llm-http-io-design-2026-07-23.md`.
 
@@ -185,7 +172,7 @@ through the pod service. Grounding:
 
 R3 render core + canvas (11 census rows; canvas renders behind the
 door); R4 the full ctx port with the one structural eval re-seam
-(`lookup-value` → static trusted table vs the guarded door via
+(`lookup-value` → static trusted table vs `:interrupt-fn` via
 `agent-authored-sym?`). Acquisition is already protocol-member
 data; one portable executor makes blocks acquire→execute→format.
 
@@ -208,12 +195,12 @@ child/self-host tests — per the deletion-audit inventory (its
 consumers re-pointed by U2/U5/U7). Bun pod becomes the leaf host
 (topology #3). Census cutover assertion flips at zero.
 
-### U10 — Graduation drills (rolling, final gate)
+### U10 — System drills (rolling, final gate)
 
-U12 kill-anything-anytime (claimant, writer, leaf host — at the
-audit's five kill points, two-claimant race variant) · the
+U12 kill-anything-anytime (cluster JVM, web-render JVM, leaf runtime — at the
+audit's five kill points) · the
 100-agent U10 drill · writer probes at target load · q18 OOME ·
-byte-identity render gate. GRADUATION = all green on the demo
+byte-identity render gate. THE SYSTEM GATE = all green on the demo
 scenario with the census at zero.
 
 ## The derived-execution program (added 2026-07-23 PM, owner green-lit)
@@ -265,8 +252,8 @@ Composes with the schema-admission lane's R30/R31/R34 gates.
 ### P5 — Driver enforcement + router deletion (M) — after P2
 
 Pre-dispatch plan → verify coverage → compare inventories → provision →
-execute; release-for-handoff when another claimant satisfies; steering
-errors naming missing leaves/schemas/edges/bases. The mixed-tier router
+execute; provision the permitted leaf or return a flat error naming missing
+leaves/schemas/edges/bases. The mixed-tier router
 becomes a planner consumer: its AST/loader/prefix scans DELETE (R18
 becomes consumer behavior). The regex purity classifier
 (host/context.clj pure-block?) deletes into the plan.
@@ -287,7 +274,7 @@ re-derivation.
 Sequencing: P1 → P2 → {P3 ∥ P4 ∥ P5} → P6. The original U7 (ctx port),
 U6b (transport leaf), schema-admission, and U8 portfolio continue in
 their own lanes; U9 (great deletion) additionally waits for P5's router
-deletion; U10 graduation drills resume after the core-hardening queue
+deletion; U10 system drills resume after the core-hardening queue
 (C-classes) and P3 land.
 
 ## Sequencing
@@ -319,16 +306,14 @@ U1 ──► U2 ──────────────► U9 ──► U10
 - **Demo cadence (owner):** re-runs are BUG-FINDERS at orchestrator
   discretion — cheap, focused on proving the conversion right;
   never benchmark sweeps.
-- **D5 — REFRAMED by ruling 27:** interpreter-step/deadline budgets are
-  abort-only circuit breakers calibrated at ≥100× measured
-  legitimate P99.9, landed as fully-specced config facts with U1's
-  calibration data; owner blesses the defaults from the numbers.
+- **D5 — REFRAMED by ruling 27:** `time-limit` is the only SCI execution
+  limit; `:seon.eval/fn-entries` is diagnostic evidence, never a budget.
 
-## Graduation gate (unchanged in spirit, now concrete)
+## Final system gate
 
-Kill anything at any time — claimant, writer, leaf host — and the
+Kill anything at any time — cluster JVM, web-render JVM, leaf runtime — and the
 demo scenario completes with zero lost or doubled effects; census
 at zero with the cutover assertion flipped; 100 concurrent agents
-on one cluster within the measured writer envelope; every sci
-invocation interpreter-step/deadline-bounded through one door; agent-authored
-code provably absent from the writer process.
+on one cluster within the measured writer envelope; every SCI invocation uses
+the one `:interrupt-fn` and `time-limit`; agent-authored code is absent from the
+web-render JVM.

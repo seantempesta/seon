@@ -9,7 +9,7 @@ tags: [issue, agent, database, architecture]
 
 ## Overnight triage — 2026-07-23
 
-**FOLD-INTO-UNIT — U9 deletion.** Claimant-owned capability stamping is the
+**FOLD-INTO-UNIT — U9 deletion.** Process holding the run-owned capability stamping is the
 unforgeable actor boundary required before this transition can graduate.
 
 ## Problem
@@ -72,7 +72,7 @@ delegated subtree and escalation episode. The grounded transition matrix is in
 [[docs/prds/archive/agent-runtime-correctness/research/plan-transition-authority-audit-2026-07-15]].
 The unforgeable actor dependency and its first bounded proof are specified in
 [[docs/prds/archive/agent-runtime-correctness/research/process-death-containment-audit-2026-07-15]];
-the plan slice must not claim actor-security graduation before that parent-owned
+the plan slice must not claim actor-security proof before that parent-owned
 task capability exists.
 
 Triage 2026-07-23 — **DISSOLVES into P4 loop migration**; its capability-stamped CAS claim is the unforgeable actor boundary this note requires.

@@ -15,9 +15,9 @@ the ten-unit program ledger: graduate this branch, then deliver database
 lifecycle recovery, reactive render units, the database browser, root workspace
 sessions, canvas interaction, agent runtime correctness, Inspect/autocomplete
 evidence, independent downstream distribution, and final local-performance
-graduation.
+system proof.
 
-This PRD has **graduated unit 0 and now serves as the program integration
+This PRD has **closed unit 0 and now serves as the program integration
 ledger**. Work from the original phases 3–5 landed out of order, so the former
 “phase 3 of 6” label was retired. The authoritative remaining order is the
 **Program task ledger** at the top of [[roadmap]]; unit 1, database lifecycle
@@ -40,7 +40,7 @@ Treat every lane return, compaction, and material discovery as a program-level
 scheduling boundary: reread the complete unit ledger, update the lane's proof
 and dependency edge, identify its next refill, and only then continue. Never
 promote a lane's local task list into the program plan or report progress
-without the remaining units 1–9 and unit 9 graduation gate still visible.
+without the remaining units 1–9 and unit 9 system gate still visible.
 
 At each scheduling boundary, write the same five fields into the active
 roadmap before taking another implementation detour: ordered spine, live
@@ -348,7 +348,7 @@ a hosted JVM + Node cluster.
 
 Follow the roadmap's active execution ledger exactly: baseline; database
 lifecycle; lazy reactive/data units; root/session/canvas/UI; tests/operator/
-callers; profiling; acceptance/graduation. Keep one slice in progress, close it
+callers; profiling; acceptance/system proof. Keep one slice in progress, close it
 with focused tests + live proof + docs + commits, then mark the next slice in
 progress. Bugs and smells follow the ledger's interruption/recording policy.
 Human-visible work also follows the roadmap's browser journey discipline: use

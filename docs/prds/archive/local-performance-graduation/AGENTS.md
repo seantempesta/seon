@@ -4,7 +4,7 @@ status: active
 tags: [orchestrator, prd, flow, database, web, agent]
 ---
 
-# Local performance graduation — working context
+# Local performance proof — working context
 
 This final PRD owns the destructive end-to-end acceptance matrix, explicit
 local performance budgets, and safe retirement of superseded processes,
@@ -23,4 +23,4 @@ closed preservation/read-back gates. Never touch the active ACME worktree or
 protected shared-schema file.
 
 Research belongs in `research/`; current gaps, order, and proof belong in
-[[roadmap]]. This PRD cannot claim subsystem graduation early.
+[[roadmap]]. This PRD cannot claim subsystem proof early.

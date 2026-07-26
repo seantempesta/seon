@@ -1,7 +1,7 @@
 ---
 type: research
 status: complete
-tags: [research, integration, runtime, reliability]
+tags: [research, architecture, runtime, reliability]
 ---
 
 # Integration seam sweep — 2026-07-23
@@ -155,7 +155,7 @@ Stale consumers:
 ### BN-6 — Three new web limits validate and persist but have no runtime reader
 
 **Status:** verified; breaks when overridden  
-**Producer:** `34f0373e87eefdff4b06f389a194fa5fa648e2c5` — `Harden claimant persistence and runtime limits`
+**Producer:** `34f0373e87eefdff4b06f389a194fa5fa648e2c5` — `Harden run-holding process persistence and runtime limits`
 
 Inert facts:
 
@@ -453,4 +453,4 @@ No tracked references remain to retired execution-context request schema names, 
 9. Page `grep-graph` and committed host projections.
 10. Replace the admission pager’s single-row size assumption with chunked source/form acquisition.
 
-The graduation gate remains a frozen-tree source-free package proof plus complete CLJS, writer, and operator gates after these producer/consumer contracts converge.
+The final system gate remains a frozen-tree source-free package proof plus complete CLJS, writer, and operator gates after these producer/consumer contracts converge.

@@ -4,6 +4,8 @@ status: active
 tags: [research, runtime]
 ---
 
+Terminology: this note records evidence from before the rename; the process holding a run is now `:seon.agent.run/process`.
+
 # Measurements, 2026-07-25 — the numbers, their conditions, and how to falsify them
 
 This is the appendix every other 2026-07-25 document cites. It exists because the
@@ -685,7 +687,7 @@ centre.
 
 **The commit path, not SCI, is the cost centre.** SCI is ~5% of a turn — *before* an
 LLM call that dwarfs everything. Every "make the interpreter faster" proposal (JIT,
-graduation-as-speed, compiled tiers) optimizes that 5%.
+accretion-as-speed, compiled tiers) optimizes that 5%.
 
 **This turn figure is a LOWER BOUND by the cost of a model call.** No LLM ran (§14).
 
@@ -1122,7 +1124,7 @@ are checked into the working tree.
 Be suspicious of anything not above. Specifically:
 
 - **No LLM. No real capability calls.** No fs, web, shell, or agent-authored `db`
-  write passed through the door. No `:mixed` workload. No streaming. Every "reply"
+  write passed through `:interrupt-fn`. No `:mixed` workload. No streaming. Every "reply"
   was a pure function; every eval was CPU-only or a deliberate host block.
   **Every turn-level timing is therefore a LOWER BOUND by the cost of a model call.**
 - **No live `bin/seon up` with `-Xshare:on`** (§2.9).
@@ -1151,9 +1153,9 @@ Marked here so nothing lifts them as settled.
   source.** The attribution is **already asserted as fact** in the committed tree at
   `docs/seon/issues/output-map-closedness-decides-accretion-legality.md:15-16`,
   which defeats the design set's own UNVERIFIED marker unless that line is marked.
-- **`:seon.agent.run/process` as the replacement for the coinage "claimant"** —
-  proposed, not ratified. Grounding is real on both sides (`rg -i claimant
-  reference-code/datahike/ -l` → **0 files**, against `rg -c claimant src/` → **25
+- **`:seon.agent.run/process` as the replacement for the coinage "cluster JVM"** —
+  proposed, not ratified. Grounding is real on both sides (`rg -i cluster JVM
+  reference-code/datahike/ -l` → **0 files**, against `rg -c cluster JVM src/` → **25
   files**; `script/seon/dev/process.clj:95, :910, :918, :929-938` carries the process
   record with `(pid, start-instant)` and generation, matching JDK `ProcessHandle`).
   The rename itself is an owner ruling, not a measurement.

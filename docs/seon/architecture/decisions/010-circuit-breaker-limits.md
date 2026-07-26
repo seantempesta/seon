@@ -9,11 +9,11 @@ tags: [decision, architecture, config, runtime]
 
 ## Context
 
-A hidden or routinely reached limit becomes an accidental scheduler: it
+A hidden or routinely reached bound becomes an accidental scheduler: it
 silently throttles normal work, obscures capacity defects, and makes behavior
-depend on literals scattered through runtime code. Interpreter-step budgets,
-deadlines, output caps, pools, queues, heap ceilings, connection counts, and
-body bounds all need one policy.
+depend on literals scattered through runtime code. SCI has one `time-limit`;
+bounded projections, queues, heap ceilings, connection counts, and body sizes
+are explicit data or capacity boundaries.
 
 ## Decision
 
@@ -44,5 +44,5 @@ or the operation as a structured configuration error.
 
 - [[laws]] — the timeless limit laws.
 - [[data-model]] — configuration facts.
-- [[agent-runtime]] — guarded eval and claimant bounds.
+- [[agent-runtime]] — SCI `time-limit` and cluster JVM bounds.
 - [[toolkit]] — flat capability steering errors.

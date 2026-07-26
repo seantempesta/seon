@@ -20,13 +20,13 @@ Counts use one row per mechanism or coherent constant family:
 - D — Tuned design constant: 33
 - Total: 81
 
-Key conclusion: the 900-second cleanup and 20-minute claim lease are both class C. The claimant virtual thread’s termination was observable immediately, but `driver.host/dispatch!` discarded that event in `finally` without guaranteeing durable phase settlement.
+Key conclusion: the 900-second cleanup and 20-minute claim lease are both class C. The run-driving virtual thread’s termination was observable immediately, but `driver.host/dispatch!` discarded that event in `finally` without guaranteeing durable phase settlement.
 
 ## Required cross-checks
 
 | Item | Classification | Finding |
 |---|---|---|
-| 900s turn/request deadline | C | The exhibit shows it was the only effective detector after the claimant thread died. It must remain only a loud outer backstop. |
+| 900s turn/request deadline | C | The exhibit shows it was the only effective detector after the run-driving thread died. It must remain only a loud outer backstop. |
 | Heartbeat lease | C | Appropriate as a distributed last-resort fence, but not as the primary detector of local virtual-thread or supervised-process death. |
 | Watchdog `stale-ms` = 1,200,000 | C | Current ticker calls `driver/scan!`, which steals expired leases. The older loud `close-stale-runs!` is referenced only by a test; current takeover fault recording is unverified and appears absent. |
 | R42 pod stall = 300,000 | C, with B poll | Named, documented, and throws loudly, but the 200ms readiness/log polling should consume file/process/readiness events. No durable fault datom was found. |
@@ -39,7 +39,7 @@ Key conclusion: the 900-second cleanup and 20-minute claim lease are both class 
 | File:line | Constant/current value | Event or nondeterminism | Recommended owner |
 |---|---|---|---|
 | `config/system.edn:150-162`, `src/seon/ai/http.clj:39-79,210-217` | Connect 300,000ms; request deadline from attempt | Remote HTTP connection/response | Keep in model-transport/provider facts. Timeout becomes a flat retryable result and durable attempt evidence. |
-| `src/seon/agent/driver/host.clj:110-137` | Claimant LLM outer attempt, normally 120,000ms | Remote provider call | Keep. Firing returns `:seon.ai/timeout?` and terminalizes the attempt. |
+| `src/seon/agent/driver/host.clj:110-137` | Process holding the run LLM outer attempt, normally 120,000ms | Remote provider call | Keep. Firing returns `:seon.ai/timeout?` and terminalizes the attempt. |
 | `config/system.edn:408-416,431-432` | Planning 300,000/360,000ms; execution 120,000ms; one retry | Hosted model request | Keep as per-agent/provider data with attempt receipts. |
 | `config/system.edn:204-210`, `src/seon/agent/turn/core.cljc:256-280` | Max wait 20,000ms; total 60,000ms; four retries | Transient provider 429/5xx/transport failure | **LIFTED W-R50-6.** Ceilings and base/factor/jitter now come from the acquired `:seon.config/llm-retry` facts. |
 | `config/system.edn:319-330`, `src/seon/agent/web/host.clj:300-438`, `pod.cljs:484-795` | 30,000ms | Remote HTTP/search completion | Keep. Flat error values are produced. The host’s inline 30s connect timeout should consume the same fact. |
@@ -53,7 +53,7 @@ Key conclusion: the 900-second cleanup and 20-minute claim lease are both class 
 
 | File:line | Constant/current value | Observable event | Recommended owner |
 |---|---|---|---|
-| `src/seon/agent/loop.cljs:648-690` | 30,000ms ticker | Run/claim datom, claimant completion, scheduled due instant | Keep a scheduler only for cron due instants. Claim recovery should be driven by vthread completion, process exit, and database interest. |
+| `src/seon/agent/loop.cljs:648-690` | 30,000ms ticker | Run/claim datom, run-holding process completion, scheduled due instant | Keep a scheduler only for cron due instants. Claim recovery should be driven by vthread completion, process exit, and database interest. |
 | `src/seon/db/transport/uds.cljs:25,455-646` | 250ms deadline scan | Request Promise response/rejection or socket disconnect | Replace the shared scan with request-completion callbacks plus a nearest-deadline one-shot backstop. |
 | `src/seon/db/session.cljs:513-545` | 1ms→250ms ambiguous-write retry | Original transaction receipt/terminal response | Await the stable request receipt through the existing database interest/response path. |
 | `src/seon/db/host.clj:225-254` | 250ms source fallback; configured 1,000ms in web-render | Interest session EOF/restoration | Reconnect from socket-close and writer-ready events. A delay may rate-limit respawn, but must not detect readiness. |
@@ -78,7 +78,7 @@ Key conclusion: the 900-second cleanup and 20-minute claim lease are both class 
 | `src/seon/agent/driver/host.clj:587-614`; exhibit `tmp/orchestrator/lifecycle-redrive-gate.log:244-341` | Detected only at 900,000ms | Claimed virtual thread terminated with uncaught NPE | `driver.host/dispatch!` must join/completion-handle every vthread and atomically settle the phase error or observe already-terminal/displaced state before removing its handle. |
 | `src/seon/web/serve.cljs:827-863,1544-1609` | Request-selected deadline; exhibit 900,000ms | Run and every request-owned turn reaching terminal datoms | Keep only as a loud API backstop. On firing, record a core fault naming the unsettled run/turn and owning config/request key. |
 | `src/seon/config.cljs:1020-1029`, `src/seon/client.cljs:2590-2715`, `script/seon/dev/process.clj:1923-1924,2052-2059,2265-2269` | 900,000ms plus 120,000ms reserve | Durable run/turn settlement and quiesce completion | Replace the primary wait with database interest. One acquired config fact should own the backstop; remove source/operator duplicates. |
-| `config/system.edn:599-607`, `src/seon/agent/run/core.cljc:15-33,99-136`, `driver.cljc:223-263` | 1,200,000ms claim lease | Local vthread completion or claimant process exit | Vthread completion and supervisor `onExit` must immediately trigger settlement/release/scan. Lease remains a loud distributed survivor backstop only. |
+| `config/system.edn:599-607`, `src/seon/agent/run/core.cljc:15-33,99-136`, `driver.cljc:223-263` | 1,200,000ms claim lease | Local vthread completion or cluster JVM exit | Vthread completion and supervisor `onExit` must immediately trigger settlement/release/scan. Lease remains a loud distributed survivor backstop only. |
 | `src/seon/agent/run.cljs:1035-1167`, `agent/loop.cljs:654-669` | Same 1,200,000ms | Watchdog firing/fault publication | `close-stale-runs!` is referenced only by a test; the ticker now calls `driver/scan!`. Record a fault on lease steal or retire the dead watchdog path. Current loudness is **UNVERIFIED** and appears absent. |
 | `src/seon/host.clj:56-59,160-239` | 10,000ms startup frame | Managed pod session startup frame or socket EOF | Consume protocol-frame/EOF completion. If the last-resort timer fires, record a core fault; current timeout is intentionally suppressed from fault recording. |
 | `src/seon/db/transport/uds.cljs:455-646`, `db/session.cljs:503-545` | 15,000ms calls; 120,000ms transactions | Writer response, receipt, or disconnect | Request completion owner must reject/deliver on every terminal transport path. Timer remains loud backstop only. |
@@ -114,7 +114,7 @@ Key conclusion: the 900-second cleanup and 20-minute claim lease are both class 
 | `src/seon/config/resolve.cljc:1660-1834` | Hardware-derived worker, queue, heap, frame, byte, slot, and 5,000ms shutdown defaults | Database operational sizing | Facts are named, but several formulas remain design guesses. Preserve formulas with benchmark evidence; shutdown timeout is C. |
 | `config/system.edn:150-162` | Identity 512; endpoint 2,048; response 16MiB | Model evidence/response caps | Good facts with rationale. |
 | `config/system.edn:180-188` | Heap 4,096MiB; result 1MiB | Claim-driver containment | Keep configured. Pool/invocation deadlines belong in C. |
-| `config/system.edn`, `src/seon/agent/turn/core.cljc` | Base 500ms; factor 2; jitter 0.5 | LLM retry shape | **LIFTED W-R50-6.** The existing `:seon.config/llm-retry` owner supplies all three acquired facts to both claimant and pod turn contexts. |
+| `config/system.edn`, `src/seon/agent/turn/core.cljc` | Base 500ms; factor 2; jitter 0.5 | LLM retry shape | **LIFTED W-R50-6.** The existing `:seon.config/llm-retry` owner supplies all three acquired facts to both run-holding process and pod turn contexts. |
 | `config/system.edn:319-330` | 2M bytes; 2,000 preview tokens; redirects 5; links 25; search 10/20; HTML 1M chars/depth 3,000 | Web response/search caps | Named facts; rationale mostly “preserves policy” and remains **UNVERIFIED**. |
 | `config/system.edn`, `src/seon/agent/search/internal.cljs` | 8MiB; preview 32 tokens; 12 results | Search output caps | **LIFTED W-R50-6.** The acquired `:seon.config/search` row owns all three caps. |
 | `config/system.edn`, `src/seon/subprocess.cljs`, `shell/leaf.clj` | Kill grace 1,000ms | SIGTERM→SIGKILL escalation | **LIFTED W-R50-6.** Both leaves consume `:seon.config.shell/kill-grace-ms`. The previous JVM-only 250ms drift was removed in favor of the existing cross-tier subprocess policy value. |
@@ -142,8 +142,8 @@ Key conclusion: the 900-second cleanup and 20-minute claim lease are both class 
 
 | Rank | Lane package | Owned mechanism and acceptance evidence |
 |---|---|---|
-| 1 | Claimant completion settlement | `src/seon/agent/driver/host.clj`, `driver.cljc`, focused claimant tests. Every claimed vthread completion—success, throw, interruption—must either observe terminal/displaced state or commit phase error + release before handle removal. Reproduce the planner NPE and show settlement in one transaction without waiting for any clock. |
-| 2 | Claim lease and process-death signalling | Claim driver, run-core lease policy, claimant supervision. Feed virtual-thread completion and supervised claimant `ProcessHandle.onExit` into immediate scan/release. Retain `stale-ms` only as a loud survivor backstop; lease steal records a core fault. Remove or rewire the dead `close-stale-runs!` path. |
+| 1 | Process holding the run completion settlement | `src/seon/agent/driver/host.clj`, `driver.cljc`, focused run-holding process tests. Every claimed vthread completion—success, throw, interruption—must either observe terminal/displaced state or commit phase error + release before handle removal. Reproduce the planner NPE and show settlement in one transaction without waiting for any clock. |
+| 2 | Claim lease and process-death signalling | Claim driver, run-core lease policy, run-holding process supervision. Feed virtual-thread completion and supervised run-holding process `ProcessHandle.onExit` into immediate scan/release. Retain `stale-ms` only as a loud survivor backstop; lease steal records a core fault. Remove or rewire the dead `close-stale-runs!` path. |
 | 3 | Run/API/quiescence settlement | `web/serve.cljs`, `client.cljs`, operator quiesce. Use database interest for request-owned run/turn completion and shutdown drainage. The outer deadline records a fault with exact unsettled datoms; no 10ms or 900s primary detection remains. |
 | 4 | Database completion and receipt delivery | `db/transport/uds.cljs`, `db/session.cljs`, `db/host.clj`, writer receipt owner. Replace 250ms deadline scanning and 10ms conflict loops with Promise/receipt/disconnect delivery. Internal deadlines become named, loud backstops. |
 | 5 | Event-driven operator | `script/seon/dev/process.clj`, branch/changed-test helpers. Use `ProcessHandle.onExit`, `WatchService`, selector readiness, and terminal-result publication. Keep R42’s 300s stall ceiling as configured loud evidence, not a 200ms poll loop. |
@@ -153,4 +153,4 @@ Key conclusion: the 900-second cleanup and 20-minute claim lease are both class 
 | 9 | External-backstop loudness proof | Add recurring tests that each remote HTTP/subprocess deadline produces the expected flat error, attempt receipt/log, and governing config key. |
 | 10 | Dev-tool polling cleanup | Changed-test, MCP, program-artifact, and branch-release event conversion; lower production risk but removes many inline guesses. |
 
-Top five summary: claimant vthread completion; process-death/lease signalling; database-driven run/quiescence settlement; database request/receipt completion; event-driven operator readiness and containment.
+Top five summary: run-holding process vthread completion; process-death/lease signalling; database-driven run/quiescence settlement; database request/receipt completion; event-driven operator readiness and containment.

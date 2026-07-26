@@ -10,11 +10,11 @@ tags: [architecture, agent, runtime, database]
 > evidence live only in [[roadmap]].
 
 An agent is durable database state plus replaceable compute. A trigger opens a
-bounded **run**. Claimant processes compete for that run through database CAS,
-advance one persisted **turn phase** at a time, and release custody whenever
-the next phase belongs elsewhere. No process-local loop, promise registry, or
-attempt buffer is an authority. Killing a claimant loses only transient
-compute; the next claimant resumes from the database facts.
+bounded **run**. The cluster JVM acquires that run through database CAS,
+advances one persisted **turn phase** at a time, and releases custody when work
+must wait or terminate. No process-local loop, promise registry, or attempt
+buffer is an authority. Killing the cluster JVM loses only transient compute;
+its replacement resumes from the database facts.
 
 The runtime has one portable `.cljc` driver. Every execution tier calls that
 same driver and supplies a small platform leaf for the phases it can execute.
@@ -33,10 +33,10 @@ projects the visible state from facts:
 - `:idle` otherwise.
 
 Run expiry is also derived. A claim is expired when the run remains open and
-unpaused, has a claimant and epoch, and its last heartbeat is older than the
-configured stale interval. There is no stored `expired?`, recovery status, or
-process-alive bit. Wall-clock comparison is performed against one immutable
-observation of the run and the configured lease policy.
+unpaused, has a `:seon.agent.run/process` and epoch, and its last heartbeat is
+older than the configured stale interval. There is no stored `expired?`,
+recovery status, or process-alive bit. Wall-clock comparison is performed
+against one immutable observation of the run and the configured lease policy.
 
 ## Runs are claimable database state
 
@@ -53,36 +53,38 @@ fingerprint, schema-projected ordered arguments, subject refs, and
 `:seon.db/user` and `:seon.db/process`; it is not copied onto the interaction.
 Submission leaves the agent's current-run ref absent so multiple interactions
 can queue as database facts. First claim atomically CASes that absent pointer
-to the interaction run while acquiring claimant epoch `1`. The same pointer
+to the interaction run while acquiring claim epoch `1`. The same pointer
 and epoch fence then governs every receipt and terminal transition.
 
 Custody lives on that run:
 
-- `:seon.agent.run/claimant` is the stable identity of one process instance,
-  derived from its process identity and start instant;
+- `:seon.agent.run/process` identifies the process record for the cluster JVM
+  instance holding the run, grounded by its generation and `(pid,
+  start-instant)` identity;
 - `:seon.agent.run/claim-epoch` is a monotonic fencing number; and
 - `:seon.agent.run/last-beat-at` is the last committed lease heartbeat.
 
-The first acquisition CASes an absent claimant and epoch to the claimant and
-epoch `1`. Reacquisition of a cleanly released run CASes claimant
-`nil → claimant` and increments the observed epoch. Takeover of an expired
-claim CASes the observed heartbeat and epoch before replacing the claimant and
-heartbeat. A live foreign claim is not stealable.
+The first acquisition CASes an absent process ref and epoch to the current
+cluster JVM's process record and epoch `1`. Reacquisition of a cleanly released
+run CASes the absent process ref to the current process record and increments
+the observed epoch. Takeover of an expired claim CASes the observed heartbeat
+and epoch before replacing the process ref and heartbeat. A live foreign claim
+is not stealable.
 
 Every run mutation leads with two assertions:
 
 1. the agent still points to the observed run; and
-2. the run still has the claimant's held epoch.
+2. the run still has the cluster JVM's held epoch.
 
-The claimant string identifies custody for operators and archaeology; the
-epoch is the authority fence. A displaced claimant cannot publish late work
-because its transaction fails at the writer.
+The process record identifies custody for operators and archaeology; the epoch
+is the authority fence. A displaced cluster JVM cannot publish late work
+because its transaction fails at the transaction owner.
 
 Heartbeat, input consumption, release, pause, close, and phase advancement all
 carry the same pointer-plus-epoch fence. A clean release retracts only the
-claimant and retains the monotonic epoch. Closing the run records the terminal
-facts, retracts the claimant, and retracts the agent's current-run ref in one
-transaction.
+process ref and retains the monotonic epoch. Closing the run records the
+terminal facts, retracts the process ref, and retracts the agent's current-run
+ref in one transaction.
 
 ## The portable driver
 
@@ -96,21 +98,20 @@ transaction.
 6. commit the phase result under the run and phase fences; and
 7. continue, close, or release for a clean tier handoff.
 
-Claimants advertise capabilities such as interaction, render, model I/O, eval,
-and publish. Eligibility is a pure function of that set and the persisted
-interaction status or turn phase.
-Claimants do not route by agent identity or keep a private queue of runs.
-Database interests are ephemeral wakeups that request another scan; the scan
-and CAS determine authority.
+The cluster JVM advertises capabilities such as interaction, render, model
+I/O, eval, and publish. Eligibility is a pure function of that set and the
+persisted interaction status or turn phase. It does not route by agent
+identity or keep a private queue of runs. Database interests are ephemeral
+wakeups that request another scan; the scan and CAS determine authority.
 
 Phase eligibility says who may claim; the derived execution plan says whether
-this claimant can run this particular work. After parsing a proposed
+the cluster JVM can run this particular work. After parsing a proposed
 invocation and before entering the eval phase, the driver derives the plan at
 the claim database value, verifies schema and capability coverage against its
-own inventory, and provisions any permitted remote leaves. If another eligible
-claimant can satisfy the plan, the work is released unchanged for handoff; if
-no tier can, the result is one flat steering error naming the missing leaves,
-schemas, or unresolved edges. See [[architecture]] §Transparent distribution.
+own inventory, and provisions any permitted remote leaves. If no tier can
+satisfy the execution plan, the result is one flat error value naming the
+missing leaves, schemas, or unresolved edges. See [[architecture]]
+§Transparent distribution.
 
 Every active tier uses this driver from the same source. Platform leaves own
 only native effects: database sessions, clocks, virtual-thread dispatch,
@@ -118,17 +119,18 @@ provider transport, SCI invocation, and publication I/O. Sync versus async
 ceremony is confined to the entry expression. No tier owns a forked state
 machine or translates through hand-mirrored host wrappers.
 
-On the JVM, a scan starts at most one named virtual thread per run in that
-claimant process. That thread drives the held claim until it closes, loses the
-fence, or reaches a phase the leaf cannot execute. Eval work enters the bounded
-platform eval pool; the claim virtual thread parks for its result.
+On the cluster JVM, a scan starts at most one named virtual thread per run.
+That thread drives the held claim until it closes, loses the fence, or reaches
+a phase the leaf cannot execute. Blocking work uses `:io`; SCI eval work uses
+`:compute` platform threads under the one `:interrupt-fn`; the claim virtual
+thread parks for the result.
 
-For an interaction, the claimant first CASes `:pending → :running` under the
+For an interaction, the cluster JVM first CASes `:pending → :running` under the
 held run fence. Only that committed receipt admits the pinned handler through
-the guarded SCI door and bounded eval pool. Success or a flat error is
+SCI with the one `:interrupt-fn` on `:compute`. Success or a flat error is
 schema-projected into ordinary data and committed with
 `:running → :done|:error` in the same fenced transaction that closes the run.
-A replacement claimant that observes `:running` records `:interrupted` and
+A replacement cluster JVM that observes `:running` records `:interrupted` and
 does not replay the authored handler.
 
 ## Turns have a durable phase cursor
@@ -148,7 +150,7 @@ A turn is the durable record of one prompt/model/eval/publish cycle. Its
 Before a turn exists, the driver treats its phase as `:unstarted`. Rendering
 creates the turn and advances it to `:rendered`. Every later transition uses
 an in-transaction CAS from the observed phase to the next phase, composed with
-the held run fence. A claimant may repeat a read, but it cannot repeat a
+the held run fence. The cluster JVM may repeat a read, but it cannot repeat a
 committed phase transition.
 
 The turn pins the database value used to render the prompt through its rendered
@@ -186,59 +188,52 @@ There is no in-memory attempt ledger to reconcile.
 Each eval form similarly receives a durable `:running` receipt before its SCI
 dispatch and a terminal update afterward. The receipt records source,
 namespace, result or error projection, bounded output, and progress evidence.
-If a claimant dies at `:evaling` before any receipt exists, no form was
+If the cluster JVM dies at `:evaling` before any receipt exists, no form was
 admitted and the batch may begin. If receipts exist, takeover terminalizes
 still-running rows as interrupted and advances from their durable evidence.
 Recovery never fabricates success and never replays an already terminal form.
 
 Receipt transitions compose with the held run epoch and the turn phase CAS.
 They are therefore both execution evidence and the write fence against stale
-claimants.
+processes.
 
-## Guarded evaluation door
+## SCI interruption
 
 Every SCI invocation—agent eval, authored render, plan function, or schema
-predicate—passes through one guarded door. A retained SCI context owns one stable
-interpreter-step counter;
-each invocation resets it from the resolved policy and installs the current
-platform interrupt predicate.
+predicate—installs the one zero-argument `:interrupt-fn`. SCI calls it at every
+`fn` body entrance. The invocation's `time-limit` is the only execution limit;
+when it expires, `interrupt!` stops the eval uncatchably.
 
 Malli never constructs or forks a private SCI context. The schema projection
 resolves every admitted `[:fn]` symbol to its already-materialized corpus
 callable before Malli compiles the schema. Predicate invocation therefore runs
-in the surrounding retained corpus context and charges that invocation's
-holder. If Malli catches SCI's interrupt marker or replaces it with a schema
-error, the holder retains the fired policy kind and the door still returns the
-canonical flat steering value.
+in the surrounding retained `ctx`. If Malli catches SCI's interruption marker
+or replaces it with a schema error, the runtime retains the fired `time-limit`
+result and returns the canonical flat error value.
 
-The door enforces three independent abort-only circuit breakers:
+The runtime records `:seon.eval/fn-entries`, the number of `fn` body entrances,
+as a diagnostic only. It is never a budget or control input: a large count in a
+short interval identifies a spin, while a small count during a long interval
+identifies work blocked in a host call. Bounded output projection is a data
+boundary, not a second execution limit.
 
-- deterministic interpreter steps charged at SCI safepoints;
-- a wall-clock deadline where the platform can arm one; and
-- bounded captured output.
-
-Interpreter-step budgets, deadlines, and output caps are required database
-configuration facts,
-selected by invocation class. They are not scheduling quanta and do not slow
-normal work. Crossing any bound stops through SCI's uncatchable interrupt
-marker, records an agent fault, and returns the one flat steering value:
+`time-limit` is a required database configuration fact selected by invocation
+class. It is not a scheduling quantum. Expiry calls `interrupt!`, records an
+agent fault, and returns one flat error value:
 
 ```clojure
 {:seon.error/message "..."
- :seon.error/kind :budget
+ :seon.error/kind :timeout
  :seon.error/data
- {:seon.host.guard/config-key :seon.config.guard/...
-  :seon.host.guard/invocation-class :agent-eval
-  :seon.host.guard/interpreter-steps-used 123}}
+ {:seon.eval/invocation-class :agent-eval
+  :seon.eval/fn-entries 123}}
 ```
 
-The diagnostic kind is `:budget`, `:timeout`, or `:agent` for interpreter-step
-budget, deadline, or output policy; the shape does not fork. Deadline state is
-disarmed and the interrupt predicate is cleared in `finally`, so a retained
-context cannot leak one invocation's policy into the next.
+The `:interrupt-fn` is cleared in `finally`, so a retained `ctx` cannot leak
+one invocation's interruption state into the next.
 
-All resource limits follow [[laws]]: configuration facts with schemas,
-docstrings, units, and calibration provenance; defaults far above measured
+The `time-limit` follows [[laws]]: a configuration fact with a schema,
+docstring, unit, and calibration provenance; a default far above measured
 legitimate work; loud firing; no runtime numeric fallback.
 
 ## Lease-aware recovery
@@ -255,23 +250,23 @@ cluster repair sweep.
   execution.
 
 Startup reconstructs program declarations and registers database interests,
-then the normal claimant scan offers open work. It does not close every
+then the normal run scan offers open work. It does not close every
 apparently running turn, clear process registries, or infer failure merely
 because a different process now hosts the cluster.
 
 Pause is a fenced release: it banks remaining wall-clock time, records
-`:paused-at`, and retracts claimant custody. Resume clears the pause facts,
-extends the deadline from the banked duration, and leaves the run available for
-ordinary reacquisition at a new epoch. Termination and explicit close use the
-same fence and terminal transaction as normal completion.
+`:paused-at`, and retracts `:seon.agent.run/process`. Resume clears the pause
+facts, extends the deadline from the banked duration, and leaves the run
+available for ordinary reacquisition at a new epoch. Termination and explicit
+close use the same fence and terminal transaction as normal completion.
 
 ## Bounds and truthful stopping
 
 A run has separate work and wall-clock bounds. Reply evaluation in `:batch`
 mode counts completed turns; `:first-form` counts attempted forms independently
 of whether the provider transport streams bytes. The absolute deadline bounds
-the whole run, while guarded-door limits bound each SCI invocation. Provider
-attempts have their own frozen transport deadline and durable receipt.
+the whole run, while `time-limit` bounds each SCI invocation. Provider attempts
+have their own frozen transport deadline and durable receipt.
 
 No-progress is derived from trailing committed eval observations. Repeated
 equivalent no-progress turns close cleanly rather than spinning. A bound,
@@ -301,10 +296,10 @@ concurrency limits are enforced at the lifecycle transaction boundary.
 ## Program reconstruction
 
 Authored functions, schemas, tests, namespace declarations, and require edges
-are database program facts. A claimant reconstructs the admitted program from
-those facts, topologically loads declarations, and installs instrumentation
-from the same graph. A source change updates the shared program; it does not
-create a per-agent copy.
+are database program facts. The cluster JVM reconstructs the admitted program
+from those facts, topologically loads declarations, and installs
+instrumentation from the same graph. A source change updates the shared
+program; it does not create a per-agent copy.
 
 Process replacement reloads declarations and current retained context. It does
 not replay scratch evals, provider calls, filesystem effects, Promises, sockets,
@@ -313,16 +308,16 @@ the only program reconstruction.
 
 ## Isolation and process ownership
 
-Claimant JVMs execute agent code. The writer JVM executes transactions and
-serves committed-transaction interests only. The web-render JVM evaluates only
-trusted pure projections over acquired database values. The disposable Bun
-leaf host runs JavaScript packages and selected platform workers, not the agent
-driver. See [[architecture]] for the complete topology.
+The cluster JVM executes agent code, owns transactions, and serves the
+committed-transaction feed for its store. The web-render JVM evaluates only
+trusted pure projections over acquired database values. Disposable leaf
+runtimes run packages and selected platform workers, not the agent driver. See
+[[architecture]] for the complete topology.
 
-Adding claimant capacity means adding replaceable claimant processes. All of
-them compete through the same run claims, epochs, phase cursors, and receipts.
-No claimant retains a Datahike index or becomes part of the durable agent
-identity.
+One cluster has one cluster JVM because Datahike's `:self` writer permits one
+writer process per store. Scale by adding isolated clusters, never by adding
+processes to one store. `:seon.agent.run/process` records transient run custody
+without becoming part of the durable agent identity.
 
 ## What the database gives us
 

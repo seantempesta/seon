@@ -10,7 +10,7 @@ tags: [decision, architecture, schema, runtime]
 ## Context
 
 Public function schemas are executable contracts. Agent-authored code runs in
-replaceable claimant contexts, so input, output, and arity violations surface
+replaceable `ctx` values inside the cluster JVM, so input, output, and arity violations surface
 at the call boundary rather than corrupt later state.
 
 ## Decision

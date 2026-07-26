@@ -4,6 +4,8 @@ status: active
 tags: [research, agent, runtime, architecture]
 ---
 
+Terminology: this note records evidence from before the rename; the process holding a run is now `:seon.agent.run/process`.
+
 # Scheduled functions — live failure proof and durable-turn design (2026-07-23)
 
 Read-only probe and design deliverable for U9 blocker B2 in
@@ -47,7 +49,7 @@ therefore:
    reason.
 
 The recommended U9 design is accepted in principle: **one durable eval-ready
-scheduled turn plus a database wake, executed through the portable claimant
+scheduled turn plus a database wake, executed through the portable run-holding process
 and the existing JVM receipt path**. It is the only alternative that removes
 the child eval surface, survives process replacement after admission, obeys
 R26, and keeps one run/claim/phase/receipt state machine. It is not
@@ -99,10 +101,10 @@ First-party mechanisms that constrain the design:
   (`src/seon/agent/run.cljs:440-527`);
 - claim arbitration and work execution are portable database-driven state
   (`src/seon/agent/driver.cljc:49-107`, `src/seon/agent/driver.cljc:371-469`);
-- the JVM claimant always advertises eval and runs it on the bounded eval pool
+- the cluster JVM always advertises eval and runs it on the bounded eval pool
   (`src/seon/agent/driver/host.clj:60-66`,
   `src/seon/agent/driver/host.clj:272-316`);
-- pod claimants deliberately advertise render/LLM/publish, not eval
+- pod processes holding runs deliberately advertise render/LLM/publish, not eval
   (`src/seon/agent/driver/pod.cljs:32-67`); and
 - every form's `:running` receipt commits before SCI executes it
   (`src/seon/host/eval.clj:335-380`;
@@ -278,26 +280,26 @@ The current scheduler is process-local pod machinery:
 
 - one `setInterval` checks wall-clock facts every 30 seconds
   (`src/seon/agent/loop.cljs:630-690`);
-- each tick first offers open work to the pod claimant, then queries and fires
+- each tick first offers open work to the pod run-holding process, then queries and fires
   due schedules (`src/seon/agent/loop.cljs:654-669`);
 - cold `start-runtime!` resumes every durable agent, restores generated-code
   root schedulers, starts the web surface, and only then installs the ticker
   (`src/seon/client.cljs:2345-2395`); and
-- JVM claimants independently listen to committed database changes and scan
+- JVM processes holding runs independently listen to committed database changes and scan
   open runs, one virtual thread per admitted run
   (`src/seon/agent/driver/host.clj:487-553`).
 
 The architecture contract is that one scheduler derives due work and opens
 runs but does not execute agent work
 (`docs/seon/architecture/agent-runtime.md:253-264`). The writer cannot become
-that executor: it owns transactions and committed interests only; claimant
+that executor: it owns transactions and committed interests only; run-holding process
 JVMs execute agent code
 (`docs/seon/architecture/agent-runtime.md:285-296`).
 
 An important correction to the informal recommendation:
 
 - once a scheduler **commits** a fire as a run/turn, a durable turn survives
-  every process being down and any claimant can resume it later;
+  every process being down and any the process can resume it later;
 - if every scheduler process is down when a cron instant passes, the current
   system commits nothing. On restart it checks only the current wall-clock
   minute. A durable turn cannot preserve a fire that was never observed.
@@ -314,9 +316,9 @@ whether any schedule run for the agent started in the current minute
 
 The scheduler derives the due functions, writes the fire's durable intent as
 an open run plus a `:running`, `:scheduled? true`, eval-ready turn, and stops.
-The commit itself wakes claimant scans. A JVM claimant plans and evals the
+The commit itself wakes run-holding process scans. A cluster JVM plans and evals the
 stored program through the normal guarded door and receipt mechanism. The pod
-or another publish-capable claimant finishes the scheduled turn and applies
+or another publish-capable run-holding process finishes the scheduled turn and applies
 the ruled post-eval run behavior.
 
 Why this is the right architecture:
@@ -335,7 +337,7 @@ Why this is the right architecture:
 - It deletes `exec-scheduled-fns!`, `turn/eval-parsed!`,
   `invoke-compiled!`, and the child eval arm on U9's intended dependency
   boundary instead of creating a replacement transport.
-- It obeys R26 because the scheduler only transacts intent and claimant JVMs
+- It obeys R26 because the scheduler only transacts intent and cluster JVMs
   execute SCI. The writer never runs agent code.
 - Database interest is only an ephemeral hint to scan; CAS remains authority
   (`docs/seon/architecture/agent-runtime.md:77-108`).
@@ -355,23 +357,23 @@ batch until the later leaf-host unit. It is the smallest behavioral patch,
 but it preserves precisely the self-host/child eval surface U9 must delete.
 It also retains process-local compiler ownership, makes a pod crash between
 fire and receipt ambiguous, and creates a compatibility path that cannot prove
-the JVM claimant replacement.
+the cluster JVM replacement.
 
 This is acceptable only as an explicitly time-boxed emergency rollback that
 blocks U9 graduation. It is not a design answer to B2.
 
-### C. Direct claimant RPC — reject
+### C. Direct run-holding process RPC — reject
 
-The scheduler could call a JVM claimant directly with the function symbols.
+The scheduler could call a cluster JVM directly with the function symbols.
 That creates a second admission queue and a second routing/failure protocol:
-the scheduler must discover a claimant, handle its death, correlate the RPC,
+the scheduler must discover a run-holding process, handle its death, correlate the RPC,
 and somehow reconstruct an unacknowledged request. A fire that loses the RPC
 has no database work item; a retry can double-execute. Adding receipts inside
 the RPC does not fix the pre-receipt delivery gap.
 
 It violates the target rule that coordination is database data and bypasses
-the existing claimant scan/CAS mechanism. It also couples scheduler liveness
-to a particular claimant, contrary to replaceable claimant capacity
+the existing run-holding process scan/CAS mechanism. It also couples scheduler liveness
+to a particular run-holding process, contrary to replaceable run-holding process capacity
 (`docs/seon/architecture/agent-runtime.md:293-310`).
 
 ### D. Self-message as schedule payload — insufficient
@@ -399,9 +401,9 @@ Subject to §8 rulings, the smallest one-mechanism transition is:
    eval-ready phase. The existing open-run CAS precedent is
    `src/seon/agent/run.cljs:503-527`.
 4. **Wake by facts.** Return after commit. Do not call an eval helper or a
-   claimant RPC. The JVM claimant's database interest scans the open run
+   run-holding process RPC. The cluster JVM's database interest scans the open run
    (`src/seon/agent/driver/host.clj:538-546`).
-5. **Plan and eval normally.** The claimant parses the stored scheduled
+5. **Plan and eval normally.** The run-holding process parses the stored scheduled
    payload in the agent home namespace, derives `plan-execution`, advances
    `:reply-ready → :evaling`, and executes through the existing bounded SCI
    door (`src/seon/agent/driver/host.clj:318-414`).
@@ -409,13 +411,13 @@ Subject to §8 rulings, the smallest one-mechanism transition is:
    CASes to a terminal state afterward
    (`src/seon/eval/receipt.cljc:69-99`). A missing/unplannable function becomes
    a normal steering or failed-eval value, never a ticker rejection.
-7. **Finish the scheduled turn.** A publish-capable claimant recognizes
+7. **Finish the scheduled turn.** A publish-capable the process recognizes
    `:scheduled? true`, skips LLM-only generated-program publication, advances
    `:evaled → :published`, and commits `:status :done` under the run/epoch and
    phase fences.
 8. **Apply the ruled run policy.** The likely compatibility choice is to leave
    the run open: the now-completed scheduled turn remains excluded from work
-   count (`src/seon/agent/driver.cljc:119-130`), and the next claimant opens an
+   count (`src/seon/agent/driver.cljc:119-130`), and the next run-holding process opens an
    ordinary LLM turn so the agent sees the scheduled eval in its transcript.
 
 Use the existing phase vocabulary if the payload contract can make
@@ -428,7 +430,7 @@ phase name once. Do not add a parallel scheduled-phase state machine.
 
 Once run, turn, payload, and fire identity commit atomically:
 
-- death before claim leaves an eval-ready turn for the next claimant;
+- death before claim leaves an eval-ready turn for the next run-holding process;
 - death after `:evaling` but before any receipt permits exact replay because
   the receipt boundary guarantees no form ran;
 - death after a `:running` receipt does **not** prove the form's external
@@ -436,7 +438,7 @@ Once run, turn, payload, and fire identity commit atomically:
   rather than replaying them (`src/seon/agent/driver/host.clj:416-452`);
 - death after terminal receipts but before scheduled publish resumes from
   `:evaled`; and
-- every late claimant publication loses the run/epoch or phase CAS.
+- every late run-holding process publication loses the run/epoch or phase CAS.
 
 This provides once-only **admission** and no blind replay after admission. It
 cannot promise exactly-once arbitrary external effects; no general system can
@@ -505,7 +507,7 @@ must stop claiming that an unobserved fire survived downtime.
    attribute? Current code and architecture describe reply blobs as LLM
    evidence (`src/seon/agent/turn.cljs:859-896`).
 9. Is a fire frozen to the function symbols and corpus basis observed by the
-   scheduler, or may the claimant late-resolve the current symbol/source after
+   scheduler, or may the run-holding process late-resolve the current symbol/source after
    restart? Schedule attributes are symbol values
    (`docs/seon/architecture/data-model.md:723-731`), but deterministic recovery
    needs a ruled basis.
@@ -552,13 +554,13 @@ must stop claiming that an unobserved fire survived downtime.
 ### Process ownership and errors
 
 24. For U9, does the cron observer remain in the surviving Bun pod while
-    execution moves to JVM claimants, or move now to a separate claimant-side
+    execution moves to JVM processes holding runs, or move now to a separate process side
     scheduler service? It cannot move into the writer under R26.
 25. Which long-term supervised process owns wall-clock observation after the
     Bun pod's remaining surfaces retire?
 26. Does the scheduler need its own database-interest rescan in addition to
     its timer, or is cold-start plus periodic scan sufficient?
-27. How does an unavailable JVM claimant surface? Recommendation: the durable
+27. How does an unavailable cluster JVM surface? Recommendation: the durable
     turn remains pending; no scheduler timeout converts absence into failure.
 28. Which failures are agent eval receipts versus core faults? A missing
     scheduled function should be an agent/program error value; a broken phase
@@ -572,7 +574,7 @@ After the rulings, S0b should be specified as one narrow replacement:
 
 - Define one persisted scheduled-fire identity/event shape, or rule that the
   existing run identity plus a unique nominal-fire assertion is sufficient.
-- Generalize one turn payload contract so a claimant can reconstruct an exact
+- Generalize one turn payload contract so the process can reconstruct an exact
   scheduled program without an LLM attempt.
 - Add a pure allocation-aware `schedule-fire-tx-data` builder that creates the
   fire, run, and scheduled turn and CASes the agent pointer in one transaction.
@@ -585,7 +587,7 @@ After the rulings, S0b should be specified as one narrow replacement:
 - Replace `fire-schedule!`'s `exec-fn!`/`drive!` callbacks with the one durable
   admission transaction.
 - Let the existing JVM database listener wake `driver/scan!`; do not call the
-  claimant.
+  run-holding process.
 - Extend the JVM reply-program acquisition by the one generalized turn
   payload seam; keep planning, guarded SCI execution, and receipts unchanged.
 - Branch the existing publish phase on the scheduled-turn presence fact so it
@@ -604,7 +606,7 @@ After the rulings, S0b should be specified as one narrow replacement:
 - Remove the scheduler callback schema and injection
   (`src/seon/agent/schedule.cljs:264-276`,
   `src/seon/agent/loop.cljs:654-669`).
-- Keep one JVM wire symbol/door only as long as the claimant's host invocation
+- Keep one JVM wire symbol/door only as long as the run-holding process's host invocation
   contract needs it; do not retain a pod child implementation to preserve the
   name.
 
@@ -618,7 +620,7 @@ After the rulings, S0b should be specified as one narrow replacement:
 3. **No pod eval:** a source/census assertion proves
    `exec-scheduled-fns!`, `eval-parsed!`, `invoke-compiled!`, and the child
    eval arm are absent after U9.
-4. **No explicit claimant RPC:** the schedule transaction alone wakes the JVM
+4. **No explicit run-holding process RPC:** the schedule transaction alone wakes the JVM
    database listener and completes.
 5. **Restart before claim:** stop after the fire transaction, restart, and
    prove the same fire/turn completes once.
@@ -646,8 +648,8 @@ After the rulings, S0b should be specified as one narrow replacement:
 16. **Downtime:** a skipped or caught-up missed fire is proven exactly as
     ruled, including the bound on catch-up.
 17. **R26 topology:** writer process has no SCI/agent-code execution edge;
-    claimant JVM owns scheduled eval.
-18. **Full U9 gates:** focused JVM claimant/receipt tests, authoritative
+    cluster JVM owns scheduled eval.
+18. **Full U9 gates:** focused cluster JVM/receipt tests, authoritative
     `bin/test-writer`, operator gate, then one isolated reset-boundary live
     proof ending in that cluster's `bin/seon down`.
 

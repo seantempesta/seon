@@ -1,10 +1,11 @@
 ---
 type: issue
 status: open
-tags: [packages, claimant, classpath, sci]
+severity: blocker
+tags: [issue, packages, runtime, sci]
 ---
 
-# A deps-ecosystem package install cannot reach a running claimant
+# A deps-ecosystem package install cannot reach an active cluster JVM
 
 ## Observed
 
@@ -18,7 +19,7 @@ Nothing loads it into a live process:
 
 - `rg -n 'add-lib|add-libs|DynamicClassLoader|addURL|clojure.tools.deps' src/ script/ deps.edn`
   returns nothing. There is no dynamic classpath mechanism in the tree.
-- The claimant JVM's classpath is fixed at process start, so a jar named by a
+- The cluster JVM's classpath is fixed at process start, so a jar named by a
   freshly written `deps.edn` is not resolvable by `requiring-resolve` in that
   process.
 - SCI cannot reach it either: `registry-load-fn`
@@ -34,7 +35,7 @@ to write empty manifests at cluster creation.
 
 Any design that lets an agent install a JVM package and then call it in the
 same cluster lifetime depends on this path existing. Today the only way a
-newly installed deps coordinate becomes callable is a full claimant restart,
+newly installed deps coordinate becomes callable is a full cluster JVM restart,
 which costs the measured 9232 ms boot and discards every process-local SCI
 context and in-flight run.
 
@@ -46,7 +47,7 @@ context and in-flight run.
 
 Either:
 
-1. an installed deps row becomes callable in the already-running claimant, with
+1. an installed deps row becomes callable in the active cluster JVM, with
    a live proof that a coordinate absent at boot resolves after install; or
 2. the ledger states plainly that a deps install requires a cluster restart,
    and the install path returns that as data rather than implying immediacy.

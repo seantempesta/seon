@@ -14,7 +14,7 @@ but the restarted pod could not acquire the run for publication. The portable
 driver's run selector failed against the fresh database because
 `:seon.eval/progress?` was absent from installed schema. Eval receipt
 attributes were registered only when the pod-only `seon.eval` namespace
-loaded, although the JVM claimant now creates and reads the same receipts.
+loaded, although the cluster JVM now creates and reads the same receipts.
 
 ## Resolution
 
@@ -31,6 +31,6 @@ fresh schema installation on both tiers.
 ## Acceptance
 
 - A fresh database installs every eval receipt attribute used by either tier.
-- The JVM claimant can create and terminalize eval receipts while the pod is
+- The cluster JVM can create and terminalize eval receipts while the pod is
   down.
 - The restarted pod can read the same receipt and publish the turn.

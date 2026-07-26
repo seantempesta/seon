@@ -56,4 +56,4 @@ reentrancy, final release, and reconnect.
 The semantic and lifetime defect is fixed. Keep this issue open until the
 grown temporal benchmark proves the latency, allocation, CPU, and bounded
 retention thresholds in the linked research report; that measurement belongs
-to Unit 10 density graduation and does not require another cache mechanism.
+to Unit 10 density proof and does not require another cache mechanism.

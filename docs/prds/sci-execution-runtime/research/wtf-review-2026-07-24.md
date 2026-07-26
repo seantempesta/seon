@@ -4,6 +4,8 @@ status: active
 tags: [research, runtime]
 ---
 
+Terminology: this note records evidence from before the rename; the process holding a run is now `:seon.agent.run/process`.
+
 # WTF review: one agent turn, traced at HEAD (2026-07-24)
 
 Fresh-eyes review against the stated pitch: stateless agents, everything is
@@ -28,12 +30,12 @@ A = user message posted. B = agent's committed facts + reply visible in the UI.
 | 4 | Step loop | `seon.agent.driver/drive-claim!` + `seon.agent.loop.core` (`eligible?`, `next-step`) | close-reason check, capability eligibility, phase → step dispatch through a leaf map | phase cursor: NECESSARY-ish; the capability/eligibility layer exists **only because one turn spans two processes** — see WTF-1 |
 | 5 | `:render` (Bun pod) | `seon.agent.turn/render-phase!` → `render-prompt` → `seon.agent.ctx.driver/render-prompt!` → `seon.agent.ctx` + `ctx/*` block families | 3-member `execute-many` acquisition; stored blocks resolved; **authored render fns round-trip to the JVM over the UDS frame protocol** (`seon.host.session.leaf` → `seon.host` server → `seon.host.invoke/begin-invocation!` → guarded door → frame back), per block; second resolve pass for derived blocks; prompt blob put; turn row + `:rendered` tx under fence | derivation itself: NECESSARY. Doing it on the pod while eval lives on the JVM: WTF-1. The pod→JVM→pod bounce per authored block: WTF-2 |
 | 6 | Handoff pod→JVM | `release!` tx → JVM `db.host/listen!` (interest = `:all`) → `scan!` re-queries **every** open run → new vthread → `claim!` again (epoch+1) | full release/wake/scan/reclaim cycle mid-turn | WTF-1 (cost of the split); the `:all`-dependency listener rescanning everything on every commit: DEFENSIBLE at current scale, won't survive load |
-| 7 | `:open-attempt`/`:settle-attempt` (JVM) | `seon.agent.driver.host/execute-step!` → `seon.agent.turn.llm/llm-phase!` → `durable-attempt!` → `seon.ai.core` transport | pull turn; `as-of` at rendered-tx; `resolve-llm-context!` (2 more config pulls); read prompt blob; split on a magic boundary string; pull turn **again** inside `durable-attempt!`; crash-mark stale open attempt; allocate attempt id; open-attempt tx; transport with watchdog interrupt + partial-text no-history sink; reply blob put; terminal tx → `:reply-ready` | durable attempt rows + resume: NECESSARY for "LLM call survives claimant death". The ~40-optional-key attempt evidence row built by **two** overlapping builders (`turn.core/open-attempt-row` vs `turn.llm/attempt-row`, the open row derived by calling `attempt-row` with `{}` then dissoc'ing): WTF-5 |
+| 7 | `:open-attempt`/`:settle-attempt` (JVM) | `seon.agent.driver.host/execute-step!` → `seon.agent.turn.llm/llm-phase!` → `durable-attempt!` → `seon.ai.core` transport | pull turn; `as-of` at rendered-tx; `resolve-llm-context!` (2 more config pulls); read prompt blob; split on a magic boundary string; pull turn **again** inside `durable-attempt!`; crash-mark stale open attempt; allocate attempt id; open-attempt tx; transport with watchdog interrupt + partial-text no-history sink; reply blob put; terminal tx → `:reply-ready` | durable attempt rows + resume: NECESSARY for "LLM call survives run-holding process death". The ~40-optional-key attempt evidence row built by **two** overlapping builders (`turn.core/open-attempt-row` vs `turn.llm/attempt-row`, the open row derived by calling `attempt-row` with `{}` then dissoc'ing): WTF-5 |
 | 8 | `:eval` — plan | `seon.agent.driver.host/eval-step!` → `seon.program.plan/acquire-planning-projection` + `plan-execution` → `seon.program.edge` → `seon.agent.driver/execution-plan-disposition` | read reply blob, parse once; then **three unbounded corpus queries** (every `:seon.program.edge` bundle, every schema, every fn contract), reconstruct bundles, digest the whole graph, statically analyze every reply form (`edge/analyze-function`), fold the call graph to a placement, build schema + capability manifests, classify into 6 dispositions | WTF-3. ~1,240 lines (`plan.cljc` 671 + `edge.cljc` 567) on the hot path of **every** reply, to answer "run here or hand to bun," with exactly one JVM tier inventory installed and the bun tier being retired |
 | 9 | `:eval` — execute | `run-eval-batch!` → `seon.host.invoke/execute-invocation!` → `seon.host.guard` → `seon.host.eval/eval-batch-result` → `seon.host.preflight` / `seon.host.record` / `seon.host.graduate` / `seon.host.instrument` / `seon.host.context` | `:reply-ready→:evaling` tx; per-session context fork; provision bindings; eval-pool submit; guard policy pull (`sample/acquire-guard-policy!`); guard reset/arm; **standalone fence-only tx** (`claim-run-fence!`); per form: receipt tx → preflight (repair + `:malli/schema` admission) → sci eval with step budget + output cap → terminal tx (fence + eval row + `:seon.fn`/`:seon.ns`/`:seon.schema` tees) → nursery install → instrument reconcile → projection publish; then `resolve-head!`, pull turn, `:evaling→:evaled` tx | guard door, receipt-before-run, terminal-with-tees: NECESSARY — this is the actual product. The fence asserted at four layers (claim tx, standalone pre-batch tx, every receipt, every terminal): WTF-6 |
 | 10 | Handoff JVM→pod | release → listener → scan → reclaim | second full mid-turn handoff, because `:publish` is a pod capability | WTF-1 |
 | 11 | `:publish` (pod) | `seon.agent.turn/publish-phase!` → `my.plan/publish-generated-program!` | pull turn, read reply blob **again**, **re-parse the reply a second time** (`turn.core/reply-program` again), publish program, `:evaled→:published` tx, turn `:done` | the re-read/re-parse: WTF-4; the phase itself could be part of eval settlement |
-| 12 | Close + UI | `drive-claim!` close tx (retract claimant + agent pointer); writer feed → `seon.reactive` → render units → Datastar SSE morph | | NECESSARY. The reactive/UI derivation path genuinely matches the pitch |
+| 12 | Close + UI | `drive-claim!` close tx (retract run-holding process + agent pointer); writer feed → `seon.reactive` → render units → Datastar SSE morph | | NECESSARY. The reactive/UI derivation path genuinely matches the pitch |
 
 **Hop count: 12 macro-hops**, of which hop 8–9 internally contain ~10
 sub-hops. Per-turn transaction count on the happy path: claim, rendered,
@@ -53,8 +55,8 @@ config singleton.
    capability/eligibility layer, the release disposition, the handoff-tier
    selection policy, and half of `drive-claim!`'s branches exist to service
    this split. The pitch ("context derived from the db → LLM → eval on a JVM
-   claimant") contains no reason context assembly — a pure derivation over an
-   immutable database value — can't run on the JVM claimant.
+   run-holding process") contains no reason context assembly — a pure derivation over an
+   immutable database value — can't run on the cluster JVM.
    `seon.host.invoke` even says so out loud: "render-prompt!/render-agent-view!
    remain pod-served: the host serves EVAL; the pod keeps rendering (design
    §1)." Interim or not, this is the single largest hop generator.
@@ -91,7 +93,7 @@ config singleton.
    empty-receipt batch with `(run-eval-batch! host storage-view run
    claim-epoch database)` — 5 args, `storage-view` in the `run` position —
    against a 7-arg signature `[host run claim-epoch database program
-   invocation-configuration execution-plan]`. The claimant-died-after-
+   invocation-configuration execution-plan]`. The run-holding process died-after-
    `:evaling` recovery would throw `ArityException`. A six-phase durable
    cursor whose distinguishing recovery arm doesn't compile-check is strong
    evidence the phase matrix is bigger than what's actually exercised.
@@ -149,9 +151,9 @@ config singleton.
 Stateless agents, one database, processes may die, agent code interpreted and
 budgeted. The minimum I believe correct:
 
-**One claimant process kind with all capabilities.** Keep `run.core` claims
-exactly as-is (claimant + epoch CAS + heartbeat + steal). A claimed run is
-driven start-to-finish in one process; another claimant steals only on death.
+**One cluster JVM with all capabilities.** Keep `run.core` claims
+exactly as-is (run-holding process + epoch CAS + heartbeat + steal). A claimed run is
+driven start-to-finish in one process; another run-holding process steals only on death.
 No capability sets, no eligibility, no mid-turn release disposition, no
 handoff tier.
 
@@ -186,7 +188,7 @@ with the identical crash story: epoch steal + resume from three checkpoints.
 ## Deletion / merge list
 
 - **Delete** the render/publish pod capabilities and the mid-turn
-  release-handoff machinery once prompt rendering runs on the JVM claimant:
+  release-handoff machinery once prompt rendering runs on the cluster JVM:
   `driver/pod.cljs`, the capability/eligibility layer in `loop/core.cljc`,
   the `:release` disposition, `handoff-tier` selection policy.
 - **Delete** the UDS invocation frame protocol for authored renders
@@ -214,4 +216,4 @@ with the identical crash story: epoch steal + resume from three checkpoints.
   unify).
 - **Fix now** (independent of any redesign): the `settle-eval-step!` 5-arg
   call to 7-arg `run-eval-batch!` in `seon.agent.driver.host` (~L700), and add
-  the claimant-died-mid-`:evaling` recovery test that would have caught it.
+  the run-holding process died-mid-`:evaling` recovery test that would have caught it.

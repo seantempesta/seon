@@ -5,11 +5,13 @@ severity: blocker
 tags: [issue, agent, runtime, config]
 ---
 
-# Preserve the inherited LLM attempt timeout on the JVM claimant
+Terminology: this note records evidence from before the rename; the process holding a run is now `:seon.agent.run/process`.
+
+# Preserve the inherited LLM attempt timeout on the cluster JVM
 
 ## Problem
 
-The JVM claimant refuses every ordinary agent whose
+The cluster JVM refuses every ordinary agent whose
 `:seon.ai/agent-attempt-timeout-ms` override is absent. Absence is the
 documented inherit case, but `seon.agent.driver.host/resolve-llm-context!`
 requires the optional override itself to be a positive integer before it calls
@@ -20,9 +22,9 @@ is opened, so the `java.net.http` transport is never called.
 
 The graduation drive created agent `yummy-mirrors-hang` through `POST /agents`
 on the ready default cluster. Run `pbnfs9xudihn` opened at
-`2026-07-24T06:44:15.451Z`; pod claimant
+`2026-07-24T06:44:15.451Z`; pod run-holding process
 `82416@2026-07-24T06:34:22.798Z` rendered turn `vdwttk9tkndz`, then released it.
-JVM claimant `82301@2026-07-24T06:34:12.318333Z` acquired the run at epoch `2`.
+cluster JVM `82301@2026-07-24T06:34:12.318333Z` acquired the run at epoch `2`.
 The current turn remained `:running` at phase `:rendered`, with a prompt blob
 but zero `:seon.ai.attempt/id` rows.
 
@@ -39,7 +41,7 @@ absent, and only then calls `ai.core/resolved-config-from-rows`.
 `src/seon/ai/core.cljc:438-441` already owns the correct contract: use the
 agent override when present, otherwise use the acquired fallback argument.
 The existing pod owner supplies that fallback through
-`src/seon/ai.cljs:593-608`; the JVM claimant does not.
+`src/seon/ai.cljs:593-608`; the cluster JVM does not.
 
 No provider request or 402 occurred. Exact live datoms, database values, and
 process generations are in `tmp/orchestrator/finaldrive-gate.log`. The
@@ -60,14 +62,14 @@ attempt-timeout fallback used by the active configuration authority.
 - An agent with no `:seon.ai/agent-attempt-timeout-ms` datom resolves the
   configured/default positive attempt timeout instead of returning an error.
 - A present per-agent override still wins.
-- The JVM claimant reaches the next phase boundary without returning the
+- The cluster JVM reaches the next phase boundary without returning the
   missing-override configuration error.
 
 ## Resolution
 
 Commit `094e7a7e6` moves the process fallback into
 `seon.config.resolve/llm-attempt-timeout-ms` and makes both the pod accessor and
-the JVM claimant pass that same fallback to
+the cluster JVM pass that same fallback to
 `seon.ai.core/resolved-config-from-rows`. The shared resolver still gives a
 present per-agent override precedence.
 

@@ -112,7 +112,7 @@ but the leaf-binding repair is not: owner ruling R53 dissolves the effectful
 entry rather than widening lifecycle capability bindings.
 
 The runtime contained the failure: run `t7kpxag6nt8x` closed `:no-forms` at
-transaction `536871403`, claimant and agent current-run refs are absent, and
+transaction `536871403`, run-holding process and agent current-run refs are absent, and
 all ten turns are `:published/:done`. No synthesis message entity exists, so
 the alive-caveat gate is honestly NOT cleared. Full evidence is in
 `tmp/orchestrator/alivegate2-gate.log`.
@@ -131,7 +131,7 @@ called. Every `::lib` the host registry provisions is enumerable
 `my.plan`, `my.kb`, `my.kb.shared`, `my.skills`, `seon.render.canvas`.
 
 Three of the four discovery paths are therefore unavailable to an agent running
-on the claimant JVM:
+on the cluster JVM:
 
 - `seon.agent.search/grep-graph` — the one literal search over `:seon.fn`
   source/doc/name — is not registered at all, and its only implementation is
@@ -175,7 +175,7 @@ The same function text reaches three consumers through three unrelated readers:
 3. `seon.host.graduate/rebuild!` (graduate.clj:256) replays `:seon.fn/source`
    rows from the database into the registry.
 
-(2) makes the claimant depend on a source tree at its CWD rather than on the
+(2) makes the run-holding process depend on a source tree at its CWD rather than on the
 artifact or the database, and it is the only one of the three whose inclusion
 rule is a regex over source text. Naming this here so the census can decide
 which reader survives.
@@ -187,7 +187,7 @@ schema'd terminal lifecycle value carrying the synthesis text and terminal
 intent. Guarded eval returns that ordinary value; it performs no database
 write, message transaction, platform operation, or leaf lookup on either tier.
 
-The claimant driver owns the interpretation. When an eval result carries that
+The run-holding process driver owns the interpretation. When an eval result carries that
 terminal value, the driver uses its existing canonical formless-reply delivery
 path together with its terminal close transaction data to persist the
 transcript message, result, run close, and custody release. This is driver
@@ -198,7 +198,7 @@ Acceptance for this R53 slice is:
 - No lifecycle message-leaf wiring remains in the host registry or lifecycle
   binding path; the capability census does not classify the pure terminal
   function as a capability.
-- A real claimant-driver regression evaluates the exact completion form in an
+- A real driver regression evaluates the exact completion form in an
   eval context with zero lifecycle/message/database capability bindings, then
   proves the driver's transaction writes the message and terminal result and
   publishes the turn `:published/:done`.

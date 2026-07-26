@@ -53,5 +53,5 @@ must independently enforce the same resolved maxima.
 
 ## Triage — 2026-07-23
 
-DISSOLVES into the post-cutover U10 value-drill graduation unit, which owns the
+DISSOLVES into the post-cutover U10 value-drill system unit, which owns the
 remaining renderer/route effective-limit and zero-work proofs.
