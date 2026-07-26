@@ -469,6 +469,14 @@ path, no pod. N1 decomposes into the ladder:
 Then N2 (run model — in flight), N3 (loop), N4 (render), N5 (corpus),
 N6 (proofs/leaves) as below, each with its own port manifest.
 
+**ACME is TABLED (owner, 2026-07-26 s3 close) — possibly permanently.**
+Git is the archive. No `acme-client` build identity, no downstream
+consideration in the publish design, no ACME row in any port manifest; it
+returns only by an explicit future ruling. Standing bar for the nucleus
+era, owner's words: **simplify everything — clean builds and clean code
+from now on.** Every rung's review asks "is this simpler than it was?"
+and a build or namespace that cannot answer is not done.
+
 **Trusted components (libraries, not baggage):** Datahike (`:self` writer,
 in-process), `seon.schema` (register!/bridge), `seon.sci.eval` (guarded
 eval + computed binding table + home-require exposure), `seon.flow`
