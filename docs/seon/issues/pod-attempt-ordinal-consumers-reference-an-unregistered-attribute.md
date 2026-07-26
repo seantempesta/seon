@@ -5,37 +5,64 @@ severity: cleanup
 tags: [issue, agent, web, schema]
 ---
 
-# Delete pod consumers of the unregistered attempt ordinal
+# Delete consumers of attributes removed with the run and turn stacks
 
 ## Problem
 
-The pod web surface still pulls, validates, reads, compares, and sorts by
-`:seon.ai.attempt/ordinal`, but no source namespace registers or writes that
-attribute. These reads therefore return no durable ordinal, and the sort key is
-nil for every row.
+The run and turn cuts removed three schema families while production readers
+survived. Current source uses 36 distinct unregistered attributes: 24
+`:seon.ai.attempt/*`, seven old run-policy attributes, and five old turn-stack
+attributes. Datahike reads therefore silently return empty or nil results, and
+the web evidence projection validates and sorts rows that no current writer can
+produce.
 
 ## Evidence
 
-Commit `f6f6673b6` deleted the attribute's registration with the pod turn phase
-stack. Current source has five consumers in `src/seon/web/serve.cljs` at lines
-976, 999, 1010, 1175, and 1181, plus one in-memory fixture in
-`test/seon/web/serve_test.cljs:919`.
+Commit `f6f6673b6` deleted the turn and attempt registrations at parent
+`src/seon/agent/turn.cljs:46-100,156-261`. Commit `bd12fdc7d` deleted the old
+run registrations at parent `src/seon/agent/run.cljs:28-110`.
 
-`rg ':seon\.ai\.attempt/ordinal' src test` finds only those six sites. None is
-a database transaction or schema registration: the production sites are a
-pull pattern, a required-attribute set, reads, a comparison, and a sort; the
-test site constructs an ordinary map.
+Measured on 2026-07-26 after commit `42a9faf2e`:
+
+- `rg -o --no-filename --pcre2
+  ':seon\.ai\.attempt/[\w?!*+.-]+' src | sort -u` returns 24 names. The
+  previously reported count of 25 does not reproduce against current source;
+  `src` plus `test` returns 27 because tests additionally mention
+  `config-digest`, `deadline-at`, and `id`.
+- `src/seon/web/serve.cljs:975-996,998-1050,1057-1092,1108-1185` consumes 23
+  of those names in pull, validation, comparison, and rendering paths.
+  `src/seon/agent/ctx/transcript.cljc:799-810` consumes `partial-text`.
+- Seven removed run-policy attributes remain in database reads:
+  `deadline`, `last-beat-at`, `paused-at`, `remaining-ms`, `result-ref`,
+  `trigger`, and `turn-limit`. Representative owners are
+  `src/seon/derive.cljs:68-75,129-141,449-463`,
+  `src/seon/agent/ctx/subagents.cljc:107-141,328-337`, and
+  `src/seon/agent/authorization.cljs:8-14`.
+- Five removed turn attributes remain: `scheduled?`, `phase`, `llm-attempts`,
+  `prompt-blob`, and `reply-blob`. Readers include
+  `src/seon/agent/ctx/transcript.cljc:782-810`,
+  `src/seon/agent/debug.cljs:102-123`, and
+  `src/seon/web/serve.cljs:1247-1250`.
+- A registration search over `src/` returns zero `schema/register!` or
+  `register-schema!` calls for all 36 names. The surviving run schema at
+  `src/seon/agent/run/core.cljc:11-65` deliberately owns none of the seven
+  old run-policy attributes.
 
 ## Owner
 
-Owner ruling O13 (2026-07-26) deletes every remaining `.cljs` file and removes
-`:seon.dev.process/pod` from the supervised set. The pod cut owns deletion of
-`src/seon/web/serve.cljs` and its test; this issue does not authorize restoring
-the removed schema or adding a compatibility read.
+This is deletion residue, not authority to restore the removed schemas.
+
+- O13's pod cut owns the attempt, phase, and scheduled-turn consumers.
+- The owner-keyed run cleanup owns deletion of the old pause, heartbeat,
+  deadline, and turn-budget projections.
+- A later JVM observability owner may deliberately register and write new
+  prompt/reply blob or partial-presentation facts, but only in the same change
+  that makes them real database facts. A registration-only repair is forbidden.
 
 ## Acceptance
 
-- The O13 pod cut removes all six `:seon.ai.attempt/ordinal` consumers.
-- No replacement schema registration, writer, fallback read, or duplicate web
-  evidence path is introduced.
-- `rg ':seon\.ai\.attempt/ordinal' src test` returns no matches.
+- Every remaining run, turn, and attempt attribute reference has one of two
+  dispositions: deleted with its old-model consumer, or registered and written
+  by a surviving JVM owner in the same implementation unit.
+- No compatibility registration is added to make an empty read appear valid.
+- The production dangling-attribute scan returns zero names.

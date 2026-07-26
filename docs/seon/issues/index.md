@@ -10,7 +10,7 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (57)
+## Blocker (58)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -50,6 +50,7 @@ See `README.md` for the convention.
 | [Projected map keys are not drill paths](projected-map-keys-are-not-drill-paths.md) | blocker | UI |
 | [Pull cluster JVM limits from the cluster config identity](jvm-claimant-pulls-config-with-wrong-identity.md) | blocker | agent |
 | [Read-side attribute admission fails open (silent empty results, :all fallback)](read-side-attribute-admission-fails-open.md) | blocker | Core |
+| [Realize authored values deeply before disarming the interrupt](lazy-authored-values-escape-the-armed-interrupt-boundary.md) | blocker | agent |
 | [Reduce retained memory in each execution child](execution-children-retain-hundreds-of-megabytes.md) | blocker | agent |
 | [Refuse model dispatch when turn allocation fails](jvm-driver-continues-after-turn-allocation-error.md) | blocker | agent |
 | [Restore writer admin transition is unimplemented](restore-writer-admin-transition-is-unimplemented.md) | blocker | Core |
@@ -72,7 +73,7 @@ See `README.md` for the convention.
 | [seon.agent.ctx file reads bypass the filesystem grant](agent-ctx-file-reads-bypass-fs-grant.md) | blocker | agent |
 | [tools.reader executes agent source at read time, outside SCI entirely](tools-reader-evaluates-agent-source-at-read-time.md) | blocker | general |
 
-## Friction (77)
+## Friction (76)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -91,7 +92,6 @@ See `README.md` for the convention.
 | [Branch trial tests write into the live operator state directory](branch-trial-tests-write-into-live-operator-state.md) | friction | Core |
 | [Bun's rejection net loses AsyncLocalStorage scope](bun-rejection-net-loses-async-scope.md) | friction | general |
 | [Calibrate cross-database writer scaling on shared file persistence](shared-file-persistence-limits-cross-database-writer-scaling.md) | friction | Core |
-| [Coalesce duplicate run-open attempts in the JVM driver](agent-driver-scans-duplicate-run-open-attempts.md) | friction | agent |
 | [Context block order is static](context-block-order-is-static.md) | friction | agent |
 | [Cross-agent planners can reopen worker-completed steps](plan-reopen-cross-agent-authority.md) | friction | agent |
 | [D13 repair merge broke the bare-babashka loadability the candidates half had](d13-merge-broke-bare-babashka-loading.md) | friction | agent |
@@ -154,17 +154,19 @@ See `README.md` for the convention.
 | [test-cljs compile failure retains a live lock owner](test-cljs-compile-failure-retains-live-lock-owner.md) | friction | general |
 | [try in expression position inside a compiled ^:async fn auto-awaits](async-try-expression-iife-auto-awaits.md) | friction | agent |
 
-## Cleanup (10)
+## Cleanup (12)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Address resident agents by namespace](namespace-addressed-resident-agents.md) | cleanup | agent |
 | [Bun 1.3.14 segfaults on AsyncLocalStorage.enterWith in ESM top-level continuations](bun-enterwith-toplevel-segfault.md) | cleanup | Core |
-| [Delete pod consumers of the unregistered attempt ordinal](pod-attempt-ordinal-consumers-reference-an-unregistered-attribute.md) | cleanup | UI |
+| [Delete consumers of attributes removed with the run and turn stacks](pod-attempt-ordinal-consumers-reference-an-unregistered-attribute.md) | cleanup | UI |
+| [Delete unreachable runtime code left by the deletion waves](deletion-waves-left-unreachable-runtime-code.md) | cleanup | general |
 | [Inspect concurrent attributed agent messages](inspect-concurrent-agent-messages.md) | cleanup | agent |
 | [Move product routes out of the static router supplement](static-routes-bypass-database-route-authority.md) | cleanup | UI |
 | [Partially-Stale Reference Docs Need Updates](stale-reference-docs.md) | cleanup | docs |
 | [Remove the remaining child vocabulary and tier dial](u9-surviving-child-vocabulary-and-tier-dial.md) | cleanup | agent |
+| [Remove unused require aliases left by the deletion waves](deletion-waves-left-unused-require-aliases.md) | cleanup | general |
 | [Subagents block is implemented but not installed](subagents-block-is-implemented-but-not-installed.md) | cleanup | agent |
 | [Surface recency may be recomputed globally](surface-recency-recomputed.md) | cleanup | UI |
 | [Unify agent and operation AsyncLocalStorage](als-unify-tx-meta.md) | cleanup | Core |
