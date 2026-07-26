@@ -6,6 +6,23 @@ tags: [prd, agent, architecture]
 
 # What is not settled
 
+**2026-07-26 s3 close — the nucleus era.** README's session-3 rulings and
+the nucleus ladder (R0/B0-B3/N2-N6) supersede everything below that
+contradicts them; rows below predate the pivot and survive only as
+evidence pointers. UNBUILT right now, in order: **R0** — the atomic
+`src/`→`src-old/` split (orchestrator executes at the next lane-quiet
+point; the src-split-audit lane's inventory is the prerequisite); **B0+B1
+contract packages** (launch signature `bin/seon start [cluster]
+[--config path]`, two-phase config with the closed bootstrap schema,
+per-instance REPL advertisement, store rung with the facade port
+verdict); **N2 to green** (implementation lane in flight on the sealed
+run model). IN FLIGHT at the boundary: nucleus-run-impl, jvm-indexer
+(pages/facet fixes + full `cluster apply` proof owed), src-split-audit.
+OPEN and unowned: function-level test selection spec (task #6),
+cluster-apply-no-longer-births-root-agent, the build audit's remaining
+owner questions, the adversarial design-review lane, architecture-doc
+alignment (deferred until the nucleus reports).
+
 Owner instruction, 2026-07-26: *"I feel like we are close to representing
 everything witht he same primitves and composing them together but we aren't
 there yet and be honest about what isn't done."*
