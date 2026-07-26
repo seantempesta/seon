@@ -81,6 +81,21 @@
            (get-in result
                    [::eval/value :seon.error/data :sci.impl/symbol])))))
 
+(deftest mixed-namespace-reply-forms-evaluate-independently
+  (eval/open! {::eval/concurrency 1})
+  (let [evaluate
+        #(eval/evaluate
+          {::eval/source %
+           ::interrupt/time-limit-ms 1000})]
+    (is (= [3 "ABC"
+            {:seon.agent.lifecycle/disposition :completed
+             :seon.agent.lifecycle/result "mixed"}]
+           (mapv
+            (comp ::eval/value evaluate)
+            ["(+ 1 2)"
+             "(clojure.string/upper-case \"abc\")"
+             "(seon.agent.lifecycle/complete \"mixed\")"])))))
+
 (deftest blocked-host-call-consumes-only-its-own-capacity
   (let [release (promise)
         base-ctx
