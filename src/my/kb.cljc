@@ -7,13 +7,7 @@
    authority operations without supplying a universal domain model or sample
    knowledge; agents own their domain schemas in dedicated namespaces."
   (:require
-    [clojure.string :as str]
-    [my.data :as data]
     [seon.db :as db]
-    [seon.embed :as embed]
-    ;; the shared `:seon.result/ok?` + `:seon.items/*` envelope shapes —
-    ;; Core owns them; [[recall]] REFERENCES them (required for load order).
-    [seon.items]
     [seon.schema :as schema]))
 
 ;;; SHARED PROVENANCE — registered ONCE, referenced by every domain (never
@@ -58,40 +52,6 @@
 (schema/register! ::id :int)                    ; the stored finding's eid
 (schema/register! ::remembered [:map [::id ::id]])
 (schema/register! ::remember-response [:or ::remembered :seon.db/transact-response])
-
-;; The map-out shape [[source-stats]] returns — itself a registered schema,
-;; so the renderer and instrumentation can see it.
-(schema/register!
-  ::source-summary
-  [:map
-   [::count        :int]
-   [::rating-total :int]
-   [::topic-counts [:map-of :keyword :int]]])
-
-;; [[recall]]'s map-in / map-out — the symmetric ASK to [[remember]]'s
-;; store. `::match`/`::matched-tokens` are DERIVED response labels stamped
-;; on each returned item at return time, never stored on any row;
-;; `::matched` is the honest total before the `::limit` cap.
-(schema/register! ::about [:string {:min 1}])
-(schema/register! ::limit [:int {:min 1 :max 50}])
-(schema/register! ::recall-request
-  [:map {:closed true}
-   [::about ::about]
-   [::limit {:optional true} ::limit]])
-(schema/register! ::match [:enum :text :semantic])
-(schema/register! ::matched-tokens :int)
-(schema/register! ::matched :int)
-(schema/register! ::hint :string)
-(schema/register! ::error :string)
-(schema/register!
-  ::recall-response
-  [:map
-   [:seon.result/ok? :seon.result/ok?]
-   [:seon.items/items {:optional true} :seon.items/items]
-   [:seon.items/count {:optional true} :seon.items/count]
-   [::matched {:optional true} ::matched]
-   [::hint    {:optional true} ::hint]
-   [::error   {:optional true} ::error]])
 
 ;;; SCHEMA — register the attr; the system DERIVES datahike storage, and the
 ;;; FIRST transact! using an attr installs it (lazy). Inside a fn so reading
@@ -280,161 +240,6 @@
                       [?s :my.kb.source/title ?title]]
              author-name)))
 
-(defn ^:async source-stats
-  "Summarize stored sources: count, rating total, and topic tally.
-
-   Aggregation toward a question — the analysis built ON TOP of stored
-   data. Delegates to my.data, so you never hand-roll a datalog aggregate:
-   `rows` pulls each source to a MAP, then `sum-by` totals the ratings and a
-   plain `frequencies` tallies the (cardinality-many) topics. Pulling to
-   maps first makes the `(sum ?r)`/`:with` dedup collapse structurally
-   impossible — two sources rated 5 stay 5+5=10."
-  {:malli/schema [:=> [:cat] ::source-summary]}
-  []
-  (let [sources (await (data/rows {:my.data/attr :my.kb.source/id}))
-        items   (:seon.items/items sources)]
-    {::count        (:seon.items/count sources)
-     ::rating-total (data/sum-by {:seon.items/items items
-                                  :my.data/key :my.kb.source/rating})
-     ::topic-counts (frequencies (mapcat :my.kb.source/topics items))}))
-
-;;; RECALL — the symmetric ASK to [[remember]]'s store: a question in,
-;;; ranked stored facts out, no datalog authoring.
-
-(defn- tokens
-  "Lowercase alphanumeric runs of length ≥ 2 — [[recall]]'s match unit."
-  [s]
-  (into #{} (filter #(>= (count %) 2)) (re-seq #"[a-z0-9]+" (str/lower-case s))))
-
-(defn ^:async ^:private kb-text-rows
-  "Every `[eid attr text]` of a `my.kb`-family STRING attr at one database value — the
-   deterministic recall corpus: [[remember]] claims AND your own
-   `my.kb.<domain>` rows alike. Attrs come from the db's installed schema
-   (an attr installs at its first write); sorted for determinism."
-  [database]
-  (let [family? (fn [a] (when-let [ns (and (keyword? a) (namespace a))]
-                          (or (= ns "my.kb") (str/starts-with? ns "my.kb."))))
-        installed (await (db/installed-schema database))]
-    (if (:seon.error/message installed)
-      installed
-      (let [attrs (->> installed
-                       (filter (fn [[a m]] (and (family? a)
-                                                (= :db.type/string (:db/valueType m)))))
-                       (map first)
-                       sort
-                       vec)]
-        (if (empty? attrs)
-          []
-          (await
-           (db/query
-            {:seon.db/query '[:find ?e ?a ?v
-                              :in $ [?a ...]
-                              :where [?e ?a ?v]]
-             :seon.db/args [attrs]
-             :seon.db/db database})))))))
-
-(defn- recall-error
-  [stage error]
-  {:seon.result/ok? false
-   ::error (str "recall failed during " stage ": "
-                (or (:seon.error/message error) (pr-str error)))})
-
-(defn- text-matches
-  "Rank `[eid attr text]` rows against a question-token set: an entity's
-   score counts the DISTINCT question tokens matched across all its
-   texts (whole-token equality — no stemming). Returns `[[eid score]]`
-   best-first (ties: lower eid)."
-  [q-tokens rows]
-  (->> rows
-       (reduce (fn [m [e _ v]]
-                 (let [hit (filter (tokens v) q-tokens)]
-                   (if (seq hit) (update m e (fnil into #{}) hit) m)))
-               {})
-       (map (fn [[e ts]] [e (count ts)]))
-       (sort-by (fn [[e n]] [(- n) e]))
-       vec))
-
-(defn ^{:async true} recall
-  "Find what you already know about a topic: ranked facts with sources.
-
-   \"What do we know about X?\" in ONE call. Map-in:
-     ::about  the topic/question, plain words.
-     ::limit  max facts returned (default 10).
-
-   Matching is DETERMINISTIC: your words (lowercased whole tokens, no
-   stemming) are matched against every stored `my.kb*` STRING value —
-   [[remember]] claims and your own `my.kb.<domain>` rows alike. Facts
-   rank by distinct words matched (`::matched-tokens`). When `SEON_EMBED`
-   is set, unfilled slots TOP UP with semantic neighbours via
-   `seon.embed/search-pull` (`::match :semantic`, distance attached);
-   unset, recall is purely deterministic.
-
-     (my.kb/recall {::about \"vendor API rate limits\"})
-     ; ⟹ «map: :seon.result/ok? true, :seon.items/items [{:db/id …,
-     ;    :my.kb/claim …, :my.kb/source-path …, ::match :text,
-     ;    ::matched-tokens 2} …], :seon.items/count int, ::matched int»
-
-   Each item is the FULL pulled row (claim + provenance + domain attrs)
-   plus the derived `::match`/`::matched-tokens` labels; `::matched` is
-   the honest total before the cap. No matches is SUCCESS (empty items); use
-   direct database queries or `/data` before concluding nothing is known."
-  {:malli/schema [:=> [:cat ::recall-request] ::recall-response]}
-  [{::keys [about limit]}]
-  (let [limit (or limit 10)
-        database (await (db/db))]
-    (if (:seon.error/message database)
-      (recall-error "database acquisition" database)
-      (let [rows (await (kb-text-rows database))]
-        (if (:seon.error/message rows)
-          (recall-error "text acquisition" rows)
-          (let [hits (text-matches (tokens about) rows)
-                selected (vec (take limit hits))
-                pulled (if (seq selected)
-                         (await
-                          (db/pull-many
-                           {:seon.db/db database
-                            :seon.db/pull-pattern '[*]
-                            :seon.db/refs (mapv first selected)}))
-                         [])]
-            (if (:seon.error/message pulled)
-              (recall-error "entity acquisition" pulled)
-              (let [items (mapv (fn [[_e score] entity]
-                                  (assoc entity
-                                         ::match :text
-                                         ::matched-tokens score))
-                                selected pulled)
-                    want (- limit (count items))
-                    seen (into #{} (map :db/id) items)
-                    scope (into #{} (map first) rows)
-                    sem (when (and (embed/enabled?) (pos? want) (seq scope))
-                          (await
-                           (embed/search-pull
-                            {:seon.db/db database
-                             :seon.embed/query about
-                             :seon.embed/k limit
-                             :seon.embed/eids scope})))
-                    items (into items
-                                (->> (:seon.embed/hits sem)
-                                     (remove #(seen (:seon.embed/eid %)))
-                                     (take want)
-                                     (mapv
-                                      (fn [{:seon.embed/keys
-                                            [entity eid distance]}]
-                                        (assoc (or entity {:db/id eid})
-                                               ::match :semantic
-                                               :seon.embed/distance
-                                               distance)))))]
-                (cond-> {:seon.result/ok? true
-                         :seon.items/items items
-                         :seon.items/count (count items)
-                         ::matched (count hits)}
-                  (:seon/error sem)
-                  (assoc ::hint
-                         (str "semantic top-up failed — "
-                              (get-in sem
-                                      [:seon/error
-                                       :seon.error/message]))))))))))))
-
 ;;; PULL / ENTITY — read one entity by lookup-ref `[identity-attr value]`,
 ;;; which IS the "by name" addressing.
 
@@ -461,19 +266,3 @@
   {:malli/schema [:=> [:catn [::id :string]] :any]}
   [id]
   (await (db/pull '[*] [:my.kb.source/id id])))
-
-;;; WORKFLOW — store data, then build fns that turn it into answers: switch
-;;; into a domain, register its schema, transact rows, run your analysis fn.
-
-(defn ^:async build-kb-example!
-  "Run the end-to-end example: register, seed rows, run [[source-stats]].
-   `^:async` because it AWAITS the write before reading. Resolves to the stats
-   summary, or the failure envelope if rejected. Run it once, then build your
-   OWN domain the same way."
-  {:malli/schema [:=> [:cat] :any]}
-  []
-  (register-kb-schema!)
-  (let [{::db/keys [ok?] :as envelope} (await (remember-sources!))]
-    (if ok?
-      (await (source-stats))
-      envelope)))
