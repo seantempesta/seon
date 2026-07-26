@@ -534,11 +534,31 @@ process-boundary case `interrupt.md:85` names.
 | host interop with `:classes` unset | `(.pow (biginteger 10) 50000000)` and `(java.lang.Thread/sleep 2000)` both fail to analyse |
 | permits leaked across ~50 killed/thrown/OOM'd evals | **zero** |
 
-**The uncatchable marker holds, and agent code cannot even name a broad class.**
-**measured 2026-07-25:** `Throwable`, `Error`, `RuntimeException`,
-`StackOverflowError` and `:default` all fail with *"Unable to resolve classname"*;
-only `Exception` resolves. The marker contract is stated verbatim in
-`reference-code/sci/src/sci/interrupt.cljc:32-42`.
+**The uncatchable marker holds.** The 2026-07-25 baseline had only
+`Exception`: `Throwable`, `Error`, `RuntimeException`, `StackOverflowError`,
+and `:default` all failed with *"Unable to resolve classname"*. The marker
+contract is stated in `reference-code/sci/src/sci/interrupt.cljc:32-42`.
+
+**Re-measured 2026-07-26 through `seon.sci.eval/evaluate` after installing the
+deliberate broad-root class surface:**
+
+| catch spelling | observed result |
+|---|---|
+| `Throwable` | caught an `Exception` and returned `:caught` |
+| `Error` | caught an `Error` and returned `:caught` |
+| `Exception` | caught an `Exception` and returned `:caught` |
+| `RuntimeException` | `Unable to resolve classname: RuntimeException` |
+| `StackOverflowError` | `Unable to resolve classname: StackOverflowError` |
+| `:default` | `Unable to resolve classname: :default` |
+
+Subclasses are intentionally not an open-ended allowlist: portable agent code
+uses `Throwable`, while `:default` is a ClojureScript spelling. Most
+importantly, `(try (loop [] (recur)) (catch Throwable _ :swallowed))` still
+returned the flat `:time` error after 14 ms; the user catch never received
+SCI's interrupt marker. A real recursive overflow reported throwable class
+`java.lang.StackOverflowError`; before the correction its public
+`:seon.error/message` was only the generic evaluation diagnosis, and after the
+correction it is `java.lang.StackOverflowError` (30 ms in the confirming run).
 
 **ESCAPE 1 — D8, the 1024-entry sample. measured, reproduced independently.**
 

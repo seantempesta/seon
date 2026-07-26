@@ -26,6 +26,8 @@
           'pause (sci/copy-var lifecycle/pause lifecycle-ns)
           'resume (sci/copy-var lifecycle/resume lifecycle-ns)
           'terminate (sci/copy-var lifecycle/terminate lifecycle-ns)}}
+        ;; SCI already exposes Exception. Keep the additional JVM surface to
+        ;; the two broad roots instead of enumerating exception subclasses.
         :classes
         {'Throwable Throwable
          'java.lang.Throwable Throwable

@@ -56,17 +56,18 @@
   (.availablePermits ^Semaphore @permits))
 
 (defn- diagnosis
-  [{:seon.eval/keys [outcome duration-ms]}]
+  [throwable {:seon.eval/keys [outcome duration-ms]}]
   (case outcome
     :time
     (format "Ran out of time after %dms." duration-ms)
 
-    (format "Evaluation failed after %dms." duration-ms)))
+    (or (.getMessage ^Throwable throwable)
+        (.getName (class throwable)))))
 
 (defn- error-value
   [throwable record]
   (let [exception-data (ex-data throwable)]
-    {:seon.error/message (diagnosis record)
+    {:seon.error/message (diagnosis throwable record)
      :seon.error/kind (:seon.eval/outcome record)
      :seon.error/data
      (cond->

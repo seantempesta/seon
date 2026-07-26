@@ -49,6 +49,56 @@
     (is (= :time
            (get-in result [::eval/record :seon.eval/outcome])))))
 
+(deftest catch-class-surface-is-deliberately-broad-and-small
+  (eval/open! {::eval/concurrency 1})
+  (let [evaluate
+        #(eval/evaluate
+          {::eval/source %
+           ::interrupt/time-limit-ms 1000})]
+    (testing "the broad JVM catch roots and SCI's Exception resolve"
+      (doseq [[class-name throwable]
+              [["Throwable" "(Exception. \"x\")"]
+               ["Error" "(Error. \"x\")"]
+               ["Exception" "(Exception. \"x\")"]]]
+        (is (= :caught
+               (::eval/value
+                (evaluate
+                 (format
+                  "(try (throw %s) (catch %s e :caught))"
+                  throwable
+                  class-name))))
+            class-name)))
+    (testing "subclasses are not an open-ended allowlist and :default is CLJS"
+      (doseq [class-name
+              ["RuntimeException" "StackOverflowError" ":default"]]
+        (let [value
+              (::eval/value
+               (evaluate
+                (format
+                 "(try (throw (Exception. \"x\")) (catch %s e :caught))"
+                 class-name)))]
+          (is (eval/error? value) class-name)
+          (is (= (str "Unable to resolve classname: " class-name)
+                 (get-in value
+                         [:seon.error/data
+                          :seon.sci.eval/raw-message]))
+              class-name))))))
+
+(deftest stack-overflow-error-message-falls-back-to-its-class
+  (eval/open! {::eval/concurrency 1})
+  (let [value
+        (::eval/value
+         (eval/evaluate
+          {::eval/source "((fn overflow [] (overflow)))"
+           ::interrupt/time-limit-ms 1000}))]
+    (is (eval/error? value))
+    (is (= "java.lang.StackOverflowError"
+           (:seon.error/message value)))
+    (is (= "java.lang.StackOverflowError"
+           (get-in value
+                   [:seon.error/data
+                    :seon.sci.eval/throwable-class])))))
+
 (deftest ordinary-source-produces-a-value-and-diagnostics
   (eval/open! {::eval/concurrency 1})
   (let [result
