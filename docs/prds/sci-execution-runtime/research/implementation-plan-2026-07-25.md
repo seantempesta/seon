@@ -698,7 +698,7 @@ justified the opposite conclusion for the wrong reason.
 
 | meaning | attributes |
 |---|---|
-| **stored ordinal of a child in an ordered collection** | `:seon.eval/ordinal` (`eval/receipt.cljc:16`), `:seon.agent.turn.timing/ordinal` (`:71`), `:seon.agent.run.form/ordinal` (`agent/run/core.cljc:33`, aliased to `:seon.eval/ordinal`) — and the one outlier, `:seon.error.frame/index` (`error.cljc:81`) |
+| **stored ordinal of a child in an ordered collection** | `:seon.eval/ordinal` (`eval/receipt.cljc:16`), `:seon.agent.turn.timing/ordinal` (`:71`), `:seon.agent.run.form/ordinal` (`agent/run/core.cljc:33`, aliased to `:seon.eval/ordinal`) — and the one outlier, `:seon.error.frame/ordinal` (`error.cljc:81`) — renamed by `ee000a4e7` |
 | **an index, i.e. Datahike's and Proximum's own word** | `:db/index` (14), `::db/index` (7), `:seon.db/index` (4), `:datahike/index` (2); `:seon.db.protocol/index` and `seon.db/::index`, both `[:enum :eavt :aevt :avet]` (`protocol.cljc:671`, `db.cljc:57`); `:seon.embed/index`, a Proximum **secondary index** (`embed.clj:18`, `:115`); `:datahike.index-page/*` |
 | **not a competing spelling** | `:my.plan/position` (`my/plan.cljc:375`) is a derived "where am I in the plan" projection — root, step, progress — never a stored ordinal |
 
@@ -717,12 +717,12 @@ conclusion:
 So the count of stored-position attributes is 3 × `ordinal` + 1 × `index`, and
 **every other one of ~27 `index` uses means an index.** Note the honest
 weakness: all three `ordinal` attributes are new from this program, and
-`:seon.error.frame/index` is the pre-existing one — so seniority argues for
+`:seon.error.frame/ordinal` was the pre-existing `index` spelling — so seniority argued for
 `index`. Non-collision decides it the other way and decides it more strongly:
 Datahike and Proximum both own the word `index`, and **a position is not an
 index.**
 
-**Decision: keep `ordinal`; rename `:seon.error.frame/index`; correct
+**Decision (landed `ee000a4e7`): keep `ordinal`; rename `:seon.error.frame/index`; correct
 `measurements-2026-07-25.md:1001-1007`,** which names `index` as the idiom.
 This is a reconciliation to ONE spelling, which is what the row asked for; it
 is not a fourth mechanism.
@@ -800,10 +800,10 @@ recommendation.**
 Vendored and readable, all present: `reference-code/datastar`,
 `reference-code/datastar-clojure` (`libraries/sdk-http-kit` is what
 `deps.edn:70-72` resolves), `reference-code/hyperlith`,
-`reference-code/http-kit` (v2.9.0-beta2 — a loose copy with its own git repo
-and **no `.gitmodules` entry**, contrary to the vendor-as-submodules rule).
-Note `docs/seon/reference/datastar-extended-patterns.md` points at
-`/reference-code/n/examples/`, a stale path for `reference-code/hyperlith`.
+`reference-code/http-kit` (v2.9.0-beta2 `70432d3`, made a proper submodule by
+`2953a3b2f`; it was the only loose directory of 99).
+Hyperlith examples are under `reference-code/hyperlith/examples/` (the
+previous `/reference-code/n/examples/` path was stale).
 
 ### 9.5 Revised wave order after these rulings
 
@@ -832,6 +832,131 @@ Note `docs/seon/reference/datastar-extended-patterns.md` points at
 7. **RENDER — blocked on O14's investigation and ruling.** Then the pod's
    remaining `.cljs` and `:seon.dev.process/pod` go, per O13.
 8. **Wave 5's capability work**, then packages/bun-as-leaf **last**.
+
+### 9.4a O15 — index at COMPILE time, from a JVM build only; never at runtime
+
+Owner ruling, 2026-07-26. Verbatim: *"We index at compile time and during
+runtime we are always updating the database with the new functions specs and
+tests being authored. There is zero shit that misses both of these points."*
+*"There are two states — the agent is starting up a fresh cluster so during
+compilation we need to come up with a pre-load set of datoms to fully index all
+of the code that was compiled and the startup state (from aero config). Then we
+have a resume state where the system still reads the config to see if anything
+needs to be overridden, but otherwise is just resuming from the database. The
+database is the single source of truth."* *"Do not index the source at
+runtime."* And: *"I want fast startup and fast resume in all conditions."*
+
+**Ruled: index everything from a JVM build only.** The shadow-cljs indexing
+hooks go with the pod. One indexer, one build, no shadow dependency. The owner
+accepted the known cost of this explicitly: packages will then need their
+surface enumerated without the CLJS analyzer that knows it — recorded below as
+an open problem for the packages wave, not solved here.
+
+**What is already built, and where it leaks.** The compile-time indexer the
+ruling describes EXISTS, as six shadow-cljs build hooks wired at
+`shadow-cljs.edn:63-80` and `:116-126`:
+`prepare-program-rows!` (`:optimize-prepare`), `publish!`, `publish-rows!`,
+`publish-base-projection!`, `publish-page-plan!`, `publish-inventory!` — all in
+`script/seon/dev/program_artifact.clj` (653). It is fed by
+`seon.dev.program-inventory/analyzer-fn-inventory`
+(`script/seon/dev/program_inventory.clj:46`, docstring *"Derive callable symbols
+from a selected compiler analysis closure"*) and it publishes **precomputed
+initialization pages**, which is the ratified vocabulary
+(`AGENTS.md:472` ↔ `src/seon/db/protocol.cljc` pages/phases ↔ Datahike tx-data).
+
+Three defects, all verified 2026-07-26:
+
+1. **It is CLJS-only.** It runs off shadow's analyzer data, and
+   `program-row-build-js` (`program_artifact.clj:215`) literally runs a JS
+   program that writes the rows to stdout (`:248`). **No `.clj`/`.cljc` source
+   has ever been indexed at build time.**
+2. **A runtime-index leak.** `seon.db.protocol/initialization-pages`
+   (`src/seon/db/protocol.cljc:2000-2007`) returns *"the precomputed pages **or
+   derive them from raw initialization**"*. That `or` is runtime indexing, and
+   it is a silent slow path rather than a failure. Plausibly a large part of the
+   81 s corpus-indexing term in the 271 s reset.
+3. **The reconciler is orphaned.** `seon.db.program/compile-tx-data`
+   (`src/seon/db/program.clj:292`) has exactly **one caller in the tree: its own
+   test.** Its docstring still says *"compilation remains a pod concern."*
+
+**O16 — delete the derive branch.** Owner-ruled: missing pages is a **loud
+failure, no fallback** (R41: panic in development, log loudly in production).
+A broken artifact must not present as an 81-second boot.
+
+**The two states, neither of which indexes anything.**
+
+| state | behaviour |
+|---|---|
+| fresh cluster | load the precomputed initialization pages. Nothing derives, nothing reads source. |
+| resume | read the config manifest for overrides only — already the ruled behaviour, writes nothing when converged — then resume from the database. Zero source reading, zero indexing. |
+
+**Runtime writes only agent-authored facts**: the driver commits
+`:seon.fn`/`:seon.schema`/`:seon.test` in the terminal transaction next to the
+receipt. That is the deleted tee re-imagined as one commit, shape 3. Nothing
+else writes the index at runtime. Between compile-time indexing and this, the
+owner's *"zero shit that misses both of these points"* is the coverage claim to
+prove.
+
+**Deletion scope for this ruling** (sizes verified):
+`script/seon/dev/program_artifact.clj` 653, `src/seon/client/indexing.clj` 108,
+`script/seon/dev/program_inventory.clj` 74, plus the `:build-hooks` vectors in
+`shadow-cljs.edn` and the orphaned reconciler path in `src/seon/db/program.clj`
+(297). Blast radius to check before cutting: `script/seon/dev/artifact.clj`,
+`script/seon/dev/release.clj`, and five tests under `test/seon/dev/` all consume
+`program-inventory`.
+
+**Open problem, owner-acknowledged, deferred to the packages wave (LAST):** with
+no CLJS analyzer in the pipeline, how does a JS/CLJS package's callable surface
+get enumerated? Candidates not yet evaluated: a leaf reporting its own surface
+at install time; reading the ecosystem's own manifest; a one-shot build. Do not
+design this before the packages wave; do not let it justify keeping the shadow
+hooks alive in the meantime.
+
+**Fast startup and fast resume are two axes with two owners**
+(`measurements-2026-07-25.md` 2.7), and both need re-measurement after
+`8dc8623ad`:
+
+| axis | measured | note |
+|---|---|---|
+| JVM namespace load | 10,293 → 3,886 ms with AOT+AppCDS, `-Xmx2g`, JDK 26.0.1. AOT carries 92.7%, AppCDS 7.3% | residual is 63% three non-AOT namespaces: `sci.core` 825 + `host.context` 900 + `db.writer` 723. **`host.context` is now DELETED**, so ~900 ms should already be gone — UNMEASURED |
+| fresh cluster reset | 271 s = 81 s corpus indexing + 46 s `build-projection` computed **twice** + 35 s unlogged gap + 16 s paging | build-time indexing attacks the 81 s; the double computation is a straight bug; the 35 s gap is unexplained |
+
+### 9.4b O17 — the plan is restructured into ONE owner-keyed ledger
+
+Owner ruling, 2026-07-26, after asking why the previous plan was written and
+then not followed. The diagnosis is that it was not unclear — it was
+**un-followable** — and the evidence is in this document:
+
+1. **Two competing orderings, with no statement of which wins.** §3.5 "The
+   order" (cluster healthy → `interrupt` ‖ `ctx` → `eval` → driver claim/CAS →
+   receipts → one live turn) is not §4's wave order (velocity/deletion →
+   containment → loop/topology → wire → cuts → capability → acceptance). §3.5
+   puts the driver at step 4 where §4 puts it in Wave 2 behind all of
+   containment, and §3.5 never mentions the wire, the cuts, or the capability
+   work at all. A reader must choose, and choosing is where drift enters.
+2. **Rows anchored to line numbers that the plan's own work invalidates.**
+   Three anchors were dead within a day (§9.1).
+3. **Forty readiness tags, one state marker.** `rg` counts 40
+   `[READY]`/`[HEAD]`/`[DESIGN]`/`[OWNER:]` against 1 mention of anything having
+   landed. The plan says what is *startable* forty times and what is *done*
+   once, so a returning session must re-derive what remains — which is exactly
+   what happened.
+4. **Rows organized by defect, not by owner.** One deletion (`8dc8623ad`)
+   discharged **five** separate rows — Wave 1's D9 and `policy-error!`, Wave 2's
+   per-agent-ctx-retention and fixed-eval-thread-count, and half of Wave 4's
+   second-IPC-path — because all five lived in `src/seon/host/`. The structure
+   could not show that, so it would have scheduled five lanes to edit files a
+   sixth was deleting.
+
+**Ruled: rewrite as one owner-keyed ledger** — one ordered list; rows keyed by
+the file or mechanism that must change; a state field per row
+(`open` / `blocked on Ox` / `discharged by <sha>`); symbol anchors rather than
+line numbers where a symbol exists. Every existing row's evidence and falsifier
+is preserved verbatim inside its new row; nothing is dropped.
+
+**Ruled: restructure ONCE, after the three in-flight audit/research lanes
+land** (`pod-verdict`, `capability-ledger`, `render-design`), because all three
+produce rows.
 
 ### 9.6 Still open, and NOT decided by these rulings
 
