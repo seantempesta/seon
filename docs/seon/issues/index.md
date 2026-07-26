@@ -10,7 +10,7 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (60)
+## Blocker (62)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -55,6 +55,8 @@ See `README.md` for the convention.
 | [Recover a run opened before its plan commits](run-is-unrecoverable-before-its-plan-commits.md) | blocker | agent |
 | [Reduce retained memory in each execution child](execution-children-retain-hundreds-of-megabytes.md) | blocker | agent |
 | [Refuse model dispatch when turn allocation fails](jvm-driver-continues-after-turn-allocation-error.md) | blocker | agent |
+| [Remove surviving requires of pod provider namespaces](pod-cut-group-3-leaves-surviving-provider-requires.md) | blocker | agent |
+| [Remove surviving requires of pod toolkit namespaces](pod-cut-group-4-leaves-surviving-toolkit-requires.md) | blocker | agent |
 | [Restore writer admin transition is unimplemented](restore-writer-admin-transition-is-unimplemented.md) | blocker | Core |
 | [Resume JVM execution from the committed run plan](jvm-driver-does-not-resume-committed-plan.md) | blocker | agent |
 | [Retain complete model transport evidence in Inspect logs](inspect-model-transport-evidence-is-incomplete.md) | blocker | agent |
@@ -156,7 +158,7 @@ See `README.md` for the convention.
 | [test-cljs compile failure retains a live lock owner](test-cljs-compile-failure-retains-live-lock-owner.md) | friction | general |
 | [try in expression position inside a compiled ^:async fn auto-awaits](async-try-expression-iife-auto-awaits.md) | friction | agent |
 
-## Cleanup (12)
+## Cleanup (14)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -167,6 +169,8 @@ See `README.md` for the convention.
 | [Inspect concurrent attributed agent messages](inspect-concurrent-agent-messages.md) | cleanup | agent |
 | [Move product routes out of the static router supplement](static-routes-bypass-database-route-authority.md) | cleanup | UI |
 | [Partially-Stale Reference Docs Need Updates](stale-reference-docs.md) | cleanup | docs |
+| [Remove requires left by the Group 1 pod cut](pod-cut-group-1-leaves-surviving-requires.md) | cleanup | general |
+| [Remove surviving requires of deleted pod Group 2 namespaces](pod-group-2-deletion-leaves-surviving-requires.md) | cleanup | agent |
 | [Remove the remaining child vocabulary and tier dial](u9-surviving-child-vocabulary-and-tier-dial.md) | cleanup | agent |
 | [Remove unused require aliases left by the deletion waves](deletion-waves-left-unused-require-aliases.md) | cleanup | general |
 | [Subagents block is implemented but not installed](subagents-block-is-implemented-but-not-installed.md) | cleanup | agent |

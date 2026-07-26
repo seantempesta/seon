@@ -37,6 +37,30 @@
 (schema/register! :seon.eval/ns :symbol)
 ;; Optional direct ref to the agent whose scope produced the eval.
 (schema/register! :seon.eval/agent :seon.db/ref)
+(schema/register!
+  :seon.eval
+  [:map {:seon.db/entity true
+         :seon.render/ai 'seon.render.handlers.eval/render-ai
+         :seon.render/html 'seon.render.handlers.eval/render-html}
+   [:seon.eval/id :seon.eval/id]
+   [:seon.eval/source :seon.eval/source]
+   [:seon.eval/ok? :seon.eval/ok?]
+   [:seon.eval/at :seon.eval/at]
+   [:seon.eval/run {:optional true} :seon.eval/run]
+   [:seon.eval/ordinal {:optional true} :seon.eval/ordinal]
+   [:seon.eval/total {:optional true} :seon.eval/total]
+   [:seon.eval/claim-epoch {:optional true} :seon.eval/claim-epoch]
+   [:seon.eval/status {:optional true} :seon.eval/status]
+   [:seon.eval/agent {:optional true} :seon.eval/agent]
+   [:seon.eval/duration-ms {:optional true} :seon.eval/duration-ms]
+   [:seon.eval/narration {:optional true} :seon.eval/narration]
+   [:seon.eval/ns {:optional true} :seon.eval/ns]
+   [:seon.eval/progress? {:optional true} :seon.eval/progress?]
+   [:seon.eval/result-edn {:optional true} :seon.eval/result-edn]
+   [:seon.eval/output {:optional true} :seon.eval/output]
+   [:seon.eval/error {:optional true} :seon.eval/error]
+   [:seon.eval/error-data {:optional true} :seon.eval/error-data]
+   [:seon.render/full? {:optional true} :seon.render/full?]])
 (schema/register! ::receipt-state
                   [:enum :absent :running :done :error :interrupted])
 (schema/register! ::start-request
