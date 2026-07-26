@@ -33,7 +33,7 @@ protected implementation or invent a second tool protocol.
 - Generated identities come from `seon.db.id/allocate!`. Callers do not invent
   timestamp IDs; human-visible agent IDs are readable word IDs.
 - `seon.db` is the sole database API. Reads use the injected frozen database
-  value; writes cross the typed database protocol to the JVM writer.
+  value; writes call the co-located transaction owner in the cluster JVM.
 - Exact contracts remain colocated with code and enter context through the
   program graph. This document owns namespace purpose and boundary, not a
   signature copy that can drift.
@@ -59,23 +59,28 @@ home-require scalar with lifecycle and navigation capabilities; ordinary agents
 do not inherit those grants. A namespace's full source becomes context when it
 is current. The entire toolkit is not rendered unconditionally every turn.
 
-## Intended `my.*` corpus
+## Intended `my.*` namespaces
 
 | Namespace | Owner and purpose |
 |---|---|
 | `my.blob` | SHA-256-addressed large-content storage and bounded reads |
 | `my.canvas` | the one agent-facing focal canvas and interaction API |
 | `my.data` | small data transformation and presentation composition |
+| `my.fs` | guarded filesystem reads and writes over approved paths |
 | `my.kb` | global knowledge-domain schemas, database examples, and recall composition |
 | `my.ns` | discovery over namespace, function, schema, and test program facts |
 | `my.plan` | per-agent plan tree and its derived document/render |
+| `my.shell` | guarded process execution with bounded input, output, and duration |
 | `my.skills` | canonical skill facts plus explicit import/list/load/unload |
 | `my.ui` | reusable Hiccup and control composition over the public render shapes |
+| `my.web` | guarded fetch, search, and browser-facing web operations |
 
-Filesystem, search, shell, web, test-running, lifecycle, scheduling, and eval
-capabilities remain protected `seon.agent.*`, `seon.test.*`, or other `seon.*`
-namespaces selected by home requirements. A future editable wrapper enters the
-table only with one real owner and an implementation PRD.
+Agent-facing tools are flat `my.*` namespaces. Their protected policy and
+platform leaves remain under `seon.*`, but an agent never selects or calls a
+leaf directly. Every `my.*` tool call enters the one guarded
+`seon.effect/request!` function carrying the request identity. The
+function validates policy and schema, records the admitted request boundary,
+and dispatches to the selected leaf.
 
 The per-agent home namespace `my.agent.<id>` is a safe starting namespace, not
 a code silo or ownership scheme. An agent may author a coherent application in
@@ -113,26 +118,37 @@ effect metadata. Exactly one leaf per tier supplies native work and ambient
 invocation data. Direct JavaScript or Java interop stays within that leaf or
 another tier-local function; portable logic receives ordinary values.
 
+`seon.effect/request!` is the single guarded entry for every
+agent-facing tool family. There is no second guarded entry, per-family
+request identity, or direct leaf binding. The flat `my.*` function supplies
+ordinary request data; `effect/request!` carries the one identity through
+admission, execution, receipt, and result.
+
 The four effect classes describe replay behavior at the entry boundary:
 
 - `:pure` is referentially transparent for its arguments, including a read at
   an explicit immutable database value.
 - `:read` observes mutable external state without changing it and is safe to
   run again without a receipt.
-- `:idempotent` mutates through a durable receipt. Its request accepts the
-  optional public `:seon.capability/op-id`; an absent key is minted once at the
-  entry, while a repeated key addresses the recorded operation.
+- `:idempotent` mutates through a durable receipt. `effect/request!` assigns
+  `:seon.effect/request-id` once; explicitly reusing that identity addresses
+  the same recorded request.
 - `:external` mutates without a durable receipt, so recovery never assumes that
   replay is safe.
 
-The operation id is capability vocabulary, not a transport request id or a
-domain entity identity. A successful replay exposes
-`:seon.capability/replayed? true` in the family result.
+The effect request identity is the only request identity across admission,
+leaf execution, transport, receipt, and result; families do not mint another
+operation ID. A successful replay exposes `:seon.effect/replayed? true` in the
+family result.
 
 ### Database and program graph
 
 `seon.db` owns query, pull, eager entity data, index cursors, ordinary database
-values, native-shaped transaction reports, and CAS work fences. `seon.schema` owns registered shapes and the
+values, native-shaped transaction reports, and Datahike `:db.fn/cas` work
+fences. `:db.fn/cas` is reserved for facts two processes race to win exactly
+once: plan freeze from absent to digest, and run claim from no process to the
+process record together with a claim-epoch increment. `seon.schema` owns
+registered shapes and the
 Malli-to-Datahike bridge. `seon.eval`, `seon.ns`, and the program graph own code
 lookup and evaluation. `my.kb`, `my.ns`, and `my.plan` compose those contracts;
 they do not bypass them.
@@ -146,11 +162,11 @@ semantics and is not mistaken for a work or materialization bound.
 
 ### Host and network effects
 
-Filesystem, search, shell, fetch, and web search are protected capability
-namespaces. Their own schemas and policy checks name allowed paths, domains,
-deadlines, output bounds, and errors. An agent sees one only when its curated
-home requirements expose it. A thin editable wrapper may compose returned data,
-but never weakens the protected check.
+`my.fs`, `my.shell`, and `my.web` are the public filesystem, process, fetch,
+and search namespaces. Their schemas and protected policy leaves name allowed
+paths, domains, deadlines, output bounds, and errors. An agent sees one only
+when its curated home requirements expose it; composition never weakens
+`effect/request!`.
 
 ### Packages
 
@@ -170,7 +186,7 @@ envelope, or routing protocol.
 
 ### Lifecycle, messages, schedules, and sessions
 
-Agent birth, run control, termination, cross-agent messaging, scheduling, and
+Agent birth, run control, termination, cross-agent messaging, scheduled work, and
 browser-session navigation stay in the protected namespaces that own their
 database facts. Roles are capability sets rather than stored entity kinds. Root
 can discover the elevated functions it receives; each operation still enforces
@@ -249,7 +265,7 @@ browser capability gate; neither namespace touches SSE connections.
 ### `my.skills`
 
 `my.skills` stores canonical imported skill facts and supports explicit loading
-through the ordinary block mechanism. Importing a corpus does not inject a
+through the ordinary block mechanism. Importing skill source does not inject a
 standing skills block. Default capability discovery remains namespace-led and
 pull-first as described in [[context]].
 

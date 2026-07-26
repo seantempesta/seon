@@ -10,10 +10,11 @@ tags: [decision, architecture, database, runtime]
 ## Context
 
 One cluster JVM owns each store's ordered transactions, committed-report
-source, and agent evals. The web-render JVM reads a process-local immutable
-replica and forwards writes to that cluster JVM. Disposable leaf runtimes are
-clients of capability seams but own no durable database state. Transport
-details may differ locally and remotely without changing database semantics.
+source, run loop, guarded evals, program graph, render pipeline, and web UI.
+Co-located database reads use immutable database values directly and writes
+call the transaction owner. Disposable leaf runtimes and remote clients use
+ordinary protocol values but own no durable database state. Transport details
+may differ locally and remotely without changing database semantics.
 
 ## Decision
 
@@ -27,9 +28,12 @@ client can therefore keep user-input and core-bug classification without
 parsing an error string or learning JVM exception types.
 
 The writer is the sole durable mutation owner. Clients never send closures or
-database handles; transaction functions such as CAS cross only in their data
-form. One persistent session carries independently correlated mutation
-requests, responses, cancellation, committed changes, and selective interests.
+database handles. Datahike's `:db.fn/cas` crosses only in data form and is
+reserved for facts two processes race to win exactly once: plan freeze from
+absent to digest, and run claim from no process to the process record together
+with a claim-epoch increment. One persistent remote session carries
+independently correlated mutation requests, responses, cancellation, committed
+changes, and selective interests.
 Successful writes advance replicas with committed ordinary data. A gap
 reacquires a complete current database value before delivery resumes. Durable
 request receipts provide same-request mutation recovery without a second write
@@ -48,7 +52,8 @@ and Promise values remain inside their host owners.
   state machine.
 - Nippy is not a wire contract; any use inside Konserve remains private storage
   encoding.
-- Each reader process has one database replica owner; there is no second
+- Each remote reader process has one database replica owner; the cluster JVM
+  reads its co-located database values directly. There is no second
   application cache, database broker, or duplicate invalidation bus.
 - Interests are connection-owned and ephemeral; the database does not persist
   active subscriptions, changed-row summaries, or a second invalidation bus.
@@ -58,7 +63,7 @@ and Promise values remain inside their host owners.
 
 ## Related
 
-- [[architecture]] — cluster JVM, web-render, leaf-runtime, and browser topology.
+- [[architecture]] — cluster-JVM, leaf-runtime, and browser topology.
 - [[data-model]] — transaction provenance and database values.
-- [[agent-runtime]] — CAS fences and lifecycle transitions.
+- [[agent-runtime]] — `:db.fn/cas` fences and lifecycle transitions.
 - [[observability]] — replay and forensic database values.

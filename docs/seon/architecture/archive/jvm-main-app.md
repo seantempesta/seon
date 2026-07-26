@@ -17,9 +17,8 @@ last checkpoint before the reliability refactor. Historical entry points such
 as `bin/run`, ports 7888/8080, and `user/go` or `user/run-tests` are not active
 operations and must not be restored as compatibility paths.
 
-The active system is one Node ClojureScript pod plus the JVM
-`seon.db.server`: the pod runs agents, derives context and surfaces, and serves
-the web UI; the JVM serializes Datahike writes, publishes committed
-transactions, and performs explicitly selected heavy database work. Start with
+The target system has one cluster JVM per store. That JVM owns Datahike writes,
+the run loop, guarded evals, the program graph, the render pipeline, and its web
+UI; disposable leaf runtimes run packages and selected workers. Start with
 [[../architecture]] for the canonical design and
 [[../../../prds/archive/runtime-reliability/roadmap]] for current implementation status.

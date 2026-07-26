@@ -58,7 +58,7 @@ flag:
 - The existing projections: prompt size (tokens at display), `llm-usage` /
   `llm-meta`, the `:seon.eval` component refs, status, retries.
 - **Compact turn measurements** —
-  `:seon.agent.turn/duration-ns` records one monotonic driver interval and
+  `:seon.agent.turn/duration-ns` records one monotonic run-loop interval and
   `:seon.agent.turn/timings` owns its measured component rows. Each row names
   the boundary, ordinal, nanosecond duration, and optional exact transaction
   ref. The component sum is checked against the total; any difference is
@@ -102,9 +102,13 @@ questions without consulting process memory:
   `:seon.agent.run/claim-epoch` at the relevant database value.
 - **What step was admitted?** Read `:seon.agent.turn/phase` together with the
   attempt or eval receipt opened before dispatch.
-- **What finished?** Terminal receipt state is a CAS from the open/running
-  state and carries the bounded result, error, output, usage, or response
-  identity.
+- **What finished?** Terminal receipt state uses Datahike's `:db.fn/cas` from
+  the open/running state and carries the bounded result, error, output, usage,
+  or response identity. `:db.fn/cas` is reserved for facts two processes race
+  to win exactly once: plan freeze from absent to digest, and run claim from
+  no process to the process record together with a claim-epoch increment;
+  receipt settlement follows the same asserted old-value discipline under the
+  run fence.
 - **What did takeover repair?** An abandoned provider attempt becomes
   `:crashed`; an admitted eval remains terminal or becomes interrupted
   according to its receipt. The later phase transition records the recovery
@@ -113,7 +117,7 @@ questions without consulting process memory:
 An `:open` attempt with an `:attempt-open` turn phase is evidence that external
 work was admitted but not durably settled. Absence of an eval receipt at
 `:evaling` means no form was admitted; a `:running` eval receipt means a form
-crossed the execution door but did not terminalize. These distinctions govern
+crossed guarded eval admission but did not terminalize. These distinctions govern
 recovery and remain visible to debug projections.
 
 Datahike temporal history supplies **claim archaeology**. An investigator can
@@ -150,11 +154,10 @@ database fact keyed by that process-instance identity — the result-symbol
 lifecycle registry. A platform reset or restart wipes its instance's rows, so
 a stale handle reference is a loud steering error toward re-derivation, and
 forensics can always answer which tier held a value and when it died.
-Streamed reply partials are the opposite case: a no-history presentation
-attribute holds only the current prefix, the terminal transaction retracts it
-while linking the durable reply blob, and historical feeds never replay it —
-partial text is presentation, never evidence; the attempt receipt and reply
-blob remain the forensic truth.
+Streamed reply partials are the opposite case: complete prefixes remain
+process-local values in the render flow and are never database or blob
+evidence. A full `(sliding-buffer 1)` tap may drop intermediate prefixes. The
+attempt receipt and terminal reply blob remain the forensic truth.
 
 Cluster-JVM telemetry follows the same storage law. JVM thread handles, active
 timers, and demanded CPU or heap samples remain transient in the
@@ -195,7 +198,7 @@ counters and assign them to whichever agent happens to be open. Datahike's
 cache outcome, work, result count, result weight, and dependency-plan names stay
 intact; Seon request duration is a separate boundary measurement.
 
-Search runs at two ends, one door each, and nothing in between:
+Search runs at two ends, one function boundary each, and nothing in between:
 
 - **Literal** — `grep-graph` targets every text-carrying attr: fns, schemas,
   evals, messages, turns, and blob-backed prompts/replies; filterable by
@@ -319,10 +322,10 @@ roots, seed-copy ctx override via `install!`, as-of reconstruction,
 per-agent provider routing — not a new runtime. A forensic pass is cheap
 enough to run on every puzzling drive.
 
-## Cluster lifecycle and the composition door
+## Cluster lifecycle and the composition endpoint
 
-Isolation is the CLUSTER: one store, one cluster JVM, one web-render JVM, and
-disposable leaf runtimes. From inside a cluster there is ONE connection and
+Isolation is the CLUSTER: one store, one cluster JVM, and disposable leaf
+runtimes. From inside a cluster there is ONE connection and
 ONE database — agents never know other clusters exist. Database enumeration,
 fork, release, and deletion are
 typed root/supervisor operations in `seon.db.registry`, never agent protocol
@@ -335,7 +338,7 @@ operations. The supervisor owns the lifecycle:
 - destroy quiesces users of the target and removes only resources owned by that
   database name. A branch cannot delete source-database content.
 
-`POST /agents/run` is the one-shot composition door, built
+`POST /agents/run` is the one-shot composition endpoint, built
 purely from the agent primitives: start-or-reuse an agent in the cluster's own
 cluster (optional `agent_id` — durable database, so the same agent can be
 driven again across a cluster JVM restart), deliver the input through the real wake
@@ -349,7 +352,7 @@ The pure `seon.ai/resolved-config` reconstructs configuration intent at each
 attempt database value; stored attempt facts preserve non-derivable response
 identity and outcome. A response-time final database value is never mislabeled as
 call evidence. Inspect AI copies the projection unchanged and rejects missing
-or drifting transport evidence before capability scoring. Inspect AI drives
+or drifting transport evidence before capability scoring. Inspect AI runs
 per-sample ephemeral clusters by port through this same production boundary;
 there is no in-process evaluator lifecycle. The answer key never enters the cluster
 — scoring stays host-side. Benchmark vocabulary is harness-side only.
@@ -365,14 +368,14 @@ native sample metadata. These are derived evidence, not another config value.
 The eval projection is derived from the same final immutable database value
 and exact turn-entity set used for the response counts. General eval results,
 printed output, exception stacks, and unrelated source dumps never enter the
-door. The bounded result projection comes from the eval row recorded in the
+endpoint. The bounded result projection comes from the eval row recorded in the
 same database authority as the turn; it does not preserve a second execution
 trace or database-operation log. Inspect consumes this production response
 directly and does not issue arbitrary forms through the writer REPL to
 reconstruct eval rows.
 
 Standard Inspect tasks measure the selected model and scorer. Cluster-backed Inspect
-tasks measure Seon's production agent/runtime behavior through this door; the
+tasks measure Seon's production agent/runtime behavior through this endpoint; the
 two claims are reported separately and no duplicate evaluator is created.
 Every admitted live run retains both its opening and closing source admission
 plus the operator-owned target identity in the native `.eval`. A formal local-

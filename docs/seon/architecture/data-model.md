@@ -14,7 +14,7 @@ the three relationship forms; how an entity's shape is identified; the
 `my.*` domain schemas; and the one flat error value. Vocabulary is
 locked in [[architecture]] (the glossary). This doc owns the **schema**; it
 points at [[ui]] for the render/route/slot machinery, at [[agent-runtime]] for
-the claim driver and lifecycle that mutate these rows, and at [[toolkit]] for the functions an
+the run loop and lifecycle that mutate these rows, and at [[toolkit]] for the functions an
 agent calls over them.
 
 ## 1. TL;DR — the entity graph in one paragraph
@@ -369,14 +369,10 @@ Facet column reads `valueType / cardinality / unique|component`. Mixed-`:or`
 attrs note the EDN-string storage. Every attribute below is named, typed, and
 registered via `schema/register!`; the bridge derives the datahike facet.
 
-High-churn presentation attributes (streamed reply partials, progress
-text) additionally carry the `:seon.db/no-history?` facet, which the
-bridge maps to `:db/noHistory`: the temporal indexes keep only the
-current value, so repeated asserts replace rather than accumulate, and
-the terminal retraction leaves no residue. Use it exactly for ephemeral
-display state whose truth lives elsewhere (the blob-linked reply); never
-for domain facts, receipts, claims, or anything recovery or claim
-archaeology reads through history.
+Rendered output, including streamed reply partials and progress text, is not a
+database attribute. It remains process-local in the in-process render flow;
+the durable terminal reply, receipts, and domain facts retain their ordinary
+history.
 
 **`register!` ≠ bridge-to-datahike.** `schema/register!` adds to the in-memory
 declaration candidate only; it does not publish a new process-global Malli
@@ -390,8 +386,8 @@ the transaction.
 **Registration authority is the committed facts, on every tier.** A
 registration is a committed `:seon.schema` fact, global by construction.
 Loading a namespace publishes nothing: a colocated `register!` form is a pure
-declaration whose authority is its transaction. Every tier — cluster JVM,
-web-render JVM, leaf runtime — acquires the committed projection at a database value and
+declaration whose authority is its transaction. Every runtime tier — cluster
+JVM or leaf runtime — acquires the committed projection at a database value and
 never re-runs `register!` to reconstruct it. Admission is symmetrical across
 reads and writes: a transaction may name only registered attributes, and a
 pull pattern's keys validate against the same committed projection, with
@@ -402,9 +398,9 @@ attribute list exists.
 **Polymorphic slots are named predicate schemas.** `:any` is an undefined hole
 and is banned in agent contracts. A genuinely polymorphic slot is a named
 registered `[:fn]` predicate schema carrying `:error/message` and a
-`:gen/schema` generator hint. Predicates are corpus data like every other
+`:gen/schema` generator hint. Predicates are program-graph data like every other
 function: the schema projection resolves each predicate symbol to its admitted
-callable from the corpus-loaded SCI environment before Malli compilation.
+callable from the program-graph-loaded SCI environment before Malli compilation.
 Malli never constructs a private SCI context; predicate execution remains in
 the surrounding guarded invocation, so contracts validate fully on the tier
 that holds the value. Predicate admission is one computed rule — the
@@ -538,12 +534,17 @@ attributes exist.
 
 ### 4.4 turn — `:seon.agent.turn/*`
 
+Datahike's `:db.fn/cas` is reserved for facts two processes race to win
+exactly once: plan freeze from absent to digest, and run claim from no process
+to the process record together with a claim-epoch increment. Phase and receipt
+transitions reuse that asserted old-value discipline under the held run fence.
+
 | attribute | malli | datahike facet | notes |
 |---|---|---|---|
 | `:seon.agent.turn/id` | `[:and {:seon.db/identity true :seon.db.id/generator :seon.db.id.generator/compact} :seon.db.id/compact-value]` | string / one / identity | compact |
 | `:seon.agent.turn/at` | `:inst` | instant / one | |
 | `:seon.agent.turn/status` | `[:enum :running :done :error :interrupted]` | keyword / one | value enum; `:interrupted` is asserted only by crash recovery when no runtime remains to close the committed turn normally |
-| `:seon.agent.turn/phase` | `[:enum :rendered :attempt-open :reply-ready :evaling :evaled :published]` | keyword / one | durable recovery cursor; every advance is an observed-phase CAS composed with the run epoch fence |
+| `:seon.agent.turn/phase` | `[:enum :rendered :attempt-open :reply-ready :evaling :evaled :published]` | keyword / one | durable recovery cursor; every advance is an observed-phase `:db.fn/cas` composed with the run epoch fence |
 | `:seon.agent.turn/run` | `:seon.db/ref` | ref / one | turn → its run |
 | `:seon.agent.turn/cause-message` | `:seon.db/ref` | ref / one | optional; exact inbound human message this turn is assigned to answer |
 | `:seon.agent.turn/rendered-tx` | `:seon.db/ref` | ref / one | basis transaction of the request-scoped database value captured before prompt rendering; historical rendering uses `as-of` |
@@ -557,7 +558,7 @@ attributes exist.
 | `:seon.agent.turn/usage-estimated?` | `:boolean` | boolean / one | usage came from the canonical token estimator |
 | `:seon.agent.turn/llm-attempts` | `[:vector {:seon.db/component true} :seon.db/ref]` | ref / many / **component** | ordered bounded provider-attempt evidence; absence means no attempt |
 | `:seon.agent.turn/evals` | `[:vector {:seon.db/component true} :seon.db/ref]` | ref / many / **component** | owned evals (cascade-retract) |
-| `:seon.agent.turn/duration-ns` | `[:int {:min 0}]` | long / one | monotonic driver entry through final publish transaction return; timing-settlement transaction excluded |
+| `:seon.agent.turn/duration-ns` | `[:int {:min 0}]` | long / one | monotonic run-loop entry through final publish transaction return; timing-settlement transaction excluded |
 | `:seon.agent.turn/timings` | `[:vector {:seon.db/component true} :seon.db/ref]` | ref / many / **component** | compact measured component rows; absence is unmeasured, never zero |
 
 Turn timing rows are identity-free components written once with the completed
@@ -581,9 +582,9 @@ Provider attempt rows are component evidence owned by the turn:
 
 | attribute | malli | datahike facet | notes |
 |---|---|---|---|
-| `:seon.ai.attempt/id` | compact generated identity | string / one / identity | retry-instance lookup and CAS target |
+| `:seon.ai.attempt/id` | compact generated identity | string / one / identity | retry-instance lookup and `:db.fn/cas` target |
 | `:seon.ai.attempt/ordinal` | `:int` | long / one | derived next ordinal from durable siblings |
-| `:seon.ai.attempt/outcome` | `[:enum :open :success :provider-error :adapter-timeout :outer-timeout :crashed]` | keyword / one | `:open` is committed before dispatch; terminal state is an open→terminal CAS |
+| `:seon.ai.attempt/outcome` | `[:enum :open :success :provider-error :adapter-timeout :outer-timeout :crashed]` | keyword / one | `:open` is committed before dispatch; terminal state is an open→terminal `:db.fn/cas` |
 | `:seon.ai.attempt/config-digest` | content digest | string / one | non-secret frozen request projection identity |
 | `:seon.ai.attempt/deadline-at` | `:inst` | instant / one | exact admitted outer deadline |
 | `:seon.ai.attempt/provider` / `adapter` | keywords | keyword / one | selected transport path |
@@ -815,7 +816,10 @@ maps to `["/agent/{id}" {:get {:handler <sym> :middleware […]}}]`. `db->routes
 ### 4.11 program graph — `:seon.fn` / `:seon.ns` / `:seon.schema` / `:seon.test`
 
 Blocks, routes, and schedules reference these members BY SYMBOL VALUE (§2.3), so
-only the identities and core refs matter here.
+only the identities and core refs matter here. The current attributes remain
+`:seon.fn`, `:seon.ns`, `:seon.schema`, and `:seon.test` until the pending
+owner rename to `seon.code.fn`, `seon.code.ns`, `seon.code.schema`, and
+`seon.code.test`.
 
 | entity | identity attr | valueType | other refs |
 |---|---|---|---|
@@ -838,8 +842,8 @@ analyzer-derived snapshot reconciles every compiled namespace, public function,
 and registered schema into the program graph. Agent-authored namespace,
 function, schema, and test forms enter through the eval analyzer tee. The
 platform test suite belongs only to the dedicated test build; it is not loaded
-into a product artifact or copied into the database at boot. The whole live code
-corpus is therefore queryable without a second test registry. Agent context
+into a product artifact or copied into the database at boot. The whole live
+program graph is therefore queryable without a second test registry. Agent context
 renders only `my.*` members in full source while compiled members stay
 indexed-but-summarized. The render policy is owned by [[ui]]; the declaration
 facts are owned here.
@@ -976,7 +980,7 @@ reconstructing it from transcript residue.
 | `:my.plan/goal` | `[:string]` | optional, root-level; the WHY narrative that outlives the transcript window |
 | `:my.plan/expect` | `[:string]` | optional; the falsifiable expected outcome — "how I'd know this step failed" — so the render prompts VERIFY-before-`done!` (stops blind re-issue) |
 | `:my.plan/pace` | `[:enum :one-shot :multi-session]` | optional, root-level; explicit scope so "spans sessions" can't collapse to a sprint |
-| `:my.plan/completed-at` | `:inst` | optional; drives the recently-completed window |
+| `:my.plan/completed-at` | `:inst` | optional; controls the recently-completed window |
 | `:my.plan/from` | `:seon.db/ref` | optional; → who asked |
 | `:my.plan/message` | `:seon.db/ref` | optional; → the inbound message it tracks |
 
@@ -1067,11 +1071,11 @@ mechanism are refined in place rather than replaced:
   `install!`/`remove!` block collection. Loaded state is derived from block
   presence, never stored as a flag.
 
-The default and test context trees contain no skills context block. Importing a
-corpus therefore consumes no standing prompt tokens. Dynamic context, namespace
+The default and test context trees contain no skills context block. Importing
+skill source therefore consumes no standing prompt tokens. Dynamic context, namespace
 cards/current source, and state-gated blocks remain responsible for normal
 capability discovery; explicit loading is available when a user or agent truly
-wants the source in context. `seon-skills` is the shipped corpus authority, while
+wants the source in context. `seon-skills` is the shipped skill-source authority, while
 `.agents/skills` and `.claude/skills` are generated or mechanically validated
 adapter views.
 
@@ -1117,7 +1121,7 @@ concern = ONE `:seon.config/<section>` schema + one resolver fn + one key here:
 
 Resource ceilings are **circuit-breaker facts**, never hidden governors. SCI
 `time-limit`, cluster JVM heap and `:compute` / `:io` demand, database
-mutation-admission bounds, web-render connection/mailbox/pool/body bounds, and
+mutation-admission bounds, render-flow channel/tap/connection/body bounds, and
 future bounds each have:
 
 - a closed Malli schema and database attribute with explicit units;
@@ -1149,7 +1153,7 @@ section schemas remain colocated with `seon.config.resolve`.
    [:seon.config/schedule-breaker {:optional true} :seon.config/schedule-breaker]
    [:seon.config/model-variants   {:optional true} :seon.config/model-variants-spec] ; named sparse birth-time agent model attrs
    [:seon.config/agent-context    {:optional true} :seon.config/agent-context]     ; the per-agent block tree + dials
-   [:seon.config/skills-dir       {:optional true} :seon.config/skills-dir]        ; importable SKILL.md corpus directory
+   [:seon.config/skills-dir       {:optional true} :seon.config/skills-dir]        ; importable SKILL.md source directory
    [:seon.config/root-context     {:optional true} :seon.config/root-context]])    ; root block reconciliation + complete home-require scalar
 ```
 
@@ -1223,8 +1227,8 @@ Provider-specific status and retry fields may accompany the same flat core.
 The LLM adapters return errors as values, never an uncaught transport failure: a
 `:seon.ai/transport?` error gets one bounded retry; a persistent failure closes
 the turn `:seon.agent.turn/status :error`, and the render derives a system line
-from the turn status so the agent SEES the failure in its transcript. The turn
-driver is owned by [[agent-runtime]].
+from the turn status so the agent SEES the failure in its transcript. The run
+loop is owned by [[agent-runtime]].
 
 ### 6.1 Persistence per carrier
 
@@ -1333,4 +1337,4 @@ source.
 - [[roadmap]] — implementation state, gaps, work order, and evidence.
 - [[datahike-primer]] — the source-grounded "work in datahike's grain" mindset
   for the bridge (db is a value, only values cross the protocol,
-  CAS-as-assertion).
+  `:db.fn/cas` as assertion).

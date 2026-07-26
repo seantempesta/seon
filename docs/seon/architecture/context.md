@@ -123,7 +123,7 @@ the agent's own eval log rendered as a REPL session ("I evaluated X, got Y; a
 message arrived; I evaluated Z"). A snapshot section (plan, findings,
 subagents) is a photo of *now* with no story; a REPL narrative is inherently
 stateful, because it is the ordered record of what the agent actually did and
-what actually happened to it. The eval log is one view of the code corpus
+what actually happened to it. The eval log is one view of the program graph
 (code-as-data); the transcript is its faithful render, and it is the agent's
 primary memory. Everything else is **additive**.
 
@@ -270,8 +270,8 @@ This is the block's two renders (`:seon.render/ai` / `:seon.render/hiccup`),
 now emitted by any in-scope `defn`, not only by seeded blocks. Its args are
 the db value (all data is reachable from it — [[think-in-clojure]]); it
 `require`s only the *code* it calls. It is pure over the frozen db, so it
-re-runs safely every turn, is bounded + errors-as-values through the guarded
-execution door (a throw becomes a flat error card, never a crash), and replays
+re-runs safely every turn, is bounded + errors-as-values through
+`seon.sci.eval/evaluate` (a throw becomes a flat error card, never a crash), and replays
 from an immutable database value ([[observability]]). The historical prompt
 blob—not a re-executed effect—is the byte ground truth.
 
@@ -286,14 +286,16 @@ messaging required. Planning in full detail *is* showing the human the plan.
 
 ## What puts a fn in scope — writing it, or pinning it
 
-The code corpus is cluster-shared. A function written by one agent is a
+The program graph is cluster-shared. A function written by one agent is a
 committed `:seon.fn` fact with its namespace, schema, source, dependencies, and
 source-transaction provenance. Other agents do not replay the author's eval;
 every execution scope receives the accepted program delta and can resolve the
 same function with normal Clojure semantics. Context then selects relevant
 namespace source and function contracts from that one graph. Capabilities
 therefore accumulate as the application grows instead of remaining private to
-the process that first authored them.
+the process that first authored them. These facts retain the current
+`:seon.fn`/`:seon.ns`/`:seon.schema` attributes until their pending owner rename
+to `seon.code.fn`/`seon.code.ns`/`seon.code.schema`/`seon.code.test`.
 
 A resident namespace steward is another database-derived consumer of this
 graph. Its context can include the namespace's current source, dependents,
@@ -429,7 +431,7 @@ text is admitted.
 ### Importing a skill does not inject it
 
 Users may import standard `SKILL.md` content into canonical `my.skills` database
-facts, but corpus availability and prompt placement are independent. Default and
+facts, but skill-fact availability and prompt placement are independent. Default and
 test context trees omit the skills block. Namespace cards, current-namespace
 source, state-gated blocks, and pull references remain the normal discovery
 path. An explicit `my.skills/load` uses the ordinary `install!` override when the
@@ -491,10 +493,10 @@ learned order improves real reuse. The bands are:
    it becomes a recompute-every-step tail block (a capped token budget, config
    dial) only if a drive proves the need. When present it competes with nothing
    cached and vanishes when its queries return empty; every element earns its
-   place in drives. ([[context-rebuild]] §"Deliberately NOT blocks".)
+   place in evaluations. ([[context-rebuild]] §"Deliberately NOT blocks".)
 6. **the free dynamic tail** — root-only live clock, Unix load averages in the
    standard 1/5/15-minute order, and bounded process memory. Active-child
-   progress joins this tail only after solo-agent drives graduate; child
+   progress joins this tail only after solo-agent evaluations graduate; child
    outcomes themselves remain database facts in the ordinary derived body.
 
 Code grows slowly against tokens spent running things, so groups 1–2 are the
@@ -544,7 +546,7 @@ predicted-relevance token cap, per-agent overrides in agent scope. A manifest is
 an optional desired-state input explicitly selected for one startup/apply
 operation; no selection preserves DB facts and never falls back to
 `config/system.edn`. Environment overrides are captured only while compiling a
-selected input and never become a side-door runtime dependency.
+selected input and never become a hidden runtime dependency.
 
 **Config-through-DB (the whole surface, not one dial).** A selected manifest is
 a transition input, not a runtime dependency. At a selected startup/apply,

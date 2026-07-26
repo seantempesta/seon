@@ -10,8 +10,9 @@ tags: [architecture, web, agent]
 > evidence live only in [[roadmap]].
 
 The human's UI and the agent's prompt are the same data, dual-rendered. Every
-page is a derived projection of the database; nothing rendered is stored. The
-context unit is the **block**; the engine is `seon.render`; the front door is
+settled page state is a derived projection of the database; transient streamed
+prefixes are process-local render-unit inputs, and nothing rendered is stored. The
+context unit is the **block**; the engine is `seon.render`; the HTTP router is
 **reitit**; the live channel is a Datastar **morph** stream backed by one
 normalized reactive registration and database-scoped selective interest per
 demanded computation. Loopback streams are uncompressed by
@@ -20,11 +21,13 @@ symbol or a datom, so a third party overrides any of it — blocks, canvas,
 layout, the root agent’s view, routes, CSS, client — reusing the same
 primitives, with zero `src/seon` edits.
 
-The web UI runs in the independent **web-render JVM**. It serves HTTP through
-http-kit, frames SSE through the Datastar Clojure SDK, and reads through its own
-immutable replica and database session. It never executes agent-authored code.
-The cluster JVM evaluates authored renders with the one `:interrupt-fn` and commits or returns ordinary
-render data; the web-render process performs only trusted pure derivation.
+The web UI runs inside the **cluster JVM** beside the writer and run loop. It
+serves HTTP through http-kit, frames SSE through the Datastar Clojure SDK, and
+reads the cluster's current immutable database values directly. Agent-authored
+renderers run through the one `seon.sci.eval/evaluate` path: a fresh `fork`,
+the one `:interrupt-fn`, value admission, and bounded output. Supervision,
+bounded evals, and Integrant component restart protect the process; the UI does
+not rely on a process wall.
 
 ## Interactions are database transactions
 
@@ -33,12 +36,13 @@ arguments. The route validates the handler's exact committed schema and source
 identity, transacts one pending interaction/run fact, and acknowledges
 immediately. The HTTP response is never an execution-result channel.
 
-The cluster JVM's driver acquires and executes the interaction. Its
+The cluster JVM's run loop acquires and executes the interaction. Its
 result or flat error becomes committed interaction facts. A normal HTML block
 queries the latest terminal outcome for the page's agent and returns no render
 when no such fact exists. The existing database interest, equality
-suppression, latest-wins mailbox, and Datastar morph chain therefore own every
-visible outcome; reconnecting derives the same surface from database truth.
+suppression, `mult`, per-tab `(sliding-buffer 1)` tap, and Datastar morph chain
+therefore own every visible outcome; reconnecting derives the same surface
+from database truth.
 
 ## The block and its two renders
 
@@ -96,8 +100,8 @@ late.
 always-on is nothing but a block — `install!` at a chosen priority pins it,
 `remove!` drops it, so the agent dials context in and the cost is derived at
 render. (`my.skills` explicit load/unload reuses this exact override; importing
-a corpus alone installs no block—see [[data-model]] §5.5 + [[context]].) And the
-per-cluster `seon.config`
+skill source alone installs no block—see [[data-model]] §5.5 + [[context]].)
+The per-cluster `seon.config`
 manifest (aero `config/system.edn`) shapes the seed set declaratively WITHOUT a
 code change. An absent block tree means no blocks; no hidden code fallback or
 implicit skill-body injection exists.
@@ -113,7 +117,7 @@ render yields a flat error value (see [[data-model]] §6) for that render only;
 siblings never crash.
 
 **prompt == page by construction.** Both derive from the same blocks at the
-turn's complete ordinary database value. The prompt driver acquires and formats
+turn's complete ordinary database value. The run loop acquires and formats
 the AI renders in `:seon.agent.ctx/priority` order; the web UI places
 the same blocks' HTML renders into a layout's slots. "What the agent saw at turn
 N" is a re-derive from that exact value; `:t` alone is not a durable bookmark.
@@ -159,12 +163,12 @@ default height. Scale is handled by disclosure and windowing, never smaller
 unbounded text.
 
 **Capability + cache.** The cluster JVM acquires authored program and ordinary
-inputs at one immutable database value, invokes authored code with the one
-`:interrupt-fn`,
-door, and exposes only ordinary data to trusted render functions. Agent-authored
-renders, layouts, and route handlers never run inside the web-render process or
-perform leaf RPCs. The byte-stable cache prefix at low priority is preserved
-for provider prefix-caching.
+inputs at one immutable database value and invokes authored code through
+`seon.sci.eval/evaluate` with the one `:interrupt-fn` and value admission.
+Renderers may request genuine effects only through
+`seon.effect/request!`; the normal render path remains pure and returns
+ordinary data. The byte-stable cache prefix at low priority is preserved for
+provider prefix-caching.
 
 **Byte identity is a design property.** The complete database value, verified
 configuration and file fingerprints, render inputs, and program artifact
@@ -296,7 +300,7 @@ render-unit, routing, and live-morph mechanism in one route tree:
   metadata only; opening one twin materializes only that current renderer.
   Raw AI disclosures are lazy slices of the already acquired prompt result,
   not independent database render units; opening one performs no authored invocation.
-  It uses the same Datastar subscription graph and activation door as every
+  It uses the same Datastar subscription graph and activation endpoint as every
   other live page, not a provenance-routed debug interest. With no open page it
   owns no database interest or render work.
 - **app** (`/agent/{id}/app/{x}`) — an agent-authored sub-page; its route handler
@@ -314,8 +318,8 @@ re-derived); datom count (links `/data`) + `SEON_EMBED` on/off; and a
   render unit: a relevant database dependency change renders it once and
   fans the same complete element to every subscribed page. It does not recompute
   inside every whole view and it uses a cheap index count rather than reconstructing
-  every database entity. The `+ new agent` button POSTs the one `/agents` creation door
-  with an empty purpose and switches to the new `/agent/{id}`. The same door
+  every database entity. The `+ new agent` button POSTs the `/agents` creation endpoint
+  with an empty purpose and switches to the new `/agent/{id}`. The same endpoint
   accepts an optional purpose from a root-fleet form; there is no separate
   creation or agents page.
 
@@ -334,8 +338,9 @@ same no-match redirect to `/`.
 
 ## Routing is data — reitit + the capability gate
 
-The front door is **reitit** (vendored `reference-code/reitit`, `.cljc`, loaded
-by the web-render JVM) consuming `:seon.route/*` datoms. A route datom carries its pattern,
+The HTTP router is **reitit** (vendored `reference-code/reitit`, `.cljc`,
+loaded by the cluster JVM) consuming `:seon.route/*` datoms. A route datom
+carries its pattern,
 method, unique name (reverse routing), owning agent (`:seon.route/owner`, rides as
 route-data for auth), and a `:seon.route/handler` symbol that **IS a layout
 symbol** — the same render machinery as a block's html render, not a separate
@@ -348,8 +353,8 @@ registered per [[data-model]].)
 - **Seeded core routes:** `/` owns one dedicated root shell and one feed,
   `POST /agents` creates an agent, and `/agent/{id}` owns the ordinary agent
   shell and feed. A page shell and its long-lived SSE stream are distinct GET
-  routes. The one action door is
-  `/agent/{id}/call` (POST); `POST /agents` is the sole agent-birth HTTP door
+  routes. The browser-action endpoint is
+  `/agent/{id}/call` (POST); `POST /agents` is the sole agent-birth HTTP endpoint
   and shares the same database route projection.
   Agents add `/agent/{id}/app/{x}` rows. Application functions may live in any
   allowed namespace; route ownership and source-transaction authorship are
@@ -358,9 +363,9 @@ registered per [[data-model]].)
   child (`:seon.route/owner` + middleware flow down). `match-by-name` gives reverse
   routing; build-time path/name conflict detection catches overlaps the
   hand-rolled `cond` silently shadowed.
-- **`/agent/{id}/call` is the one action door, and the capability gate
+- **`/agent/{id}/call` is the browser-action endpoint, and the callback gate
   (`seon.web.reactive.call`) remains the authorization boundary.** reitit dispatches the URL to that one
-  per-agent door; the fn rides as a route-data **descriptor** (the `?fn=` param),
+  per-agent endpoint; the fn rides as a route-data **descriptor** (the `?fn=` param),
   NOT its own route — **namespaces are not a routing level**. The gate authorizes
   the fn by proving at one immutable database value that the route agent is
   live and that the registered function's source transaction was authored by
@@ -375,7 +380,7 @@ registered per [[data-model]].)
 - **Interactivity is plain Clojure.** Agents author fn-calls in handler slots; a
   render-time server-side postwalk rewrites a fn-call `(cancel-order! id)` or a
   fn-ref `submit-order!` into one standard datastar `@post` to the agent's
-  `/agent/{id}/call` door (fn-call args transit-serialized in the query; the
+  `/agent/{id}/call` endpoint (fn-call args transit-serialized in the query; the
   fn-ref case pulls form values from datastar **signals** — the POST body).
   The render owner supplies the agent id; ordinary Clojure resolution supplies
   the fully qualified function symbol. Bare symbols resolve in the renderer's
@@ -446,140 +451,72 @@ the browser remains a projection of database state. A missing originating
 session returns an explicit error envelope instead of guessing which tab to
 move.
 
-## Streaming presentation state — no-history attributes end to end
+## The in-process render flow
 
-High-frequency "live" display (streamed LLM reply partials, progress text)
-rides the one database path and stays cheap by construction:
+The live channel uses `core.async.flow` graphs inside the cluster JVM:
 
-- the producing worker folds its stream completely for the real work and
-  publishes COALESCED complete-value snapshots through an isolated
-  non-blocking sink; sink backpressure drops snapshots, never slows the
-  fold;
-- the snapshot attribute is cardinality-one, unindexed, and registered
-  with the `:seon.db/no-history?` facet (`:db/noHistory`): the temporal
-  indexes never accumulate its churn, and the terminal transaction
-  retracts it while asserting the durable fact (the blob-linked reply);
-- delivery cost is the existing chain: the writer's attribute-indexed
-  interest tables wake only feeds subscribed to that attribute; the
-  reactive registry's equality suppression skips recomputation output
-  that did not change; the per-connection latest-wins mailbox hands a
-  slow browser only the newest morph. Nothing new is invented per
-  streaming feature;
-- the coalescing cadence is a config fact; the UI remains a pure function
-  of the database value, so reconnect is repaint and no replay channel
-  exists. Ephemeral display never bypasses the database without an
-  explicit fenced ruling.
+1. a transaction commits and `listen!` wakes only matching registrations
+   through a `(sliding-buffer 1)` interest channel;
+2. the render proc runs each affected agent-authored renderer through the one
+   `seon.sci.eval/evaluate` path: `fork`, `:interrupt-fn`, admission, and
+   bounded output;
+3. the registration compares the completed Clojure value with its current
+   process-local snapshot using `=` and suppresses equal output;
+4. a `mult` fans each changed stable-ID element patch to one per-tab
+   `(sliding-buffer 1)` tap for each visible render unit; and
+5. one `:io` writer proc per tab batches available Datastar element patches
+   onto that tab's single SSE connection, with bounded writes.
 
-## The live channel — selective Datastar morph SSE
+Flow topology is static within each `graph-def`. The cluster render graph names
+the interest and render procs, their `step-fn`s, bounded channels, and `conns`.
+Opening a tab creates one small tab graph whose fixed input is that tab's tap
+and whose sole writer proc owns the SSE connection; closing the tab stops that
+graph and untaps it. Core.async's `executor-for :compute` runs guarded render
+work; `executor-for :io` owns bounded socket writes. Each graph's report
+channel and unmodified `flow-monitor` are the operational and visualization
+surfaces. Flow channels are disposable in-process scheduling state, never a
+second database work ledger.
 
-The live channel is **ours** (reitit has no streaming primitives by design).
-The web-render JVM owns one interest-bearing database session. Each demanded
-normalized computation derives from the exact immutable database value supplied
-at open or by a matching committed report. There is no ambient latest database,
-global render listener, or second transaction broadcast. The agent only
-transacts datoms; it never opens or writes a stream.
+**Nothing rendered is stored.** The equality snapshot exists only in the
+registration's memory. Restart discards it and performs one render for every
+pinned canvas at boot. There is no stored render snapshot, presentation
+attribute, or replay log for display output.
 
-- **view = f(db), one complete morph.** Reitit route match plus normalized
-  path/query defines one semantic subscription key. Initial paint and each
-  relevant later database value derive the complete `[:main#app-view …]` and
-  emit one `datastar-patch-elements` event (default `outer`). Conditional
-  elements therefore disappear honestly without a second patch or renderer.
-  Equivalent tabs share one render and the same serialized bytes; their view
-  IDs own only socket replacement. Frozen as-of subscriptions do no current
-  work.
-- **Work is bounded by the normalized subscription.** One derivation consumes
-  one explicit database value. Equivalent sockets share the same serialized
-  complete element. Closing the final consumer releases the registration; no
-  later completion can publish into a replacement connection.
-- **http-kit + Datastar SDK own the stream.** The web-render process returns the
-  SDK-owned SSE response. One virtual thread drains each connection. Its
-  configured one-slot mailbox clears any older pending element before offering
-  the newest complete element, so a slow browser cannot form an unbounded queue.
-  The SDK's identity and gzip write profiles change transport bytes only.
-  `Accept-Encoding` remains authoritative. One shared scheduler emits inert
-  heartbeats, and close cleanup removes the connection, interrupts its virtual
-  thread, and releases its admission permit.
-- **Datahike reactive reads, complete rendering.** Datahike derives a
-  source-scoped dependency plan from each parsed eager read and its actual
-  inputs. A page projection unions the plans from reads that actually execute.
-  Committed transaction reports select registered reactive computations through
-  Datahike's reverse attribute interest index; matching commits mark a
-  registration dirty and advance its one pending target to the newest database
-  value without updating cached rows. Evaluation occurs lazily after settling
-  or at the configured maximum latency, so continuous writes cannot starve a
-  consumer. Missing evidence is `:all`.
-- **Declared renderer reads are database facts.** The analyzer tee persists
-  qualified keyword reads as `:seon.fn/read-attrs`; focus/recency and an optional
-  cold-start hint consume those facts. They never regex-scan function source as
-  a compatibility path. The declared set is non-transitive through helper
-  calls, so it can never exclude a Datahike read dependency or veto committed-
-  report selection. The declared set is discovery metadata, not invalidation
-  authority.
-- **Caching and equality are automatic at the reactive-read boundary.** Core
-  and agent-authored renderers do not call `memoize`. Datahike's bounded
-  weighted cache retains immutable eager results at exact database source
-  identities and computes a later result only on demand. A reactive
-  registration compares its completed Clojure value with its last delivered
-  value using `=`; equal values suppress established-consumer notification,
-  while a new consumer always receives its first current value. Hashes may
-  accelerate comparison but never decide equality. A page subscription then
-  retains the last complete serialized event for equivalent sockets. Eviction
-  affects performance only.
-- **One generic transition engine.** Root, ordinary-agent, canvas, context,
-  debug, and `/data` layouts use the same
-  acquire/select/enqueue/render/serialize transition. Page namespaces define
-  complete projection and presentation, not custom invalidation algorithms.
-  Agent-authored surfaces inherit the mechanism by participating in their
-  ordinary complete page render; no special API or caching instruction is
-  exposed to the agent.
-- **Separate GET feed path.** The shim page (`/view`, `/agent/{id}`) and its live
-  stream (`/view/feed`, `/agent/{id}/feed`) are two GET URLs; the shim's
-  `data-init="@get('…/feed')"` opens the stream. Two distinct URLs sidestep the
-  GET/POST same-URL cache collision that forces hyperlith's same-path-POST `&u=`
-  hack, and this matches datastar-clojure's own example (`tiny_gzip.clj`: page `/`,
-  stream GET `/updates`). reitit routes the feed GET to the SDK-backed SSE
-  handler over http-kit; no transport object enters page code.
-- **Transient state is signals; time-travel and reconnect are just re-renders.**
-  Transient client state lives in datastar **signals** only, never DOM attrs. Time
-  travel is `view = f(db)` over the bitemporal DB—a different
-  resolved commit, the same render. Reconnect needs no numeric `since-t` replay:
-  the first paint fires immediately on open and repaints the current view. A
-  historical request carries the complete canonical
-  `{:db-name :t :as-of :since :history :datahike/commit-id}` value; the server
-  verifies its retained lineage and echoes that value in its response/bookmark.
-  There is no bare-`:t` compatibility selector. That feed is marked frozen and
-  excluded from current broadcasts. No explicit database value means the current
-  dependency-reactive feed. The `/agent`
-  shim's time-travel controls (siblings of `#app-view`) own the feed connection;
-  one `data-effect` `@get` lets Datastar's per-attribute auto-cancellation abort
-  the prior stream, so exactly one stream targets `#app-view`. Signals hold
-  `$live`, a transient scrub `$t`, and the last complete database value; only
-  that value enters the feed URL/cache key. The slider domain may display `:t`
-  values and human timestamps, but `:datahike/commit-id` plus `:db-name` is the
-  durable lineage bookmark. A reconnect whose database name changed or
-  whose last commit is not an ancestor receives a full reset, never numeric
-  replay across lineages.
-- **The hard invariant: no agent code ever touches an SSE connection.** Agent →
-  datom → committed `:db-after` value → selective derivation → morph, one way; actions
-  reverse it (a browser POST → the cluster JVM's `:interrupt-fn` for the owning
-  agent → result datoms → selective derivation → morph). The database is the bus both ways.
+Streamed reply partials enter this same flow as another producer. The provider
+proc reduces its byte stream for the durable terminal reply while offering
+coalesced complete prefixes to the render graph; a full tap drops intermediate
+prefixes rather than delaying inference. The terminal reply blob and attempt
+receipt remain the forensic facts. A reconnect paints current database truth
+and does not replay transient prefixes.
 
-Each authored invocation owns one immutable input and guarded deadline. No
-process-global input or deadline cell can be overwritten by a nested or future
-render. The run's process and epoch fences prevent a late result from
-entering a newer turn. Repeated failure recording is bounded and cannot retain
-an unbounded set of broken symbols.
+### Fine-grained Datastar element patches
 
-The same Datastar subscription mechanism serves root, agent, debug, and data
-views. There is no provenance-routed debug stream or unused generic `/sse`
-registry. Transaction user/process is relevant to agent-derived focus semantics,
-never to dependency invalidation. Legitimate expensive units are bounded before
-building hidden hiccup; collapsed markup alone is not a compute bound.
+Initial paint is the only whole-page render. Later work is per visible render
+unit: root cards, canvas, context, debug, `/data`, and shared header units keep
+their stable element IDs and emit independent Datastar patches. Conditional
+elements disappear through the same unit patch. Equivalent render-unit demands
+share one evaluation before `mult` fan-out; a slow tab retains only its newest
+patch per unit through its `(sliding-buffer 1)` tap.
 
-The streamer is the web-render process. It owns one direct database session,
-database-scoped interests, complete derivation at exact database values, and
-browser patch delivery. Page code depends on that data contract rather than a
-transport-global registry.
+Datahike's reverse attribute interest index selects registrations from committed
+transaction reports. Each evaluation receives the report's exact immutable
+`:db-after` value. The analyzer's `:seon.fn/read-attrs` facts remain discovery
+metadata; actual observed Datahike reads determine invalidation, and missing
+evidence widens to `:all`. A registration's in-memory equality snapshot affects
+performance only and never becomes database authority.
+
+The shim page and feed remain distinct GET routes. http-kit and the Datastar SDK
+own the one SSE response per tab; `Accept-Encoding` remains authoritative.
+Transient browser state lives in Datastar signals, never DOM attributes.
+Historical requests carry the complete
+`{:db-name :t :as-of :since :history :datahike/commit-id}` value and are frozen
+from current transaction wakes. Reconnect performs an initial paint from the
+resolved current or historical database value; there is no numeric replay.
+
+The hard invariant is unchanged: no agent code touches an SSE connection.
+Agent-authored renderers return admitted values; writer procs alone serialize
+and write patches. Browser actions become database facts or guarded callback
+results, and the same render flow derives the visible consequence.
 
 ## Errors render as surfaces
 

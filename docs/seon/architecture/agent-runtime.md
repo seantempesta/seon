@@ -10,14 +10,18 @@ tags: [architecture, agent, runtime, database]
 > evidence live only in [[roadmap]].
 
 An agent is durable database state plus replaceable compute. A trigger opens a
-bounded **run**. The cluster JVM acquires that run through database CAS,
-advances one persisted **turn phase** at a time, and releases custody when work
+bounded **run**. The cluster JVM acquires that run through Datahike's
+`:db.fn/cas`, which is reserved for facts two processes race to win exactly
+once: plan freeze from absent to digest, and run claim from no process to the
+process record together with a claim-epoch increment. The run loop advances
+one persisted **turn phase** at a time and releases custody when work
 must wait or terminate. No process-local loop, promise registry, or attempt
 buffer is an authority. Killing the cluster JVM loses only transient compute;
 its replacement resumes from the database facts.
 
-The runtime has one portable `.cljc` driver. Every execution tier calls that
-same driver and supplies a small platform leaf for the phases it can execute.
+The runtime has one run loop. Its current code owner remains
+`src/seon/agent/driver.clj` until the namespace-rename wave. Platform leaves
+supply only the native work for phases the cluster JVM can execute.
 The JVM runs one virtual thread per held claim. A virtual thread may park on
 database, model, or bounded eval work without consuming a platform thread for
 the life of the run.
@@ -86,7 +90,7 @@ process ref and retains the monotonic epoch. Closing the run records the
 terminal facts, retracts the process ref, and retracts the agent's current-run
 ref in one transaction.
 
-## The portable driver
+## The run loop
 
 `seon.agent.driver` owns the control algorithm:
 
@@ -102,28 +106,32 @@ The cluster JVM advertises capabilities such as interaction, render, model
 I/O, eval, and publish. Eligibility is a pure function of that set and the
 persisted interaction status or turn phase. It does not route by agent
 identity or keep a private queue of runs. Database interests are ephemeral
-wakeups that request another scan; the scan and CAS determine authority.
+wakeups that request another scan; the scan and `:db.fn/cas` determine
+authority.
 
 Phase eligibility says who may claim; the derived execution plan says whether
 the cluster JVM can run this particular work. After parsing a proposed
-invocation and before entering the eval phase, the driver derives the plan at
+invocation and before entering the eval phase, the run loop derives the plan at
 the claim database value, verifies schema and capability coverage against its
 own inventory, and provisions any permitted remote leaves. If no tier can
 satisfy the execution plan, the result is one flat error value naming the
 missing leaves, schemas, or unresolved edges. See [[architecture]]
 §Transparent distribution.
 
-Every active tier uses this driver from the same source. Platform leaves own
-only native effects: database sessions, clocks, virtual-thread dispatch,
-provider transport, SCI invocation, and publication I/O. Sync versus async
-ceremony is confined to the entry expression. No tier owns a forked state
-machine or translates through hand-mirrored host wrappers.
+The cluster JVM uses `core.async.flow` as its one scheduling substrate. The run
+loop is a proc behind a `flow.spi/ProcLauncher` so it can select over Flow
+control and a bounded database-interest wake channel. Its `step-fn`, `conns`,
+and bounded workload-class channels live in the `graph-def`; current status
+and metrics reach `flow-monitor` through the ordinary report channel and ping
+surface. Database facts, never Flow channels, remain the durable work record.
 
-On the cluster JVM, a scan starts at most one named virtual thread per run.
-That thread drives the held claim until it closes, loses the fence, or reaches
-a phase the leaf cannot execute. Blocking work uses `:io`; SCI eval work uses
-`:compute` platform threads under the one `:interrupt-fn`; the claim virtual
-thread parks for the result.
+Each workload class uses core.async's `executor-for :io` or
+`executor-for :compute`. The eval seam runs on a `:compute` platform thread,
+arms the one `:interrupt-fn`, and holds its admitted permit until settlement.
+The run loop reduces over the frozen form plan: the accumulator is the current
+basis, initialized from the plan transaction report's `:db-after`; after each
+form, that form's transaction report supplies the next basis through
+`:db-after`.
 
 For an interaction, the cluster JVM first CASes `:pending → :running` under the
 held run fence. Only that committed receipt admits the pinned handler through
@@ -147,10 +155,10 @@ A turn is the durable record of one prompt/model/eval/publish cycle. Its
   → :published
 ```
 
-Before a turn exists, the driver treats its phase as `:unstarted`. Rendering
+Before a turn exists, the run loop treats its phase as `:unstarted`. Rendering
 creates the turn and advances it to `:rendered`. Every later transition uses
-an in-transaction CAS from the observed phase to the next phase, composed with
-the held run fence. The cluster JVM may repeat a read, but it cannot repeat a
+an in-transaction `:db.fn/cas` from the observed phase to the next phase,
+composed with the held run fence. The cluster JVM may repeat a read, but it cannot repeat a
 committed phase transition.
 
 The turn pins the database value used to render the prompt through its rendered
@@ -193,7 +201,8 @@ admitted and the batch may begin. If receipts exist, takeover terminalizes
 still-running rows as interrupted and advances from their durable evidence.
 Recovery never fabricates success and never replays an already terminal form.
 
-Receipt transitions compose with the held run epoch and the turn phase CAS.
+Receipt transitions compose with the held run epoch and the turn phase
+`:db.fn/cas`.
 They are therefore both execution evidence and the write fence against stale
 processes.
 
@@ -205,8 +214,9 @@ predicate—installs the one zero-argument `:interrupt-fn`. SCI calls it at ever
 when it expires, `interrupt!` stops the eval uncatchably.
 
 Malli never constructs or forks a private SCI context. The schema projection
-resolves every admitted `[:fn]` symbol to its already-materialized corpus
-callable before Malli compiles the schema. Predicate invocation therefore runs
+resolves every admitted `[:fn]` symbol to its already-materialized
+program-graph callable before Malli compiles the schema. Predicate invocation
+therefore runs
 in the surrounding retained `ctx`. If Malli catches SCI's interruption marker
 or replaces it with a schema error, the runtime retains the fired `time-limit`
 result and returns the canonical flat error value.
@@ -244,7 +254,7 @@ cluster repair sweep.
 - A live claim remains untouched.
 - A cleanly released open run is reacquired at the next epoch.
 - An expired foreign claim is taken over only through the heartbeat-and-epoch
-  CAS.
+  `:db.fn/cas`.
 - The phase cursor and receipts determine the next safe step.
 - A stale holder's later mutation fails the same run fence used during normal
   execution.
@@ -282,8 +292,9 @@ Creation does not start hidden execution. A message or due schedule opens a run
 through the single writer; concurrent open attempts race on the same agent-run
 pointer and only one wins.
 
-One scheduler derives due work from schedule facts and opens runs. It does not
-own agent execution or heartbeat state. Messages arriving during an open run
+One schedule proc derives due work from schedule facts and opens runs through
+the same Flow graph. Its `step-fn` does not own agent execution or heartbeat
+state. Messages arriving during an open run
 become explicit consumed-input edges and may extend the run's work window
 without opening a second run.
 
@@ -308,10 +319,10 @@ the only program reconstruction.
 
 ## Isolation and process ownership
 
-The cluster JVM executes agent code, owns transactions, and serves the
-committed-transaction feed for its store. The web-render JVM evaluates only
-trusted pure projections over acquired database values. Disposable leaf
-runtimes run packages and selected platform workers, not the agent driver. See
+The cluster JVM executes agent code, owns transactions and the
+committed-transaction feed for its store, evaluates renders through
+`seon.sci.eval/evaluate`, and serves its own web UI. Disposable leaf runtimes
+run packages and selected platform workers, not the run loop. See
 [[architecture]] for the complete topology.
 
 One cluster has one cluster JVM because Datahike's `:self` writer permits one
@@ -321,7 +332,7 @@ without becoming part of the durable agent identity.
 
 ## What the database gives us
 
-- single-writer CAS establishes one winner for a claim or phase;
+- single-writer `:db.fn/cas` establishes one winner for a claim or phase;
 - immutable database values make each decision reproducible;
 - temporal history preserves claim, heartbeat, cursor, and receipt
   archaeology;
@@ -338,7 +349,7 @@ turn phase and receipts are the workflow and recovery record.
 - [[architecture]] — process topology and the portable capability seam.
 - [[data-model]] — run, turn, attempt, eval, and error attributes.
 - [[observability]] — receipt forensics and temporal claim archaeology.
-- [[ui]] — pure database-value renders and the independent web-render process.
-- [[toolkit]] — effect classes and `:seon.capability/op-id`.
+- [[ui]] — the in-process render flow and pure database-value renders.
+- [[toolkit]] — effect classes and the one `:seon.effect/request-id`.
 - [[laws]] — circuit-breaker and one-mechanism laws.
 - [[roadmap]] — implementation state and evidence.

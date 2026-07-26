@@ -43,12 +43,11 @@ sample sizes, and acceptance evidence belong in PRD research and roadmaps.
 
 ## Runtime
 
-- **Process jobs stay narrow.** The cluster JVM performs transactions, emits
-  the committed feed, and executes agent work for its one store; it never
-  serves HTTP. The web-render JVM performs trusted database-value derivation
-  and HTTP/SSE delivery; it never executes agent code. Leaf runtimes are
-  disposable native-effect capacity. Process replacement does not broaden a
-  role.
+- **Process jobs stay narrow.** The cluster JVM performs transactions, runs
+  agents and guarded renders, owns the program graph and render flow, and
+  serves HTTP/SSE for its one store. Leaf runtimes are disposable native-effect
+  capacity. Supervision, bounded evals, and Integrant component restart protect
+  the cluster JVM; process walls do not split its co-located responsibilities.
 - **Claims and receipts outrank process memory.** A run's
   `:seon.agent.run/process`, epoch, and heartbeat establish custody; the turn
   phase and attempt/eval receipts establish admitted and completed work.
@@ -56,10 +55,14 @@ sample sizes, and acceptance evidence belong in PRD research and roadmaps.
 - **Same source or same artifact.** Cross-runtime policy is one portable
   `.cljc` core or one shared compiled artifact. Each tier adds one native leaf,
   with reader conditionals only at entry expressions. Hand-mirrored wrappers
-  and duplicated drivers are not interfaces.
+  and duplicated run loops are not interfaces.
 - **Replacement is one mechanism.** When consumers move to the portable owner,
   the superseded path is deleted. Compatibility shims and dual-maintained
-  drivers, renderers, or capability surfaces violate the architecture.
+  run loops, renderers, or capability surfaces violate the architecture.
+- **Scheduling is Flow.** Runtime owners are `core.async.flow` procs with
+  `step-fn`s, bounded workload channels, `conns`, a `graph-def`, and a report
+  channel. Custom launchers implement `flow.spi/ProcLauncher`; flow-monitor is
+  the operational surface. Database facts remain the durable work record.
 - **Reset, never migrate.** A cluster reconciles to current code and schema by
   resetting and reinstalling from the manifest and program facts. No data
   migration path exists; a live proof runs on a freshly reset cluster at the
@@ -111,8 +114,11 @@ The full decision record is [[011-tests-find-design-issues]].
 - **Localized tests belong to lanes; full suites belong to frozen trees.** A
   lane runs the tests for its own boundary; complete suites are integration
   checkpoints over a coherent frozen tree.
-- **Assertions target facts, transitions, envelopes, and CAS outcomes.** Never
-  exact prose.
+- **Assertions target facts, transitions, envelopes, and Datahike
+  `:db.fn/cas` outcomes.** `:db.fn/cas` is reserved for facts two processes
+  race to win exactly once: plan freeze from absent to digest, and run claim
+  from no process to the process record together with a claim-epoch increment.
+  Never exact prose.
 
 - **No datom string-size limit exists; amplification is the real cost.** Datahike
   validates `:db.type/string` with `string?` alone; a 10 MB value transacts in

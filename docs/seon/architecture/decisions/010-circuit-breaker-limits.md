@@ -9,7 +9,8 @@ tags: [decision, architecture, config, runtime]
 
 ## Context
 
-A hidden or routinely reached bound becomes an accidental scheduler: it
+A hidden or routinely reached bound becomes an accidental scheduling
+mechanism: it
 silently throttles normal work, obscures capacity defects, and makes behavior
 depend on literals scattered through runtime code. SCI has one `time-limit`;
 bounded projections, queues, heap ceilings, connection counts, and body sizes
@@ -36,8 +37,9 @@ or the operation as a structured configuration error.
 - Normal work does not encounter protective limits.
 - Capacity tuning changes facts, not call sites.
 - A fired limit is observable and attributable.
-- Bounded queues and pools remain safety containment, while admission and
-  scheduling are designed explicitly.
+- Bounded Flow workload channels and `executor-for :io` / `:compute` remain
+  safety containment, while procs, `step-fn`s, `conns`, and the `graph-def`
+  express scheduling explicitly.
 - New limits follow the same schema, provenance, calibration, and error law.
 
 ## Related

@@ -29,43 +29,43 @@ hallucinating interfaces.
 
 ---
 
-## The Dual-Track System (CLJ + CLJS)
+## Runtime tiers
 
-Seon is **one system split across two co-equal halves that converge at the wire
-boundary**. The current pod ↔ wire-server split is the seed of this model.
+Seon has two runtime process kinds: one cluster JVM per store and disposable
+leaf runtimes.
 
-- **JVM / server (`.clj`)** — the server and heavy processing. The
-  **authoritative DB writer** (today the `wire-server` process). Heavy compute,
-  durable storage, and the sole write path live here. In practice the live JVM
-  side today is **basically just the datahike writer** — most of the broader
-  `.clj` app (Integrant system, the `core.async.flow` routing backbone) is
-  **paused**, kept for when JVM core-systems integration resumes. Treat
-  `core.async.flow` as a parked JVM-track concern, not an active one.
-- **On-device / pod (`.cljs`)** — runs on device (a long-running Node process
-  today). Holds a **read-only replica of the DB** (local lazy db values; memory
-  ∝ working set) and does **local function execution** (the agent loop, eval,
-  render). It **forwards every write over a Unix socket** to the JVM writer; it
-  never writes the store directly. Uses native CLJS `^:async`/`await` for
-  Promise interop — **no `core.async` in the pod**.
+- **Cluster JVM (`.clj` / `.cljc`)** — owns the Datahike writer, run loop,
+  guarded evals, program graph, render pipeline, and the cluster's HTTP/SSE web
+  UI. Reads are pointers into immutable database values and writes call the
+  co-located transaction owner.
+- **Leaf runtimes** — run packages and selected platform workers on demand.
+  They own no durable state and receive only admitted ordinary request data.
+
+The browser is a client, not a runtime process. It receives static assets and
+Datastar element patches and has no database or application runtime.
+
+Store open takes one `flock` assertion before Datahike is opened. A second
+cluster JVM for the same store refuses loudly. This is the one fenced exception
+where coordination precedes the database. Supervision, bounded evals, and
+Integrant component restart protect the cluster JVM; a separate render process
+is not a containment boundary.
+
+`core.async.flow` is the one scheduling substrate. Runtime owners are procs
+with `step-fn`s; bounded channels and `conns` form the `graph-def`; the report
+channel and flow-monitor provide the operational surface. Custom owners use
+`flow.spi/ProcLauncher` without forking Flow. Workload channels use
+`executor-for :io` or `executor-for :compute`; guarded eval additionally owns
+the one `:interrupt-fn`, a platform thread, and its admitted permit.
 
 ### Lane Discipline: `.clj` / `.cljs` / `.cljc`
 
-Surfaces use **`.cljs` files alongside `.clj` files** — the CLJS compiler reads
-`.cljs`, the CLJ compiler reads `.clj`, neither sees the other's. Choose by
-where the code runs:
+Choose a source extension by the runtime that owns the code:
 
-- **`.cljs`** — on-device code: the agent loop, `seon.eval`, `seon.ctx`,
-  `seon.render`, `seon.db` (the pod's read-local + write-forwarding face),
-  `seon.agent.*`, the web UI (`seon.web.serve`/`debug`).
-- **`.clj`** — server/heavy code: the authoritative datahike writer and the
-  Integrant-managed JVM app.
-- **`.cljc`** — only genuinely platform-portable code (e.g. `seon.schema`,
-  `seon.instrument`). Don't author a `.cljc` for a namespace that has a live
-  sibling on the other track unless both sides converge on its shape.
-
-The active focus is the CLJS pod + the datahike wire-server. The broader JVM
-main-app integration is currently paused; assume CLJS-pod context unless a task
-is explicitly JVM-track.
+- **`.clj`** — cluster-JVM owners and JVM platform leaves.
+- **`.cljs`** — JavaScript leaf-runtime owners only.
+- **`.cljc`** — the default for genuinely portable capability cores and pure
+  transformations. Reader conditionals occur only at the entry expression that
+  bridges platform ceremony.
 
 ### The `.internal` namespace pattern
 
@@ -319,8 +319,11 @@ retract it explicitly — omitting a key means "leave unchanged".)
 
 ## Errors Are Values (agent-facing function boundaries)
 
-Functions an agent calls directly — the capability functions — **return an
-envelope, they do NOT throw**. The canonical shape:
+Functions an agent calls directly — the flat `my.*` tool functions — enter the
+one guarded `seon.effect/request!` function carrying the request
+identity. `my.fs`, `my.shell`, `my.web`, and `my.blob` follow the same rule;
+their protected policy and platform leaves remain under `seon.*`. These
+functions **return an envelope; they do not throw**. The canonical shape:
 
 ```clojure
 {::ok? true  …data…}                                   ; success
@@ -406,14 +409,15 @@ wrapper registers no wrapper at all. There is no hand-maintained symbol set.
 outside `src/seon/db/`. Everything else uses `db/transact!`, `db/query`,
 `db/pull`, `db/entity`, `db/listen!`.
 
-On the pod, `seon.db` is a thin face over the dual-track wire boundary:
+Inside the cluster JVM, `seon.db` is co-located with the transaction owner:
 
 - **Reads are local and synchronous** — `query`/`pull`/`entity` resolve against
-  the current db value (`@*conn*`, the read-only replica). Compose them in
-  straight-line code.
-- **Writes are forwarded to the JVM writer** — `transact!` is `^:async` and
-  routes over the Unix socket to the authoritative writer. Await it (it
-  auto-awaits) and you get an **envelope**, never a throw.
+  the invocation's immutable database value. Compose them in straight-line
+  code.
+- **Writes are direct function calls** — `transact!` calls the sole
+  transaction owner and returns an **envelope**, never a throw. A leaf or
+  remote client crosses the typed protocol only through its admitted effect
+  request; the agent path has no database wire.
 
 ```clojure
 (require '[seon.db :as db]
@@ -900,9 +904,12 @@ the prose `;` lines; don't hand-roll a `(str ";; " …)` prefixer in a section f
 
 ## SSE Patterns
 
-See the `/datastar-web-ui` skill for SSE patterns (direct response vs background
-push, buffer design, refresh triggers, handler hot reload). The pod's web UI is
-`seon.web.serve` + `debug` (hiccup, `.cljs`).
+The web UI uses the cluster JVM's one in-process render Flow: transaction →
+`listen!` interest wake through `(sliding-buffer 1)` → guarded render proc →
+equality suppression → `mult` → per-tab `(sliding-buffer 1)` tap → per-tab
+`:io` writer proc → one bounded SSE connection. Initial paint is the only
+whole-page render; later updates are stable-ID Datastar element patches.
+Rendered snapshots are never stored.
 
 ---
 
@@ -920,7 +927,7 @@ clj-reload calls two per-namespace 0-arg hooks if they exist:
 
 | Hook | When | Use For |
 |------|------|---------|
-| `before-ns-unload` | Before ns is removed | Stop go-loops, drain promises, cancel schedulers, remove watches |
+| `before-ns-unload` | Before ns is removed | Stop go-loops, drain promises, stop procs, remove watches |
 | `after-ns-reload` | After ns is reloaded | Re-populate from Integrant system, restart background processes |
 
 ### Pattern
@@ -940,7 +947,7 @@ clj-reload calls two per-namespace 0-arg hooks if they exist:
 
 ### Rules
 
-1. **Any `defonce` holding runtime state must have hooks.** Caches, registries, go-loops, channels, promises, schedulers.
+1. **Any `defonce` holding runtime state must have hooks.** Caches, registries, go-loops, channels, promises, and Flow procs.
 2. **`before-ns-unload` must be idempotent.** It may be called when state is already nil.
 3. **`after-ns-reload` should re-derive from Integrant.** The system map is the source of truth.
 4. **Don't add hooks for `defonce` holding immutable config.** Pure values, schema definitions.
