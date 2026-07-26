@@ -103,13 +103,17 @@ All existing or same-day ruled; the loop invents none of them:
   spec-expressible (prose, UI feel) stays with `src-inspect-ai`, outside
   the green-loop.
 
-## Open questions for the owner
+## Open questions — ALL RESOLVED (owner, 2026-07-26 evening)
 
-1. ~~Accrete-vs-adapt default~~ RESOLVED above: accrete-first standing.
-2. Who arbitrates a consumer that refuses/fails to adapt — root always, or
-   the planner up to a budget?
-3. Does a plan lineage get its own budget fact (total turns across all
-   owners) in addition to per-owner escalation thresholds?
-4. Local-model implementers: which model rides the free tier first
-   (MLX/DiffusionGemma vs a small hosted row), and is implementer identity
-   a lineage fact so cost attribution is queryable?
+1. Accrete-vs-adapt default: **accrete-first standing policy.**
+2. Arbitration of a consumer that fails to adapt: **root, always.**
+3. Lineage budget fact (total turns across owners) on top of per-owner
+   thresholds: **yes** (owner: tentatively interested — treat as a config
+   fact from day one, cheap to carry).
+4. Implementer tier: **MLX local models, hammered freely** — this loop is
+   the real test of the distributed implementation. The ruled economics:
+   the smart model iterates a LIMITED step budget on the data model and
+   tests only (the contract layer); the distributed multi-step/hop/retry
+   system of local implementers satisfies everything and returns the diff;
+   the smart planner then decides more-or-victory. Implementer identity is
+   a lineage fact so cost-per-green is queryable.
