@@ -82,3 +82,20 @@ source namespace and form directly instead of requiring an IPC value-path
 diagnostic.
 
 Triage 2026-07-23 — **DISSOLVES into post-P4 `eval.cljs` self-host deletion**; repairability must survive through the landed loader door and SCI path.
+
+## 2026-07-26 post-indexer residual
+
+After the JVM page producer committed all 12 pages, the JVM config transaction
+stamped the exact release, and watcher, writer, and host reached readiness,
+the condemned pod failed later with:
+
+```text
+start-runtime!: committed program reconstruction failed
+Committed program acquisition failed.
+
+```
+
+This no longer blocks initialization, artifact publication, template cloning,
+writer readiness, or host readiness. It is the remaining pod reconstruction
+residual for the step-6 JVM runtime owner; do not restore a pod-side program
+producer or weaken the startgate to hide it.
