@@ -863,10 +863,30 @@ package-runtimes research is deferred, not cancelled.
 **O11. Implementation goes to sol lanes; Fable for design review only**, used
 sparingly.
 
-**Prototype disposition:** `src-flow-prototype/` stays outside `src/` because
-it does not compile against the real system, and it is **deleted, not merged,**
-when the real implementation lands. Its attack suite graduates to tests. Two
-implementations of one mechanism is the smell the rules ban.
+**O12. IT IS NOT A PROTOTYPE. IT IS THE SYSTEM. RIP AND TEAR.**
+(owner, 2026-07-25 night, overriding the disposition recorded an hour earlier.)
+
+`src-flow-prototype/` moves into `src/` under real namespaces and the old paths
+are DELETED. Not kept beside it, not migrated onto, not preserved until the new
+one is proven. **Git is the archive** — every deletion is recoverable, so there
+is no reason to carry both.
+
+The owner's reasoning, and it is the sharpest statement of the failure mode
+this whole ledger exists to prevent: *keeping the old one and the new one at
+the same time is how the design gets broken.* Every hour both exist is an hour
+someone reconciles the new design against the old one's shape — which is
+exactly how the previous conversion became a port.
+
+Consequences:
+
+- The sixteen defects D1-D16 are fixed **in `src/`**, not in a sandbox first.
+  CUT FIRST, SEAM-FIX SECOND already rules this: a discovered seam defect gets
+  a one-line issue and the cutting continues.
+- The attack suite becomes real tests under `test/`, not a parallel harness.
+- "Wait until it is production-ready" is REFUSED. It becomes production by
+  being the only thing there.
+- Deleting the placement layer from the old driver is subsumed — that driver is
+  going. The lane doing it is being widened rather than finished.
 
 ## Vocabulary — RATIFIED by the owner, 2026-07-25
 
