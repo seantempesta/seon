@@ -3,6 +3,10 @@
   (:require
     [seon.agent.core]
     [seon.db.id :as db.id]
+    ; loads the :seon.eval/* registrations this namespace's form schemas
+    ; reference — a schema reference requires its registering owner in
+    ; the same admitted population
+    [seon.eval.receipt]
     [seon.schema :as schema]))
 
 ;; The run contract is portable because the synchronous JVM driver is now the

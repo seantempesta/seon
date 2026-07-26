@@ -1161,6 +1161,28 @@
 ;;; of generating fresh candidates — fresh candidates change the logical
 ;;; transaction hash, which the writer correctly refuses as a conflict.
 
+     (defn- ^:async recovered-allocation-rows!
+       "Sequentially recover each allocation's identity datoms from the
+       committed transaction. Awaits recurse through self-calls — the
+       one async-recursion idiom this namespace already uses — because
+       an inner fn is not an async context on the self-host tier."
+       [database transaction allocations]
+       (if (empty? allocations)
+         []
+         (let [{allocation-key ::key identity-attr ::identity-attr}
+               (first allocations)
+               pairs
+               (vec (await
+                     (db/query
+                      {::db/db database
+                       ::db/query '[:find ?value ?entity
+                                    :in $ ?tx ?attr
+                                    :where [?entity ?attr ?value ?tx]]
+                       ::db/args [transaction identity-attr]})))]
+           (into [[allocation-key pairs]]
+                 (await (recovered-allocation-rows!
+                         database transaction (next allocations)))))))
+
      (defn- ^:async allocation-recovery
        "Recover a committed allocation by its replay identity, or nil.
        Queries through the one `seon.db/query` facade — a wire database
@@ -1179,19 +1201,8 @@
                                      [?tx :seon.db.protocol/request-id
                                       ?request-id]]
                         ::db/args [op-id]})))]
-           (let [rows
-                 (mapv (fn [{allocation-key ::key
-                             identity-attr ::identity-attr}]
-                         [allocation-key
-                          (vec (await
-                                (db/query
-                                 {::db/db database
-                                  ::db/query '[:find ?value ?entity
-                                               :in $ ?tx ?attr
-                                               :where
-                                               [?entity ?attr ?value ?tx]]
-                                  ::db/args [transaction identity-attr]})))])
-                       allocations)]
+           (let [rows (await (recovered-allocation-rows!
+                              database transaction allocations))]
              (if (every? (fn [[_ pairs]] (= 1 (count pairs))) rows)
                {::ids (into {} (map (fn [[k pairs]] [k (ffirst pairs)]))
                             rows)

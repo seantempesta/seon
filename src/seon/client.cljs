@@ -2002,20 +2002,13 @@
                 (throw
                  (ex-info "Cluster apply config reconciliation failed."
                           reconciled)))
+              ;; Group-4 cut: `seon.agent/ensure-initial-agent!` is deleted, so
+              ;; pod cluster apply no longer births root or the initial agent.
+              ;; Agent birth belongs to the cluster JVM (step 6);
+              ;; docs/seon/issues/cluster-apply-no-longer-births-root-agent.md.
               (let [installed (await (acquire-configuration!))
                     _ (await (prove-launch-configuration! envelope installed))
                     _ (db/install-configuration-context! installed)
-                    initial-agent
-                    (await
-                     (db/with-tx-context
-                      {:seon.db/user [:seon.agent/id "root"]
-                       :seon.db/process
-                       (db.process/lookup-ref :seon.db.process/boot)}
-                      (fn [] (agent/ensure-initial-agent! {}))))
-                    _ (when (initial-agent-failure? initial-agent)
-                        (throw
-                         (ex-info "Cluster apply initial agent birth failed."
-                                  initial-agent)))
                     stamped
                     (await
                      (stamp-applied-identity! expected base-projection))
@@ -2023,15 +2016,11 @@
                 {:seon.cluster.apply/ok? true
                  :seon.cluster.apply/changed?
                  (or (:seon.runtime.state/changed? reconciled)
-                     (::agent/root-created? initial-agent)
-                     (::agent/initial-created? initial-agent)
                      (:seon.cluster.apply/changed? stamped))
                  :seon.cluster.apply/config-changed?
                  (:seon.runtime.state/changed? reconciled)
-                 :seon.cluster.apply/root-created?
-                 (boolean (::agent/root-created? initial-agent))
-                 :seon.cluster.apply/initial-agent-created?
-                 (boolean (::agent/initial-created? initial-agent))
+                 :seon.cluster.apply/root-created? false
+                 :seon.cluster.apply/initial-agent-created? false
                  :seon.cluster.apply/identity expected
                  :seon.cluster.apply/database
                  (select-keys after [:db-name :t :datahike/commit-id])}))))
