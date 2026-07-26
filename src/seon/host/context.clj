@@ -1395,22 +1395,22 @@
   ([writer]
    (build-base! writer (base-load-plan)))
   ([writer load-plan]
-  (let [wrapper-registry (registry)
+  (let [holder (guard/holder)
+        wrapper-registry (registry)
         toolkit-delegates (atom {})
         tier-inventory
         (register-host-capabilities! wrapper-registry writer
                                      toolkit-delegates)
-        ctx (sci/init
-             {:load-fn (registry-load-fn wrapper-registry writer)
-              :namespaces {'clojure.core interrupt/clojure-core
-                           'clojure.string interrupt/clojure-string}
-              :classes {'java.util.Date java.util.Date
-                        'java.lang.Long java.lang.Long
-                        'Long java.lang.Long}
-              :interrupt-fn
-              (fn []
-                (when-let [holder (::guard/holder (sci.ctx-store/get-ctx))]
-                  ((::guard/check! holder))))})
+        ctx (assoc
+             (sci/init
+              {:load-fn (registry-load-fn wrapper-registry writer)
+               :namespaces {'clojure.core interrupt/clojure-core
+                            'clojure.string interrupt/clojure-string}
+               :classes {'java.util.Date java.util.Date
+                         'java.lang.Long java.lang.Long
+                         'Long java.lang.Long}
+               :interrupt-fn (guard/interrupt-fn holder)})
+             ::guard/holder holder)
         report (load-portable-slice! ctx wrapper-registry load-plan)
         _ (load-host-toolkit-bindings! ctx wrapper-registry
                                        toolkit-delegates load-plan)

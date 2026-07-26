@@ -127,6 +127,15 @@
     (is (= 4950 value))
     (is (pos? (guard/interpreter-steps-used holder)))))
 
+#?(:clj
+   (deftest carrier-fairness-park-preserves-entry-counting
+     (let [holder (guard/holder)
+           interrupt-fn (guard/interrupt-fn holder)]
+       (guard/reset! holder (policy 65536 :count))
+       (dotimes [_ 65536]
+         (interrupt-fn))
+       (is (= 65536 (guard/interpreter-steps-used holder))))))
+
 (deftest output-policy-uses-the-same-flat-steering-shape
   (let [holder (guard/holder)]
     (guard/reset! holder (policy 100 :enforce))
@@ -147,5 +156,5 @@
    (deftest portable-guard-has-no-thread-or-executor-dependency
      (let [source (slurp "src/seon/host/guard.cljc")]
        (is (not (re-find #"\bThread\b|\bExecutor" source)))
-       (is (= 1 (count (re-seq #"#\?\(" source)))
-           "deadline arming is the only reader-conditional site"))))
+       (is (= 2 (count (re-seq #"#\?\(" source)))
+           "deadline arming and carrier fairness are the reader conditionals"))))

@@ -43,16 +43,25 @@
 (def ^:private output-config-key-index 4)
 (def ^:private fired-policy-kind-index 5)
 (def ^:private policy-reported-index 6)
+(def ^:private carrier-fairness-entry-mask 0xffff)
+(def ^:private carrier-fairness-park-nanos 1000)
 
-(declare check-holder! unreported-policy-kind)
+(declare check-arrays! unreported-policy-kind)
 
 (defn holder
   "Create one stable interpreter-step counter for a retained SCI context."
   {:malli/schema [:=> [:cat] ::holder]}
   []
-  (let [holder {::interpreter-step-counter (long-array 3)
-                ::control-cell (object-array 7)}]
-    (assoc holder ::check! (fn [] (check-holder! holder)))))
+  (let [interpreter-step-counter (long-array 3)
+        control-cell (object-array 7)
+        holder {::interpreter-step-counter interpreter-step-counter
+                ::control-cell control-cell}]
+    (assoc holder
+           ::check!
+           (fn []
+             (check-arrays! holder
+                            interpreter-step-counter
+                            control-cell)))))
 
 (defn reset!
   "Reset a retained context's holder for one invocation."
@@ -191,14 +200,23 @@
        :seon.error/kind policy-kind
        :seon.error/data (dissoc data ::policy-kind)})))
 
-(defn- check-holder!
-  [{::keys [^longs interpreter-step-counter ^objects control-cell] :as holder}]
+(defn- check-arrays!
+  [holder ^longs interpreter-step-counter ^objects control-cell]
   (let [interpreter-steps-remaining
         (unchecked-dec (aget interpreter-step-counter remaining-index))]
     (aset interpreter-step-counter remaining-index interpreter-steps-remaining)
     (when (and (= 1 (aget interpreter-step-counter enforce-index))
                (neg? interpreter-steps-remaining))
-      (stop! holder :budget)))
+      (stop! holder :budget))
+    #?(:clj
+       (when (zero?
+              (bit-and
+               (unchecked-subtract
+                (aget interpreter-step-counter initial-index)
+                interpreter-steps-remaining)
+               carrier-fairness-entry-mask))
+         (java.util.concurrent.locks.LockSupport/parkNanos
+          carrier-fairness-park-nanos))))
   (when-let [interrupted? (aget control-cell interrupted-index)]
     (when (interrupted?)
       (stop! holder :timeout)))
@@ -207,8 +225,8 @@
 (defn check!
   "Charge one SCI safepoint, then check the platform interrupt predicate."
   {:malli/schema [:=> [:cat ::holder] :nil]}
-  [holder]
-  (check-holder! holder))
+  [{::keys [check!]}]
+  (check!))
 
 (defn interrupt-fn
   "Return the SCI safepoint closure for one retained context holder."
