@@ -198,6 +198,14 @@ carried stale evidence within a day. Re-verify before starting.
   acceptance item.
 - **Pod cut groups 1–4 launched** the same day, delete-never-port; group 5
   waits for step 5's producer replacement.
+- **Division of construction (owner, 2026-07-26 night).** The system is
+  built spec-first BY US, not by live agents: the Fable orchestrator
+  personally authors every contract layer — data schemas, `:=>` function
+  contracts with relational `:fn` properties, and the generative/property
+  tests — and sol lanes implement against those contracts until green.
+  Live agents building the system is explicitly NOT the construction
+  model; the generate-code loop is a product capability, not our build
+  process.
 - **The render contract is two projections on one unit (owner, 2026-07-26
   night).** Any value carrying `:seon.render/ai` and `:seon.render/html` is
   renderable to both destinations: the `ai` projection derives into agent
