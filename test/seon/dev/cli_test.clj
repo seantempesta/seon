@@ -1173,6 +1173,7 @@
                       "    host: forced\n"
                       "    writer: forced\n"
                       "● cluster default reset\n"
+                      "  database: empty\n"
                       "  release: "
                       (:seon.dev.artifact/application-digest manifest) "\n"
                       "  next: bin/seon cluster apply default\n")

@@ -104,6 +104,38 @@
       (is (= (::launch/process source)
              (::launch/process target))))))
 
+(deftest matching-release-template-replaces-the-cluster-with-an-isolated-clone
+  (let [root (fs/create-temp-dir {:prefix "seon-template-store-"})
+        cluster-dir (fs/path root "data/clusters/example")
+        database (fs/path cluster-dir "db")
+        configuration
+        {:seon.dev.config/root (str root)
+         :seon.dev.config/cluster-name "example"
+         :seon.dev.config/cluster-dir (str cluster-dir)
+         :seon.dev.config/launch-descriptor
+         {::launch/database
+          {:seon.db.protocol/database-path (str database)}}}
+        manifest
+        {:seon.dev.artifact/application-digest
+         (apply str (repeat 64 "a"))}
+        value (fs/path database "value")]
+    (try
+      (fs/create-dirs database)
+      (spit (str value) "template")
+      (let [template
+            (fs/path
+             (cluster/publish-template-database! configuration manifest)
+             "value")]
+        (spit (str value) "changed target")
+        (is (= {:seon.dev.cluster/template? true
+                :seon.dev.cluster/database-path (str database)}
+               (cluster/reset-database! configuration manifest)))
+        (is (= "template" (slurp (str value))))
+        (spit (str value) "diverged clone")
+        (is (= "template" (slurp (str template)))))
+      (finally
+        (fs/delete-tree root {:force true})))))
+
 (deftest package-clusters-live-in-operator-state-not-the-immutable-release
   (let [source (::cluster/configuration (target-request))
         configuration
@@ -270,9 +302,13 @@
         config/publish-applied-manifest!
         (fn [selected]
           (swap! effects conj [:publish selected])
-          selected)]
+          selected)
+        cluster/publish-template-database!
+        (fn [selected selected-manifest]
+          (swap! effects conj [:template selected selected-manifest])
+          "/template")]
        (is (= result (cluster/apply! request))))
-      (let [[lock packages run publish] @effects
+      (let [[lock packages run template publish] @effects
             [_ argv environment directory] run]
         (is (= [:lock configuration :cluster 600000] lock))
         (is (= :packages packages))
@@ -283,6 +319,7 @@
              (get environment "SEON_CLUSTER_APPLY_RESULT")
              (str (fs/path process-dir "cluster-apply"))))
         (is (= (str root) directory))
+        (is (= [:template target-configuration manifest] template))
         (is (= [:publish target-configuration] publish)))
       (finally (fs/delete-tree root {:force true})))))
 
@@ -481,10 +518,15 @@
       config/publish-applied-manifest!
       (fn [selected]
         (swap! effects conj :publish)
-        selected)]
+        selected)
+      cluster/publish-template-database!
+      (fn [_ _]
+        (swap! effects conj :template)
+        "/template")]
      (is (= result (cluster/apply! request))))
     (is (= [[:own process/writer-id] :writer-start :apply
             [:stop process/writer-id writer-record]
+            :template
             :publish]
            (mapv #(if (and (vector? %) (= :own (first %)))
                     (subvec % 0 2)

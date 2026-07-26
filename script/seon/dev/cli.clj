@@ -835,36 +835,11 @@
              (cluster/request
               {::cluster/configuration configuration
                ::cluster/name cluster-name})))
-          {:keys [stop-results manifest]}
+          {:keys [stop-results manifest reset-database]}
           (state/with-lock
            configuration :stack 1800000
            #(let [_ (assert-current-database-layout! target-configuration)
                   _ (require-no-retained-restore! configuration :cluster-reset)
-                  database
-                  (or
-                   (get-in target-configuration
-                           [:seon.dev.config/launch-descriptor
-                            ::launch/database
-                            :seon.db.protocol/database-path])
-                   (some-> (:seon.dev.config/cluster-dir
-                            target-configuration)
-                           (fs/path "db")
-                           str))
-                  _ (when-not (and (string? database)
-                                   (= database
-                                      (str
-                                       (fs/path
-                                        (:seon.dev.config/cluster-dir
-                                         target-configuration)
-                                        "db"))))
-                      (throw
-                       (ex-info
-                        "The selected cluster database path is inconsistent."
-                        {:seon.dev.cluster/requested cluster-name
-                         :seon.dev.cluster/database-path database
-                         :seon.dev.cluster/cluster-dir
-                         (:seon.dev.config/cluster-dir
-                          target-configuration)})))
                   stopped
                   (stop-processes!
                    target-configuration
@@ -872,11 +847,6 @@
                    (disj (set (process/target-process-ids
                                target-configuration))
                          process/watcher-id))
-                  _ (when (fs/exists? database) (fs/delete-tree database))
-                  _ (config/delete-applied-manifest! target-configuration)
-                  _ (cluster/reset-package-skeleton!
-                     (:seon.dev.config/launch-descriptor
-                      target-configuration))
                   selected (select-config configuration nil)
                   current
                   (if (= false
@@ -896,13 +866,24 @@
                        selected
                        (fn [start-owned!]
                          (publish-source-artifact!
-                          selected start-owned!))))]
+                          selected start-owned!))))
+                  reset-database
+                  (cluster/reset-database! target-configuration manifest)
+                  _ (config/delete-applied-manifest! target-configuration)
+                  _ (cluster/reset-package-skeleton!
+                     (:seon.dev.config/launch-descriptor
+                      target-configuration))]
               {:stop-results (cond-> [stopped]
                                watcher-stop (conj watcher-stop))
-               :manifest manifest}))]
+               :manifest manifest
+               :reset-database reset-database}))]
       (doseq [result stop-results]
         (print-stop-evidence! "  " result))
       (println (str "● cluster " cluster-name " reset"))
+      (println (str "  database: "
+                    (if (:seon.dev.cluster/template? reset-database)
+                      "template clone"
+                      "empty")))
       (println (str "  release: "
                     (:seon.dev.artifact/application-digest manifest)))
       (println (str "  next: bin/seon cluster apply " cluster-name)))))

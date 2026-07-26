@@ -37,6 +37,118 @@
 (def ^:private apply-result-byte-limit (* 1024 1024))
 (def ^:private apply-diagnostic-character-limit 4096)
 
+(declare bounded-diagnostic)
+
+(defn- template-database-path
+  [configuration manifest]
+  (let [application-digest
+        (:seon.dev.artifact/application-digest manifest)
+        cluster-name (:seon.dev.config/cluster-name configuration)]
+    (when-not (and (re-matches #"[0-9a-f]{64}" (or application-digest ""))
+                   (m/validate ::name cluster-name))
+      (throw
+       (ex-info "The template database has no exact release and cluster identity."
+                {:seon.dev.cluster/application-digest application-digest
+                 :seon.dev.cluster/name cluster-name})))
+    (fs/path (:seon.dev.config/root configuration)
+             "tmp/seon-template-stores"
+             application-digest cluster-name "db")))
+
+(defn- database-path
+  [configuration]
+  (let [configured
+        (get-in configuration
+                [:seon.dev.config/launch-descriptor
+                 ::launch/database
+                 ::protocol/database-path])
+        expected
+        (some-> (:seon.dev.config/cluster-dir configuration)
+                (fs/path "db")
+                str)
+        configured (or configured expected)]
+    (when-not (and (string? configured) (= expected configured))
+      (throw
+       (ex-info "The selected cluster database path is inconsistent."
+                {:seon.dev.cluster/database-path configured
+                 :seon.dev.cluster/expected-database-path expected
+                 :seon.dev.cluster/cluster-dir
+                 (:seon.dev.config/cluster-dir configuration)})))
+    (fs/path configured)))
+
+(defn- clone-command
+  [source target]
+  (case (System/getProperty "os.name")
+    "Mac OS X" ["/bin/cp" "-cR" (str source) (str target)]
+    "Linux" ["cp" "--reflink=auto" "-a" (str source) (str target)]
+    nil))
+
+(defn- clone-tree!
+  [source target]
+  (let [parent (fs/parent target)
+        temporary (fs/path parent (str "." (fs/file-name target) "."
+                                            (random-uuid) ".tmp"))
+        command (clone-command source temporary)]
+    (when-not (and (fs/directory? source) command)
+      (throw
+       (ex-info "An at-rest template database cannot be cloned on this host."
+                {:seon.dev.cluster/template-database (str source)
+                 :seon.dev.cluster/operating-system
+                 (System/getProperty "os.name")})))
+    (try
+      (fs/create-dirs parent)
+      (let [result
+            (shell/sh {:continue true
+                       :out :string
+                       :err :string
+                       :cmd command})]
+        (when-not (zero? (:exit result))
+          (throw
+           (ex-info "The at-rest template database clone failed."
+                    {:seon.dev.cluster/template-database (str source)
+                     :seon.dev.cluster/target-database (str target)
+                     :seon.dev.cluster/exit (:exit result)
+                     :seon.dev.cluster/error
+                     (bounded-diagnostic (:err result))}))))
+      (fs/move temporary target {:atomic-move true})
+      target
+      (finally
+        (when (fs/exists? temporary)
+          (fs/delete-tree temporary))))))
+
+(defn publish-template-database!
+  "Publish one closed cluster database as its exact release template."
+  {:malli/schema [:=> [:cat config/configuration-schema :map] :string]}
+  [configuration manifest]
+  (let [source (database-path configuration)
+        target (template-database-path configuration manifest)]
+    (when-not (fs/directory? source)
+      (throw
+       (ex-info "A successful cluster apply has no closed database to publish."
+                {:seon.dev.cluster/database-path (str source)})))
+    (if (fs/directory? target)
+      (str target)
+      (str (clone-tree! source target)))))
+
+(defn reset-database!
+  "Replace a cluster database from its exact release template when available."
+  {:malli/schema
+   [:=> [:cat config/configuration-schema :map]
+    [:map
+     [:seon.dev.cluster/template? :boolean]
+     [:seon.dev.cluster/database-path :string]]]}
+  [configuration manifest]
+  (let [target (database-path configuration)
+        template (template-database-path configuration manifest)]
+    (when (fs/exists? target)
+      (fs/delete-tree target))
+    (if (fs/directory? template)
+      (do
+        (clone-tree! template target)
+        {:seon.dev.cluster/template? true
+         :seon.dev.cluster/database-path (str target)})
+      {:seon.dev.cluster/template? false
+       :seon.dev.cluster/database-path (str target)})))
+
 (defn- validate!
   [schema-key value message]
   (when-not (m/validate schema-key value)
@@ -320,6 +432,7 @@
            result (read-apply-result! result-path process-result)]
        (when-let [record @started-writer]
          (process/stop! target-configuration process/writer-id record))
+       (publish-template-database! target-configuration manifest)
        (config/publish-applied-manifest! target-configuration)
        result))))))
 
