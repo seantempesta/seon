@@ -10,7 +10,7 @@ tags: [prd, agent, architecture]
 produced by the command shown, against the working tree — so a stale row is
 impossible and an agent can re-verify any claim in one line.
 
-Generated from `codex/runtime-reliability-refactor` at `8a3e41a11`, measuring the **working tree** — so a
+Generated from `codex/runtime-reliability-refactor` at `27a9f6f1b`, measuring the **working tree** — so a
 lane with uncommitted work shows up here. Rows that can differ between committed
 and working state say both. `git status --short` before trusting a surprising row.
 
@@ -147,14 +147,19 @@ a `bin/seon up` / `bin/seon down` freeze rebuilds it. Retained runs live in
 Last retained run — `tmp/plan-evidence/test-writer-2026-07-26.log` (2026-07-26):
 
 ```
-<no summary line>
-<no result line>
+Ran 544 tests containing 3676 assertions.
+3 failures, 1 errors.
 ```
 
-**INCOMPLETE — do not read this as green.** The log has no
-`N failures, N errors.` line, so the run did not finish (still writing,
-killed, or crashed before the summary). Absence of `FAIL in` lines in an
-unfinished log proves nothing.
+**Not green. Every failing test, named:**
+
+- `ERROR every-registered-wire-shape-is-total-and-round-trips`
+- `FAIL composes-the-established-frozen-prompt-projections`
+- `FAIL no-stored-attribute-promises-an-order-the-database-cannot-keep`
+
+An unnamed failure count is worse than no gate — it launders red into a
+number. Each of these is either a real defect or a test pinning a deleted
+path; decide which and act, never re-baseline the count.
 
 Test source inventory (what exists, not what passes):
 ```
@@ -166,8 +171,8 @@ deftest (cljs):       1216
 ## 9. Open blockers
 
 ```
-open issues:    160
-blockers:       60
+open issues:    161
+blockers:       61
 ```
 
 Filed 2026-07-26 and not yet owned end to end by a step:
@@ -206,8 +211,8 @@ registered :seon.agent/* attributes:
 
 registered in:
   src/seon/agent.cljs
-  src/seon/agent/ctx.cljc
   src/seon/agent/run/core.cljc
+  src/seon/agent/ctx.cljc
 ```
 
 **Duplicate registrations:** `:seon.agent/run ` — one attribute registered in two

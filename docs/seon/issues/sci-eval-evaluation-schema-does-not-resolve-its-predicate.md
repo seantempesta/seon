@@ -49,6 +49,22 @@ always-true predicate is the right contract for a value crossing out of an
 eval, given that the same boundary is where deep realization and bounding must
 happen ([[lazy-authored-values-escape-the-armed-interrupt-boundary]]).
 
+## Hypothesis worth testing first: this may be THREE of the four failures
+
+`composes-the-established-frozen-prompt-projections` fails twice
+(`prompt_test.clj:50`, `:52`) because `schema/valid-candidate-value?` returns
+false for `:seon.agent.prompt/render-request` and `:seon.agent.prompt/rendered-prompt`
+on values that look structurally fine. If one invalid registration prevents the
+schema population from admitting, every `valid-candidate-value?` call against
+that population would fail regardless of its input — which would make this one
+defect the cause of 3 of the run's 4 failures.
+
+**`[UNVERIFIED]`.** Test it before fixing anything else: fix this registration,
+re-run `bin/test-writer`, and see whether the prompt failures disappear. If they
+do, the run is one defect away from green and the prompt test is not broken at
+all. If they do not, the prompt failures are independent and need their own
+diagnosis. Either answer is cheap and changes what to do next.
+
 ## Owner
 
 `seon.sci.eval` owns the shape. `seon.schema` owns admission and is the

@@ -108,8 +108,15 @@ shared resources and take down every cluster.
   `clojure.core`, `clojure.string`, and five `seon.agent.lifecycle` vars. No db,
   blob, fs, shell, web, messaging or LLM. Every demo, every load test and every
   proof of the design flows through the door that does not exist yet.
-- **Nothing verifies the JVM** *(freeze run 2026-07-26; see [state.md](state.md)
-  §8 for the current count)*. `bin/test-writer` needs the compiled artifact. The
+- **The JVM gate is RESTORED and RED** *(2026-07-26 — see [state.md](state.md) §8,
+  regenerated from the retained log)*. **544 tests / 3,676 assertions, 3 failures,
+  1 error.** All four are named and filed. Restoring it paid immediately: six
+  stored attributes declaring ordered collections had been invisible for as long
+  as the runner was broken. And a hypothesis worth testing before anything else —
+  the one invalid registration
+  ([[../../../seon/issues/sci-eval-evaluation-schema-does-not-resolve-its-predicate]])
+  may be causing 3 of the 4 failures, which would put the suite one fix from
+  green. Original note follows. `bin/test-writer` needs the compiled artifact. The
   freeze rebuilt it and **`writer` and `host` both reached ready** — live proof
   that the 58-line replacement `seon.host` main boots, which closes one of the
   owed proofs. The **pod** failed readiness on a release-digest mismatch
