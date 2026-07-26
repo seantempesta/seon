@@ -248,10 +248,13 @@
               response (parse-completion body resolution)]
           (cond-> (merge response
                          (select-keys result [:seon.ai/config-evidence
-                                              :seon.ai/status]))
+                                              :seon.ai/status
+                                              :seon.ai/provider-duration-ns]))
             (or (:seon.ai.http/aborted? result) (nil? usage))
             (assoc :seon.ai/usage (estimated-usage request text)
                    :seon.ai/estimated? true)))
         (merge
          (parse-completion (:seon.ai.http/body result) resolution)
-         (select-keys result [:seon.ai/config-evidence :seon.ai/status]))))))
+         (select-keys result [:seon.ai/config-evidence
+                              :seon.ai/status
+                              :seon.ai/provider-duration-ns]))))))

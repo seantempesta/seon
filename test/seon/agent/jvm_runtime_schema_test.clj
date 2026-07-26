@@ -17,7 +17,22 @@
     (is (contains? registered :seon.agent.message/id))
     (is (contains? registered :seon.agent.message))
     (is (contains? registered :seon.agent.turn/id))
-    (is (contains? registered :seon.agent.turn/evals))))
+    (is (contains? registered :seon.agent.turn/evals))
+    (is (every?
+         (set (schema/canonical-database-attributes))
+         [:seon.agent.run/plan-digest
+          :seon.agent.run/forms
+          :seon.agent.run.form/id
+          :seon.agent.run.form/run
+          :seon.agent.run.form/ordinal
+          :seon.agent.run.form/source
+          :seon.agent.turn/duration-ns
+          :seon.agent.turn/timings
+          :seon.agent.turn.timing/name
+          :seon.agent.turn.timing/ordinal
+          :seon.agent.turn.timing/duration-ns
+          :seon.agent.turn.timing/transaction])
+        "the cold page-plan authority includes plan and timing facts")))
 
 (deftest runtime-attributes-derive-the-database-contract
   (is
@@ -77,6 +92,28 @@
             [:seon.agent.run/id "run-a"]
             :seon.agent.run/process]
            (last released)))))
+
+(deftest turn-timings-derive-component-and-transaction-ref-facets
+  (is
+   (=
+    [{:db/ident :seon.agent.turn/duration-ns
+      :db/valueType :db.type/long
+      :db/cardinality :db.cardinality/one}
+     {:db/ident :seon.agent.turn/timings
+      :db/valueType :db.type/ref
+      :db/cardinality :db.cardinality/many
+      :db/isComponent true}
+     {:db/ident :seon.agent.turn.timing/duration-ns
+      :db/valueType :db.type/long
+      :db/cardinality :db.cardinality/one}
+     {:db/ident :seon.agent.turn.timing/transaction
+      :db/valueType :db.type/ref
+      :db/cardinality :db.cardinality/one}]
+    (db/malli->datahike-schema
+     [:seon.agent.turn/duration-ns
+      :seon.agent.turn/timings
+      :seon.agent.turn.timing/duration-ns
+      :seon.agent.turn.timing/transaction]))))
 
 (deftest lease-instant-drives-one-shot-wake-and-takeover
   (let [lease-until (java.util.Date. 1000)

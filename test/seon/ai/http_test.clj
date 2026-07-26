@@ -91,6 +91,7 @@
                        (json/read-value
                         (slurp (.getRequestBody exchange))
                         (json/object-mapper {:decode-key-fn true}))})
+             (Thread/sleep 10)
              (write-response!
               exchange "application/json"
               (json/write-value-as-string
@@ -108,6 +109,8 @@
                       (request (.getPort (.getAddress instance)) false 2000))]
           (is (= "(+ 1 2)" (:seon.ai/text result)))
           (is (= 200 (:seon.ai/status result)))
+          (is (<= 10000000 (:seon.ai/provider-duration-ns result))
+              "provider timing includes response-body receipt and parsing")
           (is (= 9 (get-in result [:seon.ai/usage :total_tokens])))
           (is (= "Bearer not-a-real-secret"
                  (:authorization (deref observed 1000 nil))))

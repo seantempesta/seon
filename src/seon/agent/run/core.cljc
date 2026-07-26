@@ -24,6 +24,21 @@
 (schema/register! :seon.agent.run/closed-reason :keyword)
 (schema/register! :seon.agent.run/closed-at :inst)
 (schema/register! :seon.agent.run/result :string)
+(schema/register! :seon.agent.run/plan-digest :string)
+(schema/register! :seon.agent.run/forms
+                  [:vector {:seon.db/component true} :seon.db/ref])
+(schema/register! :seon.agent.run.form/id
+                  [:string {:seon.db/identity true}])
+(schema/register! :seon.agent.run.form/run :seon.db/ref)
+(schema/register! :seon.agent.run.form/ordinal :seon.eval/ordinal)
+(schema/register! :seon.agent.run.form/source :string)
+(schema/register!
+  :seon.agent.run.form
+  [:map {:seon.db/entity true}
+   [:seon.agent.run.form/id :seon.agent.run.form/id]
+   [:seon.agent.run.form/run :seon.agent.run.form/run]
+   [:seon.agent.run.form/ordinal :seon.agent.run.form/ordinal]
+   [:seon.agent.run.form/source :seon.agent.run.form/source]])
 
 (schema/register!
   :seon.agent.run
@@ -43,7 +58,11 @@
    [:seon.agent.run/closed-at
     {:optional true} :seon.agent.run/closed-at]
    [:seon.agent.run/result
-    {:optional true} :seon.agent.run/result]])
+    {:optional true} :seon.agent.run/result]
+   [:seon.agent.run/plan-digest
+    {:optional true} :seon.agent.run/plan-digest]
+   [:seon.agent.run/forms
+    {:optional true} :seon.agent.run/forms]])
 
 (defn error-value?
   "Whether `value` is a direct Seon error envelope."

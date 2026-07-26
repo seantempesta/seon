@@ -482,6 +482,30 @@
     (is (every? installed-idents [:seon.ns/doc :seon.ns/summary])
         "cold publication installs namespace metadata before catalog rendering")))
 
+(deftest bootstrap-schema-installs-driver-plan-and-timing-attributes
+  (let [installed-idents
+        (into #{}
+              (map :db/ident)
+              (db/malli->datahike-schema client/agent-bootstrap-attrs))]
+    (is (every?
+         installed-idents
+         [:seon.agent.run/plan-digest
+          :seon.agent.run/forms
+          :seon.agent.run.form/id
+          :seon.agent.run.form/run
+          :seon.agent.run.form/ordinal
+          :seon.agent.run.form/source])
+        "a fresh database can commit the complete driver plan before eval")
+    (is (every?
+         installed-idents
+         [:seon.agent.turn/duration-ns
+          :seon.agent.turn/timings
+          :seon.agent.turn.timing/name
+          :seon.agent.turn.timing/ordinal
+          :seon.agent.turn.timing/duration-ns
+          :seon.agent.turn.timing/transaction])
+        "a fresh database can persist the turn waterfall after publication")))
+
 (deftest malli-bridge-preserves-explicit-avet-indexing
   (is (= {:db/ident ::indexed-value
           :db/valueType :db.type/string

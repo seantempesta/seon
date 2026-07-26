@@ -194,17 +194,21 @@
           (let [client (process-client connect-timeout-ms)]
             (if (:seon.ai/error client)
               (assoc client :seon.ai/config-evidence evidence)
-              (assoc
-               (if stream?
-                 (send-stream client
-                              (request-builder request secret)
-                              maximum-response-bytes
-                              stream-initial stream-step stream-abort?
-                              progress!)
-                 (send-batch client
-                             (request-builder request secret)
-                             maximum-response-bytes))
-               :seon.ai/config-evidence evidence)))
+              (let [provider-started-ns (System/nanoTime)
+                    result
+                    (if stream?
+                      (send-stream client
+                                   (request-builder request secret)
+                                   maximum-response-bytes
+                                   stream-initial stream-step stream-abort?
+                                   progress!)
+                      (send-batch client
+                                  (request-builder request secret)
+                                  maximum-response-bytes))]
+                (assoc result
+                       :seon.ai/provider-duration-ns
+                       (- (System/nanoTime) provider-started-ns)
+                       :seon.ai/config-evidence evidence))))
           (catch InterruptedException interrupted
             (throw interrupted))
           (catch HttpTimeoutException exception

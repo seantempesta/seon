@@ -51,6 +51,52 @@
 (schema/register! :seon.agent.turn/usage-estimated? :boolean)
 (schema/register! :seon.agent.turn/evals
                   [:vector {:seon.db/component true} :seon.db/ref])
+(schema/register! :seon.agent.turn/duration-ns [:int {:min 0}])
+(schema/register! :seon.agent.turn/timings
+                  [:vector {:seon.db/component true} :seon.db/ref])
+(schema/register!
+  :seon.agent.turn.timing/name
+  [:enum
+   :run-admission-transaction-call
+   :turn-transaction-call
+   :context-derivation
+   :provider-request-response
+   :model-envelope-overhead
+   :reply-derivation
+   :plan-transaction-call
+   :eval-admission-transaction-call
+   :eval
+   :eval-terminal-transaction-call
+   :publish-transaction-call])
+(schema/register! :seon.agent.turn.timing/ordinal [:int {:min 0}])
+(schema/register! :seon.agent.turn.timing/duration-ns [:int {:min 0}])
+(schema/register! :seon.agent.turn.timing/transaction :seon.db/ref)
+(schema/register!
+  :seon.agent.turn.timing
+  [:map {:seon.db/entity true}
+   [:seon.agent.turn.timing/name :seon.agent.turn.timing/name]
+   [:seon.agent.turn.timing/ordinal :seon.agent.turn.timing/ordinal]
+   [:seon.agent.turn.timing/duration-ns
+    :seon.agent.turn.timing/duration-ns]
+   [:seon.agent.turn.timing/transaction
+    {:optional true} :seon.agent.turn.timing/transaction]])
+(schema/register!
+  :seon.agent.turn
+  [:map {:seon.db/entity true}
+   [:seon.agent.turn/id :seon.agent.turn/id]
+   [:seon.agent.turn/at :seon.agent.turn/at]
+   [:seon.agent.turn/status :seon.agent.turn/status]
+   [:seon.agent.turn/run {:optional true} :seon.agent.turn/run]
+   [:seon.agent.turn/rendered-tx
+    {:optional true} :seon.agent.turn/rendered-tx]
+   [:seon.agent.turn/error {:optional true} :seon.agent.turn/error]
+   [:seon.agent.turn/usage-estimated?
+    {:optional true} :seon.agent.turn/usage-estimated?]
+   [:seon.agent.turn/evals {:optional true} :seon.agent.turn/evals]
+   [:seon.agent.turn/duration-ns
+    {:optional true} :seon.agent.turn/duration-ns]
+   [:seon.agent.turn/timings
+    {:optional true} :seon.agent.turn/timings]])
 
 (schema/register! ::receipt-state
                   [:enum :absent :running :done :error :interrupted])

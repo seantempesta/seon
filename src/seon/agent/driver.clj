@@ -26,15 +26,6 @@
            [java.util Date]
            [java.util.concurrent.atomic AtomicBoolean]))
 
-(schema/register! :seon.agent.run/plan-digest :string)
-(schema/register! :seon.agent.run/forms
-                  [:vector {:seon.db/component true} :seon.db/ref])
-(schema/register! :seon.agent.run.form/id
-                  [:string {:seon.db/identity true}])
-(schema/register! :seon.agent.run.form/run :seon.db/ref)
-(schema/register! :seon.agent.run.form/ordinal :seon.eval/ordinal)
-(schema/register! :seon.agent.run.form/source :string)
-
 (schema/register!
  ::form
  [:map {:closed true}
@@ -186,6 +177,24 @@
        :seon.error/message (or (ex-message exception)
                                (.getName (class exception)))})}]))
 
+(def ^:dynamic *nano-time*
+  "Monotonic JVM clock, replaceable only by deterministic tests."
+  #(System/nanoTime))
+
+(defn- elapsed-ns
+  [started-ns]
+  (- (*nano-time*) started-ns))
+
+(defn- timed
+  [f]
+  (let [started-ns (*nano-time*)
+        value (f)]
+    [value (elapsed-ns started-ns)]))
+
+(defn- transaction-ref
+  [report]
+  (get-in report [:db-after :t]))
+
 (defn- commit!
   [transact! tx-data]
   (let [result (transact! tx-data)]
@@ -221,53 +230,65 @@
     :as request}]
   (let [eval-id (receipt/receipt-id run-id ordinal claim-epoch)
         fence (run/run-fence agent-id run-id claim-epoch)
-        running-report
-        (commit!
-         transact!
-         (into
-          fence
-          (receipt/start-tx-data
-           {:seon.agent.turn/id turn-id
-            :seon.agent.run/id run-id
-            :seon.eval/at at
-            :seon.eval/ordinal ordinal
-            :seon.eval/total total
-            :seon.eval/claim-epoch claim-epoch
-            :seon.eval/source source
-            :seon.eval/narration ""
-            :seon.eval/ns eval-ns})))]
+        [running-report running-duration-ns]
+        (timed
+         #(commit!
+           transact!
+           (into
+            fence
+            (receipt/start-tx-data
+             {:seon.agent.turn/id turn-id
+              :seon.agent.run/id run-id
+              :seon.eval/at at
+              :seon.eval/ordinal ordinal
+              :seon.eval/total total
+              :seon.eval/claim-epoch claim-epoch
+              :seon.eval/source source
+              :seon.eval/narration ""
+              :seon.eval/ns eval-ns}))))]
     (try
-      (let [evaluation
-            (evaluate!
-             {:seon.sci.eval/source source
-              :seon.sci.interrupt/time-limit-ms time-limit-ms})
+      (let [[evaluation eval-duration-ns]
+            (timed
+             #(evaluate!
+               {:seon.sci.eval/source source
+                :seon.sci.interrupt/time-limit-ms time-limit-ms}))
             value (::sci.eval/value evaluation)
             record (::sci.eval/record evaluation)
             status (if (sci.eval/error? value) :error :done)
             admitted (if (= :done status)
                        (admit-value request value)
                        [])
-            terminal-report
-            (commit!
-             transact!
-             (into fence
-                   (concat
-                    (terminal-receipt-data eval-id status value record)
-                    admitted)))]
+            [terminal-report terminal-duration-ns]
+            (timed
+             #(commit!
+               transact!
+               (into fence
+                     (concat
+                      (terminal-receipt-data eval-id status value record)
+                      admitted))))]
         {:seon.agent.driver/running-report running-report
          :seon.agent.driver/terminal-report terminal-report
+         :seon.agent.driver/running-duration-ns running-duration-ns
+         :seon.agent.driver/eval-duration-ns eval-duration-ns
+         :seon.agent.driver/terminal-duration-ns terminal-duration-ns
+         :seon.agent.driver/published?
+         (= :completed (::lifecycle/disposition value))
          :seon.eval/id eval-id
          :seon.eval/status status
          :seon.sci.eval/value value
          :seon.sci.eval/record record})
       (catch Throwable exception
-        (let [error-report
-              (commit!
-               transact!
-               (into fence
-                     (transaction-error-data eval-id exception)))]
+        (let [[error-report terminal-duration-ns]
+              (timed
+               #(commit!
+                 transact!
+                 (into fence
+                       (transaction-error-data eval-id exception))))]
           {:seon.agent.driver/running-report running-report
            :seon.agent.driver/terminal-report error-report
+           :seon.agent.driver/running-duration-ns running-duration-ns
+           :seon.agent.driver/terminal-duration-ns terminal-duration-ns
+           :seon.agent.driver/published? false
            :seon.eval/id eval-id
            :seon.eval/status :error
            :seon.sci.eval/value
@@ -371,7 +392,9 @@
         run-id (get-in allocation [::db.id/ids :seon.agent.run/id])]
     (when-not (:seon.error/message allocation)
       {:seon.agent.run/id run-id
-       :seon.agent.run/claim-epoch 1})))
+       :seon.agent.run/claim-epoch 1
+       :seon.agent.driver/transaction
+       (transaction-ref allocation)})))
 
 (defn- open-turn!
   [allocate! database-functions agent-id run-id claim-epoch at]
@@ -393,7 +416,10 @@
                 :seon.agent.turn/at at
                 :seon.agent.turn/status :running}])})})]
     (when-not (:seon.error/message allocation)
-      (get-in allocation [::db.id/ids :seon.agent.turn/id]))))
+      {:seon.agent.turn/id
+       (get-in allocation [::db.id/ids :seon.agent.turn/id])
+       :seon.agent.driver/transaction
+       (transaction-ref allocation)})))
 
 (defn- model-request
   [database-functions agent-id content]
@@ -437,60 +463,169 @@
       :seon.agent.turn/status :error
       :seon.agent.turn/error message}])))
 
+(defn- timing-row
+  [name ordinal duration-ns transaction]
+  (cond->
+   {:seon.agent.turn.timing/name name
+    :seon.agent.turn.timing/ordinal ordinal
+    :seon.agent.turn.timing/duration-ns duration-ns}
+    transaction
+    (assoc :seon.agent.turn.timing/transaction transaction)))
+
+(defn- persist-turn-timings!
+  [database-functions turn-id total-duration-ns timings]
+  (commit!
+   #(transact! database-functions %)
+   [{:seon.agent.turn/id turn-id
+     :seon.agent.turn/duration-ns total-duration-ns
+     :seon.agent.turn/timings (vec timings)}]))
+
+(defn- drive-sources!
+  [allocate! database-functions agent-id run-id claim-epoch turn-id
+   sources initial-timings]
+  (loop [ordinal 0
+         timings initial-timings]
+    (when (< ordinal (count sources))
+      (let [result
+            (execute-form!
+             #(allocated-transact! allocate! database-functions %)
+             evaluate!
+             lifecycle-tx-data
+             {:seon.agent/id agent-id
+              :seon.agent.run/id run-id
+              :seon.agent.run/claim-epoch claim-epoch
+              :seon.agent.turn/id turn-id
+              :seon.eval/at (Date.)
+              :seon.eval/ordinal ordinal
+              :seon.eval/total (count sources)
+              :seon.eval/source (nth sources ordinal)
+              :seon.eval/ns 'user
+              :seon.sci.interrupt/time-limit-ms 60000})
+            eval-duration-ns (:seon.agent.driver/eval-duration-ns result)
+            terminal-name
+            (if (:seon.agent.driver/published? result)
+              :publish-transaction-call
+              :eval-terminal-transaction-call)
+            next-timings
+            (cond->
+             (conj
+              timings
+              (timing-row
+               :eval-admission-transaction-call ordinal
+               (:seon.agent.driver/running-duration-ns result)
+               (transaction-ref
+                (:seon.agent.driver/running-report result))))
+              eval-duration-ns
+              (conj
+               (timing-row :eval ordinal eval-duration-ns nil))
+              true
+              (conj
+               (timing-row
+                terminal-name ordinal
+                (:seon.agent.driver/terminal-duration-ns result)
+                (transaction-ref
+                 (:seon.agent.driver/terminal-report result)))))
+            continue?
+            (and
+             (not= :error (:seon.eval/status result))
+             (not= :completed
+                   (::lifecycle/disposition
+                    (:seon.sci.eval/value result))))]
+        (if continue?
+          (recur (inc ordinal) next-timings)
+          {:seon.agent.driver/result result
+           :seon.agent.driver/timings next-timings})))))
+
 (defn- process-message!
   [allocate! database-functions llm-transport! process-id
-   [message-id agent-id content at]]
-  (let [now (Date.)
-        lease-until (Date. (+ (.getTime now) 120000))]
+   [message-id agent-id content at _committed-at]]
+  (let [driver-started-ns (*nano-time*)
+        entered-at (Date.)
+        lease-until (Date. (+ (.getTime entered-at) 120000))
+        [opened-run run-duration-ns]
+        (timed
+         #(open-run! allocate! database-functions process-id message-id
+                     agent-id at lease-until))]
     (when-let [{run-id :seon.agent.run/id
-                claim-epoch :seon.agent.run/claim-epoch}
-               (open-run! allocate! database-functions process-id message-id
-                          agent-id at lease-until)]
-      (let [turn-id
-            (open-turn! allocate! database-functions agent-id run-id
-                        claim-epoch now)
-            response (llm-transport!
-                      (model-request database-functions agent-id content))
+                claim-epoch :seon.agent.run/claim-epoch
+                run-transaction :seon.agent.driver/transaction}
+               opened-run]
+      (let [[opened-turn turn-duration-ns]
+            (timed
+             #(open-turn! allocate! database-functions agent-id run-id
+                          claim-epoch entered-at))
+            turn-id (:seon.agent.turn/id opened-turn)
+            turn-transaction (:seon.agent.driver/transaction opened-turn)
+            [request context-duration-ns]
+            (timed #(model-request database-functions agent-id content))
+            [response model-envelope-duration-ns]
+            (timed #(llm-transport! request))
+            provider-duration-ns (:seon.ai/provider-duration-ns response)
             reply (:seon.ai/text response)
-            sources (when (string? reply) (reply-sources reply))]
+            [sources reply-duration-ns]
+            (timed #(when (string? reply) (reply-sources reply)))]
         (if-not (seq sources)
           (close-error!
            database-functions agent-id run-id claim-epoch turn-id (Date.)
            (or (get-in response [:seon.ai/error :seon.ai/msg])
                "The model reply contained no executable forms."))
-          (do
-            (transact!
-             database-functions
-             (plan-tx-data
-              {:seon.agent/id agent-id
-               :seon.agent.run/id run-id
-               :seon.agent.run/claim-epoch claim-epoch
-               :seon.agent.run/plan-digest
-               (content-hash/sha-256 (pr-str sources))
-               ::sources sources}))
-            (loop [ordinal 0]
-              (when (< ordinal (count sources))
-                (let [result
-                      (execute-form!
-                       #(allocated-transact!
-                         allocate! database-functions %)
-                       evaluate!
-                       lifecycle-tx-data
-                       {:seon.agent/id agent-id
-                        :seon.agent.run/id run-id
-                        :seon.agent.run/claim-epoch claim-epoch
-                        :seon.agent.turn/id turn-id
-                        :seon.eval/at (Date.)
-                        :seon.eval/ordinal ordinal
-                        :seon.eval/total (count sources)
-                        :seon.eval/source (nth sources ordinal)
-                        :seon.eval/ns 'user
-                        :seon.sci.interrupt/time-limit-ms 60000})]
-                  (when (and (not= :error (:seon.eval/status result))
-                             (not= :completed
-                                   (::lifecycle/disposition
-                                    (:seon.sci.eval/value result))))
-                    (recur (inc ordinal))))))))))))
+          (let [[plan-report plan-duration-ns]
+                (timed
+                 #(transact!
+                   database-functions
+                   (plan-tx-data
+                    {:seon.agent/id agent-id
+                     :seon.agent.run/id run-id
+                     :seon.agent.run/claim-epoch claim-epoch
+                     :seon.agent.run/plan-digest
+                     (content-hash/sha-256 (pr-str sources))
+                     ::sources sources})))]
+            (if (run/error-value? plan-report)
+              (do
+                (let [close-report
+                      (close-error!
+                       database-functions agent-id run-id claim-epoch turn-id
+                       (Date.) (:seon.error/message plan-report))]
+                  (if (run/error-value? close-report)
+                    close-report
+                    plan-report)))
+              (let [initial-timings
+                    (cond->
+                     [(timing-row :run-admission-transaction-call 0
+                                  run-duration-ns run-transaction)
+                      (timing-row :turn-transaction-call 0
+                                  turn-duration-ns turn-transaction)
+                      (timing-row :context-derivation 0
+                                  context-duration-ns nil)]
+                      provider-duration-ns
+                      (conj
+                       (timing-row :provider-request-response 0
+                                   provider-duration-ns nil))
+                      provider-duration-ns
+                      (conj
+                       (timing-row
+                        :model-envelope-overhead 0
+                        (- model-envelope-duration-ns provider-duration-ns)
+                        nil))
+                      true
+                      (conj
+                       (timing-row :reply-derivation 0
+                                   reply-duration-ns nil))
+                      true
+                      (conj
+                       (timing-row :plan-transaction-call 0
+                                   plan-duration-ns
+                                   (transaction-ref plan-report))))
+                    driven
+                    (drive-sources!
+                     allocate! database-functions agent-id run-id claim-epoch
+                     turn-id sources initial-timings)
+                    result (:seon.agent.driver/result driven)
+                    timings (:seon.agent.driver/timings driven)
+                    total-duration-ns (elapsed-ns driver-started-ns)]
+                (persist-turn-timings!
+                 database-functions turn-id total-duration-ns timings)
+                result))))))))
 
 (defn start!
   "Start the database-interest-driven JVM run driver."
