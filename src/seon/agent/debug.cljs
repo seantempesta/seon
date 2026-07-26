@@ -35,7 +35,6 @@
    [::ok? ::ok?]
    [:seon.agent.turn/id :seon.agent.turn/id]
    [::error                          {:optional true} ::error]
-   [:seon.agent.turn/status         {:optional true} :seon.agent.turn/status]
    [:seon.agent.turn/at             {:optional true} :seon.agent.turn/at]
    [:seon.agent.turn/rendered-tx    {:optional true} :seon.agent.turn/rendered-tx]
    [:seon.agent.turn/error          {:optional true} :seon.agent.turn/error]
@@ -104,7 +103,6 @@
                                     :seon.db/pull-pattern
                                     (into
                                      [:seon.agent.turn/id :seon.agent.turn/at
-                                      :seon.agent.turn/status
                                       :seon.agent.turn/rendered-tx
                                       :seon.agent.turn/error
                                       :seon.agent.turn/usage-estimated?]
@@ -127,7 +125,6 @@
                 errs (vec (keep ::error [p r]))]
             (cond-> (merge (select-keys t [:seon.agent.turn/id
                                            :seon.agent.turn/at
-                                           :seon.agent.turn/status
                                            :seon.agent.turn/rendered-tx
                                            :seon.agent.turn/error
                                            :seon.agent.turn/usage-estimated?])
