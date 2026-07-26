@@ -128,16 +128,26 @@
       (get locals value)
       (some-> (resolved-target resolution value) hash-set))
 
+    (and (seq? value) (= 'quote (first value)))
+    #{}
+
     (and (seq? value) (= 'if (first value)))
     (let [branches (map #(closed-targets resolution locals %)
                         (drop 2 value))]
       (when (and (seq branches) (every? set? branches))
-        (apply into #{} branches)))
+        (reduce into #{} branches)))
 
     (and (seq? value) (= 'do (first value)))
     (closed-targets resolution locals (last value))
 
-    :else nil))
+    (seq? value) nil
+
+    (coll? value)
+    (let [members (map #(closed-targets resolution locals %) value)]
+      (when (every? set? members)
+        (reduce into #{} members)))
+
+    :else #{}))
 
 ;;; Canonical terminal descriptors
 
@@ -372,8 +382,8 @@
   (reduce
    (fn [result argument]
      (if (set? (closed-targets resolution locals argument))
-       (add-uncertainty result :value-passed-pattern)
-       result))
+       result
+       (add-uncertainty result :value-passed-pattern)))
    state arguments))
 
 (defn- walk-call [state resolution locals form]
@@ -414,12 +424,22 @@
   (cond
     (symbol? form)
     (cond
-      (contains? locals form) state
-      (resolved-target resolution form) state
+      (set? (get locals form))
+      (reduce #(add-call %1 resolution %2) state (get locals form))
+
+      (contains? locals form)
+      (add-uncertainty state :open-higher-order)
+
+      (resolved-target resolution form)
+      (add-call state resolution (resolved-target resolution form))
+
       :else (add-uncertainty state :unresolved-symbol))
 
-    (not (seq? form)) state
+    (not (coll? form)) state
     (= 'quote (first form)) state
+
+    (not (seq? form))
+    (walk-expressions state resolution locals form)
 
     (contains? #{'let 'let* 'loop 'loop*} (first form))
     (walk-binding-form state resolution locals

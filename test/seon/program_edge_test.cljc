@@ -10,7 +10,7 @@
    ::edge/aliases {'db 'seon.db}
    ::edge/refers {'fetch 'seon.agent.web/fetch}
    ::edge/current-vars #{'subject 'helper}
-   ::edge/core-vars #{'keyword}
+   ::edge/core-vars #{'keyword 'map}
    ::edge/known-namespaces
    #{'fixture.edge 'clojure.core 'seon.db 'seon.agent.web
      'seon.packages.js.lodash}
@@ -18,6 +18,7 @@
    ::edge/effects
    {'fixture.edge/helper :pure
     'clojure.core/keyword :pure
+    'clojure.core/map :pure
     'seon.db/transact! :idempotent
     'seon.db/query :read
     'seon.db/pull :read
@@ -58,11 +59,36 @@
    "seon.agent.web/fetch" :external
    "seon.packages.js.lodash/get" :external})
 
-(defn- analyzed-bundle [form]
+(defn- analyzed-bundle-as [function-symbol form]
   (edge/analyze-function
-   {::edge/function-symbol "fixture.edge/subject"
+   {::edge/function-symbol function-symbol
     ::edge/form form
     ::edge/resolution resolution}))
+
+(defn- analyzed-bundle [form]
+  (analyzed-bundle-as "fixture.edge/subject" form))
+
+(defn- pure-call-graph? [root bundles]
+  (loop [pending (list root)
+         seen #{}]
+    (if-let [function-symbol (first pending)]
+      (if (contains? seen function-symbol)
+        (recur (next pending) seen)
+        (if-let [bundle (get bundles function-symbol)]
+          (let [terminal-effects
+                (into {} (map (juxt ::edge/terminal-symbol ::edge/effect))
+                      (::edge/terminals bundle))
+                calls (::edge/calls bundle)
+                corpus-calls (filter #(contains? bundles %) calls)
+                terminal-calls (remove #(contains? bundles %) calls)]
+            (if (or (seq (::edge/uncertainties bundle))
+                    (some #(not= :pure (get terminal-effects %))
+                          terminal-calls))
+              false
+              (recur (concat corpus-calls (next pending))
+                     (conj seen function-symbol))))
+          false))
+      true)))
 
 (deftest direct-edge-bundle-is-exact-on-this-tier
   (let [bundle (analyzed-bundle fixture-form)]
@@ -71,7 +97,9 @@
     (is (= #{:demo/id :demo/name :demo/score}
            (::edge/written-attributes bundle)))
     (is (true? (::edge/all-at-basis? bundle)))
-    (is (= #{:constructed-keyword} (::edge/uncertainties bundle)))
+    (is (= #{:constructed-keyword :open-higher-order
+             :value-passed-pattern}
+           (::edge/uncertainties bundle)))
     (is (= expected-effects
            (into {} (map (juxt ::edge/terminal-symbol ::edge/effect))
                  (::edge/terminals bundle))))))
@@ -103,3 +131,37 @@
             (keyword forms)))]
     (is (= #{"clojure.core/keyword"} (::edge/calls bundle)))
     (is (contains? (::edge/uncertainties bundle) :unresolved-symbol))))
+
+(deftest higher-order-values-produce-sound-call-graph-data
+  (let [closed
+        (analyzed-bundle
+         '(defn subject []
+            (map helper [1 2])
+            helper
+            {:fixture/handler helper}))
+        open
+        (analyzed-bundle
+         '(defn subject [f xs]
+            (map f xs)))]
+    (is (= #{"clojure.core/map" "fixture.edge/helper"}
+           (::edge/calls closed)))
+    (is (not (contains? (::edge/uncertainties closed)
+                        :value-passed-pattern)))
+    (is (contains? (::edge/uncertainties open) :open-higher-order))
+    (is (contains? (::edge/uncertainties open) :value-passed-pattern))))
+
+(deftest capability-reachable-call-graphs-are-never-pure
+  (let [root
+        (analyzed-bundle
+         '(defn subject []
+            (map helper [1 2])))
+        helper
+        (analyzed-bundle-as
+         "fixture.edge/helper"
+         '(defn helper []
+            (fetch {:seon.agent.web/url "https://example.test"})))
+        bundles {"fixture.edge/subject" root
+                 "fixture.edge/helper" helper}]
+    (is (contains? (::edge/calls root) "fixture.edge/helper"))
+    (is (contains? (::edge/calls helper) "seon.agent.web/fetch"))
+    (is (false? (pure-call-graph? "fixture.edge/subject" bundles)))))

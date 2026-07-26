@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: major
 tags: [issue, runtime, schema]
 ---
@@ -72,3 +72,52 @@ Root cause, three sites in `src/seon/program/edge.cljc`:
 ## Owner
 
 The execution-planning unit that owns `seon.program.edge`.
+
+## Resolution
+
+Resolved on 2026-07-26.
+
+Dependency ledger:
+
+- The historical authored-code producer at `57761ddb4` passed ordinary
+  tools.reader forms plus `seon.analyzer-info/analysis-resolution` into
+  `seon.program.edge/analyze-function`; no production caller survives at HEAD
+  while the step-5 JVM compile-time producer is being built.
+- ClojureScript is vendored at `946d75f3483c0c8e784e6668bff2c71a25619a77`.
+  `reference-code/clojurescript/src/main/clojure/cljs/analyzer.cljc` establishes
+  the namespace `:defs`/`:uses`/`:requires` resolution data and local-versus-var
+  distinction. Its vendored
+  `src/main/clojure/cljs/vendor/clojure/tools/reader.clj` establishes that the
+  producer returns ordinary collection forms and preserves reader
+  conditionals when requested.
+
+The one form walker now retains every statically closed value target:
+
+- argument target analysis no longer converts a closed target into
+  `:value-passed-pattern`;
+- a resolved bare symbol or closed lexical alias records a call; and
+- map, vector, and set literals are recursively traversed while quoted data is
+  excluded.
+
+This is computed from resolution facts and form structure. It contains no
+higher-order function name list. A value whose target cannot be closed
+statically records `:value-passed-pattern`; an open local value also records
+`:open-higher-order`. Those uncertainty facts make later purity and workload
+folds fail closed rather than silently treating the graph as pure or
+`:compute`-safe.
+
+## Proof
+
+- Direct JVM namespace run:
+  `seon.program-edge-test` — 5 tests, 18 assertions, 0 failures, 0 errors.
+- Focused CLJS runner:
+  `bin/test-cljs --test=seon.program-edge-test` — 5 tests, 18 assertions,
+  0 failures, 0 errors.
+- The standing transitive property builds
+  `subject → helper → seon.agent.web/fetch` and proves the root graph is not
+  pure.
+- `bin/seon test changed --path src/seon/program/edge.cljc` was invoked. Its
+  writer boundary refused because the current compiled artifact is absent; its
+  pod boundary widened to the forbidden full retained gate because the managed
+  Shadow manifest is unavailable, so that widening was terminated. The
+  focused CLJS run above then passed from a two-file compile.
