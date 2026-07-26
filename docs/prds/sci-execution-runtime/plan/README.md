@@ -198,6 +198,12 @@ carried stale evidence within a day. Re-verify before starting.
   acceptance item.
 - **Pod cut groups 1–4 launched** the same day, delete-never-port; group 5
   waits for step 5's producer replacement.
+- **A smaller suite is a desired outcome, not a regression.** Port ideas
+  (invariants), never tests; one regression per failure class at one choke
+  point. When simplification removes mechanisms, their tests die with them
+  and the count drops — the health metric is class coverage
+  (`research/pod-test-coverage-2026-07-26.md`'s invariant list), never test
+  count. No lane re-inflates the suite to match an old number.
 
 ## 1. The base constructs
 
