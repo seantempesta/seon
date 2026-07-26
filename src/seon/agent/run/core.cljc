@@ -1,5 +1,40 @@
 (ns seon.agent.run.core
-  "Pure run-claim, lease, and fencing policy shared by pod and JVM drivers.")
+  "Pure run acquisition, lease, and fencing shared by active drivers."
+  (:require
+    [seon.db.id :as db.id]
+    [seon.schema :as schema]))
+
+;; The run contract is portable because the synchronous JVM driver is now the
+;; execution owner. `seon.agent.run` previously registered these only when the
+;; CLJS pod loaded; a cold JVM therefore could not validate or install its own
+;; run transaction data.
+(schema/register! :seon.agent/run :seon.db/ref)
+(schema/register!
+  :seon.agent.run/id
+  [:and {:seon.db/identity true
+         :seon.db.id/generator :seon.db.id.generator/compact}
+   ::db.id/compact-value])
+(schema/register! :seon.agent.run/agent :seon.db/ref)
+(schema/register! :seon.agent.run/started-at :inst)
+(schema/register! :seon.agent.run/cause :seon.db/ref)
+(schema/register! :seon.agent.run/process [:string {:min 1}])
+(schema/register! :seon.agent.run/claim-epoch [:int {:min 1}])
+(schema/register! :seon.agent.run/lease-until :inst)
+(schema/register! :seon.agent.run/status [:enum :open :closed])
+
+(schema/register!
+  :seon.agent.run
+  [:map {:seon.db/entity true}
+   [:seon.agent.run/id :seon.agent.run/id]
+   [:seon.agent.run/agent :seon.agent.run/agent]
+   [:seon.agent.run/started-at :seon.agent.run/started-at]
+   [:seon.agent.run/status :seon.agent.run/status]
+   [:seon.agent.run/cause {:optional true} :seon.agent.run/cause]
+   [:seon.agent.run/process {:optional true} :seon.agent.run/process]
+   [:seon.agent.run/claim-epoch
+    {:optional true} :seon.agent.run/claim-epoch]
+   [:seon.agent.run/lease-until
+    {:optional true} :seon.agent.run/lease-until]])
 
 (defn error-value?
   "Whether `value` is a direct Seon error envelope."
@@ -12,25 +47,31 @@
   #?(:clj (.getTime ^java.util.Date instant)
      :cljs (.getTime ^js instant)))
 
-(defn expired-claim?
-  "Whether an observed claim lease is expired at `now`.
-
-   An unclaimed run is not an expired claim. Paused and closed runs are never
-   stealable."
-  [run now stale-ms]
-  (let [beat (:seon.agent.run/last-beat-at run)]
+(defn expired-lease?
+  "Whether a process-held run has reached its stored lease instant."
+  [run now]
+  (let [lease-until (:seon.agent.run/lease-until run)]
     (and (= :open (:seon.agent.run/status run))
-         (nil? (:seon.agent.run/paused-at run))
-         (string? (:seon.agent.run/claimant run))
+         (string? (:seon.agent.run/process run))
          (some? (:seon.agent.run/claim-epoch run))
-         (some? beat)
-         (< (instant-ms beat) (- (instant-ms now) stale-ms)))))
+         (some? lease-until)
+         (<= (instant-ms lease-until) (instant-ms now)))))
 
-(defn live-claim?
-  "Whether `run` has a claimant whose derived lease is still live."
-  [run now stale-ms]
-  (and (string? (:seon.agent.run/claimant run))
-       (not (expired-claim? run now stale-ms))))
+(defn live-process?
+  "Whether `run` has a process whose lease is still live."
+  [run now]
+  (and (= :open (:seon.agent.run/status run))
+       (string? (:seon.agent.run/process run))
+       (some? (:seon.agent.run/claim-epoch run))
+       (some? (:seon.agent.run/lease-until run))
+       (not (expired-lease? run now))))
+
+(defn lease-wake-at
+  "The exact one-shot wake instant for an open process-held run."
+  [run]
+  (when (and (= :open (:seon.agent.run/status run))
+             (string? (:seon.agent.run/process run)))
+    (:seon.agent.run/lease-until run)))
 
 (defn run-fence
   "The one run-work fence at the driver-held epoch.
@@ -44,146 +85,95 @@
      [:db.fn/cas run-ref :seon.agent.run/claim-epoch
       claim-epoch claim-epoch]]))
 
-(defn consume-input-data
-  "Explicit input-consumption edge for the claim/renew transaction."
-  [run-id input-ref]
-  (when input-ref
-    [[:db/add [:seon.agent.run/id run-id]
-      :seon.agent.run/consumed-input input-ref]]))
-
 (defn acquire-tx-data
-  "First claim of an open run: absent claimant and epoch become `claimant`, 1."
-  [agent-id run-id claimant beat-at input-ref]
-  (let [run-ref [:seon.agent.run/id run-id]]
-    (into
-     [[:db.fn/cas [:seon.agent/id agent-id]
-       :seon.agent/run run-ref run-ref]
-      [:db.fn/cas run-ref :seon.agent.run/claimant nil claimant]
-      [:db.fn/cas run-ref :seon.agent.run/claim-epoch nil 1]
-      [:db/add run-ref :seon.agent.run/last-beat-at beat-at]]
-     (consume-input-data run-id input-ref))))
-
-(defn attach-acquire-tx-data
-  "First claim of a queued interaction run.
-
-   The submission transaction deliberately leaves the agent pointer absent.
-   This claim transition first CASes the idle pointer from nil to the queued
-   run, then uses the same claimant/epoch/heartbeat facts as an ordinary first
-   claim."
-  [agent-id run-id claimant beat-at]
+  "First acquisition: absent process and epoch become `process`, 1."
+  [agent-id run-id process lease-until]
   (let [run-ref [:seon.agent.run/id run-id]]
     [[:db.fn/cas [:seon.agent/id agent-id]
-      :seon.agent/run nil run-ref]
-     [:db.fn/cas run-ref :seon.agent.run/claimant nil claimant]
+      :seon.agent/run run-ref run-ref]
+     [:db.fn/cas run-ref :seon.agent.run/process nil process]
      [:db.fn/cas run-ref :seon.agent.run/claim-epoch nil 1]
-     [:db/add run-ref :seon.agent.run/last-beat-at beat-at]]))
+     [:db/add run-ref :seon.agent.run/lease-until lease-until]]))
 
 (defn reacquire-tx-data
-  "Claim a released run without displacing another claimant."
-  [agent-id run-id observed-epoch claimant beat-at input-ref]
+  "Acquire a released run without displacing another process."
+  [agent-id run-id observed-epoch process lease-until]
   (let [run-ref [:seon.agent.run/id run-id]]
-    (into
-     [[:db.fn/cas [:seon.agent/id agent-id]
-       :seon.agent/run run-ref run-ref]
-      [:db.fn/cas run-ref :seon.agent.run/claimant nil claimant]
-      [:db.fn/cas run-ref :seon.agent.run/claim-epoch
-       observed-epoch (inc observed-epoch)]
-      [:db/add run-ref :seon.agent.run/last-beat-at beat-at]]
-     (consume-input-data run-id input-ref))))
+    [[:db.fn/cas [:seon.agent/id agent-id]
+      :seon.agent/run run-ref run-ref]
+     [:db.fn/cas run-ref :seon.agent.run/process nil process]
+     [:db.fn/cas run-ref :seon.agent.run/claim-epoch
+      observed-epoch (inc observed-epoch)]
+     [:db/add run-ref :seon.agent.run/lease-until lease-until]]))
 
 (defn steal-tx-data
-  "Take over one observed expired claim.
+  "Take over one observed expired lease.
 
-   The beat old→old CAS closes the read-to-steal race. Adding the new claimant
-   replaces the cardinality-one value only after both assertions succeed."
-  [agent-id run-id observed-epoch observed-beat claimant beat-at input-ref]
+   The lease old→old CAS closes the read-to-takeover race. Adding the new
+   process replaces the cardinality-one value only after both assertions
+   succeed."
+  [agent-id run-id observed-epoch observed-lease process lease-until]
   (let [run-ref [:seon.agent.run/id run-id]]
-    (into
-     [[:db.fn/cas [:seon.agent/id agent-id]
-       :seon.agent/run run-ref run-ref]
-      [:db.fn/cas run-ref :seon.agent.run/last-beat-at
-       observed-beat observed-beat]
-      [:db.fn/cas run-ref :seon.agent.run/claim-epoch
-       observed-epoch (inc observed-epoch)]
-      [:db/add run-ref :seon.agent.run/claimant claimant]
-      [:db/add run-ref :seon.agent.run/last-beat-at beat-at]]
-     (consume-input-data run-id input-ref))))
+    [[:db.fn/cas [:seon.agent/id agent-id]
+      :seon.agent/run run-ref run-ref]
+     [:db.fn/cas run-ref :seon.agent.run/lease-until
+      observed-lease observed-lease]
+     [:db.fn/cas run-ref :seon.agent.run/claim-epoch
+      observed-epoch (inc observed-epoch)]
+     [:db/add run-ref :seon.agent.run/process process]
+     [:db/add run-ref :seon.agent.run/lease-until lease-until]]))
 
-(declare beat-tx-data)
+(declare renew-tx-data)
 
 (defn claim-plan
   "Return the exact claim transition observed at one immutable database value.
 
-   A nil result means this claimant must not transact. The authority caller,
+   A nil result means this process must not transact. The authority caller,
    not this builder, commits the returned transaction data."
   [{agent-id :seon.agent/id
     run-id :seon.agent.run/id
-    claimant :seon.agent.run/claimant
+    process :seon.agent.run/process
     claim-epoch :seon.agent.run/claim-epoch
-    last-beat-at :seon.agent.run/last-beat-at
+    observed-lease :seon.agent.run/lease-until
     :as run}
-   process-claimant now stale-ms input-ref]
+   process-id now lease-until]
   (cond
     (not= :open (:seon.agent.run/status run)) nil
-    (some? (:seon.agent.run/paused-at run)) nil
-    (and (:seon.agent.interaction/id run)
-         (not (:seon.agent.run/attached? run))
-         (nil? claimant)
-         (nil? claim-epoch))
-    {:seon.agent.run/claim-transition :attach-acquire
-     :seon.agent.run/claim-epoch 1
-     :seon.db/tx-data
-     (attach-acquire-tx-data agent-id run-id process-claimant now)}
-    (nil? claimant)
+    (nil? process)
     (if (nil? claim-epoch)
       {:seon.agent.run/claim-transition :acquire
        :seon.agent.run/claim-epoch 1
        :seon.db/tx-data
-       (acquire-tx-data agent-id run-id process-claimant now input-ref)}
+       (acquire-tx-data agent-id run-id process-id lease-until)}
       {:seon.agent.run/claim-transition :reacquire
        :seon.agent.run/claim-epoch (inc claim-epoch)
        :seon.db/tx-data
        (reacquire-tx-data agent-id run-id claim-epoch
-                          process-claimant now input-ref)})
-    (= claimant process-claimant)
+                          process-id lease-until)})
+    (= process process-id)
     {:seon.agent.run/claim-transition :held
      :seon.agent.run/claim-epoch claim-epoch
      :seon.db/tx-data
-     (beat-tx-data agent-id run-id claim-epoch now input-ref)}
-    (expired-claim? run now stale-ms)
+     (renew-tx-data agent-id run-id claim-epoch lease-until)}
+    (expired-lease? run now)
     {:seon.agent.run/claim-transition :steal
      :seon.agent.run/claim-epoch (inc claim-epoch)
      :seon.db/tx-data
-     (steal-tx-data agent-id run-id claim-epoch last-beat-at
-                    process-claimant now input-ref)}
+     (steal-tx-data agent-id run-id claim-epoch observed-lease
+                    process-id lease-until)}
     :else nil))
 
-(defn beat-tx-data
+(defn renew-tx-data
   "Renew the held lease under the pointer+epoch fence."
-  [agent-id run-id claim-epoch beat-at input-ref]
-  (into
-   (run-fence agent-id run-id claim-epoch)
-   (concat
-    [[:db/add [:seon.agent.run/id run-id]
-      :seon.agent.run/last-beat-at beat-at]]
-    (consume-input-data run-id input-ref))))
+  [agent-id run-id claim-epoch lease-until]
+  (conj
+    (run-fence agent-id run-id claim-epoch)
+    [:db/add [:seon.agent.run/id run-id]
+     :seon.agent.run/lease-until lease-until]))
 
 (defn release-tx-data
   "Release a held claim without retracting its monotonic epoch."
   [agent-id run-id claim-epoch]
   (conj (run-fence agent-id run-id claim-epoch)
         [:db/retract [:seon.agent.run/id run-id]
-         :seon.agent.run/claimant]))
-
-(defn close-tx-data
-  "Close and release one driver-held run atomically."
-  [agent-id run-id claim-epoch reason closed-at]
-  (into
-   (run-fence agent-id run-id claim-epoch)
-   [{:seon.agent.run/id run-id
-     :seon.agent.run/status :closed
-     :seon.agent.run/closed-reason reason
-     :seon.agent.run/closed-at closed-at}
-    [:db/retract [:seon.agent.run/id run-id]
-     :seon.agent.run/claimant]
-    [:db/retract [:seon.agent/id agent-id] :seon.agent/run]]))
+         :seon.agent.run/process]))

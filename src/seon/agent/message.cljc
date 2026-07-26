@@ -18,8 +18,7 @@
 #?(:clj (defmacro await [value] value))
 
 (defn- register-schema! [key definition]
-  #?(:cljs (schema/register! key definition)
-     :clj nil))
+  (schema/register! key definition))
 
 (def ^:dynamic *leaf* nil)
 
