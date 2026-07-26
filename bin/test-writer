@@ -108,8 +108,20 @@ trap 'stop_writer_test HUP' HUP
 
 # :host adds the pinned sci dependency the seon.host conformance tests load;
 # it composes onto the same :writer basis and changes nothing else.
-SEON_WRITER_TEST_NAMESPACES="$WRITER_TEST_LIST" \
-  clojure -M:writer:host:writer-test -e "$RUNNER" &
+#
+# A FULL run (no namespace selectors) is the gate, and the gate owns its
+# retained evidence: it tees its complete output to the one canonical log
+# bin/plan-state reads. Ad-hoc redirect naming was a hand convention and it
+# reported a stale red after the green run landed under another name.
+if [[ -z "$WRITER_TEST_LIST" ]]; then
+  mkdir -p tmp/plan-evidence
+  SEON_WRITER_TEST_NAMESPACES="" \
+    clojure -M:writer:host:writer-test -e "$RUNNER" \
+    > >(tee tmp/plan-evidence/test-writer-latest.log) 2>&1 &
+else
+  SEON_WRITER_TEST_NAMESPACES="$WRITER_TEST_LIST" \
+    clojure -M:writer:host:writer-test -e "$RUNNER" &
+fi
 writer_pid=$!
 
 set +e

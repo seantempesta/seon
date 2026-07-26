@@ -10,7 +10,7 @@ tags: [prd, agent, architecture]
 produced by the command shown, against the working tree — so a stale row is
 impossible and an agent can re-verify any claim in one line.
 
-Generated from `codex/runtime-reliability-refactor` at `74d535283`, measuring the **working tree** — so a
+Generated from `codex/runtime-reliability-refactor` at `4ccc0a7fc`, measuring the **working tree** — so a
 lane with uncommitted work shows up here. Rows that can differ between committed
 and working state say both. `git status --short` before trusting a surprising row.
 
@@ -51,10 +51,10 @@ rg -A14 ':namespaces' src/seon/sci/ctx.clj
          :interrupt-fn interrupt-fn))
 ```
 
-**VERDICT: an agent cannot act.** Zero db / blob / fs / shell / web /
-messaging / LLM bindings on the agent surface
-(`rg "my\.fs|my\.web|my\.db|my\.shell|my\.blob|seon\.agent\.message" src/seon/sci/ctx.clj` → 0).
-It can compute and close a turn. Nothing else.
+**VERDICT: bindings are computed, but 3 effect arm(s) are honest
+not-implemented stubs** (`rg -c not-implemented src/seon/effect.cljc`).
+An agent can call the tools and receives error values; it cannot yet act
+on the world.
 
 ## 2. The live execution path
 
@@ -150,9 +150,13 @@ O15: index at compile time from a JVM build only; never at runtime.
 ## 8. Can the machine prove anything?
 
 The JVM gate needs the compiled program artifact, so it reports zero tests until
-a `bin/seon up` / `bin/seon down` freeze rebuilds it. Retained runs live in
-`tmp/plan-evidence/`; re-run with
-`bin/test-writer > tmp/plan-evidence/test-writer-$(date +%F).log 2>&1`.
+a `bin/seon up` / `bin/seon down` freeze rebuilds it. A full `bin/test-writer`
+run tees its own retained evidence to `tmp/plan-evidence/test-writer-latest.log`;
+dated copies in the same directory are archives.
+
+**WARNING: no canonical `test-writer-latest.log` yet** — falling back to
+newest name-matched log, which missed the true latest run once before.
+Run the full `bin/test-writer` to establish the canonical log.
 
 Last retained run — `tmp/plan-evidence/test-writer-2026-07-26-frozen-prompt-final.log` (2026-07-26):
 

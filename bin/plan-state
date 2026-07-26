@@ -67,15 +67,27 @@ sed -n '/:namespaces/,/:classes/p' src/seon/sci/ctx.clj 2>/dev/null
 echo '```'
 echo
 
-CAP=$(n 'my\.fs|my\.web|my\.db|my\.shell|my\.blob|seon\.agent\.message' src/seon/sci/ctx.clj)
-if [ "$CAP" = "0" ]; then
-  echo "**VERDICT: an agent cannot act.** Zero db / blob / fs / shell / web /"
-  echo "messaging / LLM bindings on the agent surface"
-  echo '(`rg "my\.fs|my\.web|my\.db|my\.shell|my\.blob|seon\.agent\.message" src/seon/sci/ctx.clj` → 0).'
-  echo "It can compute and close a turn. Nothing else."
+# Bindings are COMPUTED from program facts (L17), so a literal my.* string in
+# ctx.clj is a DEFECT (a hand list returned), not evidence of capability. The
+# real questions: does the computed table exist, and are the effect family
+# arms implemented or honest not-implemented stubs?
+LITERAL=$(n 'my\.fs|my\.web|my\.db|my\.shell|my\.blob' src/seon/sci/ctx.clj)
+COMPUTED=$(n 'tool-namespaces' src/seon/sci/ctx.clj)
+STUBS=$(n 'not-implemented' src/seon/effect.cljc)
+if [ "$LITERAL" != "0" ]; then
+  echo "**VERDICT: L17 REGRESSION — $LITERAL literal my.* binding(s) in ctx.clj.**"
+  echo "The binding table must be computed from program facts, never listed."
+elif [ "$COMPUTED" = "0" ]; then
+  echo "**VERDICT: an agent cannot act.** No computed binding table in ctx.clj"
+  echo '(`rg -c tool-namespaces src/seon/sci/ctx.clj` → 0).'
+elif [ "$STUBS" != "0" ]; then
+  echo "**VERDICT: bindings are computed, but $STUBS effect arm(s) are honest"
+  echo "not-implemented stubs** (\`rg -c not-implemented src/seon/effect.cljc\`)."
+  echo "An agent can call the tools and receives error values; it cannot yet act"
+  echo "on the world."
 else
-  echo "**VERDICT: $CAP capability reference(s) on the agent surface.** Enumerate them"
-  echo "before assuming the door is built — a reference is not a guarded dispatcher."
+  echo "**VERDICT: computed bindings with zero not-implemented stubs.** Verify with"
+  echo "the step-1 live falsifier before claiming the door is done."
 fi
 echo
 
@@ -207,13 +219,27 @@ cat <<'S8'
 ## 8. Can the machine prove anything?
 
 The JVM gate needs the compiled program artifact, so it reports zero tests until
-a `bin/seon up` / `bin/seon down` freeze rebuilds it. Retained runs live in
-`tmp/plan-evidence/`; re-run with
-`bin/test-writer > tmp/plan-evidence/test-writer-$(date +%F).log 2>&1`.
+a `bin/seon up` / `bin/seon down` freeze rebuilds it. A full `bin/test-writer`
+run tees its own retained evidence to `tmp/plan-evidence/test-writer-latest.log`;
+dated copies in the same directory are archives.
 
 S8
-LOG=$(ls -t tmp/plan-evidence/test-writer-*.log 2>/dev/null | head -1)
-if [ -n "$LOG" ]; then
+# The gate writes its own retained evidence: a FULL bin/test-writer run tees to
+# test-writer-latest.log. Ad-hoc dated names are archives, never the selection
+# source — name-pattern selection once reported a stale red after the green
+# run landed under a different prefix.
+LOG=tmp/plan-evidence/test-writer-latest.log
+if [ ! -f "$LOG" ]; then
+  LOG=$(ls -t tmp/plan-evidence/test-writer-*.log 2>/dev/null | head -1)
+  STALE_SELECTION=1
+fi
+if [ -n "$LOG" ] && [ -f "$LOG" ]; then
+  if [ "${STALE_SELECTION:-0}" = "1" ]; then
+    echo "**WARNING: no canonical \`test-writer-latest.log\` yet** — falling back to"
+    echo "newest name-matched log, which missed the true latest run once before."
+    echo "Run the full \`bin/test-writer\` to establish the canonical log."
+    echo
+  fi
   RAN=$(rg --no-filename -o 'Ran [0-9]+ tests containing [0-9]+ assertions\.' "$LOG" 2>/dev/null | tail -1)
   RES=$(rg --no-filename -o '[0-9]+ failures, [0-9]+ errors\.' "$LOG" 2>/dev/null | tail -1)
   echo "Last retained run — \`$LOG\` ($(date -r "$LOG" +%Y-%m-%d 2>/dev/null)):"
