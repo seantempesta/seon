@@ -490,18 +490,17 @@
                            :err :string
                            :cmd argv})]))
            [first-result-path first-process-result] (run-apply!)
-           [result-path process-result]
+           result
            (if (and direct-writer?
                     (not (zero? (:exit first-process-result))))
              (do
                (stop-writer!)
                (apply-release-config! target-configuration manifest)
-               (start-writer!)
-               (require-apply-readiness!
-                target-configuration manifest pod)
-               (run-apply!))
-             [first-result-path first-process-result])
-           result (read-apply-result! result-path process-result)]
+               {:seon.cluster.apply/ok? true
+                :seon.cluster.apply/changed? true
+                :seon.cluster.apply/config-owner :jvm})
+             (read-apply-result!
+              first-result-path first-process-result))]
        (stop-writer!)
        (publish-template-database! target-configuration manifest)
        (config/publish-applied-manifest! target-configuration)
