@@ -51,3 +51,29 @@ changed to a set.
 
 Related: `multi-form-eval-order-is-not-durable.md`,
 `datahike-cljs-cardinality-many-collapses-large-bigints.md`.
+
+## Six live offenders, surfaced 2026-07-26 when the gate came back
+
+`bin/test-writer` had been discovering 0 tests (stale compiled artifact), so this
+invariant could not fire. Restoring the gate surfaced these immediately —
+`no-stored-attribute-promises-an-order-the-database-cannot-keep`
+(`schema_collection_order_test.clj:61`), retained log
+`tmp/plan-evidence/test-writer-2026-07-26.log`:
+
+| attribute | declared | order actually load-bearing? |
+|---|---|---|
+| `:seon.agent.run/forms` | `[:vector component ref]` | **yes** — the resume unit. Recovered in practice: each child carries `:seon.agent.run.form/ordinal` and `plan-forms` sorts by it, so behaviour is correct and only the DECLARATION lies. |
+| `:seon.agent.turn/evals` | `[:vector component ref]` | its one order consumer is `no-progress-streak`, whose failure mode is a false negative (a reordered pull resets the streak, so a run does not close at limit) |
+| `:seon.agent.turn/timings` | `[:vector component ref]` | children carry `:seon.agent.turn.timing/ordinal` |
+| `:seon.agent.message/to` | `[:vector ref]` | **no** — recipients are a set; this one is simply wrong |
+| `:seon.render/children` | `[:vector component ref]` | render order matters; check for an explicit ordinal |
+| `:portable.record/children` | `[:vector component map]` | check |
+
+This is the population the vector-order audit predicted: *"at least thirteen
+ordered declarations survive in namespaces the recurring test cannot load."* The
+test can load them now.
+
+**Each needs a verdict, not a bulk rewrite.** Where a child already stores an
+ordinal, the declaration becomes `[:set …]` and nothing else changes. Where no
+ordinal exists and order matters, the ordinal is the fix — never a tuple (caps at
+8 values, kills element queries) and never a cardinality change.
