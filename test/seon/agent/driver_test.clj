@@ -1,6 +1,7 @@
 (ns seon.agent.driver-test
   (:require [clojure.test :refer [deftest is testing]]
             [seon.agent.driver :as driver]
+            [seon.agent.run.core :as run]
             [seon.db.host :as db.host])
   (:import [java.util.concurrent CountDownLatch TimeUnit]))
 
@@ -40,6 +41,8 @@
     (with-redefs-fn
       {#'db.host/listen! (fn [_writer request] request)
        #'driver/process-message! process-message!
+       #'driver/configured-lease-duration-ms (constantly 3000)
+       #'driver/recoverable-runs (constantly [])
        #'driver/start-virtual-thread!
        (fn [task]
          (swap! scheduled-tasks conj task)
@@ -89,6 +92,199 @@
       (is (= [{:seon.db/a :seon.agent.message/to}]
              (:seon.agent.driver-test/listener-patterns measurement))
           "the wake interest excludes attributes committed by driver work"))))
+
+(deftest terminal-step-renews-the-held-lease-without-an-extra-transaction
+  (let [lease-duration-ms 3000
+        clock (atom (java.util.Date. 2000))
+        transactions (atom [])
+        transact!
+        (fn [tx-data]
+          (swap! transactions conj tx-data)
+          {:db-after {:t (count @transactions)}})
+        request
+        {:seon.agent/id "agent-a"
+         :seon.agent.run/id "run-a"
+         :seon.agent.run/claim-epoch 1
+         :seon.agent.turn/id "turn-a"
+         :seon.eval/at (java.util.Date. 1000)
+         :seon.eval/ordinal 0
+         :seon.eval/total 2
+         :seon.eval/source "(identity :first)"
+         :seon.eval/ns 'user
+         ::driver/lease-duration-ms lease-duration-ms
+         :seon.sci.interrupt/time-limit-ms 100}
+        result
+        (binding [driver/*now* #(deref clock)]
+          (driver/execute-form!
+           transact!
+           (constantly
+            {:seon.sci.eval/value :first
+             :seon.sci.eval/record
+             {:seon.eval/duration-ms 1
+              :seon.eval/fn-entries 1
+              :seon.eval/allocated-bytes 1}})
+           (constantly [])
+           request))
+        renewed-lease (:seon.agent.driver/lease-until result)
+        held-run
+        {:seon.agent/id "agent-a"
+         :seon.agent.run/id "run-a"
+         :seon.agent.run/status :open
+         :seon.agent.run/process "process-a"
+         :seon.agent.run/claim-epoch 1
+         :seon.agent.run/lease-until renewed-lease}]
+    (is (= (java.util.Date. 5000) renewed-lease)
+        "a step settling at 2s publishes the next exact 3s lease")
+    (is (= 2 (count @transactions))
+        "renewal rides the existing terminal-receipt transaction")
+    (is (some
+         #{[:db/add
+            [:seon.agent.run/id "run-a"]
+            :seon.agent.run/lease-until
+            (java.util.Date. 5000)]}
+         (second @transactions)))
+    (is (run/live-process? held-run (java.util.Date. 4000))
+        "the chain remains held after crossing its original 3s lease")
+    (is (nil?
+         (run/claim-plan
+          held-run "process-b"
+          (java.util.Date. 4000)
+          (java.util.Date. 7000)))
+        "another process cannot steal between renewed step boundaries")))
+
+(deftest replacement-arms-the-committed-lease-and-resumes-without-a-commit
+  (let [lease-duration-ms 3000
+        started-at (java.util.Date.)
+        original-lease
+        (java.util.Date. (+ (.getTime started-at) lease-duration-ms))
+        forms
+        (mapv
+         (fn [ordinal]
+           {:seon.agent.run.form/id (str "form-" ordinal)
+            :seon.agent.run.form/ordinal ordinal
+            :seon.agent.run.form/source (str "(identity " ordinal ")")})
+         (range 7))
+        run-state
+        (atom
+         {:seon.agent/id "agent-a"
+          :seon.agent.run/id "run-a"
+          :seon.agent.run/status :open
+          :seon.agent.run/process "host-dead"
+          :seon.agent.run/claim-epoch 1
+          :seon.agent.run/lease-until original-lease
+          :seon.agent.run/forms forms})
+        turn
+        {:seon.agent.turn/id "turn-a"
+         :seon.agent.turn/status :running
+         :seon.agent.turn/evals
+         [{:seon.eval/id "old-eval"
+           :seon.eval/ordinal 0
+           :seon.eval/status :done}]}
+        lease-armed (CountDownLatch. 1)
+        drive-settled (CountDownLatch. 1)
+        armed-at (atom nil)
+        first-transaction-at (atom nil)
+        transactions (atom [])
+        evaluations (atom 0)
+        transact-request!
+        (fn [{tx-data :seon.db/tx-data}]
+          (compare-and-set! first-transaction-at nil (java.util.Date.))
+          (swap! transactions conj tx-data)
+          (doseq [item tx-data]
+            (cond
+              (and (vector? item)
+                   (= :seon.agent.run/claim-epoch (nth item 2 nil)))
+              (swap! run-state assoc
+                     :seon.agent.run/claim-epoch (nth item 4))
+
+              (and (vector? item)
+                   (= :seon.agent.run/process (nth item 2 nil))
+                   (= :db/add (first item)))
+              (swap! run-state assoc :seon.agent.run/process (nth item 3))
+
+              (and (vector? item)
+                   (= :seon.agent.run/process (nth item 2 nil))
+                   (= :db/retract (first item)))
+              (swap! run-state dissoc :seon.agent.run/process)
+
+              (and (vector? item)
+                   (= :seon.agent.run/lease-until (nth item 2 nil))
+                   (= :db/add (first item)))
+              (swap! run-state assoc
+                     :seon.agent.run/lease-until (nth item 3))
+
+              (and (map? item) (:seon.agent.run/status item))
+              (swap! run-state merge
+                     (select-keys
+                      item
+                      [:seon.agent.run/status
+                       :seon.agent.run/closed-reason
+                       :seon.agent.run/closed-at]))))
+          (when (some :seon.agent.turn/timings (filter map? tx-data))
+            (.countDown drive-settled))
+          {:db-after {:t (count @transactions)}})
+        database-functions
+        {'db (constantly {})
+         'transact! transact-request!}
+        allocate!
+        (fn [{allocations :seon.db.id/allocations
+              transaction-builder :seon.db.id/transaction-builder}]
+          (let [key (:seon.db.id/key (first allocations))
+                ids {key "reply-a"}]
+            (merge
+             {:seon.db.id/ids ids}
+             (transact-request! (transaction-builder ids)))))
+        production-await driver/*await-lease!*]
+    (with-redefs-fn
+      {#'db.host/listen! (fn [_writer request] request)
+       #'driver/pending-messages (constantly [])
+       #'driver/recoverable-runs
+       (fn [_]
+         (if (= :open (:seon.agent.run/status @run-state))
+           [@run-state]
+           []))
+       #'driver/running-turn (fn [_ _] turn)
+       #'driver/configured-lease-duration-ms (constantly lease-duration-ms)
+       #'driver/*await-lease!*
+       (fn [wake-at task]
+         (reset! armed-at wake-at)
+         (.countDown lease-armed)
+         (production-await wake-at task))
+       #'driver/evaluate!
+       (fn [_]
+         (let [evaluation (swap! evaluations inc)]
+           {:seon.sci.eval/value
+            (if (= 6 evaluation)
+              {:seon.agent.lifecycle/disposition :completed
+               :seon.agent.lifecycle/result "resumed"}
+              evaluation)
+            :seon.sci.eval/record
+            {:seon.eval/duration-ms 0
+             :seon.eval/fn-entries 1
+             :seon.eval/allocated-bytes 1}}))}
+      (fn []
+        (driver/start! ::writer allocate! database-functions ::llm-transport!)
+        (await-event! lease-armed :lease-readiness-armed)
+        (is (= original-lease @armed-at)
+            "replacement startup derives one exact wake from the committed lease")
+        (is (empty? @transactions)
+            "no unrelated commit is needed before the lease becomes ready")
+        (await-event! drive-settled :replacement-drive-settled)
+        (let [claim-delay-ms
+              (- (.getTime ^java.util.Date @first-transaction-at)
+                 (.getTime started-at))]
+          (is (<= lease-duration-ms
+                  claim-delay-ms
+                  (* event-backstop-seconds 1000))
+              (str "the lease-expiry claim was the first transaction at "
+                   claim-delay-ms " ms")))
+        (is (= 2 (:seon.agent.run/claim-epoch @run-state)))
+        (is (= :closed (:seon.agent.run/status @run-state)))
+        (is (= :completed (:seon.agent.run/closed-reason @run-state)))
+        (is (= 6 @evaluations)
+            "the terminal ordinal from the dead process is not re-evaluated")
+        (is (= 14 (count @transactions))
+            "one claim, six receipt pairs, and one timing settlement commit")))))
 
 (def plan-request
   {:seon.agent/id "agent-a"

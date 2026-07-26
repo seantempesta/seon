@@ -55,7 +55,12 @@
   [:seon.eval/total :seon.eval/total]
   [:seon.eval/source :string]
   [:seon.eval/ns :symbol]
+  [::lease-duration-ms {:optional true} [:int {:min 1}]]
   [:seon.sci.interrupt/time-limit-ms :seon.sci.interrupt/time-limit-ms]])
+
+(def ^:private default-lease-duration-ms
+  ;; This is config.resolve's absent-value default, not a second runtime dial.
+  1200000)
 
 (defn form-id
   "Identity of one form in a run's committed ordered plan."
@@ -181,6 +186,10 @@
   "Monotonic JVM clock, replaceable only by deterministic tests."
   #(System/nanoTime))
 
+(def ^:dynamic *now*
+  "Wall clock used to derive committed lease instants."
+  #(Date.))
+
 (defn- elapsed-ns
   [started-ns]
   (- (*nano-time*) started-ns))
@@ -194,6 +203,15 @@
 (defn- transaction-ref
   [report]
   (get-in report [:db-after :t]))
+
+(defn- lease-deadline
+  [lease-duration-ms]
+  (Date. (+ (run/instant-ms (*now*)) lease-duration-ms)))
+
+(defn- continue-value?
+  [status value]
+  (and (= :done status)
+       (nil? (::lifecycle/disposition value))))
 
 (defn- commit!
   [transact! tx-data]
@@ -226,7 +244,9 @@
     total :seon.eval/total
     source :seon.eval/source
     eval-ns :seon.eval/ns
+    lease-duration-ms ::lease-duration-ms
     time-limit-ms :seon.sci.interrupt/time-limit-ms
+    :or {lease-duration-ms default-lease-duration-ms}
     :as request}]
   (let [eval-id (receipt/receipt-id run-id ordinal claim-epoch)
         fence (run/run-fence agent-id run-id claim-epoch)
@@ -258,11 +278,16 @@
             admitted (if (= :done status)
                        (admit-value request value)
                        [])
+            continue? (continue-value? status value)
+            next-lease (when continue? (lease-deadline lease-duration-ms))
             [terminal-report terminal-duration-ns]
             (timed
              #(commit!
                transact!
-               (into fence
+               (into (if next-lease
+                       (run/renew-tx-data
+                        agent-id run-id claim-epoch next-lease)
+                       fence)
                      (concat
                       (terminal-receipt-data eval-id status value record)
                       admitted))))]
@@ -271,6 +296,7 @@
          :seon.agent.driver/running-duration-ns running-duration-ns
          :seon.agent.driver/eval-duration-ns eval-duration-ns
          :seon.agent.driver/terminal-duration-ns terminal-duration-ns
+         :seon.agent.driver/lease-until next-lease
          :seon.agent.driver/published?
          (= :completed (::lifecycle/disposition value))
          :seon.eval/id eval-id
@@ -314,6 +340,44 @@
     [?message :seon.agent.message/at ?at]
     (not [?run :seon.agent.run/cause ?message])])
 
+(def ^:private recoverable-run-query
+  '[:find ?agent-id ?run-id
+    :where
+    [?agent :seon.agent/id ?agent-id]
+    [?agent :seon.agent/run ?run]
+    [?run :seon.agent.run/id ?run-id]
+    [?run :seon.agent.run/status :open]
+    [?run :seon.agent.run/plan-digest _]])
+
+(def ^:private recoverable-run-pull-pattern
+  [:seon.agent.run/id
+   :seon.agent.run/status
+   :seon.agent.run/process
+   :seon.agent.run/claim-epoch
+   :seon.agent.run/lease-until
+   {:seon.agent.run/forms
+    [:seon.agent.run.form/id
+     :seon.agent.run.form/ordinal
+     :seon.agent.run.form/source]}])
+
+(def ^:private running-turn-query
+  '[:find ?turn-id ?at
+    :in $ ?run-id
+    :where
+    [?run :seon.agent.run/id ?run-id]
+    [?turn :seon.agent.turn/run ?run]
+    [?turn :seon.agent.turn/id ?turn-id]
+    [?turn :seon.agent.turn/at ?at]
+    [?turn :seon.agent.turn/status :running]])
+
+(def ^:private running-turn-pull-pattern
+  [:seon.agent.turn/id
+   :seon.agent.turn/status
+   {:seon.agent.turn/evals
+    [:seon.eval/id
+     :seon.eval/ordinal
+     :seon.eval/status]}])
+
 (defn- compact-id [prefix value]
   (str prefix (subs (content-hash/sha-256 value) 0 11)))
 
@@ -355,10 +419,35 @@
 (defn- start-virtual-thread! [task]
   (Thread/startVirtualThread task))
 
-(defn- claim-message! [in-flight-message-ids message-id]
-  (let [[before after]
-        (swap-vals! in-flight-message-ids conj message-id)]
+(def ^:dynamic *await-lease!*
+  (fn [wake-at task]
+    ;; The lease commit publishes this exact instant. This clock implements
+    ;; that declared transition; it is not a polling interval or backstop.
+    (start-virtual-thread!
+     (fn []
+       (let [remaining-ms
+             (- (run/instant-ms wake-at)
+                (run/instant-ms (*now*)))]
+         (when (pos? remaining-ms)
+           (Thread/sleep (long remaining-ms)))
+         (task))))))
+
+(defn- claim-id! [in-flight-ids id]
+  (let [[before after] (swap-vals! in-flight-ids conj id)]
     (not= before after)))
+
+(defn- arm-lease-wake!
+  [lease-wakes run-id wake-at scan!]
+  (let [wake-ms (run/instant-ms wake-at)
+        [before after] (swap-vals! lease-wakes assoc run-id wake-ms)]
+    (when (and (not= wake-ms (get before run-id))
+               (= wake-ms (get after run-id)))
+      (*await-lease!*
+       wake-at
+       (fn []
+         (when (= wake-ms (get @lease-wakes run-id))
+           (swap! lease-wakes dissoc run-id)
+           (scan!)))))))
 
 (defn- pull-one [database-functions pattern ref]
   ((get database-functions 'pull)
@@ -367,6 +456,46 @@
     :datahike.resource/max-work 100000
     :datahike.resource/max-results 2048
     :datahike.resource/max-result-weight 262144}))
+
+(defn- configured-lease-duration-ms
+  [database-functions]
+  (or
+   (:seon.config.watchdog/stale-ms
+    (pull-one database-functions
+              [:seon.config.watchdog/stale-ms]
+              config.resolve/cluster-config-lookup-ref))
+   default-lease-duration-ms))
+
+(defn- recoverable-runs
+  [database-functions]
+  (mapv
+   (fn [[agent-id run-id]]
+     (assoc
+      (pull-one database-functions
+                recoverable-run-pull-pattern
+                [:seon.agent.run/id run-id])
+      :seon.agent/id agent-id))
+   ((get database-functions 'query)
+    {:seon.db/query recoverable-run-query
+     :datahike.resource/max-work 100000
+     :datahike.resource/max-results 64
+     :datahike.resource/max-result-weight 131072})))
+
+(defn- running-turn
+  [database-functions run-id]
+  (when-let [[turn-id]
+             (last
+              (sort-by
+               second
+               ((get database-functions 'query)
+                {:seon.db/query running-turn-query
+                 :seon.db/args [run-id]
+                 :datahike.resource/max-work 100000
+                 :datahike.resource/max-results 64
+                 :datahike.resource/max-result-weight 131072})))]
+    (pull-one database-functions
+              running-turn-pull-pattern
+              [:seon.agent.turn/id turn-id])))
 
 (defn open-run-tx-data
   "Build one allocated run row and its idle-agent pointer CAS."
@@ -490,8 +619,8 @@
 
 (defn- drive-sources!
   [allocate! database-functions agent-id run-id claim-epoch turn-id
-   sources initial-timings]
-  (loop [ordinal 0
+   sources start-ordinal lease-duration-ms initial-timings]
+  (loop [ordinal start-ordinal
          timings initial-timings]
     (when (< ordinal (count sources))
       (let [result
@@ -508,6 +637,7 @@
               :seon.eval/total (count sources)
               :seon.eval/source (nth sources ordinal)
               :seon.eval/ns 'user
+              ::lease-duration-ms lease-duration-ms
               :seon.sci.interrupt/time-limit-ms 60000})
             eval-duration-ns (:seon.agent.driver/eval-duration-ns result)
             terminal-name
@@ -534,22 +664,68 @@
                 (transaction-ref
                  (:seon.agent.driver/terminal-report result)))))
             continue?
-            (and
-             (not= :error (:seon.eval/status result))
-             (not= :completed
-                   (::lifecycle/disposition
-                    (:seon.sci.eval/value result))))]
+            (continue-value?
+             (:seon.eval/status result)
+             (:seon.sci.eval/value result))]
         (if continue?
           (recur (inc ordinal) next-timings)
           {:seon.agent.driver/result result
            :seon.agent.driver/timings next-timings})))))
 
+(defn- resume-run!
+  [allocate! database-functions observed-run claim-epoch lease-duration-ms]
+  (let [driver-started-ns (*nano-time*)
+        agent-id (:seon.agent/id observed-run)
+        run-id (:seon.agent.run/id observed-run)
+        forms (ordered-forms (:seon.agent.run/forms observed-run))
+        turn (running-turn database-functions run-id)
+        receipts (:seon.agent.turn/evals turn)
+        form (next-form forms receipts)]
+    (when (and turn form)
+      (let [sources (mapv :seon.agent.run.form/source forms)
+            start-ordinal (:seon.agent.run.form/ordinal form)
+            driven
+            (drive-sources!
+             allocate! database-functions agent-id run-id claim-epoch
+             (:seon.agent.turn/id turn) sources start-ordinal
+             lease-duration-ms [])
+            result (:seon.agent.driver/result driven)]
+        (when driven
+          (persist-turn-timings!
+           database-functions
+           (:seon.agent.turn/id turn)
+           (elapsed-ns driver-started-ns)
+           (:seon.agent.driver/timings driven)))
+        result))))
+
+(defn- claim-recoverable-run!
+  [allocate! database-functions process-id lease-duration-ms observed-run
+   arm-wake!]
+  (let [now (*now*)
+        transition
+        (run/claim-plan
+         observed-run process-id now
+         (Date. (+ (run/instant-ms now) lease-duration-ms)))]
+    (if transition
+      (let [report
+            (transact! database-functions (:seon.db/tx-data transition))]
+        ;; Another process may win the same observed lease. Its CAS is the
+        ;; cross-process authority, so this process simply stops.
+        (when-not (run/error-value? report)
+          (resume-run!
+           allocate! database-functions observed-run
+           (:seon.agent.run/claim-epoch transition)
+           lease-duration-ms)))
+      (when-let [wake-at (run/lease-wake-at observed-run)]
+        (arm-wake! (:seon.agent.run/id observed-run) wake-at)))))
+
 (defn- process-message!
   [allocate! database-functions llm-transport! process-id
    [message-id agent-id content at _committed-at]]
   (let [driver-started-ns (*nano-time*)
-        entered-at (Date.)
-        lease-until (Date. (+ (.getTime entered-at) 120000))
+        entered-at (*now*)
+        lease-duration-ms (configured-lease-duration-ms database-functions)
+        lease-until (lease-deadline lease-duration-ms)
         [opened-run run-duration-ns]
         (timed
          #(open-run! allocate! database-functions process-id message-id
@@ -574,7 +750,7 @@
             (timed #(when (string? reply) (reply-sources reply)))]
         (if-not (seq sources)
           (close-error!
-           database-functions agent-id run-id claim-epoch turn-id (Date.)
+           database-functions agent-id run-id claim-epoch turn-id (*now*)
            (or (get-in response [:seon.ai/error :seon.ai/msg])
                "The model reply contained no executable forms."))
           (let [[plan-report plan-duration-ns]
@@ -589,14 +765,13 @@
                      (content-hash/sha-256 (pr-str sources))
                      ::sources sources})))]
             (if (run/error-value? plan-report)
-              (do
-                (let [close-report
-                      (close-error!
-                       database-functions agent-id run-id claim-epoch turn-id
-                       (Date.) (:seon.error/message plan-report))]
-                  (if (run/error-value? close-report)
-                    close-report
-                    plan-report)))
+              (let [close-report
+                    (close-error!
+                     database-functions agent-id run-id claim-epoch turn-id
+                     (*now*) (:seon.error/message plan-report))]
+                (if (run/error-value? close-report)
+                  close-report
+                  plan-report))
               (let [initial-timings
                     (cond->
                      [(timing-row :run-admission-transaction-call 0
@@ -627,7 +802,7 @@
                     driven
                     (drive-sources!
                      allocate! database-functions agent-id run-id claim-epoch
-                     turn-id sources initial-timings)
+                     turn-id sources 0 lease-duration-ms initial-timings)
                     result (:seon.agent.driver/result driven)
                     timings (:seon.agent.driver/timings driven)
                     total-duration-ns (elapsed-ns driver-started-ns)]
@@ -639,48 +814,75 @@
   "Start the database-interest-driven JVM run driver."
   [writer allocate! database-functions llm-transport!]
   (let [scanning? (AtomicBoolean. false)
+        scan-requested? (AtomicBoolean. false)
         in-flight-message-ids (atom #{})
+        in-flight-run-ids (atom #{})
+        lease-wakes (atom {})
         process-id (str "host-" (.pid (ProcessHandle/current)))
-        scan-body!
-        (fn []
-          (doseq [message (pending-messages database-functions)]
-            (let [message-id (first message)]
-              (when (claim-message! in-flight-message-ids message-id)
-                (try
-                  (start-virtual-thread!
-                   (fn []
-                     (try
-                       (process-message!
-                        allocate! database-functions llm-transport!
-                        process-id message)
-                       (catch Throwable throwable
-                         (log/error
-                          throwable
-                          "JVM run driver message processing failed"
-                          {:seon.agent.message/id message-id}))
-                       (finally
-                         (swap! in-flight-message-ids disj message-id)))))
-                  (catch Throwable throwable
-                    (swap! in-flight-message-ids disj message-id)
-                    (throw throwable)))))))
-        scan!
-        (fn scan! []
-          (when (.compareAndSet scanning? false true)
-            (start-virtual-thread!
-             (fn []
+        launch!
+        (fn [in-flight-ids id task failure-message failure-data]
+          (when (claim-id! in-flight-ids id)
+            (try
+              (start-virtual-thread!
+               (fn []
+                 (try
+                   (task)
+                   (catch Throwable throwable
+                     (log/error throwable failure-message failure-data))
+                   (finally
+                     (swap! in-flight-ids disj id)))))
+              (catch Throwable throwable
+                (swap! in-flight-ids disj id)
+                (throw throwable)))))]
+    (letfn
+     [(arm-wake! [run-id wake-at]
+        (arm-lease-wake! lease-wakes run-id wake-at scan!))
+      (scan-body! []
+        (doseq [message (pending-messages database-functions)]
+          (let [message-id (first message)]
+            (launch!
+             in-flight-message-ids message-id
+             #(process-message!
+               allocate! database-functions llm-transport! process-id message)
+             "JVM run driver message processing failed"
+             {:seon.agent.message/id message-id})))
+        (let [duration-ms (configured-lease-duration-ms database-functions)]
+          (doseq [observed-run (recoverable-runs database-functions)]
+            (let [run-id (:seon.agent.run/id observed-run)]
+              (launch!
+               in-flight-run-ids run-id
+               #(claim-recoverable-run!
+                 allocate! database-functions process-id duration-ms
+                 observed-run arm-wake!)
+               "JVM run driver committed-plan recovery failed"
+               {:seon.agent.run/id run-id})))))
+      (scan! []
+        (.set scan-requested? true)
+        (when (.compareAndSet scanning? false true)
+          (start-virtual-thread!
+           (fn []
+             (loop []
+               (.set scan-requested? false)
                (try
                  (scan-body!)
                  (catch Throwable throwable
-                   (log/error throwable "JVM run driver scan failed"))
-                 (finally
-                   (.set scanning? false)))))))]
-    (let [listener
-          (db.host/listen!
-           writer
-           {:seon.db/key ::messages
-            ;; Wake attributes must not be committed by work this wake starts.
-            :seon.db/datom-patterns
-            [{:seon.db/a :seon.agent.message/to}]
-            :seon.db/handler (fn [_] (scan!))})]
-      (scan-body!)
-      listener)))
+                   (log/error throwable "JVM run driver scan failed")))
+               (let [rerun?
+                     (or
+                      (.get scan-requested?)
+                      (do
+                        (.set scanning? false)
+                        (and (.get scan-requested?)
+                             (.compareAndSet scanning? false true))))]
+                 (when rerun?
+                   (recur))))))))]
+      (let [listener
+            (db.host/listen!
+             writer
+             {:seon.db/key ::messages
+              ;; Wake attributes must not be committed by work this wake starts.
+              :seon.db/datom-patterns
+              [{:seon.db/a :seon.agent.message/to}]
+              :seon.db/handler (fn [_] (scan!))})]
+        (scan-body!)
+        listener))))
