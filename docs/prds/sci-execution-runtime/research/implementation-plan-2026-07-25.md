@@ -688,21 +688,44 @@ re-pointed:
 
 Wave 2 says `:seon.eval/index` + `:seon.eval/total` "is the same fact under a
 different name; **reconcile the name**", and the O12 cut shipped
-`:seon.eval/ordinal` instead. Measured spellings in `src/`:
+`:seon.eval/ordinal` instead.
 
-| spelling | registered attributes |
+**Evidence, corrected 2026-07-26.** A first pass of this table was wrong in
+three rows; lane `reconcile` refused to act on it and re-grepped, and the
+corrections were then verified independently. Recorded in full because the
+decision rests entirely on these counts and the first version would have
+justified the opposite conclusion for the wrong reason.
+
+| meaning | attributes |
 |---|---|
-| `ordinal` | `:seon.eval/ordinal`, `:seon.agent.run.form/ordinal`, `:seon.agent.turn.timing/ordinal`, `:seon.ai.attempt/ordinal` |
-| `index` as a position | `:seon.error.frame/index`, `:seon.embed/index`, `:seon.db.protocol.operation/index` |
-| `index` as Datahike's **indexing facet** — a different meaning | `:db/index` (14), `:seon.db/index` (5), `:datahike/index` (2) |
+| **stored ordinal of a child in an ordered collection** | `:seon.eval/ordinal` (`eval/receipt.cljc:16`), `:seon.agent.turn.timing/ordinal` (`:71`), `:seon.agent.run.form/ordinal` (`agent/run/core.cljc:33`, aliased to `:seon.eval/ordinal`) — and the one outlier, `:seon.error.frame/index` (`error.cljc:81`) |
+| **an index, i.e. Datahike's and Proximum's own word** | `:db/index` (14), `::db/index` (7), `:seon.db/index` (4), `:datahike/index` (2); `:seon.db.protocol/index` and `seon.db/::index`, both `[:enum :eavt :aevt :avet]` (`protocol.cljc:671`, `db.cljc:57`); `:seon.embed/index`, a Proximum **secondary index** (`embed.clj:18`, `:115`); `:datahike.index-page/*` |
+| **not a competing spelling** | `:my.plan/position` (`my/plan.cljc:375`) is a derived "where am I in the plan" projection — root, step, progress — never a stored ordinal |
 
-`:seon.ai.attempt/ordinal` predates this work (`f6f6673b6`). So `ordinal` is
-already the repo's dominant spelling for a stored position, and `index` is
-overloaded by the dependency's own indexing vocabulary — naming a position
-`index` collides with Datahike. **Decision: keep `ordinal`; rename
-`:seon.error.frame/index`; correct `measurements-2026-07-25.md:1003-1005`,**
-which names `index` as the idiom. This is a reconciliation to ONE spelling,
-which is what the row asked for; it is not a fourth mechanism.
+Three corrections to the first pass, each of which **strengthens** the
+conclusion:
+
+- `:seon.ai.attempt/ordinal` is **not registered anywhere.** Its registration
+  was deleted by `f6f6673b6`; five consumers survive in
+  `src/seon/web/serve.cljs` (`:976`, `:999`, `:1010`, `:1175`, `:1181`) plus
+  `test/seon/web/serve_test.cljs:919`. That is a **dangling attribute
+  reference**, not supporting evidence — file it; it rides the pod cut (O13).
+- `:seon.db.protocol.operation/index` **does not exist.** The real attribute is
+  `::index` = `[:enum :eavt :aevt :avet]` — index *selection*, not a position.
+- `:seon.embed/index` is a Proximum secondary-index identity, not a position.
+
+So the count of stored-position attributes is 3 × `ordinal` + 1 × `index`, and
+**every other one of ~27 `index` uses means an index.** Note the honest
+weakness: all three `ordinal` attributes are new from this program, and
+`:seon.error.frame/index` is the pre-existing one — so seniority argues for
+`index`. Non-collision decides it the other way and decides it more strongly:
+Datahike and Proximum both own the word `index`, and **a position is not an
+index.**
+
+**Decision: keep `ordinal`; rename `:seon.error.frame/index`; correct
+`measurements-2026-07-25.md:1001-1007`,** which names `index` as the idiom.
+This is a reconciliation to ONE spelling, which is what the row asked for; it
+is not a fourth mechanism.
 
 ### 9.3 O13 — the pod dies unconditionally (owner ruling, 2026-07-26)
 
