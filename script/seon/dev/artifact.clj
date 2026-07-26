@@ -944,22 +944,9 @@
                    [:seon.dev.artifact/release-client-inventory-output
                     client-inventory-output]]]
             (release-relative-path! root field path))
-        program-source-relative
-        (release-relative-path!
-         root :seon.dev.artifact/release-program-source-output
-         program-source-output)
-        program-row-relative
-        (release-relative-path!
-         root :seon.dev.artifact/release-program-row-output
-         program-row-output)
-        base-projection-relative
-        (release-relative-path!
-         root :seon.dev.artifact/release-base-projection-output
-         base-projection-output)
-        page-plan-relative
-        (release-relative-path!
-         root :seon.dev.artifact/release-page-plan-output
-         page-plan-output)
+        _ (release-relative-path!
+           root :seon.dev.artifact/release-program-source-output
+           program-source-output)
         client-inventory-relative
         (release-relative-path!
          root :seon.dev.artifact/release-client-inventory-output
@@ -981,17 +968,7 @@
         :compiler-options {:parallel-build false}
         :build-hooks
         (with-meta
-          [['seon.dev.program-artifact/prepare-program-rows!
-            program-source-relative program-row-relative
-            base-projection-relative page-plan-relative]
-           ['seon.dev.program-artifact/publish! program-source-relative]
-           ['seon.dev.program-artifact/publish-rows!
-            program-source-relative program-row-relative]
-           ['seon.dev.program-artifact/publish-base-projection!
-            program-row-relative base-projection-relative]
-           ['seon.dev.program-artifact/publish-page-plan!
-            program-row-relative page-plan-relative]
-           ['seon.dev.program-artifact/publish-inventory!
+          [['seon.dev.program-artifact/publish-inventory!
             client-inventory-relative]]
           {:replace true})
         :devtools {:enabled false :preloads [] :build-notify nil}}
@@ -1004,9 +981,9 @@
                              [:seon.dev.config/environment
                               "SEON_EXTRA_PRELOAD"])
                      "/-main"))))))
-    ;; Shadow still owns the client output in this cut. The JVM indexer owns
-    ;; every program graph and initialization-page artifact that is frozen
-    ;; beside it; the obsolete hooks' intermediate bytes are overwritten.
+    ;; Shadow owns the client output and its exact analyzed inventory. The JVM
+    ;; indexer is the sole producer of every program graph and initialization
+    ;; page artifact frozen beside them.
     (publish-program-artifacts!
      release-config program-source-output program-row-output
      base-projection-output page-plan-output)

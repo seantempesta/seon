@@ -492,23 +492,7 @@
         (is (= "client" (nth pod-argv 3)))
         (is (= (:seon.dev.artifact/release-client-output release)
                (:output-to pod-merge)))
-        (is (= [['seon.dev.program-artifact/prepare-program-rows!
-                 "runtime/program-sources.edn"
-                 "runtime/program-rows.edn"
-                 "runtime/base-projection.edn"
-                 "runtime/page-plan.edn"]
-                ['seon.dev.program-artifact/publish!
-                 "runtime/program-sources.edn"]
-                ['seon.dev.program-artifact/publish-rows!
-                 "runtime/program-sources.edn"
-                 "runtime/program-rows.edn"]
-                ['seon.dev.program-artifact/publish-base-projection!
-                 "runtime/program-rows.edn"
-                 "runtime/base-projection.edn"]
-                ['seon.dev.program-artifact/publish-page-plan!
-                 "runtime/program-rows.edn"
-                 "runtime/page-plan.edn"]
-                ['seon.dev.program-artifact/publish-inventory!
+        (is (= [['seon.dev.program-artifact/publish-inventory!
                  "runtime/client-program-inventory.edn"]]
                (:build-hooks pod-merge)))
         (is (= {:enabled false :preloads [] :build-notify nil}
