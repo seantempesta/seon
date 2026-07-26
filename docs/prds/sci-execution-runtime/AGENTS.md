@@ -13,12 +13,9 @@ research doc(s) the row cites, then the SOURCE it names. Do not re-research
 settled designs; execute them.
 
 **Sequence from nowhere else.** Seven orderings once existed across six files
-in five naming schemes — U/B/C-series here, P-series in `unified-plan`, a build
-order in `design.md`, plus §3.5 "The order" and §4 "Waves" in
-`research/implementation-plan-2026-07-25.md` — which is why "follow the plan"
-had no referent. Each of those files now carries a SUPERSEDED banner and is
-evidence only. `design.md` is still the architecture and nothing contradicts it,
-but it does not sequence work.
+in five naming schemes, which is why "follow the plan" had no referent. They are
+DELETED — git is the archive. `design.md` is still the architecture and nothing
+contradicts it, but it does not sequence work.
 
 **A row not re-verified since the last cut is a hypothesis, not work.** Every
 row carries a `verified` date; re-grep its evidence before you start, because a
