@@ -1,29 +1,18 @@
 (ns seon.effect
-  "The one system-side owner every agent-facing tool call enters.
+  "Effect replay identity and admission for capability owners.
 
-  CONTRACT LAYER ONLY (owner ruling 2026-07-26: Fable authors schemas and
-  contracts; a sol lane implements until the pending properties go green).
-  `request!` is declared with its complete contract and returns an honest
-  not-implemented error value until the step-1 implementation lands.
-
-  Grounding: the request identity is `:seon.capability/op-id`, the replay
-  identity `seon.db/transact!` already accepts; capability classification
-  is the existing `:seon.capability/effect` fn metadata in the db owner;
-  results follow the message owner's idiom — a concise domain map or a
-  flat error value, never a raw report and never a throw."
-  (:require [seon.agent.message :as message]
-            [seon.schema :as schema]
-            ; loads the :seon.capability/op-id registration this envelope
-            ; references; the implementation calls seon.db anyway
-            [seon.db :as db]))
-
-;;; The effect family — the closed architectural set from the plan's
-;;; construct 5. A new family is an architecture decision, never a row
-;;; appended casually; each family's args schema is registered by its
-;;; own my.* surface and joined here through the `:multi` dispatch.
-
-(schema/register! ::family
-                  [:enum :db :blob :fs :shell :web :message :llm])
+  Not a wrapper layer and not a dispatcher: agents call the owning
+  APIs directly (`seon.db/transact!`, `seon.agent.message/message!`).
+  This namespace is the one place effect identity is DERIVED. The run
+  loop binds `*request-context*` around each form execution; an owner
+  performing a durable effect asks `next-op-id!` for its replay
+  identity when the caller supplied none. The identity is
+  `(run, form-ordinal, effect-ordinal)` — claim epoch is a run fence
+  and never part of it — so re-execution after a crash derives the
+  SAME identity and the owner's ledger replays the recorded result
+  instead of repeating the effect. Errors are values; the ceiling is
+  at-least-once."
+  (:require [seon.schema :as schema]))
 
 (defn ordinary-request-value?
   "True for a value admissible inside an effect request or result.
@@ -41,9 +30,18 @@
       (and (or (vector? v) (set? v) (list? v))
            (every? ordinary-request-value? v))))
 
+(defn invocation-counter?
+  "True for the invocation-local effect counter (an atom)."
+  [v]
+  #?(:clj (instance? clojure.lang.IAtom v)
+     :cljs (instance? cljs.core/Atom v)))
+
 (schema/register-core-predicate!
  'seon.effect/ordinary-request-value?
  ordinary-request-value?)
+(schema/register-core-predicate!
+ 'seon.effect/invocation-counter?
+ invocation-counter?)
 
 (schema/register!
  ::args
@@ -56,160 +54,55 @@
        :gen/schema [:map-of :keyword :string]}
   'seon.effect/ordinary-request-value?])
 
-;;; The request envelope. Provenance is injected by the run loop from the
-;;; executing receipt — (run, ordinal, epoch) — so an effect is always
-;;; attributable to the form that requested it; agent code never supplies
-;;; provenance itself.
+;;; The executing form's effect coordinates. The run loop injects one
+;;; context per form execution; the counter is invocation-local
+;;; coordination (a sanctioned atom) — never indexed, never persisted —
+;;; reset by construction on every re-execution so a re-run derives the
+;;; same ordinal sequence. Effect identity therefore assumes SEQUENTIAL
+;;; effect issue within one form; a parallel eval surface needs its own
+;;; identity ruling before it ships.
 
 (schema/register!
- ::request
+ ::request-context
  [:map {:closed true}
-  [:seon.effect/family ::family]
-  [:seon.effect/args ::args]
-  [:seon.capability/op-id {:optional true} :seon.capability/op-id]])
-
-;;; The result envelope: a concise domain value or a flat error, never a
-;;; throw (nothing throws into the agent loop). `::value` is absent —
-;;; never nil — when the effect produces no value. At-least-once is the
-;;; honest delivery ceiling: `:seon.capability/op-id` is what makes a retry a
-;;; replay instead of a second effect.
-
-(schema/register!
- ::result
- [:or
-  [:map {:closed true}
-   [:seon.effect/family ::family]
-   [:seon.capability/op-id :seon.capability/op-id]
-   [:seon.effect/value {:optional true} ::value]]
-  [:map
-   [:seon.error/message :string]
-   [:seon.error/kind {:optional true} :qualified-keyword]]])
+  [::run-id [:string {:min 1}]]
+  [::form-ordinal [:int {:min 0}]]
+  [::effect-counter
+   [:fn {:error/message "must be the invocation counter atom"
+         :gen/schema [:= nil]}
+    'seon.effect/invocation-counter?]]
+  [:seon.agent/id {:optional true} [:string {:min 1}]]])
 
 (def ^:dynamic *request-context*
-  "The executing form's lexical effect context."
+  "The executing form's effect coordinates, or nil outside a run."
   nil)
 
-(defn- error-value?
-  [value]
-  (and (map? value)
-       (string? (:seon.error/message value))))
+(defn request-context
+  "Build one form execution's effect context from its receipt coordinates."
+  {:malli/schema [:=> [:catn [::run-id [:string {:min 1}]]
+                       [::form-ordinal [:int {:min 0}]]]
+                  ::request-context]}
+  [run-id form-ordinal]
+  {::run-id run-id
+   ::form-ordinal form-ordinal
+   ::effect-counter (atom -1)})
 
-(defn- failure
-  [message kind]
-  {:seon.error/message message
-   :seon.error/kind kind})
+(defn op-id
+  "Derive one effect's replay identity from its executing coordinates."
+  {:malli/schema [:=> [:catn [::run-id [:string {:min 1}]]
+                       [::form-ordinal [:int {:min 0}]]
+                       [::effect-ordinal [:int {:min 0}]]]
+                  [:string {:min 1}]]}
+  [run-id form-ordinal effect-ordinal]
+  (pr-str [run-id form-ordinal effect-ordinal]))
 
-(defn- operation
-  [key fallback]
-  (or (get *request-context* key) fallback))
-
-(defn- message-result
-  [op-id args]
-  (let [agent-id (:seon.agent/id *request-context*)
-        request
-        (cond-> {:seon.agent.message/content
-                 (:seon.agent.message/content args)
-                 :seon.agent.message/to
-                 (mapv (fn [recipient]
-                         [:seon.agent/id recipient])
-                       (:seon.agent.message/to args))
-                 :seon.capability/op-id op-id}
-          agent-id
-          (assoc :seon.agent.message/from
-                 [:seon.agent/id agent-id]))
-        result ((operation ::message! message/message!) request)]
-    (if (error-value? result)
-      result
-      {:seon.effect/family :message
-       :seon.capability/op-id op-id
-       :seon.effect/value
-       (select-keys result
-                    [:seon.agent.message/id
-                     :seon.agent.message/hops])})))
-
-(defn- query-result
-  [op-id args]
-  (let [query (:my.db/q args)
-        inputs (:my.db/inputs args)
-        query! (operation ::query db/query)
-        result (apply query! query inputs)]
-    (if (error-value? result)
-      result
-      {:seon.effect/family :db
-       :seon.capability/op-id op-id
-       :seon.effect/value result})))
-
-(defn- transaction-basis
-  [report]
-  (or (get-in report [:db-after :as-of])
-      (get-in report [:db-after :t])))
-
-(defn- transaction-result
-  [op-id args]
-  (let [transact! (operation ::transact! db/transact!)
-        report
-        (transact!
-         {:seon.db/tx-data (:my.db/tx-data args)
-          :seon.capability/op-id op-id})]
-    (if (error-value? report)
-      report
-      {:seon.effect/family :db
-       :seon.capability/op-id op-id
-       :seon.effect/value
-       (cond->
-        {:seon.db/t (transaction-basis report)
-         :seon.capability/op-id op-id}
-         (:seon.capability/replayed? report)
-         (assoc :seon.capability/replayed? true))})))
-
-(defn- dispatch
-  [{family :seon.effect/family
-    args :seon.effect/args
-    op-id :seon.capability/op-id}]
-  (case family
-    :message (message-result op-id args)
-    :db (cond
-          (contains? args :my.db/q)
-          (query-result op-id args)
-
-          (contains? args :my.db/tx-data)
-          (transaction-result op-id args)
-
-          :else
-          (failure "The database effect request names no supported operation."
-                   :seon.effect/invalid-db-operation))
-    (failure (str "Effect family " family " is not implemented.")
-             :seon.effect/not-implemented)))
-
-(defn request!
-  "Perform one guarded effect request.
-  The single entry point for every my.* tool: records the request
-  identity before the effect runs, performs it
-  through the family's one owner, and returns the result envelope.
-  Errors are values; the ceiling is at-least-once."
-  {:malli/schema [:=> [:cat ::request] ::result]}
-  [request]
-  (try
-    (cond
-      (not (schema/valid-candidate-value? ::request request))
-      (failure "The effect request envelope is invalid."
-               :seon.effect/invalid-request)
-
-      :else
-      (if-let [op-id (or (:seon.capability/op-id request)
-                         (:seon.capability/op-id *request-context*))]
-        (let [result (dispatch (assoc request :seon.capability/op-id op-id))]
-          (if (schema/valid-candidate-value? ::result result)
-            result
-            (failure "The effect family returned an invalid result envelope."
-                     :seon.effect/invalid-result)))
-        {:seon.error/message
-         (str "seon.effect/request! is not implemented; the step-1 "
-              "implementation lane activates this contract. Requested family: "
-              (:seon.effect/family request))
-         :seon.error/kind :seon.effect/not-implemented}))
-    (catch #?(:clj Throwable :cljs :default) exception
-      (failure (or #?(:clj (ex-message exception)
-                      :cljs (.-message exception))
-                   "The effect request failed.")
-               :seon.effect/request-failed))))
+(defn next-op-id!
+  "The next effect's replay identity, or nil outside a run.
+  Nil means a system-side caller with no replay coordinates.
+  Capability owners call this when a durable effect arrives without an
+  explicit `:seon.capability/op-id`."
+  {:malli/schema [:=> [:cat] [:maybe [:string {:min 1}]]]}
+  []
+  (when-let [{::keys [run-id form-ordinal effect-counter]}
+             *request-context*]
+    (op-id run-id form-ordinal (swap! effect-counter inc))))

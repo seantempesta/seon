@@ -10,6 +10,7 @@
    Its caller supplies the one writer operation and immutable database values."
   (:require [seon.ai.core :as ai]
             [seon.agent.lifecycle :as lifecycle]
+            [seon.agent.home :as home]
             [seon.agent.message :as message]
             [seon.agent.message.leaf :as message.leaf]
             [seon.agent.run.core :as run]
@@ -19,15 +20,11 @@
             [seon.db.host :as db.host]
             [seon.db.id :as db.id]
             [seon.db.leaf :as db.leaf]
+            [seon.effect :as effect]
             [seon.eval.receipt :as receipt]
             [seon.repl.parse :as repl.parse]
             [seon.schema :as schema]
-            [seon.sci.ctx :as sci.ctx]
             [seon.sci.eval :as sci.eval]
-            ;; These are program-index roots, not a binding list. The SCI
-            ;; table is derived exclusively from their committed fn facts.
-            [my.db]
-            [my.message]
             [taoensso.timbre :as log])
   (:import [java.lang ProcessHandle]
            [java.util Date]
@@ -669,42 +666,61 @@
   {::db.leaf/current-agent-id (constantly agent-id)
    ::db.leaf/current-tx-context (constantly nil)})
 
-(defn- effect-request-context
-  [writer agent-id run-id ordinal claim-epoch]
-  (let [database-leaf
-        (db.host/leaf
-         writer
-         #(invocation-database-context agent-id))
-        database-functions (db/bind-leaf database-leaf)
-        message-leaf
-        {::message.leaf/available? (constantly true)
-         ::message.leaf/unavailable
-         (constantly
-          {:seon.error/message "The message capability is unavailable."
-           :seon.error/kind :seon.effect/unavailable})
-         ::message.leaf/now #(Date.)
-         ::message.leaf/uuid #(str (random-uuid))}]
-    {:seon.agent/id agent-id
-     :seon.capability/op-id
-     (receipt/receipt-id run-id ordinal claim-epoch)
-     :seon.effect/query (get database-functions 'query)
-     :seon.effect/transact! (get database-functions 'transact!)
-     :seon.effect/message!
-     (fn [request]
-       (binding [db/*leaf* database-leaf
-                 message/*leaf* message-leaf]
-         (message/message! request)))}))
+(defn- message-platform-leaf
+  []
+  {::message.leaf/available? (constantly true)
+   ::message.leaf/unavailable
+   (constantly
+    {:seon.error/message "The message capability is unavailable."
+     :seon.error/kind :seon.effect/unavailable})
+   ::message.leaf/now #(Date.)
+   ::message.leaf/uuid #(str (random-uuid))})
+
+(defn- invocation-bindings
+  "The {Var value} context every tool call establishes on the eval
+  thread: the executing form's effect coordinates and the platform
+  leaves. Claim epoch is deliberately absent — it fences run
+  transactions and is never part of effect identity, so recovery
+  re-derives the same op-ids and ledgered owners replay."
+  [database-leaf agent-id run-id ordinal]
+  {#'effect/*request-context*
+   (assoc (effect/request-context run-id ordinal)
+          :seon.agent/id agent-id)
+   #'db/*leaf* database-leaf
+   #'message/*leaf* (message-platform-leaf)})
+
+(defn- exposed-namespaces
+  "The agent's callable namespace set, derived from its home-require
+  policy facts — the agent's own datom or the config-seeded default.
+  A failed policy read logs loudly and exposes nothing: an agent with
+  no derivable policy cannot act, visibly."
+  [database-leaf database agent-id]
+  (let [require-specs
+        (binding [db/*leaf* database-leaf]
+          (home/home-requires-for database agent-id))]
+    (if (:seon.error/message require-specs)
+      (do (log/error "Home-require policy read failed; exposing no tools."
+                     {:seon.agent/id agent-id
+                      :seon/error require-specs})
+          #{})
+      (sci.eval/require-spec-namespaces require-specs))))
 
 (defn- form-evaluate!
-  [database-functions agent-id run-id ordinal claim-epoch]
+  [database-functions agent-id run-id ordinal _claim-epoch]
   (if-let [writer (::writer database-functions)]
-    (let [base-ctx
-          (sci.ctx/base
-           {::sci.ctx/program-functions
+    (let [database-leaf
+          (db.host/leaf
+           writer
+           #(invocation-database-context agent-id))
+          database ((get database-functions 'db))
+          base-ctx
+          (sci.eval/base
+           {::sci.eval/program-functions
             (callable-program-functions database-functions)
-            ::sci.ctx/request-context
-            (effect-request-context
-             writer agent-id run-id ordinal claim-epoch)})]
+            ::sci.eval/exposed-namespaces
+            (exposed-namespaces database-leaf database agent-id)
+            ::sci.eval/bindings
+            (invocation-bindings database-leaf agent-id run-id ordinal)})]
       (fn [request]
         (evaluate! (assoc request ::sci.eval/base-ctx base-ctx))))
     evaluate!))

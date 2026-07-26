@@ -1,11 +1,113 @@
 (ns seon.sci.eval
-  "Evaluate one source form on a bounded `:compute` platform thread."
+  "Evaluate one source form on a bounded `:compute` platform thread.
+
+  Also owns the SCI base: one process-shared interpreter context (SCI's
+  own word, `ctx` — `reference-code/sci/src/sci/core.cljc`) forked per
+  evaluation, whose callable surface is computed from committed
+  program-function facts filtered by the agent's derived namespace
+  policy — never a name-prefix rule or a hand list."
   (:require [sci.core :as sci]
+            [sci.interrupt :as sci.interrupt]
+            [seon.agent.lifecycle :as lifecycle]
             [seon.schema :as schema]
-            [seon.sci.ctx :as ctx]
             [seon.sci.interrupt :as interrupt])
   (:import (java.util.concurrent Callable Executors Semaphore TimeUnit
                                  TimeoutException)))
+
+;;; ---------------------------------------------------------------------------
+;;; The SCI base and its computed callable surface
+;;; ---------------------------------------------------------------------------
+
+(def ^:private core-base
+  "The process-shared SCI context without database-derived tools."
+  (delay
+    (let [lifecycle-ns (sci/create-ns 'seon.agent.lifecycle)]
+      (sci/init
+       {:namespaces
+        {'clojure.core sci.interrupt/clojure-core
+         'clojure.string sci.interrupt/clojure-string
+         'seon.agent.lifecycle
+         {'wait (sci/copy-var lifecycle/wait lifecycle-ns)
+          'complete (sci/copy-var lifecycle/complete lifecycle-ns)
+          'pause (sci/copy-var lifecycle/pause lifecycle-ns)
+          'resume (sci/copy-var lifecycle/resume lifecycle-ns)
+          'terminate (sci/copy-var lifecycle/terminate lifecycle-ns)}}
+        ;; SCI already exposes Exception. Keep the additional JVM surface to
+        ;; the two broad roots instead of enumerating exception subclasses.
+        :classes
+        {'Throwable Throwable
+         'java.lang.Throwable Throwable
+         'Error Error
+         'java.lang.Error Error}}))))
+
+(defn require-spec-namespaces
+  "The namespace symbols one agent's resolved require specs expose.
+  The specs come from `seon.agent.home/home-requires-for` — the
+  agent's own datom or the config-seeded canonical default — so the
+  callable surface is a database-derived policy, never a name-prefix
+  rule or a hand list."
+  {:malli/schema [:=> [:cat [:sequential :any]] [:set :symbol]]}
+  [require-specs]
+  (into #{}
+        (keep (fn [spec]
+                (when (and (sequential? spec) (symbol? (first spec)))
+                  (first spec))))
+        require-specs))
+
+(defn- tool-binding
+  "Wrap one exposed program function so its call establishes the
+  invocation bindings — the effect request context and the platform
+  leaves — on the calling (eval) thread. The bindings map is
+  {Var value}."
+  [bindings function-symbol]
+  (when-let [host-var (requiring-resolve (symbol function-symbol))]
+    (with-meta
+      (fn [& args]
+        (with-bindings bindings
+          (apply @host-var args)))
+      (meta host-var))))
+
+(defn- tool-namespaces
+  [program-functions exposed-namespaces bindings]
+  (reduce
+   (fn [namespaces function-symbol]
+     (let [qualified (symbol function-symbol)
+           namespace-symbol (some-> (namespace qualified) symbol)]
+       (if (contains? exposed-namespaces namespace-symbol)
+         (if-let [binding (tool-binding bindings function-symbol)]
+           (assoc-in namespaces
+                     [namespace-symbol (symbol (name qualified))]
+                     binding)
+           namespaces)
+         namespaces)))
+   {}
+   program-functions))
+
+(defn base
+  "Build the SCI base from current program-graph function facts.
+  `::program-functions` are the committed public function symbols;
+  `::exposed-namespaces` is the agent's derived require-spec namespace
+  set; `::bindings` is the {Var value} invocation context established
+  on each tool call."
+  [{::keys [program-functions exposed-namespaces bindings]}]
+  (sci/merge-opts
+   (sci/fork @core-base)
+   {:namespaces (tool-namespaces program-functions
+                                 (or exposed-namespaces #{})
+                                 (or bindings {}))}))
+
+(defn fork
+  "Fork the shared base and install one evaluation's `:interrupt-fn`."
+  [{::keys [base-ctx] :keys [interrupt-fn]}]
+  (assoc (sci/fork (or base-ctx
+                       (base {::program-functions []
+                              ::exposed-namespaces #{}
+                              ::bindings {}})))
+         :interrupt-fn interrupt-fn))
+
+;;; ---------------------------------------------------------------------------
+;;; Bounded evaluation
+;;; ---------------------------------------------------------------------------
 
 (defn evaluation-value?
   "Whether a value is a possible result from SCI evaluation."
@@ -133,9 +235,9 @@
           (interrupt/start
            {::interrupt/time-limit-ms time-limit-ms})
           evaluation-ctx
-          (ctx/fork
+          (fork
            (cond-> {:interrupt-fn interrupt-fn}
-             base-ctx (assoc ::ctx/base-ctx base-ctx)))
+             base-ctx (assoc ::base-ctx base-ctx)))
           task
           (.submit
            ^java.util.concurrent.ExecutorService compute-pool

@@ -15,6 +15,7 @@
    [seon.db.internal :as internal]
    [seon.db.leaf :as leaf]
    [seon.db.protocol :as protocol]
+   [seon.effect :as effect]
    [seon.error :as error]
    [seon.schema :as schema]
    #?(:cljs [seon.db.session :as session])))
@@ -395,7 +396,13 @@
   (let [database (await (read-db! arg))]
     (if (error-value? database)
       database
-      (let [op-id (or (:seon.capability/op-id arg) ((leaf-fn ::leaf/uuid)))
+      ;; Replay identity precedence: an explicit caller identity, then the
+      ;; executing form's derived identity (crash re-execution derives the
+      ;; SAME one, so the writer replays), then a fresh uuid for a
+      ;; system-side caller with no replay coordinates.
+      (let [op-id (or (:seon.capability/op-id arg)
+                      (effect/next-op-id!)
+                      ((leaf-fn ::leaf/uuid)))
             request (protocol/transaction-request
                      (cond-> {::protocol/request-id op-id ::db database
                               ::protocol/transaction-data

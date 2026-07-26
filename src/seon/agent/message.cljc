@@ -12,6 +12,7 @@
     [seon.db :as db]
     [seon.db.id :as db.id]
     [seon.db.protocol :as protocol]
+    [seon.effect :as effect]
     [seon.schema :as schema]))
 
 #?(:clj (defmacro await [value] value))
@@ -512,12 +513,21 @@
                    :seon.agent.message/origin origin}))]
             (if (failed-read? transaction)
               transaction
-              (let [op-id (or supplied-op-id ((leaf-fn ::leaf/uuid)))
+              ;; Replay identity precedence: explicit caller identity, then
+              ;; the executing form's derived identity (a crash re-execution
+              ;; derives the SAME one, so the committed message is recovered
+              ;; instead of double-sent), then a fresh uuid for a system-side
+              ;; caller. The top-level op-id lets `allocate!` recover the
+              ;; committed allocation before generating any candidate.
+              (let [op-id (or supplied-op-id
+                              (effect/next-op-id!)
+                              ((leaf-fn ::leaf/uuid)))
                     build (:seon.agent.message/transaction-builder transaction)
                     env
                     (await
                      (db.id/allocate!
                       {::db/db database
+                       :seon.capability/op-id op-id
                        ::db.id/allocations
                        (:seon.agent.message/allocations transaction)
                        ::db.id/transaction-builder

@@ -1153,6 +1153,49 @@
          manifest
          (:seon.error/data result))))
 
+;;; Replay recovery. An allocation request carrying `:seon.capability/op-id`
+;;; is replayable: the committed transaction stores that identity as its
+;;; `:seon.db.protocol/request-id` datom, and the allocated values are the
+;;; identity-attribute datoms asserted IN that transaction. A crash-retry
+;;; therefore recovers the original allocation from committed facts instead
+;;; of generating fresh candidates — fresh candidates change the logical
+;;; transaction hash, which the writer correctly refuses as a conflict.
+
+     (defn- allocation-recovery
+       "Recover a committed allocation by its replay identity, or nil."
+       [database op-id allocations]
+       (when op-id
+         (when-let [transaction
+                    (first
+                     (d/q '[:find [?tx ...]
+                            :in $ ?request-id
+                            :where
+                            [?tx :seon.db.protocol/request-id ?request-id]]
+                          database op-id))]
+           (let [rows
+                 (mapv (fn [{allocation-key ::key
+                             identity-attr ::identity-attr}]
+                         [allocation-key
+                          (vec (d/q '[:find ?value ?entity
+                                      :in $ ?tx ?attr
+                                      :where [?entity ?attr ?value ?tx]]
+                                    database transaction identity-attr))])
+                       allocations)]
+             (if (every? (fn [[_ pairs]] (= 1 (count pairs))) rows)
+               {::ids (into {} (map (fn [[k pairs]] [k (ffirst pairs)]))
+                            rows)
+                ::eids (into {} (map (fn [[k pairs]]
+                                       [k (second (first pairs))]))
+                             rows)
+                :seon.capability/op-id op-id
+                :seon.capability/replayed? true}
+               (failure
+                "A committed allocation with this replay identity cannot be recovered unambiguously."
+                :core-bug
+                {::error :seon.db.id.error/ambiguous-replay-recovery
+                 :seon.capability/op-id op-id
+                 ::allocations allocations}))))))
+
      #?(:clj
         (defn- candidate-conflict-error
           [candidate]
@@ -1354,6 +1397,10 @@
                          :seon.error/kind :core-bug}))))
          (let [[built manifest]
                (normalize-built-allocation! candidate-manifest raw-built)
+               built (cond-> built
+                       (:seon.capability/op-id request)
+                       (assoc :seon.capability/op-id
+                              (:seon.capability/op-id request)))
                transaction-request
                (allocation-transaction-request database built manifest)
                result (await (db/transact! transaction-request))]
@@ -1455,18 +1502,36 @@
           (try
             (validate-request! request)
             (let [database (or (::db/db request) (await (db/db)))
-                  policies (or (::generator-policies request)
-                               (await
-                                (acquire-generator-policies!
-                                 database
-                                 (::allocations request))))]
-              (validate-generator-policies! (::allocations request) policies)
-              (await
-               (allocate-attempt!
-                (assoc request
-                       ::db/db database
-                       ::generator-policies policies)
-                1)))
+                  op-id (:seon.capability/op-id request)]
+              (or
+               ;; A replay identity that already committed is recovered from
+               ;; facts — no candidate is generated, so the retry cannot
+               ;; change the logical transaction hash.
+               (allocation-recovery database op-id (::allocations request))
+               (let [policies (or (::generator-policies request)
+                                  (await
+                                   (acquire-generator-policies!
+                                    database
+                                    (::allocations request))))
+                     _ (validate-generator-policies!
+                        (::allocations request) policies)
+                     result
+                     (await
+                      (allocate-attempt!
+                       (assoc request
+                              ::db/db database
+                              ::generator-policies policies)
+                       1))]
+                 (if (and (error-value? result) op-id)
+                   ;; The concurrent-retry race: another execution committed
+                   ;; our identity first. Recover the winner from a fresh
+                   ;; database value; any other error stands.
+                   (let [fresh (await (db/db))]
+                     (or (when-not (error-value? fresh)
+                           (allocation-recovery
+                            fresh op-id (::allocations request)))
+                         result))
+                   result))))
             (catch :default e
               (failure
                (or (.-message e) (str e))
@@ -1485,14 +1550,32 @@
           (try
             (validate-request! request)
             (if-let [database (::db/db request)]
-              (let [policies
-                    (or (::generator-policies request)
-                        (acquire-generator-policies!
-                         database (::allocations request)))]
-                (validate-generator-policies! (::allocations request) policies)
-                (allocate-attempt!
-                 (assoc request ::generator-policies policies)
-                 1))
+              (let [op-id (:seon.capability/op-id request)]
+                (or
+                 ;; A replay identity that already committed is recovered
+                 ;; from facts — no candidate is generated, so the retry
+                 ;; cannot change the logical transaction hash.
+                 (allocation-recovery database op-id (::allocations request))
+                 (let [policies
+                       (or (::generator-policies request)
+                           (acquire-generator-policies!
+                            database (::allocations request)))
+                       _ (validate-generator-policies!
+                          (::allocations request) policies)
+                       result
+                       (allocate-attempt!
+                        (assoc request ::generator-policies policies)
+                        1)]
+                   (if (and (error-value? result) op-id)
+                     ;; The concurrent-retry race: another execution
+                     ;; committed our identity first. Recover the winner
+                     ;; from a fresh database value; other errors stand.
+                     (let [fresh (db/db)]
+                       (or (when-not (error-value? fresh)
+                             (allocation-recovery
+                              fresh op-id (::allocations request)))
+                           result))
+                     result))))
               (do
                 (assert-allocation-writer! (:seon.db/conn request))
                 (allocate-jvm-attempt! request 1)))

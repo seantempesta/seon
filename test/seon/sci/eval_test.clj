@@ -209,3 +209,21 @@
           (recur (inc attempt))))
       (is (= 2 (eval/available))
           "the permit returns only when the blocked call really exits"))))
+
+(deftest fork-isolates-new-definitions
+  (let [never-interrupt (constantly nil)
+        fork-a (eval/fork {:interrupt-fn never-interrupt})
+        fork-b (eval/fork {:interrupt-fn never-interrupt})]
+    (sci/eval-string* fork-a "(def local-value 42)")
+    (is (= 42 (sci/eval-string* fork-a "local-value")))
+    (is (thrown-with-msg?
+         Throwable #"Unable to resolve symbol: local-value"
+         (sci/eval-string* fork-b "local-value")))))
+
+(deftest interrupt-aware-string-functions-are-in-the-base
+  (let [entries (atom 0)
+        forked (eval/fork {:interrupt-fn #(swap! entries inc)})]
+    (is (= "bbb" (sci/eval-string*
+                  forked
+                  "(clojure.string/replace \"aaa\" #\"a\" \"b\")")))
+    (is (pos? @entries))))
