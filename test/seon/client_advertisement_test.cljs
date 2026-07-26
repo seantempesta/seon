@@ -91,8 +91,7 @@
                (is (= ["root"] (::client/resumable-agent-ids @client/!state)))
                (is (= 1 (count @requests)))
                (is (= [{::db/a :seon.agent/id}
-                       {::db/a :seon.agent/terminated-at}
-                       {::db/a :seon.agent.lifecycle/wake?}]
+                       {::db/a :seon.agent/terminated-at}]
                       (::db/datom-patterns (first @requests))))
                (is (not (contains? (first @requests) ::db/query)))
                (reset! latest (with-meta database-1 {:decoded-copy true}))

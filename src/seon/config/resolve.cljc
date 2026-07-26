@@ -799,7 +799,6 @@
 (def ^:private agent-context-entries
   (into
    [;; Persisted agent datoms — override-only (no default; consumer owns it).
-    [:seon.agent.lifecycle/wake? {:optional true} :boolean]
     [:seon.eval/home-requires {:optional true} [:vector :any]]
     [:seon.agent/ctx
      {:optional true :default []}

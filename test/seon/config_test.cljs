@@ -786,26 +786,21 @@
       (with-redefs [config/load-manifest (fn [] {})]
         (is (empty? (ctx-block-names "worker-x" nil)))))))
 
-;;; Persisted agent-level dials — `:seon.agent.lifecycle/wake?` / `:seon.eval/home-requires`
-;;; carry NO schema default (the CONSUMER owns the default), so a no-config agent
-;;; gets NO datom (byte-parity) and the manifest sets the key only to OVERRIDE.
+;;; Persisted agent-level home requires carry no schema default, so a no-config
+;;; agent gets no datom and the manifest sets the key only to override.
 
 (deftest agent-level-dials-are-override-only
   (with-redefs [config/load-manifest (fn [] {})]
-    (testing "a default agent-context carries NEITHER wake? nor home-requires (consumer owns the default)"
+    (testing "a default agent-context carries no home-requires"
       (let [ctx (config/resolve-agent-context
                  "worker-x" nil (selected-configuration))]
-        (is (not (contains? ctx :seon.agent.lifecycle/wake?))
-            "no wake? datom on a default agent → seed transacts nothing → parity")
         (is (not (contains? ctx :seon.eval/home-requires))
             "no home-requires datom on a default agent → home-requires-for uses the const")))
     (testing "a per-mint override carries the key into the atomic birth map"
       (let [ctx (config/resolve-agent-context
                  "worker-x"
-                 {:seon.agent.lifecycle/wake? false
-                  :seon.eval/home-requires '[[seon.db :as db]]}
+                 {:seon.eval/home-requires '[[seon.db :as db]]}
                  (selected-configuration))]
-        (is (false? (:seon.agent.lifecycle/wake? ctx)))
         (is (= '[[seon.db :as db]] (:seon.eval/home-requires ctx)))))))
 
 (deftest per-agent-model-config-resolves-through-the-birth-context

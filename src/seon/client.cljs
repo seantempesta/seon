@@ -381,8 +381,7 @@
 
 (def ^:private runtime-agent-datom-patterns
   [{::db/a :seon.agent/id}
-   {::db/a :seon.agent/terminated-at}
-   {::db/a :seon.agent.lifecycle/wake?}])
+   {::db/a :seon.agent/terminated-at}])
 
 (defn- runtime-advertisement-event!
   [owner event]
