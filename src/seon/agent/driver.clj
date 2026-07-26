@@ -333,7 +333,7 @@
   "Build the atomic idle-agent pointer and new run transaction."
   [process-id message-id agent-id at lease-until]
   (let [run-id (compact-id "r" message-id)
-        run-tempid "seon.agent.driver/run"]
+        run-tempid -1]
     [[:db.fn/cas [:seon.agent/id agent-id] :seon.agent/run nil run-tempid]
      {:db/id run-tempid
       :seon.agent.run/id run-id
