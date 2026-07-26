@@ -49,7 +49,6 @@
     ;; home ns can `:refer` them; required here so the build includes the ns.
     ;; The agent loop + wake trigger: the client boot path ARMS the wake
     ;; trigger (seon.agent does NOT, to stay acyclic).
-    [seon.agent.loop :as agent-loop]
     ;; The run lifecycle — the bootstrap turn-0 opens a run for its turn.
     ;; Cron-as-data — required so its `:seon.agent.schedule/*` register! calls
     ;; run before `agent-bootstrap-attrs` installs them, and so the ticker's
@@ -640,10 +639,8 @@
                                  (ex-info
                                   "Reload scheduler restoration failed."
                                   restored)))
-                              (agent-loop/install-ticker! configuration))
-                            (do
-                              (agent-loop/uninstall-ticker!)
-                              (agent-loop/uninstall-all-wake-triggers!)))
+                              restored)
+                            nil)
                           (start-heartbeat!))))
                      (.catch
                       (fn [publication-error]
@@ -2337,8 +2334,7 @@
                     {::web.serve/configuration configuration})))]
             (when autonomous?
               (await (ai/sync!))
-              (await (web.brand/sync!))
-              (agent-loop/install-ticker! configuration))
+              (await (web.brand/sync!)))
             (log/info-console! "seon.client" "runtime started"
                                {:autonomous? autonomous?
                                 :resumed resumable-ids
@@ -2548,9 +2544,7 @@
 (defn ^:async ^:private drain-runtime-owners!
   "Drain every runtime owner below the optional HTTP listener inverse."
   [_capability]
-  (agent-loop/uninstall-ticker!)
-  (let [{wake-ids ::agent-loop/uninstalled-ids}
-        (agent-loop/uninstall-all-wake-triggers!)
+  (let [wake-ids []
         _ (swap! !state update ::quiesce-progress
                  merge-quiesce-progress
                  {::lifecycle/unhosted-ids wake-ids})
