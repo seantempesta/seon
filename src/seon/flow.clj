@@ -77,6 +77,11 @@
   ::no-response])
 (schema/register! ::plan-step-fn 'fn?)
 (schema/register! ::fix-step-fn 'fn?)
+(schema/register! ::read-sources 'fn?)
+(schema/register! ::compile-namespace-fn 'fn?)
+(schema/register! ::sources [:map-of :symbol :string])
+(schema/register! ::changed-namespace :symbol)
+(schema/register! ::changed-source :string)
 (schema/register! ::owner-count [:int {:min 1}])
 (schema/register! ::successful-owners [:set :keyword])
 (schema/register! ::escalated? :boolean)
@@ -160,6 +165,14 @@
 (schema/register!
  ::namespace-owner-proc-request
  [:map [::fix-step-fn ::fix-step-fn]])
+(schema/register!
+ ::source-enumerator-proc-request
+ [:map [::read-sources ::read-sources]])
+(schema/register!
+ ::indexer-proc-request
+ [:map
+  [::compile-namespace-fn ::compile-namespace-fn]
+  [::compute-timeout-ms ::compute-timeout-ms]])
 
 (defn bounded-platform-executor
   "Create a bounded executor whose workers are platform threads."
@@ -408,6 +421,75 @@
           {::flow/report
            [{::event ::owner-attempt
              ::outcome outcome}]}]))})))
+
+(defn source-enumerator-proc
+  "Create an I/O proc that emits fixture namespaces and changed events."
+  {:malli/schema
+   [:=> [:catn [::request ::source-enumerator-proc-request]] ::launcher]}
+  [{::keys [read-sources]}]
+  (flow/process
+   (flow/map->step
+    {:describe
+     (fn []
+       {:ins {::source-event
+              "A full-drain request or one changed namespace source."}
+        :outs {::index-request
+               "One namespace source submitted to the indexer."}
+        :workload :io
+        :ping-map-fn #(select-keys % [::emitted ::sources])})
+     :init
+     (fn [_]
+       {::sources (read-sources)
+        ::emitted 0})
+     :transform
+     (fn [state _input message]
+       (let [changed-namespace (::changed-namespace message)
+             sources
+             (cond-> (::sources state)
+               changed-namespace
+               (assoc changed-namespace (::changed-source message)))
+             selected
+             (if changed-namespace
+               [changed-namespace]
+               (sort (keys sources)))
+             requests
+             (mapv
+              (fn [namespace]
+                {::changed-namespace namespace
+                 ::changed-source (get sources namespace)})
+              selected)]
+         [(-> state
+              (assoc ::sources sources)
+              (update ::emitted + (count requests)))
+          {::index-request requests
+           ::flow/report
+           [{::event ::source-enumerated
+             ::namespaces (set selected)}]}]))})))
+
+(defn indexer-proc
+  "Create a compute proc that compiles one namespace into transaction data."
+  {:malli/schema
+   [:=> [:catn [::request ::indexer-proc-request]] ::launcher]}
+  [{::keys [compile-namespace-fn compute-timeout-ms]}]
+  (flow/process
+   (flow/map->step
+    {:describe
+     (fn []
+       {:ins {::index-request "One namespace source to compile."}
+        :outs {::tx-page "Transaction data for the database committer."}
+        :workload :compute
+        :ping-map-fn #(select-keys % [::compiled])})
+     :init (fn [_] {::compiled 0})
+     :transform
+     (fn [state _input request]
+       (let [page (compile-namespace-fn request)]
+         [(update state ::compiled inc)
+          {::tx-page [page]
+           ::flow/report
+           [{::event ::namespace-indexed
+             ::namespace (::changed-namespace request)}]}]))})
+   {:workload :compute
+    :compute-timeout-ms compute-timeout-ms}))
 
 (defn eval-proc
   "Create a compute proc that simulates one guarded evaluation."

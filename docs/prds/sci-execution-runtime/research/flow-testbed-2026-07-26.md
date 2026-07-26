@@ -13,8 +13,46 @@ Path A is technically viable: the public Flow API runs Seon's ordinary
 database-backed proc reconstructs its state from surviving Datahike facts, and
 bounded platform-thread capacity remains directly observable.
 
-The testbed also proved six parts of the prior understanding wrong or
-incomplete:
+The indexer-as-proc extension found one production-interface defect that must
+be fixed before the production lane can treat edge generations as stable:
+
+- **`seon.program.edge/analyze-function` generations currently depend on
+  `*print-namespace-maps*`.** The analyzer hashes `pr-str` of a map with
+  namespaced keys. A direct call produced generation
+  `6290aa56075ea3b5a53f34ef5a4d6e649cff2c19ca2b35880e37205dbc419c17`,
+  while the identical bundle on Flow's compute executor produced
+  `afb7e22fe660ce975dda0c98e1a5082fbb099ad4d231cc29f9072e68572684ae`.
+  The only difference was the dynamic print binding. The testbed adapter binds
+  `*print-namespace-maps*` to `false`; the protected analyzer was not edited.
+  The pure core must canonicalize independently of dynamic printer state.
+
+The extension also exposed precise proc-interface friction:
+
+- `compile-tx-data` accepts a database value plus the **complete desired
+  program**, not one namespace event. The indexer proc therefore retains
+  successfully compiled rows by namespace and presents their complete
+  accumulated snapshot on every call. A malformed namespace is not admitted
+  to that accumulator.
+- `compile-tx-data` reconciles base function fields but does not exactly
+  replace the analyzer's cardinality-many edge attributes. The testbed must
+  compose `seon.program.edge/transition-tx` for the changed function bundles;
+  without it, changing `inc` to `+` retains the stale `inc` call fact.
+- Source enumeration, reader-conditional parsing, namespace description, and
+  analyzer resolution are outside `compile-tx-data`. That boundary is
+  appropriate for purity, but the production proc needs one explicit adapter
+  whose output names both the complete program rows and changed edge bundles.
+- Malformed source and analyzer failures throw rather than return error values.
+  This works with Flow's two-class design—the exception becomes a core fault
+  fact and later namespace events continue—but it is an explicit boundary
+  conversion, not an error-value API.
+- The isolated database must install `:seon.ns/source` and the optional
+  `:seon.db.id/generator` attribute before compiling. Desired schema rows carry
+  the established `:seon.db.id.generator/absent` sentinel; otherwise a partial
+  schema basis can make reconciliation emit a retraction against an
+  uninstalled attribute.
+
+The earlier testbed proved these additional parts of the prior understanding
+wrong or incomplete:
 
 - **Flow Monitor is not a non-invasive report tap; the testbed now resolves
   that defect.** Its `report-monitoring` loop takes directly from the channels
@@ -112,6 +150,22 @@ The recurring proof is `test/seon/flow_test.clj`. The real child-process
 crash helper is `test/seon/flow/kill_child.clj`; it lives under `test/` because
 the experiment must run again.
 
+The JVM indexer proof is `test/seon/flow/indexer_test.clj`, with four real
+`.cljc` inputs under `test/seon/flow/fixtures/` (three valid namespaces and one
+deliberately malformed namespace). Its graph is one mechanism, not a bespoke
+runner:
+
+- `:source-enumerator` is an `:io` proc. Its injected reader walks and reads
+  the fixture files at proc initialization; later input may replace and emit
+  exactly one namespace source.
+- `:indexer` is a `:compute` proc on a supplied one-thread bounded platform
+  executor. It calls the real `seon.program.edge/analyze-function`,
+  `seon.db.program/compile-tx-data`, and
+  `seon.program.edge/transition-tx`.
+- `:page-committer` is the existing database-backed proc. Its fixed input
+  buffer carries transaction pages only; durable program state remains in the
+  throwaway Datahike connection.
+
 ## Expected-versus-observed scenario matrix
 
 | scenario | expected | observed |
@@ -131,6 +185,12 @@ the experiment must run again.
 | 13. Fault tap is lossless within its bound | N faults admitted to a capacity-N tap survive a paused committer | Passed for N = 6. No facts existed while paused, no drops were recorded, and resume committed all six distinct fault messages. |
 | 14. Fault overflow is loud and durable | Values beyond the committer tap bound do not disappear silently | Passed at capacity 2 with five faults. Two fault facts committed and the durable drop counter became 3. The monitor tap independently received all five because its test capacity was five. |
 | 15. Agent errors remain values | A flat eval error value never enters Flow's core error channel | Passed. The synthetic interrupt returned `:seon.error/kind :timeout` in the normal eval report, the Flow error channel remained empty, and the proc handled its next submission. |
+| 16. Indexer one-shot drain equivalence | Pipeline facts equal the direct pure-core composition for the same fixture sources | Passed. Three namespace pages committed the same namespace sources, require edges, functions, exact direct-call edges, generations, and schemas as a direct `compile-tx-data` plus `transition-tx` call. |
+| 17. One-namespace incremental upsert | Re-injecting alpha changes only alpha and exactly replaces its edge facts | Passed. A Datahike `since` query resolved every changed program entity to `seon.flow.fixtures.alpha`; the function identity remained singular and its call set changed exactly from `clojure.core/inc` to `clojure.core/+`. |
+| 18. Malformed source isolation | A reader failure becomes a durable core-fault fact while later namespaces still index | Passed. The shared fan-out committed a fault naming `:indexer`; a subsequent valid gamma event committed and the indexer public ping reported five completed pages. |
+| 19. Slow committer backpressure | A full fixed buffer parks the indexer and loses no transaction page | Passed. An event latch proved all three pages had compiled, public indexer ping timed out while its third delivery was parked, release committed all three pages, and all three namespaces existed. |
+| 20. Mid-drain graph recreation | Stopping and recreating the graph completes without duplicate or torn program facts | Passed. The first graph stopped while its first commit was held; after release, a fresh graph drained the complete fixture snapshot. Final facts equaled the direct result with exactly three function and three schema identities. |
+| 21. Flow Monitor indexer topology | The released monitor names all three procs and observes drain progress | Passed. Its WebSocket stream named `:source-enumerator`, `:indexer`, and `:page-committer`, contained `namespace-indexed`, and the committer public ping reported count three. |
 
 The two error classes are now executable rather than documentary: exceptions
 escaping a Flow step are core faults routed through the fan-out and committed;
@@ -164,6 +224,21 @@ clojure -M:writer:host:writer-test -e \
 
 Result after the error-design extension: 14 tests, 66 assertions, 0 failures,
 0 errors.
+
+The indexer-as-proc extension was run independently on the same basis:
+
+```sh
+clojure -M:writer:host:writer-test -e \
+  '(require (quote seon.flow.indexer-test))
+   (clojure.test/run-tests (quote seon.flow.indexer-test))'
+```
+
+Result: 3 tests, 11 assertions, 0 failures, 0 errors. The retained concise
+receipt is
+`tmp/plan-evidence/flow-indexer-proc-2026-07-26.log`.
+
+The existing Flow proofs and the indexer extension were then run in one JVM:
+17 tests, 77 assertions, 0 failures, 0 errors.
 
 The focused pre-existing JVM async paths were run on the same alpha3 basis:
 
@@ -205,6 +280,13 @@ The production move should preserve the tested split:
   bounded and cannot delay fault commitment.
 - Agent error values stay on the ordinary result path. Only exceptions escaping
   Flow machinery enter the core-fault path and obey the core-error config fact.
+- The JVM indexer uses the same Flow graph, executor, fixed-channel
+  backpressure, lifecycle, error fan-out, and Flow Monitor view. Its durable
+  result is ordinary program facts, not proc state.
+- A production incremental indexer cannot call `compile-tx-data` with one
+  namespace row and call that reconciliation. It needs the complete desired
+  population plus the changed bundles' exact `transition-tx`, and analyzer
+  generation hashing must first be independent of dynamic printer bindings.
 
 This testbed does not move the existing semaphore/eval path and is not proof
 that the production mechanism has already adopted Flow.

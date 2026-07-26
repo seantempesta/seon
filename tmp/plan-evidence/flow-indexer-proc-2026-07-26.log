@@ -1,0 +1,24 @@
+command:
+  clojure -M:writer:host:writer-test -e '(require (quote seon.flow.indexer-test)) (clojure.test/run-tests (quote seon.flow.indexer-test))'
+
+observed:
+  Testing seon.flow.indexer-test
+  Ran 3 tests containing 11 assertions.
+  0 failures, 0 errors.
+  {:test 3, :pass 11, :fail 0, :error 0, :type :summary}
+
+combined command:
+  clojure -M:writer:host:writer-test -e '(doseq [n (quote [seon.flow-test seon.flow.indexer-test])] (require n)) (apply clojure.test/run-tests (quote [seon.flow-test seon.flow.indexer-test]))'
+
+combined observed:
+  Ran 17 tests containing 77 assertions.
+  0 failures, 0 errors.
+  {:test 17, :pass 77, :fail 0, :error 0, :type :summary}
+
+proof scope:
+  one-shot direct equivalence
+  one-namespace since-query and exact edge replacement
+  malformed-source durable fault plus continued indexing
+  fixed-buffer producer parking with no loss
+  graph recreation during a held commit
+  Flow Monitor WebSocket topology and progress evidence
