@@ -221,6 +221,76 @@ carried stale evidence within a day. Re-verify before starting.
   (`research/pod-test-coverage-2026-07-26.md`'s invariant list), never test
   count. No lane re-inflates the suite to match an old number.
 
+### Rulings 2026-07-26 night, session 2 (owner, conversational) — effect model sealed, pilot before alignment
+
+- **Effect identity is `(run, form-ordinal, effect-ordinal)`.** The
+  effect-ordinal counts effect requests within one form execution; claim
+  epoch is a fence ONLY and never part of logical identity. Resolves both
+  op-id blockers (`effect-operation-id-collides-within-one-form`,
+  `effect-operation-id-changes-on-run-recovery`).
+- **The closed `::family` enum dies.** A hand list by the house standard.
+  Capability identity on a request/receipt is the owner function's own
+  symbol, derived from what was called; adding a capability = writing the
+  owner function with its schema, zero registration. Rides the same
+  contract revision as the identity fix.
+- **Code always re-runs on recovery; the four declared effect classes
+  (`:pure`/`:read`/`:idempotent`/`:external`) die entirely.** World-effect
+  dedup happens inside `seon.effect` at request time: ledgered owners
+  (db, message) replay by op-id and return the recorded result; each
+  family core owns its replay contract. No per-function replay
+  declaration exists anywhere.
+- **Receipt-before-dispatch for every ledgerless family** (fs, shell,
+  web, llm) — the provider attempt pattern generalized. Writer ordering
+  guarantees: no receipt → never fired → safe to execute. Open receipt +
+  untagged leaf → the may-have-happened steering error, NEVER a refire.
+  The one opt-in is `redispatch-on-crash true` on first-party ledgerless
+  leaves whose repeat is harmless (reads); absence means never. Safety is
+  the default, not a tag (`fire-the-missles!` is safe by construction).
+- **The complete annotation surface is two facts**: `:malli/schema` on
+  durable defns (agents author this and nothing else), and
+  `redispatch-on-crash` on a few first-party leaves. Effectful?, family,
+  purity, workload, placement, replayability are ALL derived —
+  effectfulness is reachability of the one door; family is the owner
+  symbol in the call graph.
+- **Workload is core.async's enum `{:io :compute :mixed}`, never
+  declared.** Derived `:compute` = reaches no capability owner; derived
+  `:io` = a leaf hop (pure blocking transport); **`:mixed` is the
+  fail-closed default for anything the graph cannot resolve** — core.
+  async's own bucket for unknown code (supersedes the earlier
+  unknown→`:io` lean; unknown code may compute, violating `:io`'s
+  contract). A sequential chain is never pool-hopped per frame: it splits
+  into tasks at effect boundaries — compute segments on the eval's
+  `:compute` platform thread (with the `:interrupt-fn`), leaf hops on
+  `:io`. `:mixed` being unused by resolved chains is evidence the door
+  decomposes the workload; needing it for resolved code would mean
+  something bypasses the door. Future, measured-not-asserted: receipts'
+  durations/`fn-entries`/`allocated-bytes` can feed profile-informed
+  classing with zero author annotation.
+- **Turn phases: receipts subsume.** The six-phase cursor shrinks to what
+  receipts cannot express (the provider attempt boundary); plan freeze +
+  per-form receipts are the one recovery cursor.
+- **Construction model** is codified in `docs/seon/architecture/`
+  (construction.md, covering both our spec-first build AND the product's
+  agent accretion gate as one discipline) — DEFERRED until the pilot
+  below reports.
+- **Pilot before full alignment (owner: "minimum weirdness").** No
+  architecture rewrite yet. One test run, implemented BY THE ORCHESTRATOR
+  at top level: db + message (ledgered replay) + `my.fs` (`read` =
+  redispatch-on-crash, `write!` = untagged steering) on the revised
+  identity contract, with a crash-scenario walk table in the contract and
+  the live kill/resume falsifiers (double-send experiment; kill between
+  fs receipt and terminal). Acceptance includes the weirdness count: the
+  agent-visible reply is standard Clojure — no envelope, no identity
+  argument, no effect vocabulary; target zero constructs beyond
+  `:malli/schema`. What the pilot does not need, the architecture never
+  gets.
+- **Gate cadence**: the edit hook's affected selection per commit; full
+  suites at frozen-tree checkpoints only. **Test selection's target** is
+  function-level derivation over the program graph (changed functions →
+  reverse call-graph closure → test roots; unknown widens) — spec now,
+  build once the indexer's emitted rows are current facts; it replaces
+  the hook's clj-kondo/Shadow namespace closure (a second graph builder).
+
 ## 1. The base constructs
 
 Everything the runtime is made of. Every step below is an application of

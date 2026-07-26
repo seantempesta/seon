@@ -10,7 +10,7 @@ tags: [prd, agent, architecture]
 produced by the command shown, against the working tree — so a stale row is
 impossible and an agent can re-verify any claim in one line.
 
-Generated from `codex/runtime-reliability-refactor` at `27a9f6f1b`, measuring the **working tree** — so a
+Generated from `codex/runtime-reliability-refactor` at `74d535283`, measuring the **working tree** — so a
 lane with uncommitted work shows up here. Rows that can differ between committed
 and working state say both. `git status --short` before trusting a surprising row.
 
@@ -39,6 +39,16 @@ rg -A14 ':namespaces' src/seon/sci/ctx.clj
         ;; SCI already exposes Exception. Keep the additional JVM surface to
         ;; the two broad roots instead of enumerating exception subclasses.
         :classes
+   {:namespaces (tool-namespaces program-functions request-context)}))
+
+(defn fork
+  "Fork the shared `ctx` and install one evaluation's `:interrupt-fn`."
+  {:malli/schema [:=> [:cat ::fork-request] ::ctx]}
+  [{::keys [base-ctx] :keys [interrupt-fn]}]
+  (assoc (sci/fork (or base-ctx
+                       (base {::program-functions []
+                              ::request-context {}})))
+         :interrupt-fn interrupt-fn))
 ```
 
 **VERDICT: an agent cannot act.** Zero db / blob / fs / shell / web /
@@ -53,12 +63,12 @@ wc -l src/seon/agent/driver.clj src/seon/sci/*.clj src/seon/host.clj
 ```
 
 ```
-     888 src/seon/agent/driver.clj
+     982 src/seon/agent/driver.clj
      105 src/seon/sci/interrupt.clj
-      42 src/seon/sci/ctx.clj
-     146 src/seon/sci/eval.clj
+      85 src/seon/sci/ctx.clj
+     180 src/seon/sci/eval.clj
       61 src/seon/host.clj
-    1242 total
+    1413 total
 ```
 
 **Containment mechanisms:** `seon.sci.interrupt` present;
@@ -98,8 +108,8 @@ find src -name '*.cljs' | wc -l ; find src -name '*.cljs' | xargs wc -l | tail -
 34-
 35-(def ^:private legacy-containment-shutdown-grace-ms 2500)
 --
-cljs files: 63
-   30962 total
+cljs files: 26
+   15731 total
 ```
 
 ## 5. Where work is bounded, and where it is not
@@ -124,7 +134,7 @@ written as facts, it is installed at boot, and form 2 of a reply can see form 1.
 |---|---|---|
 | authored fn written as facts | **MISSING** | `rg -c tee-tx-data src/` → 0 |
 | corpus installed at boot | **MISSING** | `rg -c "install-nursery!|rebuild!" src/` → 0 |
-| form 1 visible to form 2 | **MISSING** | driver passes a base ctx → 0 hits |
+| form 1 visible to form 2 | BUILT | driver passes a base ctx → 1 hits |
 | `:seon.fn/execution-tier` kind stamp | gone (R-19a satisfied) | `rg -c` → 0 |
 
 ## 7. The index producer
@@ -134,8 +144,8 @@ O15: index at compile time from a JVM build only; never at runtime.
 | fact | value | meaning |
 |---|---|---|
 | shadow-cljs build hooks | 6 | the CLJS-only compile-time indexer; dies with the pod |
-| runtime derive branch | 2 | O16 deletes this; missing pages must fail loudly |
-| production callers of `compile-tx-data` | 0 | 0 = the reconciler is orphaned |
+| runtime derive branch | 0 | O16 deletes this; missing pages must fail loudly |
+| production callers of `compile-tx-data` | 1 | 0 = the reconciler is orphaned |
 
 ## 8. Can the machine prove anything?
 
@@ -144,17 +154,15 @@ a `bin/seon up` / `bin/seon down` freeze rebuilds it. Retained runs live in
 `tmp/plan-evidence/`; re-run with
 `bin/test-writer > tmp/plan-evidence/test-writer-$(date +%F).log 2>&1`.
 
-Last retained run — `tmp/plan-evidence/test-writer-2026-07-26.log` (2026-07-26):
+Last retained run — `tmp/plan-evidence/test-writer-2026-07-26-frozen-prompt-final.log` (2026-07-26):
 
 ```
-Ran 544 tests containing 3676 assertions.
-3 failures, 1 errors.
+Ran 549 tests containing 3865 assertions.
+1 failures, 0 errors.
 ```
 
 **Not green. Every failing test, named:**
 
-- `ERROR every-registered-wire-shape-is-total-and-round-trips`
-- `FAIL composes-the-established-frozen-prompt-projections`
 - `FAIL no-stored-attribute-promises-an-order-the-database-cannot-keep`
 
 An unnamed failure count is worse than no gate — it launders red into a
@@ -163,22 +171,21 @@ path; decide which and act, never re-baseline the count.
 
 Test source inventory (what exists, not what passes):
 ```
-test files:           189
-deftest (clj/cljc):   1017
-deftest (cljs):       1216
+test files:           146
+deftest (clj/cljc):   1049
+deftest (cljs):       605
 ```
 
 ## 9. Open blockers
 
 ```
-open issues:    161
-blockers:       61
+open issues:    166
+blockers:       66
 ```
 
 Filed 2026-07-26 and not yet owned end to end by a step:
 
 - [run-is-unrecoverable-before-its-plan-commits](../../../seon/issues/run-is-unrecoverable-before-its-plan-commits.md) — Recover a run opened before its plan commits
-- [agent-messages-never-wake-the-jvm-driver](../../../seon/issues/agent-messages-never-wake-the-jvm-driver.md) — Wake on the one inbound rule, not on `:origin :human`
 - [lazy-authored-values-escape-the-armed-interrupt-boundary](../../../seon/issues/lazy-authored-values-escape-the-armed-interrupt-boundary.md) — Realize authored values deeply before disarming the interrupt
 - [http-kit-streaming-writes-have-an-unbounded-socket-queue](../../../seon/issues/http-kit-streaming-writes-have-an-unbounded-socket-queue.md) — Bound http-kit streaming writes for slow SSE consumers
 
@@ -189,7 +196,7 @@ defect: the read returns nil and any sort over it is meaningless.
 
 ```
 :seon\.ai\.attempt/*  distinct used: 24   registered: 0
-:seon\.agent\.turn/*  distinct used: 17   registered: 9
+:seon\.agent\.turn/*  distinct used: 16   registered: 0
 ```
 
 ## 11. The agent entity
@@ -210,16 +217,13 @@ registered :seon.agent/* attributes:
   :seon.agent/terminated-at
 
 registered in:
-  src/seon/agent.cljs
-  src/seon/agent/run/core.cljc
   src/seon/agent/ctx.cljc
+  src/seon/agent/core.cljc
 ```
 
-**Duplicate registrations:** `:seon.agent/run ` — one attribute registered in two
-places. Check whether both agree, and note that a registration living in a
-`.cljs` file dies with the pod cut.
+**No duplicate `:seon.agent/*` registrations.**
 
-`.cljs` files registering agent attributes: **1**. Every one is on the
+`.cljs` files registering agent attributes: **0**. Every one is on the
 pod deletion list, so the agent's own schema must move to a surviving owner
 before that cut.
 
@@ -231,7 +235,7 @@ before that cut.
 | does an unsafe two-writer configuration refuse to open? | **NO** | `rg -c "refuse" src/seon/db/registry.clj` → 0 (O2 still unruled) |
 | does agent scheduling use core.async dispatch? | **NO — hand-rolled** | core.async refs → 0; hand-rolled pools → 1 |
 | is workload a fact yet? | **NO — designed, not built** | `rg -c ":seon.fn/workload"` → 0 |
-| reader conditionals in `.cljc` | 448 | `rg -c "#?\(" src/ --glob "*.cljc"`; the pod cut is projected to retire most |
+| reader conditionals in `.cljc` | 424 | `rg -c "#?\(" src/ --glob "*.cljc"`; the pod cut is projected to retire most |
 | is Integrant a dependency? | no | `rg -c integrant deps.edn` → 0 (adoption is conditional, `bd8038419`) |
 
 ## How to trust this file
