@@ -6,15 +6,22 @@ tags: [prd, agent, architecture]
 
 # What is not settled
 
-**UNDECIDED (needs the owner's seal): schema definitions leave code
-files.** Recommended and owner-leaning-yes at s3 close: attribute/entity
-schemas move to EDN data files, one per attribute namespace, admitted as
-ONE validated population at boot (kills the load-order/dangling-ref
-class — three incidents 2026-07-26); function contracts stay on defns;
-named predicates stay in code. Full reasoning in
-[handbook.md](handbook.md) §Where things are defined. On seal: fold into
-the B2 contract and convert N2's registrations into the first
-`schema/seon.cluster.run.edn`.
+**SEALED (owner, s3 close): schema definitions leave code files.**
+Attribute/entity schemas are EDN data under `src/seon/schema/*.edn` —
+the schema OWNER's folder, on the classpath so runtime inspection and
+`(schema/reload!)` are first-class. The population is GLOBAL: file
+boundaries are editorial convenience with zero semantic meaning; the
+loader merges every file and refuses a duplicate attribute across files.
+ONE validating admission gate (all references resolve, every `[:fn]`
+names a registered core predicate, generative-honesty lint) shared by
+both producers: our declared files at build/boot, and agents'
+`register!` transactions at runtime — one gate, one registry, and the
+build-time indexer READS THE DIRECTORY instead of loading namespaces to
+scrape registrations (deleting the load-set-closure failure class at the
+producer). Function contracts stay on defns; named predicates stay in
+code. Conversion of N2's in-code registrations into the first schema EDN
+happens when the nucleus-run-impl lane returns (never edit a sealed file
+a lane holds); fold into the B2 contract at authoring.
 
 **2026-07-26 s3 close — the nucleus era.** README's session-3 rulings and
 the nucleus ladder (R0/B0-B3/N2-N6) supersede everything below that
