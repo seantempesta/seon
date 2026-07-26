@@ -498,8 +498,14 @@ path, no pod. N1 decomposes into the ladder:
   an audit lane first inventories every consumer of the literal `"src"`
   path (deps/bb/shadow edn, the changed-test hook's corpus scan, indexer
   roots, AOT discovery, kondo config) so the split is one coherent
-  commit, not a bleed. `test/` splits the same way when the nucleus
-  suites outgrow co-residence.
+  commit, not a bleed. **`test/` splits in the SAME atomic commit**
+  (owner, s3 close): `test/` → `test-old/` (still discovered by the
+  runners), fresh `test/` holds only the nucleus acceptance suites —
+  so `ls test/` is the honest list of what the nucleus proves, and an
+  old suite is adopted the same way code is: by `git mv`, with a port
+  verdict. The framing stays honest: this is not literally zero — git
+  history and State A are the quarry and the rough map to B; starting
+  fresh is how we find what is actually CORE and build only that.
 
 - **B0 — the entry.** `seon.cluster` main: the process starts from source,
   prints its identity, and opens its io-prepl IMMEDIATELY — the REPL is
