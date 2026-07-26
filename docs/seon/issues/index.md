@@ -10,7 +10,7 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (63)
+## Blocker (66)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -30,16 +30,19 @@ See `README.md` for the convention.
 | [Freeze one turn input across provider retries](turn-retries-reread-provider-inputs.md) | blocker | agent |
 | [Freeze the restore pod artifact in confirmed intent](restore-intent-does-not-freeze-client-artifact.md) | blocker | Core |
 | [Full writer gate fails during runtime lane integration](full-writer-gate-fails-during-runtime-lane-integration.md) | blocker | Core |
+| [Give each effect in a form a distinct replay identity](effect-operation-id-collides-within-one-form.md) | blocker | agent |
 | [Give each named cluster its own writer process](named-clusters-share-one-writer-process.md) | blocker | Core |
 | [Implement browser-session navigation provenance](web-session-navigation-provenance-is-missing.md) | blocker | UI |
 | [Install durable corpus functions into the shared SCI base](cluster-jvm-boot-does-not-install-durable-corpus-functions.md) | blocker | agent |
 | [Invalidate a cached failed Datastar render after its owner reloads](datastar-feed-retains-failed-render-after-hot-reload.md) | blocker | UI |
 | [JVM result surface does not implement R32 result-symbol handles](jvm-result-symbols-not-bound-r32.md) | blocker | Core |
 | [Keep a running target's bootstrap artifact immutable](shared-bootstrap-output-mutates-running-artifact.md) | blocker | Core |
+| [Keep an unfinished effect identity stable across run recovery](effect-operation-id-changes-on-run-recovery.md) | blocker | agent |
 | [Keep database control entry independent of occupied handlers](uds-codec-capacity-can-delay-control-entry.md) | blocker | Core |
 | [Keep pod republication's reusable projection inside its contract](pod-republication-passes-nil-reusable-projection.md) | blocker | agent |
 | [Keep restore publication closed through completion](restore-completion-cannot-precede-admission.md) | blocker | Core |
 | [Let the common Inspect pod solver address an existing agent](inspect-pod-solver-cannot-address-existing-agent.md) | blocker | agent |
+| [Make Step-1 relational properties executable](step1-relational-properties-are-comments.md) | blocker | Core |
 | [Make the downstream runtime package self-contained](downstream-runtime-package-is-not-self-contained.md) | blocker | Core |
 | [Make writer drain proof consumable by the operator](planned-restart-cannot-observe-writer-drain-result.md) | blocker | Core |
 | [Plan a visible cluster JVM reply on an inspected tier](jvm-claimant-rejects-visible-reply-without-exact-execution-plan.md) | blocker | agent |
