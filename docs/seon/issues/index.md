@@ -10,7 +10,7 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (52)
+## Blocker (53)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -28,6 +28,7 @@ See `README.md` for the convention.
 | [Freeze one turn input across provider retries](turn-retries-reread-provider-inputs.md) | blocker | agent |
 | [Freeze the restore pod artifact in confirmed intent](restore-intent-does-not-freeze-client-artifact.md) | blocker | Core |
 | [Full writer gate fails during runtime lane integration](full-writer-gate-fails-during-runtime-lane-integration.md) | blocker | Core |
+| [Give each named cluster its own writer process](named-clusters-share-one-writer-process.md) | blocker | Core |
 | [Implement browser-session navigation provenance](web-session-navigation-provenance-is-missing.md) | blocker | UI |
 | [Invalidate a cached failed Datastar render after its owner reloads](datastar-feed-retains-failed-render-after-hot-reload.md) | blocker | UI |
 | [JVM result surface does not implement R32 result-symbol handles](jvm-result-symbols-not-bound-r32.md) | blocker | Core |
@@ -46,8 +47,8 @@ See `README.md` for the convention.
 | [Projected map keys are not drill paths](projected-map-keys-are-not-drill-paths.md) | blocker | UI |
 | [Pull cluster JVM limits from the cluster config identity](jvm-claimant-pulls-config-with-wrong-identity.md) | blocker | agent |
 | [Read-side attribute admission fails open (silent empty results, :all fallback)](read-side-attribute-admission-fails-open.md) | blocker | Core |
-| [Reconcile the cluster JVM for named clusters](named-cluster-open-does-not-reconcile-jvm-host.md) | blocker | agent |
 | [Reduce retained memory in each execution child](execution-children-retain-hundreds-of-megabytes.md) | blocker | agent |
+| [Refuse execution when the run plan is not durable](jvm-driver-ignores-plan-transaction-errors.md) | blocker | agent |
 | [Restore writer admin transition is unimplemented](restore-writer-admin-transition-is-unimplemented.md) | blocker | Core |
 | [Retain complete model transport evidence in Inspect logs](inspect-model-transport-evidence-is-incomplete.md) | blocker | agent |
 | [Retain live eval values in the owning JVM host](retain-live-eval-values-in-the-owning-jvm-host.md) | blocker | agent |
@@ -67,7 +68,7 @@ See `README.md` for the convention.
 | [seon.agent.ctx file reads bypass the filesystem grant](agent-ctx-file-reads-bypass-fs-grant.md) | blocker | agent |
 | [tools.reader executes agent source at read time, outside SCI entirely](tools-reader-evaluates-agent-source-at-read-time.md) | blocker | general |
 
-## Friction (74)
+## Friction (76)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -86,6 +87,7 @@ See `README.md` for the convention.
 | [Branch trial tests write into the live operator state directory](branch-trial-tests-write-into-live-operator-state.md) | friction | Core |
 | [Bun's rejection net loses AsyncLocalStorage scope](bun-rejection-net-loses-async-scope.md) | friction | general |
 | [Calibrate cross-database writer scaling on shared file persistence](shared-file-persistence-limits-cross-database-writer-scaling.md) | friction | Core |
+| [Coalesce duplicate run-open attempts in the JVM driver](agent-driver-scans-duplicate-run-open-attempts.md) | friction | agent |
 | [Context block order is static](context-block-order-is-static.md) | friction | agent |
 | [Cross-agent planners can reopen worker-completed steps](plan-reopen-cross-agent-authority.md) | friction | agent |
 | [D13 repair merge broke the bare-babashka loadability the candidates half had](d13-merge-broke-bare-babashka-loading.md) | friction | agent |
@@ -122,6 +124,7 @@ See `README.md` for the convention.
 | [Preserve distinct large BigInts in cardinality-many attributes](datahike-cljs-cardinality-many-collapses-large-bigints.md) | friction | Core |
 | [Prevent output data from becoming a phantom callable arity](callable-contract-output-data-becomes-phantom-arity.md) | friction | agent |
 | [Prove Kimi K3 completion and continuation compatibility](kimi-k3-continuation-compatibility.md) | friction | agent |
+| [Reconcile issue frontmatter with the maintained lifecycle](issue-authority-frontmatter-drift-blocks-index.md) | friction | general |
 | [Remove local Datahike ownership from execution children](execution-artifact-packages-local-datahike.md) | friction | agent |
 | [Remove the Node module-register deprecation from CSS builds](tailwind-node-module-register-deprecation.md) | friction | UI |
 | [Remove undeclared-var warnings from the self-host bootstrap build](bootstrap-analyzer-api-emits-undeclared-var-warnings.md) | friction | agent |

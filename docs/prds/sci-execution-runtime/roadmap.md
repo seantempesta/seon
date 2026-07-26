@@ -156,17 +156,34 @@ checkpoint makes the suite a stable instrument; it does not satisfy the live
 load, performance, or end-to-end final system gates. Full evidence:
 [[research/codec-test-instrument-repair-2026-07-25]].
 
-The 2026-07-25/26 saturation pass now closes the direct transaction-wall
-unknown, but not the real-agent or end-to-end gates. Under OpenJDK 26.0.1,
-Clojure 1.12.5, G1, and `-Xmx4g`, fixed work degraded from 4,336.40 tx/s at
-65,536 concurrent callers to 3,621.77 tx/s at 131,072. At that same concurrency,
-doubling sustained work filled Datahike's 120,000-entry queues and exhausted
-the 4 GiB heap; moderate load was instead dominated by Konserve/APFS metadata
-forces. The first real-agent resource still fails before `N=1`: named-cluster
-open does not reconcile a target JVM driver. Current turn facts also cannot
-attribute model, transaction, context, and publish time, so no end-to-end
-waterfall or current SCI share is claimed. Complete conditioned evidence:
-[[research/measurements-2026-07-25#16-load-and-saturation]].
+The 2026-07-25/26 saturation pass closes the direct transaction-wall unknown.
+Under OpenJDK 26.0.1, Clojure 1.12.5, G1, and `-Xmx4g`, fixed work degraded
+from 4,336.40 tx/s at 65,536 concurrent callers to 3,621.77 tx/s at 131,072.
+At that same concurrency, doubling sustained work filled Datahike's
+120,000-entry queues and exhausted the 4 GiB heap; moderate load was instead
+dominated by Konserve/APFS metadata forces.
+
+The named-cluster blocker reported in §16 is now fixed by `051825d92`,
+`2c885f754`, and `037e285e2`. Fresh `agentload0726` reached ready with its own
+JVM driver/pod/web-render, and a history query tied a real run receipt to that
+driver's PID. The final named reset removed only that target database and its
+three process records while default watcher/writer generations stayed exact.
+The requested `1, 5, 10, 25` DeepSeek climb completed 41/41 turns. The first
+scaling defect appeared at `N=5`: repeated scans submitted 12 duplicate
+run-open CAS attempts, growing to 62 at `N=25`; one CAS won each time, so the
+ceiling is 25/25 successful with the first break already named, not a capacity
+claim of 25.
+
+One minimal real turn measured 2,409 ms inside the HTTP task: a 1,398 ms model
+envelope, 3 ms SCI eval (**0.1245%**, not the historical ~5%), and 1,008 ms of
+commit-adjacent scheduling/protocol/response work. Full target context
+derivation is absent on this path and publish shares the terminal transaction,
+so their standalone costs remain unobservable. The load clause now has a
+conditioned first break; the speed clause is measured but **not graduated**
+because the expected model-dominates shape was only 58% at best and the
+non-SCI remainder is too large. Complete conditioned evidence and explicit
+non-measurements:
+[[research/measurements-2026-07-25#17-named-cluster-real-agent-load-and-turn-waterfall]].
 
 The 2026-07-24 reset-boundary checkpoint fixed claimant-host committed
 acquisition in `c2c5faeff`: one frozen database value, AEVT identity pages,

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, runtime, operator]
 ---
@@ -87,3 +87,27 @@ authority.
   member in dependency order without changing the source cluster generations.
 - A fresh named-cluster run persists a `:seon.agent.run/process` whose PID matches its
   target host workload PID.
+
+## Resolution
+
+Resolved across `051825d92`, `2c885f754`, and `037e285e2`.
+
+`seon.dev.cluster/ensure-under-lock!` now reconciles the entire derived target
+graph in dependency order, while close/restart target every target-owned
+member. `seon.dev.process` stores all target-owned records and the web-render
+port under the named process directory and supplies the named database
+backend/path to the host.
+
+Fresh cluster `agentload0726` reached ready with private host workload PID
+`15335`, pod workload PID `15367`, web-render workload PID `15402`, database
+`data/clusters/agentload0726/db`, and web endpoint
+`http://127.0.0.1:55729`. Historical query of real run `m5bng2aq847g`
+showed `:seon.agent.run/process "host-15335"` asserted at transaction
+`536871033` and retracted at terminal transaction `536871036`. Its eval
+receipt and transcript reply are recorded in
+[[../../../prds/sci-execution-runtime/research/measurements-2026-07-25#172-one-real-turn-proves-the-named-driver-and-database]].
+
+Focused operator lifecycle proof and the live open/turn/reset falsifier are
+green. The separate remaining architecture gap—named clusters still depend on
+one shared writer process—is tracked by
+[[../named-clusters-share-one-writer-process]].

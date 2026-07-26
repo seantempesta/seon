@@ -1,6 +1,6 @@
 ---
 type: issue
-status: resolved
+status: open
 severity: friction
 tags: [issue, architecture, index]
 ---
@@ -58,3 +58,15 @@ resolved top-level notes into the archive, and regenerated the derived index.
 eight affected Markdown files validate with zero violations and
 `git diff --check` is clean. No issue substance or unrelated source ownership
 changed.
+
+## Regression (2026-07-26)
+
+The named-cluster measurement issue updates regenerated the valid-note
+projection, but both `bin/issues-index` and `bin/issues-index --check` again
+exited 1. The report names current open notes with missing or invalid
+severities (`high`, `bug`, `major`, `correctness`) or a missing `issue` tag,
+plus two archived notes with `status: complete` and missing severity.
+
+The new named-cluster notes themselves validate and appear in the regenerated
+index. This recurrence does not block their recording, but the authority-wide
+check remains red until the reported owners normalize their frontmatter.

@@ -1383,3 +1383,306 @@ with G1 timing and are not retained-footprint measurements.
 The direct transaction load clause now has a number, a knee, a degraded point,
 and named resources. The real-agent and end-to-end performance clauses remain
 open on the two explicit blockers above.
+
+## 17. Named-cluster real-agent load and turn waterfall
+
+### 17.0 The earlier blocker is superseded, not erased
+
+**Measured and fixed, 2026-07-26 01:00–02:15 EDT.** Sections 16.3–16.6
+accurately describe revision `4ea5d22fb`, but their zero-agent result is no
+longer current. This section records the disagreement explicitly: after the
+named-cluster lifecycle fix, the same disposable-cluster path reached ready,
+drove real DeepSeek turns, and completed all requested `1, 5, 10, 25`
+concurrency rungs.
+
+The pre-fix cause was exact:
+
+- `seon.dev.cluster/ensure-under-lock!` selected only `pod-id`
+  (`script/seon/dev/cluster.clj` at revision `4ea5d22fb`, lines 233–241);
+- close/restart targeted only the pod (`:318–350`);
+- the complete host/pod/web-render graph already existed in
+  `seon.dev.process/owned-process-graph`
+  (`script/seon/dev/process.clj`, lines 221–250), so cluster lifecycle was
+  bypassing its own authority;
+- process records used the target-private directory only for an externally
+  written pod, causing named host/web reads to alias the source operator
+  (`script/seon/dev/process.clj`, lines 321–328);
+- the web-render port used the source process directory (`:216–219`); and
+- host/web specs passed the source database/socket coordinates rather than the
+  selected launch descriptor (`:706–779`).
+
+`051825d92` makes open/close/restart reconcile the complete derived target
+graph and gives every target-owned process private records/endpoints.
+`2c885f754` supplies the selected database backend/path and fixes apply-time
+writer ownership. `037e285e2` makes named reset coordinate-safe.
+
+The live named target then reported:
+
+| member | workload PID | private evidence |
+|---|---:|---|
+| host / JVM driver | `15335` | `logs/clusters/agentload0726/host/…`, target host socket and database path |
+| pod | `15367` | target HTTP endpoint `http://127.0.0.1:55729` |
+| web-render | `15402` | target-private port file and log |
+
+The database was
+`/Users/sean/src/seon/data/clusters/agentload0726/db`; target status was
+`:seon.dev.target.status/ready`.
+
+**Remaining topology disagreement.** The target owns the JVM driver but still
+uses default writer PID `14973` through
+`tmp/seon-cluster-default-req.sock`. This was the implementation's deliberate
+“shared writer” topology, but it contradicts the later O9 one-writer-per-store
+isolation ruling. It did not invalidate database-path isolation for this
+measurement, but process failure and queue/heap isolation are not yet true.
+[[../../../seon/issues/named-clusters-share-one-writer-process]] owns that
+separate blocker.
+
+### 17.1 Conditions and method
+
+Every number in §§17.2–17.6 has these conditions unless a table overrides one:
+
+| condition | value |
+|---|---|
+| machine | MacBook Pro `Mac17,6`, Apple M5 Max, 18 cores, 128 GiB RAM |
+| operating system | macOS 26.5.2, build `25F84` |
+| JVM | Homebrew OpenJDK 26.0.1 arm64, G1, `-Xmx4096m` |
+| JVM launch flags | `--add-modules jdk.incubator.vector`, `--enable-native-access=ALL-UNNAMED`, `--sun-misc-unsafe-memory-access=allow`, `-XX:+UseG1GC`, `-Xshare:on`, AppCDS archive |
+| Seon release | application digest `596b6c1d43bd76cbf925ea288bc402d3c393cdab9fc9bc06e3309c0e91a3ca0a`; commits through `ad33c2268` |
+| cluster | fresh reset/apply/open of `agentload0726`; host workload PID `15335`; file database; shared default writer PID `14973` |
+| model | DeepSeek `deepseek-v4-flash`, thinking disabled, non-streaming, `max_tokens=64`, temperature `0.7`, zero configured retries |
+| request | one raw instruction asking for exactly `(seon.agent.lifecycle/complete "<RUNG>_OK")`; request timeout 120 s, model-attempt timeout 30 s |
+| concurrency | calls launched within 1.577 ms (`N=5`), 11.490 ms (`N=10`), and 34.762 ms (`N=25`) |
+| other work | complete default Seon system, watcher, shared writer, named host/pod/web-render, unrelated Shadow build artifacts, and desktop apps; not sole tenant |
+
+`bench/agent_turn_load.sh` is the reproducible HTTP rung driver.
+`bench/jvm_memory_snapshot.sh` records JVM/OS conditions, forces a full GC, and
+captures whole-KiB heap/RSS/thread evidence. Response JSON and the database
+timeline used here were retained under `tmp/load-saturation/`.
+
+The requested rungs made **41 confirmed paid model calls**. Three additional
+completed preflight calls were required while repairing the truthful
+`/agents/run` evidence projection, for **44 confirmed completed calls** in
+this cluster; one earlier interrupted pre-fix request may have reached provider
+dispatch, but that is unverified. Token usage was not persisted, so exact
+dollar cost is **unmeasured**. The output cap and tiny prompt bounded spend,
+but no cost is inferred without usage facts.
+
+### 17.2 One real turn proves the named driver and database
+
+The `N=1` request reused agent `red-windows-pump`. It returned HTTP 200 with
+reply `RUNG1_OK`, one turn, and one eval after 2,409 ms inside the handler
+(2,575.833 ms full HTTP wall).
+
+Its named-database evidence was:
+
+```text
+run       m5bng2aq847g
+turn      q88c21uqtcee
+eval      ["m5bng2aq847g" 0 1]
+source    (seon.agent.lifecycle/complete "RUNG1_OK")
+status    :done, :seon.eval/ok? true, :seon.eval/duration-ms 3
+reply     RUNG1_OK at 2026-07-26T05:53:08.902Z
+```
+
+A history query showed
+`:seon.agent.run/process "host-15335"` asserted at basis transaction
+`536871033` and retracted in the terminal transaction `536871036`. That PID
+was the named host workload PID, not the default host. The current run pull
+showed `:closed-reason :completed` and result `RUNG1_OK`; the transcript query
+returned the same reply. The database value after the response carried basis
+transaction `536871036` and commit ID
+`6a65a0c5-c022-5fa3-9e9c-56227485e0e1`.
+
+This closes the old “probe broke before `N=1`” result. It does not prove
+per-store writer-process isolation; §17.0 names that remaining difference.
+
+### 17.3 Requested concurrency climb
+
+Every request returned HTTP 200, exactly one successful eval receipt, exactly
+one turn, and the exact rung reply:
+
+| concurrent real agents | successes | handler elapsed min / median / max | full HTTP wall min / max | first observed defect |
+|---:|---:|---:|---:|---|
+| 1 | 1/1 | 2,409 / 2,409 / 2,409 ms | 2.576 / 2.576 s | none |
+| 5 | 5/5 | 3,508 / 4,065 / 4,402 ms | 4.023 / 4.638 s | 12 duplicate run-open CAS losses |
+| 10 | 10/10 | 5,306 / 6,617 / 7,097 ms | 6.211 / 7.537 s | 29 duplicate run-open CAS losses |
+| 25 | 25/25 | 6,724 / 16,773 / 18,331 ms | 8.493 / 19.341 s | 62 duplicate run-open CAS losses |
+
+**The first thing that broke was same-process run admission at `N=5`.**
+`seon.agent.driver/start!` starts a virtual thread for every row returned by
+each interest-triggered `pending-messages` scan. `scanning?` prevents two scan
+enumerations at once, but no in-flight message set spans scans. Before the
+winning run-cause transaction becomes visible, a new scan starts more threads
+for the same message. Datahike's agent-run CAS correctly lets one win; the
+others consume the writer queue and log errors.
+
+The resource is **duplicate run-open transactions against the shared writer**,
+not provider capacity, SCI, carrier threads, or a user-visible timeout. The
+defect grew 12 → 29 → 62 losing transactions across the three concurrent
+rungs. [[../../../seon/issues/agent-driver-scans-duplicate-run-open-attempts]]
+owns the fix.
+
+No hard success ceiling was reached through the requested maximum of 25, and
+no request was bought above that number merely to obtain a rounder ceiling.
+The usable ceiling established here is therefore: **25/25 succeeded, with the
+first scaling defect already present at 5**. This is a load-to-first-break
+result, not a claim that capacity is 25.
+
+### 17.4 One-turn end-to-end waterfall
+
+The `N=1` turn has enough transaction timestamps to bound the real wall.
+The handler timer began at the inbound message's logical time
+`05:53:06.897Z`; its 2,409 ms total ends at approximately
+`05:53:09.306Z`.
+
+| interval | wall | classification | what it includes |
+|---|---:|---|---|
+| handler start → inbound-message transaction `536871032` | 188 ms | measured | message construction, protocol transaction, commit |
+| message commit → run-open transaction `536871033` | 291 ms | measured | interest delivery, scan/thread scheduling, run allocation, CAS commit |
+| run commit → turn-open transaction `536871034` | 141 ms | measured | turn allocation and commit |
+| turn commit → eval-admission transaction `536871035` | 1,398 ms | measured model envelope; model duration upper bound | config/agent pulls, request construction, DeepSeek call, response parse, and the failed plan transaction |
+| eval admission → terminal/reply transaction `536871036` | 128 ms | measured | SCI eval plus terminal commit and reply publication |
+| final commit → handler result complete | 263 ms | derived from measured endpoints | final database reacquisition and response projection |
+| outside handler timer | 166.833 ms | measured | remaining HTTP client/server request and response wall |
+
+The six inside-handler intervals sum exactly to 2,409 ms. The real provider
+call is **not separately timestamped**: 1,398 ms is an honest upper bound and
+envelope, not a fabricated model duration. It is 58.0% of handler wall.
+
+SCI recorded **3 ms**, or **0.1245%** of handler wall. Thus the historical
+prototype statement “SCI is ~5% of a turn” does **not** survive this minimal
+real-model turn. At `N=25`, all 25 eval durations recorded `0 ms`; that is
+millisecond-resolution truncation, not zero work and not a better SCI result.
+
+The current driver does not derive the full agent context for this path.
+`model-request` pulls model configuration and the agent row, then sends the raw
+message with a static system instruction. **Context derivation is absent, not
+measured as zero.** Reply publication shares terminal transaction
+`536871036`, so its standalone duration is also unobservable. Commit-adjacent
+intervals include scheduling and protocol work and must not be relabeled as
+pure Datahike commit time.
+
+The expected “model dwarfs everything else” shape is only partly true: the
+model envelope is the largest interval, but at most 58.0% of handler wall;
+the remaining non-SCI path is about 41.9%. “Kick-ass fast” therefore has a
+real conditioned waterfall now, but its performance claim is **falsified, not
+graduated**.
+
+### 17.5 A silent missing transaction changes the waterfall
+
+Source tracing predicted an execution-plan transaction between the model reply
+and eval admission. It did not commit.
+
+The fresh database had none of the six
+`:seon.agent.run/plan-*` / `:seon.agent.run.form/*` attributes registered by
+`seon.agent.driver`. `process-message!` discards the returned error value from
+that transaction and evaluates anyway (`src/seon/agent/driver.clj:461-471`).
+The `N=1` run had no plan attributes, and every rung advanced the basis by
+exactly five successful transactions per completed turn. At `N=25`, basis
+transaction `536871111` became `536871236`: exactly 125 successful
+transactions.
+
+This is not a timing optimization. It is missing durable plan evidence and a
+silently ignored database error. The failed call's wall is included inside the
+1,398 ms model envelope. The correctness blocker is
+[[../../../seon/issues/jvm-driver-ignores-plan-transaction-errors]].
+
+### 17.6 Idle-agent and load memory
+
+**Measured idle curve.** Before the final helper-only artifact rebuild, named
+host PID `89573` ran the same OpenJDK 26.0.1, G1, `-Xmx4096m`, AppCDS flags,
+cluster database, default shared writer, and non-sole-tenant machine described
+in §17.1. Host source was unchanged by the later rebuild. After each agent
+count was committed, `jcmd GC.run` completed before `GC.heap_info`, RSS, and
+`ps -M` were read:
+
+| total database agents | used heap KiB | committed heap KiB | RSS KiB | OS thread rows excluding header |
+|---:|---:|---:|---:|---:|
+| 2 seeded | 59,679 | 253,952 | 1,005,520 | 62 |
+| 3 | 59,679 | 233,472 | 607,888 | 62 |
+| 7 | 59,679 | 225,280 | 586,848 | 62 |
+| 12 | 59,679 | 219,136 | 579,024 | 62 |
+| 27 | 59,679 | 219,136 | 572,752 | 62 |
+
+The correct result is **no retained host-heap change detectable at 1 KiB
+resolution through 25 additional idle agents, and no thread increase**. It is
+not “zero bytes per agent.” The identical 59,679 KiB values are a
+whole-KiB/resolution artifact, just as §3.1's “1,000 forks = 0 MB” was a
+whole-megabyte artifact. RSS decreased because G1 uncommitted heap pages across
+successive forced collections; negative RSS is not an agent-memory credit and
+these points cannot yield a marginal byte count.
+
+Source agrees with the thread result: agent creation writes facts and starts
+no thread. `seon.agent.driver/start!` creates transient virtual threads only
+when a pending message is scanned (`src/seon/agent/driver.clj:495-522`).
+The current runtime also creates transient SCI forks; it does not retain the
+target one-context-per-agent model. “Zero idle threads per agent” is therefore
+source-verified and live-confirmed for the current implementation only.
+
+Transient load memory, measured before forced GC on final host PID `15335`,
+was:
+
+| completed rung | used / committed heap KiB | RSS KiB | OS threads |
+|---:|---:|---:|---:|
+| 1 | 176,512 / 1,161,216 | 1,451,936 | 76 |
+| 5 | 512,360 / 1,161,216 | 1,454,368 | 82 |
+| 10 | 572,323 / 1,161,216 | 1,486,160 | 83 |
+| 25 | 176,352 / 1,161,216 | 1,489,728 | 91 |
+
+GC timing makes the `N=25` used-heap point lower than `N=10`; it is not a
+retained-footprint curve. After two explicit full collections the same loaded
+process reported 61,491 KiB used, 239,616 KiB committed, 607,968 KiB RSS, and
+86 OS thread rows. That is post-load process retention, not per-agent memory.
+
+### 17.7 What this section did not measure
+
+- No exact provider-call start/end, token usage, cache hit, or dollar cost.
+- No full target context derivation; this driver sends the raw message.
+- No standalone transaction-service, plan-attempt, or reply-publish duration.
+- No streaming reply, capability call, browser/SSE repaint, or hour-long
+  survival.
+- No load above 25 real agents and no provider-capacity ceiling.
+- No retained SCI context per agent; the current path forks transiently.
+- No sub-KiB retained-heap attribution, NMT/object histogram by agent, database
+  disk bytes per agent, or sole-tenant repeat.
+- No named-cluster writer failure isolation; the measurement shared the
+  default writer.
+
+### 17.8 Reset falsifier
+
+After all database evidence above was captured, the explicit destructive
+falsifier ran:
+
+```text
+bin/seon cluster reset agentload0726
+  web-render: clean generation=27dc2264-339a-416a-af34-0104c4d72d55
+  pod: clean generation=c6bd57e8-b664-458e-b9fc-6e06591aa007
+  host: clean generation=68f17a74-290a-4f7e-ad8b-9c93c92af42e
+● cluster agentload0726 reset
+```
+
+The target host/pod/web-render records were absent afterward and
+`data/clusters/agentload0726/db` no longer existed. The default database
+remained present and ready. Its watcher generation
+`77448069-93b3-4491-b563-9aab360d93d6` (owner PID `14119`) and writer
+generation `a4f62e62-cce4-409d-bf04-6bf94da1ebc5` (owner PID `14973`) were
+unchanged across the reset.
+
+Reset deletes the selected database and applied identity, then instructs the
+operator to apply the current initialization pages again. No migration step or
+data-migration path ran. The throwaway ended down, which is the intended
+disposable-cluster terminal state.
+
+Recurring proof after the reset: `bin/seon test operator` passed 336 tests /
+1,960 assertions, and the focused `seon.web.serve-test` CLJS gate passed 35 /
+185, both with zero failures/errors. Both benchmark scripts pass `bash -n`.
+The generated issue projection contains every valid new note, but the
+authority-wide `bin/issues-index --check` remains red on unrelated invalid
+frontmatter and is recorded in
+[[../../../seon/issues/issue-authority-frontmatter-drift-blocks-index]].
+
+The topology blocker from §16 is fixed and the two requested clauses now have
+real-agent evidence. The load clause has a first break and named resource.
+The speed clause has a conditioned end-to-end waterfall, but the expected
+result did not pass: SCI is ~0.12%, the model envelope is at most 58%, and the
+non-SCI remainder is too large and too coarsely attributed to graduate.

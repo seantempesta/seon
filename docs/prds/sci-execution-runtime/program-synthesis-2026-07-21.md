@@ -16,6 +16,36 @@ earlier — consult it only for archaeology, never for current truth.
 units U1-U10, sequencing, decisions, graduation gate. Read it
 COMPLETELY before dispatching anything.
 
+## Named-cluster load checkpoint — 2026-07-26
+
+The real-agent/load-measurement topology blocker is fixed. Commits
+`051825d92`, `2c885f754`, and `037e285e2` make arbitrary named clusters
+reconcile private host/pod/web-render processes and selected database
+coordinates; `ad33c2268` makes `/agents/run` report only surviving JVM-driver
+evidence. Fresh `agentload0726` reached ready, tied a real eval receipt and
+transcript reply to its host PID, and completed the requested DeepSeek
+`1 + 5 + 10 + 25` climb 41/41.
+
+The earliest new unsettled contract exposed by load is same-process run
+admission: duplicate interest scans began submitting losing run-open CAS
+transactions at `N=5` and reached 62 losses at `N=25`. A second correctness
+blocker is the ignored execution-plan transaction error: fresh schema lacks
+the driver plan attributes, but eval continues without durable plan rows. The
+integrated measurement proof is the named run history + transcript + rung
+responses + final target-only reset; the reset removed the target records and
+database while default watcher/writer generations remained exact. The
+dependency-ready portfolio is run-scan coalescing, plan-schema/error
+settlement, and O9's remaining one-writer-per-store topology (named clusters
+still share the default writer). The next refill is run-scan coalescing
+because it is the first measured break. Final graduation remains U12's
+100-agent real-work kill/restart demonstration.
+
+The speed clause is measured but not graduated: one real minimal turn took
+2,409 ms inside the task, of which the model envelope was at most 1,398 ms and
+SCI was 3 ms (0.1245%); the remaining 1,008 ms is too large and too coarsely
+attributed. Full evidence:
+[[research/measurements-2026-07-25#17-named-cluster-real-agent-load-and-turn-waterfall]].
+
 ## MORNING 2026-07-24 (owner awake — supersedes the overnight block)
 
 Owner directives (08:20): the overnight "reserved for owner" hold on
