@@ -416,7 +416,6 @@
     :seon.fn/ns :seon.db/ref
     :seon.fn/source :string
     :seon.fn/source-fingerprint :string
-    :seon.fn/execution-tier [:enum :nursery :graduated]
     :seon.fn/fn-var? :boolean
     :seon.fn/arglists :string
     :seon.fn/doc :string
@@ -443,26 +442,12 @@
      [:seon.fn/source :seon.fn/source]
      [:seon.fn/source-fingerprint {:optional true}
       :seon.fn/source-fingerprint]
-     [:seon.fn/execution-tier {:optional true} :seon.fn/execution-tier]
      [:seon.fn/fn-var? {:optional true} :seon.fn/fn-var?]
      [:seon.fn/arglists {:optional true} :seon.fn/arglists]
      [:seon.fn/doc {:optional true} :seon.fn/doc]
      [:seon.fn/private? {:optional true} :seon.fn/private?]
      [:seon.fn/spec {:optional true} :seon.fn/spec]
      [:seon.fn/schema-error {:optional true} :seon.fn/schema-error]
-     [:seon.program.edge/generation {:optional true}
-      :seon.program.edge/generation]
-     [:seon.program.edge/calls {:optional true} :seon.program.edge/calls]
-     [:seon.program.edge/read-attributes {:optional true}
-      :seon.program.edge/read-attributes]
-     [:seon.program.edge/written-attributes {:optional true}
-      :seon.program.edge/written-attributes]
-     [:seon.program.edge/all-at-basis? {:optional true}
-      :seon.program.edge/all-at-basis?]
-     [:seon.program.edge/uncertainties {:optional true}
-      :seon.program.edge/uncertainties]
-     [:seon.program.edge/terminal-refs {:optional true}
-      :seon.program.edge/terminal-refs]
      [:seon.fn/read-attrs {:optional true} :seon.fn/read-attrs]
      [:seon.fn/created-at {:optional true} :seon.fn/created-at]]
     :seon.schema
