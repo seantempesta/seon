@@ -40,6 +40,12 @@ The remaining `:client` failure is not another watcher entry to prune:
 `seon.client/project-pages`. The surviving `authority-density-client` Shadow
 build compiles, but does not produce those program pages.
 
+The final direct gate transcript is
+`tmp/plan-evidence/pod-seam-test-writer-2026-07-26.log`.
+`bin/test-writer` exits 1 before discovery because
+`seon.dev.artifact/current-manifest` rejects the stale manifest. No
+authoritative post-cut test count exists yet.
+
 ## Owner
 
 The ordered JVM-indexer unit owns the replacement pages producer. Group 5 then

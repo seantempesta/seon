@@ -1,0 +1,27 @@
+▶ prepare writer dependencies
+  ● prepare writer dependencies (1010ms)
+----- Error --------------------------------------------------------------------
+Type:     clojure.lang.ExceptionInfo
+Message:  Standalone writer tests require the current compiled program artifact. Run `bin/seon up`, wait for watcher readiness, then run `bin/seon down` and retry `bin/test-writer`.
+Data:     {:seon.dev.artifact/path "/Users/sean/src/seon/tmp/seon-operator/artifact.edn", :seon.dev.artifact/remedy "bin/seon up; bin/seon down; bin/test-writer"}
+Location: NO_SOURCE_PATH:6:10
+
+----- Context ------------------------------------------------------------------
+ 2:      (let [config (seon.dev.config/load! (System/getProperty "user.dir"))
+ 3:            manifest (seon.dev.artifact/current-manifest config)
+ 4:            path (:seon.dev.config/artifact-manifest config)]
+ 5:        (when-not manifest
+ 6:          (throw
+             ^--- Standalone writer tests require the current compiled program artifact. Run `bin/seon up`, wait for watcher readiness, then run `bin/seon down` and retry `bin/test-writer`.
+ 7:           (ex-info
+ 8:            (str "Standalone writer tests require the current compiled program "
+ 9:                 "artifact. Run `bin/seon up`, wait for watcher readiness, then "
+10:                 "run `bin/seon down` and retry `bin/test-writer`.")
+11:            {:seon.dev.artifact/path path
+
+----- Stack trace --------------------------------------------------------------
+user - NO_SOURCE_PATH:6:10
+user - NO_SOURCE_PATH:2:6
+
+
+EXIT=1
