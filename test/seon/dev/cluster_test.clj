@@ -60,6 +60,14 @@
         descriptor (:seon.dev.config/launch-descriptor target-configuration)]
     (is (= "experiment" name))
     (is (= "experiment"
+           (:seon.dev.config/cluster-name target-configuration)))
+    (is (= (str (fs/path root "data/clusters/experiment"))
+           (:seon.dev.config/cluster-dir target-configuration)))
+    (is (= (str (fs/path root "tmp/seon-clusters/experiment"))
+           (:seon.dev.config/process-dir target-configuration)))
+    (is (= (str (fs/path root "logs/clusters/experiment"))
+           (:seon.dev.config/log-dir target-configuration)))
+    (is (= "experiment"
            (get-in descriptor [::launch/runtime ::launch/runtime-cluster])))
     (is (= {:seon.client/autonomous? true}
            (get-in descriptor

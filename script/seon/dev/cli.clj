@@ -828,28 +828,55 @@
     (when (or (nil? cluster-name) (next arguments))
       (throw (ex-info "`cluster reset` requires exactly one cluster name."
                       {:seon.dev.cli/arguments (vec arguments)})))
-    (when-not (= cluster-name (:seon.dev.config/cluster-name configuration))
-      (throw (ex-info "This operator can reset only its explicitly configured cluster."
-                      {:seon.dev.cluster/requested cluster-name
-                       :seon.dev.cluster/configured
-                       (:seon.dev.config/cluster-name configuration)})))
-    (let [{:keys [stop-results manifest]}
+    (let [target-configuration
+          (if (= cluster-name (:seon.dev.config/cluster-name configuration))
+            configuration
+            (::cluster/target-configuration
+             (cluster/request
+              {::cluster/configuration configuration
+               ::cluster/name cluster-name})))
+          {:keys [stop-results manifest]}
           (state/with-lock
            configuration :stack 1800000
-           #(let [_ (assert-current-database-layout! configuration)
+           #(let [_ (assert-current-database-layout! target-configuration)
                   _ (require-no-retained-restore! configuration :cluster-reset)
                   database
-                  (fs/path (:seon.dev.config/cluster-dir configuration) "db")
+                  (or
+                   (get-in target-configuration
+                           [:seon.dev.config/launch-descriptor
+                            ::launch/database
+                            :seon.db.protocol/database-path])
+                   (some-> (:seon.dev.config/cluster-dir
+                            target-configuration)
+                           (fs/path "db")
+                           str))
+                  _ (when-not (and (string? database)
+                                   (= database
+                                      (str
+                                       (fs/path
+                                        (:seon.dev.config/cluster-dir
+                                         target-configuration)
+                                        "db"))))
+                      (throw
+                       (ex-info
+                        "The selected cluster database path is inconsistent."
+                        {:seon.dev.cluster/requested cluster-name
+                         :seon.dev.cluster/database-path database
+                         :seon.dev.cluster/cluster-dir
+                         (:seon.dev.config/cluster-dir
+                          target-configuration)})))
                   stopped
                   (stop-processes!
-                   configuration
+                   target-configuration
                    :seon.dev.process.operation/reset
-                   (disj (set (process/target-process-ids configuration))
+                   (disj (set (process/target-process-ids
+                               target-configuration))
                          process/watcher-id))
                   _ (when (fs/exists? database) (fs/delete-tree database))
-                  _ (config/delete-applied-manifest! configuration)
+                  _ (config/delete-applied-manifest! target-configuration)
                   _ (cluster/reset-package-skeleton!
-                     (:seon.dev.config/launch-descriptor configuration))
+                     (:seon.dev.config/launch-descriptor
+                      target-configuration))
                   selected (select-config configuration nil)
                   current
                   (if (= false

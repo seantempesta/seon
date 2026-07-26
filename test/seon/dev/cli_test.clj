@@ -1190,6 +1190,59 @@
       (is (not (fs/exists? applied-manifest)))
       (finally (fs/delete-tree root {:force true})))))
 
+(deftest cluster-reset-derives-and-wipes-an-arbitrary-named-target
+  (let [root (fs/create-temp-dir {:prefix "seon-cli-named-reset-"})
+        source-cluster (fs/path root "data/clusters/default")
+        target-cluster (fs/path root "data/clusters/experiment")
+        target-database (fs/path target-cluster "db")
+        configuration
+        {:seon.dev.config/root (str root)
+         :seon.dev.config/cluster-dir (str source-cluster)
+         :seon.dev.config/cluster-name "default"
+         :seon.dev.config/environment {}}
+        target-configuration
+        (assoc configuration
+               :seon.dev.config/cluster-dir (str target-cluster)
+               :seon.dev.config/cluster-name "experiment"
+               :seon.dev.config/launch-descriptor
+               {::launch/database
+                {:seon.db.protocol/database-path (str target-database)}
+                :seon.launch/packages-dir
+                (str (fs/path target-cluster "packages"))})
+        manifest {:seon.dev.artifact/application-digest
+                  (apply str (repeat 64 "a"))}
+        stopped (atom nil)]
+    (try
+      (fs/create-dirs target-database)
+      (spit (str (fs/path target-database "old.ksv")) "old database")
+      (with-redefs-fn
+        {#'cluster/request
+         (fn [request]
+           (is (= configuration (::cluster/configuration request)))
+           (is (= "experiment" (::cluster/name request)))
+           {::cluster/target-configuration target-configuration})
+         #'state/with-lock (fn [_ _ _ transition] (transition))
+         #'process/target-process-ids
+         (constantly [process/host-id process/pod-id process/web-render-id])
+         #'process/clean-or-force!
+         (fn [request]
+           (reset! stopped request)
+           (stop-result
+            (:seon.dev.process/operation request)
+            (:seon.dev.process/targets request)
+            :seon.dev.process.classification/clean))
+         #'cluster/reset-package-skeleton! (constantly nil)
+         #'cli/select-config (fn [selected _] selected)
+         #'artifact/current-manifest (constantly manifest)}
+        (fn []
+          (#'cli/reset-cluster! configuration ["experiment"])))
+      (is (= target-configuration
+             (:seon.dev.process/configuration @stopped)))
+      (is (= #{process/host-id process/pod-id process/web-render-id}
+             (:seon.dev.process/targets @stopped)))
+      (is (not (fs/exists? target-database)))
+      (finally (fs/delete-tree root {:force true})))))
+
 (deftest cluster-reset-uncertainty-preserves-the-database
   (let [root (fs/create-temp-dir {:prefix "seon-cli-reset-uncertain-"})
         cluster (fs/path root "data/clusters/default")

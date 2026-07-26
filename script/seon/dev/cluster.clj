@@ -62,6 +62,8 @@
         source (:seon.dev.config/launch-descriptor configuration)
         cluster-dir (str (fs/path cluster-base name))
         process-dir (str (fs/path state-root "tmp" "seon-clusters" name))
+        log-dir (str (fs/path state-root "logs" "clusters" name))
+        http-port-file (str (fs/path process-dir "http.port"))
         descriptor
         (launch/shared-writer-cluster-descriptor
          {::launch/source-descriptor source
@@ -70,13 +72,19 @@
          ::protocol/database-path (str (fs/path cluster-dir "db"))
          ::launch/packages-dir (str (fs/path cluster-dir "packages"))
          ::launch/process-dir process-dir
-          ::launch/log-dir (str (fs/path state-root "logs" "clusters" name))
+          ::launch/log-dir log-dir
           ::launch/http-port 0
-          ::launch/http-port-file (str (fs/path process-dir "http.port"))
+          ::launch/http-port-file http-port-file
           ::launch/writable-blob-dir (str (fs/path cluster-dir "blobs"))})]
     {::configuration configuration
      ::target-configuration
      (-> configuration
+         (assoc :seon.dev.config/cluster-name name
+                :seon.dev.config/cluster-dir cluster-dir
+                :seon.dev.config/process-dir process-dir
+                :seon.dev.config/log-dir log-dir
+                :seon.dev.config/http-port 0
+                :seon.dev.config/http-port-file http-port-file)
          (config/select-launch-descriptor descriptor)
          (config/select-manifest nil))
      ::name name})))
