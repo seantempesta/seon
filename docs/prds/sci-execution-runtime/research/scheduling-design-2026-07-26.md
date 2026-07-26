@@ -16,16 +16,25 @@ function call inside an agent turn, all on one executor system. This
 document designs that system, tests the claim that dropping channels loses
 no needed semantics, and prices what it costs.
 
-Verdict up front: **the split holds.** In `core.async.flow` a channel is
-both the coordination medium and the scheduling boundary. Seon separates
-them — the database is the medium (durable, global, temporal), and the
-workload-tagged executor is the scheduling boundary, adopted from
-core.async's own dispatch rather than reimplemented. Dropping channels
-costs two genuine things (producer backpressure and cheap proc-local
-state, §2); everything else has a Seon equivalent that is equal or
-stronger. The scheduling half — the part the owner wants pushed down to
-function granularity — is kept literally, as core.async's own executors
-selected by a derived per-function fact.
+Verdict up front: **the split holds, and channels come back on the
+scheduling side of it** (owner correction, 2026-07-26). In
+`core.async.flow` a channel is both the coordination medium and the
+scheduling boundary. Seon separates them — the database is the medium
+(durable, global, temporal), and the scheduling boundary is a **bounded
+submission channel per workload class feeding one launcher** onto
+core.async's own executors. A channel does not have to carry the
+communication to give backpressure: as the submission queue, a full
+channel parks the submitter and pressure propagates upward for free,
+while the work itself stays a claimable fact in the database. This is a
+UNIFICATION, not an addition — the tree already bounds submission in
+three different expressions (a `Semaphore` for evals, Datahike's own
+bounded transaction queue, and nothing at two points that need it, §2)
+where one mechanism serves. Dropping channels as the *medium* costs one
+genuine thing (cheap proc-local state, §2 item 7); everything else has a
+Seon equivalent that is equal or stronger. The scheduling half — the
+part the owner wants pushed down to function granularity — is kept
+literally: core.async's executors selected by a derived per-function
+fact, fed through core.async's channels.
 
 Every claim below carries a file:line or symbol actually read. Numbers
 carry their conditions. `[UNVERIFIED]` marks the exceptions.
@@ -102,35 +111,50 @@ transit encodes/decodes per unpinned write
 
 The claim under test: flow conflates the coordination medium with the
 scheduling boundary, and Seon can split them without losing semantics.
+The owner's correction sharpened the split's second half: channels stay
+OUT of the medium and come BACK as the scheduler's bounded submission
+queues, which flips two of the seven verdicts below from loss to kept.
 Seven capabilities a core.async channel provides, each with Seon's
 equivalent at a file:line or an honest loss.
 
 | # | channel capability | core.async site | Seon equivalent or loss |
 |---|---|---|---|
-| 1 | backpressure — a full fixed buffer blocks the producer | `async.clj:113-117`; flow default `buf-or-n` 10 (`impl.clj:101-109`) | **partially lost — the one genuine structural loss.** See below. |
+| 1 | backpressure — a full fixed buffer blocks the producer | `async.clj:113-117`; flow default `buf-or-n` 10 (`impl.clj:101-109`) | **kept — as the submission queue, not the medium** (owner correction). The bound already exists in three inconsistent expressions today (see below); §3.6 unifies them as one bounded channel per workload class into the launcher. A full class channel parks the submitter; the durable backlog stays in the database. |
 | 2 | rendezvous / synchronous handoff | unbuffered `chan` (`async.clj:138-153`) transfers only when both sides are ready | not needed at agent boundaries: the commit IS the handoff, and consumption exclusivity is the claim CAS (`run.core/claim-plan`), which is *stronger* — a fenced take that survives process death. The one true sync handoff that remains is `Future.get` at the eval boundary (`sci/eval.clj:132`). Cost: a cross-agent hop pays a commit (0.53-45 ms/tx depending on concurrency, F §1) instead of ~µs. |
-| 3 | `alts!` — wait on several, take the first | `async.clj:343-409`; the flow proc parks in `alts!!` over `[control casts & ins]` with control priority (`impl.clj:286-292`) | structurally present, differently factored: an idle agent's "read set" is its wake predicate over datom patterns (`waking-inbound?`, `message.cljc:292-307`; the driver's one interest, `driver.clj:884-886`); control-priority = the run fence CAS failing first (`run.core/run-fence`); the lease timer is the `timeout` arm (`arm-lease-wake!`). Loss: agent code cannot block mid-form on N sources — but it structurally *must not* (no suspend/resume of an SCI eval, landmine 4); waiting is `(lifecycle/wait ...)` → open + unclaimed, and the wake conditions are the alt. |
+| 3 | `alts!` — wait on several, take the first | `async.clj:343-409`; the flow proc parks in `alts!!` over `[control casts & ins]` with control priority (`impl.clj:286-292`) | **kept, in both halves — no longer a loss.** Scheduling half: the launcher (§3.6) is one loop parked in `alts!!` over the three class channels — take from whichever class has work, optional `:priority`, one loop instead of N blocked threads; this is exactly flow's own proc-loop shape (`impl.clj:292`). Communication half: an idle agent's "read set" is its wake predicate over datom patterns (`waking-inbound?`, `message.cljc:292-307`; the driver's one interest, `driver.clj:884-886`); control-priority = the run fence CAS failing first; the lease timer is the `timeout` arm. Agent code still cannot block mid-form on N sources — structurally must not (no suspend/resume of an SCI eval, landmine 4); waiting is `(lifecycle/wait ...)` → open + unclaimed. |
 | 4 | per-channel FIFO ordering | channel semantics | **stronger**: the transaction log is a total order over the whole system, and every ordered collection carries an explicit ordinal — plan forms (`:seon.agent.run.form/ordinal`), receipts (`receipt-id` = run+ordinal+epoch). Order is never a property of the collection type (Datahike has exactly two cardinalities); the cost is that order must be explicit, which is also why it survives a crash. |
 | 5 | buffer policies (sliding/dropping) as flow control | `async.clj:119-130`; flow report/error/casts use sliding 100 (`impl.clj:97-100`, `:124-128`) | ratified as three cases, not one (ledger 19e): agent messages never drop (a committed datom); unclaimed runs queue in the database with the CLAIM as backpressure (22 evals vs 18 permits → 4 queued, 71 ms max wait, zero bounced); presentation frames are latest-wins — `enqueue-latest!` `.clear`+`.offer` (`feed.clj:22-25`), the sliding-buffer-of-one, plus `:seon.db/no-history?` as its in-database temporal twin. Dropping-newest has no equivalent and no ratified need. |
 | 6 | close/drain semantics, completion signalling | closed chan → nil after drain; `pipe` propagates close (`async.clj:599-609`) | **stronger**: completion is a durable fact — `finish-tx-data` closes the run, retracts the process, detaches the agent pointer in one transaction (`run.core:209-221`); drain = `next-ordinal` over terminal receipts until `total` (`receipt.cljc:137-151`), proven across six kill positions plus a double kill (F §1). Downstream "propagation" is unnecessary: consumers derive from facts; there is nothing to notify. |
-| 7 | proc-local state threaded between inputs | `transform: (state, input, msg) -> [state' output]` (`flow.clj:240-256`); the loop threads it (`impl.clj:269-319`) | **deliberately absent, and this is the second honest loss.** Between forms the state is the previous step's transaction report `:db-after` (measured FORCED: the identical form answered 0 at the turn's opening basis and 9 at the step's, M §8.1). Between turns it is the database, period. Cost: private in-memory accumulation across inputs is not free — an agent counter costs a commit (and the measured turn already carries 12 transactions). Benefit: the state cannot be lost, which is the entire thesis. |
+| 7 | proc-local state threaded between inputs | `transform: (state, input, msg) -> [state' output]` (`flow.clj:240-256`); the loop threads it (`impl.clj:269-319`) | **deliberately absent — the one remaining honest loss, and the submission-channel correction does not change it.** A submission channel is a queue of independent work items, not a pipeline stage threading state between them, so nothing about it restores flow's `state'`. Between forms the state is the previous step's transaction report `:db-after` (measured FORCED: the identical form answered 0 at the turn's opening basis and 9 at the step's, M §8.1). Between turns it is the database, period. Cost: private in-memory accumulation across inputs is not free — an agent counter costs a commit (and the measured turn already carries 12 transactions). Benefit: the state cannot be lost, which is the entire thesis. |
 
-**Item 1, the honest core.** A full channel blocks its producer, and that
-pressure propagates upstream automatically through a flow graph. Seon has
-backpressure at the *consumption* boundary — the claim queues on the
-semaphore, measured queueing with zero bounced claims — and loop-bounding
-at the messaging layer (`hop-live?`, cap 8, `message.cljc:308-317`), but
-**nothing slows a producer of facts** until Datahike's own queues fill:
-the transaction queue warns at >90% (`writer.cljc:103-104`), the commit
-queue throttles 50 ms at >50% (`:173-175`), and past that the measured
-outcome is the knee (4,336 tx/s at 65,536 callers) and, far past it,
-`OutOfMemoryError` with the 120,000-entry transaction queue above 90%
-(M §16). An agent emitting facts in a tight loop is bounded by its
-`time-limit` and by writer queue pressure, not by a full buffer parking
-it. This is a real difference in kind. The mitigation is designed, not
-free: bounded admission at the one door (§3.5) plus the writer's own
-queue dials (§7.3). It should be stated in agent-facing docs as the
-system's flow-control contract, not discovered.
+**Item 1, corrected — the unification finding.** The first version of
+this report called producer backpressure "the one genuine structural
+loss." The owner's correction stands: the channel does not have to be
+the communication medium to give backpressure — it can be the
+**submission queue** to the scheduler, with communication staying in the
+database. And the tree shows this is a unification, not an addition,
+because the submission bound already exists in three different
+expressions and is absent at two points that need it:
+
+| submission point | bound today | expression |
+|---|---|---|
+| SCI eval | YES — `.acquire` on a `Semaphore` sized to `availableProcessors`, released in a `finally` (`sci/eval.clj:49`, `:56`, `:93`, `:130`) | a bounded queue with parking, in disguise — the measured 22-vs-18 result (4 queued, 71 ms max wait, zero bounced) IS a full channel parking its producer, spelled `Semaphore` |
+| transactions | YES but unset — Datahike's own `transaction-queue` bounded by `transaction-queue-size` (`writer.cljc:286-306`); warns >90% (`:103-104`), commit queue throttles 50 ms at >50% (`:173-175`) | the dependency's own bounded channel; the `writer-dials` lane is exposing the dials |
+| run admission / drives | NO — `start-virtual-thread!` per pending message (`driver.clj:419-420`) fanned out from `scan-body!`; `scanning?` serialises enumeration only, nothing bounds concurrent drives | nothing |
+| agent capability calls | NO — nothing in `seon.db.host` or the LLM transport bounds concurrent leaf calls | nothing |
+
+One mechanism serves all four: a bounded submission channel per workload
+class (§3.6). That is a one-mechanism defect closed, which is stronger
+than the loss claim it replaces. What remains honestly different from
+flow: pressure reaches the *submitter* (the scan loop, the driver, the
+eval's leaf call), not necessarily the *original author* of the work —
+an agent that committed 500 messages completed its turn long ago, and
+the backlog sits durable in the database while a full graph of bounded
+flow channels would have parked the producing proc itself. That residue
+is the design (durable backlog + bounded consumption), it is bounded on
+the authoring side by `hop-live?` (cap 8, `message.cljc:308-317`) and by
+Datahike's transaction queue parking the author's own `transact!`
+mid-eval, and it moves to §8's flow-is-better list in its narrowed form.
 
 **The counter-example that completes the argument.** Datahike's writer
 uses channels *internally* — a serial processing loop feeding a batching
@@ -201,7 +225,7 @@ machinery that computes effects, with these rules in order:
 
 1. **any uncertainty anywhere in f's transitive graph → `:mixed`.**
    Fail closed. `:mixed` is the only value that is safe under both
-   misclassification directions (§3.6).
+   misclassification directions (§3.7).
 2. **no reachable `:io` axiom, graph closed → `:compute`.** Pure and
    capability-free code, which is also exactly the class admissible as
    contract predicates — the two derivations share the substrate.
@@ -260,20 +284,24 @@ source, so the fact can never be stale relative to the corpus.
 (`sci/eval.clj:33-38`) while its namespace docstring claims a "bounded
 `:compute` platform thread" — the borrowed word without its dispatch.
 `make-ctp-named` is the identical construction (`dispatch.clj:71-73`), so
-replace the private pool with `(disp/executor-for :compute)` and keep
-Seon's semaphore as the bound (core's pool is unbounded by design). Two
-things come free: the `clojure.core.async.executor-factory` system
-property (`dispatch.clj:141-143`) gives Seon one place to own
-construction of all three executors process-wide; and because `go`
-compiles to `thread-call :io` on this JDK (`async.clj:519-533`),
-**Datahike's own writer pipeline already runs on `executor-for`'s `:io`
-executor** — the database, the driver, and agent evals end up on one
-dispatch substrate without any glue.
+replace the private pool with `(disp/executor-for :compute)`; the bound
+moves to the launcher's submission channels (§3.6 — core's pool is
+unbounded by design, and the current semaphore is deleted, not kept
+beside them). Two things come free: the
+`clojure.core.async.executor-factory` system property
+(`dispatch.clj:141-143`) gives Seon one place to own construction of all
+three executors process-wide; and because `go` compiles to
+`thread-call :io` on this JDK (`async.clj:519-533`), **Datahike's own
+writer pipeline already runs on `executor-for`'s `:io` executor** — the
+database, the driver, and agent evals end up on one dispatch substrate
+without any glue.
 
-The scheduling rules, by consumer:
+The scheduling rules, by consumer (the reader of the workload fact is
+the launcher, §3.6):
 
 1. **The eval boundary (agent interpreted code).** Always the `:compute`
-   platform pool + one semaphore permit + the one `:interrupt-fn`.
+   platform pool + one `:compute` slot from the launcher + the one
+   `:interrupt-fn`.
    The workload fact never moves an eval off platform threads, because
    the platform-thread constraint is absolute for two independent
    reasons: JMX allocation returns -1 on a virtual thread, and agent
@@ -285,48 +313,134 @@ The scheduling rules, by consumer:
    guarded dispatcher (roadmap row 1) consults the callee's
    `:seon.fn/workload` at the door:
    - `:compute` → direct call; nothing special.
-   - `:io` or `:mixed` → **release the `:compute` permit**, submit the
-     leaf body to `(executor-for :io)` (a virtual thread), `.get` with
-     the eval's remaining `time-limit` plus slack and `Thread.interrupt`
-     on timeout, **reacquire the permit** on return.
+   - `:io` or `:mixed` → **release the `:compute` slot first**, then
+     submit the leaf body onto the `:io` submission channel (§3.6; the
+     launcher runs it on `executor-for :io`, a virtual thread), `.get`
+     with the eval's remaining `time-limit` plus slack and
+     `Thread.interrupt` on timeout, **reacquire the slot** on return.
 
    This makes the `:compute` contract honest automatically rather than
    by a special case: "an agent-initiated blocking call releases the
-   `:compute` permit while it waits" is not a rule about a list of
+   `:compute` slot while it waits" is not a rule about a list of
    blocking functions — it is the generic wrapper triggered by the
-   callee's derived fact. GAP #3 (a wedged host call permanently
-   retaining a permit) dissolves into: a wedged leaf call holds a
-   virtual thread and the parked platform thread, but **zero permits**;
-   compute capacity degrades by zero, thread capacity by one, and the
-   thread's reclamation remains what O2 says it is — process
-   replacement, resumed from receipts. Note what does *not* move: the
-   platform thread itself must wait for the leaf result, because SCI has
-   no suspend/resume (landmine 4). The permit is the logical compute
-   slot; the thread is just memory.
+   callee's derived fact. **It is also the same rule as §3.6's
+   invariant (b)** — release-before-submit is what makes parking on a
+   full `:io` channel legal from inside an eval; one rule serves both
+   the wedge case and the backpressure case, which is the collapse that
+   makes the channel design compose instead of adding a mechanism.
+   GAP #3 (a wedged host call permanently retaining a permit) dissolves
+   into: a wedged leaf call holds a virtual thread and the parked
+   platform thread, but **zero `:compute` slots**; compute capacity
+   degrades by zero, thread capacity by one, and the thread's
+   reclamation remains what O2 says it is — process replacement,
+   resumed from receipts. Note what does *not* move: the platform
+   thread itself must wait for the leaf result, because SCI has no
+   suspend/resume (landmine 4). The slot is the logical compute
+   capacity; the thread is just memory.
 3. **Driver orchestration.** `process-message!` reaches the LLM leaf and
    `transact!`, so it derives `:io` — and it already runs on virtual
    threads (`start-virtual-thread!`, `driver.clj:419-420`), which is
    `thread-call :io` by another name. The derivation *ratifies* the
-   current placement instead of changing it; that is what a correct
-   classification rule should do to correct code.
+   placement; what changes is admission: drives go through the `:io`
+   submission channel (§3.6) instead of an unbounded
+   thread-per-message fan-out.
 4. **Out-of-eval planned work** (future: `my.plan` invocations, schedule
-   fires): submit to `executor-for (workload f)`, applying the eval
-   boundary (rule 1) whenever f is corpus code — a condition computed
-   from provenance, not from a list.
+   fires): submit to the class channel for `(workload f)`, applying the
+   eval boundary (rule 1) whenever f is corpus code — a condition
+   computed from provenance, not from a list.
 
-**Bounded admission at the door (the §2 item-1 mitigation).** The same
-dispatcher is the one place to meter an agent's fact production: the
-per-eval output caps that already exist as config facts extend naturally
-to a transactions-per-eval budget enforced where `transact!` enters.
-This is design intent, not mechanism invention — the door exists (row
-1), the budget is one more config fact beside `time-limit`.
+**Fact production remains metered at the writer.** An agent's
+`transact!` inside an eval parks on Datahike's own bounded
+`transaction-queue` when full (`writer.cljc:286-306`) — the dependency's
+channel is the admission bound for facts, exposed as config by the
+`writer-dials` lane; the door does not need a second budget for it.
 
-### 3.6 Smart defaults
+### 3.6 The submission channels and the launcher
+
+The owner's correction, made mechanism. Three fixed-buffer channels —
+one per workload class — and one launcher:
+
+- **Submit**: every piece of schedulable work — a form eval, a drive, a
+  capability leaf call, a planned invocation — is a map put (`>!!`) onto
+  the channel for its class, selected by `:seon.fn/workload`. A full
+  channel parks the submitter; that park IS the backpressure, and it is
+  core.async's fixed-buffer semantics doing it (`async.clj:113-117`),
+  not a Seon mechanism.
+- **Launch**: one loop parked in `alts!!` over the three channels
+  (`async.clj:380-391`; the same shape as flow's proc loop,
+  `impl.clj:292`), taking from whichever class has work — with
+  `:priority` available as a policy dial and deliberately not used yet
+  (`do-alts` randomizes by default, `async.clj:356-361`, which is the
+  fairness we want until measurement says otherwise). The launcher runs
+  each taken item on `executor-for` of its class and enforces the
+  class's concurrency: `:compute` items start only while live `:compute`
+  slots remain.
+- **Bounds are config facts, per class**: `queue-depth` (the channel's
+  fixed buffer) and `concurrency` (the class's slot count). Today's
+  defaults, preserved: `:compute` concurrency = `availableProcessors`
+  (the measured 22-vs-18 queueing behavior carries over unchanged —
+  the 4 queued submissions live in the channel instead of parked on
+  `.acquire`); `:io` concurrency effectively unbounded (virtual
+  threads), its queue-depth the meaningful dial; `:mixed` both modest.
+
+**What replaces `seon.sci.eval`'s semaphore: it is deleted, not kept
+beside the channel.** The public `open!`/`available`/`permits` surface
+and the private pool (`sci/eval.clj:33-56`) go; `evaluate` becomes the
+work the launcher runs, not a gate of its own. The semaphore's two jobs
+split into the two named config facts above — its queueing job becomes
+the channel's buffer (parking preserved, now instrumentable and
+`alts!`-able), and its concurrency job becomes the launcher's slot
+count. Whether the slot count is *implemented* with a
+`java.util.concurrent.Semaphore` inside the launcher is an
+implementation detail with exactly one owner; there is no second
+admission mechanism anywhere, and nothing outside the launcher can
+acquire capacity.
+
+**What a full channel does at each submission point** — and whether
+parking is correct there:
+
+| submission point | who parks | correct? |
+|---|---|---|
+| run admission / drives (`scan-body!` submitting instead of `start-virtual-thread!` per message) | the scan loop | **yes — this is the design working.** Stop enumerating when drives are saturated; the durable backlog is the database, re-enumerated by the next scan. Wake latency under saturation: a commit during the park sets `scan-requested?` (the existing latest-wins coalescer), so enumeration resumes the moment the channel drains — delay is bounded by drain time, and no wake is lost. |
+| form evals (the drive loop submitting to `:compute`) | the driver's `:io` virtual thread | yes — the run holds its claim while queued; the lease-renewal-while-queued item (§9.5) becomes load-bearing here and must land with it. |
+| capability leaf calls (the door submitting to `:io`) | the eval's platform thread — **only after releasing its `:compute` slot** (invariant b) | yes, given (b); the park is on a thread that holds no compute capacity. |
+| `transact!` (Datahike's own `transaction-queue`) | the calling leaf thread | yes — the dependency's own bound, reaching the authoring agent mid-eval; dials exposed by the `writer-dials` lane. |
+
+**Three invariants, stated here once and destined for code** — each
+lands as a comment at the channel/launcher creation site, not only in
+this document (owner: knowledge lives mostly in code):
+
+- **(a) A channel is a scheduling buffer over durable work, never the
+  record of the work.** Channels are process-local; queued submissions
+  die with the process. That is acceptable *only* because every
+  agent-visible submission is a claimable run or a receipt-covered form
+  in the database, and a survivor re-enumerates it (`scan-body!` on
+  boot). Therefore **channel depth is never truth**: "what is queued"
+  is answered by the database query (§4.4), and any reader treating
+  channel depth as state has reinvented hidden state — the exact class
+  §5's audit exists to prevent.
+- **(b) Parking the submitter must never park a `:compute` thread.**
+  Parking the scan loop or a driver vthread is fine — they are `:io`.
+  An eval submitting an `:io` leaf call may park **only after the door
+  releases its `:compute` slot** (§3.5 rule 2 — the same rule that
+  fixes GAP #3; one rule, two consequences). `:compute` must not ever
+  block is the dependency's own contract (`async.clj:562`).
+- **(c) Two different channels; never conflate them.** The turn-boundary
+  take — "what is addressed to me" — is a database query over facts
+  (`waking-inbound?`), durable, global, temporal. The submission
+  channel is "run this work," process-local and disposable.
+  Communication versus scheduling. Routing agent *messages* through a
+  core.async channel would reintroduce the medium this design
+  deliberately replaced and forfeit durability, global access, and time
+  travel; a later "simplification" that merges the two channels is a
+  regression, not a cleanup.
+
+### 3.7 Smart defaults
 
 - **Unknown workload → `:mixed`.** This is core.async's own default —
   `thread-call` (`async.clj:566`) and flow's proc (`impl.clj:245`) both
   default `:mixed` — and it is the only safe direction: misclassifying
-  as `:compute` blocks a compute permit on a park (the D9/GAP-3 class);
+  as `:compute` blocks a compute slot on a park (the D9/GAP-3 class);
   misclassifying as `:io` puts extended computation on the virtual-
   thread executor, hogging carriers. `:mixed` costs only scheduling
   efficiency (its pool is a plain platform cached pool,
@@ -338,9 +452,13 @@ This is design intent, not mechanism invention — the door exists (row
   but a constraint (§3.5 rule 1); recorded here because it is the
   "smart default" most tempting to relax and most expensive to get
   wrong.
-- **Permit count**: the existing config fact defaulting to
-  `availableProcessors` (measured queueing behavior at 22/18 with 71 ms
-  max wait). Unchanged.
+- **Per-class bounds**: `:compute` concurrency defaults to
+  `availableProcessors` (the measured queueing behavior at 22/18 with
+  71 ms max wait carries over into the channel unchanged);
+  `queue-depth` per class is a new config fact whose right default
+  needs the §9.2 sweep — start modest (flow's own per-channel default
+  is 10, `impl.clj:109`) so saturation parks early and visibly rather
+  than deep and late.
 - **The writer's three unset dials** — `transaction-queue-size`,
   `commit-queue-size`, `commit-wait-time` (`writer.cljc:286-297`):
   Seon sets none of them (`rg 'commit-wait-time|transaction-queue-size'
@@ -427,31 +545,36 @@ non-adoption ratification the roadmap lists as owed:
 | `ping` (timeout 1000, omits non-responders, `flow.clj:136-140`) | a query over run + receipt facts — which *includes* the wedged process, the one `ping` structurally omits | §4.4 |
 | workload option | `:seon.fn/workload`, derived | §3 |
 | `:mixed-exec`/`:io-exec`/`:compute-exec` | `executor-for` + the sysprop factory | §3.5 |
+| bounded proc input buffer (`buf-or-n` 10, `impl.clj:101-109`) | the per-class submission channel into the launcher — same primitive, same parking, but over durable work | §3.6 |
 
 Flow needs an admin API because its state is hidden in memory. Putting
 the state in the database does not replace that surface — it deletes the
 need for one (ledger 19f). Agents run in parallel because each claimed
-run is independent work on the shared executors, bounded by the permit
-pool — not because each agent owns a thread. An idle agent costs a few
-datoms, no thread, no channel, no proc.
+run is independent work submitted through the class channels onto the
+shared executors, bounded by each class's concurrency — not because
+each agent owns a thread. An idle agent costs a few datoms, no thread,
+no channel entry, no proc.
 
 ### 4.3 Level three: function calls inside a turn
 
-Already designed in §3.5: the door consults the callee's workload fact
-and the same executor tags schedule the leaf work; the same receipts
-cover it (a capability call happens inside a form and is covered by that
-form's receipt). The turtle claim is real because the *agent turn
-itself* is just the outermost case: `process-message!` is a first-party
-`:io`-derived function running on the `:io` executor, whose inner
-`:compute` sections (evals) claim permits, whose inner `:io` sections
-(leaf calls) release them. One rule, applied recursively. The database
-writer is the same shape one level down: a serial `:io` pipeline whose
-inner work is the pure index update. Nothing anywhere schedules by kind
-of thing — only by workload fact.
+Already designed in §3.5-3.6: the door consults the callee's workload
+fact, submission goes through the class channels, and the same executor
+tags run the leaf work; the same receipts cover it (a capability call
+happens inside a form and is covered by that form's receipt). The
+turtle claim is real because the *agent turn itself* is just the
+outermost case: `process-message!` is a first-party `:io`-derived
+function submitted through the `:io` channel, whose inner `:compute`
+sections (evals) hold slots, whose inner `:io` sections (leaf calls)
+release them before parking. One rule, applied recursively. The
+database writer is the same shape one level down: a serial `:io`
+pipeline over its own bounded channels whose inner work is the pure
+index update. Nothing anywhere schedules by kind of thing — only by
+workload fact.
 
 **The one seam, named honestly.** Agent interpreted code carries three
 obligations first-party code does not: the `:interrupt-fn`, the platform
-thread (for allocation attribution and pinning-freedom), and the permit.
+thread (for allocation attribution and pinning-freedom), and the
+`:compute` slot.
 This is a genuine boundary — but it is expressed *in the same metadata
 system*: corpus provenance (a `:seon.fn/source` row authored through the
 door) is a computed condition that switches the eval boundary on. One
@@ -470,7 +593,9 @@ Answered as queries over committed facts, against flow's `ping`:
   source per process.
 - *what is queued*: open + plan-digest + no process — the durable
   backlog, inspectable and historical (`recoverable-run-query` is this
-  query minus the history).
+  query minus the history). **Never the submission channels' depth**:
+  invariant (a), §3.6 — a channel is a process-local scheduling buffer
+  and its occupancy is diagnostics at best, truth never.
 - *what is wedged*: a `:running` receipt whose run's lease has expired —
   precisely the process flow's `ping` omits (it returns status only "for
   those procs that reply within timeout-ms", `flow.clj:136-140`).
@@ -523,7 +648,7 @@ the D12 fix, present at HEAD.
 | `in-flight-run-ids` atom | `start!` | **legitimate** — same shape; authority is `claim-plan`'s CAS |
 | `lease-wakes` atom + `*await-lease!*` sleeping vthreads | `arm-lease-wake!` | **legitimate with a condition** — the timer implements the committed lease instant (event-driven off the lease commit, per the D2 fix); the condition: a fresh process must scan on boot to re-arm, and `start!` does (`scan-body!` before returning). The firing of a wake that finds nothing stale is normal; a *missed* wake with no surviving process to re-arm is impossible only while every boot scans |
 | `seon.sci.eval/compute-pool` (hand-rolled cached pool) | `sci/eval.clj:33-38` | **legitimate as process resource, wrong as construction** — replace with `executor-for :compute` (§3.5); the docstring's claim is currently ahead of the code |
-| `permits` Semaphore | `sci/eval.clj:40-56` | **legitimate** — the process's compute bound; its observable projection (what is executing) is already derivable from running receipts, and becomes fully so after row 4(d) |
+| `permits` Semaphore | `sci/eval.clj:40-56` | **legitimate today, deleted by this design** — it is the `:compute` submission bound spelled as a semaphore; §3.6 replaces its queueing job with the class channel's buffer and its concurrency job with the launcher's slot count, one owner, no public gate. Its observable projection (what is executing) stays derivable from running receipts, fully so after row 4(d) |
 | `seon.sci.ctx/base` delay | `ctx.clj:15-35` | **legitimate** — compiler-state cache (149.454 bytes / 321.747 ns per fork against the real base, M §3.2, is what it buys). Standing condition: base vars hold only functions and immutable values — the fork-leak class is real on an unsafe base and **nothing enforces the invariant** (F §1); it must become a startup assertion when the capability door installs into the base |
 | `db.host/writer-session` pool/interest atoms | `host.clj:40-76` | **legitimate** — connection state; dies with the wire (§7) except for web-render |
 | `interrupt/time-limit-timer` | `interrupt.clj:36-44` | **legitimate** — process resource |
@@ -533,47 +658,43 @@ the D12 fix, present at HEAD.
 No holder in the driver must become a fact. But two things *around* the
 driver must:
 
-### 5.3 Defect found: the pre-plan crash window strands the run
+### 5.3 Two blockers found by this audit, now filed
 
-A run that cannot be resumed from facts alone is the bug this design
-exists to prevent, and one exists at HEAD:
+Both defects this audit surfaced are filed with full evidence; cited
+here, not restated:
 
-- `recoverable-run-query` requires a committed plan:
-  `[?run :seon.agent.run/plan-digest _]` (`driver.clj:343-350`).
-- `pending-message-query` excludes any message that already caused a
-  run: `(not [?run :seon.agent.run/cause ?message])`
-  (`driver.clj:332-341`), regardless of that run's state.
-- `process-message!` commits the run (with its cause) and the turn
-  *before* the model call, and the plan only after the reply parses
-  (`driver.clj:722-811`).
+- **The pre-plan crash window strands the run** —
+  `docs/seon/issues/run-is-unrecoverable-before-its-plan-commits.md`.
+  A process killed between `open-run!` and the plan commit (a window
+  dominated by the provider call, 78.5% of the measured turn) leaves an
+  open run no survivor can recover: `recoverable-run-query` requires
+  `plan-digest` (`driver.clj:343-350`) and `pending-message-query`
+  excludes messages with a run cause regardless of the run's state
+  (`driver.clj:332-341`). A run that cannot be resumed from facts alone
+  is the exact bug this design exists to prevent; closing direction —
+  recovery selects on *open*, and a plan-less claimable run re-drives
+  from its `:seon.agent.run/cause` message, at-least-once for the
+  provider call being the honest ceiling (landmine 10).
+- **Agent-to-agent messages never wake anyone** —
+  `docs/seon/issues/agent-messages-never-wake-the-jvm-driver.md`.
+  Worse than drift: `:seon.agent.message/origin` is
+  `[:enum :human :agent :core]` (`message.cljc:68`), an agent-sent
+  message carries `:agent` (derived at `message-transaction`,
+  `message.cljc:337`; written literally by `delegate!`,
+  `message.cljc:425`), and `pending-message-query` requires `:human`
+  (`driver.clj:336`) — so **multi-agent collaboration is
+  non-functional at HEAD**, while `waking-inbound?` — the stated one
+  rule — would wake on everything except self and `:core`
+  (`message.cljc:292-307`). One observed mercy of the narrowing: the
+  completion message the driver itself commits (`lifecycle-tx-data`,
+  `driver.clj:92-98`) re-fires the listener and is dropped by the
+  origin filter, bounded to one no-op scan by the coalescer — the fix
+  must keep self-wake excluded (that is `waking-inbound?`'s `from ≠ me`
+  clause, plus landmine 8) while admitting `:agent` origins.
 
-So a process killed between `open-run!` and the plan commit — a window
-dominated by the provider call, 78.5% of the measured turn — leaves an
-open, lease-carrying run **no survivor's scan can ever pick up**: not as
-a recoverable run (no plan digest), not as a pending message (the cause
-edge exists). The run strands until manual intervention; the agent
-appears busy forever (its `:seon.agent/run` pointer is set).
-
-Closing change, one mechanism: make recovery select on *open*, not on
-*planned* — `claim-recoverable-run!` for a plan-less run whose lease is
-claimable re-drives from the causing message (the run's
-`:seon.agent.run/cause` ref reaches it), re-issuing the model call under
-the same run and a fresh turn. At-least-once for the provider call is
-already the system's honest ceiling (landmine 10). Not fixed here (this
-lane changes no source); it gates any claim that the loop is fully
-database-defined, and it belongs with roadmap row 6.
-
-Adjacent drift, reported while verified: the driver's wake query accepts
-only `:seon.agent.message/origin :human` (`driver.clj:336`), so
-agent-to-agent messages currently open no run, while `waking-inbound?` —
-the stated one rule — wakes on everything except self and `:core`
-(`message.cljc:292-307`). One rule, two behaviors; the completion
-message the driver itself commits (`lifecycle-tx-data`,
-`driver.clj:92-98`) is also a `:to` datom that re-fires the listener and
-is then dropped by the origin filter — bounded to one no-op scan by the
-coalescer, but the asymmetry is exactly the drift the predicate's own
-comment forbids. Interim narrowing or defect, it should be named in row
-6's scope.
+Neither is fixed here (this lane changes no source); both gate any
+claim that the loop is fully database-defined, and both enter the §6
+ordering.
 
 ### 5.4 The agent as an entity — the owner's claim, checked
 
@@ -622,14 +743,24 @@ whether the schedule ticker has a surviving JVM owner planned.
    bytes, semaphore wait onto the terminal receipt — so §4.4's
    management queries and the axiom-falsification loop (§3.2) have
    data.
-5. **The stranded pre-plan window** (§5.3) — with row 6, because its fix
-   touches the same recovery queries.
-6. **Then** `:seon.fn/workload` + `executor-for` routing + the permit
-   release wrapper. Order within this step: route `seon.sci.eval`
-   through `executor-for :compute` first (small, independently
-   shippable, closes the "borrowed word without its dispatch" defect
-   the roadmap already lists as owed), then the door wrapper, then the
-   derived fact.
+5. **The two filed driver blockers** (§5.3) — with row 6, because both
+   fixes touch the same wake/recovery queries:
+   `run-is-unrecoverable-before-its-plan-commits.md` and
+   `agent-messages-never-wake-the-jvm-driver.md`. The second gates any
+   multi-agent claim at all — no scheduling design matters for agents
+   that cannot wake each other.
+6. **Then the launcher**: the per-class submission channels (§3.6) with
+   `seon.sci.eval`'s semaphore and public `open!`/`available` surface
+   deleted in the same change (never both mechanisms live at once), the
+   scan fan-out and capability calls routed through them, `executor-for`
+   routing, `:seon.fn/workload`, and the slot-release door wrapper.
+   Order within this step: route `seon.sci.eval` through
+   `executor-for :compute` first (small, independently shippable,
+   closes the "borrowed word without its dispatch" defect the roadmap
+   already lists as owed), then the channels + launcher replacing the
+   semaphore, then the door wrapper, then the derived fact. The three
+   invariants of §3.6 land as comments at the channel creation site in
+   this step.
 
 Independent of all six: the wire merge (§7) can land before or after;
 nothing above reads through the UDS path except incidentally. Merge
@@ -684,10 +815,12 @@ the interest transport is precisely the remote-wake mechanism. The wire
 does not die; it retreats to the one boundary where a second process is
 architecturally required (nothing agent-controlled runs in web-render).
 
-**The three dials** (§3.6): set `transaction-queue-size` and
-`commit-queue-size` as config facts when the merge lands — in-process,
-writer queue pressure and agent fact production share one heap, so the
-queue bound becomes the memory guard; leave `commit-wait-time` 0
+**The three dials** (§3.7; the `writer-dials` lane is exposing them):
+set `transaction-queue-size` and `commit-queue-size` as config facts
+when the merge lands — in-process, writer queue pressure and agent fact
+production share one heap, so the queue bound becomes the memory guard,
+and Datahike's bounded transaction queue is the third expression of the
+one submission-bound pattern (§2 item 1); leave `commit-wait-time` 0
 pending the §9 experiment.
 
 ## 8. Where this improves on flow, and where flow is better
@@ -719,17 +852,26 @@ pending the §9 experiment.
 - **One medium for machines and humans.** The same facts drive the
   driver, the web UI, and forensics; flow's channels are invisible to
   everything but the procs holding them.
-- **Backpressure where it is queryable.** The unclaimed-run backlog is
-  inspectable data with measured claim-side bounding; a full channel is
-  an opaque stall.
+- **Backpressure where it is queryable, now with flow's own primitive
+  doing the parking.** The unclaimed-run backlog is inspectable durable
+  data, and the submission bound is a real bounded channel (§3.6) —
+  Seon gets flow's parking semantics at every submission point *and* a
+  backlog you can query; flow's full channel is an opaque stall.
 
 **Where flow is better (non-empty, honestly):**
 
-- **Automatic producer backpressure.** A bounded channel parks the
-  producer and the pressure propagates upstream through the graph with
-  zero design work. Seon must engineer the equivalent at the door and
-  the writer queues (§2 item 1, §3.6) and cannot express "slow this
-  producer" without one of those bounds firing.
+- **Graph-propagated backpressure to the original producer.** With
+  submission channels Seon has parking backpressure at every point
+  where work is *run* (§3.6), but pressure reaches the submitter — the
+  scan loop, the driver, the eval's leaf call — not necessarily the
+  *author* of the work: an agent that committed 500 messages finished
+  its turn long ago, and the durable backlog absorbs what a chain of
+  bounded flow channels would have pushed back to the producing proc
+  itself. The authoring side is bounded by `hop-live?` and by
+  Datahike's transaction queue parking `transact!` mid-eval, but the
+  end-to-end producer stall flow gives across a whole graph is
+  genuinely not reproduced — by design (the durable backlog is the
+  feature), and stated so nobody discovers it.
 - **Cheap proc-local state.** flow's `state` is a map in memory;
   Seon's is a committed fact (12 transactions per measured turn). For
   hot in-memory aggregation — windowed stream statistics, high-rate
@@ -770,12 +912,15 @@ one mechanism, facts at every visible boundary.
    packing. Experiment: after §6.1-2 land, run the rollup over the
    first-party corpus and count; the number is meaningless before the
    discard sites close, which is why it was not produced today.
-2. **The writer queue dials.** Right sizes for
-   `transaction-queue-size` / `commit-queue-size`, and whether any
-   `commit-wait-time` > 0 ever wins on APFS given self-tuning batches.
-   Experiment: the §16 load rig swept over the three dials on a
-   throwaway cluster (O9 makes this safe), watching tx/s, p50, queue
-   pressure warnings, and RSS.
+2. **The queue dials — writer and submission channels together.** Right
+   sizes for `transaction-queue-size` / `commit-queue-size`, whether
+   any `commit-wait-time` > 0 ever wins on APFS given self-tuning
+   batches, and the per-class `queue-depth` / `concurrency` defaults
+   for the §3.6 channels — including the scan loop's park latency under
+   drive saturation (how stale enumeration gets before the channel
+   drains). Experiment: the §16 load rig swept over all five dials on a
+   throwaway cluster (O9 makes this safe), watching tx/s, p50, park
+   time at each submission point, queue pressure warnings, and RSS.
 3. **Derived `:io` beyond thin wrappers.** Whether rule 3 of §3.3 ever
    fires on real corpus code or every real function with a leaf edge is
    `:mixed`. Settled by the same census as (1).
@@ -788,11 +933,13 @@ one mechanism, facts at every visible boundary.
    latency and `jdk.VirtualThreadPinned` events (zero at the knee
    today, M §16.2).
 5. **Lease renewal while queued or mid-eval.** Carried from the
-   prototype (F §3): max observed semaphore wait was 71 ms against a
+   prototype (F §3): max observed submission wait was 71 ms against a
    60 s lease, so renewal-during-wait never fired; a convoy of long
-   evals makes a healthy queued run stealable. Experiment: permits 2,
-   three evals of length > lease, assert no steal of a queued healthy
-   run once renewal ownership lands with row 6.
+   evals makes a healthy queued run stealable — and §3.6 makes queued
+   time a first-class state (a submission parked in the `:compute`
+   channel), so renewal ownership must cover it. Experiment: `:compute`
+   concurrency 2, three evals of length > lease, assert no steal of a
+   queued healthy run once renewal lands with row 6.
 6. **Multi-cluster co-hosting blast radius.** N `LocalWriter`s in one
    JVM is structurally available (§4.1); what one cluster's OOM does to
    its co-tenants' recovery time is unmeasured. Experiment: two-cluster
