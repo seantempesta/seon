@@ -4,10 +4,9 @@
   Friday — used for the workday-cron cases."
   (:require
     [cljs.test :refer [async deftest is]]
-    [seon.agent.run :as run]
     [seon.agent.schedule :as sched]
-    [seon.config :as config]
     [seon.db :as db]
+    [seon.db.id :as db.id]
     [seon.db.protocol :as protocol]
     [seon.runtime.admission :as admission]))
 
@@ -67,11 +66,12 @@
     (let [database ::database
           now (js/Date. 2026 5 25 9 0 0)
           requests (atom [])
+          transactions (atom [])
           effects (atom [])
           originals [[#(set! admission/available? %) admission/available?]
                      [#(set! db/db %) db/db]
                      [#(set! db/execute-many %) db/execute-many]
-                     [#(set! run/open-run! %) run/open-run!]]]
+                     [#(set! db.id/allocate! %) db.id/allocate!]]]
       (set! admission/available? (constantly true))
       (set! db/db (fn ([] (swap! effects conj :db)
                           (js/Promise.resolve database))
@@ -83,25 +83,16 @@
                {::db/results
                 [{::protocol/success? true
                   :datahike.query/result
-                  [["agent-a" {} "0 9 * * *" 'my.jobs/run]]}
-                 {::protocol/success? true :datahike.query/result []}
-                 {::protocol/success? true :datahike.query/result []}
-                 {::protocol/success? true
-                  ::protocol/result
-                  {:seon.config/id config/cluster-config-id
-                   :seon.config.breaker/crash-count 4
-                   :seon.config.breaker/window-ms 60000}}]})))
-      (set! run/open-run!
-            (fn [_]
-              (swap! effects conj :open)
-              (js/Promise.resolve
-               {:seon.agent.run/id "run-a"
-                :seon.agent.run/status :open
-                :seon.agent.run/trigger :schedule
-                :seon.agent.run/started-at now
-                :seon.agent.run/turn-limit 20
-                :seon.agent.run/deadline
-                (js/Date. (+ (.getTime now) 60000))})))
+                 [["agent-a" {} "0 9 * * *" 'my.jobs/run]]}
+                 {::protocol/success? true :datahike.query/result []}]})))
+      (set! db.id/allocate!
+            (fn [request]
+              (swap! effects conj :allocate)
+              (let [ids {:seon.agent.run/id "run-a"}
+                    transaction
+                    ((::db.id/transaction-builder request) ids)]
+                (swap! transactions conj (::db/tx-data transaction))
+                (js/Promise.resolve {::db.id/ids ids}))))
       (-> (sched/fire-due-schedules!
              {:seon.agent/now now})
             (.then
@@ -112,19 +103,20 @@
                (is (= 1 (count @requests)))
                (let [request (first @requests)]
                  (is (identical? database (::db/db request)))
-                 (is (= 4 (count (::db/members request))))
+                 (is (= 2 (count (::db/members request))))
                  (is (every? #(identical? database (::db/db %))
-                             (::db/members request)))
-                 (let [configuration-member (last (::db/members request))]
-                   (is (= protocol/pull-operation
-                          (::protocol/operation configuration-member)))
-                   (is (= [:seon.config/id
-                           :seon.config.breaker/crash-count
-                           :seon.config.breaker/window-ms]
-                          (::protocol/selector configuration-member)))
-                   (is (= [:seon.config/id config/cluster-config-id]
-                          (::protocol/entity-id configuration-member)))))
-               (is (= [:db :open] @effects))))
+                             (::db/members request))))
+               (is (= [:db :allocate] @effects))
+               (is (=
+                    [{:seon.agent.run/id "run-a"
+                      :seon.agent.run/agent [:seon.agent/id "agent-a"]
+                      :seon.agent.run/started-at now
+                      :seon.agent.run/status :open
+                      :seon.agent.schedule/fns ['my.jobs/run]}
+                     [:db.fn/cas [:seon.agent/id "agent-a"]
+                      :seon.agent/run nil
+                      [:seon.agent.run/id "run-a"]]]
+                    (first @transactions)))))
             (.catch (fn [exception]
                       (is false (str "fire-due-schedules! threw: " exception))))
             (.finally

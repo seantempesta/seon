@@ -11,7 +11,7 @@
   (:require
     [clojure.string :as str]
     [cljs.test :refer [async deftest is]]
-    [seon.agent.run :as run]
+    [seon.agent.interaction :as interaction]
     [seon.db :as db]
     [seon.db.id :as db.id]
     [seon.runtime.admission :as admission]
@@ -95,16 +95,13 @@
 
 (deftest invalid-interaction-is-flat-error-and-never-allocates
   (async done
-    (let [original-deadline run/effective-deadline-ms
-          original-allocate db.id/allocate!
+    (let [original-allocate db.id/allocate!
           allocations (atom 0)
           capability
           {::call/agent-id agent-id
            ::call/handler granted-sym
            ::call/handler-source-fingerprint (apply str (repeat 64 "b"))
            ::call/handler-spec "[:=> [:cat :int] :int]"}]
-      (set! run/effective-deadline-ms
-            (fn [_] (js/Promise.resolve 60000)))
       (set! db.id/allocate!
             (fn [_]
               (swap! allocations inc)
@@ -121,7 +118,51 @@
           (.catch (fn [error] (is false (str error))))
           (.finally
            (fn []
-             (set! run/effective-deadline-ms original-deadline)
+             (set! db.id/allocate! original-allocate)
+             (done)))))))
+
+(deftest successful-submission-has-no-deadline-projection
+  (async done
+    (let [original-validate interaction/validate-request
+          original-open interaction/open-tx-data
+          original-without db/without-agent
+          original-allocate db.id/allocate!
+          opened (atom nil)
+          capability
+          {::call/agent-id agent-id
+           ::call/handler granted-sym
+           ::call/handler-source-fingerprint (apply str (repeat 64 "b"))
+           ::call/handler-spec "[:=> [:cat :int] :int]"}]
+      (set! interaction/validate-request identity)
+      (set! interaction/open-tx-data
+            (fn [request]
+              (reset! opened request)
+              [{:seon.agent.interaction/id
+                (:seon.agent.interaction/id request)}]))
+      (set! db/without-agent (fn [body] (body)))
+      (set! db.id/allocate!
+            (fn [request]
+              ((::db.id/transaction-builder request)
+               {::call/interaction-id "interaction-a"
+                ::call/run-id "run-a"})
+              (js/Promise.resolve
+               {::db.id/ids
+                {::call/interaction-id "interaction-a"
+                 ::call/run-id "run-a"}})))
+      (-> (call/submit! database capability [1])
+          (.then
+           (fn [result]
+             (is (true? (::call/ok? result)))
+             (is (= "interaction-a" (::call/interaction-id result)))
+             (is (= "run-a" (:seon.agent.run/id @opened)))
+             (is (inst? (:seon.agent.interaction/requested-at @opened)))
+             (is (not (contains? @opened :seon.agent.run/deadline)))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! interaction/validate-request original-validate)
+             (set! interaction/open-tx-data original-open)
+             (set! db/without-agent original-without)
              (set! db.id/allocate! original-allocate)
              (done)))))))
 

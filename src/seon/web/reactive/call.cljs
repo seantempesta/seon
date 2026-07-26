@@ -4,13 +4,12 @@
    The HTTP request never waits for authored execution. It capability-checks
    the live route agent and exact committed handler row, validates the
    schema-projected argument vector, commits one pending interaction/run fact,
-   and acknowledges. Existing JVM claimants execute that fact; the page learns
-   its outcome only from committed result/error facts through the normal
+   and acknowledges. The cluster JVM executes that fact; the page learns its
+   outcome only from committed result/error facts through the normal
    database-interest → reactive render → Datastar morph chain."
   (:require
     [clojure.string :as str]
     [seon.agent.interaction :as interaction]
-    [seon.agent.run :as run]
     [seon.db :as db]
     [seon.db.id :as db.id]
     [seon.log :as log]
@@ -109,47 +108,38 @@
           :seon.schema/projection (schema/current-projection)})]
     (if (:seon.error/message validated)
       {::ok? false ::error validated}
-      (let [deadline-ms
+      (let [now (js/Date.)
+            allocation
             (await
-             (run/effective-deadline-ms
-              {:seon.db/db database :seon.agent/id agent-id}))]
-        (if (:seon.error/message deadline-ms)
-          {::ok? false ::unavailable? true ::error deadline-ms}
-          (let [now (js/Date.)
-                deadline (js/Date. (+ (.getTime now) deadline-ms))
-                allocation
-                (await
-                 (db/without-agent
-                  #(db.id/allocate!
-                    {::db/db database
-                     ::db.id/allocations
-                     [{::db.id/key ::interaction-id
-                       ::db.id/identity-attr
-                       :seon.agent.interaction/id}
-                      {::db.id/key ::run-id
-                       ::db.id/identity-attr :seon.agent.run/id}]
-                     ::db.id/transaction-builder
-                     (fn [ids]
-                       {::db/tx-data
-                        (interaction/open-tx-data
-                         {:seon.agent.interaction/id
-                          (get ids ::interaction-id)
-                          :seon.agent.run/id (get ids ::run-id)
-                          :seon.agent/id agent-id
-                          :seon.agent.interaction/handler handler
-                          :seon.agent.interaction/handler-source-fingerprint
-                          (::handler-source-fingerprint capability)
-                          :seon.agent.interaction/arguments args
-                          :seon.agent.interaction/subjects
-                          #{[:seon.agent/id agent-id]}
-                          :seon.agent.interaction/requested-at now
-                          :seon.agent.run/deadline deadline})})})))]
-            (if (:seon.error/message allocation)
-              {::ok? false ::unavailable? true ::error allocation}
-              {::ok? true
-               ::interaction-id
-               (get-in allocation
-                       [::db.id/ids ::interaction-id])})))))))
+             (db/without-agent
+              #(db.id/allocate!
+                {::db/db database
+                 ::db.id/allocations
+                 [{::db.id/key ::interaction-id
+                   ::db.id/identity-attr
+                   :seon.agent.interaction/id}
+                  {::db.id/key ::run-id
+                   ::db.id/identity-attr :seon.agent.run/id}]
+                 ::db.id/transaction-builder
+                 (fn [ids]
+                   {::db/tx-data
+                    (interaction/open-tx-data
+                     {:seon.agent.interaction/id
+                      (get ids ::interaction-id)
+                      :seon.agent.run/id (get ids ::run-id)
+                      :seon.agent/id agent-id
+                      :seon.agent.interaction/handler handler
+                      :seon.agent.interaction/handler-source-fingerprint
+                      (::handler-source-fingerprint capability)
+                      :seon.agent.interaction/arguments args
+                      :seon.agent.interaction/subjects
+                      #{[:seon.agent/id agent-id]}
+                      :seon.agent.interaction/requested-at now})})})))]
+        (if (:seon.error/message allocation)
+          {::ok? false ::unavailable? true ::error allocation}
+          {::ok? true
+           ::interaction-id
+           (get-in allocation [::db.id/ids ::interaction-id])})))))
 
 ;; ============================================================
 ;; HTTP handler — POST /agent/{id}/call. The Ring request carries the native
