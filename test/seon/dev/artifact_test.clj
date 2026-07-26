@@ -467,10 +467,13 @@
          (str (fs/path directory "runtime/client-program-inventory.edn"))}
         calls (atom [])]
     (try
-      (with-redefs [artifact/run-step!
-                    (fn [observed-config label argv]
-                      (swap! calls conj [observed-config label argv]))]
-        (is (= release (artifact/build-release-programs! config release))))
+      (with-redefs-fn
+        {#'artifact/publish-program-artifacts! (fn [& _])}
+        #(with-redefs [artifact/run-step!
+                       (fn [observed-config label argv]
+                         (swap! calls conj [observed-config label argv]))]
+           (is (= release
+                  (artifact/build-release-programs! config release)))))
       (is (= ["build release pod"] (mapv second @calls)))
       (doseq [[observed-config _ argv] @calls]
         (is (= "value"
@@ -564,10 +567,12 @@
          (str (fs/path directory "runtime/client-program-inventory.edn"))}
         calls (atom [])]
     (try
-      (with-redefs [artifact/run-step!
-                    (fn [_ label argv]
-                      (swap! calls conj [label argv]))]
-        (artifact/build-release-programs! config release))
+      (with-redefs-fn
+        {#'artifact/publish-program-artifacts! (fn [& _])}
+        #(with-redefs [artifact/run-step!
+                       (fn [_ label argv]
+                         (swap! calls conj [label argv]))]
+           (artifact/build-release-programs! config release)))
       (doseq [[_ argv] @calls]
         (is (= ["clj" "-Sdeps"] (subvec argv 0 2)))
         (is (= {'seon.extra/src {:local/root (str downstream)}}
@@ -596,6 +601,8 @@
        #'artifact/bun-executable-current? (constantly true)
        #'artifact/build-source!
        (fn [_ _] (swap! events conj :source))
+       #'artifact/publish-program-artifacts!
+       (fn [_] (swap! events conj :jvm-indexer))
        #'artifact/read-manifest
        (constantly nil)
        #'artifact/output-manifest
@@ -604,7 +611,9 @@
        (fn [_ value] (swap! events conj :publish) value)}
       #(let [result (artifact/build!
                      config (fn [] (swap! events conj :watcher-flush)))]
-         (is (= [:source :watcher-flush :manifest :publish] @events))
+         (is (= [:source :watcher-flush :jvm-indexer
+                 :manifest :publish]
+                @events))
          (is (= manifest
                 (dissoc result :seon.dev.artifact/changed)))))))
 
@@ -630,6 +639,7 @@
        #'artifact/bun-identity! (constantly {})
        #'artifact/bun-executable-current? (constantly true)
        #'artifact/build-source! (fn [_ _])
+       #'artifact/publish-program-artifacts! (fn [_])
        #'artifact/read-manifest
        (fn [_] (throw (ex-info "obsolete manifest" {})))
        #'artifact/output-manifest (fn [_ _] published)

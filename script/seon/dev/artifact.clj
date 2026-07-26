@@ -107,7 +107,8 @@
    [:seon.dev.writer-cache/writer-jvm-options-digest
     [:re #"[0-9a-f]{64}"]]])
 
-(declare validate-maintained-dependencies! current-writer-publication)
+(declare validate-maintained-dependencies! current-writer-publication
+         output-manifest)
 
 (defn- validate-manifest! [manifest]
   (when-not (m/validate artifact-manifest-schema manifest)
@@ -397,6 +398,7 @@
    "resources"
    "script/seon/dev/config_manifest.clj"
    "script/seon/dev/program_artifact.clj"
+   "script/seon/dev/program_indexer.clj"
    "script/seon/dev/program_inventory.clj"
    "src"])
 
@@ -846,6 +848,61 @@
     (println (str "  ● " label " (" elapsed-ms "ms)"))
     result))
 
+(defn- program-indexer-command
+  [config program-source-output program-row-output
+   base-projection-output page-plan-output]
+  (let [config-manifest-digest
+        (get-in config
+                [:seon.dev.config/launch-descriptor
+                 :seon.launch/resolved-manifest
+                 :seon.launch/sha-256])
+        page-rows
+        (get-in config
+                [:seon.dev.config/resolved-configuration
+                 :seon.config.database.initialization/page-rows])
+        heap (config/writer-max-heap config)]
+    (when-not (and (string? config-manifest-digest)
+                   (re-matches #"[0-9a-f]{64}" config-manifest-digest)
+                   (pos-int? page-rows)
+                   (string? heap))
+      (throw
+       (ex-info "The JVM program indexer has no admitted build configuration."
+                {:seon.dev.artifact/config-manifest-digest
+                 config-manifest-digest
+                 :seon.db.initialization/page-rows page-rows
+                 :seon.dev.config/writer-max-heap heap})))
+    ["clojure"
+     (str "-J-Xmx" heap)
+     "-Sdeps"
+     (pr-str
+      {:aliases
+       {'program-indexer {:extra-paths ["script"]}}})
+     "-M:writer:host:program-indexer"
+     "-m" "seon.dev.program-indexer"
+     (:seon.dev.config/root config)
+     (str program-source-output)
+     (str program-row-output)
+     (str base-projection-output)
+     (str page-plan-output)
+     config-manifest-digest
+     (str page-rows)]))
+
+(defn- publish-program-artifacts!
+  ([config]
+   (publish-program-artifacts!
+    config
+    (program-source-path config)
+    (program-row-path config)
+    (base-projection-path config)
+    (page-plan-path config)))
+  ([config program-source-output program-row-output
+    base-projection-output page-plan-output]
+   (run-step!
+    config "index JVM program graph and initialization pages"
+    (program-indexer-command
+     config program-source-output program-row-output
+     base-projection-output page-plan-output))))
+
 (defn build-release-programs!
   "Build the surviving pod entry as an isolated Shadow release.
 
@@ -946,6 +1003,12 @@
                              [:seon.dev.config/environment
                               "SEON_EXTRA_PRELOAD"])
                      "/-main"))))))
+    ;; Shadow still owns the client output in this cut. The JVM indexer owns
+    ;; every program graph and initialization-page artifact that is frozen
+    ;; beside it; the obsolete hooks' intermediate bytes are overwritten.
+    (publish-program-artifacts!
+     release-config program-source-output program-row-output
+     base-projection-output page-plan-output)
     release))
 
 (defn- capture-command! [config argv]
@@ -1189,7 +1252,9 @@
 (defn prepare-dependencies!
   "Prepare selected dependency aliases under the checkout artifact lock.
 
-   CLJS preparation includes the selected downstream source basis."
+   CLJS preparation includes the selected downstream source basis. A standalone
+   writer preparation also publishes the source-current JVM program pages and
+   freezes the manifest without requiring a live Shadow watcher."
   {:malli/schema
    [:=> [:cat [:map
                [:seon.dev.config/root :string]
@@ -1198,7 +1263,18 @@
     [:map [:seon.dev.artifact/prepared-aliases
            [:vector {:min 1} :keyword]]]]}
   [config aliases]
-  (with-build-lock config #(prepare-dependencies-unlocked! config aliases)))
+  (with-build-lock
+    config
+    #(let [prepared (prepare-dependencies-unlocked! config aliases)]
+       (when (and (:seon.dev.config/source-checkout? config)
+                  (= [:writer] aliases))
+         (ensure-writer! config)
+         (publish-program-artifacts! config)
+         (let [bun (bun-identity! config)
+               manifest (output-manifest config bun)]
+           (atomic-spit! (:seon.dev.config/artifact-manifest config)
+                         manifest)))
+       prepared)))
 
 (def ^:private runtime-root-links ["src" "test" "guest-cljs" "resources"])
 
@@ -1514,6 +1590,7 @@
           ;; completed flush happens under the same checkout-wide lock as the
           ;; remaining outputs and the one final manifest publication.
           (prepare-client!)
+          (publish-program-artifacts! config)
           (let [previous (try
                            (read-manifest config)
                            (catch Exception _ nil))
