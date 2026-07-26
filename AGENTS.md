@@ -195,26 +195,39 @@ invalidates that fact, update the localized authority in the same commit.
 
 ## Current runtime and boundary
 
-Seon is one application whose cluster runs several supervised processes
-under the one `bin/seon` operator (ruling 26):
+Seon is one application. Each cluster is a **store** — its own
+`data/clusters/<name>/`, its own process directory, its own ports — and
+that store is the isolation boundary: clusters share no mutable state, so
+one crashing or being reset cannot touch another. Datahike ships only a
+`:self` writer, so there is exactly **one writer process per store**,
+which makes one JVM per cluster the structural consequence rather than a
+choice. Scale by adding clusters, never by adding processes to one
+(owner rulings O1/O9, 2026-07-25).
 
-- the **writer JVM** owns transactions and the committed-transaction feed
-  ONLY; agent-authored code never executes there;
+Processes under the one `bin/seon` operator:
+
+- the **cluster JVM** owns transactions, the committed-transaction feed,
+  and every running agent. Agent evals are CO-LOCATED with the database
+  (O1): reads are a pointer into an immutable database value, writes are
+  a function call — no wire on the agent path. Runs are claimable
+  database state (`:seon.agent.run/process` + epoch CAS, lease, durable
+  receipts); sci evals run under the one `:interrupt-fn` on `:compute`
+  platform threads, where allocation is measurable;
 - the **web-render JVM** serves the Datastar web UI as pure derivation
   over a replica session; nothing agent-controlled runs there;
-- **claimant JVM(s)** run the one portable claim-native driver: runs are
-  claimable database state (claimant + epoch CAS, heartbeat lease, turn
-  phase cursor, durable attempt/eval receipts); sci evals and authored
-  renders execute behind the guarded eval door on a bounded platform
-  pool; one virtual thread per claimed run;
-- the **Bun leaf host** is a disposable js-package runtime (the pod
-  interim drives render/publish phases as a phase-limited claimant
-  until its remaining surfaces retire);
+- **leaf runtimes** are disposable package processes, started on demand
+  and reaped freely (scheduled after the JVM system is solid, O10);
 - the **browser** receives static assets and morphed HTML only.
 
 All coordination is database data; any process may die at any time and a
-survivor resumes from receipts and the phase cursor. Clusters always
-RESET to the latest code and schema — never data migration.
+survivor resumes from receipts. Clusters always RESET to the latest code
+and schema — never data migration.
+
+**Never say "claimant".** It is a Seon coinage with no basis in Datahike
+or anywhere else. The process that holds a run is
+`:seon.agent.run/process`, grounded on both sides:
+`script/seon/dev/process.clj` (process record, generation, (pid,
+start-instant) identity) ↔ JDK `ProcessHandle`.
 
 Sci containment catches model mistakes; it is not a security boundary.
 Isolation comes from processes and the database capability surface. Seon
@@ -447,7 +460,15 @@ Use discoverable code names, not umbrella nouns or synonyms:
 | provider descriptor row | adapter, integration | one hosted provider's data row under the config singleton |
 | packages/, package.json, deps.edn, node_modules | npm-pkgs, maven-pkgs | per-cluster `data/clusters/<name>/packages/` using each ecosystem's own manifest names |
 | contexts on hosts, binding tables | sandbox, VM, jail | sci's own vocabulary for agent execution |
-| interpreter-step budget | fuel, gas | the guard door's interpreter-step count at sci's `:interrupt-fn` safepoint; `src/seon/host/guard.cljc` ↔ `reference-code/sci` interpreter |
+| `:interrupt-fn` | the guard, the door, the cage | the ONE zero-arg fn sci calls on every fn body entrance; `reference-code/sci/doc/interrupt.md:6` ↔ `seon.sci.interrupt` |
+| `interrupt!` | stop!, steering-error! | how an `:interrupt-fn` stops an eval uncatchably; `reference-code/sci/src/sci/interrupt.cljc:32` |
+| `time-limit` | fuel, gas, interpreter-step budget, deadline-ms | the ONLY limit. Sci counts nothing — it has no step concept; `reference-code/sci/doc/interrupt.md:32` |
+| `:seon.eval/fn-entries` | a step budget | a RECORDED DIAGNOSTIC, never a limit: 271M entries in 500ms reads as a spin, 12 reads as blocked in a host call |
+| every `fn` body entrance | safepoint | where sci calls the `:interrupt-fn`. A JVM safepoint is a different real thing (GC); `reference-code/sci/doc/interrupt.md:50` |
+| `ctx`, `fork` | warm base, sandbox, the agent's world | sci's own names; `reference-code/sci/src/sci/core.cljc:318` |
+| `:io` / `:compute` / `:mixed` | eval pool, wait pool | core.async's workload tags: `:io` may block but must not compute, `:compute` must not block; `reference-code/core.async/.../impl/dispatch.clj:122-134` |
+| `:seon.agent.run/process` | **claimant** | the process holding a run; `script/seon/dev/process.clj` ↔ JDK `ProcessHandle` |
+| accretion / breakage | graduation, nursery, graduated | a change that requires no more and provides no less. **Attribution to Rich Hickey's Spec-ulation is UNVERIFIED** — do not cite it as established |
 | initialization pages, rows, transaction data | seed bundle, sidecar | paged database population; `src/seon/db/protocol.cljc` (pages/phases) ↔ Datahike tx-data |
 | process record, generation, (pid, start-instant) identity | orphan registry, liveness flag | operator-managed process descriptors; `script/seon/dev/process.clj` + `state.clj` ↔ JDK `ProcessHandle` |
 | pre-processing, apply, resume | warmup, hydration | the explicit derive-once/install/attach operations (R45); `docs/prds/sci-execution-runtime/research/preprocessing-design-2026-07-23.md` until code owners land |
