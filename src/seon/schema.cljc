@@ -20,6 +20,7 @@
   (:require [malli.core :as m]
             [malli.registry :as mr]
             [clojure.walk :as walk]
+            [datahike.api :as d]
             [seon.schema.form :as form]
             [seon.schema.internal :as internal]
             #?(:clj [clojure.edn :as edn]
@@ -259,53 +260,115 @@
                (= application preprocessed))
       application)))
 
-(def asserting-transaction-provenance-pattern
-  "Pull pattern for the transaction that asserted a canonical schema/contract
-   form. Producers pass this as Datalog input so admission source remains a
-   derived cache value, never another stored schema-row attribute."
-  '[{:seon.db/user [:seon.agent/id :seon.user/id]}
-    {:seon.db/process [:seon.db.process/id]}])
+(defn- one-value [values]
+  (when (= 1 (count values))
+    (first values)))
 
-(def ^:private core-process-identities
-  #{:seon.db.process/boot
-    :seon.db.process/config
-    :seon.db.process/core})
+(defn- installed-attribute? [db attribute]
+  (contains? (:schema db) attribute))
+
+(defn- asserting-process-ref [db asserting-tx-eid]
+  (when (installed-attribute? db :seon.db/process)
+    (one-value
+     (d/q '[:find [?process ...]
+            :in $ ?tx
+            :where [?tx :seon.db/process ?process]]
+          db
+          asserting-tx-eid))))
+
+(defn- current-process-id [db process-ref]
+  (when (and process-ref
+             (installed-attribute? db :seon.db.process/id))
+    (one-value
+     (d/q '[:find [?process-id ...]
+            :in $ ?process
+            :where [?process :seon.db.process/id ?process-id]]
+          db
+          process-ref))))
+
+(defn- current-user [db asserting-tx-eid]
+  (let [user-ref
+        (when (installed-attribute? db :seon.db/user)
+          (one-value
+           (d/q '[:find [?user ...]
+                  :in $ ?tx
+                  :where [?tx :seon.db/user ?user]]
+                db
+                asserting-tx-eid)))]
+    (if user-ref
+      (into {}
+            (keep
+             (fn [attribute]
+               (when (installed-attribute? db attribute)
+                 (when-let [value
+                            (one-value
+                             (d/q '[:find [?value ...]
+                                    :in $ ?user ?attribute
+                                    :where [?user ?attribute ?value]]
+                                  db
+                                  user-ref
+                                  attribute))]
+                   [attribute value]))))
+            [:seon.agent/id :seon.user/id])
+      {})))
+
+(defn- history-value [db]
+  (try
+    (d/history db)
+    (catch #?(:clj Throwable :cljs :default) _
+      nil)))
+
+(defn- ancestor-seal-tx [db history]
+  (when (and history
+             (installed-attribute? db :seon.ancestor/digest))
+    (let [seal-datoms
+          (d/q '[:find ?ancestor ?digest ?tx
+                 :where
+                 [?ancestor :seon.ancestor/digest ?digest ?tx true]]
+               history)]
+      (when (= 1 (count seal-datoms))
+        (nth (first seal-datoms) 2)))))
+
+(defn- first-process-id-tx [history process-ref process-id]
+  (when (and history process-ref process-id)
+    (let [transactions
+          (d/q '[:find [?tx ...]
+                 :in $ ?process ?process-id
+                 :where
+                 [?process :seon.db.process/id ?process-id ?tx true]]
+               history
+               process-ref
+               process-id)]
+      (when (seq transactions)
+        (apply min transactions)))))
 
 (defn admission-from-asserting-transaction
   "Derive strictness source from one canonical row's asserting transaction.
 
    Missing and unrecognized provenance deliberately fail closed as
    agent-authored. The note is projection-cache guidance, not database truth."
-  {:malli/schema [:=> [:cat [:maybe :map]] :map]}
-  [transaction]
-  (let [process-id (get-in transaction [:seon.db/process
-                                        :seon.db.process/id])
-        user (some-> (:seon.db/user transaction)
-                     (select-keys [:seon.agent/id :seon.user/id]))
-        recognized? (some? process-id)
-        source (if (contains? core-process-identities process-id)
-                 :core
-                 :agent)]
+  {:malli/schema [:=> [:cat :map :int] :map]}
+  [db asserting-tx-eid]
+  (let [process-ref (asserting-process-ref db asserting-tx-eid)
+        process-id (current-process-id db process-ref)
+        user (current-user db asserting-tx-eid)
+        history (history-value db)
+        seal-tx (ancestor-seal-tx db history)
+        first-process-tx
+        (first-process-id-tx history process-ref process-id)
+        core? (and seal-tx
+                   first-process-tx
+                   (< first-process-tx seal-tx))
+        source (if core? :core :agent)]
     (cond->
       {:seon.schema.admission/source source
        :seon.schema.admission/process-id process-id
-       :seon.schema.admission/user (or user {})}
-      (not recognized?)
+       :seon.schema.admission/user user}
+      (not core?)
       (assoc :seon.schema.admission/note
-             (str "The asserting transaction has no recognizable process "
-                  "provenance, so this row is admitted as agent-authored. "
-                  "Re-register it through boot/config/core reconciliation "
-                  "to claim the documented core exceptions."))
-
-      (and recognized?
-           (= :agent source)
-           (not (#{:seon.db.process/repl :seon.db.process/agent}
-                 process-id)))
-      (assoc :seon.schema.admission/note
-             (str "The asserting process is not a recognized core process, "
-                  "so this row is admitted as agent-authored. Re-register it "
-                  "through boot/config/core reconciliation to claim the "
-                  "documented core exceptions.")))))
+             (str "The asserting transaction has no process identity whose "
+                  "first assertion precedes the ancestor seal, so this row "
+                  "is admitted as agent-authored.")))))
 
 (defn- candidate-forms []
   (if *candidate-forms-overlay*
@@ -553,11 +616,10 @@
                            [:set :seon.schema/registry-key]))
 (defonce ^:private _projection-row-type
   (update-candidate-forms! assoc :seon.schema/projection-row
-                           [:or
-                            [:tuple [:or :keyword :string :symbol] :string]
-                            [:tuple [:or :keyword :string :symbol]
-                             :string
-                             [:maybe :map]]]))
+                           [:tuple
+                            [:or :keyword :string :symbol]
+                            :string
+                            :int]))
 (defonce ^:private _projection-rows-type
   (update-candidate-forms! assoc :seon.schema/projection-rows
                            [:or
@@ -567,6 +629,7 @@
   (update-candidate-forms!
     assoc :seon.schema/projection-input
     [:map {:closed true}
+     [:seon.schema/database-value :map]
      [:seon.schema/schema-rows :seon.schema/projection-rows]
      [:seon.schema/function-contract-rows :seon.schema/projection-rows]
      [:seon.schema/function-source-rows
@@ -1419,7 +1482,7 @@
      ::projection]]}
   ([projection-input]
    (projection-from-rows projection-input {}))
-  ([{:seon.schema/keys [schema-rows function-contract-rows
+  ([{:seon.schema/keys [database-value schema-rows function-contract-rows
                         function-source-rows artifact-exports
                         pure-predicate-symbols]
      :or {function-source-rows []
@@ -1430,14 +1493,14 @@
             (reduce
               (fn [parsed row]
                 (when-not (and (sequential? row)
-                               (#{2 3} (count row)))
+                               (= 3 (count row)))
                   (throw (ex-info (str "Malformed committed " identity-label
                                        " row.")
                                   {:seon.schema/error
                                    :seon.schema/malformed-projection-row
                                    :seon.schema/row row
                                    :seon.error/kind :core-bug})))
-                (let [[raw-identity form-string asserting-transaction] row
+                (let [[raw-identity form-string asserting-tx-eid] row
                       identity (identity-fn raw-identity)]
                   (when-not (string? form-string)
                     (throw (ex-info (str "Malformed committed " identity-label
@@ -1459,7 +1522,8 @@
                            form-string)
                           :seon.schema.parsed/admission
                           (admission-from-asserting-transaction
-                            asserting-transaction)})))
+                            database-value
+                            asserting-tx-eid)})))
               {}
               rows))]
     (let [schemas
@@ -1503,7 +1567,7 @@
                                 :seon.schema/malformed-projection-row
                                 :seon.schema/row row
                                 :seon.error/kind :core-bug})))
-             (let [[raw-identity source asserting-transaction] row
+             (let [[raw-identity source asserting-tx-eid] row
                    identity (cond
                               (qualified-symbol? raw-identity) raw-identity
                               (string? raw-identity) (symbol raw-identity)
@@ -1523,7 +1587,8 @@
                                   :seon.error/kind :core-bug})))
                (assoc admissions identity
                       (admission-from-asserting-transaction
-                       asserting-transaction))))
+                       database-value
+                       asserting-tx-eid))))
            {}
            function-source-rows)
           artifact-exports

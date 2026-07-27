@@ -312,9 +312,9 @@
   data and N5's program-graph indexer replaces it without touching the
   boot path. Three transactions, each DERIVED and none hand-written:
   the Datahike declarations of every registered database attribute, the
-  canonical schema rows themselves, and the core process entities the
-  provenance refs resolve to (genesis data — bootstrap content lives in
-  the ancestor)."
+  core process entities the provenance refs resolve to (genesis data —
+  bootstrap content lives in the ancestor), and the canonical schema rows
+  asserted with that process provenance."
   {:malli/schema
    [:=> [:cat [:map [:seon.store/branch-connection
                      :seon.store/branch-connection]]]
@@ -324,10 +324,13 @@
               {:tx-data (schema.datahike/malli->datahike-schema
                          (schema/canonical-database-attributes))})
   (d/transact connection
-              {:tx-data (schema/canonical-schema-rows (java.util.Date.))})
-  (d/transact connection
               {:tx-data [{:seon.db.process/id
                           config/managing-process-identity}]})
+  (d/transact connection
+              {:tx-data (schema/canonical-schema-rows (java.util.Date.))
+               :tx-meta
+               {:seon.db/process
+                [:seon.db.process/id config/managing-process-identity]}})
   nil)
 
 ;;; ---------------------------------------------------------------------------
