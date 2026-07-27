@@ -7,12 +7,13 @@
 ;; 2. Loads configuration from .claude/seon-hook.edn
 ;; 3. Validates prospective Clojure syntax before an edit
 ;; 4. Runs the canonical Markdown/docstring linters after an edit
-;; 5. Runs the live core-fault gate
+;; 5. Runs the bounded, rate-limited Gemini review and live core-fault gate
 ;;
 ;; It has no running Seon-process dependency. Pure linter namespaces load
 ;; directly into Babashka only for the file type that needs them.
 
 (require '[babashka.deps :as deps]
+         '[babashka.process :as process]
          '[cheshire.core :as json]
          '[clojure.edn :as edn]
          '[clojure.java.io :as io]
@@ -38,6 +39,12 @@
 (def config-path
   (or (System/getenv "SEON_HOOK_CONFIG")
       (str (root-file ".claude/seon-hook.edn"))))
+
+(def conventions-path (root-file "docs/conventions.md"))
+(def last-review-path (root-file "tmp/.last-review"))
+(def pending-review-path (root-file "tmp/.pending-review"))
+(def reviews-path (root-file "tmp/reviews"))
+(def max-pending-files 50)
 
 ;;; ---------------------------------------------------------------------------
 ;;; Logging
@@ -299,6 +306,274 @@
         (log! "DOCSTRING_LINT_ERROR" (.getMessage e))
         nil))))
 
+;;; ---------------------------------------------------------------------------
+;;; Rate-limited Gemini review
+;;; ---------------------------------------------------------------------------
+
+(defn- reviewable-file?
+  "True for source, configuration, and Markdown files worth an AI review."
+  [file-path]
+  (when file-path
+    (let [lower (str/lower-case file-path)]
+      (or (clojure-file? file-path)
+          (str/ends-with? lower ".md")))))
+
+(defn- review-rate-limited?
+  "True when the last Gemini review is newer than `interval-seconds`."
+  [interval-seconds]
+  (let [file (io/file last-review-path)]
+    (and (.exists file)
+         (try
+           (let [last-ms (Long/parseLong (str/trim (slurp file)))
+                 elapsed-ms (- (System/currentTimeMillis) last-ms)]
+             (< elapsed-ms (* 1000 interval-seconds)))
+           (catch Exception _ false)))))
+
+(defn- touch-last-review! []
+  (try
+    (io/make-parents last-review-path)
+    (spit last-review-path (str (System/currentTimeMillis)))
+    (catch Exception _ nil)))
+
+(defn- read-pending
+  "Pending absolute review paths in edit order, or an empty vector."
+  []
+  (try
+    (let [file (io/file pending-review-path)]
+      (if (.exists file)
+        (->> (str/split-lines (slurp file))
+             (map str/trim)
+             (remove str/blank?)
+             vec)
+        []))
+    (catch Exception _ [])))
+
+(defn- write-pending! [paths]
+  (try
+    (io/make-parents pending-review-path)
+    (spit pending-review-path
+          (str (str/join "\n" paths) (when (seq paths) "\n")))
+    (catch Exception _ nil)))
+
+(defn- accumulate-pending!
+  "Append a path with newest-kept deduplication and a fixed file cap."
+  [file-path]
+  (try
+    (when (seq file-path)
+      (let [current (vec (remove #(= % file-path) (read-pending)))
+            appended (conj current file-path)
+            dropped (max 0 (- (count appended) max-pending-files))
+            capped (vec (drop dropped appended))]
+        (when (pos? dropped)
+          (log! "REVIEW_PENDING_CAP" (str "dropped=" dropped)))
+        (write-pending! capped)))
+    (catch Exception error
+      (log! "REVIEW_PENDING_ERROR" (.getMessage error))
+      nil)))
+
+(defn- clear-reviewed-pending!
+  "Remove only reviewed paths, preserving edits appended during the call."
+  [reviewed-paths]
+  (try
+    (let [reviewed (set reviewed-paths)]
+      (write-pending! (remove reviewed (read-pending))))
+    (catch Exception _ nil)))
+
+(defn- load-conventions
+  "Load the conventions rubric with a safety length cap."
+  [max-length]
+  (let [file (io/file conventions-path)]
+    (when (.exists file)
+      (let [content (slurp file)]
+        (if (> (count content) max-length)
+          (str (subs content 0 max-length) "\n[truncated]")
+          content)))))
+
+(defn- file-language [file-path]
+  (if (str/ends-with? (str/lower-case file-path) ".md")
+    "markdown"
+    "clojure"))
+
+(defn- render-file-block
+  "Render one fenced review block, truncating its source when necessary."
+  [{:keys [path content]} max-code-length]
+  (let [code (if (> (count content) max-code-length)
+               (str (subs content 0 max-code-length) "\n[truncated]")
+               content)]
+    (str "=== EDITED FILE: " path " ===\n"
+         "```" (file-language path) "\n"
+         code
+         "\n```\n")))
+
+(defn- build-review-prompt
+  "Build one bounded batch prompt with the conventions rubric included once."
+  [files {:keys [max-code-length max-conventions-length]
+          :or {max-code-length 12000
+               max-conventions-length 60000}}]
+  (let [conventions (load-conventions max-conventions-length)
+        files (vec files)
+        {:keys [kept]}
+        (reduce
+         (fn [{:keys [kept total]} file]
+           (let [block-length
+                 (count (render-file-block file max-code-length))]
+             (if (or (empty? kept)
+                     (<= (+ total block-length) max-code-length))
+               {:kept (conj kept file)
+                :total (+ total block-length)}
+               (reduced {:kept kept :total total}))))
+         {:kept [] :total 0}
+         (reverse files))
+        dropped (- (count files) (count kept))
+        ordered (reverse kept)]
+    (when (pos? dropped)
+      (log! "REVIEW_BATCH_TRUNCATED" (str "dropped-oldest=" dropped)))
+    (str
+     "You are a code reviewer for the Seon project. Review the edited "
+     "file(s) below. Find REAL DEFECTS first: correctness bugs, concurrency "
+     "hazards, and silent failure paths. Then check project-convention "
+     "conformance using the rubric below. Be terse and high-signal; report "
+     "only actionable issues, not style preferences. Review each file "
+     "separately and name it. If a file is fine, say so in one line.\n\n"
+     (when conventions
+       (str "=== PROJECT CONVENTIONS (rubric) ===\n"
+            conventions
+            "\n\n"))
+     (str/join
+      "\n"
+      (map #(render-file-block % max-code-length) ordered)))))
+
+(defn- call-agy
+  "Call `agy` with the prompt on stdin, bounded by `timeout-ms`."
+  [prompt timeout-ms]
+  (try
+    (let [child (process/process ["agy" "-p" ""]
+                                 {:in prompt :out :string :err :string})
+          finished (deref child timeout-ms ::timeout)]
+      (if (= finished ::timeout)
+        (do
+          (process/destroy-tree child)
+          (log! "REVIEW_TIMEOUT" (str timeout-ms "ms"))
+          nil)
+        (let [{:keys [exit out]} finished
+              review (str/trim (or out ""))]
+          (if (and (zero? exit) (seq review))
+            review
+            (do
+              (log! "REVIEW_AGY_FAIL" (str "exit=" exit))
+              nil)))))
+    (catch java.io.IOException _
+      (log! "REVIEW_AGY_UNAVAILABLE")
+      nil)
+    (catch Exception error
+      (log! "REVIEW_AGY_EXCEPTION" (.getMessage error))
+      nil)))
+
+(defn- utc-review-path []
+  (let [formatter
+        (java.time.format.DateTimeFormatter/ofPattern
+         "yyyyMMdd'T'HHmmss.SSS'Z'")]
+    (io/file
+     reviews-path
+     (str (.format formatter
+                   (.atZone (java.time.Instant/now)
+                            java.time.ZoneOffset/UTC))
+          ".md"))))
+
+(defn- write-full-review!
+  "Write the complete Gemini response to a UTC-named Markdown file."
+  [review]
+  (try
+    (when-not (.exists reviews-path)
+      (.mkdirs reviews-path))
+    (let [path (utc-review-path)]
+      (spit path (str review "\n"))
+      (.getPath path))
+    (catch Exception error
+      (log! "REVIEW_WRITE_ERROR" (.getMessage error))
+      nil)))
+
+(defn- clip-review-feedback
+  "Conservatively cap review feedback below the configured token budget.
+
+   One retained character per configured token is deliberately stricter than
+   Seon's token estimator. The full response is preserved in `tmp/reviews/`."
+  [config message]
+  (let [limit (max 0 (get-in config [:feedback :max-tokens] 300))
+        marker "\n[truncated]"]
+    (if (<= (count message) limit)
+      message
+      (if (<= limit (count marker))
+        (subs message 0 limit)
+        (str (subs message 0 (- limit (count marker))) marker)))))
+
+(defn- gemini-review-feedback
+  "Accumulate reviewable edits and synchronously review one due batch."
+  [event config]
+  (try
+    (let [review-config (:review config)
+          review-paths
+          (->> (event-file-paths event)
+               (map absolute-file-path)
+               (filter reviewable-file?)
+               vec)]
+      (when (and (= (:hook_event_name event) "PostToolUse")
+                 (get review-config :enabled false)
+                 (seq review-paths))
+        (doseq [path review-paths]
+          (accumulate-pending! path))
+        (let [interval-seconds
+              (get review-config :interval-seconds 120)]
+          (if (review-rate-limited? interval-seconds)
+            (do
+              (log! "REVIEW_RATE_LIMITED"
+                    (str "interval=" interval-seconds "s")
+                    (str "pending=" (count (read-pending))))
+              nil)
+            (let [pending (read-pending)
+                  files
+                  (->> pending
+                       (keep
+                        (fn [path]
+                          (when-let [content
+                                     (try
+                                       (slurp path)
+                                       (catch Exception _ nil))]
+                            (when (seq content)
+                              {:path path :content content}))))
+                       vec)]
+              (when (seq files)
+                (let [prompt
+                      (build-review-prompt
+                       files
+                       {:max-code-length
+                        (get review-config :max-code-length 12000)})
+                      _ (log! "REVIEW_BATCH"
+                              (str "count=" (count files))
+                              (str "files="
+                                   (str/join
+                                    ","
+                                    (map #(-> % :path io/file .getName)
+                                         files))))
+                      review (call-agy prompt 60000)]
+                  (touch-last-review!)
+                  (when (seq review)
+                    (let [artifact (write-full-review! review)
+                          names (str/join
+                                 ", "
+                                 (map #(-> % :path io/file .getName) files))]
+                      (when artifact
+                        (clear-reviewed-pending! pending))
+                      (clip-review-feedback
+                       config
+                       (str "Gemini review (" names ")"
+                            (when artifact (str " — " artifact))
+                            ":\n"
+                            review)))))))))))
+    (catch Exception error
+      (log! "REVIEW_ERROR" (.getMessage error))
+      nil)))
+
 (def ^:private changed-test-build-inputs
   #{"deps.edn" "shadow-cljs.edn" "package.json" "bun.lock" "bb.edn"})
 
@@ -487,7 +762,8 @@
                                 (docstring-feedback path-event config)])
                              path-events)
                   feedback (conj (vec feedback)
-                                 (changed-test-feedback event config))
+                                 (changed-test-feedback event config)
+                                 (gemini-review-feedback event config))
                   clojure-event (some #(when (clojure-file? (get-file-path %)) %)
                                       path-events)
                   gate (when clojure-event (core-fault-gate! clojure-event))]
