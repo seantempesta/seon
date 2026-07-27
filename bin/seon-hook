@@ -724,10 +724,10 @@
              "queued because these resulting Clojure files do not parse:\n"
              (str/join "\n" (map #(str "- " %) invalid-source-paths)))
         (try
-          (load-direct-check! 'seon.dev.changed-test)
-          (load-direct-check! 'seon.dev.config)
+          (require 'seon.dev.changed-test)
           (let [configuration
-                ((requiring-resolve 'seon.dev.config/load!) repo-root)
+                ((requiring-resolve 'seon.dev.changed-test/configuration)
+                 repo-root)
                 request
                 ((requiring-resolve 'seon.dev.changed-test/enqueue-hook!)
                  configuration paths)
@@ -739,7 +739,7 @@
                      " coalesced path(s). The result will be published to "
                      (root-file "tmp/test-changed/latest.report.edn")
                      "; that path is mutable and may later describe another generation.")]
-            (clip-feedback config message))
+            message)
           (catch Exception error
             (str "ADVISORY — changed-test feedback could not run: "
                  (.getMessage error))))))))

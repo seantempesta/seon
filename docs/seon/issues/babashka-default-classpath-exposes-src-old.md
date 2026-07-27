@@ -83,3 +83,20 @@ There is also a separate proof seam: the no-selector operator runner discovers
 `test/seon/dev` and reports zero tests after operator tests moved to
 `test-old/`. That split work is already specified in
 `docs/prds/sci-execution-runtime/research/src-split-audit-2026-07-26.md`.
+
+## Changed-test isolation 2026-07-27
+
+The edit hook exposed both sides of the ambient-classpath defect:
+
+- with the fresh dependency graph dynamically added to Babashka, loading the
+  retired operator configuration reached Datahike JVM source and failed on
+  `clojure.lang.Util/hashCombine`; and
+- with only maintained `script/` plus fresh `src/`, the same configuration
+  load failed at its quarry-only `seon.config.resolve` require.
+
+The changed-test owner needed only the checkout root and its own process
+directory. It now derives those values inside `seon.dev.changed-test`, and
+`bin/seon-hook` no longer loads `seon.dev.config` or the project dependency
+graph to enqueue fresh JVM tests. This closes the edit-hook instance while the
+issue remains open for plain Babashka and the explicitly old `bin/seon`
+launcher.

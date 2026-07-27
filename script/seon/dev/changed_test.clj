@@ -17,8 +17,16 @@
 
 (declare normalize-paths)
 
+(defn configuration
+  "Derive the changed-test filesystem configuration from one checkout root."
+  [root]
+  (let [root (str (fs/normalize (fs/absolutize root)))]
+    {:seon.dev.config/root root
+     :seon.dev.config/process-dir
+     (str (fs/path root "tmp/test-changed"))}))
+
 (defn- hook-directory [configuration]
-  (fs/path (:seon.dev.config/process-dir configuration) "changed-test-hook"))
+  (fs/path (:seon.dev.config/process-dir configuration) "hook"))
 
 (defn- hook-state-path [configuration name]
   (fs/path (hook-directory configuration) (str name ".edn")))
@@ -631,8 +639,7 @@
   (when-not (= ["hook-worker" "--root"] (vec (take 2 arguments)))
     (throw (ex-info "Choose `hook-worker --root ROOT`."
                     {:seon.dev.changed-test/arguments (vec arguments)})))
-  (let [load-configuration (requiring-resolve 'seon.dev.config/load!)]
-    (run-hook-worker! (load-configuration (nth arguments 2)))))
+  (run-hook-worker! (configuration (nth arguments 2))))
 
 (defn format-result
   "Format one bounded advisory result for a human or edit hook."
