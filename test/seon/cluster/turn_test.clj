@@ -16,6 +16,8 @@
             [seon.cluster.loop :as cluster.loop]
             [seon.cluster.run :as run]
             [seon.cluster.work :as work]
+            [sci.core :as sci.core]
+            [seon.sci.eval :as sci.eval]
             [seon.schema]
             [seon.schema.datahike :as schema.datahike])
   (:import [java.util Date]))
@@ -46,7 +48,32 @@
    :seon.cluster.eval/result-edn "1"
    :seon.sci.admit/value 1})
 
-(defn fake-evaluate [_request] *evaluation*)
+(defn fake-evaluate
+  "The stand-in evaluator, for the cases that pin an exact value."
+  [_request]
+  *evaluation*)
+
+;;; THE REAL EVALUATOR, injected through the same seam. The one thing it
+;;; adds is the deadline: `turn` passes source + caps only, so the time
+;;; limit — the ONE limit — has nowhere to come from at that call site.
+;;; That is a seam defect in the loop's call, reported rather than
+;;; papered over; this adapter supplies it so the injection can be
+;;; proven against a real sci evaluation today.
+;;; ONE ctx per drive, standing in for one ctx per RUN: sci's fork
+;;; copies the env, so a fork per form would lose every def between
+;;; forms. The loop must eventually hold this per run.
+(def ^:dynamic *ctx* nil)
+
+(defn real-evaluate
+  [request]
+  (sci.eval/evaluate (assoc request
+                            :seon.sci.eval/time-limit-ms 2000
+                            :seon.sci.eval/ctx *ctx*)))
+
+(defn quick-evaluate
+  "The real evaluator on a short leash, for the runaway case."
+  [request]
+  (sci.eval/evaluate (assoc request :seon.sci.eval/time-limit-ms 300)))
 
 (defn- with-cluster [body]
   (let [configuration {:store {:backend :memory :id (random-uuid)}
@@ -96,6 +123,74 @@
                        (cluster.loop/turn
                         {:seon.cluster.loop/cluster cluster
                          :seon.cluster.work/next work}))))))))
+
+(deftest a-whole-turn-runs-a-REAL-sci-evaluation-end-to-end
+  ;; the injection seam, proven: the same qualified symbol the cluster
+  ;; handle carries now points at seon.sci.eval, so this drives a real
+  ;; armed boundary, a real fork, and real admission — with no model
+  ;; call, because the reply is the only thing stubbed.
+  (with-cluster
+    (fn [cluster]
+      (binding [*ctx* (sci.core/fork (sci.eval/base))]
+       (let [cluster (assoc cluster :seon.cluster.loop/evaluate
+                            'seon.cluster.turn-test/real-evaluate)
+            connection (:seon.store/branch-connection cluster)]
+        (with-redefs [ai/complete
+                      (fn [_] {:seon.ai/text
+                               (str "(def widgets (map inc (range 3)))\n"
+                                    "widgets\n"
+                                    "(my.run/complete (str \"counted \" "
+                                    "(reduce + widgets)))")})]
+          (let [reports (drive! cluster 10)]
+            (is (= [:open :call :resume :resume :resume]
+                   (take 5 (mapv :seon.cluster.work/situation reports)))
+                "open, model, then one pass per form")
+            (testing "the receipts carry what sci actually produced"
+              (let [results (into {}
+                                  (d/q '[:find ?ordinal ?edn
+                                         :where
+                                         [?e :seon.cluster.eval/ordinal ?ordinal]
+                                         [?e :seon.cluster.eval/result-edn ?edn]]
+                                       @connection))]
+                (is (= "#:seon.sci.admit{:reference \"sci.lang.Var\", :name \"#'user/widgets\"}"
+                       (get results 0))
+                    "a def evaluates to a VAR, and admission names it
+                     without dereferencing it")
+                (is (= "[1 2 3]" (get results 1))
+                    "form 1 SAW form 0's def — one ctx per run, not per
+                     form — and its lazy sequence came back REALIZED")
+                (is (= (pr-str (my.run/complete "counted 6"))
+                       (get results 2))
+                    "and the disposition round-tripped through admission")))
+            (testing "every receipt is done — no interrupt, no error"
+              (is (= #{:done}
+                     (set (d/q '[:find [?status ...] :where
+                                 [_ :seon.cluster.eval/status ?status]]
+                               @connection)))))
+            (is (some? (d/q '[:find ?c . :where
+                              [_ :seon.cluster.run/closed-at ?c]] @connection))
+                "and the run closed"))))))))
+
+(deftest a-real-evaluation-that-runs-away-is-stopped-and-recorded
+  ;; the loop's honest failure path, end to end: an agent writes an
+  ;; infinite loop, the boundary stops it, and the receipt says so
+  (with-cluster
+    (fn [cluster]
+      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
+                           'seon.cluster.turn-test/quick-evaluate)
+            connection (:seon.store/branch-connection cluster)]
+        (with-redefs [ai/complete
+                      (fn [_] {:seon.ai/text "(loop [] (recur))"})]
+          (drive! cluster 6)
+          (is (= [:interrupted]
+                 (d/q '[:find [?status ...] :where
+                        [_ :seon.cluster.eval/status ?status]]
+                      @connection))
+              "the receipt records the time limit, and the fold moved on")
+          (is (re-find #"(?i)time"
+                       (d/q '[:find ?error . :where
+                              [_ :seon.cluster.eval/error ?error]]
+                            @connection))))))))
 
 (deftest a-whole-turn-runs-from-trigger-to-closed-run
   (with-cluster
