@@ -90,7 +90,21 @@ n3-plan (parser shed to sci reader, no lease clock, 4-line wake), n4-plan
 measured), test-selection-spec. ALL RULINGS in README ('Rulings
 2026-07-27' ×3 batches — read every one before sealing).
 
-NEXT, in order: **B2 contract sealing by the orchestrator** — config→
+**Quality-review-2 (`4bc02d33e`) triage — folds into the B2 wave:**
+five reproduced blockers. Dissolve by design: lease expiry games (N3
+deletes lease clocks entirely) and terminal-receipt reversion (receipt
+writes become fenced transitions in the N3 contract). Fix in the wave:
+failed d/release drops the flock while the connection lives
+(store.clj:299 — keep the fence on failure, loudly), name-addressed
+stop! kills replacement instances (cluster.clj:336 — stops become
+instance-addressed), close tolerates a broken agent pointer silently
+(run.cljc:419 — refuse, never omit). Plus the standing Gemini backlog
+race and the issue-index lifecycle cleanup.
+
+NEXT, in order: **B2 contract sealing by the orchestrator** (ONE
+author pass: branch-per-cluster contracts + B0/B1/N2 revisions =
+verdict changes + the three review fixes + lease deletion + receipt
+fencing) — config→
 facts (pure plan before transact; empty plan = NO transaction; :max-tx
 unchanged = converged), schema-EDN loader + one admission gate,
 branch-per-cluster (open-branch!, ancestor genesis, the ~15-line fork
