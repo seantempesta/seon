@@ -43,7 +43,12 @@
   resources and in-memory populations — no durable state, nothing to
   recover. Committing admitted schema FACTS to a store is the
   ancestor build's job, not this namespace's."
-  (:require [seon.schema :as schema]))
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
+            [clojure.string :as str]
+            [seon.schema :as schema])
+  (:import [java.net JarURLConnection URL]
+           [java.util.jar JarFile]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas
@@ -69,6 +74,102 @@
 ;;; Contracts
 ;;; ---------------------------------------------------------------------------
 
+(defonce ^:private !source-files (atom {}))
+
+(defn- resource-files
+  [resource-dir]
+  (let [loader (clojure.lang.RT/baseLoader)]
+    (into []
+          (mapcat
+           (fn [^URL directory-url]
+             (case (.getProtocol directory-url)
+               "file"
+               (let [directory (io/file (.toURI directory-url))]
+                 (->> (or (.listFiles directory) (make-array java.io.File 0))
+                      (filter #(.isFile ^java.io.File %))
+                      (filter #(str/ends-with? (.getName ^java.io.File %) ".edn"))
+                      (sort-by #(.getName ^java.io.File %))
+                      (map (fn [file]
+                             {:seon.schema.edn/file
+                              (.toExternalForm (.toURL (.toURI ^java.io.File file)))
+                              :seon.schema.edn/url (.toURL (.toURI ^java.io.File file))}))))
+
+               "jar"
+               (let [^JarURLConnection connection
+                     (.openConnection directory-url)
+                     ^JarFile jar (.getJarFile connection)
+                     prefix (str (str/replace resource-dir #"/+$" "") "/")]
+                 (->> (enumeration-seq (.entries jar))
+                      (map #(.getName ^java.util.jar.JarEntry %))
+                      (filter #(and (str/starts-with? % prefix)
+                                    (str/ends-with? % ".edn")
+                                    (not (str/includes?
+                                          (subs % (count prefix)) "/"))))
+                      sort
+                      (map (fn [entry]
+                             (let [url (URL. (str "jar:"
+                                                   (.toExternalForm
+                                                    (.getJarFileURL connection))
+                                                   "!/" entry))]
+                               {:seon.schema.edn/file (.toExternalForm url)
+                                :seon.schema.edn/url url})))))
+
+               (throw
+                (ex-info
+                 "Schema resource directory uses an unsupported URL protocol."
+                 {:seon.schema.edn/resource-dir resource-dir
+                  :seon.schema.edn/file (.toExternalForm directory-url)
+                  :seon.error/kind :core-bug})))))
+          (enumeration-seq (.getResources loader resource-dir)))))
+
+(defn- read-schema-file
+  [{::keys [file url]}]
+  (let [value
+        (try
+          (with-open [reader (java.io.PushbackReader. (io/reader url))]
+            (edn/read {:eof ::eof} reader))
+          (catch Exception e
+            (throw
+             (ex-info
+              (str "Schema EDN file is unreadable: " file)
+              {::error ::unreadable-file
+               ::file file
+               :seon.error/kind :user-input}
+              e))))]
+    (when-not (map? value)
+      (throw
+       (ex-info
+        (str "Schema EDN file must contain one map: " file)
+        {::error ::not-a-map
+         ::file file
+         :seon.error/kind :user-input})))
+    value))
+
+(defn- merge-schema-files
+  [resources]
+  (reduce
+   (fn [{::keys [forms files-by-key] :as population} resource]
+     (let [file (::file resource)
+           file-forms (read-schema-file resource)]
+       (reduce-kv
+        (fn [result attribute definition]
+          (if-let [prior-file (get (::files-by-key result) attribute)]
+            (throw
+             (ex-info
+              (str "Schema attribute " attribute
+                   " is declared by two classpath resources.")
+              {::error ::duplicate-attribute
+               ::attribute attribute
+               ::files [prior-file file]
+               :seon.error/kind :user-input}))
+            (-> result
+                (assoc-in [::forms attribute] definition)
+                (assoc-in [::files-by-key attribute] file))))
+        population
+        file-forms)))
+   {::forms {} ::files-by-key {}}
+   resources))
+
 (defn load!
   "Merge every `<resource-dir>/*.edn` on the classpath into candidates.
   Default resource-dir is \"seon/schema\". Each
@@ -80,8 +181,71 @@
   admits the whole population through `admit`. Returns what was
   loaded."
   {:malli/schema [:=> [:cat ::load-request] ::loaded]}
-  [request]
-  (throw (ex-info "awaits implementation" {::fn `load!})))
+  [{::keys [resource-dir]}]
+  (let [resource-dir (or resource-dir "seon/schema")
+        resources (resource-files resource-dir)
+        {::keys [forms files-by-key]} (merge-schema-files resources)]
+    (schema/contribute-candidate-forms! forms)
+    (swap! !source-files merge files-by-key)
+    {::files (mapv ::file resources)
+     ::keys (count forms)}))
+
+(defn- predicate-declarations
+  [value path]
+  (cond
+    (and (vector? value) (= :fn (first value)))
+    (let [properties (when (map? (second value)) (second value))
+          predicate (get value (if properties 2 1))]
+      [{::path path
+        ::predicate predicate
+        ::honest-generator?
+        (boolean
+         (and properties
+              (or (contains? properties :gen/schema)
+                  (contains? properties :gen/gen))))}])
+
+    (map? value)
+    (into []
+          (mapcat (fn [[k v]]
+                    (into (predicate-declarations k (conj path :key))
+                          (predicate-declarations v (conj path k)))))
+          value)
+
+    (coll? value)
+    (into []
+          (mapcat (fn [[index child]]
+                    (predicate-declarations child (conj path index))))
+          (map-indexed vector value))
+
+    :else []))
+
+(defn- refusal!
+  [error identity declaration extra]
+  (let [file (get @!source-files identity)]
+    (throw
+     (ex-info
+      (str "Schema population refused " identity " (" (name error) ").")
+      (cond->
+       (merge
+        {::error error
+         ::attribute identity
+         :seon.schema/definition declaration
+         :seon.error/kind :user-input}
+        extra)
+        file (assoc ::file file))))))
+
+(defn- assert-predicates!
+  [forms]
+  (doseq [[identity definition] (sort-by key forms)
+          {::keys [predicate honest-generator? path]}
+          (predicate-declarations definition [])]
+    (when-not honest-generator?
+      (refusal! ::dishonest-generator identity definition
+                {::predicate predicate ::path path}))
+    (when-not (and (qualified-symbol? predicate)
+                   (schema/core-predicate-registered? predicate))
+      (refusal! ::unregistered-predicate identity definition
+                {::predicate predicate ::path path}))))
 
 (defn admit
   "THE one admission gate over a complete candidate population.
@@ -96,5 +260,35 @@
   `:gen/schema` nor `:gen/gen`)."
   {:malli/schema [:=> [:cat [:map [:seon.schema/forms :map]]]
                   [:vector :map]]}
-  [request]
-  (throw (ex-info "awaits implementation" {::fn `admit})))
+  [{:seon.schema/keys [forms identity admission]}]
+  (assert-predicates! forms)
+  (try
+    (if identity
+      ;; Runtime registration admits the new declaration against the complete
+      ;; candidate registry. Unrelated bootstrap declarations may still await
+      ;; their owning namespace during module loading, so they are not
+      ;; recompiled merely because this producer added one independent key.
+      (schema/assert-complete-contract!
+       {:seon.schema/identity identity
+        :seon.schema/definition (get forms identity)
+        :seon.schema/forms forms
+        :seon.schema/admission
+        (or admission {:seon.schema.admission/source :agent})})
+      ;; Activation has no distinguished producer: every declaration must
+      ;; compile and resolve in the complete population before publication.
+      (schema/build-projection forms))
+    (catch Exception e
+      (let [data (ex-data e)
+            offending (or (:seon.schema/identity data)
+                          (:seon.schema/key data)
+                          identity)
+            definition (get forms offending)]
+        (if (or (:seon.schema/missing-reference data)
+                (= :malli.core/invalid-schema (:type data)))
+          (refusal! ::unresolved-reference offending definition
+                    {::cause data})
+          (throw e)))))
+  (mapv (fn [[identity definition]]
+          {:seon.schema/key identity
+           :seon.schema/definition definition})
+        (sort-by key forms)))

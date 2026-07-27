@@ -55,17 +55,15 @@
             [datahike.store :as datahike.store]
             [konserve.core :as k]
             [konserve.filestore :as filestore]
-            [seon.schema :as schema])
+            [clojure.test.check.generators :as gen]
+            [seon.schema :as schema]
+            [seon.schema.edn :as schema.edn])
   (:import [java.nio.channels FileChannel FileLock OverlappingFileLockException]
            [java.nio.file OpenOption StandardOpenOption]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas
 ;;; ---------------------------------------------------------------------------
-
-(schema/register! :seon.store/dir [:string {:min 1}])
-; the lock file BESIDE the store directory — derived, never configured
-(schema/register! :seon.store/lock-file [:string {:min 1}])
 
 (defn connection?
   "True for a live (unreleased) Datahike connection.
@@ -88,22 +86,28 @@
 (schema/register-core-predicate! 'seon.cluster.store/file-lock?
                                  file-lock?)
 
-; a cluster branch name in the one store's roster
-(schema/register! :seon.store/branch :keyword)
+(defonce ^:private generator-resources
+  (delay
+    (let [configuration {:store {:backend :memory :id (random-uuid)}
+                         :schema-flexibility :write}
+          _ (d/create-database configuration)
+          connection (d/connect configuration)
+          lock-file (io/file "tmp/schema-generator/file-lock")
+          _ (.mkdirs (.getParentFile lock-file))
+          channel (FileChannel/open
+                   (.toPath lock-file)
+                   (into-array
+                    OpenOption
+                    [StandardOpenOption/CREATE StandardOpenOption/WRITE]))
+          lock (.tryLock channel)]
+      {:connection connection :channel channel :lock lock})))
 
-(schema/register!
- :seon.store/branch-connection
- [:fn 'seon.cluster.store/connection?])
+(def connection-generator
+  (gen/fmap (fn [_] (:connection @generator-resources)) (gen/return nil)))
+(def file-lock-generator
+  (gen/fmap (fn [_] (:lock @generator-resources)) (gen/return nil)))
 
-(schema/register!
- :seon.store/store
- [:map {:closed true}
-  [:seon.store/dir :seon.store/dir]
-  [:seon.store/lock-file :seon.store/lock-file]
-  [:seon.store/connection [:fn 'seon.cluster.store/connection?]]
-  [:seon.store/lock [:fn 'seon.cluster.store/file-lock?]]
-  ; true when open-store! created (or recreated) the store this call
-  [:seon.store/created? :boolean]])
+(schema.edn/load! {})
 
 ;;; ---------------------------------------------------------------------------
 ;;; Pure derivations

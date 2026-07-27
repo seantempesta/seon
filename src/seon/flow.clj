@@ -12,8 +12,10 @@
             [clojure.core.async.flow.spi :as flow.spi]
             [clojure.core.async.impl.protocols :as async.impl]
             [clojure.datafy :as datafy]
+            [clojure.test.check.generators :as gen]
             [clojure.walk :as walk]
-            [seon.schema :as schema])
+            [seon.schema :as schema]
+            [seon.schema.edn :as schema.edn])
   (:import [clojure.lang Counted]
            [java.util LinkedList]
            [java.util.concurrent Executor ExecutorService Executors Future
@@ -52,150 +54,32 @@
 (schema/register-core-predicate! 'seon.flow/graph? graph?)
 (schema/register-core-predicate! 'seon.flow/channel? channel?)
 
-(schema/register! ::parallelism [:int {:min 1}])
-(schema/register! ::executor [:fn 'seon.flow/executor?])
-(schema/register! ::active-evals [:fn 'seon.flow/atom-reference?])
-(schema/register! ::active-work [:fn 'seon.flow/atom-reference?])
-(schema/register! ::future [:fn 'seon.flow/java-future?])
-(schema/register! ::workload [:enum :compute])
-(schema/register! ::submission-id [:or :uuid :keyword :string])
-(schema/register! ::work-fn 'fn?)
-(schema/register! ::compute-timeout-ms [:int {:min 1}])
-(schema/register! ::deliver! 'fn?)
-(schema/register! ::read-facts 'fn?)
-(schema/register! ::step-fn 'fn?)
-(schema/register! ::stopped! 'fn?)
-(schema/register! ::commit-fault! 'fn?)
-(schema/register! ::commit-drop! 'fn?)
-(schema/register! ::read-core-error-mode 'fn?)
-(schema/register! ::panic! 'fn?)
-(schema/register! ::launcher [:fn 'seon.flow/proc-launcher?])
-(schema/register! ::graph [:fn 'seon.flow/graph?])
-(schema/register! ::channel [:fn 'seon.flow/channel?])
-(schema/register! ::buffer-capacity [:int {:min 1}])
-(schema/register!
- ::launcher-configuration
- [:map {:closed true}
-  [:seon.config.flow.compute/queue-depth
-   :seon.config.flow.compute/queue-depth]
-  [:seon.config.flow.compute/concurrency
-   :seon.config.flow.compute/concurrency]])
-(schema/register!
- ::work-launcher-request
- [:map {:closed true}
-  [::configuration ::launcher-configuration]])
-(schema/register!
- ::work-submission
- [:map {:closed true}
-  [::submission-id ::submission-id]
-  [::workload ::workload]
-  [::work-fn ::work-fn]
-  [::time-limit-ms ::compute-timeout-ms]])
-(schema/register! ::seed :int)
-(schema/register! ::owner-ordinal [:int {:min 0}])
-(schema/register! ::attempt [:int {:min 0}])
-(schema/register!
- ::fix-outcome
- [:enum ::fix-succeeds ::fix-fails ::fix-breaks-other-namespace
-  ::no-response])
-(schema/register! ::plan-step-fn 'fn?)
-(schema/register! ::fix-step-fn 'fn?)
-(schema/register! ::read-sources 'fn?)
-(schema/register! ::compile-namespace-fn 'fn?)
-(schema/register! ::sources [:map-of :symbol :string])
-(schema/register! ::changed-namespace :symbol)
-(schema/register! ::changed-source :string)
-(schema/register! ::owner-count [:int {:min 1}])
-(schema/register! ::successful-owners [:set :keyword])
-(schema/register! ::escalated? :boolean)
-(schema/register! ::admitted? :boolean)
-(schema/register! ::lineage-status [:enum ::iterating ::escalated ::done])
-(schema/register! ::turn-count [:int {:min 0}])
-(schema/register! ::failure-count [:int {:min 0}])
-(schema/register! ::max-turns [:int {:min 1}])
-(schema/register! ::max-failures [:int {:min 1}])
-(schema/register!
- ::eval-proc-request
- [:map
-  [::parallelism ::parallelism]
-  [::active-evals ::active-evals]
-  [::compute-timeout-ms ::compute-timeout-ms]])
-(schema/register!
- ::capacity-observer-request
- [:map
-  [::parallelism ::parallelism]
-  [::active-work ::active-work]])
-(schema/register! ::mailbox-request [:map [::deliver! ::deliver!]])
-(schema/register!
- ::database-proc-request
- [:map
-  [::read-facts ::read-facts]
-  [::step-fn ::step-fn]
-  [::stopped! ::stopped!]])
-(schema/register!
- ::fault-committer-proc-request
- [:map
-  [::fault-channel ::channel]
-  [::read-core-error-mode ::read-core-error-mode]
-  [::commit-fault! ::commit-fault!]
-  [::panic! ::panic!]])
-(schema/register!
- ::error-fanout-request
- [:map
-  [::graph ::graph]
-  [::started
-   [:map
-    [:report-chan ::channel]
-    [:error-chan ::channel]]]
-  [::fault-buffer-capacity ::buffer-capacity]
-  [::monitor-buffer-capacity ::buffer-capacity]
-  [::read-core-error-mode ::read-core-error-mode]
-  [::commit-fault! ::commit-fault!]
-  [::commit-drop! ::commit-drop!]
-  [::panic! ::panic!]])
-(schema/register!
- ::error-fanout
- [:map
-  [::graph ::graph]
-  [::fault-graph ::graph]
-  [::application-report-channel ::channel]
-  [::monitor-report-channel ::channel]
-  [::monitor-error-channel ::channel]
-  [::fault-channel ::channel]])
-(schema/register!
- ::seeded-outcome-request
- [:map
-  [::seed ::seed]
-  [::owner-ordinal ::owner-ordinal]
-  [::attempt ::attempt]])
-(schema/register!
- ::lineage-status-request
- [:map
-  [::owner-count ::owner-count]
-  [::successful-owners ::successful-owners]
-  [::escalated? ::escalated?]
-  [::admitted? ::admitted?]])
-(schema/register!
- ::escalation-request
- [:map
-  [::turn-count ::turn-count]
-  [::failure-count ::failure-count]
-  [::max-turns ::max-turns]
-  [::max-failures ::max-failures]])
-(schema/register!
- ::planner-proc-request
- [:map [::plan-step-fn ::plan-step-fn]])
-(schema/register!
- ::namespace-owner-proc-request
- [:map [::fix-step-fn ::fix-step-fn]])
-(schema/register!
- ::source-enumerator-proc-request
- [:map [::read-sources ::read-sources]])
-(schema/register!
- ::indexer-proc-request
- [:map
-  [::compile-namespace-fn ::compile-namespace-fn]
-  [::compute-timeout-ms ::compute-timeout-ms]])
+(defonce ^:private generator-values
+  (delay
+    {:executor (Executors/newSingleThreadExecutor)
+     :atom-reference (atom {})
+     :future (java.util.concurrent.FutureTask. (fn [] nil))
+     :proc-launcher
+     (reify flow.spi/ProcLauncher
+       (describe [_] {:params {} :ins {} :outs {}})
+       (start [_ _] nil))
+     :graph (flow/create-flow {:procs {} :conns []})
+     :channel (async/chan)}))
+
+(def executor-generator
+  (gen/fmap (fn [_] (:executor @generator-values)) (gen/return nil)))
+(def atom-reference-generator
+  (gen/fmap (fn [_] (:atom-reference @generator-values)) (gen/return nil)))
+(def java-future-generator
+  (gen/fmap (fn [_] (:future @generator-values)) (gen/return nil)))
+(def proc-launcher-generator
+  (gen/fmap (fn [_] (:proc-launcher @generator-values)) (gen/return nil)))
+(def graph-generator
+  (gen/fmap (fn [_] (:graph @generator-values)) (gen/return nil)))
+(def channel-generator
+  (gen/fmap (fn [_] (:channel @generator-values)) (gen/return nil)))
+
+(schema.edn/load! {})
 
 (defn bounded-platform-executor
   "Create a bounded executor whose workers are platform threads."
@@ -404,20 +288,6 @@
 
                  :else
                  nil)))))))))
-
-;;; The launcher's own config dials — schemas colocated with their owner.
-
-(schema/register! :seon.config.flow.compute/queue-depth
-  [:int
-   {:min 1
-    :description
-    "Queued compute submissions. Default 10 preserves core.async.flow's fixed per-channel default at alpha3; a full channel parks the submitter and loses no work."}])
-
-(schema/register! :seon.config.flow.compute/concurrency
-  [:int
-   {:min 1
-    :description
-    "Concurrent compute submissions. Default equals the acquired :seon.hardware/cores fact, preserving the measured pre-Flow availableProcessors bound without a runtime fallback."}])
 
 (def flow-workload-attributes
   "Flat config-singleton attributes consumed by the work launcher."

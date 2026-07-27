@@ -47,7 +47,8 @@
   known unowned issue), and a receipt written `:running` before its
   eval settles (recovery marks it `:interrupted`)."
   (:require [datahike.api :as d]
-            [seon.schema :as schema]))
+            [seon.schema :as schema]
+            [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The agent pointer — owned HERE. Port manifest: old `:seon.agent/*`
@@ -56,65 +57,7 @@
 ;;; the current-run pointer opens race on.
 ;;; ---------------------------------------------------------------------------
 
-(schema/register! :seon.cluster.agent/id
-                  [:string {:min 1 :seon.db/identity true}])
-(schema/register! :seon.cluster.agent/run :seon.db/ref)
-
-;;; ---------------------------------------------------------------------------
-;;; The run entity
-;;; ---------------------------------------------------------------------------
-
-(schema/register! ::id [:string {:min 1 :seon.db/identity true}])
-(schema/register! ::agent :seon.db/ref)
-(schema/register! ::opened-at :inst)
-(schema/register! ::closed-at :inst)
-; the claiming process's identity — (pid, start-instant) projected to one
-; string by the process owner; the run model treats it as opaque
-(schema/register! ::process [:string {:min 1}])
-(schema/register! ::claim-epoch [:int {:min 1}])
-(schema/register! ::lease-until :inst)
-; frozen reply plan identity; asserted once — concurrent replies are
-; mutually exclusive by construction
-(schema/register! ::plan-digest [:string {:min 1}])
-
-(schema/register!
- ::run
- [:map {:seon.db/entity true}
-  [::id ::id]
-  [::agent ::agent]
-  [::opened-at ::opened-at]
-  [::closed-at {:optional true} ::closed-at]
-  [::process {:optional true} ::process]
-  [::claim-epoch {:optional true} ::claim-epoch]
-  [::lease-until {:optional true} ::lease-until]
-  [::plan-digest {:optional true} ::plan-digest]])
-
-;;; The plan's forms — one entity per ordered form, owned by the run.
-
-(schema/register! :seon.cluster.run.form/id
-                  [:string {:min 1 :seon.db/identity true}])
-(schema/register! :seon.cluster.run.form/run :seon.db/ref)
-(schema/register! :seon.cluster.run.form/ordinal [:int {:min 0}])
-(schema/register! :seon.cluster.run.form/source [:string {:min 1}])
-(schema/register! ::forms
-                  [:set {:seon.db/component true} :seon.db/ref])
-
-;;; Eval receipts — the ONLY receipt entities (effect attribution is the
-;;; transaction's provenance metadata). Identity is the attempt address.
-
-(schema/register! :seon.cluster.eval/id
-                  [:string {:min 1 :seon.db/identity true}])
-(schema/register! :seon.cluster.eval/run :seon.db/ref)
-(schema/register! :seon.cluster.eval/ordinal [:int {:min 0}])
-(schema/register! :seon.cluster.eval/claim-epoch [:int {:min 1}])
-(schema/register! :seon.cluster.eval/at :inst)
-(schema/register! :seon.cluster.eval/status
-                  [:enum :running :done :error :interrupted])
-(schema/register! :seon.cluster.eval/result-edn :string)
-; derived-only value returned by interrupted-warning; registered so the
-; one warning shape is schema-checked like everything else
-(schema/register! ::missing-results [:int {:min 0}])
-(schema/register! :seon.cluster.eval/error :string)
+(schema.edn/load! {})
 
 ;;; ---------------------------------------------------------------------------
 ;;; Pure derivations

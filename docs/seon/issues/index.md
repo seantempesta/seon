@@ -10,7 +10,7 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (13)
+## Blocker (15)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -20,6 +20,8 @@ See `README.md` for the convention.
 | [Derive core schema admission without an identity allowlist](schema-core-admission-uses-a-process-identity-allowlist.md) | blocker | Core |
 | [Fence cluster stop against a replacement instance](cluster-stop-can-kill-a-replacement-instance.md) | blocker | general |
 | [Fence held-run transitions by the live lease](run-held-transitions-ignore-lease-expiry.md) | blocker | Core |
+| [Bound submission startup by the declared time limit](flow-submit-waits-forever-before-time-limit.md) | blocker | Core |
+| [Replace bare flow callback predicates with honest contracts](flow-callback-schemas-are-not-generatively-constructible.md) | blocker | Core |
 | [Fence terminal receipt state and observe it in the run model](run-acceptance-properties-miss-takeover-and-terminal-preservation.md) | blocker | Core |
 | [Fence the agent pointer when opening and closing a run](run-close-does-not-fence-the-agent-pointer.md) | blocker | agent |
 | [Mixed-union Datahike declaration lacks the fresh EDN codec](mixed-union-datahike-declaration-lacks-fresh-edn-codec.md) | blocker | Core |

@@ -1,0 +1,5 @@
+{:seon.store/branch :keyword
+ :seon.store/branch-connection [:fn {:gen/gen seon.cluster.store/connection-generator} seon.cluster.store/connection?]
+ :seon.store/dir [:string {:min 1}]
+ :seon.store/lock-file [:string {:min 1}]
+ :seon.store/store [:map {:closed true} [:seon.store/dir :seon.store/dir] [:seon.store/lock-file :seon.store/lock-file] [:seon.store/connection [:fn {:gen/gen seon.cluster.store/connection-generator} seon.cluster.store/connection?]] [:seon.store/lock [:fn {:gen/gen seon.cluster.store/file-lock-generator} seon.cluster.store/file-lock?]] [:seon.store/created? :boolean]]}

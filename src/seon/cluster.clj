@@ -47,70 +47,18 @@
   (:require [clojure.core.server]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
+            [clojure.test.check.generators :as gen]
+            [seon.cluster.run]
+            [seon.cluster.store]
             [seon.flow :as flow]
-            [seon.schema :as schema]))
+            [seon.schema :as schema]
+            [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Bootstrap configuration — the CLOSED pre-store key set.
 ;;; A key that the database could own does not belong here; the closed
 ;;; map makes that a review-time refusal, not a convention.
 ;;; ---------------------------------------------------------------------------
-
-(schema/register! :seon.boot/cluster-name [:string {:min 1}])
-; the parent directory holding every cluster's directory
-(schema/register! :seon.boot/root [:string {:min 1}])
-(schema/register! :seon.boot/prepl-host [:string {:min 1}])
-; 0 = ephemeral; the advertisement carries the real bound port
-(schema/register! :seon.boot/prepl-port [:int {:min 0 :max 65535}])
-(schema/register! :seon.boot/log-dir [:string {:min 1}])
-; the ONE physical store this process owns; every cluster is a branch
-; of it (branch-per-cluster, b2-plan section 0). Derived from
-; :seon.boot/root by convention, overridable for tests.
-(schema/register! :seon.boot/store-dir [:string {:min 1}])
-; the ancestor branch a NEW cluster branches from; absent = :db
-(schema/register! :seon.boot/ancestor-branch :keyword)
-
-(schema/register!
- :seon.boot/config
- [:map {:closed true}
-  [:seon.boot/cluster-name :seon.boot/cluster-name]
-  [:seon.boot/root :seon.boot/root]
-  [:seon.boot/prepl-host :seon.boot/prepl-host]
-  [:seon.boot/prepl-port :seon.boot/prepl-port]
-  [:seon.boot/log-dir :seon.boot/log-dir]
-  [:seon.boot/store-dir :seon.boot/store-dir]
-  [:seon.boot/ancestor-branch {:optional true}
-   :seon.boot/ancestor-branch]])
-
-; overrides: any subset of the complete config's keys, still closed
-(schema/register!
- :seon.boot/overrides
- [:map {:closed true}
-  [:seon.boot/cluster-name {:optional true} :seon.boot/cluster-name]
-  [:seon.boot/root {:optional true} :seon.boot/root]
-  [:seon.boot/prepl-host {:optional true} :seon.boot/prepl-host]
-  [:seon.boot/prepl-port {:optional true} :seon.boot/prepl-port]
-  [:seon.boot/log-dir {:optional true} :seon.boot/log-dir]
-  [:seon.boot/store-dir {:optional true} :seon.boot/store-dir]
-  [:seon.boot/ancestor-branch {:optional true}
-   :seon.boot/ancestor-branch]])
-
-;;; The advertisement — one EDN file under the cluster directory that
-;;; makes every instance's REPL discoverable. (pid, start-instant) is
-;;; the staleness fence: a reader validates the pid is alive AND
-;;; started at that instant before trusting the port.
-
-(schema/register! :seon.boot/pid [:int {:min 1}])
-(schema/register! :seon.boot/start-instant :inst)
-
-(schema/register!
- :seon.boot/advertisement
- [:map {:closed true}
-  [:seon.boot/cluster-name :seon.boot/cluster-name]
-  [:seon.boot/prepl-host :seon.boot/prepl-host]
-  [:seon.boot/prepl-port [:int {:min 1 :max 65535}]]
-  [:seon.boot/pid :seon.boot/pid]
-  [:seon.boot/start-instant :seon.boot/start-instant]])
 
 ;;; The running instance value returned by start!. Named predicates for
 ;;; the genuinely opaque platform objects; everything else is ordinary
@@ -124,16 +72,14 @@
 (schema/register-core-predicate! 'seon.cluster/socket-server?
                                  socket-server?)
 
-(schema/register!
- :seon.boot/instance
- [:map {:closed true}
-  [:seon.boot/config :seon.boot/config]
-  [:seon.boot/advertisement :seon.boot/advertisement]
-  [:seon.boot/prepl-server [:fn 'seon.cluster/socket-server?]]
-  [:seon.boot/executors
-   [:map {:closed true}
-    [:compute [:fn 'seon.flow/executor?]]
-    [:io [:fn 'seon.flow/executor?]]]]])
+(defonce ^:private generator-server
+  (delay (java.net.ServerSocket. 0)))
+
+(def socket-server-generator
+  (gen/fmap (fn [_] @generator-server) (gen/return nil)))
+
+(schema.edn/load! {})
+(schema/activate! (schema/snapshot))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Pure resolution — defaults are THE defaults document for this layer

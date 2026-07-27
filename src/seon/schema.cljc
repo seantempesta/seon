@@ -78,7 +78,14 @@
   [form predicate-functions]
   (walk/postwalk
    (fn [value]
-     (if (and (vector? value) (= :fn (first value)))
+     (cond
+       (and (map? value)
+            (qualified-symbol? (:gen/gen value)))
+       (assoc value :gen/gen
+              #?(:clj (some-> (:gen/gen value) requiring-resolve deref)
+                 :cljs (:gen/gen value)))
+
+       (and (vector? value) (= :fn (first value)))
        (let [predicate-index (if (map? (second value)) 2 1)
              predicate (get value predicate-index)
              bound (and (qualified-symbol? predicate)
@@ -101,7 +108,8 @@
              {:seon.schema/error :seon.schema/unresolved-predicate
               :seon.schema/predicate predicate
               :seon.error/kind :user-input}))))
-       value))
+
+       :else value))
    form))
 
 (defn- bound-forms [forms predicate-functions]
@@ -322,6 +330,12 @@
 (defn- core-predicate-functions []
   (:seon.schema.state/predicate-functions @!schema-state))
 
+(defn core-predicate-registered?
+  "True when `predicate` has a callable registered by core."
+  {:malli/schema [:=> [:cat :qualified-symbol] :boolean]}
+  [predicate]
+  (ifn? (get (core-predicate-functions) predicate)))
+
 (defn- active-forms []
   (or (:seon.schema.projection/forms (active-projection))
       (candidate-forms)))
@@ -333,10 +347,19 @@
            :seon.schema.state/candidate-forms f args)))
 
 (defn- candidate-registry []
-  (mr/composite-registry
-    (m/default-schemas)
-    (mr/fast-registry
-     (bound-forms (candidate-forms) (core-predicate-functions)))))
+  (let [defaults (mr/fast-registry (m/default-schemas))
+        forms (candidate-forms)
+        predicate-functions (core-predicate-functions)]
+    (reify
+      mr/Registry
+      (-schema [this type]
+        (or (mr/-schema defaults type)
+            (when-let [form (get forms type)]
+              (m/schema
+               (bind-predicates form predicate-functions)
+               {:registry this}))))
+      (-schemas [_]
+        (merge (mr/-schemas defaults) forms)))))
 
 ;; THE one stable registry facade Seon installs as Malli's process-global
 ;; default. Once a projection is active it reads only that committed
@@ -427,6 +450,14 @@
     ;; preserve it for scalars anyway (values sort by value, so a
     ;; `[:vector :qualified-keyword]` round-trips alphabetized).
     :seon.fn/read-attrs [:set :qualified-keyword]
+    :seon.db.id/generator
+    [:enum
+     :seon.db.id.generator/human-readable
+     :seon.db.id.generator/compact]
+    :seon.ns/name [:symbol {:seon.db/identity true}]
+    :seon.ns/source :string
+    :seon.ns/doc :string
+    :seon.ns/summary [:string {:min 1}]
     :seon.ns/require-edges
     [:set {:seon.db/component true} :seon.db/ref]}))
 
@@ -793,24 +824,43 @@
            :seon.schema/key k
            :seon.schema/definition v
            :seon.error/kind :user-input}))))
-  ;; A manifest-admitted preprocessed release already proved the complete
-  ;; population. Its module-load registrations collect the exact authored
-  ;; forms without repeating the quadratic prefix proof. Unverified REPL/dev
-  ;; loads and agent registration retain the full gate.
-  (when-not *verified-release-identity*
-    (try
-      (assert-complete-contract!
-        {:seon.schema/identity k
-         :seon.schema/definition v
-         :seon.schema/forms (assoc (candidate-forms) k v)
-         :seon.schema/admission
-         {:seon.schema.admission/source *registration-admission-source*}
-         :seon.schema/predicate-functions (core-predicate-functions)})
-      (catch #?(:clj Exception :cljs :default) e
-        (when-not (= :malli.core/invalid-schema (:type (ex-data e)))
-          (throw e)))))
+  ;; The schema authority's own shapes are the computed bootstrap population:
+  ;; they must exist before the EDN loader and its admission gate can compile.
+  ;; Every other JVM registration flows through seon.schema.edn/admit once that
+  ;; namespace has finished loading; there is no hand-maintained exception set.
+  #?(:clj
+     (when-let [admit (some-> (find-ns 'seon.schema.edn)
+                              (ns-resolve 'admit))]
+       (when-not *verified-release-identity*
+         (admit
+          {:seon.schema/forms (assoc (candidate-forms) k v)
+           :seon.schema/identity k
+           :seon.schema/admission
+           {:seon.schema.admission/source *registration-admission-source*}})))
+     :cljs
+     ;; The retired CLJS tier has no schema-EDN loader. Preserve its existing
+     ;; complete-population validation until that source is deleted.
+     (when-not *verified-release-identity*
+       (try
+         (assert-complete-contract!
+          {:seon.schema/identity k
+           :seon.schema/definition v
+           :seon.schema/forms (assoc (candidate-forms) k v)
+           :seon.schema/admission
+           {:seon.schema.admission/source *registration-admission-source*}
+           :seon.schema/predicate-functions (core-predicate-functions)})
+         (catch :default e
+           (when-not (= :malli.core/invalid-schema (:type (ex-data e)))
+             (throw e))))))
   (update-candidate-forms! assoc k v)
   k)
+
+(defn ^:no-doc contribute-candidate-forms!
+  "Merge a prevalidated population into the candidate collector."
+  {:malli/schema [:=> [:catn [::forms :map]] :map]}
+  [forms]
+  (update-candidate-forms! merge forms)
+  (candidate-forms))
 
 (defn form-string
   "Canonical, full EDN encoding of registered schema `k`, or nil when absent.
@@ -1556,6 +1606,11 @@
    against the replacement schema population. Returns the activated projection."
   {:malli/schema [:=> [:catn [::forms :map]] :map]}
   [forms]
+  #?(:clj
+     (when-let [admit (some-> (find-ns 'seon.schema.edn)
+                              (ns-resolve 'admit))]
+       (admit {:seon.schema/forms forms}))
+     :cljs nil)
   (activate-projection!
     (build-projection
       forms

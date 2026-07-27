@@ -1,0 +1,25 @@
+{:seon.cluster.agent/id [:string {:min 1 :seon.db/identity true}]
+ :seon.cluster.agent/run :seon.db/ref
+ :seon.cluster.eval/at :inst
+ :seon.cluster.eval/claim-epoch [:int {:min 1}]
+ :seon.cluster.eval/error :string
+ :seon.cluster.eval/id [:string {:min 1 :seon.db/identity true}]
+ :seon.cluster.eval/ordinal [:int {:min 0}]
+ :seon.cluster.eval/result-edn :string
+ :seon.cluster.eval/run :seon.db/ref
+ :seon.cluster.eval/status [:enum :running :done :error :interrupted]
+ :seon.cluster.run/agent :seon.db/ref
+ :seon.cluster.run/claim-epoch [:int {:min 1}]
+ :seon.cluster.run/closed-at :inst
+ :seon.cluster.run/forms [:set {:seon.db/component true} :seon.db/ref]
+ :seon.cluster.run/id [:string {:min 1 :seon.db/identity true}]
+ :seon.cluster.run/lease-until :inst
+ :seon.cluster.run/missing-results [:int {:min 0}]
+ :seon.cluster.run/opened-at :inst
+ :seon.cluster.run/plan-digest [:string {:min 1}]
+ :seon.cluster.run/process [:string {:min 1}]
+ :seon.cluster.run/run [:map {:seon.db/entity true} [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.run/agent :seon.cluster.run/agent] [:seon.cluster.run/opened-at :seon.cluster.run/opened-at] [:seon.cluster.run/closed-at {:optional true} :seon.cluster.run/closed-at] [:seon.cluster.run/process {:optional true} :seon.cluster.run/process] [:seon.cluster.run/claim-epoch {:optional true} :seon.cluster.run/claim-epoch] [:seon.cluster.run/lease-until {:optional true} :seon.cluster.run/lease-until] [:seon.cluster.run/plan-digest {:optional true} :seon.cluster.run/plan-digest]]
+ :seon.cluster.run.form/id [:string {:min 1 :seon.db/identity true}]
+ :seon.cluster.run.form/ordinal [:int {:min 0}]
+ :seon.cluster.run.form/run :seon.db/ref
+ :seon.cluster.run.form/source [:string {:min 1}]}
