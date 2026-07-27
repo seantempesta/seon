@@ -345,6 +345,16 @@ seon.error/commit! + boot wiring as a cluster.clj revision (D4);
 measurements); (5) seon.ai failover rows + disposition reducer +
 ai-projection notice. D1/D3 land WITH the error owner that consumes
 the discarded values, not before. I seal each on return.
+OWNER DIRECTION (night, loved the projections concept): GENERALIZE —
+any entity/map may carry projection keys (output-kind → FULLY
+QUALIFIED SYMBOL naming the projection fn); one router resolves
+(requiring-resolve, var-backed for hot reload — the proven
+populate/evaluate/predicate-owner idiom) and applies. The render
+contract's ai+html pair becomes the special case; new output kinds
+(log, sms, metrics…) are accretion — add a key, write the fn, no
+router change. Seal note: ui.md currently fixes exactly two
+projections — admitting the open kind set is a deliberate contract
+accretion to write into ui.md at seal; each kind names its consumer.
 N4 PLAN REVISED (ab2911caa): all 25 review findings dispositioned,
 composed with the landed N3 owners, socket/reset/child-loss proofs
 moved in-suite, EIGHT owner decisions consolidated — both N4 and N5
