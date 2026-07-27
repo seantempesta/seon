@@ -13,4 +13,31 @@
  :seon.ai/timeout-ms [:int {:min 1}]
  :seon.ai/text [:string {:min 1}]
  :seon.ai/request [:map {:closed true} [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai/api-key-variable :seon.ai/api-key-variable] [:seon.ai/system {:optional true} :seon.ai/system] [:seon.ai/prompt :seon.ai/prompt] [:seon.ai/timeout-ms :seon.ai/timeout-ms]]
- :seon.ai/completion [:or [:map {:closed true} [:seon.ai/text :seon.ai/text]] :seon.error/value]}
+ :seon.ai/completion [:or [:map {:closed true} [:seon.ai/text :seon.ai/text]] :seon.error/value]
+
+ ; ---------------------------------------------------------------------
+ ; THE EVIDENCE A FAILOVER DECISION NEEDS, and the reason it lives here:
+ ; only the leaf knows what actually happened on the wire. The five flat
+ ; kinds are unchanged and stay the agent-facing shape; these are
+ ; namespaced fields inside `:seon.error/data`, never a nested envelope.
+ ;
+ ; `error-class` is NORMALIZED — derived from the JDK's own exception
+ ; taxonomy and the HTTP status, which is the dependency's vocabulary
+ ; rather than a list we invented. The three phase booleans are what
+ ; make "did this cost anything?" answerable instead of guessed, and
+ ; that question is the whole no-retry ruling.
+ :seon.ai/error-class [:enum :credential :transport-before-send :transport-unknown :timeout :rate-limit :server :authentication :authorization :model :request :response]
+ :seon.ai/http-status [:int {:min 100 :max 599}]
+ ; TRANSMITTED means the request left this machine, so the provider may
+ ; have done paid work. UNKNOWN counts as transmitted: the ruling is
+ ; strict, and "we cannot prove it was free" is not "it was free".
+ :seon.ai/request-transmitted? :boolean
+ :seon.ai/response-started? :boolean
+ :seon.ai/output-observed? :boolean
+
+ ; ONE DISPOSITION, computed. Three ordinary values, and the reducer
+ ; that produces them is pure over the evidence above plus whether a
+ ; backup exists.
+ :seon.ai/disposition [:enum :failover-now :backoff :fail]
+ :seon.ai/backup? :boolean
+ :seon.ai/disposition-request [:map {:closed true} [:seon.error/value :seon.error/value] [:seon.ai/backup? :seon.ai/backup?]]}

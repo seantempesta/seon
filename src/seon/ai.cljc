@@ -114,6 +114,97 @@
     #?(:clj (System/getenv variable)
        :cljs (some-> js/process .-env (aget variable)))))
 
+(defn- status-class
+  "One HTTP status as a normalized class.
+  Ranges and the four statuses that mean something specific — the
+  provider's own vocabulary, read rather than re-invented. 408/429 and
+  5xx are the provider saying \"not now\", which is a different fact
+  from 400 saying \"not this request\"."
+  [status]
+  (cond
+    (= 401 status) :authentication
+    (= 403 status) :authorization
+    (= 404 status) :model
+    (= 408 status) :rate-limit
+    (= 429 status) :rate-limit
+    (<= 500 status 599) :server
+    :else :request))
+
+(defn- transport-before-send?
+  "True when the JDK PROVES the request never left this machine.
+  Derived from the JDK's own exception taxonomy — a connection that was
+  refused, a host that does not resolve, a TLS handshake that failed —
+  because phase is not something to guess at. Anything else is
+  `:transport-unknown` and is treated as transmitted: the no-retry
+  ruling is strict, and \"we cannot prove it was free\" is not \"it was
+  free\"."
+  [failure]
+  (boolean
+   (some (fn [candidate] (instance? candidate failure))
+         [java.net.ConnectException
+          java.net.UnknownHostException
+          java.net.NoRouteToHostException
+          javax.net.ssl.SSLHandshakeException
+          java.net.http.HttpConnectTimeoutException])))
+
+(defn disposition
+  "What to do about one model failure: fail over, back off, or stop.
+  PURE, and computed from the EVIDENCE the leaf recorded rather than
+  from the error's kind — a kind list would be the hand-maintained
+  classification the standing rule bans, and it could not answer the
+  only question that matters anyway.
+
+  That question is: DID THIS CALL COST ANYTHING? The owner's ruling
+  forbids re-calling a model that may have done paid work; it does not
+  forbid a second call after a conclusively unpaid refusal. So:
+
+  - any evidence of OUTPUT is terminal — `:fail`. A 2xx body we could
+    not parse is generated text somebody paid for;
+  - a TRANSMITTED request with no proof of the provider's answer is
+    ambiguously paid, and ambiguously paid is terminal. This is why a
+    plain `::timeout` does NOT fail over, and it is the strictest
+    reading of the ruling rather than the convenient one;
+  - a request that provably never left this machine — no credential, a
+    refused connection, an unresolved host, a failed handshake, a
+    CONNECT timeout — cost nothing, so a backup may be called
+    immediately and, with no backup, the same call may be retried;
+  - a provider REJECTION carrying no output cost nothing either, and
+    splits by what it says: `:rate-limit`/`:server` mean \"not now\"
+    (fail over, else back off), `:authentication`/`:authorization`/
+    `:model`/`:credential` mean \"not here\" (fail over to a different
+    target, but never back off — repeating it changes nothing), and
+    `:request` means \"not this\" (terminal: a backup would reject the
+    same request).
+
+  Returns `:failover-now`, `:backoff`, or `:fail`. The caller decides
+  what to do with each; this decides nothing about execution."
+  {:malli/schema [:=> [:cat :seon.ai/disposition-request] :seon.ai/disposition]}
+  [{value :seon.error/value backup? :seon.ai/backup?}]
+  (let [{::keys [error-class output-observed? request-transmitted?]}
+        (:seon.error/data value)]
+    (cond
+      ;; somebody paid for something. Nothing re-calls that.
+      output-observed? :fail
+
+      ;; a rejection is free even though the request was transmitted:
+      ;; the provider told us it did no work
+      (contains? #{:rate-limit :server} error-class)
+      (if backup? :failover-now :backoff)
+
+      (contains? #{:credential :authentication :authorization :model}
+                 error-class)
+      ;; a different target may work; the same one never will, so this
+      ;; is the one free class that must NOT back off
+      (if backup? :failover-now :fail)
+
+      (= :transport-before-send error-class)
+      (if backup? :failover-now :backoff)
+
+      ;; :request (the provider rejected this request), :response (we
+      ;; could not read a 2xx), :timeout and :transport-unknown (the
+      ;; request may have been transmitted) are all terminal
+      :else :fail)))
+
 (defn complete
   "Call the model once and return its text, or a flat error value.
   ONE attempt. No retry, no backoff, no fallback provider. Reads the
@@ -158,26 +249,69 @@
                  :seon.error/message (str "The provider's response was not "
                                           "readable JSON: "
                                           (ex-message failure))
-                 :seon.error/data {::status status}}))
-            {:seon.error/kind ::provider-error
-             :seon.error/message (str "The provider answered " status ".")
-             :seon.error/data {::status status
-                               ::body (subs (str (.body response)) 0
-                                            (min 500 (count (str (.body response)))))}}))
+                 :seon.error/data {::status status
+                                   ::error-class :response
+                                   ::http-status status
+                                   ::request-transmitted? true
+                                   ::response-started? true
+                                   ;; a 2xx body EXISTS, so the provider
+                                   ;; generated and charged for output
+                                   ;; even though we cannot read it
+                                   ::output-observed? true}}))
+            (let [body (subs (str (.body response)) 0
+                              (min 500 (count (str (.body response)))))]
+              {:seon.error/kind ::provider-error
+               :seon.error/message (str "The provider answered " status ".")
+               :seon.error/data {::status status
+                                 ::body body
+                                 ::error-class (status-class status)
+                                 ::http-status status
+                                 ::request-transmitted? true
+                                 ::response-started? true
+                                 ;; a rejection carries no generated
+                                 ;; output; a 2xx would not be here
+                                 ::output-observed? false}})))
         (catch java.net.http.HttpTimeoutException failure
           ;; an ordinary outcome: the model was slow. Never a bug report.
-          {:seon.error/kind ::timeout
-           :seon.error/message (str "The model did not answer within "
-                                    timeout-ms "ms.")
-           :seon.error/data {:seon.ai/timeout-ms timeout-ms}})
+          ;; A CONNECT timeout never transmitted anything; any other
+          ;; timeout may have. The JDK distinguishes them by class
+          ;; (`HttpConnectTimeoutException extends HttpTimeoutException`),
+          ;; which is the only honest way to know, and "cannot prove it
+          ;; was free" is not "it was free".
+          (let [connect? (instance? java.net.http.HttpConnectTimeoutException
+                                    failure)]
+            {:seon.error/kind ::timeout
+             :seon.error/message (str "The model did not answer within "
+                                      timeout-ms "ms.")
+             :seon.error/data {:seon.ai/timeout-ms timeout-ms
+                               ::error-class (if connect?
+                                               :transport-before-send
+                                               :timeout)
+                               ::request-transmitted? (not connect?)
+                               ::response-started? false
+                               ::output-observed? false}}))
         (catch Throwable failure
-          {:seon.error/kind ::transport-failure
-           :seon.error/message (or (ex-message failure)
-                                   (.getName (class failure)))
-           :seon.error/data {:seon.ai/endpoint endpoint}})))
+          (let [before-send? (transport-before-send? failure)]
+            {:seon.error/kind ::transport-failure
+             :seon.error/message (or (ex-message failure)
+                                     (.getName (class failure)))
+             :seon.error/data {:seon.ai/endpoint endpoint
+                               ::throwable (.getName (class failure))
+                               ::error-class (if before-send?
+                                               :transport-before-send
+                                               :transport-unknown)
+                               ::request-transmitted? (not before-send?)
+                               ::response-started? false
+                               ::output-observed? false}}))))
     {:seon.error/kind ::no-credential
      :seon.error/message (if (string? api-key-variable)
                            (str "The environment variable "
                                 api-key-variable " is not set.")
                            "No credential variable was configured.")
-     :seon.error/data {:seon.ai/api-key-variable api-key-variable}}))
+     :seon.error/data {:seon.ai/api-key-variable api-key-variable
+                       ::error-class :credential
+                       ;; NO NETWORK CALL HAPPENED. This is the one
+                       ;; failure that is provably free.
+                       ::request-transmitted? false
+                       ::response-started? false
+                       ::output-observed? false}}))
