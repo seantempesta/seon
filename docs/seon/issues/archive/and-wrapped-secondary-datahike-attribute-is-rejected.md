@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 tags: [issue, database, schema]
 severity: friction
 ---
@@ -50,3 +50,19 @@ the same resolved value type as declaration.
   `:55-102` is the code that unwraps `:and`; the described rejection remains
   representable and `test/seon/schema/datahike_test.clj:1-46` has no secondary
   wrapper regression.
+
+## Resolution 2026-07-27
+
+- Added `resolve-datahike-form` as the single alias/`:and` resolver used by
+  value-type, collection-child, and cardinality derivation.
+- Secondary-only admission now compares the derived Datahike value type, so
+  direct and `:and`-wrapped `:float` and `:double` forms share one decision.
+- The whole-namespace audit found and fixed the same raw-head class in
+  collection child/cardinality derivation.
+- Falsifier before the fix: `bin/test seon.schema.datahike-test` ran 5 tests
+  and 6 assertions with 3 errors.
+- Focused proof after the fix: 5 tests, 19 assertions, 0 failures, 0 errors.
+- Full checked-in gate: 103 tests, 469 assertions, 0 failures, 0 errors. The
+  default discovery run also saw another lane's untracked, intentionally
+  unimplemented test namespaces, so the proof explicitly selected every
+  tracked test namespace.

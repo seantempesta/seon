@@ -46,6 +46,14 @@
   [form]
   (if (vector? form) (first form) form))
 
+(defn resolve-datahike-form
+  "Resolve aliases and wrappers to the form stored by Datahike."
+  [form]
+  (let [resolved (resolve-malli-form form)]
+    (if (= :and (form-head resolved))
+      (resolve-datahike-form (first (form-children resolved)))
+      resolved)))
+
 (defn- registration-form
   [attr schema-form]
   (pr-str (list 'schema/register! attr schema-form)))
@@ -55,7 +63,7 @@
 (defn form->datahike-value-type
   "The Datahike value-type keyword represented by a Malli form."
   [form]
-  (let [resolved (resolve-malli-form form)
+  (let [resolved (resolve-datahike-form form)
         head (form-head resolved)]
     (cond
       (= :seon.db/ref head) :db.type/ref
@@ -68,8 +76,6 @@
                      (registration-form :my.domain/status
                                         [:enum :open :done]) ".")
                 {::form resolved :seon.error/kind :user-input})))
-      (= :and head)
-      (form->datahike-value-type (first (form-children resolved)))
       (= :or head)
       (let [explicit (:seon.db/value-type
                       (schema.form/attr-form-properties resolved))
@@ -104,16 +110,20 @@
 (defn form->cardinality
   "The Datahike cardinality represented by one Malli form."
   [form]
-  (if (and (vector? form) (#{:vector :set :sequential} (first form)))
-    :db.cardinality/many
-    :db.cardinality/one))
+  (let [resolved (resolve-datahike-form form)]
+    (if (and (vector? resolved)
+             (#{:vector :set :sequential} (form-head resolved)))
+      :db.cardinality/many
+      :db.cardinality/one)))
 
 (defn form->child-form
   "The stored child form for a collection schema, or the scalar form."
   [form]
-  (if (and (vector? form) (#{:vector :set :sequential} (first form)))
-    (first (form-children form))
-    form))
+  (let [resolved (resolve-datahike-form form)]
+    (if (and (vector? resolved)
+             (#{:vector :set :sequential} (form-head resolved)))
+      (first (form-children resolved))
+      resolved)))
 
 (defn malli->datahike-attr
   "Derive one ordinary Datahike attribute declaration."
@@ -127,10 +137,11 @@
                         {::attr attr :seon.error/kind :user-input})))
         resolved (resolve-malli-form raw)
         props (schema.form/attr-form-properties resolved)
-        value-form (-> resolved form->child-form resolve-malli-form)
+        value-form (form->child-form resolved)
+        value-type (form->datahike-value-type value-form)
         secondary? (boolean (:db.secondary/only props))]
     (when (and secondary?
-               (not (contains? #{:float :double} (form-head value-form))))
+               (not (contains? #{:db.type/float :db.type/double} value-type)))
       (throw (ex-info
               (str "A secondary-only attribute must contain floats. Register "
                    (registration-form attr
@@ -139,7 +150,7 @@
     (cond-> {:db/ident attr
              :db/valueType (if secondary?
                              :db.type/tuple
-                             (form->datahike-value-type value-form))
+                             value-type)
              :db/cardinality (if secondary?
                                :db.cardinality/one
                                (form->cardinality resolved))}

@@ -24,11 +24,10 @@ See `README.md` for the convention.
 | [Replace bare flow callback predicates with honest contracts](flow-callback-schemas-are-not-generatively-constructible.md) | blocker | Core |
 | [`bin/seon up` exits 0 after a readiness timeout](operator-up-exits-zero-on-readiness-timeout.md) | blocker | general |
 
-## Friction (2)
+## Friction (1)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
-| [And-wrapped secondary Datahike attribute is rejected](and-wrapped-secondary-datahike-attribute-is-rejected.md) | friction | Core |
 | [Keep the old source tree off Babashka's default classpath](babashka-default-classpath-exposes-src-old.md) | friction | general |
 
 ## Cleanup (3)
