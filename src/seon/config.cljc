@@ -16,9 +16,10 @@
   `::manifest-unreadable`.
 
   Config reconciliation is provenance-scoped. `apply!` delegates to
-  `seon.reconcile/reconcile!` with `managing-process-identity`. The literal
-  three-name `core-process-identities` trust list ships unchanged by the
-  2026-07-27 owner ruling; deriving that trust is a separate follow-up.
+  `seon.reconcile/reconcile!` with `managing-process-identity`, the config
+  member of `seon.schema`'s owner-ruled literal three-name core trust list.
+  Deriving that trust is a separate follow-up; this namespace does not create
+  a second copy of the list.
 
   Crash walk: parsing and row derivation are pure. A non-empty apply is the
   one atomic reconcile transaction; a converged apply issues no transaction."
@@ -31,12 +32,6 @@
 (def managing-process-identity
   "The opaque reconcile scope owned by configuration."
   "seon.db.process/config")
-
-(def core-process-identities
-  "The owner-ruled literal trust list pending its computed replacement."
-  #{:seon.db.process/boot
-    :seon.db.process/config
-    :seon.db.process/core})
 
 (defn defaults
   "The complete manifest from THE shipped defaults document."
@@ -75,8 +70,8 @@
   "Reconcile one manifest into the cluster's config singleton.
 
   Uses `seon.reconcile/reconcile!` with `managing-process-identity`; the
-  literal `core-process-identities` remain the schema-admission trust input
-  until their separately ruled computed replacement lands."
+  literal trust list already owned by `seon.schema` remains the admission
+  input until its separately ruled computed replacement lands."
   {:malli/schema
    [:=> [:cat :seon.config/apply-request] :seon.reconcile/result]}
   [request]
