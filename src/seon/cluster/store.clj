@@ -100,6 +100,15 @@
 ;;; Pure derivations
 ;;; ---------------------------------------------------------------------------
 
+;;; The path IS the store identity twice over — the Konserve store id
+;;; and the lock file both derive from it — so the canonical form is
+;;; taken ONCE here and every other derivation reads it. Two spellings
+;;; of one physical directory must never become two locks on one store.
+(defn- canonical-path
+  "The one physical spelling of `store-dir`."
+  [store-dir]
+  (.getCanonicalPath (io/file store-dir)))
+
 (defn lock-file
   "The store's lock-file path.
   A sibling of the CANONICAL store directory (`<canonical>.lock`) so it
@@ -109,7 +118,7 @@
   One derivation — no other code builds this path."
   {:malli/schema [:=> [:cat :seon.store/dir] :seon.store/lock-file]}
   [store-dir]
-  (str store-dir ".lock"))
+  (str (canonical-path store-dir) ".lock"))
 
 (defn datahike-configuration
   "The one Datahike configuration for a cluster store.
@@ -119,16 +128,18 @@
   the single place the configuration shape lives."
   {:malli/schema [:=> [:cat :seon.store/dir] [:map]]}
   [store-dir]
-  {:store {:backend :file
-           :path store-dir
-           ; Konserve requires a UUID store id, and Datahike keys its
-           ; connection registry, schema caches, and GC guard on it. The
-           ; id must therefore be a pure function of the path, or a
-           ; reopen would present itself as a different store.
-           :id (java.util.UUID/nameUUIDFromBytes
-                (.getBytes ^String store-dir "UTF-8"))}
-   :writer {:backend :self}
-   :schema-flexibility :write})
+  (let [path (canonical-path store-dir)]
+    {:store {:backend :file
+             :path path
+             ; Konserve requires a UUID store id, and Datahike keys its
+             ; connection registry, schema caches, and GC guard on it.
+             ; The id must therefore be a pure function of the canonical
+             ; path, or a reopen — or another spelling of the same
+             ; directory — would present itself as a different store.
+             :id (java.util.UUID/nameUUIDFromBytes
+                  (.getBytes ^String path "UTF-8"))}
+     :writer {:backend :self}
+     :schema-flexibility :write}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Lifecycle
@@ -143,36 +154,64 @@
                          ::rule rule))))
 
 ;;; The flock. Non-blocking and exclusive: a foreign holder makes
-;;; `.tryLock` return nil, a holder in THIS JVM makes it throw
-;;; OverlappingFileLockException (a JVM holds one lock per file region
-;;; for the whole process). Both are the same refusal.
+;;; `.tryLock` return nil.
+;;;
+;;; A flock is held by the PROCESS, so this process's own holdings are
+;;; the half the OS cannot express, and they must be answered before a
+;;; second descriptor is ever opened. Java's FileLock is implemented
+;;; with fcntl, whose close(2) semantics drop EVERY lock the process
+;;; holds on a file as soon as ANY descriptor to it is closed. Opening a
+;;; second channel to a lock file we already hold and then closing it —
+;;; the obvious way to answer OverlappingFileLockException — therefore
+;;; unlocks the store at the OS level while `.isValid` still reports
+;;; true, and a foreign JVM walks in (falsified live: parent holds,
+;;; parent refuses its own second open, child JVM then ACQUIRES). This
+;;; table is the process's own holdings; it is not a second fence.
+(defonce ^:private held-flocks (atom {}))
+
 (defn- acquire-flock!
   "Acquire the exclusive flock on `lock-path`, or nil when it is held."
   [lock-path]
-  (let [file (io/file lock-path)]
-    (some-> (.getParentFile file) (.mkdirs))
-    (let [channel (FileChannel/open
-                   (.toPath file)
-                   (into-array OpenOption [StandardOpenOption/CREATE
-                                           StandardOpenOption/WRITE]))
-          lock (try
-                 (.tryLock channel)
-                 (catch OverlappingFileLockException _ nil)
-                 (catch Throwable failure
-                   (.close channel)
-                   (throw failure)))]
-      (if lock
-        lock
-        (do (.close channel) nil)))))
+  (locking held-flocks
+    (when-not (contains? @held-flocks lock-path)
+      (let [file (io/file lock-path)
+            _ (some-> (.getParentFile file) (.mkdirs))
+            channel (FileChannel/open
+                     (.toPath file)
+                     (into-array OpenOption [StandardOpenOption/CREATE
+                                             StandardOpenOption/WRITE]))
+            lock (try
+                   (.tryLock channel)
+                   (catch OverlappingFileLockException _
+                     ; unreachable while this table is the one opener;
+                     ; if it ever happens some other code in this JVM
+                     ; holds the file, so LEAK the descriptor rather
+                     ; than close it and drop the process's fence
+                     ::foreign-channel-in-this-jvm)
+                   (catch Throwable failure
+                     (.close channel)
+                     (throw failure)))]
+        (cond
+          (keyword? lock) nil
+          lock (do (swap! held-flocks assoc lock-path lock) lock)
+          ; no lock of ours on this file, so closing drops nothing
+          :else (do (.close channel) nil))))))
 
 (defn- release-flock!
-  "Release a held flock and close its channel."
-  [^FileLock lock]
-  (let [channel (.channel lock)]
-    (when (.isValid lock)
-      (.release lock))
-    (.close channel)
-    nil))
+  "Release the flock held at `lock-path` and close its channel."
+  [lock-path ^FileLock lock]
+  (locking held-flocks
+    (swap! held-flocks dissoc lock-path)
+    (let [channel (.channel lock)]
+      (try
+        (when (.isValid lock)
+          (.release lock))
+        (finally
+          ; the descriptor closes even on a failed release, and closing
+          ; it drops the fcntl lock anyway — the fence never outlives a
+          ; release attempt
+          (.close channel)))))
+  nil)
 
 (defn- delete-store-directory!
   "Delete the store directory and everything under it."
@@ -218,25 +257,28 @@
   `release-store!`."
   {:malli/schema [:=> [:cat :seon.store/dir] :seon.store/store]}
   [store-dir]
-  (let [lock-path (lock-file store-dir)
+  ; one physical spelling for the whole lifecycle: the fence, the store
+  ; id, the genesis probe, and the returned value all name one directory
+  (let [dir (canonical-path store-dir)
+        lock-path (lock-file dir)
         lock (or (acquire-flock! lock-path)
                  (refuse! ::held-elsewhere
-                          (str "the store at " store-dir
+                          (str "the store at " dir
                                " is held by a live process")
-                          {::dir store-dir ::lock-file lock-path}))]
+                          {::dir dir ::lock-file lock-path}))]
     (try
-      (let [configuration (datahike-configuration store-dir)
+      (let [configuration (datahike-configuration dir)
             created? (cond
                        (not (d/database-exists? configuration))
-                       (do (create-store! store-dir configuration) true)
+                       (do (create-store! dir configuration) true)
 
-                       (genesis-complete? store-dir)
+                       (genesis-complete? dir)
                        false
 
                        ; :db without :branches — killed mid-genesis, so
                        ; nothing durable ever existed. Recreate.
                        :else
-                       (do (create-store! store-dir configuration) true))
+                       (do (create-store! dir configuration) true))
             connection (d/connect configuration)]
         ; readiness is a COMPLETE connection over a COMPLETE store: the
         ; main branch must be readable before this value escapes
@@ -245,13 +287,13 @@
           (catch Throwable failure
             (d/release connection)
             (throw failure)))
-        {:seon.store/dir store-dir
+        {:seon.store/dir dir
          :seon.store/lock-file lock-path
          :seon.store/connection connection
          :seon.store/lock lock
          :seon.store/created? created?})
       (catch Throwable failure
-        (release-flock! lock)
+        (release-flock! lock-path lock)
         (throw failure)))))
 
 (defn release-store!
@@ -265,6 +307,10 @@
   ; nothing in the (closed, immutable) store value has to change
   (let [^FileLock lock (:seon.store/lock store)]
     (when (.isValid lock)
-      (d/release (:seon.store/connection store))
-      (release-flock! lock)))
+      ; a Datahike release that throws must never strand the fence: the
+      ; failure propagates, but the store is openable again
+      (try
+        (d/release (:seon.store/connection store))
+        (finally
+          (release-flock! (:seon.store/lock-file store) lock)))))
   nil)
