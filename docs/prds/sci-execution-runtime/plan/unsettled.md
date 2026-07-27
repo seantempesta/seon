@@ -317,12 +317,34 @@ does NOT prevent the bad call, +129-175ns cost, re-eval silently
 strips instrumentation → explicit idempotent apply!, hot fns are
 defn- so "public + schema" needs no list; six defects D1-D6 → issue
 lane binayawwx filing) and model-failover-2026-07-27.md (b44bd1527,
-litellm-clj + again mined). NEXT SPINE: I author the error-wiring
-contract package from the grounding report (fault consumer at boot →
-fault fact + explanation message ONE tx → escalation dial →
-problems derivation → instrumentation apply! at dev boot), then the
-failover descriptor rows. Owner directions of the evening are all in
-these two reports.
+litellm-clj + again mined). ERROR-WIRING SLICE 1 LANDED (3bd147643, gate 172/789/0): fault
+entity schema + :seon.cluster.message/about + two fault dials + the
+completeness-rule fix (requiredness reads :seon.config/effective —
+reading the manifest computed a VACUOUS #{} because every manifest
+entry is optional by design; optional dials were unrepresentable
+before). The drafting agent stopped honestly with context exhausted
+rather than half-drafting four packages. ORCHESTRATOR RULING: the
+rename stands — ONE owner `seon.error`, fault.edn's entity merges
+into the error family BEFORE anything references :seon.fault/*
+(agent's recommendation accepted; a one-file change today, expensive
+after four namespaces reference it). OWNER DIRECTION (late evening):
+one normalization function for EVERY error class (kinds computed
+from sites, never a hand list; standing totality property: every
+committed error fact validates :seon.error/value) + PROJECTIONS PER
+CONSUMER exactly like the render contract — ai steering prose
+(stored at commit time; it IS the failover "you are the backup"
+message and the explanation message content), log line (derived),
+html at N4 via the ONE render contract (design the fact to permit,
+build nothing). NEXT SESSION OPENS WITH: launch a FRESH Opus drafting
+agent (the current one — SendMessage a96513c593d3a6a83 — is context-
+exhausted; give the fresh one BOTH research reports + the slice-1
+commit + this order): (1) seon.error normalizer + totality property
++ ai/log projections + fault.edn→error family rename; (2)
+seon.error/commit! + boot wiring as a cluster.clj revision (D4);
+(3) seon.problems; (4) seon.instrument (near-mechanical from the
+measurements); (5) seon.ai failover rows + disposition reducer +
+ai-projection notice. D1/D3 land WITH the error owner that consumes
+the discarded values, not before. I seal each on return.
 N4 PLAN REVISED (ab2911caa): all 25 review findings dispositioned,
 composed with the landed N3 owners, socket/reset/child-loss proofs
 moved in-suite, EIGHT owner decisions consolidated — both N4 and N5
