@@ -1,5 +1,16 @@
 {:seon.cluster.agent/id [:string {:min 1 :seon.db/identity true}]
  :seon.cluster.agent/run :seon.db/ref
+
+ ; The agent entity. FOUND BY THE SUBSET CHECK, not by the drive: the
+ ; loop asserts `/run` when it opens a run and retracts it when it
+ ; closes one, and without this map only `/id` installed — so the live
+ ; path would have failed at run-open, one step past the trigger. Same
+ ; class, same commit. `/run` is optional because an idle agent has no
+ ; current run, and absence IS idle (there is no status to read).
+ :seon.cluster.agent/agent
+ [:map {:seon.db/entity true}
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.cluster.agent/run {:optional true} :seon.cluster.agent/run]]
  :seon.cluster.eval/at :inst
  :seon.cluster.eval/claim-epoch [:int {:min 1}]
  :seon.cluster.eval/error :string
@@ -19,6 +30,33 @@
  :seon.cluster.run/plan-digest [:string {:min 1}]
  :seon.cluster.run/process [:string {:min 1}]
  :seon.cluster.run/run [:map {:seon.db/entity true} [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.run/agent :seon.cluster.run/agent] [:seon.cluster.run/opened-at :seon.cluster.run/opened-at] [:seon.cluster.run/closed-at {:optional true} :seon.cluster.run/closed-at] [:seon.cluster.run/process {:optional true} :seon.cluster.run/process] [:seon.cluster.run/claim-epoch {:optional true} :seon.cluster.run/claim-epoch] [:seon.cluster.run/lease-until {:optional true} :seon.cluster.run/lease-until] [:seon.cluster.run/plan-digest {:optional true} :seon.cluster.run/plan-digest]]
+ ; The ordered form entity. Same reason as the message map: without it
+ ; only `/id` installed, so a frozen plan could not be transacted on the
+ ; live boot path. Every entry is required — `plan-call` writes all four
+ ; together or writes none (run.cljc:409-417).
+ :seon.cluster.run.form/form
+ [:map {:seon.db/entity true}
+  [:seon.cluster.run.form/id :seon.cluster.run.form/id]
+  [:seon.cluster.run.form/run :seon.cluster.run.form/run]
+  [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal]
+  [:seon.cluster.run.form/source :seon.cluster.run.form/source]]
+
+ ; The eval receipt entity. The optionals are exactly the states a
+ ; receipt genuinely has: a `:running` receipt has no result and no
+ ; error; a `:done` one has a result; an `:error` or time-limited one
+ ; has an error and the flat error value as its result. Absence is the
+ ; state, never a stored nil.
+ :seon.cluster.eval/receipt
+ [:map {:seon.db/entity true}
+  [:seon.cluster.eval/id :seon.cluster.eval/id]
+  [:seon.cluster.eval/run :seon.cluster.eval/run]
+  [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
+  [:seon.cluster.eval/claim-epoch :seon.cluster.eval/claim-epoch]
+  [:seon.cluster.eval/at :seon.cluster.eval/at]
+  [:seon.cluster.eval/status :seon.cluster.eval/status]
+  [:seon.cluster.eval/result-edn {:optional true} :seon.cluster.eval/result-edn]
+  [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error]]
+
  :seon.cluster.run.form/id [:string {:min 1 :seon.db/identity true}]
  :seon.cluster.run.form/ordinal [:int {:min 0}]
  :seon.cluster.run.form/run :seon.db/ref

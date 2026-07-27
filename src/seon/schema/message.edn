@@ -10,4 +10,19 @@
  ; because an idempotently re-asserted value emits no datom and would
  ; therefore emit no wake (probe B Q10).
  :seon.cluster.message/to :seon.db/ref
-}
+
+ ; THE ENTITY MAP, and it is not decoration: `canonical-database-
+ ; attributes` installs entity-map entries BY CONSTRUCTION and
+ ; standalone forms only when they carry a persistence facet. Without
+ ; this map only `/id` installed (it has an identity facet) and the
+ ; live boot path could not transact a message at all — the fixtures
+ ; never saw it because they install explicit attribute lists, which is
+ ; exactly the fixture-vs-live-boot class. Declaring the entity makes
+ ; `to`, `content` and `at` installable, and `to` installs WITH its ref
+ ; type through the bridge.
+ :seon.cluster.message/message
+ [:map {:seon.db/entity true}
+  [:seon.cluster.message/id :seon.cluster.message/id]
+  [:seon.cluster.message/to :seon.cluster.message/to]
+  [:seon.cluster.message/content :seon.cluster.message/content]
+  [:seon.cluster.message/at :seon.cluster.message/at]]}

@@ -19,8 +19,9 @@
             [datahike.api :as d]
             [my.run :as my.run]
             [seon.cluster.loop :as cluster.loop]
+            [seon.cluster.wake :as wake]
             [seon.cluster.work :as work]
-            [seon.schema]
+            [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike])
   (:import [java.util Date]))
 
@@ -70,6 +71,117 @@
           "and it goes through a transition, so the run's own fence
            applies to the close as much as to the claim"))))
 
+(def ^:private now (Date. 1700000000000))
+(def ^:private process "process/one")
+
+;;; ---------------------------------------------------------------------------
+;;; THE CLASS-KILLER: what boot installs must cover what the loop writes
+;;;
+;;; The live drive died in its first second on `Bad entity attribute
+;;; :seon.cluster.message/to`. Every suite was green, because every
+;;; fixture installs an EXPLICIT attribute list and so bypasses the rule
+;;; the boot path actually uses: `canonical-database-attributes`
+;;; installs entity-map entries by construction and standalone forms
+;;; only when they carry a persistence facet. Four families had no
+;;; entity map and therefore installed exactly one attribute each.
+;;;
+;;; These two tests are the recurring surface for that class. The subset
+;;; assertion is cheap and states the invariant; the transact-against-a
+;;; -boot-built-database test is the one with teeth, because it uses the
+;;; SAME derivation boot uses and then writes the rows the turn writes.
+;;; ---------------------------------------------------------------------------
+
+(deftest everything-the-loop-writes-is-installable-by-boot
+  (let [installable (set (schema/canonical-database-attributes))]
+    (testing "every attribute the loop commits"
+      (is (empty? (remove installable (cluster.loop/committed-attributes)))
+          "an attribute the loop writes that boot cannot install is a
+           run that dies on its first transaction"))
+    (testing "and every attribute the wake listens for"
+      (is (empty? (remove installable (wake/wake-attributes)))
+          "a wake attribute boot cannot install can never be committed,
+           so the loop would never wake at all"))))
+
+(deftest a-boot-built-database-takes-every-row-the-turn-writes
+  ;; NO explicit attribute list: the schema comes from the same
+  ;; derivation the ancestor build uses, so this database is the one the
+  ;; live drive boots onto.
+  (let [configuration {:store {:backend :memory :id (random-uuid)}
+                       :schema-flexibility :write}
+        _ (d/create-database configuration)
+        connection (d/connect configuration)]
+    (try
+      (d/transact connection
+                  (schema.datahike/malli->datahike-schema
+                   (schema/canonical-database-attributes)))
+      (testing "the trigger — the exact transact the live drive failed on"
+        (is (map? (d/transact connection
+                              [{:seon.cluster.agent/id "alice"}
+                               {:seon.cluster.message/id "m-live"
+                                :seon.cluster.message/to
+                                [:seon.cluster.agent/id "alice"]
+                                :seon.cluster.message/content "count the widgets"
+                                :seon.cluster.message/at now}]))))
+      (testing "the run, its agent pointer, and the trigger as tx-meta"
+        (is (map? (d/transact
+                   connection
+                   {:tx-data [{:seon.cluster.run/id "run-live"
+                               :seon.cluster.run/agent
+                               [:seon.cluster.agent/id "alice"]
+                               :seon.cluster.run/opened-at now
+                               :seon.cluster.run/claim-epoch 1
+                               :seon.cluster.run/process "process/one"
+                               :seon.cluster.run/lease-until now
+                               :seon.cluster.run/plan-digest
+                               (apply str (repeat 64 "a"))}
+                              {:seon.cluster.agent/id "alice"
+                               :seon.cluster.agent/run
+                               [:seon.cluster.run/id "run-live"]}]
+                    :tx-meta {:seon.db/trigger
+                              [:seon.cluster.message/id "m-live"]}}))))
+      (testing "one frozen form"
+        (is (map? (d/transact connection
+                              [{:seon.cluster.run.form/id "f-0"
+                                :seon.cluster.run.form/run
+                                [:seon.cluster.run/id "run-live"]
+                                :seon.cluster.run.form/ordinal 0
+                                :seon.cluster.run.form/source "(+ 1 1)"}]))))
+      (testing "a running receipt and its terminal, with a result"
+        (is (map? (d/transact connection
+                              [{:seon.cluster.eval/id "e-0"
+                                :seon.cluster.eval/run
+                                [:seon.cluster.run/id "run-live"]
+                                :seon.cluster.eval/ordinal 0
+                                :seon.cluster.eval/claim-epoch 1
+                                :seon.cluster.eval/at now
+                                :seon.cluster.eval/status :running}])))
+        (is (map? (d/transact connection
+                              [{:seon.cluster.eval/id "e-0"
+                                :seon.cluster.eval/status :done
+                                :seon.cluster.eval/result-edn "2"}]))))
+      (testing "and an error receipt, whose result and error both land"
+        (is (map? (d/transact connection
+                              [{:seon.cluster.eval/id "e-1"
+                                :seon.cluster.eval/run
+                                [:seon.cluster.run/id "run-live"]
+                                :seon.cluster.eval/ordinal 1
+                                :seon.cluster.eval/claim-epoch 1
+                                :seon.cluster.eval/at now
+                                :seon.cluster.eval/status :error
+                                :seon.cluster.eval/error "boom"
+                                :seon.cluster.eval/result-edn "{:seon.error/kind :x}"}]))))
+      (testing "the refs really are refs — a follow, not a string"
+        (is (= "alice"
+               (d/q '[:find ?id .
+                      :where
+                      [?m :seon.cluster.message/id "m-live"]
+                      [?m :seon.cluster.message/to ?agent]
+                      [?agent :seon.cluster.agent/id ?id]]
+                    @connection))))
+      (finally
+        (d/release connection)
+        (d/delete-database configuration)))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; The crash walk, as kill positions over facts
 ;;; ---------------------------------------------------------------------------
@@ -90,8 +202,6 @@
    :seon.cluster.message/content :seon.cluster.message/at
    :seon.db/trigger])
 
-(def ^:private now (Date. 1700000000000))
-(def ^:private process "process/one")
 (def ^:private request {:seon.cluster.run/process process
                         :seon.cluster.work/now now})
 

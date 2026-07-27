@@ -92,18 +92,27 @@
   believe."
   {:malli/schema [:=> [:cat] [:set :keyword]]}
   []
-  ;; COMPUTED from the transitions this namespace commits: every
-  ;; attribute N2's run model owns, plus the agent pointer the close
-  ;; retracts. Derived from the registered population by namespace
-  ;; rather than typed out, so a new run attribute joins it the moment
-  ;; it is registered — which is what makes the disjointness property a
-  ;; property and not a promise.
+  ;; COMPUTED from the DECLARED ENTITIES this loop writes — the run,
+  ;; its forms, and its receipts — plus the agent pointer a close
+  ;; retracts. Reading the entity maps rather than filtering the
+  ;; registry by namespace keeps out the things that live in those
+  ;; namespaces without being attributes: the entity maps themselves,
+  ;; and derived values like `:seon.cluster.run/missing-results`.
+  ;;
+  ;; Note what this set can and cannot prove. It is the right input for
+  ;; the wake/commit disjointness property, but it CANNOT by itself
+  ;; catch an attribute the boot path fails to install — a missing
+  ;; entity map removes the attribute from this set and from the
+  ;; installable set at once. The test that catches that class is the
+  ;; one that transacts these rows into a database built the way boot
+  ;; builds it.
   (into #{:seon.cluster.agent/run}
-        (filter (fn [attribute]
-                  (contains? #{"seon.cluster.run" "seon.cluster.run.form"
-                               "seon.cluster.eval"}
-                             (namespace attribute))))
-        (schema/canonical-database-attributes)))
+        (comp (mapcat (fn [entity]
+                        (drop 2 (schema/schema-definition entity))))
+              (map first))
+        [:seon.cluster.run/run
+         :seon.cluster.run.form/form
+         :seon.cluster.eval/receipt]))
 
 (defn disposition
   "The disposition an admitted eval value carries, or nil.
