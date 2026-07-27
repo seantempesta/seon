@@ -44,6 +44,7 @@
 (def skills-path (root-file ".agents/skills"))
 (def last-review-path (root-file "tmp/.last-review"))
 (def pending-review-path (root-file "tmp/.pending-review"))
+(def pending-review-lock-path (root-file "tmp/.pending-review.lock"))
 (def reviews-path (root-file "tmp/reviews"))
 (def max-pending-files 50)
 
@@ -336,8 +337,31 @@
     (spit last-review-path (str (System/currentTimeMillis)))
     (catch Exception _ nil)))
 
-(defn- read-pending
-  "Pending absolute review paths in edit order, or an empty vector."
+(defn- with-pending-lock
+  "Run one pending-review state transition under an exclusive file lock."
+  [transition]
+  (try
+    (io/make-parents pending-review-path)
+    (with-open [file (java.io.RandomAccessFile. pending-review-lock-path "rw")
+                channel (.getChannel file)]
+      (let [_lock (.lock channel)]
+        ;; Closing the channel releases the lock; Babashka does not expose
+        ;; FileLock.close through SCI.
+        (transition)))
+    (catch Exception error
+      (log! "REVIEW_PENDING_LOCK_ERROR" (.getMessage error))
+      nil)))
+
+(defn- parse-pending-entry [line]
+  (let [[id path] (str/split line #"\t" 2)
+        legacy? (nil? path)
+        path (if legacy? id path)]
+    (when (seq path)
+      {:seon.review.pending/id (if legacy? (str "legacy:" path) id)
+       :seon.review.pending/path path})))
+
+(defn- read-pending-unlocked
+  "Pending review entries in edit order, or an empty vector."
   []
   (try
     (let [file (io/file pending-review-path)]
@@ -345,39 +369,63 @@
         (->> (str/split-lines (slurp file))
              (map str/trim)
              (remove str/blank?)
+             (keep parse-pending-entry)
              vec)
         []))
     (catch Exception _ [])))
 
-(defn- write-pending! [paths]
-  (try
-    (io/make-parents pending-review-path)
-    (spit pending-review-path
-          (str (str/join "\n" paths) (when (seq paths) "\n")))
-    (catch Exception _ nil)))
+(defn- read-pending []
+  (or (with-pending-lock read-pending-unlocked) []))
+
+(defn- write-pending-unlocked! [entries]
+  (spit pending-review-path
+        (str
+         (str/join
+          "\n"
+          (map
+           (fn [{:seon.review.pending/keys [id path]}]
+             (str id "\t" path))
+           entries))
+         (when (seq entries) "\n"))))
 
 (defn- accumulate-pending!
   "Append a path with newest-kept deduplication and a fixed file cap."
   [file-path]
   (try
     (when (seq file-path)
-      (let [current (vec (remove #(= % file-path) (read-pending)))
-            appended (conj current file-path)
-            dropped (max 0 (- (count appended) max-pending-files))
-            capped (vec (drop dropped appended))]
-        (when (pos? dropped)
-          (log! "REVIEW_PENDING_CAP" (str "dropped=" dropped)))
-        (write-pending! capped)))
+      (with-pending-lock
+        (fn []
+          (let [current
+                (vec
+                 (remove
+                  #(= file-path (:seon.review.pending/path %))
+                  (read-pending-unlocked)))
+                appended
+                (conj current
+                      {:seon.review.pending/id
+                       (str (java.util.UUID/randomUUID))
+                       :seon.review.pending/path file-path})
+                dropped (max 0 (- (count appended) max-pending-files))
+                capped (vec (drop dropped appended))]
+            (when (pos? dropped)
+              (log! "REVIEW_PENDING_CAP" (str "dropped=" dropped)))
+            (write-pending-unlocked! capped)))))
     (catch Exception error
       (log! "REVIEW_PENDING_ERROR" (.getMessage error))
       nil)))
 
 (defn- clear-reviewed-pending!
-  "Remove only reviewed paths, preserving edits appended during the call."
-  [reviewed-paths]
+  "Remove only drained entries, preserving edits appended during review."
+  [reviewed-entries]
   (try
-    (let [reviewed (set reviewed-paths)]
-      (write-pending! (remove reviewed (read-pending))))
+    (with-pending-lock
+      (fn []
+        (let [reviewed-ids
+              (into #{} (map :seon.review.pending/id) reviewed-entries)]
+          (write-pending-unlocked!
+           (remove
+            #(contains? reviewed-ids (:seon.review.pending/id %))
+            (read-pending-unlocked))))))
     (catch Exception _ nil)))
 
 (def ^:private truncation-notice
@@ -594,13 +642,13 @@
                   files
                   (->> pending
                        (keep
-                        (fn [path]
+                        (fn [{:seon.review.pending/keys [path] :as entry}]
                           (when-let [content
                                      (try
                                        (slurp path)
                                        (catch Exception _ nil))]
                             (when (seq content)
-                              {:path path :content content}))))
+                              (assoc entry :path path :content content)))))
                        vec)]
               (when (seq files)
                 (let [prompt
@@ -628,7 +676,7 @@
                                  ", "
                                  (map #(-> % :path io/file .getName) files))]
                       (when artifact
-                        (clear-reviewed-pending! pending))
+                        (clear-reviewed-pending! files))
                       (clip-review-feedback
                        config
                        (str "Gemini review (" names ")"
