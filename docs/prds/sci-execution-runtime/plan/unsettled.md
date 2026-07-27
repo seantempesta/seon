@@ -245,9 +245,24 @@ request/response shapes; a live flow graph driving step; the kill -9
 child); the seon.sci.eval adoption rung; digest SHA-256 helper
 triplicated (ancestor/config/loop — wants one owner, queue). N4 PLAN
 REVIEWED (399e818b4): NOT ready to seal — revision lane running.
-IN FLIGHT (three lanes): flow-deletion cuts seon.flow/database-proc +
-helpers + schema row + pinning tests (deletion doctrine, same
-commit); n4-plan revision; the Opus agent idle-until-next-assignment. n5-plan 909394481 awaits deep review at its
+DATABASE-PROC DELETED (c7a93b075, -446 lines: proc + three private
+helpers + four schema rows + pinning tests in the same commit per the
+deletion doctrine; gate 147/640/0 INDEPENDENTLY VERIFIED; lost
+incidental coverage named honestly in the commit — the surviving
+owner is seon.cluster.loop + wake under their own suites).
+IN FLIGHT (one lane): n4-plan-revise (fresh lane — the original
+n4-plan lane had no resumable session) revises the N4 plan against
+its 399e818b4 review. NEXT SESSION'S SPINE, in order: (1) the N3
+integration proof, orchestrator-owned — bin/repl or clojure -M:dev,
+start! a cluster, install a live flow graph with the loop proc, drive
+one REAL turn (one live DeepSeek call proving request/response
+shapes), then kill -9 the child and prove interrupted+adapt; (2) the
+seon.sci.eval adoption rung (the evaluator symbol injects into
+turn/step untouched); (3) rule the N4/N5 owner-decision batches +
+R41-vs-marker + [:maybe]-in-fn-returns with Sean; (4) digest SHA-256
+helper triplication (ancestor/config/loop) wants one owner; (5) task
+#3 MCP verify (needs Sean's restart). The Opus drafting agent
+(SendMessage name a96513c593d3a6a83) holds the full N3 context. n5-plan 909394481 awaits deep review at its
 rung; GC verdict recorded above. Its accepted design: process-local
 store holder + refcount under ONE lock with running-instances;
 stop! also releases branch connection, last instance releases the
