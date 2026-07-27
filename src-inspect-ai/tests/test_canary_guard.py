@@ -18,7 +18,16 @@ DATASETS_DIR = DEFAULT_LOCK_PATH.parent
 
 # The scan surface: everything an agent or the harness could pick context up
 # from. reference-code/ (vendored deps) and build/log dirs are out of scope.
-SCAN_DIRS = ["src", "docs", "config", "seon-skills", "src-inspect-ai", "test"]
+SCAN_DIRS = [
+    "src",
+    "src-old",
+    "test",
+    "test-old",
+    "docs",
+    "config",
+    "seon-skills",
+    "src-inspect-ai",
+]
 
 SKIP_DIR_NAMES = {
     ".git",

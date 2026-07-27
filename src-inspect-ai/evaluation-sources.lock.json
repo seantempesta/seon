@@ -44,6 +44,8 @@
   },
   "seon_admitted_paths": [
     "src",
+    "src-old",
+    "test-old",
     "script",
     "resources",
     "config",

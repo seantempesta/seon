@@ -127,7 +127,8 @@ def test_selected_lock_admits_runtime_build_inputs():
     lock = json.loads(source_admission.DEFAULT_LOCK_PATH.read_text())
     admitted = set(lock["seon_admitted_paths"])
     assert {
-        "src", "script", "resources", "config", "seon-skills", "acme",
+        "src", "src-old", "test-old",
+        "script", "resources", "config", "seon-skills", "acme",
         "bb.edn", "build.clj", "deps.edn",
         "shadow-cljs.edn", "package.json", "package-lock.json",
         "bin/seon", "bin/acme", "bin/fix-bootstrap-macros",
