@@ -101,10 +101,25 @@ instance-addressed), close tolerates a broken agent pointer silently
 (run.cljc:419 — refuse, never omit). Plus the standing Gemini backlog
 race and the issue-index lifecycle cleanup.
 
-NEXT, in order: **B2 contract sealing by the orchestrator** (ONE
-author pass: branch-per-cluster contracts + B0/B1/N2 revisions =
-verdict changes + the three review fixes + lease deletion + receipt
-fencing) — config→
+**B2 wave progress:** revision chunk SEALED (`78ddeb885` — store map
+arg + open-branch! + fence-survives-failed-release; B0 store-dir/
+ancestor-branch + instance-addressed stop!; N2 close
+::agent-pointer-broken; falsifiers sealed for each) — implementation
+lane b2-revisions-impl making it green. fork-roster-fix lane running
+(falsifier-first, blocking registry work). Issue triage done
+(`90a3cac60`+`865431fec`): 164 stale notes archived, 17 real open
+issues mapped to rungs (see triage table in the lane summary /
+index.md). Lease deletion + receipt fencing deferred to N3 sealing
+(their consumer).
+
+NEXT: **chunk 2 authoring — the six new B2 namespaces** (fresh-window
+work; b2-plan §9 has seal-ready candidates + §7 the reconcile
+algorithm quarried): seon.schema.edn, seon.reconcile (plan/reconcile!
+— pure plan BEFORE transact, empty = NO transaction, :max-tx unchanged
+= converged; reuses the N2 [:db.fn/call #'f] idiom), seon.config (+ THE
+default manifest — honest dials = seon.flow's + on-core-error, never
+State A's 39), seon.cluster.ancestor, seon.cluster.registry (needs the
+fork fix landed), seon.cluster.export. Then implementation lanes — config→
 facts (pure plan before transact; empty plan = NO transaction; :max-tx
 unchanged = converged), schema-EDN loader + one admission gate,
 branch-per-cluster (open-branch!, ancestor genesis, the ~15-line fork
