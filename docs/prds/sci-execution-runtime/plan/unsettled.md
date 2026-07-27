@@ -142,10 +142,18 @@ to TYPES only, so the two refs use the one supported idiom
 recurses through :and heads). PROVEN: (require 'seon.cluster
 'seon.config) clean; bin/test 87/359/7 where the 7 failures are
 EXACTLY the sealed composition falsifiers awaiting implementation.
-The composition agent (the Opus agent that drafted+implemented the
-fork machinery; tower probe: ancestor build 717ms, fork 19ms,
-converged re-apply :max-tx unchanged) is RESUMED and implementing
-start!/stop! to green. Its accepted design: process-local
+COMPOSITION GREEN (2d2655922, full gate 87/358/0 independently
+re-verified; live probe: siblings share one store, last stop frees the
+flock, failed tower leaves a working REPL, same name restarts clean).
+Seal-side follow-ups b3b8d6a92 (honest crash walk, populate-ancestor!
+contract, trust-list-inert + half-released-stop! issue evidence). The
+GC experiment is ANSWERED (4a70900e1): retire ~50-60ms, reclaiming GC
+~160-255ms, storage halved, survivors exact — retire casually at
+teardown, coalesce full-store GC. N3 rulings recorded (858436ca8):
+interrupted+adapt no auto-retry, my.run = complete/wait only, run-why
+= trigger ref as tx-meta. IN FLIGHT: the Opus agent drafts the N3
+value-admission package contracts (ruled: own small package, FIRST);
+n5-plan landed 909394481 awaiting deep review at its rung. Its accepted design: process-local
 store holder + refcount under ONE lock with running-instances;
 stop! also releases branch connection, last instance releases the
 store (stop!'s docstring needs that revision — seal owner's). Its
