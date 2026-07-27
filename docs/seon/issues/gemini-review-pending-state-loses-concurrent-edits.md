@@ -19,7 +19,7 @@ that an edit was reviewed when it was silently lost.
 
 ## Evidence
 
-- `bin/seon-hook:338-380` implements `read-pending`, `write-pending!`,
+- `bin/seon-hook:339-381` implements `read-pending`, `write-pending!`,
   `accumulate-pending!`, and `clear-reviewed-pending!` with separate `slurp`
   and `spit` calls and no lock or generation.
 - If hooks A and B both read the same pending vector, A writes path A and B
@@ -27,6 +27,12 @@ that an edit was reviewed when it was silently lost.
 - `clear-reviewed-pending!` removes a set of path strings from the current
   file. If path P is edited again during the model call, the new occurrence is
   indistinguishable from the reviewed snapshot and is removed.
+- `gemini-review-feedback` clears the complete `pending` snapshot at
+  `bin/seon-hook:593-631`, not the subset of paths successfully read into
+  `files`. A deleted, empty, or transiently unreadable path is cleared as
+  reviewed when some other file produces an artifact.
+- `utc-review-path` has second-level filename precision. Concurrent reviews in
+  one second may overwrite the same full-review artifact.
 - This repository intentionally runs multiple edit lanes in one checkout, so
   concurrent PostToolUse hooks are a normal operating condition.
 
@@ -50,5 +56,8 @@ introduce a second review queue.
   written.
 - A killed/timed-out review preserves every pending generation for a later
   attempt.
+- An unreadable or empty pending file remains pending; absence of source text
+  is not recorded as successful review.
+- Concurrent successful reviews publish distinct artifacts.
 - A concurrent-process regression exercises publication, review, re-edit, and
   clear.
