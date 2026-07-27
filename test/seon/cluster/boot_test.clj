@@ -16,6 +16,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [seon.cluster :as cluster]
+            [seon.cluster.store :as store]
             [seon.schema]))
 
 ;;; ---------------------------------------------------------------------------
@@ -252,5 +253,78 @@
                 "the replacement's advertisement survived")
             (finally
               (cluster/stop! replacement)))))
+      (finally
+        (delete-recursively! root)))))
+
+;;; ---------------------------------------------------------------------------
+;;; The composed tower — store, ancestor, fork, config, one start!
+;;; ---------------------------------------------------------------------------
+
+(deftest the-tower-stands-in-one-start
+  (let [root (fresh-root)]
+    (try
+      (let [started-at (System/nanoTime)
+            instance (cluster/start! {:seon.boot/cluster-name "tower"
+                                      :seon.boot/root root})
+            elapsed-ms (/ (- (System/nanoTime) started-at) 1e6)]
+        (try
+          (testing "every tower field is present — nothing degraded"
+            (is (some? (:seon.store/store instance)))
+            (is (store/connection?
+                 (:seon.boot/cluster-connection instance)))
+            (is (map? (:seon.boot/config-result instance))))
+          (testing "the whole tower beats the ten-second ruling"
+            (is (< elapsed-ms 10000)
+                (str "start!->tower took " elapsed-ms " ms")))
+          (testing "a second cluster in the same process forks
+                    near-instantly off the shared store"
+            (let [forked-at (System/nanoTime)
+                  sibling (cluster/start! {:seon.boot/cluster-name "twr2"
+                                           :seon.boot/root root})
+                  fork-ms (/ (- (System/nanoTime) forked-at) 1e6)]
+              (try
+                (is (some? (:seon.boot/cluster-connection sibling)))
+                (is (identical? (:seon.store/store instance)
+                                (:seon.store/store sibling))
+                    "siblings share the ONE process-root store")
+                (is (< fork-ms 2000)
+                    (str "sibling fork took " fork-ms " ms"))
+                (finally
+                  (cluster/stop! sibling)))))
+          (finally
+            (cluster/stop! instance))))
+      (finally
+        (delete-recursively! root)))))
+
+(deftest a-failed-tower-never-takes-the-repl
+  ;; owner ruling: the REPL is always useful for debugging — a corrupt
+  ;; store fails the boot LOUDLY while the socket stays up
+  (let [root (fresh-root)]
+    (try
+      ;; a FILE where the store directory belongs corrupts layer 1
+      (spit (io/file root "store") "not a store")
+      (let [degraded
+            (try
+              (cluster/start! {:seon.boot/cluster-name "wreck"
+                               :seon.boot/root root})
+              (is false "the failed boot must throw")
+              nil
+              (catch Exception e
+                (:seon.boot/instance (ex-data e))))]
+        (is (map? degraded)
+            "the throw carries the degraded instance")
+        (is (nil? (:seon.store/store degraded))
+            "the tower fields are absent from the failure point")
+        (let [advertisement (cluster/read-advertisement root "wreck")]
+          (is (some? advertisement)
+              "the advertisement survived the failure")
+          (is (= "\"alive\""
+                 (prepl-eval (:seon.boot/prepl-host advertisement)
+                             (:seon.boot/prepl-port advertisement)
+                             "\"alive\""))
+              "the REPL answers over the wreckage"))
+        (testing "the carried instance stops like any other"
+          (is (nil? (cluster/stop! degraded)))
+          (is (nil? (cluster/read-advertisement root "wreck")))))
       (finally
         (delete-recursively! root)))))

@@ -16,7 +16,24 @@
      (io-prepl) opens FIRST, before anything else, and the instance
      advertises its coordinate; the ten-second ruling is this layer's
      bound.
-  1. STORE (B1, next rung — not in this namespace).
+  1. STORE. start! opens the ONE process-root store (B1's open-store!,
+     first instance only — later instances of this process reuse it),
+     ensures the bootstrap ancestor (seon.cluster.ancestor/ensure!),
+     forks/finds the cluster's branch
+     (seon.cluster.registry/ensure-cluster!) and opens its connection
+     (store/open-branch!).
+  2. FACTS. Config applies (seon.config/apply! — converged = zero
+     writes) against the cluster branch; runtime reads the database
+     from here on.
+
+  FAILED BOOT SEMANTICS (owner ruling 2026-07-27): the REPL is never
+  hostage to anything downstream. When a later layer fails, start!
+  THROWS — loud, the error dial decides panic vs record — but the prepl
+  socket and its advertisement STAY UP for live diagnosis, and the
+  degraded instance stays in the registry so stop! cleans it normally.
+  Which layers stand is readable from the instance value itself: the
+  tower fields are absent exactly where boot stopped — absence over
+  status booleans.
   2. FACTS and 3. FLOW (B2/N3): the flow graph definition is data
      derived from database facts at a basis; graph transforms are
      referenced as VARS so re-evaluating a defn updates a running proc
@@ -238,16 +255,21 @@
         (str (pr-str advertisement) "\n")))
 
 (defn start!
-  "Start one cluster instance in this JVM, REPL FIRST.
+  "Start one cluster instance in this JVM, REPL FIRST, then the tower.
   Order: resolve paths and create directories → open the io-prepl
-  socket server (clojure.core.server, `:accept
-  clojure.core.server/io-prepl`) → write the advertisement (real bound
-  port, this process's pid and start-instant from
-  java.lang.ProcessHandle) → return the instance value. No store, no
-  database, no flow graph — those are later rungs stacked ON this
-  value. Two instances in one JVM are fully independent except the
-  shared root executors. Refuses a second start! for a cluster this
-  JVM already has running (one instance per cluster per process)."
+  socket server and write the advertisement (real bound port, pid,
+  start-instant — the REPL is live from here NO MATTER WHAT) → open the
+  process-root store (first instance; siblings reuse the held store) →
+  ancestor/ensure! (population from :seon.boot/ancestor-branch when
+  supplied, else the default schema population) → registry/
+  ensure-cluster! → store/open-branch! → config/apply! with the shipped
+  defaults → return the complete instance. A later-layer failure THROWS
+  with the DEGRADED INSTANCE in the ex-data under :seon.boot/instance
+  (tower fields absent from the failure point) while the REPL and
+  advertisement survive; the instance stays registered, and the caller
+  stops it through that carried value like any other. Two instances in one JVM share the root store and executors,
+  nothing else. Refuses a second start! for a cluster this JVM already
+  has running."
   {:malli/schema [:=> [:cat :seon.boot/overrides] :seon.boot/instance]}
   [overrides]
   (let [config (resolve-bootstrap overrides)
