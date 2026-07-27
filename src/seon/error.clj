@@ -123,12 +123,14 @@
     commit time as the explanation message's content, and that is not a
     stored-derived slip: a message is a historical fact about what an
     agent WAS TOLD, and it must not silently change when the error's
-    context does. The same function feeds the derived `problems` block
-    (step 3) and the failover \"you are the backup, and why\" notice
-    (step 5) — one derivation, three consumers, never three renderers.
+    context does. The same function will feed the failover \"you are the
+    backup, and why\" notice — one derivation, several consumers, never
+    several renderers.
   - `log-line` (`:seon.render/log`) is a structured single line, DERIVED
     and never stored. Nothing durable depends on it, so it may change
-    shape freely.
+    shape freely. `seon.problems` COMPOSES it rather than reformatting
+    an error its own way, so there is one place that decides what an
+    error looks like in a log.
 
   Crash walk. Normalization is PURE: it opens nothing, writes nothing,
   and holds no lock. Killed before it, during it, or after it and before
@@ -488,6 +490,18 @@
                 :where [?agent :seon.cluster.agent/id ?id]]
               db agent-id)))
 
+(defn- entity-exists?
+  "True when `db` really has an entity with that identity attribute.
+  Attribution is a lookup ref, and a lookup ref to something that does
+  not exist fails the WHOLE transaction — the same way an unknown
+  recipient would. The recorder may not be destroyed by the pointer it
+  was handed: a run that vanished costs the REF, never the record."
+  [db attribute value]
+  (some? (d/q '[:find ?entity .
+                :in $ ?attribute ?value
+                :where [?entity ?attribute ?value]]
+              db attribute value)))
+
 (defn- recurrence
   "How many errors of this signature this process has already committed.
   DERIVED, never a stored tally — the count is the query. Scoped to the
@@ -540,6 +554,12 @@
   caller sets — the same rule as everywhere else in this family, that
   the shape of the thing decides:
 
+  ATTRIBUTION IS DROPPED, NEVER FATAL. A `run` or `agent` the caller
+  named that this database does not have contributes no ref: a lookup
+  ref to a missing entity fails the whole transaction, and an error
+  destroyed by its own attribution is the recorder failing at the one
+  thing it exists for. Who is told:
+
   - the ATTRIBUTED agent, when the caller could name one AND the error
     was a THROWABLE that escaped our code (the fact carries a `class`).
     That is the case where the agent's run was interrupted by our bug
@@ -591,26 +611,49 @@
                                  :seon.error/process process
                                  :seon.sci.admit/caps caps}
                           basis-t (assoc :seon.error/basis-t basis-t)
-                          run-id (assoc :seon.cluster.run/id run-id)
-                          agent-id (assoc :seon.cluster.agent/id agent-id)))
+                          (and run-id (entity-exists? db :seon.cluster.run/id run-id))
+                          (assoc :seon.cluster.run/id run-id)
+                          (and agent-id
+                               (entity-exists? db :seon.cluster.agent/id agent-id))
+                          (assoc :seon.cluster.agent/id agent-id)))
         occurrence (inc (recurrence db (:seon.error/signature fact) process))
-        recurring? (= occurrence limit)
+        ;; A MISASSEMBLED CALLER MUST NOT BREAK THE RECORDER. The limit
+        ;; is a required request key, but requiredness is a contract and
+        ;; contracts are not enforced until instrumentation is on — and
+        ;; `(> 1 nil)` throws, out of the one function whose whole job
+        ;; is that recording an error cannot fail. The recursion fence
+        ;; covers OUR bugs too. No invented number: with no honest limit
+        ;; the fact is committed and nothing is mailed, which is the
+        ;; conservative half of the storm fence rather than a guess at
+        ;; what the caller meant.
+        bounded? (pos-int? limit)
+        recurring? (and bounded? (= occurrence limit))
         ;; PAST the limit nothing is said at all. The facts keep
         ;; committing — they are the evidence, and a query counts them —
         ;; but the escalation has already been sent once and repeating
         ;; it is the storm rather than the warning.
-        silent? (> occurrence limit)
+        silent? (or (not bounded?) (> occurrence limit))
         ;; the fact says whether this was a Throwable; nothing else has
         ;; to be asked, and no caller gets to have an opinion about it
         interrupted-a-run? (some? (:seon.error/class fact))
+        ;; ATTRIBUTION IS READ BACK OFF THE FACT, never off the request.
+        ;; The two differ exactly when the caller named an agent this
+        ;; database does not have: attribution is dropped, and asking
+        ;; the request instead would take the `:your-run` branch (which
+        ;; then addresses nobody) while suppressing the
+        ;; `:no-attributable-agent` escalation — an interrupting error
+        ;; recorded and told to NOBODY. Review-caught; the general rule
+        ;; is that a decision about the fact is made from the fact.
+        attributed (second (:seon.error/agent fact))
         tell (fn [recipient reason]
                (when (and recipient (agent-exists? db recipient))
                  (message-tx fact recipient reason)))]
     (into [(assoc fact :db/id fact-tempid)]
           (remove nil?)
-          [(when (and agent-id interrupted-a-run? (not recurring?) (not silent?))
-             (tell agent-id :your-run))
-           (when (and interrupted-a-run? (not agent-id) (not silent?))
+          [(when (and attributed interrupted-a-run?
+                      (not recurring?) (not silent?))
+             (tell attributed :your-run))
+           (when (and interrupted-a-run? (not attributed) (not silent?))
              (tell escalate-to :no-attributable-agent))
-           (when (and recurring? (not= escalate-to agent-id))
+           (when (and recurring? (not= escalate-to attributed))
              (tell escalate-to :recurring))])))

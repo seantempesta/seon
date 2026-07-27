@@ -1,0 +1,217 @@
+(ns seon.problems
+  "Everything wrong RIGHT NOW, derived from the facts that say so.
+
+  THE PULL SIDE OF THE PUSH. `seon.error` commits a fault and mails an
+  explanation; this reads the same facts back and answers \"what is
+  broken?\" for whoever asks — a human at the REPL, a failing drive, and
+  (when N4 lands) a prompt block and a surface. Same facts, no second
+  store, no acknowledgement flag, no `seen-at`, nothing stamped when
+  something is fixed. A problem stops being a problem when the facts
+  stop saying so, which is the only definition that cannot go stale.
+
+  PURE, over a database value and one set. Everything it needs is a
+  query except which processes are alive, and that is an observable
+  fact about the operating system rather than something the database
+  can know — so it is a parameter, by the same name
+  `run/recover-tx` already uses.
+
+  A HEALTHY CLUSTER DERIVES `{}`. The value is a map keyed by FAMILY and
+  an empty family is ABSENT, never an empty vector and never a
+  `:healthy? true`. That does two jobs at once: `(seq (problems …))` is
+  the whole question \"is anything wrong\", and no entry needs a
+  `:type` discriminator because the key a family arrives under IS the
+  family.
+
+  FOUR FAMILIES, and each one is a fact nobody has to maintain:
+
+  - ERROR SIGNATURES — every committed `:seon.error` fact, grouped by
+    signature. Grouping is the point: a hundred errors of one signature
+    is ONE problem that recurred a hundred times, and listing it a
+    hundred times would bury the other three. The latest occurrence
+    rides along in full, so the log projection composes the ordinary
+    per-fact line and a digger needs no second lookup.
+  - WEDGED RUNS — a run held by a process that is not in the live set.
+    No clock: liveness is observable, and a deadline standing in for it
+    is the tuned constant the standing ruling bans.
+  - FAILED RUNS — a run that closed carrying WHY. The agent reads this
+    in its next prompt; a human reading problems sees the same fact
+    from the other side.
+  - ERRORED RECEIPTS — one form of one plan that errored. An agent's
+    own mistake is NOT a core fault and never becomes an error fact,
+    but a plan that keeps erroring is something a human wants to see.
+    The distinction survives into the value instead of being flattened.
+
+  WHAT IS DELIBERATELY NOT HERE: a stale-trigger family. \"Unanswered\"
+  is derivable and already owned (`work/unanswered-triggers`); STALE is
+  not, because it needs a threshold, and a threshold here would be a
+  number standing in for an event we cannot observe — a trigger is
+  unanswered for a perfectly healthy instant between its commit and the
+  loop's next pass. When the loop publishes a pass boundary, staleness
+  becomes derivable from THAT and this is where it lands.
+
+  Crash walk: pure, reads only. A kill loses a value nobody had
+  committed; the next caller re-derives it from the same facts."
+  (:require [clojure.string :as str]
+            [datahike.api :as d]
+            [seon.error :as error]
+            [seon.schema.edn :as schema.edn]))
+
+;;; ---------------------------------------------------------------------------
+;;; Schemas — src/seon/schema/problems.edn
+;;; ---------------------------------------------------------------------------
+
+(schema.edn/load! {})
+
+;;; ---------------------------------------------------------------------------
+;;; The four derivations
+;;; ---------------------------------------------------------------------------
+
+(defn- error-signatures
+  "Every committed error, grouped by signature, worst-recurring first."
+  [db]
+  (->> (d/q '[:find [(pull ?error [*]) ...]
+              :where [?error :seon.error/signature _]]
+            db)
+       (group-by :seon.error/signature)
+       (mapv (fn [[signature facts]]
+               (let [latest (last (sort-by (comp inst-ms :seon.error/at) facts))]
+                 {:seon.error/signature signature
+                  :seon.error/kind (:seon.error/kind latest)
+                  :seon.problems/occurrences (count facts)
+                  ;; the entity id is Datahike's, not ours; a projected
+                  ;; fact carrying it would not validate as one
+                  :seon.error/fact (dissoc latest :db/id)})))
+       (sort-by (juxt (comp - :seon.problems/occurrences)
+                      :seon.error/signature))
+       vec))
+
+(defn- wedged-runs
+  "Runs held by a process that is not alive. Open runs only: a closed
+  run held by a dead process is finished work, not stuck work."
+  [db live-processes]
+  (->> (d/q '[:find ?id ?agent-id ?process
+              :where
+              [?run :seon.cluster.run/id ?id]
+              [?run :seon.cluster.run/process ?process]
+              (not [?run :seon.cluster.run/closed-at _])
+              [?run :seon.cluster.run/agent ?agent]
+              [?agent :seon.cluster.agent/id ?agent-id]]
+            db)
+       (remove (fn [[_ _ process]] (contains? live-processes process)))
+       (sort)
+       (mapv (fn [[id agent-id process]]
+               {:seon.cluster.run/id id
+                :seon.cluster.agent/id agent-id
+                :seon.cluster.run/process process}))))
+
+(defn- failed-runs
+  [db]
+  (->> (d/q '[:find ?id ?agent-id ?error
+              :where
+              [?run :seon.cluster.run/id ?id]
+              [?run :seon.cluster.run/error ?error]
+              [?run :seon.cluster.run/agent ?agent]
+              [?agent :seon.cluster.agent/id ?agent-id]]
+            db)
+       (sort)
+       (mapv (fn [[id agent-id message]]
+               {:seon.cluster.run/id id
+                :seon.cluster.agent/id agent-id
+                :seon.cluster.run/error message}))))
+
+(defn- errored-receipts
+  [db]
+  (->> (d/q '[:find ?id ?run-id ?ordinal
+              :where
+              [?receipt :seon.cluster.eval/status :error]
+              [?receipt :seon.cluster.eval/id ?id]
+              [?receipt :seon.cluster.eval/ordinal ?ordinal]
+              [?receipt :seon.cluster.eval/run ?run]
+              [?run :seon.cluster.run/id ?run-id]]
+            db)
+       (sort)
+       (mapv (fn [[id run-id ordinal]]
+               (let [message (d/q '[:find ?error .
+                                    :in $ ?id
+                                    :where
+                                    [?receipt :seon.cluster.eval/id ?id]
+                                    [?receipt :seon.cluster.eval/error ?error]]
+                                  db id)]
+                 (cond-> {:seon.cluster.eval/id id
+                          :seon.cluster.run/id run-id
+                          :seon.cluster.eval/ordinal ordinal}
+                   ;; a receipt can error with no message — absence is
+                   ;; the state, and an empty string would be a lie
+                   message (assoc :seon.cluster.eval/error message)))))))
+
+;;; ---------------------------------------------------------------------------
+;;; The one derivation
+;;; ---------------------------------------------------------------------------
+
+(defn problems
+  "Everything wrong now, as a map keyed by family. `{}` when nothing is.
+  Pure over `db` plus `:seon.cluster.run/live-processes`, the same set
+  by the same name `run/recover-tx` takes — liveness is the one thing a
+  database cannot know about the operating system.
+
+  An empty family is ABSENT rather than an empty vector, so a healthy
+  cluster derives `{}` and `(seq (problems …))` is the whole question.
+  When anything IS wrong the value also carries `:seon.render/log`, so
+  it routes through the one projection router like any other unit; a
+  `{}` declares no projection, because there is nothing to say.
+
+  Ordering is deterministic and meaningful, not incidental: error
+  signatures come worst-recurring first, and every other family sorts
+  by its own identity so two derivations of one database value are the
+  same value."
+  {:malli/schema [:=> [:cat :any :seon.problems/request]
+                  :seon.problems/problems]}
+  [db {:keys [:seon.cluster.run/live-processes]}]
+  (let [signatures (error-signatures db)
+        wedged (wedged-runs db live-processes)
+        failed (failed-runs db)
+        errored (errored-receipts db)
+        found (cond-> {}
+                (seq signatures) (assoc :seon.problems/error-signatures signatures)
+                (seq wedged) (assoc :seon.problems/wedged-runs wedged)
+                (seq failed) (assoc :seon.problems/failed-runs failed)
+                (seq errored) (assoc :seon.problems/errored-receipts errored))]
+    (cond-> found
+      (seq found) (assoc :seon.render/log `log-report))))
+
+(defn log-report
+  "`:seon.render/log` — the whole value as lines, newest concern first.
+  COMPOSES rather than reformats: an error signature's line is
+  `seon.error/log-line` over the latest fact, so the line a digger sees
+  in `problems` is byte-identical to the one the fault path emitted, and
+  there is exactly one place that decides what an error looks like in a
+  log. The other three families have no per-fact owner, so their lines
+  are built here, in the same `key=value` grammar.
+
+  Returns \"\" for a healthy cluster — nothing wrong is nothing to say,
+  and a cheerful \"no problems\" line is noise in a log that only exists
+  to be grepped."
+  {:malli/schema [:=> [:cat :seon.problems/problems] :string]}
+  [found]
+  (->> (concat
+        (for [entry (:seon.problems/error-signatures found)]
+          (str (error/log-line
+                (error/notice {:seon.error/fact (:seon.error/fact entry)}))
+               " occurrences=" (:seon.problems/occurrences entry)))
+        (for [entry (:seon.problems/wedged-runs found)]
+          (str "seon.problems wedged-run run=" (:seon.cluster.run/id entry)
+               " agent=" (:seon.cluster.agent/id entry)
+               " held-by=" (:seon.cluster.run/process entry)
+               " (that process is not alive)"))
+        (for [entry (:seon.problems/failed-runs found)]
+          (str "seon.problems failed-run run=" (:seon.cluster.run/id entry)
+               " agent=" (:seon.cluster.agent/id entry)
+               " error=" (pr-str (:seon.cluster.run/error entry))))
+        (for [entry (:seon.problems/errored-receipts found)]
+          (str "seon.problems errored-receipt receipt="
+               (:seon.cluster.eval/id entry)
+               " run=" (:seon.cluster.run/id entry)
+               " ordinal=" (:seon.cluster.eval/ordinal entry)
+               (when-let [message (:seon.cluster.eval/error entry)]
+                 (str " error=" (pr-str message))))))
+       (str/join "\n")))

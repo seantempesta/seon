@@ -181,13 +181,26 @@
               (is (some? (:seon.error/data-edn fact)))
               (is (map? (clojure.edn/read-string (:seon.error/data-edn fact)))))
             (testing "and root was told, because nobody else could be"
-              (let [told (await-fact connection
-                                     (fn [db] (seq (messages-to db "root"))))
-                    message (first told)]
-                (is (= 1 (count told)))
-                (is (str/includes? (:seon.cluster.message/content message)
-                                   (:seon.error/id fact))
-                    "the message names the evidence")
+              ;; WAIT FOR THE MESSAGE THAT NAMES THIS FACT, never for a
+              ;; COUNT. Counting here was the one-in-three flake: the
+              ;; injected fault storms until the fence bounds it, so
+              ;; "exactly one message" is true only in the instant
+              ;; between the first commit and the second. What is
+              ;; actually being claimed is that the fault reached root
+              ;; with its evidence; the BOUND on how many is the storm
+              ;; test below, and an upper bound is monotone-safe where
+              ;; an equality is a race.
+              (let [message (await-fact
+                             connection
+                             (fn [db]
+                               (first
+                                (filter
+                                 (fn [candidate]
+                                   (str/includes?
+                                    (:seon.cluster.message/content candidate)
+                                    (:seon.error/id fact)))
+                                 (messages-to db "root")))))]
+                (is (some? message) "the message names the evidence")
                 (is (some? (:seon.cluster.message/about message))
                     "and points at the fact — the absence of `about` on an
                      ordinary user message is what makes the storm fence

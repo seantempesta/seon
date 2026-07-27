@@ -37,7 +37,9 @@
             [clojure.test.check.properties :as prop]
             [seon.error :as error]
             [seon.render :as render]
-            [seon.schema]))
+            [seon.schema]
+            [seon.schema.datahike :as schema.datahike]
+            [datahike.api :as d]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Fixtures — the three families, plus the hostile values
@@ -417,3 +419,172 @@
     (is (= (:seon.error/message fact) (:seon.error/message value)))
     (is (= (:seon.error/id fact) (:seon.error/id (:seon.error/data value)))
         "the value points at the durable evidence rather than copying it")))
+
+;;; ---------------------------------------------------------------------------
+;;; The commit — pure over a database value, so the whole rule is testable
+;;; ---------------------------------------------------------------------------
+
+;;; A real in-memory database with the canonical attributes installed,
+;;; because who-gets-told depends on which agents EXIST — and because
+;;; `canonical-database-attributes` is the live boot derivation, not a
+;;; hand-listed fixture set (the fixture-vs-live-boot class).
+(defn- with-db [body]
+  (let [configuration {:store {:backend :memory :id (random-uuid)}
+                       :schema-flexibility :write}
+        _ (d/create-database configuration)
+        connection (d/connect configuration)]
+    (try
+      (d/transact connection
+                  (schema.datahike/malli->datahike-schema
+                   (seon.schema/canonical-database-attributes)))
+      (d/transact connection [{:seon.cluster.agent/id "root"}
+                              {:seon.cluster.agent/id "agent-3"}])
+      (body connection)
+      (finally
+        (d/release connection)
+        (d/delete-database configuration)))))
+
+(defn- commit-request
+  [source extra]
+  (merge {:seon.error/source source
+          :seon.error/id (str (random-uuid))
+          :seon.error/at #inst "2026-07-27T21:00:00.000-00:00"
+          :seon.error/process process
+          :seon.sci.admit/caps caps
+          :seon.config.error/recurrence-limit 3
+          :seon.config.error/escalate-to "root"}
+         extra))
+
+(defn- commit!
+  "Commit one error and return [fact-count messages-by-recipient]."
+  [connection source extra]
+  (d/transact connection
+              (error/commit-tx @connection (commit-request source extra)))
+  (let [db @connection]
+    [(count (d/q '[:find ?e :where [?e :seon.error/id _]] db))
+     ;; ?message is bound so two messages to one recipient are two
+     ;; rows: a `[?to ...]` find returns a SET and would have counted
+     ;; a four-message storm as one
+     (frequencies
+      (map second
+           (d/q '[:find ?message ?to
+                  :where
+                  [?message :seon.cluster.message/about _]
+                  [?message :seon.cluster.message/to ?agent]
+                  [?agent :seon.cluster.agent/id ?to]]
+                db)))]))
+
+(deftest a-missing-recurrence-limit-records-and-stays-silent
+  ;; the recursion fence extended to OUR bugs: requiredness is a
+  ;; contract, contracts are unenforced until instrumentation is on, and
+  ;; `(> 1 nil)` thrown out of the recorder would mean an error that
+  ;; destroyed its own record. No invented default — the conservative
+  ;; half of the storm fence.
+  (with-db
+    (fn [connection]
+      (let [[facts messages]
+            (commit! connection
+                     (transform-error (ex-info "boom" {}))
+                     {:seon.config.error/recurrence-limit nil})]
+        (is (= 1 facts) "the fact is committed exactly as always")
+        (is (= {} messages) "and nobody is mailed on a caller we cannot trust")))))
+
+(deftest only-a-throwable-tells-the-attributed-agent
+  (with-db
+    (fn [connection]
+      (testing "a Throwable interrupted the agent's run, and it cannot know
+      unless told"
+        (let [[_ messages] (commit! connection
+                                    (transform-error (ex-info "boom" {}))
+                                    {:seon.cluster.agent/id "agent-3"
+                                     :seon.cluster.run/id "run-9"})]
+          (is (= {"agent-3" 1} messages))))))
+  (with-db
+    (fn [connection]
+      (testing "a refused transition is a VALUE: the run's own facts already
+      say what happened, so the fact is recorded and nobody is mailed"
+        (let [[facts messages]
+              (commit! connection
+                       {:seon.error/kind :seon.cluster.run/stale-epoch
+                        :seon.error/message "the claim epoch moved"}
+                       {:seon.cluster.agent/id "agent-3"
+                        :seon.cluster.run/id "run-9"})]
+          (is (= 1 facts))
+          (is (= {} messages)))))))
+
+(deftest an-agent-this-cluster-does-not-have-is-no-attribution-at-all
+  ;; review-caught: attribution is read off the FACT, not the request.
+  ;; Asking the request would take the :your-run branch — which then
+  ;; addresses nobody, because the agent does not exist — while
+  ;; suppressing the escalation, leaving an interrupting error recorded
+  ;; and told to NOBODY.
+  (with-db
+    (fn [connection]
+      (let [[facts messages] (commit! connection
+                                      (transform-error (ex-info "boom" {}))
+                                      {:seon.cluster.agent/id "ghost"})]
+        (is (= 1 facts))
+        (is (= {"root" 1} messages)
+            "it escalates exactly as an unattributable error does")))))
+
+(deftest an-unattributable-throwable-goes-to-the-escalation-owner
+  (with-db
+    (fn [connection]
+      (let [[_ messages] (commit! connection
+                                  (transform-error (ex-info "boom" {}))
+                                  {})]
+        (is (= {"root" 1} messages)))))
+  (with-db
+    (fn [connection]
+      (testing "and an escalation dial naming an agent this cluster does not
+      have costs the message, never the record"
+        (let [[facts messages]
+              (commit! connection
+                       (transform-error (ex-info "boom" {}))
+                       {:seon.config.error/escalate-to "nobody"})]
+          (is (= 1 facts))
+          (is (= {} messages)))))))
+
+(deftest the-storm-is-bounded-by-the-signature-count
+  ;; the live falsifier's unit twin: one signature repeated forever must
+  ;; not mail forever, because a message is a commit and a commit wakes
+  ;; the loop that faulted
+  (with-db
+    (fn [connection]
+      (let [source (transform-error (ex-info "the same bug" {}))
+            outcomes (mapv (fn [_] (commit! connection source {})) (range 6))
+            [facts messages] (last outcomes)]
+        (is (= 6 facts) "every occurrence is still evidence")
+        (is (= {"root" 4} messages)
+            "two ordinary escalations, one :recurring at the limit, then
+             silence — bounded at limit + 1 no matter how long it storms")))))
+
+(deftest a-message-id-is-derived-so-delivery-is-idempotent
+  (with-db
+    (fn [connection]
+      (let [source (transform-error (ex-info "boom" {}))
+            request (commit-request source {:seon.cluster.agent/id "agent-3"
+                                            :seon.cluster.run/id "run-9"})
+            tx (error/commit-tx @connection request)]
+        ;; the SAME request committed twice: re-execution after a crash
+        ;; must upsert, never double-send
+        (d/transact connection tx)
+        (d/transact connection tx)
+        (let [db @connection]
+          (is (= 1 (count (d/q '[:find ?e :where [?e :seon.error/id _]] db))))
+          (is (= 1 (count (d/q '[:find ?m :where
+                                 [?m :seon.cluster.message/about _]]
+                               db))))))))) 
+
+(deftest the-message-points-at-the-fact-it-explains
+  (with-db
+    (fn [connection]
+      (commit! connection (transform-error (ex-info "boom" {})) {})
+      (let [db @connection
+            about (d/q '[:find ?id .
+                         :where
+                         [?message :seon.cluster.message/about ?error]
+                         [?error :seon.error/id ?id]]
+                       db)]
+        (is (some? about)
+            "the tempid resolved: fact and message land in ONE transaction")))))
