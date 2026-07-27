@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, tooling, testing, agent]
 ---
@@ -61,3 +61,40 @@ introduce a second review queue.
 - Concurrent successful reviews publish distinct artifacts.
 - A concurrent-process regression exercises publication, review, re-edit, and
   clear.
+
+## Resolution
+
+Resolved by `f973b2d88`.
+
+`bin/seon-hook` now serializes pending-file transitions with an exclusive file
+lock and stores a UUID with each edit generation. Accumulation still applies
+newest-kept path deduplication and the 50-file cap, while review completion
+removes only UUIDs from the successfully materialized drained entries. A later
+edit of the same path therefore remains distinguishable and pending. Legacy
+path-only lines are read with stable legacy identities and rewritten in the
+new format on the next state transition.
+
+The deterministic Babashka probe
+`tmp/review-backlog-race-probe.clj` captured a batch, accumulated a distinct
+path and a new generation of the captured path, then cleared the captured
+batch:
+
+```text
+before-drain-clear [/repo/a.clj]
+arrived-during-review [/repo/b.clj /repo/a.clj]
+after-exact-clear [/repo/b.clj /repo/a.clj]
+```
+
+A live external review timed out twice and left all three pending UUID/path
+entries intact, proving the timeout path does not clear the backlog. A
+repository-local deterministic `agy` response then exercised a complete
+PostToolUse edit-to-review cycle:
+
+```text
+Gemini review (source.clj) —
+tmp/hook-e2e/tmp/reviews/20260727T153537.711Z.md:
+source.clj: review completed
+pending-after=
+```
+
+`bb bin/seon-hook <<<'{}'` and `git diff --check -- bin/seon-hook` also passed.

@@ -30,13 +30,12 @@ See `README.md` for the convention.
 | [Retain the flock when Datahike release fails](store-release-failure-drops-the-flock.md) | blocker | Core |
 | [`bin/seon up` exits 0 after a readiness timeout](operator-up-exits-zero-on-readiness-timeout.md) | blocker | general |
 
-## Friction (3)
+## Friction (2)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [And-wrapped secondary Datahike attribute is rejected](and-wrapped-secondary-datahike-attribute-is-rejected.md) | friction | Core |
 | [Keep the old source tree off Babashka's default classpath](babashka-default-classpath-exposes-src-old.md) | friction | general |
-| [Preserve concurrent edits in the Gemini review backlog](gemini-review-pending-state-loses-concurrent-edits.md) | friction | agent |
 
 ## Cleanup (1)
 
