@@ -82,8 +82,10 @@
               ;; every supplied override wins verbatim
               (every? (fn [[k v]] (= v (get config k))) overrides)
               ;; defaults fill exactly the absent keys
-              (= "default" (get config :seon.boot/cluster-name
-                                (:seon.boot/cluster-name overrides "default")))
+              (= (get overrides :seon.boot/cluster-name "default")
+                 (:seon.boot/cluster-name config))
+              (= (get overrides :seon.boot/root "data/clusters")
+                 (:seon.boot/root config))
               (string? (:seon.boot/log-dir config)))))
          :seed 20260727)]
     (is (true? (:result check))
