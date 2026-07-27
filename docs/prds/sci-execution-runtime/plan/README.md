@@ -342,6 +342,14 @@ down); that chain is condemned, not tuned. Context, same day: a deleted
 JVM REPL — with it. The REPL must never be hostage to a downstream
 process's build or gate.
 
+**Same ruling, second clause (owner, 2026-07-27): the CLJS build is OFF.
+No shadow-cljs anywhere in development — CLJ and the JVM only.** The
+operator stops owning the watcher and pod processes (the dev process set
+is writer + host + web-render); the changed-test hook stops running any
+CLJS boundary. This applies O13 (the pod dies unconditionally) to the
+development loop today instead of waiting for the group-5 cut: nothing
+may reintroduce a shadow build into the dev feedback path.
+
 ## 1. The base constructs
 
 Everything the runtime is made of. Every step below is an application of

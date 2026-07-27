@@ -217,28 +217,22 @@
                 "web-render" "http.port")))
 
 (defn- owned-process-graph
+  "The owned development process set is CLJ/JVM only (owner ruling
+  2026-07-27): no watcher, no pod — the CLJS build is off. The dev
+  processes are writer + host + web-render."
   [config]
   (let [source-checkout?
         (not= false (:seon.dev.config/source-checkout? config))
         descriptor (:seon.dev.config/launch-descriptor config)
-        owns-writer? (owns-writer-processes? descriptor)
-        owns-watcher? (and source-checkout?
-                           (owns-watcher-process? descriptor))]
-    (cond->
-     {pod-id
-      (cond-> []
-        owns-watcher? (conj watcher-id)
-        owns-writer? (conj writer-id)
-        source-checkout? (conj host-id))}
-      owns-watcher? (assoc watcher-id [])
+        owns-writer? (owns-writer-processes? descriptor)]
+    (cond-> {}
       owns-writer? (assoc writer-id [])
       source-checkout?
       (assoc host-id
              (cond-> []
-               owns-watcher? (conj watcher-id)
                owns-writer? (conj writer-id))
              web-render-id
-             (cond-> [pod-id]
+             (cond-> []
                owns-writer? (conj writer-id))))))
 
 (defn target-process-ids
