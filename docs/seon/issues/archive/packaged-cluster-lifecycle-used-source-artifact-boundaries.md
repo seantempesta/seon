@@ -1,6 +1,7 @@
 ---
 type: issue
-status: complete
+status: resolved
+severity: blocker
 tags: [issue, operator, runtime]
 ---
 
@@ -30,7 +31,7 @@ state, contradicting the release inventory's closed immutable root.
 
 ## Resolution
 
-`seon.dev.cluster` now selects the manifest reader from
+Resolved by `774cecd90`: `seon.dev.cluster` now selects the manifest reader from
 `:seon.dev.config/source-checkout?`, derives autonomous database/process/log
 paths from the configured operator state tree, and leaves the release root
 immutable. `seon.dev.process` verifies the release once, then passes the exact

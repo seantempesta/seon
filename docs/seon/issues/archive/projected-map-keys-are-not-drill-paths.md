@@ -1,0 +1,67 @@
+---
+type: issue
+status: superseded
+tags: [web, rendering, issue]
+severity: blocker
+---
+
+# Projected map keys are not drill paths
+
+## Overnight triage — 2026-07-23
+
+**FOLD-INTO-UNIT — C1 codec.** Sampler metadata is present; the remaining
+strict path-codec and no-drill consumer proof belongs to C1 boundary totality,
+not another path representation.
+
+## Problem
+
+`seon.render.value` says retained map keys remain valid path components, but
+the bounded sampler replaces long, collection, and opaque keys with safe
+display projections. Those replacement values are not the original keys and
+cannot honestly address the child value during a drill request.
+
+## Evidence
+
+`map-key-projection` records projected-key metadata while emitting a display
+replacement into the sampled entry. Treating that replacement as an ordinary
+path would return the wrong child or falsely claim that a visible node is
+navigable.
+
+## Owner
+
+The bounded value projection owns drillability metadata. The later route/UI
+consumer may expose a drill control only for an ordinary retained original key
+or for a separately proven opaque path token that safely crosses IPC.
+
+## Acceptance
+
+- Sampled entries distinguish display labels from valid original path
+  components.
+- Projected keys never produce a drill link or child request using the
+  replacement value.
+- Ordinary retained scalar keys remain deterministically drillable.
+- Focused sampler, route, and UI tests cover both branches.
+
+## Projection repair evidence (2026-07-20)
+
+Commits `edd0d2e7` and `7aebb3bc` replace the unusable projected-key count with ascending
+`:seon.render.value/non-drillable-key-indexes` in final retained-entry order.
+The focused `seon.render.value-test` gate passed 47 tests and 202 assertions,
+including bounded million-entry map work, hostile key printers, final-output
+indexing, exact original-key lookup, deterministic bytes, non-finite and
+negative-zero refusal, and shape-only schema projection.
+
+The issue remains open. The later route and UI units must still prove that a
+marked entry and all descendants emit no drill request, while an admitted
+original scalar key reaches the owning child value through the strict path
+codec.
+
+## Triage — 2026-07-23
+
+DISSOLVES into the post-cutover U10 value-drill system unit: current
+`src/seon/render/value.cljc:557-570,742-743` closes the sampler half, while
+U10 owns the remaining route/UI no-drill proof.
+
+## Resolution
+
+Superseded by the fresh-tree split in f25e34594: the cited State A owner is quarry or deleted, and the current B2/N3/N4 ledgers do not carry this defect forward.

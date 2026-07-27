@@ -1,6 +1,7 @@
 ---
 type: issue
-status: complete
+status: resolved
+severity: blocker
 tags: [issue, operator, runtime]
 ---
 
@@ -22,7 +23,7 @@ representation-boundary mistake.
 
 ## Resolution
 
-The hook validates the numeric data contract with `integer?` and includes the
+Resolved by `b28cadfee` and completed by `0e4b6234c`: the hook validates the numeric data contract with `integer?` and includes the
 fingerprint and relevant value classes in a real failure. The regression sends
 an EDN-materialized Long through the actual flush publication path.
 

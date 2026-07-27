@@ -1,7 +1,7 @@
 ---
 type: issue
 status: resolved
-severity: minor
+severity: friction
 tags: [issue, tooling]
 ---
 
@@ -39,7 +39,7 @@ prefix.
 
 ## Resolution (2026-07-27)
 
-`bin/seon-hook` now cuts every over-cap block with an in-band
+Resolved by `5c950efc1`: `bin/seon-hook` now cuts every over-cap block with an in-band
 `REVIEW TRUNCATION` marker written in that block's own comment syntax
 (`;;` for Clojure, `<!-- -->` for Markdown), and the review instructions
 state that a marked block is a partial view whose incompleteness must

@@ -1,8 +1,8 @@
 ---
 type: issue
-status: active
+status: open
 tags: [issue, database, schema]
-severity: medium
+severity: friction
 ---
 
 # And-wrapped secondary Datahike attribute is rejected
@@ -27,6 +27,11 @@ The shortest real-registration probe confirms the inherited defect:
 The underlying value type is `:db.type/double`, but the guard sees the form
 head `:and`. This is independent of the alias-property defect and was not
 expanded into that bounded implementation.
+
+## Owner
+
+The B2 schema-EDN wave in `seon.schema.datahike`; admission must derive from
+the same resolved value type as declaration.
 
 ## Acceptance
 

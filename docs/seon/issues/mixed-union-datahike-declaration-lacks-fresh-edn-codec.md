@@ -1,8 +1,8 @@
 ---
 type: issue
-status: active
+status: open
 tags: [issue, database, schema]
-severity: high
+severity: blocker
 ---
 
 # Mixed-union Datahike declaration lacks the fresh EDN codec
@@ -36,6 +36,11 @@ The bridge now comments this dependency at the fallback.
 
 The focused bridge test locks the deliberate declaration rule. It does not
 claim that fresh transaction round-tripping of mixed logical values exists.
+
+## Owner
+
+The B2 schema-EDN transaction boundary; `seon.schema.datahike` remains the
+single declaration bridge.
 
 ## Acceptance
 
