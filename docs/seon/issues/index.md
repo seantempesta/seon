@@ -36,9 +36,8 @@ See `README.md` for the convention.
 | [Keep the old source tree off Babashka's default classpath](babashka-default-classpath-exposes-src-old.md) | friction | general |
 | [Preserve concurrent edits in the Gemini review backlog](gemini-review-pending-state-loses-concurrent-edits.md) | friction | agent |
 
-## Cleanup (2)
+## Cleanup (1)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Give Flow configuration dials one registration owner](flow-config-dials-have-two-registration-owners.md) | cleanup | Core |
-| [Reconcile fresh-rung issue notes with the issue lifecycle](fresh-rung-issue-notes-break-the-derived-index.md) | cleanup | general |

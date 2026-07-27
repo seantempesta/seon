@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: cleanup
 tags: [issue, testing]
 ---
@@ -46,3 +46,8 @@ The issue notes owned by each landing wave, followed by the derived
   proof, then lives under `docs/seon/issues/archive/`.
 - `bin/issues-index` regenerates the projection and
   `bin/issues-index --check` passes without lifecycle or severity violations.
+
+## Resolution
+
+Resolved by `90a3cac60`: all open and archived notes now obey the lifecycle,
+severity, and placement contract; the regenerated index validates cleanly.
