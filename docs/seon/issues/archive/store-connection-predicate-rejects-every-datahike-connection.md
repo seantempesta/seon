@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, database, schema]
 ---
@@ -62,3 +62,15 @@ key — `datahike.connector/connection?` plus the released check its own
 `::connection` spec uses (`connector.cljc:104`,
 `(not= @(:wrapped-atom %) :released)`). `bin/test seon.cluster.store-test` is
 then fully green with no change to the store implementation.
+
+## Resolution — 2026-07-27
+
+Fixed by the contract author in `5bfc0e73f`: `connection?` is now
+`(and (instance? datahike.connector.Connection value) (some? (:wrapped-atom
+value)) (not= @(:wrapped-atom value) :released))` — the fork's own semantics,
+including the liveness the docstring promised. The store implementation needed
+no change.
+
+Proof: `bin/test seon.cluster.store-test` → `Ran 7 tests containing 21
+assertions. 0 failures, 0 errors.` and the whole gate `bin/test` → `Ran 42
+tests containing 182 assertions. 0 failures, 0 errors.` at `31e38e12d`.

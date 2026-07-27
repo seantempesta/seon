@@ -19,6 +19,7 @@ See `README.md` for the convention.
 | [Arbitrary eval allocation lacks hard process memory containment](eval-process-isolation-memory-containment.md) | blocker | agent |
 | [Bound http-kit streaming writes for slow SSE consumers](http-kit-streaming-writes-have-an-unbounded-socket-queue.md) | blocker | UI |
 | [Capture dependencies when a lazy view unit activates](lazy-view-unit-activation-drops-read-observations.md) | blocker | UI |
+| [Claim the store flock's fcntl close hazard with a recurring falsifier](store-flock-fcntl-close-hazard-has-no-recurring-falsifier.md) | blocker | Core |
 | [Commit authored corpus facts with the terminal receipt](driver-terminal-transactions-do-not-commit-authored-corpus-facts.md) | blocker | agent |
 | [Compiled program contains nilable value schemas](compiled-program-contains-nilable-value-schemas.md) | blocker | Core |
 | [Content-pin the Inspect source dependency](inspect-source-dependency-is-not-content-pinned.md) | blocker | agent |
@@ -35,7 +36,6 @@ See `README.md` for the convention.
 | [Give agent birth a surviving owner after the pod's cluster apply lost it](cluster-apply-no-longer-births-root-agent.md) | blocker | agent |
 | [Give each effect in a form a distinct replay identity](effect-operation-id-collides-within-one-form.md) | blocker | agent |
 | [Give each named cluster its own writer process](named-clusters-share-one-writer-process.md) | blocker | Core |
-| [Ground the store connection predicate in Datahike's own connection type](store-connection-predicate-rejects-every-datahike-connection.md) | blocker | Core |
 | [Implement browser-session navigation provenance](web-session-navigation-provenance-is-missing.md) | blocker | UI |
 | [Install durable corpus functions into the shared SCI base](cluster-jvm-boot-does-not-install-durable-corpus-functions.md) | blocker | agent |
 | [Invalidate a cached failed Datastar render after its owner reloads](datastar-feed-retains-failed-render-after-hot-reload.md) | blocker | UI |
