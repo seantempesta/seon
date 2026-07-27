@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, database, runtime]
 ---
@@ -79,3 +79,35 @@ Discovered while evaluating branch-per-cluster for the B2 rung
 fix is a blocking precondition for that design, but the defect is real and
 upstream-reportable regardless of which cluster-materialization verdict B2
 takes.
+
+## Resolution
+
+Closed 2026-07-27.
+
+Datahike now serializes every read-modify-write of `:branches` through one
+process-wide lock channel keyed by physical store ID. The branch-add paths in
+`branch!` and `force-branch!` and the removal path in `delete-branch!` all use
+that owner. The initial `create-database` association remains outside it
+because it creates the roster rather than mutating an existing roster.
+
+- Fork commit:
+  `357ffc87c8009f342b239145802e1385d4a18ca9`
+  (`Serialize branch roster mutations by store`).
+- Main-repository submodule pointer:
+  `a6434ecee3525ce17f2c4383aafa107fd0ac9795`
+  (`Bump Datahike for branch roster serialization`).
+- Falsifier before the fix: 32 concurrent creates through two connections;
+  29 returned success, six successful branches were absent from the roster,
+  and three calls failed while racing the roster blob's atomic move. Result:
+  one test, two passing assertions, two failures.
+- Falsifier after the fix: one test, four passing assertions, zero failures or
+  errors. Every create succeeded, every successful branch was present in the
+  roster, and every branch reconnected and read successfully.
+- Fork namespace proof: eight tests, 61 assertions, zero failures or errors.
+- Fork `clj-pss` proof: 877 tests, 4,615 assertions, zero failures.
+
+The main `bin/test` gate was also run against the pointer commit. It is
+currently red for the already-sealed, still-unimplemented
+`seon.schema.edn/load!` and `seon.schema.edn/admit` contracts: 52 tests, 208
+assertions, four failures, and two errors. Both functions throw
+`awaits implementation`; no failure enters the Datahike versioning path.
