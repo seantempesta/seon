@@ -55,12 +55,15 @@
   per JVM and shared by every cluster's flow graph
   (research/flow-per-cluster-2026-07-27.md).
 
-  Crash walk: `start!` performs no database writes and owns no durable
-  state; a kill at any instant leaves at most an orphan advertisement
-  file, and the advertisement carries (pid, start-instant) so a reader
-  detects staleness against the live process table rather than trusting
-  the file. `stop!` is idempotent; a killed process's next boot simply
-  re-advertises."
+  Crash walk: a kill at any instant leaves at most an orphan
+  advertisement file plus whatever the tower's own crash rows already
+  describe — the ancestor build (rename-at-end, scratch owned by
+  (pid, start-instant)), the fork roster, and config reconciliation
+  (one atomic transaction) each own their row; the OS releases the
+  store's flock with the process. The advertisement carries
+  (pid, start-instant) so a reader detects staleness against the live
+  process table rather than trusting the file. `stop!` is idempotent;
+  a killed process's next boot simply re-advertises."
   (:require [clojure.core.server]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
@@ -312,6 +315,10 @@
   canonical schema rows themselves, and the core process entities the
   provenance refs resolve to (genesis data — bootstrap content lives in
   the ancestor)."
+  {:malli/schema
+   [:=> [:cat [:map [:seon.store/branch-connection
+                     :seon.store/branch-connection]]]
+    :nil]}
   [{connection :seon.store/branch-connection}]
   (d/transact connection
               {:tx-data (schema.datahike/malli->datahike-schema

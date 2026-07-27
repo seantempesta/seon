@@ -41,3 +41,16 @@ connection release is unproved shutdown and must fail closed.
   the flock, after which another process can open the store.
 - Release errors remain visible; safety does not depend on treating absence of
   a lock as proof that the writer stopped.
+
+## Related shape 2026-07-27: half-released instance becomes unaddressable
+
+`seon.cluster/stop!` releases database resources first (by design — the
+REPL survives to diagnose), but a throwing `d/release` or
+`release-root-store!` skips the remaining teardown while the `finally`
+still drops the registry entry (the `marker` matches). The prepl socket
+and advertisement then leak with no instance value registered to stop
+them — same failure class as this issue's flock drop: a failed release
+must leave the resource ADDRESSABLE, never advertised as gone.
+Corroborated independently by the Gemini hook review
+(tmp/reviews/20260727T164926.037Z.md, finding 2). Fix belongs to the
+same stop-semantics pass as the acceptance rows above.

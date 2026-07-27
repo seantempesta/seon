@@ -52,3 +52,17 @@ replace the list with a `:kind` field or a second registry.
 - Missing/unrecognized provenance remains fail-closed as agent-authored.
 - Fresh recurring tests cover boot, config, runtime core, agent, REPL, missing,
   and newly added producer provenance.
+
+## Evidence 2026-07-27 (boot composition lane)
+
+The literal trust list is not only a hand list — it is silently INERT.
+`seon.schema`'s private `core-process-identities` holds KEYWORDS
+(`:seon.db.process/boot` …) while `:seon.db.process/id` is a STRING
+attribute, and `admission-from-asserting-transaction` tests
+`(contains? core-process-identities process-id)` against the string.
+A string can never match a keyword set, so every core-authored schema
+row classifies as `:agent`. Nothing on the boot path depends on the
+broken comparison today — the composition seeds only
+`seon.config/managing-process-identity` (the string reconcile actually
+uses) — but the computed-provenance replacement this issue demands is
+now also the bug fix, not just the design cleanup.
