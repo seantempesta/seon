@@ -388,13 +388,38 @@ may reintroduce a shadow build into the dev feedback path.
   2026-07-27 late).** It is our fork under `reference-code/`; calling
   internal functions is sanctioned; a small fork change is acceptable
   when it buys real isolation. Konserve stays the default backend.
-  Under this ruling, O2's clone-per-cluster mechanism is being
-  re-evaluated against BRANCH-PER-CLUSTER (one physical store, clusters
-  as branches of the ancestor, zero-copy structural sharing, per-branch
-  writer loops, backend-agnostic) — the B2 plan carries the
-  probe-grounded verdict; the hard requirement is unchanged: one
-  cluster can never take down or corrupt another. File-clone survives
-  for export/import and base-building regardless.
+  VERDICT (b2-plan §0, probe-grounded): **BRANCH-PER-CLUSTER ADOPTED**,
+  conditional on one ~15-line fork change. Two branches of one store
+  share exactly ONE mutable durable key (`:branches`, touched only on
+  cluster create/delete); commits touch only content-addressed values
+  and the branch's own head. GC isolation is STRUCTURAL (every roster
+  branch head is unconditionally seeded; proven live: deleting one
+  cluster reclaimed its tail, the survivor and ancestor intact).
+  Branch-off = 17 ms, ancestor bytes stored once, any backend. The
+  fork change is BLOCKING and falsifier-first: concurrent `branch!`
+  from two connections silently lost clusters (11 :ok / 9 in roster —
+  the L6 scar at branch granularity, inside one process where the
+  flock cannot fence); the fix applies the fork's own gc_guard
+  store-id-keyed in-flight idiom to the roster mutations
+  (issue: datahike-branch-roster-read-modify-write-race). O2 restates
+  as: clusters never share a BRANCH; one physical store per process
+  (its clusters live in that process — matching the one-JVM shape;
+  export/import is the escape hatch and clone survives only there and
+  for base-building). Owed experiment: GC pass cost over ten warm
+  clusters. B0/B1 take author revisions (store to the process root,
+  `open-branch!`, `cluster-paths` drops store-dir).
+
+  **Rulings 2026-07-27 late (owner, plain-language batch):** the
+  3-name core-process trust list ships as-is with the computed rule as
+  its own follow-up task; the run loop claims BEFORE the model call
+  and NOTHING retries paid calls (a lost call is lost; the agent
+  adapts from the interruption note); http-kit's socket buffer is
+  MEASURED in N4, forked only on evidence; the value-admission gate is
+  its own small package scoped to forcing + size-capping values
+  leaving the sandbox — allocation is watched by the O4 heap
+  watermark, runaway → interrupt + flat steering error + agent
+  restart, process restart the backstop; leverage SCI internals (our
+  fork) for oversight rather than pretending to bound what we cannot.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
