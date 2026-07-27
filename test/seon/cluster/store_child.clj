@@ -13,7 +13,7 @@
   "Open `store-dir` under the flock, publish readiness, wait for kill."
   {:malli/schema [:=> [:cat :string :string] :nil]}
   [store-dir ready-path]
-  (store/open-store! store-dir)
+  (store/open-store! {:seon.store/dir store-dir})
   (Files/writeString
    (Path/of ready-path (make-array String 0))
    "held"

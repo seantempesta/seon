@@ -86,7 +86,9 @@
                  (:seon.boot/cluster-name config))
               (= (get overrides :seon.boot/root "data/clusters")
                  (:seon.boot/root config))
-              (string? (:seon.boot/log-dir config)))))
+              (string? (:seon.boot/log-dir config))
+              ;; the process-root store every cluster branches from
+              (string? (:seon.boot/store-dir config)))))
          :seed 20260727)]
     (is (true? (:result check))
         (str "bootstrap resolution failed: " (pr-str check)))))
@@ -118,13 +120,13 @@
              (and (str/starts-with? dir root)
                   (str/includes? dir cluster-name)
                   (every? #(str/starts-with? % dir)
-                          [(:seon.boot/store-dir paths)
-                           (:seon.boot/advertisement-file paths)
+                          [(:seon.boot/advertisement-file paths)
                            (:seon.boot/log-dir paths)])
-                  ;; the three children are distinct locations
-                  (= 3 (count (hash-set (:seon.boot/store-dir paths)
-                                        (:seon.boot/advertisement-file paths)
-                                        (:seon.boot/log-dir paths)))))))
+                  ;; the store is NOT here: it is per process root
+                  ;; (branch-per-cluster, b2-plan section 0)
+                  (not (contains? paths :seon.boot/store-dir))
+                  (not= (:seon.boot/advertisement-file paths)
+                        (:seon.boot/log-dir paths)))))
          :seed 20260727)]
     (is (true? (:result check))
         (str "path derivation failed: " (pr-str check)))))
@@ -226,5 +228,29 @@
         (testing "garbage reads as nil, never as a throw"
           (spit file "{:not :an-advertisement")
           (is (nil? (cluster/read-advertisement root "stale")))))
+      (finally
+        (delete-recursively! root)))))
+
+(deftest a-delayed-stop-never-kills-a-replacement
+  ;; stops are instance-addressed: a stale stop! of an OLD instance
+  ;; value must leave a same-named replacement fully alive
+  (let [root (fresh-root)]
+    (try
+      (let [old-instance (cluster/start! {:seon.boot/cluster-name "swap"
+                                          :seon.boot/root root})]
+        (cluster/stop! old-instance)
+        (let [replacement (cluster/start! {:seon.boot/cluster-name "swap"
+                                           :seon.boot/root root})
+              port (get-in replacement [:seon.boot/advertisement
+                                        :seon.boot/prepl-port])]
+          (try
+            ;; the delayed second stop of the OLD value
+            (is (nil? (cluster/stop! old-instance)))
+            (is (= "\"alive\"" (prepl-eval "127.0.0.1" port "\"alive\""))
+                "the replacement's REPL survived the stale stop")
+            (is (some? (cluster/read-advertisement root "swap"))
+                "the replacement's advertisement survived")
+            (finally
+              (cluster/stop! replacement)))))
       (finally
         (delete-recursively! root)))))

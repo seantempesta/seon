@@ -402,12 +402,14 @@
 
 (defn close-call
   "Close the run, inside the transaction.
-  Assert closed-at, retract
-  custody, retract the owning agent's current-run pointer. The agent is
-  the run's OWN `::agent` connection read from `db` — the request
-  carries no agent id, so a wrong one cannot exist. Refuses unless the
-  run is open and held by exactly `::process` at exactly
-  `::claim-epoch`."
+  Assert closed-at, retract custody, retract the owning agent's
+  current-run pointer. The agent is the run's OWN `::agent` connection
+  read from `db` — the request carries no agent id, so a wrong one
+  cannot exist. Refuses unless the run is open and held by exactly
+  `::process` at exactly `::claim-epoch` — AND refuses
+  `::agent-pointer-broken` when the owning agent's pointer does not
+  point at this run: a broken relation is settled loudly, never by
+  silently omitting the retraction."
   {:malli/schema [:=> [:cat :any
                        [:map {:closed true}
                         [::id ::id]

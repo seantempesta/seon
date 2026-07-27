@@ -86,6 +86,13 @@
 (schema/register-core-predicate! 'seon.cluster.store/file-lock?
                                  file-lock?)
 
+; a cluster branch name in the one store's roster
+(schema/register! :seon.store/branch :keyword)
+
+(schema/register!
+ :seon.store/branch-connection
+ [:fn 'seon.cluster.store/connection?])
+
 (schema/register!
  :seon.store/store
  [:map {:closed true}
@@ -245,7 +252,10 @@
   nil)
 
 (defn open-store!
-  "Open (creating if absent) the one store at `store-dir`, fenced.
+  "Open (creating if absent) the ONE physical store this process owns,
+  fenced, on its main branch. B2 revision: one closed map argument;
+  under branch-per-cluster the store is PER PROCESS ROOT and every
+  cluster is a branch of it.
   Order is the contract: acquire the non-blocking exclusive flock on
   `(lock-file store-dir)` FIRST — a held lock refuses immediately
   ({::rule ::held-elsewhere}, including a second open in this same
@@ -255,11 +265,14 @@
   is connected and its main branch verified readable. Returns the store
   value; the flock descriptor stays held inside it until
   `release-store!`."
-  {:malli/schema [:=> [:cat :seon.store/dir] :seon.store/store]}
-  [store-dir]
+  {:malli/schema [:=> [:cat [:map {:closed true}
+                             [:seon.store/dir :seon.store/dir]]]
+                  :seon.store/store]}
+  [request]
   ; one physical spelling for the whole lifecycle: the fence, the store
   ; id, the genesis probe, and the returned value all name one directory
-  (let [dir (canonical-path store-dir)
+  (let [store-dir (:seon.store/dir request)
+        dir (canonical-path store-dir)
         lock-path (lock-file dir)
         lock (or (acquire-flock! lock-path)
                  (refuse! ::held-elsewhere
@@ -298,9 +311,13 @@
 
 (defn release-store!
   "Release the store: Datahike release first, then the flock.
-  Idempotent — releasing a released store is a no-op returning nil.
-  After release the same process (or any other) may open the store
-  again."
+  THE FENCE OUTLIVES A FAILED RELEASE: when the Datahike release
+  throws, the flock is NOT released and the error propagates loudly —
+  a live connection behind a dropped fence is the two-writers loss and
+  must be unrepresentable. Only a successful Datahike release frees the
+  flock. Idempotent — releasing a released store is a no-op returning
+  nil. After a successful release the same process (or any other) may
+  open the store again."
   {:malli/schema [:=> [:cat :seon.store/store] :nil]}
   [store]
   ; the flock's own validity IS the released? fact — no second flag, and
@@ -314,3 +331,16 @@
         (finally
           (release-flock! (:seon.store/lock-file store) lock)))))
   nil)
+
+(defn open-branch!
+  "A connection to one branch of this already-open, flock-held store.
+  The branch must exist in the roster — creation belongs to the one
+  branch-lifecycle owner (seon.cluster.registry, B2). Refuses
+  `::branch-absent` (not in the roster) and `::branch-already-open`
+  (this process already holds a connection to that branch — Datahike
+  would reference-count a second connect into the SAME connection,
+  silently giving two cluster instances one writer)."
+  {:malli/schema [:=> [:cat :seon.store/store :seon.store/branch]
+                  :seon.store/branch-connection]}
+  [store branch]
+  (throw (ex-info "awaits implementation" {::fn `open-branch!})))

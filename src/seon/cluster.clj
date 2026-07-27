@@ -63,6 +63,12 @@
 ; 0 = ephemeral; the advertisement carries the real bound port
 (schema/register! :seon.boot/prepl-port [:int {:min 0 :max 65535}])
 (schema/register! :seon.boot/log-dir [:string {:min 1}])
+; the ONE physical store this process owns; every cluster is a branch
+; of it (branch-per-cluster, b2-plan section 0). Derived from
+; :seon.boot/root by convention, overridable for tests.
+(schema/register! :seon.boot/store-dir [:string {:min 1}])
+; the ancestor branch a NEW cluster branches from; absent = :db
+(schema/register! :seon.boot/ancestor-branch :keyword)
 
 (schema/register!
  :seon.boot/config
@@ -71,7 +77,10 @@
   [:seon.boot/root :seon.boot/root]
   [:seon.boot/prepl-host :seon.boot/prepl-host]
   [:seon.boot/prepl-port :seon.boot/prepl-port]
-  [:seon.boot/log-dir :seon.boot/log-dir]])
+  [:seon.boot/log-dir :seon.boot/log-dir]
+  [:seon.boot/store-dir :seon.boot/store-dir]
+  [:seon.boot/ancestor-branch {:optional true}
+   :seon.boot/ancestor-branch]])
 
 ; overrides: any subset of the complete config's keys, still closed
 (schema/register!
@@ -81,7 +90,10 @@
   [:seon.boot/root {:optional true} :seon.boot/root]
   [:seon.boot/prepl-host {:optional true} :seon.boot/prepl-host]
   [:seon.boot/prepl-port {:optional true} :seon.boot/prepl-port]
-  [:seon.boot/log-dir {:optional true} :seon.boot/log-dir]])
+  [:seon.boot/log-dir {:optional true} :seon.boot/log-dir]
+  [:seon.boot/store-dir {:optional true} :seon.boot/store-dir]
+  [:seon.boot/ancestor-branch {:optional true}
+   :seon.boot/ancestor-branch]])
 
 ;;; The advertisement — one EDN file under the cluster directory that
 ;;; makes every instance's REPL discoverable. (pid, start-instant) is
@@ -150,7 +162,9 @@
   Every key optional; absent = default. Defaults: cluster-name
   \"default\" (just a name, nothing special), root \"data/clusters\",
   prepl-host \"127.0.0.1\", prepl-port 0 (ephemeral — the advertisement
-  carries the real port), log-dir derived as <root>/<name>/logs.
+  carries the real port), log-dir derived as <root>/<name>/logs,
+  store-dir derived as <root>/store — the PROCESS-root store every
+  cluster branches from (ancestor-branch stays absent unless supplied).
   Refuses (throws ex-info {:seon.error/kind :seon.boot/refused ...}) on
   any unknown key or invalid value — the closed schema is the gate, not
   a convention."
@@ -176,13 +190,14 @@
 
 (defn cluster-paths
   "Derive every per-cluster path from (root, cluster-name).
-  Convention owns the layout: the cluster directory, its store
-  directory, its log directory, and its advertisement file. One
-  derivation — no other code builds these paths."
+  Convention owns the layout: the cluster directory, its log directory,
+  and its advertisement file. The STORE is per process root under
+  branch-per-cluster (b2-plan section 0); its path is bootstrap config,
+  never a per-cluster derivation. One derivation — no other code builds
+  these paths."
   {:malli/schema [:=> [:cat :seon.boot/root :seon.boot/cluster-name]
                   [:map {:closed true}
                    [:seon.boot/cluster-dir :string]
-                   [:seon.boot/store-dir :string]
                    [:seon.boot/advertisement-file :string]
                    [:seon.boot/log-dir :string]]]}
   [root cluster-name]
@@ -334,9 +349,13 @@
                    (:seon.boot/prepl-server instance))))
 
 (defn stop!
-  "Stop one instance: close the prepl server, delete the advertisement.
-  Idempotent — stopping a stopped instance is a no-op returning nil.
-  Never touches the shared root executors (other instances ride them)."
+  "Stop exactly THIS instance, instance-addressed never name-addressed.
+  Closes ITS prepl server socket and deletes ITS advertisement; a
+  delayed stop! of an old instance value must not touch a replacement
+  started under the same cluster name (the replacement's socket,
+  advertisement, and registry entry all survive). Idempotent — stopping
+  a stopped instance is a no-op returning nil. Never touches the shared
+  root executors."
   {:malli/schema [:=> [:cat :seon.boot/instance] :nil]}
   [instance]
   (let [config (:seon.boot/config instance)

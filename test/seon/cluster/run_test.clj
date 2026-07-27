@@ -609,3 +609,32 @@
              ::run/agent [:seon.cluster.agent/id "runner"]
              ::run/opened-at t0}))
       "a blank identity is refused"))
+
+(deftest close-refuses-a-broken-agent-pointer
+  ;; quality-review-2 blocker: a broken relation is settled loudly,
+  ;; never by silently omitting the retraction
+  (with-model-database
+    (fn [connection]
+      (d/transact connection [{:seon.cluster.agent/id "breaker"}])
+      (d/transact connection
+                  (run/open-tx {::run/id "broken"
+                                ::run/agent [:seon.cluster.agent/id "breaker"]
+                                ::run/opened-at t0}))
+      (d/transact connection
+                  (run/claim-tx {::run/id "broken"
+                                 ::run/process "p1"
+                                 ::run/lease-until t2
+                                 ::run/now t1}))
+      ;; sever the relation out from under the run
+      (d/transact connection
+                  [[:db/retract [:seon.cluster.agent/id "breaker"]
+                    :seon.cluster.agent/run [::run/id "broken"]]])
+      (is (thrown? Exception
+                   (d/transact connection
+                               (run/close-tx {::run/id "broken"
+                                              ::run/process "p1"
+                                              ::run/claim-epoch 1
+                                              ::run/closed-at t2})))
+          "close refuses ::agent-pointer-broken")
+      (is (nil? (::run/closed-at (run-entity connection "broken")))
+          "the refused close committed nothing"))))

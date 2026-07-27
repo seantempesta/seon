@@ -87,7 +87,7 @@
 (deftest open-write-release-reopen-preserves-data
   (let [dir (fresh-dir)]
     (try
-      (let [opened (store/open-store! dir)]
+      (let [opened (store/open-store! {:seon.store/dir dir})]
         (is (seon.schema/valid-candidate-value? :seon.store/store opened))
         (is (true? (:seon.store/created? opened)))
         (d/transact (:seon.store/connection opened) probe-schema)
@@ -95,7 +95,7 @@
                     [{:seon.store.test/marker "survives"}])
         (is (nil? (store/release-store! opened)))
         (is (nil? (store/release-store! opened)) "release is idempotent")
-        (let [reopened (store/open-store! dir)]
+        (let [reopened (store/open-store! {:seon.store/dir dir})]
           (try
             (is (false? (:seon.store/created? reopened))
                 "a complete store is opened, never recreated")
@@ -108,14 +108,14 @@
 (deftest one-holder-per-store-in-one-process
   (let [dir (fresh-dir)]
     (try
-      (let [held (store/open-store! dir)]
+      (let [held (store/open-store! {:seon.store/dir dir})]
         (try
           (testing "a second open of a held store refuses immediately"
-            (is (thrown? Exception (store/open-store! dir))))
+            (is (thrown? Exception (store/open-store! {:seon.store/dir dir}))))
           (finally
             (store/release-store! held)))
         (testing "after release the store opens again"
-          (let [reopened (store/open-store! dir)]
+          (let [reopened (store/open-store! {:seon.store/dir dir})]
             (is (false? (:seon.store/created? reopened)))
             (store/release-store! reopened))))
       (finally
@@ -125,8 +125,8 @@
   (let [dir-a (fresh-dir)
         dir-b (fresh-dir)]
     (try
-      (let [a (store/open-store! dir-a)
-            b (store/open-store! dir-b)]
+      (let [a (store/open-store! {:seon.store/dir dir-a})
+            b (store/open-store! {:seon.store/dir dir-b})]
         (try
           (d/transact (:seon.store/connection a) probe-schema)
           (d/transact (:seon.store/connection b) probe-schema)
@@ -149,7 +149,7 @@
   (let [dir (fresh-dir)]
     (try
       ;; a complete store with one durable marker...
-      (let [victim (store/open-store! dir)]
+      (let [victim (store/open-store! {:seon.store/dir dir})]
         (d/transact (:seon.store/connection victim) probe-schema)
         (d/transact (:seon.store/connection victim)
                     [{:seon.store.test/marker "pre-window"}])
@@ -160,7 +160,7 @@
         (k/dissoc konserve :branches {:sync? true})
         (is (some? (k/get konserve :db nil {:sync? true}))
             "the window is real: :db survives without :branches"))
-      (let [repaired (store/open-store! dir)]
+      (let [repaired (store/open-store! {:seon.store/dir dir})]
         (try
           (is (true? (:seon.store/created? repaired))
               "mid-genesis means nothing durable existed — recreate")
@@ -206,11 +206,11 @@
             (< (System/nanoTime) limit) (do (Thread/sleep 10) (recur))
             :else (throw (ex-info "the child never reported holding" {})))))
       (testing "a live foreign holder refuses this process's open"
-        (is (thrown? Exception (store/open-store! dir))))
+        (is (thrown? Exception (store/open-store! {:seon.store/dir dir}))))
       (testing "the OS releases a killed holder's flock"
         (.destroyForcibly process)
         (is (.waitFor process 20 TimeUnit/SECONDS))
-        (let [survivor (store/open-store! dir)]
+        (let [survivor (store/open-store! {:seon.store/dir dir})]
           (try
             (is (false? (:seon.store/created? survivor))
                 "the child's completed store opens cleanly after SIGKILL")
@@ -230,9 +230,9 @@
         java-command (.getPath
                       (File. (System/getProperty "java.home") "bin/java"))]
     (try
-      (let [held (store/open-store! dir)]
+      (let [held (store/open-store! {:seon.store/dir dir})]
         (try
-          (is (thrown? Exception (store/open-store! dir))
+          (is (thrown? Exception (store/open-store! {:seon.store/dir dir}))
               "the in-process second open refuses")
           (let [process (-> (ProcessBuilder.
                              ^java.util.List
@@ -251,6 +251,40 @@
                  in-process refusal")
             (is (not (zero? (.exitValue process)))
                 "the child exited by refusal, not by success"))
+          (finally
+            (store/release-store! held))))
+      (finally
+        (delete-recursively! (str (io/file dir) "/.."))))))
+
+(deftest a-failed-release-never-drops-the-fence
+  ;; a live connection behind a dropped fence is the two-writers loss;
+  ;; when the Datahike release throws, the flock must survive it
+  (let [dir (fresh-dir)]
+    (try
+      (let [held (store/open-store! {:seon.store/dir dir})]
+        (with-redefs [d/release (fn [& _]
+                                  (throw (ex-info "injected release fault"
+                                                  {::injected true})))]
+          (is (thrown? Exception (store/release-store! held))
+              "the failure propagates loudly"))
+        (is (thrown? Exception (store/open-store! {:seon.store/dir dir}))
+            "the fence survived the failed release")
+        (is (nil? (store/release-store! held))
+            "a later successful release still works")
+        (let [reopened (store/open-store! {:seon.store/dir dir})]
+          (is (false? (:seon.store/created? reopened)))
+          (store/release-store! reopened)))
+      (finally
+        (delete-recursively! (str (io/file dir) "/.."))))))
+
+(deftest open-branch-refuses-what-the-roster-refutes
+  (let [dir (fresh-dir)]
+    (try
+      (let [held (store/open-store! {:seon.store/dir dir})]
+        (try
+          (is (thrown? Exception
+                       (store/open-branch! held :cluster-nowhere))
+              "a branch absent from the roster refuses")
           (finally
             (store/release-store! held))))
       (finally
