@@ -382,6 +382,19 @@
 ;;; change is required; the issue note is corrected at seal.
 ;;; ---------------------------------------------------------------------------
 
+(defn- panic-on-core-error?
+  "True when this branch's config says development panics (R41).
+  Read straight off the connection's own database value: there is one
+  config singleton per cluster branch, so the dial needs no cluster name
+  to find. A database with no config yet is a database before boot
+  finished — it records rather than panics, because the dial has not
+  been applied, not because the failure is acceptable."
+  [connection]
+  (= :panic
+     (d/q '[:find ?mode .
+            :where [_ :seon.config/on-core-error ?mode]]
+          @connection)))
+
 (defn refusal
   "The deepest non-empty `ex-data` in a throwable's cause chain, or nil.
   Pure, and unit-testable with no database: a refusal is a value buried
@@ -390,7 +403,13 @@
   itself information, and the caller treats it as unclassifiable."
   {:malli/schema [:=> [:cat :any] [:maybe :map]]}
   [throwable]
-  (throw (ex-info "awaits implementation" {::fn `refusal})))
+  (loop [candidate throwable
+         deepest nil]
+    (if (nil? candidate)
+      deepest
+      (let [data (ex-data candidate)]
+        (recur (ex-cause candidate)
+               (if (seq data) data deepest))))))
 
 (defn transact!
   "Commit tx-data. Returns a value on success AND on refusal; never throws.
@@ -411,4 +430,31 @@
   {:malli/schema [:=> [:cat :seon.store/branch-connection [:vector :any]]
                   [:or [:map] :seon.error/value]]}
   [connection tx-data]
-  (throw (ex-info "awaits implementation" {::fn `transact!})))
+  (try
+    (d/transact connection tx-data)
+    (catch Throwable throwable
+      (let [data (refusal throwable)]
+        (cond
+          ;; OUR transition: its own map, verbatim. The caller branches
+          ;; on the exact rule it predicted.
+          (some? (:seon.error/kind data))
+          data
+
+          ;; datahike's own abort, distinguishable BY VALUE
+          (some? (:error data))
+          {:seon.error/kind :seon.db/rejected
+           :seon.error/message (or (ex-message throwable) "transaction rejected")
+           :seon.error/data data}
+
+          ;; nothing classifiable. This is a bug, not a condition —
+          ;; absorbing it is how a typo passes for a fence — so it is
+          ;; loud by the one dial rather than by judgement here.
+          :else
+          (let [failure {:seon.error/kind :seon.db/unknown-failure
+                         :seon.error/message
+                         (or (ex-message throwable)
+                             (.getName (class throwable)))
+                         :seon.error/data (or data {})}]
+            (when (panic-on-core-error? connection)
+              (throw (ex-info (:seon.error/message failure) failure throwable)))
+            failure))))))

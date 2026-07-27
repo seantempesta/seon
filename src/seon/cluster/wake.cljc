@@ -60,7 +60,9 @@
   untouched. A kill leaves no listener (the process is gone), the
   channel's contents are discarded (`flow/impl.clj:174-183`), and the
   next boot's injected wake re-derives everything from facts."
-  (:require [seon.schema.edn :as schema.edn]))
+  (:require [clojure.core.async :as async]
+            [datahike.api :as d]
+            [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — src/seon/schema/wake.edn
@@ -78,7 +80,11 @@
   the same set."
   {:malli/schema [:=> [:cat] :seon.cluster.wake/attributes]}
   []
-  (throw (ex-info "awaits implementation" {::fn `wake-attributes})))
+  ;; ONE attribute today: a new message pointed at an agent. It is the
+  ;; smallest set that is disjoint from everything the loop writes, and
+  ;; a new message is always a new entity — so the datom always exists
+  ;; and the wake always fires.
+  #{:seon.cluster.message/to})
 
 (defn wake?
   "True when a transaction report touches a wake attribute (C1).
@@ -88,7 +94,9 @@
   not wake it."
   {:malli/schema [:=> [:cat :seon.cluster.wake/attributes :any] :boolean]}
   [attributes report]
-  (throw (ex-info "awaits implementation" {::fn `wake?})))
+  (boolean
+   (some (fn [datom] (contains? attributes (nth datom 1)))
+         (:tx-data report))))
 
 (defn listen!
   "Register the wake handler on a connection (C3).
@@ -99,12 +107,43 @@
   elsewhere."
   {:malli/schema [:=> [:cat :seon.cluster.wake/listen-request]
                   :seon.cluster.wake/key]}
-  [request]
-  (throw (ex-info "awaits implementation" {::fn `listen!})))
+  [{:keys [:seon.cluster.wake/connection :seon.cluster.wake/attributes
+           :seon.cluster.wake/channel :seon.cluster.wake/fault-channel
+           :seon.cluster.wake/key]}]
+  (d/listen
+   connection
+   key
+   ;; THE FOUR LINES. Everything about them is a prohibition:
+   ;; try/catch because an escaping exception hangs the committing
+   ;; caller forever (writer.cljc:384-386), offer! because parking puts
+   ;; the caller's commit on hold (probe B: 804 ms), and offer! again on
+   ;; the fault path for the same reason.
+   (fn [report]
+     (try
+       (when (wake? attributes report)
+         ;; `offer!` never rejects a (sliding-buffer 1) channel for
+         ;; being full — it drops the older wake, which is exactly
+         ;; right. So a false here means the channel is CLOSED: the proc
+         ;; is gone and a commit is going unnoticed. That is a fault,
+         ;; and reporting it is the other half of never throwing —
+         ;; a swallowed failure nobody hears about is an invisible one.
+         (when-not (async/offer! channel ::wake)
+           (async/offer! fault-channel
+                         (ex-info "the wake channel refused delivery"
+                                  {:seon.error/kind ::undeliverable-wake
+                                   ::key key}))))
+       (catch #?(:clj Throwable :cljs :default) failure
+         (async/offer! fault-channel failure)))))
+  key)
 
 (defn unlisten!
   "Remove the wake handler. Idempotent — removing an absent listener is
   a no-op, because `::flow/stop` may arrive after a store release."
   {:malli/schema [:=> [:cat :seon.cluster.wake/unlisten-request] :nil]}
-  [request]
-  (throw (ex-info "awaits implementation" {::fn `unlisten!})))
+  [{:keys [:seon.cluster.wake/connection :seon.cluster.wake/key]}]
+  (try
+    (d/unlisten connection key)
+    ;; stop may arrive after a release, and an absent listener is the
+    ;; state we wanted anyway
+    (catch #?(:clj Throwable :cljs :default) _ nil))
+  nil)

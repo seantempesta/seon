@@ -58,7 +58,19 @@
   a killed pass leaves exactly the facts its last committed transaction
   wrote. The sealed suite drives the rows as kill positions in a
   state-machine property."
-  (:require [seon.schema.edn :as schema.edn]))
+  (:require [clojure.core.async :as async]
+            [clojure.core.async.flow :as flow]
+            [datahike.api :as d]
+            [seon.ai :as ai]
+            [seon.cluster.prompt :as prompt]
+            [seon.cluster.reply :as reply]
+            [seon.cluster.run :as run]
+            [seon.cluster.store :as store]
+            [seon.cluster.wake :as wake]
+            [seon.cluster.work :as work]
+            [seon.schema :as schema]
+            [seon.schema.edn :as schema.edn])
+  (:import [java.util Date]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — src/seon/schema/loop.edn
@@ -78,7 +90,18 @@
   believe."
   {:malli/schema [:=> [:cat] [:set :keyword]]}
   []
-  (throw (ex-info "awaits implementation" {::fn `committed-attributes})))
+  ;; COMPUTED from the transitions this namespace commits: every
+  ;; attribute N2's run model owns, plus the agent pointer the close
+  ;; retracts. Derived from the registered population by namespace
+  ;; rather than typed out, so a new run attribute joins it the moment
+  ;; it is registered — which is what makes the disjointness property a
+  ;; property and not a promise.
+  (into #{:seon.cluster.agent/run}
+        (filter (fn [attribute]
+                  (contains? #{"seon.cluster.run" "seon.cluster.run.form"
+                               "seon.cluster.eval"}
+                             (namespace attribute))))
+        (schema/canonical-database-attributes)))
 
 (defn disposition
   "The disposition an admitted eval value carries, or nil.
@@ -88,7 +111,8 @@
   one simply stays open for the next wake."
   {:malli/schema [:=> [:cat :any] [:maybe :my.run/value]]}
   [value]
-  (throw (ex-info "awaits implementation" {::fn `disposition})))
+  (when (schema/valid-candidate-value? :my.run/value value)
+    value))
 
 (defn terminal-tx
   "The ONE transaction ending a form: its receipt AND the disposition.
@@ -98,12 +122,61 @@
   not, this is the receipt alone."
   {:malli/schema [:=> [:cat :seon.cluster.loop/terminal-request]
                   [:vector :some]]}
-  [request]
-  (throw (ex-info "awaits implementation" {::fn `terminal-tx})))
+  [{:keys [:seon.cluster.run/id :seon.cluster.run/process
+           :seon.cluster.run/claim-epoch :seon.cluster.run.form/ordinal
+           :seon.cluster.eval/status :seon.cluster.eval/result-edn
+           :seon.cluster.eval/error :my.run/value]}]
+  (let [receipt (cond-> {:seon.cluster.eval/id
+                         ;; identity is DERIVED from (run, ordinal, epoch),
+                         ;; so a re-run of the same step cannot mint a
+                         ;; second receipt for one form
+                         (pr-str [id ordinal claim-epoch])
+                         :seon.cluster.eval/run [:seon.cluster.run/id id]
+                         :seon.cluster.eval/ordinal ordinal
+                         :seon.cluster.eval/claim-epoch claim-epoch
+                         :seon.cluster.eval/at (Date.)
+                         :seon.cluster.eval/status status}
+                  result-edn (assoc :seon.cluster.eval/result-edn result-edn)
+                  error (assoc :seon.cluster.eval/error error))]
+    (into [receipt]
+          ;; ONE transaction: the disposition's own transition rides
+          ;; here, so the receipt and what it means are never two
+          ;; commits with a window between them.
+          (case (:my.run/disposition value)
+            :completed (run/close-tx {:seon.cluster.run/id id
+                                      :seon.cluster.run/process process
+                                      :seon.cluster.run/claim-epoch claim-epoch
+                                      :seon.cluster.run/closed-at (Date.)})
+            :wait (run/release-tx {:seon.cluster.run/id id
+                                   :seon.cluster.run/process process
+                                   :seon.cluster.run/claim-epoch claim-epoch})
+            nil))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The proc
 ;;; ---------------------------------------------------------------------------
+
+(declare turn)
+
+(defn- digest
+  "The plan digest: SHA-256 over the ordered sources, so the same reply
+  freezes to the same plan and N2's absent-to-digest fence is exact."
+  [sources]
+  (let [bytes (.digest (java.security.MessageDigest/getInstance "SHA-256")
+                       (.getBytes (pr-str sources) "UTF-8"))]
+    (apply str (map #(format "%02x" %) bytes))))
+
+(defn- form-source
+  "The source of one form of a run, by ordinal."
+  [db run-id ordinal]
+  (d/q '[:find ?source .
+         :in $ ?run-id ?ordinal
+         :where
+         [?run :seon.cluster.run/id ?run-id]
+         [?form :seon.cluster.run.form/run ?run]
+         [?form :seon.cluster.run.form/ordinal ?ordinal]
+         [?form :seon.cluster.run.form/source ?source]]
+       db run-id ordinal))
 
 (defn step
   "The run-loop transform, in Flow's four arities.
@@ -127,11 +200,52 @@
                   [:=> [:cat :seon.cluster.loop/state :keyword :any]
                    [:tuple :seon.cluster.loop/state
                     [:maybe [:map-of :keyword [:vector :some]]]]]]}
-  ([] (throw (ex-info "awaits implementation" {::fn `step})))
-  ([_args] (throw (ex-info "awaits implementation" {::fn `step})))
-  ([_state _transition] (throw (ex-info "awaits implementation" {::fn `step})))
-  ([_state _input-id _message]
-   (throw (ex-info "awaits implementation" {::fn `step}))))
+  ([]
+   {:workload :io
+    :params {:seon.cluster.loop/cluster "the cluster this loop drives"}
+    :ins {}
+    :outs {:seon.cluster.loop/turn-report
+           "One completed turn, for observation only."}
+    :ping-map-fn (fn [state]
+                   (select-keys state [:seon.cluster.loop/turns]))})
+
+  ([cluster]
+   ;; the wake channel is created by the caller and handed over as an
+   ;; in-port: Flow adds it to this proc's own read set, which is what
+   ;; makes a custom launcher unnecessary
+   {::flow/in-ports {:seon.cluster.wake/wake
+                     (:seon.cluster.wake/channel cluster)}
+    :seon.cluster.loop/cluster cluster
+    :seon.cluster.loop/turns 0})
+
+  ([state transition]
+   (when (= ::flow/stop transition)
+     (let [cluster (:seon.cluster.loop/cluster state)]
+       (wake/unlisten! {:seon.cluster.wake/connection
+                        (:seon.store/branch-connection cluster)
+                        :seon.cluster.wake/key ::wake})))
+   state)
+
+  ([state _input-id _message]
+   (let [cluster (:seon.cluster.loop/cluster state)
+         connection (:seon.store/branch-connection cluster)
+         request {:seon.cluster.run/process
+                  (:seon.cluster.run/process cluster)
+                  :seon.cluster.work/now (Date.)}
+         ;; ONE database value for the whole pass: everything this pass
+         ;; decides, it decides against one basis
+         work (work/next-work @connection request)]
+     (if (nil? work)
+       [state nil]
+       (let [report (turn {:seon.cluster.loop/cluster cluster
+                           :seon.cluster.work/next work})]
+         ;; self-rewake, coalescing on the (sliding-buffer 1) in-port:
+         ;; it cannot recurse, because the pass is only re-entered after
+         ;; this transform returns
+         (when (work/more-work? @connection request)
+           (async/offer! (:seon.cluster.wake/channel cluster) ::wake))
+         [(update state :seon.cluster.loop/turns inc)
+          {:seon.cluster.loop/turn-report [report]}])))))
 
 (defn turn
   "Run one turn to its next durable boundary; returns the turn report.
@@ -144,5 +258,116 @@
   agent reads on its next wake. Nothing throws into the loop."
   {:malli/schema [:=> [:cat :seon.cluster.loop/turn-request]
                   :seon.cluster.loop/turn-report]}
-  [request]
-  (throw (ex-info "awaits implementation" {::fn `turn})))
+  [{:keys [:seon.cluster.loop/cluster] work :seon.cluster.work/next}]
+  (let [connection (:seon.store/branch-connection cluster)
+        process (:seon.cluster.run/process cluster)
+        agent-id (:seon.cluster.agent/id work)
+        run-id (:seon.cluster.run/id work)
+        report (fn [outcome forms-run]
+                 (cond-> {:seon.cluster.agent/id agent-id
+                          :seon.cluster.work/situation
+                          (:seon.cluster.work/situation work)
+                          :seon.cluster.loop/forms-run forms-run
+                          :seon.cluster.loop/outcome outcome}
+                   run-id (assoc :seon.cluster.run/id run-id)))]
+    (case (:seon.cluster.work/situation work)
+      ;; OPEN + CLAIM FIRST, model second. The busy fence has to exist
+      ;; before the expensive part, and the trigger rides as tx-meta so
+      ;; answeredness needs no flag.
+      :open
+      (let [id (str (random-uuid))
+            now (Date.)
+            outcome (store/transact!
+                     connection
+                     {:tx-data
+                      (into (run/open-tx {:seon.cluster.run/id id
+                                          :seon.cluster.run/agent
+                                          [:seon.cluster.agent/id agent-id]
+                                          :seon.cluster.run/opened-at now})
+                            (run/claim-tx {:seon.cluster.run/id id
+                                           :seon.cluster.run/process process
+                                           :seon.cluster.run/lease-until
+                                           (Date. (+ (inst-ms now) 60000))
+                                           :seon.cluster.run/now now}))
+                      :tx-meta {:seon.db/trigger
+                                [:seon.cluster.message/id
+                                 (:seon.cluster.message/id work)]}})]
+        (report (if (:seon.error/kind outcome) :error :released) 0))
+
+      ;; THE ONE PAID CALL. Nothing retries it: a failure here closes
+      ;; nothing and re-derives nothing — the run stays claimed, and the
+      ;; error is what the agent reads next.
+      :call
+      (let [text (prompt/prompt @connection
+                                {:seon.cluster.agent/id agent-id
+                                 :seon.cluster.message/id
+                                 (first (map :seon.cluster.message/id
+                                             (work/unanswered-triggers
+                                              @connection agent-id)))})
+            completion (ai/complete
+                        (assoc (:seon.cluster.loop/provider cluster)
+                               :seon.ai/prompt text))]
+        (if (:seon.error/kind completion)
+          (report :error 0)
+          (let [sources (reply/sources (:seon.ai/text completion))]
+            (if (:seon.error/kind sources)
+              (report :error 0)
+              (let [run (d/pull @connection '[*] [:seon.cluster.run/id run-id])
+                    outcome (store/transact!
+                             connection
+                             (run/plan-tx
+                              {:seon.cluster.run/id run-id
+                               :seon.cluster.run/process process
+                               :seon.cluster.run/claim-epoch
+                               (:seon.cluster.run/claim-epoch run)
+                               :seon.cluster.run/plan-digest
+                               (digest sources)
+                               :seon.cluster.run/sources sources}))]
+                (report (if (:seon.error/kind outcome) :error :released) 0))))))
+
+      ;; ONE form per pass: the fold is a sequence of durable steps, and
+      ;; a pass that dies mid-form leaves exactly one running receipt
+      ;; for recovery to settle.
+      :resume
+      (let [run (d/pull @connection '[*] [:seon.cluster.run/id run-id])
+            epoch (:seon.cluster.run/claim-epoch run)
+            ordinal (:seon.cluster.run.form/ordinal work)
+            source (form-source @connection run-id ordinal)
+            evaluate (requiring-resolve
+                      (:seon.cluster.loop/evaluate cluster))
+            evaluation (evaluate {:seon.cluster.run.form/source source
+                                  :seon.sci.admit/caps
+                                  (:seon.sci.admit/caps cluster)})
+            outcome (store/transact!
+                     connection
+                     (terminal-tx
+                      (cond-> {:seon.cluster.run/id run-id
+                               :seon.cluster.run/process process
+                               :seon.cluster.run/claim-epoch epoch
+                               :seon.cluster.run.form/ordinal ordinal
+                               :seon.cluster.eval/status
+                               (:seon.cluster.eval/status evaluation)}
+                        (:seon.cluster.eval/result-edn evaluation)
+                        (assoc :seon.cluster.eval/result-edn
+                               (:seon.cluster.eval/result-edn evaluation))
+                        (:seon.cluster.eval/error evaluation)
+                        (assoc :seon.cluster.eval/error
+                               (:seon.cluster.eval/error evaluation))
+                        (disposition (:seon.sci.admit/value evaluation))
+                        (assoc :my.run/value
+                               (disposition
+                                (:seon.sci.admit/value evaluation))))))]
+        (report (if (:seon.error/kind outcome) :error :released) 1))
+
+      ;; the fold is done and nothing said otherwise: close it, so the
+      ;; agent stops being busy
+      :close
+      (let [run (d/pull @connection '[*] [:seon.cluster.run/id run-id])
+            outcome (store/transact!
+                     connection
+                     (run/close-tx {:seon.cluster.run/id run-id
+                                    :seon.cluster.run/process process
+                                    :seon.cluster.run/claim-epoch
+                                    (:seon.cluster.run/claim-epoch run)
+                                    :seon.cluster.run/closed-at (Date.)}))]
+        (report (if (:seon.error/kind outcome) :error :closed) 0)))))
