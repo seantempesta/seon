@@ -384,6 +384,17 @@ may reintroduce a shadow build into the dev feedback path.
   `seon.code.*` rename).** The core system's own names: `seon.fn`,
   `seon.ns`, `seon.schema`, `seon.test`. Schema facts remain one global
   population with derived reverse lookup (the N5 clause), unchanged.
+- **Datahike is PART of Seon, not a library we call (owner,
+  2026-07-27 late).** It is our fork under `reference-code/`; calling
+  internal functions is sanctioned; a small fork change is acceptable
+  when it buys real isolation. Konserve stays the default backend.
+  Under this ruling, O2's clone-per-cluster mechanism is being
+  re-evaluated against BRANCH-PER-CLUSTER (one physical store, clusters
+  as branches of the ancestor, zero-copy structural sharing, per-branch
+  writer loops, backend-agnostic) — the B2 plan carries the
+  probe-grounded verdict; the hard requirement is unchanged: one
+  cluster can never take down or corrupt another. File-clone survives
+  for export/import and base-building regardless.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
