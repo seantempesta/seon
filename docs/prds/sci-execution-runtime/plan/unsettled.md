@@ -397,14 +397,28 @@ unobservable event; derivable when the loop publishes a pass
 boundary). Three more recorder-survives-our-mistakes fixes:
 attribution read off the FACT (request/db divergence suppressed a
 real notice), dangling ref dropped not emitted, nil-limit = fact
-committed nothing mailed. IN FLIGHT (two): the error agent lands
-STEP 4 (seon.instrument/apply! — idempotent, throwing in :panic,
-violations compose into the fault path, re-eval-strips made
-falsifiable, D1 the fixture class); the N4 agent drafts
-render-pipeline contracts (first visible proof = the PROBLEMS PAGE
-in a browser — now with seon.problems live underneath it; adopted
-recommendations listed for owner veto at seal). THEN: step 5
-failover; two-cluster proof; projection-review experiment. THEN: two-cluster proof; projection-review experiment;
+committed nothing mailed. STEP 4 GREEN (6215ff0bc, 225/976/0 verified): seon.instrument —
+computed selection (public + :malli/schema; hot walkers are defn- by
+construction), :panic throws OUR flat violation value which composes
+into the wired fault path (violation → error fact → message →
+problems), :record instruments NOTHING (judgment flagged,
+one-line-reversible), wired at bin/repl + drives NOT start! (a
+cluster dial must not mutate process-global var roots — ruled
+accepted). FOUR never-compiled contracts caught on first collect!
+(catn duplicate key, bare-symbol :fn, loop/cluster missing
+::flow/pid, turn-report demanding an id :open lacks) — the step's
+argument made empirical. Nineteen released-connection teardown
+violations = ONE issue
+(instrumentation-surfaces-released-connection-contracts) with the
+real bar: gate green WITH apply! active. Two runaway probe JVMs from
+2026-07-26 (99% CPU × 29h) found+killed during owner process-audit.
+IN FLIGHT (two): the error agent lands STEP 5 — failover (descriptor
+rows, zero-cost error classes fail over instantly, backup context =
+the AI PROJECTION of the primary's error fact, no-retry boundary
+exact, per-attempt facts; completes task #10); the N4 agent drafts
+render-pipeline contracts (problems page in a browser). THEN:
+two-cluster proof; projection-review experiment;
+released-connection family; dispatcher lands post-measurement. THEN: two-cluster proof; projection-review experiment;
 steps 3-5. Earlier step-1 note follows:
 IN FLIGHT: the same agent applies authorized seal revisions
 (:seon.config.fault/*→error dial rename across five files; admit
