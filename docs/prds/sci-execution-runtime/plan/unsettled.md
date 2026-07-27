@@ -412,10 +412,28 @@ violations = ONE issue
 (instrumentation-surfaces-released-connection-contracts) with the
 real bar: gate green WITH apply! active. Two runaway probe JVMs from
 2026-07-26 (99% CPU × 29h) found+killed during owner process-audit.
-IN FLIGHT (two): the error agent lands STEP 5 — failover (descriptor
-rows, zero-cost error classes fail over instantly, backup context =
-the AI PROJECTION of the primary's error fact, no-retry boundary
-exact, per-attempt facts; completes task #10); the N4 agent drafts
+STEP 5 SLICE 1 GREEN (e3bc8c31f, 232/1001/0 verified): transport-
+phase evidence (request-transmitted?/response-started?/
+output-observed? from the JDK's OWN exception taxonomy — connect-
+class exceptions prove nothing was transmitted; everything else
+counts as transmitted) + seon.ai/disposition, pure,
+:failover-now|:backoff|:fail with the backoff set COMPUTED.
+ORCHESTRATOR RULING: the agent's departure from my brief is ACCEPTED
+— a plain ::timeout is :fail, only a CONNECT timeout fails over
+(a transmitted request is ambiguously paid; re-calling it is exactly
+what the no-retry ruling forbids; my brief was looser than the
+research and the research wins). STEP-5 REMAINDER (the drafting
+agent a072b05ef16cbadcd is context-EXHAUSTED after five green
+steps — a FRESH agent takes this, in dependency order, spec in its
+final report + research/model-failover-2026-07-27.md §named
+sections): (1) descriptor rows growing the :seon.config.ai/* dials
+(primary + optional backup, reconcile not duplicate); (2)
+per-attempt receipt facts (new schema family); (3) failover
+execution in the loop's :call branch consuming disposition, backup
+context = error/ai-prose over the primary's COMMITTED fact (commit
+before the backup call — ordering constraint); (4) backoff strategy
+as again-style config facts, no-backup path only. Falsifiers
+unchanged from the step-5 brief. ALSO IN FLIGHT: the N4 agent drafts
 render-pipeline contracts (problems page in a browser). THEN:
 two-cluster proof; projection-review experiment;
 released-connection family; dispatcher lands post-measurement. THEN: two-cluster proof; projection-review experiment;
