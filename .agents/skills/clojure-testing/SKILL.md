@@ -36,6 +36,23 @@ wait on and no live process to contend with.
 test in any other location is invisible to the gate, which means **not
 covered** however green it looked when you ran it by hand.
 
+Two honesty facts about the gate itself:
+
+- **A namespace with zero `deftest`s reports green.** `run-tests` returns
+  `0 fail 0 error` and the exit code is 0. Green is not evidence that anything
+  ran — check the test count.
+- **Expected refusals print full Datahike stack traces.** A refusal aborts the
+  transaction by throwing, and `datahike.writer` logs the whole
+  `:datahike/write-error` payload: `bin/test seon.cluster.run-test` emits ~15,700
+  lines for six tests. A stack trace in the log is not a failure; the
+  `Ran N tests` line and the exit code are the verdict.
+
+Cost, measured 2026-07-27: the JVM starts in 0.24 s but `(require
+'datahike.api)` costs ~6.9 s, and that cost is paid **per JVM, not per suite**
+(five suites: 69 s separately, 35.6 s together). So run a selection as ONE
+`bin/test ns-a ns-b` invocation, never one process per namespace. A test that
+spawns a child JVM re-pays the full ~7 s.
+
 ## Fresh in-memory Datahike per test
 
 Every database test opens its own `:memory` store (a fresh random `:id`, so
@@ -137,8 +154,10 @@ failure, never an expected refusal; do not fall back to message matching.
 | `Bad entity attribute … not defined in current schema` | attribute registered but not installed on this connection | add it to the fixture's attribute list |
 | "Unregistered attributes" from a Seon boundary | missing `schema/register!` | register it in the owning ns |
 | Empty `#{}` from a query that should match | attr misspelled, type mismatch, or a ref-join written as keyword-in-slot | see the `datahike` skill's read traps |
-| A property passes but the code is wrong | the property observes only the returned value | observe durable facts independently of the return |
-| Tests pass alone, fail together | the fixture shares one store across trials | fresh `:id` per test AND per generative trial |
+| A property passes but the code is wrong | the property observes only the returned value, or its checker never reads the facts the command wrote | observe durable facts independently of the return; extend the checker |
+| Tests pass alone, fail together | the fixture shares one store, or restores less than it replaced | fresh `:id` per test AND per generative trial; nothing global to restore |
+| A property fails differently on rerun | a random or wall-clock input inside the property body | derive every input from the seed |
+| The suite is green and a reviewer still finds blockers | the failure class has no representative: teardown faults, concurrency, interactions | add the missing class, not more cases of a covered one |
 | `:malli.core/invalid-input/output` | args/return don't match `:malli/schema` | read the explain — fix the call or the schema, don't coerce |
 
 ## Generative checks stay inside the same suite
@@ -180,6 +199,59 @@ commit or refuse; the real database runs the same command; a disagreement in
 either direction is a counterexample, and durable invariants are re-asserted
 after every command. `test/seon/cluster/run_test.clj` implements exactly this.
 
+### Four rules that decide whether the property is worth anything
+
+1. **One database per TRIAL, not per property.** Create the connection INSIDE
+   `prop/for-all`. The pure model resets every trial and every shrink step, so
+   the world it reasons about must too. Receipt: a sealed property was
+   unsatisfiable by *any* implementation because `with-model-database` wrapped
+   `quick-check` instead of the body — from trial 2 the oracle reasoned about
+   an empty world against a database still holding trial 1's runs
+   (`c2d3a96af`, fixed `1d6947069`).
+2. **Every generated input is a function of the seed.** No `random-uuid`, no
+   `System/currentTimeMillis`, no unordered-set iteration inside a property
+   body. A `:seed` with a random input is decoration: the trial cannot be
+   replayed and a shrunk counterexample cannot be reproduced. Receipt: a gate
+   with time seeds produced 83 failures at 22:03 and 85 at 22:55 from identical
+   source, so it could not distinguish a regression from a sample.
+3. **Your coverage is the invariant checker, not the command generator.** A
+   command whose resulting facts nothing observes buys runtime, not coverage.
+   Receipt: a `:done` receipt could be upserted back to `:running` and both
+   writes committed, while the green model property emitted receipt commands
+   but never compared receipt facts with its own map. Extend the checker before
+   extending the generator.
+4. **The oracle must re-derive the invariant, not restate the
+   implementation.** An oracle written by the contract's own author inherits
+   that author's blind spot: one oracle treated holder+epoch as sufficient
+   custody and therefore *agreed* with the lease-expiry defect it existed to
+   catch. Write it from the stated invariant ("custody is process AND epoch AND
+   live lease"), then have someone adversarial ask which one it restated.
+
+### The classes properties do not reach
+
+- **Teardown is untested code.** Nothing exercises a `finally`, `release!`, or
+  `stop!` in anger. A cleanup path that guards an invariant — a fence, a lock,
+  a lease — needs a fault injected into it and the invariant re-asserted, and
+  it must fail CLOSED (retaining a fence is safe; dropping it is data loss).
+  Receipt: a failed `d/release` propagated while its `finally` invalidated the
+  flock, leaving a live writer with no cross-process fence.
+- **Concurrency.** Sequential tests cannot see a generation race. Anything
+  fenced by `(pid, start-instant)`, an epoch, or a generation gets a test that
+  drives two operations at once — with latches, never sleeps. Receipt: a
+  delayed `stop!` killed a replacement instance that had started in between.
+- **Interactions between two covered halves.** Receipt: one test proved the
+  in-process refusal, another proved the cross-process fence; neither did both
+  at once, and the real bug was that `fcntl` drops every lock on a file when
+  any descriptor closes, so performing the refusal silently unlocked the store
+  (`test/seon/cluster/store_test.clj:223-257` is the admitted falsifier).
+
+Live falsifiers — real sockets, real files, real child JVMs, real SIGKILL —
+belong IN the suite, discovered by the runner: a proof that ran once in a lane
+counts as not covered. They are expensive (~7 s per child JVM), so write one
+per interaction class, never one per scenario. Wait on an observed event (a
+ready file, a latch); a clock is only the backstop for a foreign process, and
+its firing is a bug report (`test/seon/cluster/store_test.clj:196-207`).
+
 Grounding and the pitfall catalog:
 `docs/prds/sci-execution-runtime/research/malli-generative-patterns-2026-07-26.md`
 + `research/spec-authorship-relational-properties-2026-07-26.md` (the guard
@@ -199,5 +271,10 @@ owner.
 | File | What it teaches |
 |---|---|
 | `test/seon/cluster/run_test.clj` | the whole shape: fixture, deterministic clock, refusal-as-value, model-based state-machine property |
+| `test/seon/cluster/boot_test.clj` | a live falsifier in-suite: real prepl sockets, project-local `tmp/` fixtures, a ruling (the ten-second bound) asserted as a test |
+| `test/seon/cluster/store_test.clj` | cross-process falsifiers with a real child JVM, event-driven readiness, and the two-halves interaction test |
 | `test/seon/flow/loop_test.clj` | exercising a `core.async.flow` graph from a test |
 | `reference-code/datahike/` | the fork's source — read it, don't guess semantics |
+
+Full history — the buried harnesses, the eight root causes, and the testing
+constitution: `docs/prds/sci-execution-runtime/research/testing-story-2026-07-27.md`.

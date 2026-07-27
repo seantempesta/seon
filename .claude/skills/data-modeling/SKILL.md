@@ -272,10 +272,17 @@ Rules that make a schema generatively honest:
   keep a reachable base case and are sampled at several sizes with an asserted
   size bound.
 
+- **Every generated input is a function of the seed.** A property body that
+  mints a `random-uuid` or reads the wall clock cannot be replayed and its
+  shrunk counterexample cannot be reproduced, whatever `:seed` it passes.
+
 Write the properties as normal `clojure.test` namespaces under `test/`, run by
-`bin/test` (see `clojure-testing`). The generator remains a data
-source inside that suite; the schema, not a hand-built fixture, is the test
-oracle. Full evidence and the pitfall catalog:
+`bin/test` (see `clojure-testing`). The generator remains a data source inside
+that suite: for a *shape*, the schema is the oracle and no hand-built fixture
+is needed; for a *transition*, the oracle is a pure model you write, and it is
+only as good as the invariant it re-derives — see `clojure-testing`, "Four
+rules that decide whether the property is worth anything". Full evidence and
+the pitfall catalog:
 `docs/prds/sci-execution-runtime/research/malli-generative-patterns-2026-07-26.md`.
 
 ## Worked example — a small domain end to end
