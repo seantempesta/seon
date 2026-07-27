@@ -298,13 +298,31 @@ dial, a `problems` derivation, malli instrumentation at dev boot
 resilience = primary/backup descriptor rows with instant failover on
 error-class (backup's context says the primary failed and why),
 backoff-without-secondary reconciled with the no-retry ruling.
-IN FLIGHT (three): Opus research agent grounds the error wiring in
-core.async.flow/sci/malli/quarry source
-(error-handling-grounding-2026-07-27.md); sol model-failover-research
-mines litellm-clj + again (model-failover-2026-07-27.md); the Opus
-drafting agent lands the final pre-drill unit (GAP 2 loop settling,
-process-identity agreement in handles+drill scripts, drill verify
-reconciled with boot recovery). THEN the kill -9 drill runs.
+**PHASE 2 COMPLETE (dd8a483db, evidence in
+n3-live-proof-2026-07-27.md): kill -9 mid-model-call → reboot →
+start! recovered dead custody BY FACT ({:recovered-runs 1}, lease
+still ~50s future) → the LOOP buried the orphan itself and drove a
+NEW run to completion (real DeepSeek) in 3.1s of reboot → receipts
+only for the new run, crashed run never re-planned, warning in the
+new prompt. Interrupted+adapt proven over real facts.** Pre-drill
+unit a6d426983 (GAP 2 settle-before-derive; ONE holder string
+cluster/process-identity everywhere; drill = production wiring only).
+Gate 172/785/0. RESEARCH IN: error-handling-grounding-2026-07-27.md
+(e8fdd3518 — flow's error chan is sliding-100 SILENT DROP and start!
+wires NO consumer, every core fault vanishes live; three incompatible
+error-report shapes, ::flow/state must go through admit never pr-str;
+classification needs NO predicate — evaluate never throws so channel
+= classification; message-to = delivery already built; malli :report
+does NOT prevent the bad call, +129-175ns cost, re-eval silently
+strips instrumentation → explicit idempotent apply!, hot fns are
+defn- so "public + schema" needs no list; six defects D1-D6 → issue
+lane binayawwx filing) and model-failover-2026-07-27.md (b44bd1527,
+litellm-clj + again mined). NEXT SPINE: I author the error-wiring
+contract package from the grounding report (fault consumer at boot →
+fault fact + explanation message ONE tx → escalation dial →
+problems derivation → instrumentation apply! at dev boot), then the
+failover descriptor rows. Owner directions of the evening are all in
+these two reports.
 N4 PLAN REVISED (ab2911caa): all 25 review findings dispositioned,
 composed with the landed N3 owners, socket/reset/child-loss proofs
 moved in-suite, EIGHT owner decisions consolidated — both N4 and N5
