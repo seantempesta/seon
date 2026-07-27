@@ -250,9 +250,12 @@ helpers + four schema rows + pinning tests in the same commit per the
 deletion doctrine; gate 147/640/0 INDEPENDENTLY VERIFIED; lost
 incidental coverage named honestly in the commit — the surviving
 owner is seon.cluster.loop + wake under their own suites).
-IN FLIGHT (one lane): n4-plan-revise (fresh lane — the original
-n4-plan lane had no resumable session) revises the N4 plan against
-its 399e818b4 review. NEXT SESSION'S SPINE, in order: (1) the N3
+N4 PLAN REVISED (ab2911caa): all 25 review findings dispositioned,
+composed with the landed N3 owners, socket/reset/child-loss proofs
+moved in-suite, EIGHT owner decisions consolidated — both N4 and N5
+plans are now review-hardened and wait only on their owner-decision
+batches. IN FLIGHT (one lane): digest-unify gives the triplicated
+SHA-256 helper one owner (byte-identical proof required). NEXT SESSION'S SPINE, in order: (1) the N3
 integration proof, orchestrator-owned — bin/repl or clojure -M:dev,
 start! a cluster, install a live flow graph with the loop proc, drive
 one REAL turn (one live DeepSeek call proving request/response
