@@ -362,14 +362,32 @@ only on real triggers); two-cluster live proof right after step 2;
 CONCURRENT AGENTS PER CLUSTER is the target end state — "the
 database is the intermediary... design it correctly with flow and it
 should just work" — safe dial-bounded version first, measured;
-one-user-per-workspace, maybe multiple. IN FLIGHT (three): the error
-agent lands STEP 2 (fault consumer at boot + root seed + armed-idle
-graph install + store/refusal move + D1/D3); sol
-turn-dispatcher-design docs the end-state loop-as-dispatcher
-(per-agent serial fence, concurrency dial, measurement plan); the N4
-agent drafts render-pipeline contracts (first visible proof = the
-PROBLEMS PAGE in a browser; adopted recommendations listed for owner
-veto at seal). THEN: two-cluster proof; projection-review experiment;
+one-user-per-workspace, maybe multiple. STEP 2 GREEN (e1f7262c6, 203/913/0 — one 1-in-3 FLAKE filed as
+full-gate-has-a-one-in-three-flake-post-step-2): boot arms fault
+fan-out + root agent + armed-idle loop (dials-derived handle, four
+:seon.config.ai/* dials, zero model calls); refusal moved to
+seon.error PURE (returns tx-data — the caller commits); D1/D3/D4
+closed+archived. THREE LIVE FINDINGS: (1) THE ERROR STORM — delivery
+IS a wake, so one broken code path self-fed 6 faults/1.5s; bounded by
+recurrence signature (limit → one :recurring escalation → silence;
+facts keep committing, a fact alone wakes nobody); (2) who-is-told is
+COMPUTED from the fact (only a Throwable messages the attributed
+agent; refusals = fact + escalation only — messaging refusals made a
+test drive open runs to DISCUSS refusals); (3) the newly-wired error
+channel immediately caught a real defect (loop's ::turn-report
+resolved no channel — invisible exactly as long as nobody read the
+channel; now rides ::flow/report). OWNER-LOOK ITEM: root's
+escalation message opens a real run for root (delivery-as-wake) —
+bounded limit+1 per signature per process; revisit when root gets a
+real prompt. NAMED NOT DONE: flow/stop mid-turn loses that
+transaction (kill row; recover-tx settles next boot; honest fix = a
+completion the proc publishes). DISPATCHER DESIGN IN (d6212af43):
+the double-token-spend race is the ONE thing the database cannot
+see — process-local active-agent set fences money, everything else
+is transitions; lands after the two-cluster measurement.
+IN FLIGHT (one): the N4 agent drafts render-pipeline contracts
+(first visible proof = the PROBLEMS PAGE in a browser; adopted
+recommendations listed for owner veto at seal). THEN: two-cluster proof; projection-review experiment;
 steps 3-5. Earlier step-1 note follows:
 IN FLIGHT: the same agent applies authorized seal revisions
 (:seon.config.fault/*→error dial rename across five files; admit
