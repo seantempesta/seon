@@ -385,9 +385,26 @@ completion the proc publishes). DISPATCHER DESIGN IN (d6212af43):
 the double-token-spend race is the ONE thing the database cannot
 see — process-local active-agent set fences money, everything else
 is transitions; lands after the two-cluster measurement.
-IN FLIGHT (one): the N4 agent drafts render-pipeline contracts
-(first visible proof = the PROBLEMS PAGE in a browser; adopted
-recommendations listed for owner veto at seal). THEN: two-cluster proof; projection-review experiment;
+STEP 3 GREEN (b2fefe9d5, 218/954/0, TEN consecutive gate runs — the
+flake was the agent's own armed-test equality racing a still-storming
+producer; de-flake lesson: equality on a producing producer is a race
+BY CONSTRUCTION, upper bounds are monotone-safe; issue archived).
+seon.problems: pure over (db, live-processes), four families keyed BY
+family (no :type), healthy = {}, signatures grouped (100 recurrences
+= 1 problem), drives print it on failure (live-verified). Stale
+triggers DEFERRED correctly (threshold = a number standing in for an
+unobservable event; derivable when the loop publishes a pass
+boundary). Three more recorder-survives-our-mistakes fixes:
+attribution read off the FACT (request/db divergence suppressed a
+real notice), dangling ref dropped not emitted, nil-limit = fact
+committed nothing mailed. IN FLIGHT (two): the error agent lands
+STEP 4 (seon.instrument/apply! — idempotent, throwing in :panic,
+violations compose into the fault path, re-eval-strips made
+falsifiable, D1 the fixture class); the N4 agent drafts
+render-pipeline contracts (first visible proof = the PROBLEMS PAGE
+in a browser — now with seon.problems live underneath it; adopted
+recommendations listed for owner veto at seal). THEN: step 5
+failover; two-cluster proof; projection-review experiment. THEN: two-cluster proof; projection-review experiment;
 steps 3-5. Earlier step-1 note follows:
 IN FLIGHT: the same agent applies authorized seal revisions
 (:seon.config.fault/*→error dial rename across five files; admit
