@@ -352,7 +352,21 @@ ruled as drafted. Gate 198/822 with exactly 33 stub errors.
 IN FLIGHT: the same agent applies authorized seal revisions
 (:seon.config.fault/*→error dial rename across five files; admit
 record {:optional true}; ui.md accretion drafted as a SEPARATE commit
-for isolated review) then implements step 1 to full-gate 0/0. The
+for isolated review) then implements step 1 to full-gate 0/0.
+OWNER DIRECTIONS (late night): FAIL LOUD ≠ FALL DOWN ruling recorded
+in README (c174607ad — dev :panic halts the ACTIVITY, never the
+tower/REPL/UI; dig-into-it is the point). ITERATE THE PROJECTIONS:
+after step 1 greens, run a projection-review experiment — generate
+real errors of every family, render every projection, put actual
+outputs in front of the owner to critique and refine (hot-reloadable
+defns behind symbol routing = free iteration). SIZE DISCIPLINE
+confirmed: all fact data through the admit codec (bounded by
+construction); stack traces NOT in the step-1 fact — D2's owner lands
+a bounded frame projection, full traces go to blob storage with a ref
+(three-tier rule); recurrence signature prevents crash-loop
+duplication. My error-consumption surfaces: problems via REPL (task
+#3 MCP restart unblocks live eval_clj), log-projection files, drives
+print problems on failure, N4 html problems surface. The
 orchestrator seals on its return. OWNER DIRECTION (night, routing):
 the router's delivery substrate is COMMITTED FACTS + listen!
 attribute interest (the wake mechanism generalized — subscribe to the
