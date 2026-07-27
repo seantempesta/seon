@@ -90,7 +90,13 @@
   projections is an ordinary value, not an error."
   {:malli/schema [:=> [:cat :seon.render/unit] [:set :seon.render/kind]]}
   [unit]
-  (throw (ex-info "awaits implementation" {::fn `kinds})))
+  (into #{}
+        (keep (fn [[key value]]
+                (when (and (qualified-keyword? key)
+                           (= "seon.render" (namespace key))
+                           (qualified-symbol? value))
+                  key)))
+        unit))
 
 (defn render
   "Project `:seon.render/unit` into `:seon.render/kind`.
@@ -111,5 +117,31 @@
     the projection is what is broken."
   {:malli/schema [:=> [:cat :seon.render/request]
                   [:or :seon.render/rendered :seon.error/value]]}
-  [request]
-  (throw (ex-info "awaits implementation" {::fn `render})))
+  [{:seon.render/keys [unit kind]}]
+  (let [declaration (get unit kind)]
+    (if-not (qualified-symbol? declaration)
+      {:seon.error/kind ::kind-not-declared
+       :seon.error/message (str "This unit declares no " kind " projection.")
+       :seon.error/data {:seon.render/kind kind
+                         :seon.render/kinds (kinds unit)}}
+      ;; the VAR, never a fn value taken once: re-evaluating the
+      ;; projection's defn must change the next render
+      (if-let [projection (try
+                            (requiring-resolve declaration)
+                            (catch Throwable _ nil))]
+        (try
+          {:seon.render/kind kind
+           :seon.render/output (projection unit)}
+          (catch Throwable failure
+            {:seon.error/kind ::projection-failed
+             :seon.error/message (str "The " declaration " projection threw: "
+                                      (or (ex-message failure)
+                                          (.getName (class failure))))
+             :seon.error/data {:seon.render/kind kind
+                               :seon.render/projection declaration
+                               :seon.error/class (.getName (class failure))}}))
+        {:seon.error/kind ::unresolvable
+         :seon.error/message (str "The projection " declaration
+                                  " does not resolve.")
+         :seon.error/data {:seon.render/kind kind
+                           :seon.render/projection declaration}}))))

@@ -166,13 +166,21 @@
     (is (= "clojure.lang.ExceptionInfo"
            (:seon.error/class (:seon.error/data refused))))))
 
-(deftest the-router-never-throws
+(deftest the-router-never-throws-and-the-caller-lives
   ;; one property stated as one test, because "never throws" is the
   ;; reason this namespace exists rather than a nicety: seon.error's
   ;; notices route through here, so a throw would turn recording an
-  ;; error into a second error
+  ;; error into a second error. And per the owner's 2026-07-27 ruling —
+  ;; fail loud, do NOT fall down — the caller must still be working
+  ;; afterwards, which is the second half asserted below.
   (doseq [broken [(assoc (unit) :seon.render/ai `throwing-projection)
                   (assoc (unit) :seon.render/ai 'no.such.namespace/nope)
                   (dissoc (unit) :seon.render/ai)
                   {}]]
-    (is (map? (render/render (request broken :seon.render/ai))))))
+    (is (map? (render/render (request broken :seon.render/ai)))))
+  (testing "a broken projection does not poison the next render"
+    (render/render (request (assoc (unit) :seon.render/ai `throwing-projection)
+                            :seon.render/ai))
+    (is (= "echo:u1"
+           (:seon.render/output (render/render (request (unit)
+                                                        :seon.render/ai)))))))

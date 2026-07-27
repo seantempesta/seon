@@ -210,20 +210,39 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest the-proc-state-never-escapes-raw
+  ;; asserted STRUCTURALLY over the read-back value rather than as a
+  ;; substring of the print: `*print-namespace-maps*` is true here, so
+  ;; the marker prints `#:seon.sci.admit{:reference …}` and a string
+  ;; match would be testing the printer's settings
   (let [fact (error/normalize (request (transform-error (ex-info "boom" {}))))
-        printed (:seon.error/data-edn fact)]
+        read-back (edn/read-string (:seon.error/data-edn fact))]
     (testing "a value pr-str cannot survive reads back as EDN"
-      (is (some? (edn/read-string printed))))
-    (testing "the reference is NAMED, never entered"
-      (is (str/includes? printed ":seon.sci.admit/reference")))
-    (testing "and the honest signal says the print is not the whole source"
-      (is (true? (:seon.error/capped? fact))))))
+      (is (map? read-back)))
+    (testing "the live reference is NAMED, never entered — which is what
+    makes the cycle unrepresentable rather than detected"
+      (is (= {:seon.sci.admit/reference "clojure.lang.Atom"}
+             (get-in read-back [::flow/state
+                                :seon.cluster.loop/cluster
+                                :seon.store/branch-connection]))))
+    (testing "and the Throwable itself is a marker, not an interpretation"
+      (is (= {:seon.sci.admit/opaque "clojure.lang.ExceptionInfo"}
+             (get read-back ::flow/ex))))))
 
-(deftest capping-is-honest-in-both-directions
+(deftest capping-is-honest
+  ;; `capped?` is admission's own signal and means ELIDED OR TRUNCATED,
+  ;; not "contains a marker": a reference that was named rather than
+  ;; entered is a complete projection of an unprojectable thing. Both
+  ;; halves are asserted so the meaning cannot drift into the other one.
   (let [small (error/normalize (request {:seon.error/kind :seon.ai/timeout
-                                         :seon.error/message "slow"}))]
+                                         :seon.error/message "slow"}))
+        wide (error/normalize
+              (request {:seon.error/kind :seon.ai/timeout
+                        :seon.error/message "slow"
+                        :seon.error/data {:rows (vec (range 500))}}))]
     (is (false? (:seon.error/capped? small))
-        "a source that fits is not reported as capped")))
+        "a source that fits is not reported as capped")
+    (is (true? (:seon.error/capped? wide))
+        "a source wider than the caps says so")))
 
 (deftest normalization-never-throws
   ;; the recursion fence, stated as a test: a source whose realization
@@ -267,6 +286,19 @@
     (is (not (contains? fact :seon.error/class)))
     (is (= :seon.ai/no-credential (:seon.error/kind fact)))
     (is (= "unset" (:seon.error/message fact)))))
+
+(deftest the-message-comes-from-the-rule-not-the-wrapper
+  ;; found by READING the first real projection: the fact said
+  ;; "An error stopped work: wrapper", because the outermost Throwable
+  ;; in a Datahike-wrapped refusal carries a useless word while the rule
+  ;; sits at the bottom of the chain. The chain is not recoverable from
+  ;; data-edn either — admission projects a Throwable to an opaque
+  ;; marker by design — so this string is the only place the real
+  ;; sentence can appear.
+  (let [fact (error/normalize
+              (request (transform-error
+                        (refused-chain :seon.cluster.run/stale-epoch))))]
+    (is (= "the transition refused" (:seon.error/message fact)))))
 
 (deftest the-kind-comes-from-the-deepest-ex-data
   (let [fact (error/normalize

@@ -132,13 +132,99 @@
   was never transacted is a value on a dead thread. `commit!` (step 2)
   owns the durability and its own crash walk."
   (:require [clojure.core.async.flow :as-alias flow]
-            [seon.schema.edn :as schema.edn]))
+            [clojure.string :as str]
+            [seon.cluster.store :as store]
+            [seon.schema :as schema]
+            [seon.schema.edn :as schema.edn]
+            [seon.sci.admit :as admit]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — src/seon/schema/error.edn
 ;;; ---------------------------------------------------------------------------
 
 (schema.edn/load! {})
+
+;;; ---------------------------------------------------------------------------
+;;; Reading the source — structure only, never a flag and never a scope
+;;; ---------------------------------------------------------------------------
+
+;;; The fail-closed kind. Not a classification: the honest statement that
+;;; nothing recognized this source, which is still infinitely better than
+;;; refusing to record it.
+(def ^:private unclassified :seon.error/unclassified)
+
+(defn- throwable
+  "The Throwable in `source`, or nil.
+  `::flow/ex` is the ONE key all three of flow's report shapes share
+  (`impl.clj:106-110, 312-320`), which is what makes the family
+  recognizable without enumerating shapes."
+  [source]
+  (cond
+    (instance? Throwable source) source
+    (and (map? source) (instance? Throwable (::flow/ex source))) (::flow/ex source)))
+
+(defn- kind
+  "The namespaced rule that failed, never invented here.
+  A flat value and a refusal's ex-data carry their own; a Throwable
+  carries one at the deepest non-empty `ex-data` in its cause chain,
+  which `seon.cluster.store/refusal` already walks — one owner for that
+  walk, not a copy of it here."
+  [source failure]
+  (or (when (map? source) (:seon.error/kind source))
+      (when failure (:seon.error/kind (store/refusal failure)))
+      unclassified))
+
+(defn- root-cause
+  "The deepest Throwable in the cause chain.
+  A different question from `store/refusal`'s — that one digs out the
+  deepest DATA, this one names the throwable the chain bottoms out in —
+  so it is not a copy of that walk."
+  [failure]
+  (loop [candidate failure]
+    (if-let [cause (ex-cause candidate)]
+      (recur cause)
+      candidate)))
+
+(defn- message
+  "What a reader is told. Never absent, never blank.
+  Taken from the ROOT CAUSE, not the outermost wrapper: measured on the
+  first real projection, a Datahike-wrapped transition refusal produced
+  the message \"wrapper\" while the kind came from the bottom of the
+  chain, and an agent reading \"An error stopped work: wrapper\" has been
+  told nothing. The chain is not recoverable from `data-edn` either —
+  admission projects a Throwable to an opaque marker by design — so this
+  string is the only place the real sentence can appear.
+  A source nothing recognizes still says what arrived: `nil` is a
+  perfectly possible thing to be handed, and \"an error we cannot
+  describe\" has to describe that much."
+  [source failure]
+  (or (when (map? source) (not-empty (:seon.error/message source)))
+      (when failure
+        (let [deepest (root-cause failure)]
+          (or (not-empty (ex-message deepest))
+              (not-empty (ex-message failure))
+              (.getName (class deepest)))))
+      (if (nil? source)
+        "An unclassified nil arrived where an error was expected."
+        (str "An unclassified " (.getName (class source)) " arrived where an "
+             "error was expected."))))
+
+(defn- top-frame
+  "The Throwable's own top stack frame, or nil.
+  Part of the signature because it is what separates two different bugs
+  that happen to share a class and a kind."
+  [failure]
+  (when failure
+    (some-> ^Throwable failure .getStackTrace first str)))
+
+(defn- signature
+  "SHA-256 over the error's own content: process, class, kind, top frame.
+  The MESSAGE IS DELIBERATELY ABSENT — a message carrying a run id, a
+  path or a timestamp would make every occurrence unique and the derived
+  recurrence count (which is the escalation rule) always one."
+  [process class-name error-kind frame]
+  (schema/sha-256 [(.getBytes (pr-str [process class-name error-kind frame])
+                              "UTF-8")]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The normalizer
@@ -176,8 +262,40 @@
   one. The result is transactable as-is — every key is a declared
   attribute of `:seon.error/fact` and nothing rides along."
   {:malli/schema [:=> [:cat :seon.error/normalize-request] :seon.error/fact]}
-  [request]
-  (throw (ex-info "awaits implementation" {::fn `normalize})))
+  [{:seon.error/keys [source id at process basis-t]
+    :seon.sci.admit/keys [caps]
+    run-id :seon.cluster.run/id
+    agent-id :seon.cluster.agent/id}]
+  (let [failure (throwable source)
+        class-name (when failure (.getName (class failure)))
+        error-kind (kind source failure)
+        ;; :record UNCONDITIONALLY. The dial governs the failing site;
+        ;; the recorder may not panic, because a panic here destroys the
+        ;; one record of the original failure.
+        admitted (admit/admit {:seon.sci.admit/value source
+                               :seon.sci.admit/interrupt-fn (constantly nil)
+                               :seon.sci.admit/caps caps
+                               :seon.config/on-core-error :record})
+        flow? (map? source)]
+    (cond-> {:seon.error/id id
+             :seon.error/at at
+             :seon.error/process process
+             :seon.error/kind error-kind
+             :seon.error/message (message source failure)
+             :seon.error/signature (signature process class-name error-kind
+                                              (top-frame failure))
+             :seon.error/data-edn (:seon.cluster.eval/result-edn admitted)
+             :seon.error/capped? (:seon.sci.admit/capped? admitted)}
+      class-name (assoc :seon.error/class class-name)
+      ;; each flow key rides exactly when the arriving shape carried it,
+      ;; because absence is the state — two of the three shapes have no
+      ;; op and one has no cid
+      (and flow? (::flow/pid source)) (assoc :seon.error/proc (::flow/pid source))
+      (and flow? (::flow/op source)) (assoc :seon.error/op (::flow/op source))
+      (and flow? (::flow/cid source)) (assoc :seon.error/cid (::flow/cid source))
+      basis-t (assoc :seon.error/basis-t basis-t)
+      run-id (assoc :seon.error/run [:seon.cluster.run/id run-id])
+      agent-id (assoc :seon.error/agent [:seon.cluster.agent/id agent-id]))))
 
 (defn value
   "The flat `:seon.error/value` a caller branches on, from a fact.
@@ -189,7 +307,9 @@
   into every value is how two renderings of one error start to drift."
   {:malli/schema [:=> [:cat :seon.error/fact] :seon.error/value]}
   [fact]
-  (throw (ex-info "awaits implementation" {::fn `value})))
+  {:seon.error/kind (:seon.error/kind fact)
+   :seon.error/message (:seon.error/message fact)
+   :seon.error/data {:seon.error/id (:seon.error/id fact)}})
 
 ;;; ---------------------------------------------------------------------------
 ;;; The routing unit and its projections
@@ -208,8 +328,12 @@
   transaction, which is why the reason is derived here and never stored
   on the entity."
   {:malli/schema [:=> [:cat :seon.error/notice-request] :seon.error/notice]}
-  [request]
-  (throw (ex-info "awaits implementation" {::fn `notice})))
+  [{:seon.error/keys [fact reason] agent-id :seon.cluster.agent/id}]
+  (cond-> {:seon.error/fact fact
+           :seon.render/ai `ai-prose
+           :seon.render/log `log-line}
+    reason (assoc :seon.error/reason reason)
+    agent-id (assoc :seon.cluster.agent/id agent-id)))
 
 (defn ai-prose
   "`:seon.render/ai` — the steering prose an agent is told, from a notice.
@@ -242,15 +366,75 @@
   block, and by the failover notice. One derivation, four consumers."
   {:malli/schema [:=> [:cat :seon.error/notice] [:string {:min 1}]]}
   [notice]
-  (throw (ex-info "awaits implementation" {::fn `ai-prose})))
+  (let [{:seon.error/keys [fact reason]} notice
+        {:seon.error/keys [id kind message proc op cid class basis-t run]} fact
+        run-id (second run)]
+    (str/join
+     " "
+     (remove
+      nil?
+      [(str "An error stopped work" (when proc (str " in " proc)) ": "
+            message " (" kind ").")
+       (when (and op cid)
+         (str "It happened while handling " cid " at " op "."))
+       (when run-id (str "It interrupted run " run-id "."))
+       ;; the honesty rule: a fault mid-transform has the same ambiguity
+       ;; the interrupted-run warning already refuses to paper over
+       (str "Work already under way may or may not have completed;"
+            " nothing was retried and nothing re-executed.")
+       (case reason
+         :your-run "You are being told because this interrupted your own run."
+         :no-attributable-agent
+         (str "You are being told because you are this cluster's escalation"
+              " owner and this error could not be attributed to one agent.")
+         :recurring
+         (str "You are being told because this same failure has now recurred"
+              " often enough to be a pattern rather than bad luck.")
+         nil)
+       (str "Evidence: error " id
+            (when class (str ", " class))
+            (when basis-t (str ", basis-t " basis-t))
+            ".")
+       ;; what you can do next — present exactly when somebody is being
+       ;; contacted, because it is advice to a reader and a log has none
+       (when reason
+         (str "Nothing will retry this for you: read error " id
+              " and decide from the current facts."))]))))
 
 (defn log-line
   "`:seon.render/log` — one structured line for a human reading stderr.
   DERIVED, never stored: nothing durable may depend on this shape, so it
   stays free to change. Single line by construction — a log line that
-  wraps is two log lines to every tool that reads them — carrying the
-  identity, kind, class, proc, process, signature and the error's own
-  message, each omitted when absent."
+  wraps is two log lines to every tool that reads them.
+
+  ITS READER IS SOMEBODY DIGGING (owner ruling, 2026-07-27: failing loud
+  means the operation halts and the system stays up precisely so the
+  error can be dug into). So it carries what a REPL needs to pull the
+  whole story: the `id` to pull the fact, the `signature` to count
+  recurrence, the `kind` to find the rule, and the run, process, proc,
+  op, cid and basis-t refs to find everything around it. Each is omitted
+  when absent."
   {:malli/schema [:=> [:cat :seon.error/notice] [:string {:min 1}]]}
   [notice]
-  (throw (ex-info "awaits implementation" {::fn `log-line})))
+  (let [{:seon.error/keys [id at kind message process signature
+                           class proc op cid run basis-t]}
+        (:seon.error/fact notice)]
+    (str/join
+     " "
+     (remove
+      nil?
+      ["seon.error"
+       (str "id=" id)
+       (str "at=" (pr-str at))
+       (str "kind=" kind)
+       (when class (str "class=" class))
+       (when proc (str "proc=" proc))
+       (when op (str "op=" op))
+       (when cid (str "cid=" cid))
+       (when-let [run-id (second run)] (str "run=" run-id))
+       (when basis-t (str "basis-t=" basis-t))
+       (str "process=" process)
+       (str "signature=" signature)
+       ;; one line by construction: a message with a newline in it would
+       ;; otherwise be two log lines to every tool that reads them
+       (str "message=" (pr-str (str/replace message #"\s+" " ")))]))))
