@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: closed
 severity: blocker
 tags: [issue, test, agent]
 ---
@@ -73,3 +73,10 @@ Nothing in `src/seon/cluster/run.cljc` changes.
   counterexample is reproducible on its own.
 - `tmp/run-property-isolation-probe.clj` is deleted once the sealed suite
   itself carries the isolation.
+
+## Resolution
+
+Fixed by the contract owner same day: `with-model-database` moved inside
+`prop/for-all` so every trial and shrink step gets a fresh database
+matching the model's reset. `bin/test seon.cluster.run-test` → 6 tests /
+28 assertions / 0 failures against implementation `ba5cb0c1e`.

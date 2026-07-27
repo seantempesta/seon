@@ -54,8 +54,17 @@ requires the old `seon.db` facade. `seon.flow` owns its config dials
 locally (the `config.resolve` seam cut). Verified: `bin/test` 11/55/0/0;
 hook selects exactly the affected fresh suite per edited file.
 
-**Quality-review-1 verdict (2026-07-27, `d91dab541`): the N2 contract
-revision is now FIRST**, ahead of B0/B1 — two live-reproduced correctness
+**N2 REVISION GREEN (2026-07-27): 6/28/0 via bin/test** — transitions
+inside the transaction (Opus implementation `ba5cb0c1e`, contract
+`c65ddeeda`, suite harness fix by the author after the lane's correct
+friction stop). Open contract decision for N3: a refusal's ex-data does
+not survive Datahike's writer boundary (caller sees {}; the kind/rule
+live in the message and cause chain) — the run loop's transact wrapper
+is the ONE unwrap point to design when the loop consumes refusals.
+
+**Quality-review-1 verdict (2026-07-27, `d91dab541`) — resolved by the
+revision above; original text:** the N2 contract
+revision is now FIRST, ahead of B0/B1 — two live-reproduced correctness
 holes (takeover eligibility not fenced in the transition; agent pointer
 not fenced at open/close) plus the property gaps that let them through
 (no takeover/close/heartbeat coverage; terminal-preservation unproven)

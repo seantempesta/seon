@@ -449,14 +449,17 @@
       (= (:digest entry) (::run/plan-digest entity))))))
 
 (deftest transitions-agree-with-the-model
-  (with-model-database
-    (fn [connection]
-      (d/transact connection
-                  (mapv (fn [id] {:seon.cluster.agent/id id}) agent-ids))
-      (let [check
-            (tc/quick-check
-             60
-             (prop/for-all [commands (gen/vector command-gen 1 15)]
+  ;; One FRESH database per trial (and per shrink step): the pure model
+  ;; resets every trial, so the world it reasons about must too.
+  (let [check
+        (tc/quick-check
+         60
+         (prop/for-all [commands (gen/vector command-gen 1 15)]
+           (with-model-database
+             (fn [connection]
+               (d/transact connection
+                           (mapv (fn [id] {:seon.cluster.agent/id id})
+                                 agent-ids))
                (loop [commands commands
                       model {:runs {} :pointers {} :receipts {}}
                       index 0]
@@ -485,10 +488,10 @@
                            (recur (rest commands) model' (inc index))
                            (do (println "INVARIANT VIOLATION"
                                         {:command command :model model'})
-                               false))))))))
-             :seed 20260727)]
-        (is (true? (:result check))
-            (str "state-machine property failed: " (pr-str check)))))))
+                               false))))))))))
+         :seed 20260727)]
+    (is (true? (:result check))
+        (str "state-machine property failed: " (pr-str check)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Recovery preserves every terminal receipt byte-for-byte

@@ -206,9 +206,9 @@
 ;;; - otherwise returns plain tx-data (the serial writer makes the read
 ;;;   atomic with the write; no nested CAS is needed or wanted).
 ;;;
-;;; Awaits implementation: every `*-call` body below throws until the
-;;; implementation lane lands. The `*-tx` wrappers are the contract's
-;;; own one-liners and are complete.
+;;; Implemented 2026-07-27 (ba5cb0c1e): `held-run` is the ONE custody
+;;; fence shared by heartbeat/release/close/plan. The `*-tx` wrappers
+;;; are the contract's own one-liners.
 ;;; ---------------------------------------------------------------------------
 
 (defn- refuse!
