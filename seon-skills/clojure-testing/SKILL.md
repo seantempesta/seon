@@ -109,27 +109,26 @@ transaction by throwing. That refusal is the contract, so a test asserts it as
 a value, not with a bare `thrown?`:
 
 ```clojure
-(defn- transact-or-refusal
-  "Commit tx-data; a refusal returns a value instead of propagating."
-  [connection tx-data]
-  (try
-    (d/transact connection tx-data)
-    ::committed
-    (catch Exception error {::refused (.getMessage error)})))
+(defn- deepest-ex-data [error]
+  (loop [throwable error, found nil]
+    (if throwable
+      (recur (ex-cause throwable) (or (not-empty (ex-data throwable)) found))
+      found)))
 ```
 
 Then assert that the eligible command committed, the ineligible one refused,
 AND that the refused attempt left the database unchanged. A refusal test that
 only checks the throw does not prove atomicity.
 
-**Do not assert on `(ex-data error)`** — it is `{}`. Datahike's writer thread
-rethrows, so the original `ex-info`'s data survives only inside the message
-string, and `(ex-cause error)` is a bare `ExecutionException` (REPL-verified 2026-07-27;
-probe and output in
-`docs/seon/issues/transaction-refusal-loses-its-ex-data.md`). A test that reads
-`(:error (ex-data e))` sees `nil` for every refusal and therefore cannot tell a
-correct refusal from an unrelated crash. Assert on durable facts, and treat any
-`ex-data`-based refusal classification you find as a bug.
+**Do not stop at `(ex-data error)`** — the outer wrapper's data is `{}`.
+Datahike's `throwable-promise` wraps rather than discards: after the outer
+`ex-info` and its `ExecutionException`, the original throwable retains the
+refusing transition's data at the third link. Walk the complete `ex-cause`
+chain and select the deepest non-empty `ex-data`, as above (probe and output:
+`docs/prds/sci-execution-runtime/research/n3-plan-2026-07-27.md` §8). Assert
+the specific refusal rule from that value and independently assert that the
+database was unchanged. A chain with no classifiable data is an unknown test
+failure, never an expected refusal; do not fall back to message matching.
 
 ## Common failure patterns
 

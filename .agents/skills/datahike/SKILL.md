@@ -188,16 +188,15 @@ can reach catches it and returns an `::ok? false` envelope instead; the error's
 `:seon.error/data :seon.error/kind` distinguishes `:user-input` (fix tx-data,
 retry) from `:core-bug` (report it).
 
-**Gotcha: the thrown exception's `ex-data` is EMPTY.** The writer runs on its
-own thread and rethrows, so the original `ex-info`'s data survives only inside
-`(.getMessage e)` as printed text — `(ex-data e)` is `{}` and `(ex-cause e)` is
-a bare `java.util.concurrent.ExecutionException`. This holds for a CAS abort
-(`:error :transact/cas`) and for anything a `:db.fn/call` transition throws
-(REPL-verified 2026-07-27; probe and output in
-`docs/seon/issues/transaction-refusal-loses-its-ex-data.md`). Do not write
-a caller that dispatches on `(:error (ex-data e))` — it will silently see `nil`
-for every refusal. Distinguish refusals by the durable facts they did or did
-not write, or by matching the message, until a boundary preserves the data.
+**Gotcha: inspect the complete cause chain, not only `(ex-data error)`.**
+Datahike's `throwable-promise` wraps the writer's `ExecutionException` in an
+outer `ex-info` whose data is `{}`; it does not discard the original throwable.
+The refusing transition's intact `ex-data` is at the third link, and Datahike's
+own CAS/schema rejection data is recoverable the same way (probe and output:
+`docs/prds/sci-execution-runtime/research/n3-plan-2026-07-27.md` §8). At the
+one transact wrapper, walk `ex-cause` to the end and select the deepest
+non-empty `ex-data`. Classify that value; never parse the message. Treat a
+chain with no classifiable data as an unknown core failure, not as a refusal.
 
 ```clojure
 ;; UPSERT by identity — same identity value ⇒ same entity, no duplicate.
@@ -257,8 +256,8 @@ example; `test/seon/cluster/run_test.clj` asserts both rails.
 A `[:db.fn/cas ref attr old new]` with **`old == new`** is an in-tx assertion
 "this value is STILL `old`". Lead a work-tx with it and the whole tx commits
 atomically iff the assertion holds; otherwise it aborts with a
-`:transact/cas` error (visible in the message, not in `ex-data` — see the
-gotcha above). An `old` of **`nil` means
+`:transact/cas` error recoverable from the cause chain's deepest non-empty
+`ex-data` (see the gotcha above). An `old` of **`nil` means
 "this attribute must be ABSENT"** — the canonical way to open a pointer race
 exactly once. On a cardinality-many attribute the assertion is "some current
 value equals `old`". CAS is pure data, so unlike `:db.fn/call` it can cross a
