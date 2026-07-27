@@ -1,0 +1,48 @@
+{:seon.config/cluster
+ [:string {:min 1 :seon.db/identity true}]
+
+ :seon.config/applied-manifest-digest
+ [:re "^[0-9a-f]{64}$"]
+
+ :seon.config/on-core-error
+ [:enum :record :panic]
+
+ :seon.config/manifest
+ [:map {:closed true}
+  [:seon.config.flow.compute/queue-depth
+   {:optional true}
+   :seon.config.flow.compute/queue-depth]
+  [:seon.config.flow.compute/concurrency
+   {:optional true}
+   :seon.config.flow.compute/concurrency]
+  [:seon.config/on-core-error
+   {:optional true}
+   :seon.config/on-core-error]]
+
+ :seon.config/effective
+ [:map {:closed true}
+  [:seon.config.flow.compute/queue-depth
+   :seon.config.flow.compute/queue-depth]
+  [:seon.config.flow.compute/concurrency
+   :seon.config.flow.compute/concurrency]
+  [:seon.config/on-core-error
+   :seon.config/on-core-error]]
+
+ :seon.config/entity
+ [:map {:closed true :seon.db/entity true}
+  [:seon.config/cluster :seon.config/cluster]
+  [:seon.config/applied-manifest-digest
+   :seon.config/applied-manifest-digest]
+  [:seon.config.flow.compute/queue-depth
+   :seon.config.flow.compute/queue-depth]
+  [:seon.config.flow.compute/concurrency
+   :seon.config.flow.compute/concurrency]
+  [:seon.config/on-core-error
+   :seon.config/on-core-error]]
+
+ :seon.config/apply-request
+ [:map {:closed true}
+  ; A live Datahike connection is a genuine third-party boundary.
+  [:seon.config/connection :any]
+  [:seon.config/manifest :seon.config/manifest]
+  [:seon.boot/cluster-name :seon.boot/cluster-name]]}

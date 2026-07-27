@@ -1,0 +1,5 @@
+{; Verdict: State A stored both transaction-metadata values as refs.
+ ; Keep that shape: provenance resolves to durable user/process entities,
+ ; never denormalized strings on the transaction entity.
+ :seon.db/user :seon.db/ref
+ :seon.db/process :seon.db/ref}

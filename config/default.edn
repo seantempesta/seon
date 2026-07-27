@@ -1,0 +1,17 @@
+{; Unit: queued compute submissions.
+ ; Provenance: core.async.flow alpha3 uses a fixed buffer of 10 per channel;
+ ; the scheduling testbed preserved it because a full channel parks the
+ ; submitter and loses no work.
+ :seon.config.flow.compute/queue-depth 10
+
+ ; Unit: simultaneously executing compute submissions.
+ ; Calibration: 2026-07-25 measurements recorded 18 available processors;
+ ; 22 concurrent evals therefore queued 4, with 71 ms maximum wait and
+ ; 88 ms total. This literal is the measured current default, not a code
+ ; fallback.
+ :seon.config.flow.compute/concurrency 18
+
+ ; Unit: categorical core-fault disposition.
+ ; Provenance: the 2026-07-27 error ruling requires development to fail
+ ; loudly and production to degrade only by explicit configuration.
+ :seon.config/on-core-error :panic}
