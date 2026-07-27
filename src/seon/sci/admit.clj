@@ -106,14 +106,24 @@
   unbounded, or host-opaque crosses this line, which is L3 stated
   positively.
 
-  ERRORS. Admission never throws of its own accord: a node it cannot
-  project becomes a marker carrying the throwable's class, and the
-  refusal shapes agents see stay flat `:seon.error` values. It does NOT
+  ERRORS, AND THE ONE DIAL (owner ruling 2026-07-27, reversing the
+  drafted marker-only choice): a node the total codec CANNOT project is
+  a core degradation, not ordinary agent input, so R41 decides it. On
+  `:panic` — development — admission throws hard and loud, because a
+  value our codec cannot describe is a hole in the codec and must be
+  found immediately. On `:record` — production — it degrades: the
+  marker, plus a best-effort description when one can be taken safely
+  (never a deref, never anything sequential, always truncated). The
+  dial is a REQUIRED request key: a caller that has not decided has not
+  thought about it. Agent-visible refusal shapes stay flat
+  `:seon.error` values either way. Admission does NOT
   catch the interrupt — sci's interrupt is deliberately uncatchable by
   evaluated code (`reference-code/sci/src/sci/interrupt.cljc:32-41`),
   and host code that swallowed it would be forging the one guarantee the
   time limit rests on. It propagates to `evaluate`, which records the
-  `:time` outcome.
+  `:time` outcome. The question `is this that interrupt?` has ONE
+  owner — `seon.sci.eval/interrupted?` — and this namespace asks it
+  rather than keeping a copy (seal revision, 2026-07-27).
 
   Crash walk. Admission is PURE given the value and the caps: it opens
   nothing, writes nothing durable, and holds no lock.
@@ -159,15 +169,6 @@
 ;;; ---------------------------------------------------------------------------
 ;;; The walk — one pass, inside the armed boundary
 ;;; ---------------------------------------------------------------------------
-
-(defn- interrupt?
-  "True for sci's uncatchable interrupt.
-  Read from sci's own marker key
-  (`reference-code/sci/src/sci/interrupt.cljc:32-41`), not from a copy:
-  the N3 adoption of `seon.sci.interrupt` brings an `interrupted?` that
-  answers the same question, and the two must not diverge."
-  [throwable]
-  (contains? (ex-data throwable) :sci.impl/interrupt))
 
 ;;; A marker names what a value WAS. It is ordinary data — a small map of
 ;;; strings and keywords — so it prints, reads back, and can never hide a
@@ -220,6 +221,26 @@
   [state]
   (vreset! (:capped? state) true)
   ::elided)
+
+(defn- safe-description
+  "A bounded `str` of `value`, when taking one cannot hurt.
+  Reference types are never dereferenced and sequential things are
+  never realized — `str` on a lazy sequence walks it, and a host call
+  cannot be interrupted. Anything else gets one truncated toString,
+  guarded, because a description that throws is not a description."
+  [value caps]
+  (when-not (or (instance? clojure.lang.IDeref value)
+                (instance? clojure.lang.Seqable value)
+                (instance? java.util.Collection value)
+                (instance? clojure.lang.IPending value)
+                (some-> value class .isArray))
+    (try
+      (let [described (str value)
+            limit (:seon.config.eval.result/max-string caps)]
+        (if (<= (count described) limit)
+          described
+          (subs described 0 limit)))
+      (catch Throwable _ nil))))
 
 (defn- marker!
   "Emit a marker, charging what it REALLY costs.
@@ -366,8 +387,18 @@
     (project-node value depth state)
     (catch Throwable failure
       ;; the interrupt is the one throwable admission must not swallow
-      (when (interrupt? failure)
+      (when ((requiring-resolve 'seon.sci.eval/interrupted?) failure)
         (throw failure))
+      ;; R41 DECIDES THIS, not local judgement (owner ruling reversing
+      ;; the drafted marker-only choice): a value the total codec cannot
+      ;; project is a core degradation, so development panics on it
+      ;; immediately and production degrades.
+      (when (= :panic (:on-core-error state))
+        (throw (ex-info (str "value admission could not project a "
+                             (.getName (class value)))
+                        {:seon.error/kind ::projection-failed
+                         ::class (.getName (class value))}
+                        failure)))
       ;; a marker is a structure, so at the depth cap the elision scalar
       ;; is the only thing that fits — the same rule the walk itself
       ;; follows, applied to the failure path
@@ -375,8 +406,17 @@
         (elide! state)
         (do
           (vreset! (:capped? state) true)
-          (marker! state {::opaque (.getName (class value))
-                          ::projection-error (.getName (class failure))}))))))
+          (marker! state
+                   (cond-> {::opaque (.getName (class value))
+                            ::projection-error (.getName (class failure))}
+                     ;; a best-effort description, when one can be taken
+                     ;; SAFELY: never a deref, and never anything
+                     ;; sequential — `str` on a lazy sequence realizes it,
+                     ;; which is the hang this whole namespace exists to
+                     ;; prevent
+                     (safe-description value (:caps state))
+                     (assoc ::description
+                            (safe-description value (:caps state))))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The one operation
@@ -410,9 +450,11 @@
   marker. The one throwable it deliberately does NOT catch is sci's
   uncatchable interrupt, which must reach `evaluate`."
   {:malli/schema [:=> [:cat :seon.sci.admit/request] :seon.sci.admit/admitted]}
-  [{::keys [value interrupt-fn caps record]}]
+  [{::keys [value interrupt-fn caps record]
+    on-core-error :seon.config/on-core-error}]
   (let [state {:interrupt-fn interrupt-fn
                :caps caps
+               :on-core-error on-core-error
                ;; the root is a node like any other
                :nodes (volatile! (dec (long (:seon.config.eval.result/max-nodes
                                              caps))))

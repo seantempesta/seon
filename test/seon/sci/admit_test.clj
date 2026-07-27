@@ -67,6 +67,9 @@
    {:seon.sci.admit/value value
     :seon.sci.admit/interrupt-fn interrupt-fn
     :seon.sci.admit/caps caps
+    ;; production disposition by default: these trials are about the
+    ;; codec, and the panic case has its own test
+    :seon.config/on-core-error :record
     :seon.sci.admit/record {:seon.eval/fn-entries 4242
                             :seon.eval/duration-ms 7
                             :seon.eval/allocated-bytes 918273
@@ -352,6 +355,41 @@
     (is (string? (:seon.cluster.eval/result-edn admitted)))
     (is (some? (edn/read-string (:seon.cluster.eval/result-edn admitted))))
     (is (empty? (:forbidden (measure (:seon.sci.admit/value admitted)))))))
+
+(deftest a-projection-failure-obeys-the-one-dial
+  ;; owner ruling (2026-07-27): a value the total codec cannot project
+  ;; is a core degradation, so R41 decides — dev panics, prod degrades
+  ;; genuinely hostile to the WALK: a collection whose seq throws, so
+  ;; the codec reaches for children and is refused. (A bare Seqable is
+  ;; not hostile — the codec never enters it, which is the totality
+  ;; working rather than failing.)
+  (let [hostile (reify clojure.lang.IPersistentCollection
+                  (seq [_] (throw (ex-info "hostile seq" {})))
+                  (count [_] 1)
+                  (cons [_ _] nil)
+                  (empty [_] nil)
+                  (equiv [_ _] false))]
+    (testing ":record degrades — the marker, and the run continues"
+      (let [admitted (admit/admit (request {:hostile hostile}))]
+        (is (string? (:seon.cluster.eval/result-edn admitted)))
+        (is (true? (:seon.sci.admit/capped? admitted)))))
+    (testing ":panic throws hard and loud — a hole in OUR codec"
+      (let [data (try
+                   (admit/admit
+                    (assoc (request {:hostile hostile})
+                           :seon.config/on-core-error :panic))
+                   ::committed
+                   (catch Exception failure (ex-data failure)))]
+        (is (= :seon.sci.admit/projection-failed (:seon.error/kind data))
+            "and it names itself as a projection failure, not as an
+             agent mistake")))
+    (testing "an ordinary opaque value is NOT a failure in either mode"
+      (doseq [mode [:record :panic]]
+        (let [admitted (admit/admit
+                        (assoc (request {:fine (get @escape-kinds :sci-fn)})
+                               :seon.config/on-core-error mode))]
+          (is (string? (:seon.cluster.eval/result-edn admitted))
+              (str mode ": a marker is the codec working, not failing")))))))
 
 (deftest sci-types-keep-the-names-sci-gives-them
   ;; grounded in sci's own vocabulary: -get-type reports user.Foo /

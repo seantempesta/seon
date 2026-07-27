@@ -8,7 +8,10 @@
  ; sci's own word for an interpreter context; forked per evaluation so
  ; one eval's defs cannot reach another's.
  :seon.sci.eval/ctx [:fn {:gen/gen seon.sci.eval/ctx-generator} seon.sci.eval/ctx?]
- :seon.sci.eval/request [:map {:closed true} [:seon.cluster.run.form/source :seon.cluster.run.form/source] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.sci.eval/time-limit-ms :seon.sci.eval/time-limit-ms] [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx]]
+ ; The error disposition is REQUIRED and is passed straight to
+ ; admission: R41 decides what a projection failure does, and a caller
+ ; that has not decided has not thought about it.
+ :seon.sci.eval/request [:map {:closed true} [:seon.cluster.run.form/source :seon.cluster.run.form/source] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.sci.eval/time-limit-ms :seon.sci.eval/time-limit-ms] [:seon.config/on-core-error :seon.config/on-core-error] [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx]]
  ; What one evaluation leaves behind: a status the receipt stores, the
  ; admitted value the loop reads a disposition out of, the printed
  ; projection, and the diagnostics. Nothing here is optional-by-nil —

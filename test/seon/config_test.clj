@@ -40,6 +40,7 @@
     :seon.config.eval.result/max-collection
     :seon.config.eval.result/max-string
     :seon.config.eval.result/max-nodes
+    :seon.config.eval/time-limit-ms
     :seon.config/on-core-error})
 
 (def ^:private dial-attributes
@@ -64,6 +65,7 @@
    :seon.config.eval.result/max-collection
    :seon.config.eval.result/max-string
    :seon.config.eval.result/max-nodes
+   :seon.config.eval/time-limit-ms
    :seon.config/on-core-error])
 
 (defn- with-config-database

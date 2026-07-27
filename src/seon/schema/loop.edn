@@ -3,7 +3,7 @@
  ; (the same symbols-as-data idiom as :seon.ancestor/populate), so the
  ; loop's mechanics do not wait on the seon.sci.eval adoption and a
  ; suite can drive a turn with a fake evaluator.
- :seon.cluster.loop/cluster [:map {:closed true} [:seon.store/branch-connection :seon.store/branch-connection] [:seon.cluster.run/process :seon.cluster.run/process] [:seon.cluster.wake/channel :seon.flow/channel] [:seon.cluster.loop/provider :seon.cluster.loop/provider] [:seon.cluster.loop/evaluate :qualified-symbol] [:seon.sci.admit/caps :seon.sci.admit/caps]]
+ :seon.cluster.loop/cluster [:map {:closed true} [:seon.store/branch-connection :seon.store/branch-connection] [:seon.cluster.run/process :seon.cluster.run/process] [:seon.cluster.wake/channel :seon.flow/channel] [:seon.cluster.loop/provider :seon.cluster.loop/provider] [:seon.cluster.loop/evaluate :qualified-symbol] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.config.eval/time-limit-ms :seon.config.eval/time-limit-ms] [:seon.config/on-core-error :seon.config/on-core-error]]
  :seon.cluster.loop/provider [:map {:closed true} [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai/api-key-variable :seon.ai/api-key-variable] [:seon.ai/timeout-ms :seon.ai/timeout-ms]]
  :seon.cluster.loop/evaluation [:map {:closed true} [:seon.sci.admit/value :any] [:seon.cluster.eval/status :seon.cluster.eval/status] [:seon.cluster.eval/result-edn {:optional true} :seon.cluster.eval/result-edn] [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error]]
  :seon.cluster.loop/turn-request [:map {:closed true} [:seon.cluster.loop/cluster :seon.cluster.loop/cluster] [:seon.cluster.work/next :seon.cluster.work/next]]

@@ -59,21 +59,10 @@
 ;;; That is a seam defect in the loop's call, reported rather than
 ;;; papered over; this adapter supplies it so the injection can be
 ;;; proven against a real sci evaluation today.
-;;; ONE ctx per drive, standing in for one ctx per RUN: sci's fork
-;;; copies the env, so a fork per form would lose every def between
-;;; forms. The loop must eventually hold this per run.
-(def ^:dynamic *ctx* nil)
-
-(defn real-evaluate
-  [request]
-  (sci.eval/evaluate (assoc request
-                            :seon.sci.eval/time-limit-ms 2000
-                            :seon.sci.eval/ctx *ctx*)))
-
-(defn quick-evaluate
-  "The real evaluator on a short leash, for the runaway case."
-  [request]
-  (sci.eval/evaluate (assoc request :seon.sci.eval/time-limit-ms 300)))
+;;; The seam needs no adapter any more: the cluster handle carries the
+;;; deadline dial and the error disposition, and `turn` forks ONE ctx
+;;; per run and threads it through the fold. This is the real evaluator,
+;;; injected exactly as production injects it.
 
 (defn- with-cluster [body]
   (let [configuration {:store {:backend :memory :id (random-uuid)}
@@ -98,6 +87,8 @@
               :seon.ai/api-key-variable "SEON_AI_TEST_KEY"
               :seon.ai/timeout-ms 200}
              :seon.cluster.loop/evaluate 'seon.cluster.turn-test/fake-evaluate
+             :seon.config.eval/time-limit-ms 2000
+             :seon.config/on-core-error :panic
              :seon.sci.admit/caps
              {:seon.config.eval.result/max-depth 6
               :seon.config.eval.result/max-collection 8
@@ -131,9 +122,8 @@
   ;; call, because the reply is the only thing stubbed.
   (with-cluster
     (fn [cluster]
-      (binding [*ctx* (sci.core/fork (sci.eval/base))]
-       (let [cluster (assoc cluster :seon.cluster.loop/evaluate
-                            'seon.cluster.turn-test/real-evaluate)
+      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
+                           'seon.sci.eval/evaluate)
             connection (:seon.store/branch-connection cluster)]
         (with-redefs [ai/complete
                       (fn [_] {:seon.ai/text
@@ -142,9 +132,9 @@
                                     "(my.run/complete (str \"counted \" "
                                     "(reduce + widgets)))")})]
           (let [reports (drive! cluster 10)]
-            (is (= [:open :call :resume :resume :resume]
-                   (take 5 (mapv :seon.cluster.work/situation reports)))
-                "open, model, then one pass per form")
+            (is (= [:open :call :resume]
+                   (mapv :seon.cluster.work/situation reports))
+                "open, model, then ONE fold — the whole plan over one ctx")
             (testing "the receipts carry what sci actually produced"
               (let [results (into {}
                                   (d/q '[:find ?ordinal ?edn
@@ -169,15 +159,17 @@
                                @connection)))))
             (is (some? (d/q '[:find ?c . :where
                               [_ :seon.cluster.run/closed-at ?c]] @connection))
-                "and the run closed"))))))))
+                "and the run closed")))))))
 
 (deftest a-real-evaluation-that-runs-away-is-stopped-and-recorded
   ;; the loop's honest failure path, end to end: an agent writes an
   ;; infinite loop, the boundary stops it, and the receipt says so
   (with-cluster
     (fn [cluster]
-      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
-                           'seon.cluster.turn-test/quick-evaluate)
+      (let [cluster (assoc cluster
+                           :seon.cluster.loop/evaluate 'seon.sci.eval/evaluate
+                           ;; a short leash for the runaway case
+                           :seon.config.eval/time-limit-ms 300)
             connection (:seon.store/branch-connection cluster)]
         (with-redefs [ai/complete
                       (fn [_] {:seon.ai/text "(loop [] (recur))"})]
@@ -206,7 +198,7 @@
             (testing "the trigger was answered by exactly one run"
               (is (empty? (work/unanswered-triggers @connection "agent-a"))))
             (testing "and the pass sequence is open -> call -> fold -> close"
-              (is (= [:open :call :resume :resume :close]
+              (is (= [:open :call :resume :close]
                      (mapv :seon.cluster.work/situation reports))))
             (testing "every form got exactly one terminal receipt"
               (is (= 2 (count (d/q '[:find ?e :where

@@ -270,7 +270,8 @@
                   :seon.sci.eval/evaluation]}
   [{:keys [:seon.cluster.run.form/source :seon.sci.admit/caps]
     ctx :seon.sci.eval/ctx
-    time-limit-ms :seon.sci.eval/time-limit-ms}]
+    time-limit-ms :seon.sci.eval/time-limit-ms
+    on-core-error :seon.config/on-core-error}]
   (let [{:keys [interrupt-fn] stop! ::stop! record ::record}
         (arm time-limit-ms)
         ;; a supplied ctx is used AS GIVEN — forking it here would
@@ -288,6 +289,10 @@
                         {:seon.sci.admit/value value
                          :seon.sci.admit/interrupt-fn interrupt-fn
                          :seon.sci.admit/caps caps
+                         ;; R41 travels WITH the request: admission does
+                         ;; not read a dial of its own, and this
+                         ;; evaluator does not default one
+                         :seon.config/on-core-error on-core-error
                          :seon.sci.admit/record (record :ok)})]
           {:seon.cluster.eval/status :done
            :seon.sci.admit/value (:seon.sci.admit/value admitted)

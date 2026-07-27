@@ -25,6 +25,19 @@
  ; Unit: total nodes visited across the whole projection.
  :seon.config.eval.result/max-nodes 4096
 
+ ; Unit: milliseconds of wall clock per agent evaluation.
+ ; Provenance: the ONLY limit sci has — it counts no steps, so this is
+ ; the whole bound on an interpreted form (reference-code/sci/doc/
+ ; interrupt.md:23-35). Calibrated against the measured shapes rather
+ ; than a feeling: an authored infinite loop dies at ~55 ms once the
+ ; flag flips, and the suite's runaway cases stop inside 300 ms, so a
+ ; 30 s ceiling is three orders of magnitude above the mechanism's
+ ; latency and still bounded well below a human's patience. It bounds
+ ; INTERPRETED work only: a form blocked inside a host call never
+ ; enters an interpreted body and is covered by the caller's submission
+ ; backstop and the process boundary, never by this.
+ :seon.config.eval/time-limit-ms 30000
+
  ; Unit: categorical core-fault disposition.
  ; Provenance: the 2026-07-27 error ruling requires development to fail
  ; loudly and production to degrade only by explicit configuration.

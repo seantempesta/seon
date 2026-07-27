@@ -28,7 +28,10 @@
   ([source time-limit-ms]
    (eval/evaluate {:seon.cluster.run.form/source source
                    :seon.sci.admit/caps caps
-                   :seon.sci.eval/time-limit-ms time-limit-ms})))
+                   :seon.sci.eval/time-limit-ms time-limit-ms
+                   ;; development disposition: a codec hole must be loud
+                   ;; here of all places
+                   :seon.config/on-core-error :panic})))
 
 (defn- deadlined
   "Evaluate on another thread so a runaway FAILS the suite rather than
@@ -42,6 +45,21 @@
 ;;; ---------------------------------------------------------------------------
 ;;; The ordinary path
 ;;; ---------------------------------------------------------------------------
+
+(deftest the-request-is-what-the-contract-says-it-is
+  ;; the dial is REQUIRED, so a caller cannot forget to decide
+  (is (seon.schema/valid-candidate-value?
+       :seon.sci.eval/request
+       {:seon.cluster.run.form/source "(+ 1 1)"
+        :seon.sci.admit/caps caps
+        :seon.sci.eval/time-limit-ms 1000
+        :seon.config/on-core-error :panic}))
+  (is (not (seon.schema/valid-candidate-value?
+            :seon.sci.eval/request
+            {:seon.cluster.run.form/source "(+ 1 1)"
+             :seon.sci.admit/caps caps
+             :seon.sci.eval/time-limit-ms 1000}))
+      "no dial, no evaluation"))
 
 (deftest a-value-comes-back-admitted
   (let [evaluation (run "(+ 1 2)")]

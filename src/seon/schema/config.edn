@@ -7,6 +7,14 @@
  :seon.config/on-core-error
  [:enum :record :panic]
 
+ ; THE ONE LIMIT on an agent evaluation, as a dial. The evaluator takes
+ ; it in its request and never defaults it: a deadline literal in code
+ ; is what the ruling bans, and a dial with a provenanced default is
+ ; what replaces it. Declared here with the other dials so the config
+ ; gate and this value schema share one authority.
+ :seon.config.eval/time-limit-ms
+ [:int {:min 1}]
+
  :seon.config/manifest
  [:map {:closed true}
   [:seon.config.flow.compute/queue-depth
@@ -27,6 +35,9 @@
   [:seon.config.eval.result/max-nodes
    {:optional true}
    :seon.config.eval.result/max-nodes]
+  [:seon.config.eval/time-limit-ms
+   {:optional true}
+   :seon.config.eval/time-limit-ms]
   [:seon.config/on-core-error
    {:optional true}
    :seon.config/on-core-error]]
@@ -45,6 +56,8 @@
    :seon.config.eval.result/max-string]
   [:seon.config.eval.result/max-nodes
    :seon.config.eval.result/max-nodes]
+  [:seon.config.eval/time-limit-ms
+   :seon.config.eval/time-limit-ms]
   [:seon.config/on-core-error
    :seon.config/on-core-error]]
 
@@ -65,6 +78,8 @@
    :seon.config.eval.result/max-string]
   [:seon.config.eval.result/max-nodes
    :seon.config.eval.result/max-nodes]
+  [:seon.config.eval/time-limit-ms
+   :seon.config.eval/time-limit-ms]
   [:seon.config/on-core-error
    :seon.config/on-core-error]]
 

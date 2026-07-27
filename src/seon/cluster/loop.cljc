@@ -59,6 +59,7 @@
   wrote. The sealed suite drives the rows as kill positions in a
   state-machine property."
   (:require [clojure.core.async :as async]
+            [sci.core :as sci]
             [clojure.core.async.flow :as flow]
             [datahike.api :as d]
             [seon.ai :as ai]
@@ -68,6 +69,7 @@
             [seon.cluster.store :as store]
             [seon.cluster.wake :as wake]
             [seon.cluster.work :as work]
+            [seon.sci.eval :as sci.eval]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn])
   (:import [java.util Date]))
@@ -323,39 +325,69 @@
                                :seon.cluster.run/sources sources}))]
                 (report (if (:seon.error/kind outcome) :error :released) 0))))))
 
-      ;; ONE form per pass: the fold is a sequence of durable steps, and
-      ;; a pass that dies mid-form leaves exactly one running receipt
-      ;; for recovery to settle.
+      ;; THE FOLD, in one turn, over ONE ctx. sci's fork copies the env,
+      ;; so a ctx per FORM would lose every def between forms — the
+      ;; State A defect. One fork per run is what makes a plan read like
+      ;; a REPL session: form 2 sees what form 1 defined.
+      ;;
+      ;; A kill mid-fold loses the ctx, so a resumed fold starts fresh
+      ;; and later forms may no longer resolve earlier defs. That is the
+      ;; crash model working as designed — nothing re-executes, and the
+      ;; agent's next prompt carries the interrupted warning — not a
+      ;; case to paper over with a persisted context.
       :resume
       (let [run (d/pull @connection '[*] [:seon.cluster.run/id run-id])
             epoch (:seon.cluster.run/claim-epoch run)
-            ordinal (:seon.cluster.run.form/ordinal work)
-            source (form-source @connection run-id ordinal)
             evaluate (requiring-resolve
                       (:seon.cluster.loop/evaluate cluster))
-            evaluation (evaluate {:seon.cluster.run.form/source source
-                                  :seon.sci.admit/caps
-                                  (:seon.sci.admit/caps cluster)})
-            outcome (store/transact!
-                     connection
-                     (terminal-tx
-                      (cond-> {:seon.cluster.run/id run-id
-                               :seon.cluster.run/process process
-                               :seon.cluster.run/claim-epoch epoch
-                               :seon.cluster.run.form/ordinal ordinal
-                               :seon.cluster.eval/status
-                               (:seon.cluster.eval/status evaluation)}
-                        (:seon.cluster.eval/result-edn evaluation)
-                        (assoc :seon.cluster.eval/result-edn
-                               (:seon.cluster.eval/result-edn evaluation))
-                        (:seon.cluster.eval/error evaluation)
-                        (assoc :seon.cluster.eval/error
-                               (:seon.cluster.eval/error evaluation))
-                        (disposition (:seon.sci.admit/value evaluation))
-                        (assoc :my.run/value
-                               (disposition
-                                (:seon.sci.admit/value evaluation))))))]
-        (report (if (:seon.error/kind outcome) :error :released) 1))
+            ctx (sci/fork (sci.eval/base))]
+        (loop [ordinal (:seon.cluster.run.form/ordinal work)
+               ran 0]
+          (let [source (form-source @connection run-id ordinal)
+                evaluation (evaluate
+                            {:seon.cluster.run.form/source source
+                             :seon.sci.admit/caps
+                             (:seon.sci.admit/caps cluster)
+                             :seon.sci.eval/ctx ctx
+                             :seon.sci.eval/time-limit-ms
+                             (:seon.config.eval/time-limit-ms cluster)
+                             :seon.config/on-core-error
+                             (:seon.config/on-core-error cluster)})
+                settled (disposition (:seon.sci.admit/value evaluation))
+                outcome (store/transact!
+                         connection
+                         (terminal-tx
+                          (cond-> {:seon.cluster.run/id run-id
+                                   :seon.cluster.run/process process
+                                   :seon.cluster.run/claim-epoch epoch
+                                   :seon.cluster.run.form/ordinal ordinal
+                                   :seon.cluster.eval/status
+                                   (:seon.cluster.eval/status evaluation)}
+                            (:seon.cluster.eval/result-edn evaluation)
+                            (assoc :seon.cluster.eval/result-edn
+                                   (:seon.cluster.eval/result-edn evaluation))
+                            (:seon.cluster.eval/error evaluation)
+                            (assoc :seon.cluster.eval/error
+                                   (:seon.cluster.eval/error evaluation))
+                            settled
+                            (assoc :my.run/value settled))))
+                ran (inc ran)
+                next-ordinal (when-not (or settled (:seon.error/kind outcome))
+                               (:seon.cluster.run.form/ordinal
+                                (work/next-work @connection
+                                                {:seon.cluster.run/process
+                                                 process
+                                                 :seon.cluster.work/now
+                                                 (Date.)})))]
+            (cond
+              (:seon.error/kind outcome) (report :error ran)
+              settled (report (if (= :completed
+                                     (:my.run/disposition settled))
+                                :closed
+                                :released)
+                              ran)
+              next-ordinal (recur next-ordinal ran)
+              :else (report :released ran)))))
 
       ;; the fold is done and nothing said otherwise: close it, so the
       ;; agent stops being busy

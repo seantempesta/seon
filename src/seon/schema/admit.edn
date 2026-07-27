@@ -25,6 +25,12 @@
  ; object a sci evaluation produced; OUT, the projection, whose grammar is
  ; the admit docstring's and is deliberately NOT a second predicate
  ; (n3-plan §6.1: ordinary-wire-value? collapses into this operation).
- :seon.sci.admit/request [:map {:closed true} [:seon.sci.admit/value :any] [:seon.sci.admit/interrupt-fn :seon.sci.admit/interrupt-fn] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.sci.admit/record :seon.sci.admit/record]]
+ ; The dial rides IN the request (owner ruling, 2026-07-27, reversing
+ ; the drafted marker-only taste call): a projection failure is a core
+ ; degradation, so R41 decides it — :panic throws hard and loud in
+ ; development, :record degrades reasonably in production. It is a
+ ; required key because a caller that has not decided has not thought
+ ; about it.
+ :seon.sci.admit/request [:map {:closed true} [:seon.sci.admit/value :any] [:seon.sci.admit/interrupt-fn :seon.sci.admit/interrupt-fn] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.sci.admit/record :seon.sci.admit/record] [:seon.config/on-core-error :seon.config/on-core-error]]
  :seon.sci.admit/admitted [:map {:closed true} [:seon.sci.admit/value :any] [:seon.cluster.eval/result-edn :seon.cluster.eval/result-edn] [:seon.sci.admit/capped? :seon.sci.admit/capped?] [:seon.sci.admit/record :seon.sci.admit/record]]
  :seon.sci.admit/value :any}
