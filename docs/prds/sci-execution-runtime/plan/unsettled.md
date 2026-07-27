@@ -197,11 +197,20 @@ bb-classpath fix BLOCKED on old-operator launchers (evidence
 6a9b5a452, issue open — the seam dies with the operator). QUEUED
 OWNER QUESTIONS: R41 vs marker-not-panic at admission; does the
 [:maybe] ban extend to fn return contracts (next-work nil = idle,
-read-advertisement)? IN FLIGHT (two lanes): the Opus agent implements
-package 1 to green then drafts package 2 (wake, loop proc, seon.ai,
-store accretion); sol lane hook-changed-test-fix repairs the broken
-changed-test hook (hashCombine + stale ns→file mapping — velocity
-incident). n5-plan 909394481 awaits deep review at its
+read-advertisement)? PACKAGE 1 GREEN with one seal revision (0e1e9dc01): the fold's end is
+its own FOURTH situation :close (ruled (b) — fold-vs-close visible in
+the value, never a missing-key flag); the reply-level prose-vs-plan
+verdict blessed (a per-form filter would silently eat trailing agent
+forms). HOOK FIXED (8ac9a9c02, velocity incident closed): the hook no
+longer loads retired seon.dev.config; correct selection proven on
+three cases; bin/seon test changed still routes through the old
+operator and dies with it. N5 PLAN REVIEWED (d500c8bfb): 19 findings
+(6 confirmed defects incl. :seon.fn/schema-refs duplicate owner and
+the namespace-row derivation, 6 stale-vs-today, 7 owner questions),
+NOT ready to seal — revision lane running with the review as work
+order. IN FLIGHT (two lanes): the Opus agent drafts N3 package 2
+(wake, loop proc, seon.ai, store transact!/refusal accretion,
+:seon.error registered once); sol lane revises the N5 plan in place. n5-plan 909394481 awaits deep review at its
 rung; GC verdict recorded above. Its accepted design: process-local
 store holder + refcount under ONE lock with running-instances;
 stop! also releases branch connection, last instance releases the
