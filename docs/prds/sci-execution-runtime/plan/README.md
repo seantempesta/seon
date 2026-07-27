@@ -420,6 +420,22 @@ may reintroduce a shadow build into the dev feedback path.
   watermark, runaway → interrupt + flat steering error + agent
   restart, process restart the backstop; leverage SCI internals (our
   fork) for oversight rather than pretending to bound what we cannot.
+  **Rulings 2026-07-27 night (owner, plain-language batch — N3
+  authoring inputs):** (1) crash resume is INTERRUPTED + ADAPT, no
+  auto-retry: the run is created and claimed at wake (duplicate-turn
+  fence), a mid-turn death marks that run `:interrupted`, and the
+  agent's NEXT turn (next trigger or manual nudge) carries the derived
+  interrupted-warning — zero retry code, the trigger sits unanswered
+  until something wakes the agent (supersedes n3-plan §9.1's Option A
+  auto-re-call half; the claim-early half stands). (2) `my.run` seals
+  with exactly two pure disposition values — `complete` and `wait`;
+  no `start!`, no pause/resume/terminate until an agent-lifecycle
+  entity exists. (3) A run's WHY is transaction metadata: the
+  run-opening transition carries a ref to the triggering message as
+  tx-meta ("has this trigger been answered?" = does any run-opening
+  tx point at it) — the one deliberate extension of minimal tx-meta
+  (user + process) on one transition; never copied onto the run
+  entity.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
