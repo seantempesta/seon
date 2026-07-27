@@ -1,0 +1,7 @@
+{; One model reply, as text, and the ordered form SOURCES read out of it.
+ ; Sources are strings, not forms: the stored source is exactly what the
+ ; agent wrote (comments and all), and the evaluator parses inside its
+ ; own armed context — parsing twice on two readers is how a `#=` scar
+ ; comes back.
+ :seon.cluster.reply/sources [:vector [:string {:min 1}]]
+ :seon.cluster.reply/text :string}

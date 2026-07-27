@@ -1,0 +1,5 @@
+{; The derived prompt: a pure function of a database value. Nothing is
+ ; stored — a prompt is a projection, and the context-block machinery is
+ ; a later rung.
+ :seon.cluster.prompt/request [:map {:closed true} [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.message/id :seon.cluster.message/id]]
+ :seon.cluster.prompt/text [:string {:min 1}]}

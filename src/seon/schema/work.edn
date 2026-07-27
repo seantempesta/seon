@@ -1,0 +1,17 @@
+{; WHAT THE LOOP SHOULD DO NEXT, as one derived value. The four
+ ; situations are total and mutually exclusive over any database value;
+ ; `nil` is idle, and nothing else is representable.
+ :seon.cluster.work/situation [:enum :resume :call :open]
+ ; :resume — an open run this process holds, with a plan: fold on at the
+ ;           first ordinal lacking a terminal receipt
+ ; :call   — an open run this process holds, no plan: derive the prompt,
+ ;           call the model, freeze the plan (the ONE paid call, never
+ ;           retried)
+ ; :open   — an unanswered trigger and an idle agent: open + claim first,
+ ;           model second (the claim-early fence)
+ :seon.cluster.work/next [:multi {:dispatch :seon.cluster.work/situation}
+                          [:resume [:map {:closed true} [:seon.cluster.work/situation [:= :resume]] [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal]]]
+                          [:call [:map {:closed true} [:seon.cluster.work/situation [:= :call]] [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.agent/id :seon.cluster.agent/id]]]
+                          [:open [:map {:closed true} [:seon.cluster.work/situation [:= :open]] [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.message/id :seon.cluster.message/id]]]]
+ :seon.cluster.work/request [:map {:closed true} [:seon.cluster.run/process :seon.cluster.run/process] [:seon.cluster.work/now :inst]]
+ :seon.cluster.work/now :inst}
