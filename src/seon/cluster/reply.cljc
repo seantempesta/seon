@@ -40,13 +40,57 @@
   Crash walk: pure. A kill loses a vector of strings that had not been
   committed; the plan is not durable until N2's `plan-tx` commits it,
   and re-deriving it from the same text is deterministic."
-  (:require [seon.schema.edn :as schema.edn]))
+  (:require [clojure.string :as str]
+            [sci.core :as sci]
+            [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — src/seon/schema/reply.edn
 ;;; ---------------------------------------------------------------------------
 
 (schema.edn/load! {})
+
+;;; ---------------------------------------------------------------------------
+;;; Fence stripping — the one idea that survives the quarry's parser
+;;; ---------------------------------------------------------------------------
+
+;;; A fence is presentation. Backticks read as an ordinary symbol, so an
+;;; unstripped ```clojure reply yields plausible garbage rather than an
+;;; error — which is why this runs FIRST and why it is not a regex over
+;;; the whole text: only whole fence LINES are removed, so a backtick
+;;; inside a string literal is untouched.
+(def ^:private fence-line #"(?m)^[ \t]*```[^\n]*$")
+
+(defn- fenced-blocks
+  "The contents of every fenced block, or nil when the text has none."
+  [text]
+  (let [lines (str/split-lines text)
+        fenced? (fn [line] (re-matches #"[ \t]*```.*" line))]
+    (when (some fenced? lines)
+      (->> lines
+           (reduce (fn [{:keys [inside? blocks] :as state} line]
+                     (if (fenced? line)
+                       (assoc state :inside? (not inside?)
+                              :blocks (if inside? blocks (conj blocks [])))
+                       (cond-> state
+                         inside? (update-in [:blocks (dec (count blocks))]
+                                            conj line))))
+                   {:inside? false :blocks []})
+           :blocks
+           (map #(str/join "\n" %))
+           (str/join "\n\n")))))
+
+(defn- unfenced
+  "`text` with code fences removed: the fenced code when the reply has
+  fences, the text itself when it does not."
+  [text]
+  (or (fenced-blocks text) text))
+
+(defn- refused
+  [kind message extra]
+  (merge {:seon.error/kind kind
+          :seon.error/message message}
+         extra))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Contract
@@ -68,4 +112,43 @@
                   [:or :seon.cluster.reply/sources
                    [:map [:seon.error/message :string]]]]}
   [text]
-  (throw (ex-info "awaits implementation" {::fn `sources})))
+  (let [source (unfenced text)
+        ; parsing is not evaluation: a throwaway context with no
+        ; bindings and no interrupt-fn is all a reader needs, and it is
+        ; all model text should ever be handed
+        ctx (sci/init {})
+        reader (sci/source-reader source)]
+    (try
+      (loop [collected []
+             ; PROSE IS A REPLY-LEVEL VERDICT, not a per-form filter.
+             ; Every top-level token reads as something — an English
+             ; sentence reads as a run of symbols — so "did the agent
+             ; write code?" is answered by structure: a plan has at
+             ; least one form with a body (a list, vector, map or set).
+             ; Once one exists, EVERY form is kept, so the REPL shape
+             ; `(def a 1)` then `a` survives intact rather than having
+             ; its last line silently dropped.
+             structured? false]
+        (let [[form form-source] (sci/parse-next+string ctx reader
+                                                        {:eof ::eof})]
+          (cond
+            (= ::eof form)
+            (if structured?
+              collected
+              (refused ::no-forms
+                       "The reply carried no Clojure forms to run."
+                       {::text text}))
+
+            (str/blank? form-source)
+            (recur collected structured?)
+
+            :else (recur (conj collected form-source)
+                         (or structured? (coll? form))))))
+      (catch #?(:clj Throwable :cljs :default) failure
+        ; sci's reader refuses #= and unknown tags by itself — there is
+        ; no blocklist here, and there must never be one
+        (let [message (or (ex-message failure) (str failure))]
+          (if (or (str/includes? message "EvalReader")
+                  (str/includes? message "reader function for tag"))
+            (refused ::refused-tag message {::text text})
+            (refused ::unreadable message {::text text})))))))

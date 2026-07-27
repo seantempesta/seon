@@ -45,7 +45,8 @@
   for the agent's own next prompt — it is not a status flag."
   {:malli/schema [:=> [:cat :my.run/note] :my.run/wait]}
   [note]
-  (throw (ex-info "awaits implementation" {::fn `wait})))
+  {:my.run/disposition :wait
+   :my.run/note note})
 
 (defn complete
   "Finish this run with the reply the agent wants delivered.
@@ -57,4 +58,8 @@
   {:malli/schema [:=> [:cat :my.run/result]
                   [:or :my.run/completed [:map [:seon.error/message :string]]]]}
   [result]
-  (throw (ex-info "awaits implementation" {::fn `complete})))
+  (if (str/blank? result)
+    {:seon.error/message
+     "complete needs the reply text you want delivered; it was blank."}
+    {:my.run/disposition :completed
+     :my.run/result result}))

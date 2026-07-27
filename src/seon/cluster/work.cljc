@@ -57,7 +57,9 @@
     no next ordinal, which is the loop's signal to close;
   - kill during recovery itself: `recover-tx` is idempotent and every
     terminal receipt is byte-untouched, so the derivation is unchanged."
-  (:require [seon.schema.edn :as schema.edn]))
+  (:require [datahike.api :as d]
+            [seon.cluster.run :as run]
+            [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — src/seon/schema/work.edn
@@ -66,8 +68,65 @@
 (schema.edn/load! {})
 
 ;;; ---------------------------------------------------------------------------
+;;; Reading the facts
+;;; ---------------------------------------------------------------------------
+
+(defn- agent-run
+  "The run an agent currently points at on `db`, pulled whole, or nil.
+  The agent's pointer IS the open-run fact: N2 retracts it at close, so
+  there is no `status` to read and no closed run to filter out here."
+  [db agent-id]
+  (let [run (d/q '[:find (pull ?run [*]) .
+                   :in $ ?agent-id
+                   :where
+                   [?agent :seon.cluster.agent/id ?agent-id]
+                   [?agent :seon.cluster.agent/run ?run]]
+                 db agent-id)]
+    (when (run/open? run) run)))
+
+(defn- agents-with-work
+  "Every agent id that has an open run or an unanswered trigger."
+  [db]
+  (into (sorted-set)
+        (d/q '[:find [?agent-id ...]
+               :where
+               [?agent :seon.cluster.agent/id ?agent-id]
+               (or [?agent :seon.cluster.agent/run _]
+                   [_ :seon.cluster.message/to ?agent])]
+             db)))
+
+(defn- next-ordinal
+  "The first form ordinal of `run` with no terminal receipt, or nil.
+  Resume is a QUERY, never a cursor: a receipt is terminal when its
+  status is not `:running`, and `recover-tx` has already turned a dead
+  process's `:running` receipts into `:interrupted` ones — so an
+  interrupted form is DONE being attempted and the fold moves past it.
+  Nothing re-executes."
+  [db run-id]
+  (let [ordinals (d/q '[:find [?ordinal ...]
+                        :in $ ?run-id
+                        :where
+                        [?run :seon.cluster.run/id ?run-id]
+                        [?form :seon.cluster.run.form/run ?run]
+                        [?form :seon.cluster.run.form/ordinal ?ordinal]]
+                      db run-id)
+        settled (into #{}
+                      (d/q '[:find [?ordinal ...]
+                             :in $ ?run-id
+                             :where
+                             [?run :seon.cluster.run/id ?run-id]
+                             [?receipt :seon.cluster.eval/run ?run]
+                             [?receipt :seon.cluster.eval/ordinal ?ordinal]
+                             [?receipt :seon.cluster.eval/status ?status]
+                             [(not= ?status :running)]]
+                           db run-id))]
+    (first (sort (remove settled ordinals)))))
+
+;;; ---------------------------------------------------------------------------
 ;;; The derivations
 ;;; ---------------------------------------------------------------------------
+
+(declare unanswered-triggers)
 
 (defn next-work
   "The ONE thing to do next on `db`, or nil when idle.
@@ -78,8 +137,45 @@
   ordinal with no terminal receipt — so the loop never recomputes it."
   {:malli/schema [:=> [:cat :any :seon.cluster.work/request]
                   [:maybe :seon.cluster.work/next]]}
-  [db request]
-  (throw (ex-info "awaits implementation" {::fn `next-work})))
+  [db {:keys [:seon.cluster.run/process]}]
+  (some
+   (fn [agent-id]
+     (let [run (agent-run db agent-id)]
+       (cond
+         ;; a run this process holds outranks any trigger: finishing what
+         ;; is started is what makes the busy fence mean anything
+         (and run (= process (:seon.cluster.run/process run)))
+         (if (:seon.cluster.run/plan-digest run)
+           {:seon.cluster.work/situation :resume
+            :seon.cluster.run/id (:seon.cluster.run/id run)
+            :seon.cluster.agent/id agent-id
+            :seon.cluster.run.form/ordinal
+            (next-ordinal db (:seon.cluster.run/id run))}
+           {:seon.cluster.work/situation :call
+            :seon.cluster.run/id (:seon.cluster.run/id run)
+            :seon.cluster.agent/id agent-id})
+
+         ;; an open run nobody holds: a planned one is committed work we
+         ;; may pick up, an unplanned one lost its paid call and is
+         ;; `interruption`'s business, never ours
+         (and run (nil? (:seon.cluster.run/process run)))
+         (when (:seon.cluster.run/plan-digest run)
+           {:seon.cluster.work/situation :resume
+            :seon.cluster.run/id (:seon.cluster.run/id run)
+            :seon.cluster.agent/id agent-id
+            :seon.cluster.run.form/ordinal
+            (next-ordinal db (:seon.cluster.run/id run))})
+
+         ;; another process holds it: not ours to touch
+         (some? run) nil
+
+         :else
+         (when-let [trigger (first (unanswered-triggers db agent-id))]
+           {:seon.cluster.work/situation :open
+            :seon.cluster.agent/id agent-id
+            :seon.cluster.message/id
+            (:seon.cluster.message/id trigger)}))))
+   (agents-with-work db)))
 
 (defn more-work?
   "True when another pass would find work. The self-rewake predicate.
@@ -88,7 +184,7 @@
   rewakes for."
   {:malli/schema [:=> [:cat :any :seon.cluster.work/request] :boolean]}
   [db request]
-  (throw (ex-info "awaits implementation" {::fn `more-work?})))
+  (some? (next-work db request)))
 
 (defn interruption
   "The open, unclaimed, unplanned run of `agent-id` on `db`, or nil.
@@ -101,7 +197,11 @@
   {:malli/schema [:=> [:cat :any :seon.cluster.agent/id]
                   [:maybe [:map [:seon.cluster.run/id :seon.cluster.run/id]]]]}
   [db agent-id]
-  (throw (ex-info "awaits implementation" {::fn `interruption})))
+  (let [run (agent-run db agent-id)]
+    (when (and run
+               (nil? (:seon.cluster.run/process run))
+               (nil? (:seon.cluster.run/plan-digest run)))
+      {:seon.cluster.run/id (:seon.cluster.run/id run)})))
 
 (defn unanswered-triggers
   "The trigger messages for `agent-id` that no run-opening transaction
@@ -117,4 +217,17 @@
                   [:vector [:map [:seon.cluster.message/id
                                   :seon.cluster.message/id]]]]}
   [db agent-id]
-  (throw (ex-info "awaits implementation" {::fn `unanswered-triggers})))
+  (->> (d/q '[:find ?id ?at
+              :in $ ?agent-id
+              :where
+              [?agent :seon.cluster.agent/id ?agent-id]
+              [?message :seon.cluster.message/to ?agent]
+              [?message :seon.cluster.message/id ?id]
+              [?message :seon.cluster.message/at ?at]
+              ;; answered = SOME transaction named it as its trigger.
+              ;; The absence is the fact; there is no flag to maintain.
+              (not [_ :seon.db/trigger ?message])]
+            db agent-id)
+       (sort-by (fn [[id at]] [(inst-ms at) id]))
+       (mapv (fn [[id at]] {:seon.cluster.message/id id
+                            :seon.cluster.message/at at}))))

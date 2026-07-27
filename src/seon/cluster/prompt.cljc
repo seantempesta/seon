@@ -33,13 +33,88 @@
 
   Nothing about this is stored, so nothing about it can go stale: the
   warning is present exactly while the facts that cause it are."
-  (:require [seon.schema.edn :as schema.edn]))
+  (:require [clojure.string :as str]
+            [datahike.api :as d]
+            [seon.cluster.run :as run]
+            [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — src/seon/schema/prompt.edn
 ;;; ---------------------------------------------------------------------------
 
 (schema.edn/load! {})
+
+;;; ---------------------------------------------------------------------------
+;;; The pieces, each derived
+;;; ---------------------------------------------------------------------------
+
+(defn- trigger-content
+  [db message-id]
+  (d/q '[:find ?content .
+         :in $ ?message-id
+         :where
+         [?message :seon.cluster.message/id ?message-id]
+         [?message :seon.cluster.message/content ?content]]
+       db message-id))
+
+(defn- latest-run
+  "The agent's most recently opened run, pulled whole, or nil.
+  The warning is about the LAST run, not any run: an agent that was cut
+  once, recovered, and worked for a week is not still interrupted."
+  [db agent-id]
+  (->> (d/q '[:find [(pull ?run [*]) ...]
+              :in $ ?agent-id
+              :where
+              [?agent :seon.cluster.agent/id ?agent-id]
+              [?run :seon.cluster.run/agent ?agent]]
+            db agent-id)
+       (sort-by #(inst-ms (:seon.cluster.run/opened-at %)))
+       last))
+
+(defn- run-receipts
+  [db run-id]
+  (d/q '[:find [(pull ?receipt [*]) ...]
+         :in $ ?run-id
+         :where
+         [?run :seon.cluster.run/id ?run-id]
+         [?receipt :seon.cluster.eval/run ?run]]
+       db run-id))
+
+(defn- run-forms
+  [db run-id]
+  (d/q '[:find [(pull ?form [*]) ...]
+         :in $ ?run-id
+         :where
+         [?run :seon.cluster.run/id ?run-id]
+         [?form :seon.cluster.run.form/run ?run]]
+       db run-id))
+
+(defn- interrupted-sentence
+  "The ONE warning sentence for `agent-id`, or nil when nothing was cut.
+  Two shapes, one sentence — and both say MAY, because rows 6 and 7 of
+  the crash walk are indistinguishable from the facts and a confident
+  claim would be a lie the agent then reasons from."
+  [db agent-id]
+  (when-let [previous (latest-run db agent-id)]
+    (let [run-id (:seon.cluster.run/id previous)]
+      (if-let [cut (run/interrupted-warning (run-forms db run-id)
+                                            (run-receipts db run-id))]
+        (str "Your previous run was interrupted at form "
+             (:seon.cluster.eval/ordinal cut)
+             ". That form's effect may have happened; "
+             (:seon.cluster.run/missing-results cut)
+             " result(s) are missing. Nothing was retried — adapt from here.")
+        ;; no receipts to derive from: the run was cut before its plan
+        ;; existed, so the model call was lost and nothing re-called it
+        (when (and (nil? (:seon.cluster.run/plan-digest previous))
+                   (some? (:seon.cluster.run/closed-at previous)))
+          (str "Your previous request was interrupted before you replied, "
+               "and nothing was retried. Nothing you asked for ran."))))))
+
+(defn- refuse!
+  [rule data]
+  (throw (ex-info (str "prompt refused: " (name rule))
+                  (assoc data :seon.error/kind ::refused ::rule rule))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Contract
@@ -54,5 +129,19 @@
   answer is a caller bug, not an agent outcome."
   {:malli/schema [:=> [:cat :any :seon.cluster.prompt/request]
                   :seon.cluster.prompt/text]}
-  [db request]
-  (throw (ex-info "awaits implementation" {::fn `prompt})))
+  [db {:keys [:seon.cluster.agent/id :seon.cluster.message/id]
+       :as request}]
+  (let [agent-id (:seon.cluster.agent/id request)
+        message-id (:seon.cluster.message/id request)
+        content (or (trigger-content db message-id)
+                    (refuse! ::no-trigger request))]
+    (->> [(str "You are agent " agent-id
+               ". Your namespace is my.agents." agent-id
+               " — defns you write land there.")
+          (interrupted-sentence db agent-id)
+          (str "You have been asked:\n\n" content)
+          (str "Reply with Clojure forms to run, in order. "
+               "Finish with (my.run/complete \"your reply\") when you are "
+               "done, or (my.run/wait \"why\") to pause this run.")]
+         (remove nil?)
+         (str/join "\n\n"))))
