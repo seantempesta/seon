@@ -42,7 +42,9 @@
   Crash walk: `plan` is pure; `reconcile!` is ONE atomic transaction —
   a kill leaves it fully applied or absent, and re-apply converges
   either way."
-  (:require [seon.schema :as schema]))
+  (:require [clojure.set :as set]
+            [datahike.api :as d]
+            [seon.schema :as schema]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas
@@ -75,6 +77,253 @@
 ;;; Contracts
 ;;; ---------------------------------------------------------------------------
 
+(defn- refuse!
+  [rule data]
+  (throw
+   (ex-info
+    (str "Reconciliation refused: " (name rule) ".")
+    (merge {:seon.error/kind ::refused
+            ::rule rule}
+           data))))
+
+(defn- identity-attributes
+  []
+  (into #{}
+        (filter schema/identity-attr?)
+        (keys (schema/registered-schemas))))
+
+(defn- desired-identity
+  [identity-attrs desired]
+  (let [attrs (into [] (filter identity-attrs) (keys desired))]
+    (case (count attrs)
+      0 (refuse! ::no-identity {::desired-map desired})
+      1 (let [attr (first attrs)]
+          [attr (get desired attr)])
+      (refuse! ::two-identities
+               {::desired-map desired
+                ::identity-attributes (set attrs)}))))
+
+(defn- desired-identities
+  [identity-attrs desired]
+  (let [identities (mapv #(desired-identity identity-attrs %) desired)
+        duplicate (some (fn [[identity n]]
+                          (when (> n 1) identity))
+                        (frequencies identities))]
+    (when duplicate
+      (refuse! ::duplicate-identity {::identity duplicate}))
+    identities))
+
+(defn- installed-identity-attributes
+  [db identity-attrs]
+  (into #{}
+        (filter #(contains? (:schema db) %))
+        identity-attrs))
+
+(defn- current-identity-facts
+  [db identity-attrs]
+  (into []
+        (mapcat
+         (fn [attr]
+           (map (fn [[eid value]]
+                  {:db/id eid ::identity [attr value]})
+                (d/q
+                 '[:find ?entity ?value
+                   :in $ ?identity-attr
+                   :where
+                   [?entity ?identity-attr ?value]]
+                 db
+                 attr))))
+        identity-attrs))
+
+(defn- first-assertion-transactions
+  [db identity-attrs]
+  (let [history (d/history db)]
+    (reduce
+     (fn [first-by-identity attr]
+       (reduce
+        (fn [result [eid value tx]]
+          (update result
+                  [eid [attr value]]
+                  #(if (or (nil? %) (< tx %)) tx %)))
+        first-by-identity
+        (d/q
+         '[:find ?entity ?value ?tx
+           :in $ ?identity-attr
+           :where
+           [?entity ?identity-attr ?value ?tx true]]
+         history
+         attr)))
+     {}
+     identity-attrs)))
+
+(defn- process-by-transaction
+  [db]
+  (into {}
+        (d/q
+         '[:find ?tx ?process-id
+           :where
+           [?tx :seon.db/process ?process]
+           [?process :seon.db.process/id ?process-id]]
+         db)))
+
+(defn- cardinality-many?
+  [db attr]
+  (= :db.cardinality/many
+     (get-in db [:schema attr :db/cardinality])))
+
+(defn- ref-attribute?
+  [db attr]
+  (= :db.type/ref
+     (get-in db [:schema attr :db/valueType])))
+
+(defn- component-ref?
+  [db attr]
+  (true? (get-in db [:schema attr :db/isComponent])))
+
+(defn- value-eid
+  [identity-eids value]
+  (cond
+    (number? value) value
+    (vector? value) (get identity-eids value)
+    (map? value) (:db/id value)
+    :else nil))
+
+(declare normalize-current-entity normalize-desired-entity)
+
+(defn- normalize-current-one
+  [db entities identity-eids attr value]
+  (cond
+    (component-ref? db attr)
+    (normalize-current-entity db entities identity-eids value)
+
+    (ref-attribute? db attr)
+    (value-eid identity-eids value)
+
+    :else value))
+
+(defn- normalize-desired-one
+  [db entities identity-eids identity-attrs attr value]
+  (cond
+    (component-ref? db attr)
+    (normalize-desired-entity
+     db entities identity-eids identity-attrs value)
+
+    (ref-attribute? db attr)
+    (or (value-eid identity-eids value)
+        (when (map? value)
+          (let [attrs (into [] (filter identity-attrs) (keys value))]
+            (when (= 1 (count attrs))
+              (get identity-eids
+                   [(first attrs) (get value (first attrs))]))))
+        value)
+
+    :else value))
+
+(defn- normalize-value
+  [db attr normalize-one value]
+  (if (cardinality-many? db attr)
+    (into #{} (map normalize-one) (or value []))
+    (normalize-one value)))
+
+(defn- current-entity-map
+  [entities identity-eids value]
+  (if (map? value)
+    value
+    (some->> (value-eid identity-eids value)
+             (get entities))))
+
+(defn- normalize-current-entity
+  [db entities identity-eids value]
+  (into {}
+        (keep
+         (fn [[attr attr-value]]
+           (when (not= :db/id attr)
+             [attr
+              (normalize-value
+               db attr
+               #(normalize-current-one
+                 db entities identity-eids attr %)
+               attr-value)])))
+        (current-entity-map entities identity-eids value)))
+
+(defn- normalize-desired-entity
+  [db entities identity-eids identity-attrs entity]
+  (into {}
+        (keep
+         (fn [[attr attr-value]]
+           (when (not= :db/id attr)
+             [attr
+              (normalize-value
+               db attr
+               #(normalize-desired-one
+                 db entities identity-eids identity-attrs attr %)
+               attr-value)])))
+        entity))
+
+(defn- attr-equivalent?
+  [db entities identity-eids identity-attrs attr current desired]
+  (= (normalize-value
+      db attr
+      #(normalize-current-one db entities identity-eids attr %)
+      current)
+     (normalize-value
+      db attr
+      #(normalize-desired-one
+        db entities identity-eids identity-attrs attr %)
+      desired)))
+
+(defn- canonical-desired-entity
+  [db entity]
+  (into {}
+        (remove
+         (fn [[attr value]]
+           (and (cardinality-many? db attr)
+                (empty? value))))
+        entity))
+
+(defn- entity-exact-tx
+  [db entities identity-eids identity-attrs identity desired current]
+  (if-not current
+    [desired]
+    (let [[identity-attr identity-value] identity
+          attrs (-> (set/union (set (keys current))
+                               (set (keys desired)))
+                    (disj :db/id identity-attr))
+          changed
+          (->> attrs
+               (filter
+                (fn [attr]
+                  (let [current? (contains? current attr)
+                        desired? (contains? desired attr)]
+                    (or (not= current? desired?)
+                        (and current?
+                             desired?
+                             (not
+                              (attr-equivalent?
+                               db entities identity-eids identity-attrs
+                               attr
+                               (get current attr)
+                               (get desired attr))))))))
+               (sort-by str)
+               vec)
+          retracts
+          (into []
+                (keep
+                 (fn [attr]
+                   (when (contains? current attr)
+                     [:db.fn/retractAttribute identity attr])))
+                changed)
+          additions
+          (reduce
+           (fn [result attr]
+             (if (contains? desired attr)
+               (assoc result attr (get desired attr))
+               result))
+           {identity-attr identity-value}
+           changed)]
+      (cond-> retracts
+        (> (count additions) 1) (conj additions)))))
+
 (defn plan
   "The exact tx-data converging `db` onto the desired population.
   Pure. Empty vector = converged, and the caller must then issue NO
@@ -86,7 +335,92 @@
   adopted identity)."
   {:malli/schema [:=> [:cat :any ::request] [:vector :any]]}
   [db request]
-  (throw (ex-info "awaits implementation" {::fn `plan})))
+  (let [{::keys [desired process adopt-identities]} request
+        adopt-identities (or adopt-identities #{})
+        identity-attrs (identity-attributes)
+        identities (desired-identities identity-attrs desired)
+        installed-attrs
+        (installed-identity-attributes db identity-attrs)
+        facts (current-identity-facts db installed-attrs)
+        entity-identities
+        (reduce
+         (fn [result {:keys [db/id] ::keys [identity]}]
+           (update result id (fnil conj #{}) identity))
+         {}
+         facts)
+        identity-eids
+        (into {}
+              (map (juxt ::identity :db/id))
+              facts)
+        entities
+        (into {}
+              (map
+               (fn [eid]
+                 [eid (d/pull db '[*] eid)]))
+              (keys entity-identities))
+        first-tx
+        (first-assertion-transactions db installed-attrs)
+        process-by-tx (process-by-transaction db)
+        managed-eids
+        (into #{}
+              (keep
+               (fn [[eid entity-ids]]
+                 (when
+                  (some
+                   (fn [identity]
+                     (or (contains? adopt-identities identity)
+                         (= process
+                            (get process-by-tx
+                                 (get first-tx [eid identity])))))
+                   entity-ids)
+                   eid)))
+              entity-identities)
+        managed-by-identity
+        (into {}
+              (mapcat
+               (fn [eid]
+                 (map (fn [identity] [identity eid])
+                      (get entity-identities eid))))
+              managed-eids)
+        outside
+        (some
+         (fn [identity]
+           (when-let [eid (get identity-eids identity)]
+             (when (not= eid (get managed-by-identity identity))
+               identity)))
+         identities)]
+    (when outside
+      (refuse! ::identity-outside-scope {::identity outside}))
+    (let [desired
+          (mapv #(canonical-desired-entity db %) desired)
+          desired-set (set identities)
+          entity-tx
+          (into []
+                (mapcat
+                 (fn [[identity entity]]
+                   (entity-exact-tx
+                    db entities identity-eids identity-attrs
+                    identity
+                    entity
+                    (some->> (get managed-by-identity identity)
+                             (get entities)))))
+                (sort-by (comp pr-str first)
+                         (map vector identities desired)))
+          stale-eids
+          (->> managed-eids
+               (filter
+                (fn [eid]
+                  (empty?
+                   (set/intersection
+                    desired-set
+                    (get entity-identities eid)))))
+               sort
+               vec)]
+      (into entity-tx
+            (map (fn [eid] [:db.fn/retractEntity eid]))
+            stale-eids))))
+
+(declare reconcile-call)
 
 (defn reconcile!
   "Apply the plan through the one connection, converged = zero writes.
@@ -100,7 +434,20 @@
   and atomically from inside the writer otherwise."
   {:malli/schema [:=> [:cat :any ::request] ::result]}
   [connection request]
-  (throw (ex-info "awaits implementation" {::fn `reconcile!})))
+  (let [tx-data (plan @connection request)
+        operations (count tx-data)]
+    (if (zero? operations)
+      {::converged? true
+       ::operations 0}
+      (do
+        (d/transact
+         connection
+         {:tx-data [[:db.fn/call #'reconcile-call request]]
+          :tx-meta
+          {:seon.db/process
+           [:seon.db.process/id (::process request)]}})
+        {::converged? false
+         ::operations operations}))))
 
 (defn reconcile-call
   "The in-writer recomputation — the N2 transition idiom.
@@ -108,4 +455,4 @@
   of the mid-transaction database value returning the final tx-data."
   {:malli/schema [:=> [:cat :any ::request] [:vector :any]]}
   [db request]
-  (throw (ex-info "awaits implementation" {::fn `reconcile-call})))
+  (plan db request))

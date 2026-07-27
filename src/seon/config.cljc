@@ -26,7 +26,14 @@
 
   Crash walk: parsing and row derivation are pure. A non-empty apply is the
   one atomic reconcile transaction; a converged apply issues no transaction."
-  (:require [seon.reconcile]))
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
+            [clojure.set :as set]
+            [datahike.api :as d]
+            [seon.reconcile :as reconcile]
+            [seon.schema :as schema])
+  (:import [java.nio.charset StandardCharsets]
+           [java.security MessageDigest]))
 
 (def default-manifest-path
   "The one repository/artifact-relative shipped defaults document."
@@ -35,6 +42,68 @@
 (def managing-process-identity
   "The opaque reconcile scope owned by configuration."
   "seon.db.process/config")
+
+(defn- dial-attributes
+  []
+  (into #{}
+        (map first)
+        (drop 2 (schema/schema-definition :seon.config/manifest))))
+
+(defn- refuse!
+  [rule data cause]
+  (throw
+   (ex-info
+    (str "Configuration refused: " (name rule) ".")
+    (merge {:seon.error/kind ::refused
+            ::rule rule}
+           data)
+    cause)))
+
+(defn- read-edn-map
+  [path]
+  (try
+    (with-open [reader (java.io.PushbackReader. (io/reader path))]
+      (let [eof (Object.)
+            value (edn/read {:eof eof} reader)
+            trailing (edn/read {:eof eof} reader)]
+        (when-not (and (map? value)
+                       (identical? eof trailing))
+          (throw
+           (ex-info
+            "A manifest must contain exactly one EDN map."
+            {::path path})))
+        value))
+    (catch Throwable error
+      (refuse! ::manifest-unreadable {::path path} error))))
+
+(defn- validate-manifest
+  [manifest]
+  (let [dials (dial-attributes)]
+    (doseq [key (keys manifest)]
+      (when-not (contains? dials key)
+        (refuse! ::unknown-key {::key key} nil)))
+    (doseq [[key value] manifest]
+      (when-not (schema/valid-candidate-value? key value)
+        (refuse!
+         ::invalid-value
+         {::key key
+          ::explanation (schema/explain-candidate-value key value)}
+         nil)))
+    manifest))
+
+(defn- computed-defaults
+  []
+  {:seon.config.flow.compute/concurrency
+   (long (.availableProcessors (Runtime/getRuntime)))})
+
+(defn- sha-256
+  [value]
+  (let [digest (MessageDigest/getInstance "SHA-256")
+        bytes (.digest
+               digest
+               (.getBytes ^String value StandardCharsets/UTF_8))]
+    (apply str
+           (map #(format "%02x" (bit-and 0xff %)) bytes))))
 
 (defn defaults
   "The complete default manifest — THE defaults document.
@@ -46,7 +115,19 @@
   value."
   {:malli/schema [:=> [:cat] :seon.config/manifest]}
   []
-  (throw (ex-info "awaits implementation" {::fn `defaults})))
+  (let [manifest
+        (validate-manifest
+         (merge (read-edn-map default-manifest-path)
+                (computed-defaults)))
+        dials (dial-attributes)]
+    (when-not (= dials (set (keys manifest)))
+      (refuse!
+       ::invalid-value
+       {::explanation
+        {:seon.config/missing
+         (set/difference dials (set (keys manifest)))}}
+       nil))
+    manifest))
 
 (defn read-manifest
   "Read one override manifest and resolve absent keys from defaults.
@@ -55,9 +136,9 @@
   The invalid-value refusal includes the Malli explanation."
   {:malli/schema [:=> [:cat :string] :seon.config/manifest]}
   [path]
-  (throw (ex-info "awaits implementation"
-                  {::fn `read-manifest
-                   ::path path})))
+  (validate-manifest
+   (merge (defaults)
+          (read-edn-map path))))
 
 (defn desired-rows
   "Derive the exact config singleton row for one cluster.
@@ -70,10 +151,13 @@
    [:=> [:cat :seon.config/manifest :seon.boot/cluster-name]
     [:vector :map]]}
   [manifest cluster-name]
-  (throw (ex-info "awaits implementation"
-                  {::fn `desired-rows
-                   ::manifest manifest
-                   ::cluster-name cluster-name})))
+  (let [effective-manifest
+        (validate-manifest (merge (defaults) manifest))]
+    [(assoc effective-manifest
+            :seon.config/cluster cluster-name
+            :seon.config/applied-manifest-digest
+            (sha-256
+             (schema/canonical-data-string effective-manifest)))]))
 
 (defn apply!
   "Reconcile one manifest into the cluster's config singleton.
@@ -84,16 +168,28 @@
   {:malli/schema
    [:=> [:cat :seon.config/apply-request] :seon.reconcile/result]}
   [request]
-  (throw (ex-info "awaits implementation"
-                  {::fn `apply!
-                   ::request request})))
+  (reconcile/reconcile!
+   (:seon.config/connection request)
+   {::reconcile/desired
+    (desired-rows
+     (:seon.config/manifest request)
+     (:seon.boot/cluster-name request))
+    ::reconcile/process managing-process-identity}))
 
 (defn effective
   "The effective dial map derived from one cluster singleton."
   {:malli/schema
    [:=> [:cat :any :seon.boot/cluster-name] :seon.config/effective]}
   [db cluster-name]
-  (throw (ex-info "awaits implementation"
-                  {::fn `effective
-                   ::db db
-                   ::cluster-name cluster-name})))
+  (select-keys
+   (dissoc
+    (or
+     (d/pull
+      db
+      '[*]
+      [:seon.config/cluster cluster-name])
+     {})
+    :db/id
+    :seon.config/cluster
+    :seon.config/applied-manifest-digest)
+   (dial-attributes)))
