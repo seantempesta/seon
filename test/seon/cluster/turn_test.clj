@@ -88,6 +88,11 @@
              :seon.cluster.loop/evaluate 'seon.cluster.turn-test/fake-evaluate
              :seon.config.eval/time-limit-ms 2000
              :seon.config/on-core-error :panic
+             ;; a refused transaction is recorded as a durable error
+             ;; fact (D3), so the handle carries the dials that
+             ;; recording needs. No escalate-to: this fixture has no
+             ;; root agent, and absence is the state.
+             :seon.config.error/recurrence-limit 3
              :seon.sci.admit/caps
              {:seon.config.eval.result/max-depth 6
               :seon.config.eval.result/max-collection 8

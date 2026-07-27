@@ -2,15 +2,20 @@
   "THE ONE NORMALIZER. Anything that went wrong becomes one fact here,
   and nothing anywhere else formats an error.
 
-  CONTRACT LAYER (drafted 2026-07-27 for ORCHESTRATOR SEAL — step 1 of
-  the error-wiring order, grounded in
+  Implemented and boot-wired (2026-07-27, steps 1-2 of the error-wiring
+  order), grounded in
   `docs/prds/sci-execution-runtime/research/error-handling-grounding-2026-07-27.md`
   in full, with §1.2, §3.2, §6.1-6.3 and §8 carrying the file:line
-  evidence for every claim below). Nothing here is implemented: every
-  body throws `awaits implementation`. Slice 1 (`3bd147643`) landed the
-  entity and the two dials as `:seon.fault/*`; the orchestrator ruled
-  the rename, so this file and `src/seon/schema/error.edn` are the one
-  owner and `:seon.fault/*` no longer exists.
+  evidence for every claim below. Slice 1 landed the entity as
+  `:seon.fault/*`; the rename merged it into this one family, and
+  `:seon.fault/*` no longer exists.
+
+  THIS NAMESPACE IS PURE. It normalizes, it projects, and it returns
+  TRANSACTION DATA; it never transacts, so it needs no store — which is
+  what lets `seon.cluster.store` depend on it (for `refusal`) instead of
+  the other way round. Its two callers commit through the one door:
+  `seon.cluster/commit-fault!` for Throwables off flow's error channel,
+  and the run loop for a refused transaction.
 
   WHY ONE NORMALIZER. The quarry grew three independent bounding rules
   and two hand-maintained blame lists because every catch site formatted
@@ -36,9 +41,8 @@
   2. A flat `:seon.error/value` — what `store/transact!`, `ai/complete`,
      `config/apply!` and `reconcile` return. Nothing throws into the run
      loop, so a system failure normally arrives as a value.
-  3. A transition refusal's `ex-data` — the map
-     `seon.cluster.store/refusal` digs out of a cause chain
-     (`store.clj:398-412`). It is family 2's shape wearing family 1's
+  3. A transition refusal's `ex-data` — the map `refusal` (below) digs
+     out of a cause chain. It is family 2's shape wearing family 1's
      origin, and it normalizes as itself.
 
   Anything else is family 4 by exclusion — a bare Throwable, or a value
@@ -129,11 +133,13 @@
   Crash walk. Normalization is PURE: it opens nothing, writes nothing,
   and holds no lock. Killed before it, during it, or after it and before
   the commit, the durable state is identical — a normalized fact that
-  was never transacted is a value on a dead thread. `commit!` (step 2)
-  owns the durability and its own crash walk."
+  was never transacted is a value on a dead thread. `commit-tx` is pure
+  too: the transaction either committed or it did not, and an error
+  that was never committed is an error the next boot never sees — which
+  is the same crash row as the work it was reporting on."
   (:require [clojure.core.async.flow :as-alias flow]
             [clojure.string :as str]
-            [seon.cluster.store :as store]
+            [datahike.api :as d]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.sci.admit :as admit]))
@@ -153,6 +159,28 @@
 ;;; refusing to record it.
 (def ^:private unclassified :seon.error/unclassified)
 
+(defn refusal
+  "The deepest non-empty `ex-data` in a throwable's cause chain, or nil.
+  Pure, and unit-testable with no database: a refusal is a value buried
+  under wrappers, and finding it is a walk, not a guess. Returns nil for
+  a throwable that carries no data anywhere in its chain — which is
+  itself information, and the caller treats it as unclassifiable.
+
+  MOVED HERE from `seon.cluster.store` (2026-07-27, the grounding's own
+  recommendation): it is about throwables, not about stores, and it had
+  two consumers pulling in opposite directions — the store's own
+  `transact!` and this normalizer. With it here the dependency runs one
+  way, `store -> error`, and this namespace stays PURE."
+  {:malli/schema [:=> [:cat :any] [:maybe :map]]}
+  [throwable]
+  (loop [candidate throwable
+         deepest nil]
+    (if (nil? candidate)
+      deepest
+      (let [data (ex-data candidate)]
+        (recur (ex-cause candidate)
+               (if (seq data) data deepest))))))
+
 (defn- throwable
   "The Throwable in `source`, or nil.
   `::flow/ex` is the ONE key all three of flow's report shapes share
@@ -167,18 +195,18 @@
   "The namespaced rule that failed, never invented here.
   A flat value and a refusal's ex-data carry their own; a Throwable
   carries one at the deepest non-empty `ex-data` in its cause chain,
-  which `seon.cluster.store/refusal` already walks — one owner for that
-  walk, not a copy of it here."
+  which `refusal` above walks — one owner for that walk, and the store's
+  own `transact!` calls the same one."
   [source failure]
   (or (when (map? source) (:seon.error/kind source))
-      (when failure (:seon.error/kind (store/refusal failure)))
+      (when failure (:seon.error/kind (refusal failure)))
       unclassified))
 
 (defn- root-cause
   "The deepest Throwable in the cause chain.
-  A different question from `store/refusal`'s — that one digs out the
-  deepest DATA, this one names the throwable the chain bottoms out in —
-  so it is not a copy of that walk."
+  A different question from `refusal`'s — that one digs out the deepest
+  DATA, this one names the throwable the chain bottoms out in — so it is
+  not a copy of that walk."
   [failure]
   (loop [candidate failure]
     (if-let [cause (ex-cause candidate)]
@@ -438,3 +466,151 @@
        ;; one line by construction: a message with a newline in it would
        ;; otherwise be two log lines to every tool that reads them
        (str "message=" (pr-str (str/replace message #"\s+" " ")))]))))
+
+;;; ---------------------------------------------------------------------------
+;;; The commit — PURE transaction data, so this namespace stays store-free
+;;; ---------------------------------------------------------------------------
+
+;;; One string tempid, so the fact and the messages that explain it land
+;;; in ONE transaction with the refs already resolved. A lookup ref to an
+;;; entity created by the same transaction is not something to bet on.
+(def ^:private fact-tempid "seon.error/fact")
+
+(defn- agent-exists?
+  "True when this cluster really has that agent.
+  A message addressed to an id nothing declares would fail the WHOLE
+  transaction, taking the error fact down with it — the recorder losing
+  the record because the recipient was a typo is precisely the failure
+  mode the fault path may not have."
+  [db agent-id]
+  (some? (d/q '[:find ?agent .
+                :in $ ?id
+                :where [?agent :seon.cluster.agent/id ?id]]
+              db agent-id)))
+
+(defn- recurrence
+  "How many errors of this signature this process has already committed.
+  DERIVED, never a stored tally — the count is the query. Scoped to the
+  process because a process identity is unique per start, which is
+  exactly the \"since this process started\" window the escalation rule
+  wants, with no clock in it."
+  [db signature process]
+  (count (d/q '[:find ?error
+                :in $ ?signature ?process
+                :where
+                [?error :seon.error/signature ?signature]
+                [?error :seon.error/process ?process]]
+              db signature process)))
+
+(defn- message-tx
+  "One explanation message: the notice's ai projection, STORED.
+  The id is DERIVED from the error and the reason, which makes delivery
+  idempotent by construction — re-committing the same error upserts the
+  same message instead of double-sending it, and the double-send
+  question the plan has been carrying since 2026-07-26 does not arise on
+  this path. `about` points at the fact through the shared tempid, and
+  its ABSENCE on an ordinary user message is what makes the storm fence
+  computable without a flag."
+  [fact recipient reason]
+  {:seon.cluster.message/id (str (:seon.error/id fact) "-" (name reason))
+   :seon.cluster.message/to [:seon.cluster.agent/id recipient]
+   :seon.cluster.message/content (ai-prose (notice
+                                            {:seon.error/fact fact
+                                             :seon.error/reason reason
+                                             :seon.cluster.agent/id recipient}))
+   :seon.cluster.message/at (:seon.error/at fact)
+   :seon.cluster.message/about fact-tempid})
+
+(defn commit-tx
+  "Transaction data committing one error and everything it must say.
+  PURE over a database value: the fact, and zero to two explanation
+  messages, in ONE vector so `store/transact!` commits them together and
+  there is no torn window where an error exists that nobody was told
+  about. Returning data rather than transacting is what keeps this
+  namespace free of the store — the dependency runs `store -> error`,
+  never both ways — and it is why the whole escalation rule is testable
+  against an in-memory database value with no cluster at all.
+
+  DELIVERY IS THE EXISTING WAKE. `:seon.cluster.message/to` is the wake
+  attribute, so committing an explanation message wakes that agent's
+  loop by construction: no notification queue, no acknowledgement flag,
+  no second channel.
+
+  WHO IS TOLD, computed from THE FACT ITSELF and never from a flag the
+  caller sets — the same rule as everywhere else in this family, that
+  the shape of the thing decides:
+
+  - the ATTRIBUTED agent, when the caller could name one AND the error
+    was a THROWABLE that escaped our code (the fact carries a `class`).
+    That is the case where the agent's run was interrupted by our bug
+    and it cannot know unless told. A returned VALUE — a refused
+    transition, a model failure — is NOT told: the run's own facts
+    already say what happened, the agent reads them in its next prompt,
+    and mailing it a message would open a fresh run to explain a run
+    that already explains itself. Measured, not theorised: wiring the
+    message to every refusal turned a bounded test drive into new runs
+    opening to discuss refusals;
+  - the ESCALATION recipient (`:seon.config.error/escalate-to`), with
+    `:no-attributable-agent` when there was nobody to tell, and with
+    `:recurring` once this signature reaches
+    `:seon.config.error/recurrence-limit` occurrences in this process;
+  - NOBODY, when the dial is absent or names an agent this cluster does
+    not have. Absence is the state: the fact is still committed.
+
+  THE STORM FENCE is that same recurrence count, and it is why the
+  fence needs no flag: AT the limit one `:recurring` escalation goes
+  out, and PAST it nothing is said at all — the facts keep committing,
+  because they are the evidence a query counts, but nobody is mailed
+  again. That bound is load-bearing rather than tidy. Measured on a live
+  cluster: one injected throw in the loop's transform produced six
+  faults in 1.5 s, because committing the explanation message is a
+  commit, a commit wakes the loop through
+  `:seon.cluster.message/to`, and the woken loop hit the same broken
+  code. Delivery being the wake attribute is exactly what makes error
+  delivery free — and exactly what makes an unbounded error path a
+  self-feeding fire. An error fact ALONE wakes nobody
+  (`wake-attributes` is `#{:seon.cluster.message/to}`), so silence is
+  what breaks the cycle. error -> message -> wake -> turn -> error is a real cycle,
+  and a bounded number of messages per signature per process is what
+  makes it terminate. A recurrence escalation to the attributed agent
+  itself is skipped rather than sent twice. Together with the
+  throwable-only rule above, the number of runs an error can cause is
+  bounded by the number of DISTINCT signatures, not by the number of
+  errors."
+  {:malli/schema [:=> [:cat :any :seon.error/commit-tx-request]
+                  [:vector :any]]}
+  [db {:seon.error/keys [source id at process basis-t]
+       :seon.sci.admit/keys [caps]
+       run-id :seon.cluster.run/id
+       agent-id :seon.cluster.agent/id
+       escalate-to :seon.config.error/escalate-to
+       limit :seon.config.error/recurrence-limit}]
+  (let [fact (normalize (cond-> {:seon.error/source source
+                                 :seon.error/id id
+                                 :seon.error/at at
+                                 :seon.error/process process
+                                 :seon.sci.admit/caps caps}
+                          basis-t (assoc :seon.error/basis-t basis-t)
+                          run-id (assoc :seon.cluster.run/id run-id)
+                          agent-id (assoc :seon.cluster.agent/id agent-id)))
+        occurrence (inc (recurrence db (:seon.error/signature fact) process))
+        recurring? (= occurrence limit)
+        ;; PAST the limit nothing is said at all. The facts keep
+        ;; committing — they are the evidence, and a query counts them —
+        ;; but the escalation has already been sent once and repeating
+        ;; it is the storm rather than the warning.
+        silent? (> occurrence limit)
+        ;; the fact says whether this was a Throwable; nothing else has
+        ;; to be asked, and no caller gets to have an opinion about it
+        interrupted-a-run? (some? (:seon.error/class fact))
+        tell (fn [recipient reason]
+               (when (and recipient (agent-exists? db recipient))
+                 (message-tx fact recipient reason)))]
+    (into [(assoc fact :db/id fact-tempid)]
+          (remove nil?)
+          [(when (and agent-id interrupted-a-run? (not recurring?) (not silent?))
+             (tell agent-id :your-run))
+           (when (and interrupted-a-run? (not agent-id) (not silent?))
+             (tell escalate-to :no-attributable-agent))
+           (when (and recurring? (not= escalate-to agent-id))
+             (tell escalate-to :recurring))])))

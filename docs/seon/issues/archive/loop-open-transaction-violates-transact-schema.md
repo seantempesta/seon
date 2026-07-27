@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, database, schema, agent-runtime]
 ---
@@ -39,3 +39,17 @@ The run-loop transaction boundary jointly owned by
   relying on Datahike's permissive collection spec.
 - Boot-time instrumentation can instrument this boundary without rejecting
   the live open-and-claim path.
+
+## Resolved 2026-07-27 — the contract now says what the callers do
+
+`:seon.store/transaction` is registered in `src/seon/schema/store.edn` as
+`[:or [:vector :any] {:tx-data … :tx-meta …}]`, using Datahike's own
+unqualified key names because they are Datahike's vocabulary, and
+`seon.cluster.store/transact!` declares that form. The map arm was
+already the live critical path; the mismatch is now unrepresentable
+rather than accidentally executable.
+
+Behavioural proof: the full gate (203 tests / 911 assertions / 0 / 0)
+includes `seon.cluster.turn-test`, which drives `:open` through the map
+arm, and `seon.cluster.armed-test`, which boots a real cluster whose
+loop transacts through the same door.

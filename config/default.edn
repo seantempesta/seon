@@ -46,12 +46,38 @@
  ; facts; there is no stored tally to drift.
  :seon.config.error/recurrence-limit 3
 
- ; :seon.config.error/escalate-to is deliberately ABSENT: there is no
- ; root agent in the fresh tree, and a shipped default naming an agent
- ; that may not exist would be a lie. Absent = the fault fact is still
- ; committed, no escalation message is sent.
+ ; WHO hears what nobody else can be told about. It names the root agent
+ ; because boot now SEEDS one — the reason this was absent when the dial
+ ; landed was that a default naming an agent that may not exist would be
+ ; a lie, and that is no longer the case: every cluster has a root from
+ ; its first transaction, free, with no process and no tokens.
+ ; The dial stays OPTIONAL in the shape, and that is not vestigial —
+ ; a manifest may override it to absent, and absence still means the
+ ; error fact is committed with no escalation message. `commit-tx` also
+ ; refuses to address an agent this cluster does not have, so a dial
+ ; pointing at a typo costs the message, never the record.
+ :seon.config.error/escalate-to "root"
 
  ; Unit: categorical core-fault disposition.
  ; Provenance: the 2026-07-27 error ruling requires development to fail
  ; loudly and production to degrade only by explicit configuration.
- :seon.config/on-core-error :panic}
+ :seon.config/on-core-error :panic
+
+ ; THE MODEL SEAM. DeepSeek is the standing default provider; the loop
+ ; is installed at boot, so the provider it would call has to be a fact
+ ; rather than a literal in a drive script. Nothing here spends
+ ; anything: an installed loop with no trigger makes no call.
+ ; Unit: absolute URL of one OpenAI-compatible completions endpoint.
+ :seon.config.ai/endpoint "https://api.deepseek.com/chat/completions"
+
+ ; Unit: the provider's own model name.
+ :seon.config.ai/model "deepseek-chat"
+
+ ; Unit: the NAME of an environment variable. Never the credential —
+ ; the key is read at the leaf, never becomes a datom, never enters Git.
+ :seon.config.ai/api-key-variable "DEEPSEEK_API_KEY"
+
+ ; Unit: milliseconds. Provenance: the live drives measured a real plan
+ ; reply at 2.7 s; sixty seconds is the deadline on an unobservable
+ ; remote call, not a target.
+ :seon.config.ai/timeout-ms 60000}

@@ -128,14 +128,23 @@
  ; the entity cannot carry.
  :seon.error/notice [:map {:closed true} [:seon.error/fact :seon.error/fact] [:seon.render/ai :seon.render/projection] [:seon.render/log :seon.render/projection] [:seon.error/reason {:optional true} :seon.error/reason] [:seon.cluster.agent/id {:optional true} :seon.cluster.agent/id]]
 
- ; --- step 2's commit, renamed here, NOT drafted here ----------------------
- ; `seon.error/commit!` (the boot-wired fault committer, D4) is the next
- ; slice's owner; these two shapes landed with slice 1 and are renamed in
- ; place so that nothing ever references `:seon.fault/*`. Its author
- ; revises them against the normalizer above.
- :seon.error/messages [:int {:min 0}]
- :seon.error/commit-request [:map {:closed true} [:seon.store/branch-connection :seon.store/branch-connection] [:seon.error/source :seon.error/source] [:seon.error/process :seon.error/process] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.config/on-core-error :seon.config/on-core-error] [:seon.config.error/escalate-to {:optional true} :seon.config.error/escalate-to] [:seon.config.error/recurrence-limit {:optional true} :seon.config.error/recurrence-limit]]
- :seon.error/committed [:map {:closed true} [:seon.error/id :seon.error/id] [:seon.error/messages :seon.error/messages] [:seon.error/reason {:optional true} :seon.error/reason]]
+ ; How many faults the fan-out's bounded buffer had to DROP in this
+ ; process. Process-local by nature — it counts what never became a
+ ; fact, so it cannot itself be a fact — and it is on the instance so
+ ; "did we lose any?" is answerable rather than assumed. Dropping is
+ ; ADMITTED, never silent: the quarry's own lesson was that an unread
+ ; error channel forgets quietly.
+ :seon.error/drops [:fn {:gen/gen seon.flow/atom-reference-generator} seon.flow/atom-reference?]
+
+ ; --- the commit ------------------------------------------------------------
+ ; `commit-tx` is PURE over a database value and returns transaction
+ ; data, which is what keeps this family free of the store: the
+ ; dependency runs `store -> error` (store's `transact!` uses this
+ ; family's `refusal`), never both ways. The caller commits through the
+ ; one door. Slice 1's `commit-request`/`committed` shapes are GONE —
+ ; they described an effectful function that no longer exists, and
+ ; keeping them would have been a second contract for one mechanism.
+ :seon.error/commit-tx-request [:map {:closed true} [:seon.error/source :seon.error/source] [:seon.error/id :seon.error/id] [:seon.error/at :seon.error/at] [:seon.error/process :seon.error/process] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.config.error/recurrence-limit :seon.config.error/recurrence-limit] [:seon.error/basis-t {:optional true} :seon.error/basis-t] [:seon.cluster.run/id {:optional true} :seon.cluster.run/id] [:seon.cluster.agent/id {:optional true} :seon.cluster.agent/id] [:seon.config.error/escalate-to {:optional true} :seon.config.error/escalate-to]]
 
  ; An explanation message carries a ref to what it explains. A user
  ; message has none — absence is the state, and it is what makes the

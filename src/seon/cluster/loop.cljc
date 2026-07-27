@@ -67,6 +67,7 @@
             [seon.cluster.store :as store]
             [seon.cluster.wake :as wake]
             [seon.cluster.work :as work]
+            [seon.error :as error]
             [seon.sci.eval :as sci.eval]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn])
@@ -174,6 +175,53 @@
   [sources]
   (schema/sha-256 [(.getBytes (pr-str sources) "UTF-8")]))
 
+(defn- refused!
+  "Record one refused transaction as a durable error, and say it refused.
+  Returns true when `outcome` was a refusal, so a call site reads
+  `(if (refused! …) :error :released)` and the recording is not a
+  second branch to keep in sync.
+
+  THIS IS THE HOLE D3 NAMED. `store/transact!` preserves a transition's
+  own rule verbatim — the exact CAS fence, the exact schema violation —
+  and four of these five branches threw it away one line later, reducing
+  it to the keyword `:error` in a turn report that goes to an out
+  documented \"for observation only\". The `:call` branch had already
+  learned the lesson the expensive way (the live drive sat
+  claimed-with-no-plan for two minutes because a model error evaporated);
+  this is that fix applied to the other four, now that the error owner
+  those values belong to exists.
+
+  Attribution is passed in, never derived here: an `:open` that REFUSED
+  has no run to point at, and a lookup ref to a run that does not exist
+  would fail the very transaction that records the failure.
+
+  The recording's own outcome is deliberately ignored. This is the
+  recursion fence: if the database refuses the error fact too, the
+  answer is not to record THAT — `store/transact!` never throws, the
+  loop keeps its pass, and the visible symptom stays the original
+  refusal rather than an infinite regress of them."
+  [cluster outcome now attribution]
+  (boolean
+   (when-let [kind (:seon.error/kind outcome)]
+     (let [connection (:seon.store/branch-connection cluster)
+           db @connection]
+       (store/transact!
+        connection
+        (error/commit-tx
+         db
+         (merge {:seon.error/source outcome
+                 :seon.error/id (str (random-uuid))
+                 :seon.error/at now
+                 :seon.error/process (:seon.cluster.run/process cluster)
+                 :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
+                 :seon.error/basis-t (:max-tx db)
+                 :seon.config.error/recurrence-limit
+                 (:seon.config.error/recurrence-limit cluster)}
+                (when-let [escalate-to (:seon.config.error/escalate-to cluster)]
+                  {:seon.config.error/escalate-to escalate-to})
+                attribution))))
+     kind)))
+
 (defn- form-source
   "The source of one form of a run, by ordinal."
   [db run-id ordinal]
@@ -189,8 +237,15 @@
 (defn step
   "The run-loop transform, in Flow's four arities.
   `()` describes: `:workload :io`, no `:ins` (the wake is an in-port),
-  one `::turn-report` out for observation only, and a `:ping-map-fn`
-  exposing turn count and current run.
+  NO outs of its own, and a `:ping-map-fn` exposing the turn count.
+  The turn report goes out on `::flow/report` — flow's OWN observation
+  channel — rather than a declared out of ours. That is not a
+  preference: an out nobody connects makes `send-outputs` throw
+  `can't resolve channel with io-id` on every completed turn, and
+  because that throw lands on the error channel, it was invisible for
+  as long as nothing read it. Reports are observation, flow already
+  owns an observation channel with a sliding buffer and a monitor tap,
+  and using it means there is no out to leave unconnected.
   `(args)` returns initial state carrying `::flow/in-ports {::wake ch}`
   and the cluster handle captured at `create-flow`.
   `(state transition)` unlistens on `::flow/stop`.
@@ -212,8 +267,7 @@
    {:workload :io
     :params {:seon.cluster.loop/cluster "the cluster this loop drives"}
     :ins {}
-    :outs {:seon.cluster.loop/turn-report
-           "One completed turn, for observation only."}
+    :outs {}
     :ping-map-fn (fn [state]
                    (select-keys state [:seon.cluster.loop/turns]))})
 
@@ -263,7 +317,10 @@
          (when (work/more-work? @connection request)
            (async/offer! (:seon.cluster.wake/channel cluster) ::wake))
          [(update state :seon.cluster.loop/turns inc)
-          {:seon.cluster.loop/turn-report [report]}])))))
+          ;; flow's own report channel: observation, never a dependency.
+          ;; A dropped report costs nothing and no consumer can
+          ;; backpressure the loop.
+          {::flow/report [report]}])))))
 
 (defn settle-interruption!
   "Bury one orphaned run so its agent stops being busy.
@@ -354,7 +411,13 @@
                       :tx-meta {:seon.db/trigger
                                 [:seon.cluster.message/id
                                  (:seon.cluster.message/id work)]}})]
-        (report (if (:seon.error/kind outcome) :error :released) 0))
+        ;; a REFUSED open has no run to attribute to — the run is what
+        ;; failed to exist
+        (report (if (refused! cluster outcome now
+                              {:seon.cluster.agent/id agent-id})
+                  :error
+                  :released)
+                0))
 
       ;; THE ONE PAID CALL. Nothing retries it: a failure here closes
       ;; nothing and re-derives nothing — the run stays claimed, and the
@@ -407,7 +470,12 @@
                                (digest sources)
                                :seon.cluster.run/sources sources
                                :seon.cluster.run/now now}))]
-                (report (if (:seon.error/kind outcome) :error :released) 0))))))
+                (report (if (refused! cluster outcome now
+                                      {:seon.cluster.agent/id agent-id
+                                       :seon.cluster.run/id run-id})
+                          :error
+                          :released)
+                        0))))))
 
       ;; THE FOLD, in one turn, over ONE ctx. sci's fork copies the env,
       ;; so a ctx per FORM would lose every def between forms — the
@@ -434,7 +502,9 @@
                            :seon.cluster.run/claim-epoch epoch
                            :seon.cluster.eval/ordinal ordinal
                            :seon.cluster.eval/at now}))]
-            (if (:seon.error/kind started)
+            (if (refused! cluster started now
+                          {:seon.cluster.agent/id agent-id
+                           :seon.cluster.run/id run-id})
               (report :error ran)
               (let [source (form-source @connection run-id ordinal)
                     evaluation (evaluate
@@ -477,7 +547,11 @@
                                        {:seon.cluster.run/process process
                                         :seon.cluster.work/now now})))]
                 (cond
-                  (:seon.error/kind outcome) (report :error ran)
+                  (refused! cluster outcome now
+                            {:seon.cluster.agent/id agent-id
+                             :seon.cluster.run/id run-id})
+                  (report :error ran)
+
                   settled (report (if (= :completed
                                          (:my.run/disposition settled))
                                     :closed
@@ -498,4 +572,9 @@
                                     (:seon.cluster.run/claim-epoch run)
                                     :seon.cluster.run/closed-at now
                                     :seon.cluster.run/now now}))]
-        (report (if (:seon.error/kind outcome) :error :closed) 0)))))
+        (report (if (refused! cluster outcome now
+                              {:seon.cluster.agent/id agent-id
+                               :seon.cluster.run/id run-id})
+                  :error
+                  :closed)
+                0)))))

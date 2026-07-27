@@ -53,11 +53,14 @@
 
 (defn- required-dial-attributes
   "The dials the defaults document must carry a value for.
-  A dial the EFFECTIVE shape marks `{:optional true}` may be absent from
-  `config/default.edn`, and absence is then the state — the first case
-  is `:seon.config.error/escalate-to`, which names an agent id: there
-  is no root agent in the fresh tree, so a shipped default would name
-  something that may not exist. Every REQUIRED dial must still carry a
+  A dial the EFFECTIVE shape marks `{:optional true}` MAY be absent from
+  `config/default.edn`, and absence is then the state; an optional dial
+  that does have an honest default carries one. The case that shaped
+  this rule is `:seon.config.error/escalate-to`: it shipped absent while
+  a cluster had no agent to name, and it ships as `\"root\"` now that boot
+  seeds one — the requiredness question and the has-a-default question
+  are DIFFERENT questions, and conflating them is what made an optional
+  dial unrepresentable before. Every REQUIRED dial must still carry a
   provenanced value; that is the completeness rule that matters.
 
   READ FROM `:seon.config/effective`, NOT THE MANIFEST. Every manifest

@@ -56,6 +56,7 @@
             [konserve.core :as k]
             [konserve.filestore :as filestore]
             [clojure.test.check.generators :as gen]
+            [seon.error :as error]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn])
   (:import [java.nio.channels FileChannel FileLock OverlappingFileLockException]
@@ -395,22 +396,6 @@
             :where [_ :seon.config/on-core-error ?mode]]
           @connection)))
 
-(defn refusal
-  "The deepest non-empty `ex-data` in a throwable's cause chain, or nil.
-  Pure, and unit-testable with no database: a refusal is a value buried
-  under wrappers, and finding it is a walk, not a guess. Returns nil for
-  a throwable that carries no data anywhere in its chain — which is
-  itself information, and the caller treats it as unclassifiable."
-  {:malli/schema [:=> [:cat :any] [:maybe :map]]}
-  [throwable]
-  (loop [candidate throwable
-         deepest nil]
-    (if (nil? candidate)
-      deepest
-      (let [data (ex-data candidate)]
-        (recur (ex-cause candidate)
-               (if (seq data) data deepest))))))
-
 (defn transact!
   "Commit tx-data. Returns a value on success AND on refusal; never throws.
   Nothing throws into the run loop, so this is the one door every write
@@ -426,14 +411,28 @@
   - nothing classifiable → `{:seon.error/kind :seon.db/unknown-failure …}`
     and, on the `:seon.config/on-core-error` dial, dev PANICS. An
     unclassifiable transaction failure is a bug, not a condition, and
-    absorbing it is how a typo passes for a fence."
-  {:malli/schema [:=> [:cat :seon.store/branch-connection [:vector :any]]
+    absorbing it is how a typo passes for a fence.
+
+  `tx-data` is a VECTOR or Datahike's own argument map (`:tx-data` +
+  `:tx-meta`, its vocabulary, not ours). The map form was already on the
+  live critical path — the run loop's `:open` branch carries the trigger
+  as transaction metadata — while this contract said vector, and it
+  passed only because Datahike's `STransactions` spec accidentally
+  admits a map (`spec.cljc:66-67`: every map entry is a `coll?`). The
+  contract now says what the callers do; instrumentation would have
+  caught it, which is the whole argument for instrumentation.
+
+  The cause-chain walk this uses lives in `seon.error/refusal`: it is
+  about throwables, not stores, and moving it there made the dependency
+  one-way (`store -> error`) so the error owner can stay pure."
+  {:malli/schema [:=> [:cat :seon.store/branch-connection
+                       :seon.store/transaction]
                   [:or [:map] :seon.error/value]]}
   [connection tx-data]
   (try
     (d/transact connection tx-data)
     (catch Throwable throwable
-      (let [data (refusal throwable)]
+      (let [data (error/refusal throwable)]
         (cond
           ;; OUR transition: its own map, verbatim. The caller branches
           ;; on the exact rule it predicted.

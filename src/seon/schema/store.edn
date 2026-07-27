@@ -1,4 +1,15 @@
-{:seon.store/branch :keyword
+{; WHAT ONE TRANSACTION IS, in Datahike's own vocabulary: a vector of
+ ; operations, or its argument map carrying `:tx-data` and optional
+ ; `:tx-meta`. Those two keys are unqualified because they are THEIRS
+ ; (`reference-code/datahike/src/datahike/spec.cljc:66-67`), and
+ ; renaming a dependency's keys to look like ours is the drift the
+ ; grounding rule forbids.
+ ; This form exists because the map arm was already on the live
+ ; critical path while `transact!`'s contract said `[:vector :any]`,
+ ; and Datahike's own spec admitted the map by accident — every map
+ ; entry is a `coll?`. Declared, the mismatch is unrepresentable.
+ :seon.store/transaction [:or [:vector :any] [:map {:closed true} [:tx-data [:vector :any]] [:tx-meta {:optional true} :map]]]
+ :seon.store/branch :keyword
  :seon.store/branch-connection [:fn {:gen/gen seon.cluster.store/connection-generator} seon.cluster.store/connection?]
  :seon.store/dir [:string {:min 1}]
  :seon.store/lock-file [:string {:min 1}]

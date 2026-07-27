@@ -10,7 +10,7 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (11)
+## Blocker (8)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -19,11 +19,8 @@ See `README.md` for the convention.
 | [Bound submission startup by the declared time limit](flow-submit-waits-forever-before-time-limit.md) | blocker | Core |
 | [Keep a failed cluster stop addressable](cluster-stop-release-failure-becomes-unaddressable.md) | blocker | Core |
 | [Keep evaluation failures inside total admission](sci-eval-failure-bypasses-total-admission.md) | blocker | general |
-| [Make the loop's open transaction satisfy the transact contract](loop-open-transaction-violates-transact-schema.md) | blocker | Core |
 | [Mixed-union Datahike declaration lacks the fresh EDN codec](mixed-union-datahike-declaration-lacks-fresh-edn-codec.md) | blocker | Core |
-| [Preserve transaction refusal reasons across every run-loop branch](run-loop-discards-transaction-refusal-reasons.md) | blocker | Core |
 | [Replace bare flow callback predicates with honest contracts](flow-callback-schemas-are-not-generatively-constructible.md) | blocker | Core |
-| [Wire Flow errors and wake faults during cluster start](cluster-start-leaves-flow-errors-unconsumed.md) | blocker | Core |
 | [`bin/seon up` exits 0 after a readiness timeout](operator-up-exits-zero-on-readiness-timeout.md) | blocker | general |
 
 ## Friction (2)

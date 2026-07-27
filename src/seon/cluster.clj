@@ -24,7 +24,15 @@
      (store/open-branch!).
   2. FACTS. Config applies (seon.config/apply! — converged = zero
      writes) against the cluster branch; runtime reads the database
-     from here on.
+     from here on, and the root agent is seeded (one datom, no process,
+     no tokens) so escalation has somewhere real to go.
+  3. FLOW. The run loop is INSTALLED AND ARMED: its graph runs, the
+     error fan-out consumes flow's error channel into durable error
+     facts, the wake listener is registered with the fan-out's own
+     fault channel, and the wake is primed once. Armed is not busy —
+     a wake says only `look`, so a cluster with no triggers makes no
+     model call, while a REBOOTED one picks up the work its
+     predecessor left by the same mechanism.
 
   FAILED BOOT SEMANTICS (owner ruling 2026-07-27): the REPL is never
   hostage to anything downstream. When a later layer fails, start!
@@ -64,7 +72,12 @@
   (pid, start-instant) so a reader detects staleness against the live
   process table rather than trusting the file. `stop!` is idempotent;
   a killed process's next boot simply re-advertises."
-  (:require [clojure.core.server]
+  (:require [clojure.core.async :as async]
+            [clojure.core.async.flow :as flow.core]
+            [clojure.core.server]
+            [seon.cluster.loop :as cluster.loop]
+            [seon.cluster.wake :as wake]
+            [seon.error :as error]
             [seon.cluster.run :as run]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
@@ -415,6 +428,218 @@
     {:seon.boot/recovered-runs (count open-runs)
      :seon.boot/recovery-operations (count operations)}))
 
+;;; ---------------------------------------------------------------------------
+;;; The armed layers — the fault consumer, the root agent, and the loop
+;;; ---------------------------------------------------------------------------
+
+;;; THE ROOT AGENT. One entity, seeded at boot, idempotent by identity.
+;;; It costs one datom and no process: an agent is attributes and
+;;; connections, so "exists" is the id and nothing else. It exists so
+;;; escalation has somewhere honest to go — before it, the escalation
+;;; dial had to ship absent because naming an agent that might not
+;;; exist would have been a lie.
+(def root-agent-id "root")
+
+(defn- seed-root-agent!
+  [connection]
+  (d/transact connection [{:seon.cluster.agent/id root-agent-id}]))
+
+(defn- attributed-run
+  "The run this process holds and has not closed, or nil.
+  EXACT today because turns are serial within a cluster
+  (`loop.cljc:36-40`), so there is at most one — which is why the fault
+  committer can derive attribution instead of the loop having to carry
+  the current run in its proc state for the error path's benefit. The
+  day turns go concurrent this stops being exact and the run must ride
+  in `::flow/state`; that is a contract note, not a hypothetical."
+  [db process]
+  (d/q '[:find [?id ?agent-id]
+         :in $ ?process
+         :where
+         [?run :seon.cluster.run/process ?process]
+         [?run :seon.cluster.run/id ?id]
+         (not [?run :seon.cluster.run/closed-at _])
+         [?run :seon.cluster.run/agent ?agent]
+         [?agent :seon.cluster.agent/id ?agent-id]]
+       db process))
+
+(defn- commit-fault!
+  "Commit one escaped Throwable as durable facts. TOTAL, never throws.
+  Everything it needs is read fresh: the dials from the config
+  singleton, the attribution from the database value at the fault's
+  own basis. It goes through `store/transact!`, which never throws, and
+  it ignores its own outcome — if the database refuses the fault, the
+  answer is not to fault about the fault (the recursion fence)."
+  [connection cluster-name process caps fault]
+  (try
+    (let [db @connection
+          dials (config/effective db cluster-name)
+          [run-id agent-id] (attributed-run db process)]
+      (store/transact!
+       connection
+       (error/commit-tx
+        db
+        (cond-> {:seon.error/source fault
+                 :seon.error/id (str (random-uuid))
+                 :seon.error/at (java.util.Date.)
+                 :seon.error/process process
+                 :seon.sci.admit/caps caps
+                 :seon.error/basis-t (:max-tx db)
+                 :seon.config.error/recurrence-limit
+                 (:seon.config.error/recurrence-limit dials)}
+          (:seon.config.error/escalate-to dials)
+          (assoc :seon.config.error/escalate-to
+                 (:seon.config.error/escalate-to dials))
+          run-id (assoc :seon.cluster.run/id run-id)
+          agent-id (assoc :seon.cluster.agent/id agent-id)))))
+    (catch Throwable failure
+      ;; the last resort, and it is deliberately not a fact: the fault
+      ;; path failed, so the one place left that cannot fail is stderr
+      (binding [*out* *err*]
+        (println "seon.error commit-fault! failed:" (ex-message failure))
+        (flush))))
+  nil)
+
+(defn- loop-handle
+  "The cluster handle the loop proc carries, derived from FACTS.
+  Everything in it comes from the instance and the effective dials, so
+  the assembly the live drives were doing by hand happens once, here,
+  where production does it."
+  [connection cluster-name process wake-channel]
+  (let [dials (config/effective @connection cluster-name)]
+    (cond-> {:seon.store/branch-connection connection
+             :seon.cluster.run/process process
+             :seon.cluster.wake/channel wake-channel
+             :seon.cluster.loop/provider
+             {:seon.ai/endpoint (:seon.config.ai/endpoint dials)
+              :seon.ai/model (:seon.config.ai/model dials)
+              :seon.ai/api-key-variable (:seon.config.ai/api-key-variable dials)
+              :seon.ai/timeout-ms (:seon.config.ai/timeout-ms dials)}
+             :seon.cluster.loop/evaluate 'seon.sci.eval/evaluate
+             :seon.sci.admit/caps
+             (select-keys dials [:seon.config.eval.result/max-depth
+                                 :seon.config.eval.result/max-collection
+                                 :seon.config.eval.result/max-string
+                                 :seon.config.eval.result/max-nodes])
+             :seon.config.eval/time-limit-ms
+             (:seon.config.eval/time-limit-ms dials)
+             :seon.config/on-core-error (:seon.config/on-core-error dials)
+             :seon.config.error/recurrence-limit
+             (:seon.config.error/recurrence-limit dials)}
+      (:seon.config.error/escalate-to dials)
+      (assoc :seon.config.error/escalate-to
+             (:seon.config.error/escalate-to dials)))))
+
+(defn- arm-loop!
+  "Start the run loop for this cluster: graph, fan-out, listener, wake.
+  ARMED AND IDLE. The graph is running and the wake channel is primed
+  with one look, and that spends NOTHING: a wake says only \"look\", and
+  `next-work` finds work only where facts already are. A fresh cluster
+  has no triggers, so boot makes zero model calls; a REBOOTED cluster
+  finds the work its predecessor left, which is the same mechanism and
+  is exactly what makes interrupted+adapt happen without a recovery
+  code path.
+
+  ORDER IS THE CONTRACT. The graph starts first because the fan-out
+  taps ITS channels; the listener comes last because its fault channel
+  is THE FAN-OUT'S — the wake listener's own failures must land where
+  every other fault lands, not in a channel somebody invented. This is
+  the wiring whose absence meant every core fault in a live cluster was
+  dropped by a sliding buffer nobody read."
+  [instance connection cluster-name]
+  (let [process (process-identity (:seon.boot/advertisement instance))
+        wake-channel (async/chan (async/sliding-buffer 1))
+        handle (loop-handle connection cluster-name process wake-channel)
+        drops (atom 0)
+        graph (flow.core/create-flow
+               {:procs {:seon.cluster.loop/loop
+                        {:proc (flow.core/process #'cluster.loop/step
+                                                  {:workload :io})
+                         :args handle}}
+                :conns []})
+        started (flow.core/start graph)
+        _ (flow.core/resume graph)
+        fanout (flow/start-error-fanout!
+                {:seon.flow/graph graph
+                 :seon.flow/started started
+                 :seon.flow/fault-buffer-capacity 64
+                 :seon.flow/monitor-buffer-capacity 64
+                 :seon.flow/read-core-error-mode
+                 (fn []
+                   (or (:seon.config/on-core-error
+                        (config/effective @connection cluster-name))
+                       :record))
+                 :seon.flow/commit-fault!
+                 (fn [fault]
+                   (commit-fault! connection cluster-name process
+                                  (:seon.sci.admit/caps handle) fault))
+                 :seon.flow/commit-drop!
+                 (fn [dropped]
+                   ;; CHEAP ON PURPOSE: this runs on the thread of the
+                   ;; proc that faulted, inside the buffer's own add!,
+                   ;; so a transaction here would make an overflowing
+                   ;; error path slow down the code that is failing.
+                   ;; Counted and said out loud; never silent.
+                   (swap! drops inc)
+                   (binding [*out* *err*]
+                     (println "seon.error DROPPED a fault:"
+                              (pr-str (:clojure.core.async.flow/pid dropped)))
+                     (flush)))
+                 :seon.flow/panic!
+                 (fn [fault]
+                   ;; FAIL LOUD IS NOT FALL DOWN (owner ruling): dev
+                   ;; panic makes the fault impossible to miss, and it
+                   ;; still COMMITS it — a panic that destroyed the
+                   ;; record would be the fire alarm burning the house.
+                   (commit-fault! connection cluster-name process
+                                  (:seon.sci.admit/caps handle) fault)
+                   (binding [*out* *err*]
+                     (println "SEON CORE FAULT (dev panic):"
+                              (or (ex-message
+                                   (:clojure.core.async.flow/ex fault))
+                                  (pr-str fault)))
+                     (flush)))})]
+    (wake/listen! {:seon.cluster.wake/connection connection
+                   :seon.cluster.wake/attributes (wake/wake-attributes)
+                   :seon.cluster.wake/channel wake-channel
+                   ;; the listener's own faults ride the same path as
+                   ;; every other fault
+                   :seon.cluster.wake/fault-channel
+                   (:seon.flow/fault-channel fanout)
+                   ;; the key the loop's own ::flow/stop arity unlistens
+                   :seon.cluster.wake/key :seon.cluster.loop/wake})
+    (async/offer! wake-channel :seon.cluster.loop/boot)
+    {:seon.cluster.loop/cluster handle
+     :seon.flow/graph graph
+     :seon.flow/error-fanout fanout
+     :seon.error/drops drops}))
+
+(defn- disarm-loop!
+  "Unwind the armed layers of ONE instance, newest first.
+  The graph goes first so nothing new is derived, and stopping it runs
+  the loop's own `::flow/stop` arity, which unlistens. Then the
+  fan-out detaches its taps. Each layer is released only if it stands —
+  a degraded instance disarms the same way.
+
+  A STOP DURING AN IN-FLIGHT TURN IS A KILL, and it is treated as one
+  rather than waited out. `flow/stop` sends `::flow/stop` and closes
+  the channels (`flow/impl.clj:177-182`); it does not join the proc's
+  thread, and flow exposes no completion to wait for. So a transaction
+  already dispatched when the connection is released fails in
+  Datahike's own writer thread and is LOST — which is precisely a crash
+  row: nothing re-executes, the next boot's `recover-tx` settles the
+  dangling receipt, and the agent adapts. Do not paper this over with a
+  sleep; if it ever needs to be clean, the honest fix is a completion
+  the proc publishes, not a clock."
+  [instance]
+  (when-let [graph (:seon.flow/graph instance)]
+    (flow.core/stop graph))
+  (when-let [fanout (:seon.flow/error-fanout instance)]
+    (flow/stop-error-fanout! fanout))
+  (when-let [handle (:seon.cluster.loop/cluster instance)]
+    (async/close! (:seon.cluster.wake/channel handle)))
+  nil)
+
 (defn- stack-tower!
   "Stack store → ancestor → fork → connection → config onto `instance`.
   Each layer is assoc'd as it stands, and the whole value is republished
@@ -438,13 +663,19 @@
         recovery (recover-runs!
                   connection
                   (process-identity (:seon.boot/advertisement instance)))
-        instance (publish! (merge instance recovery))]
-    (publish!
-     (assoc instance
-            :seon.boot/config-result
-            (config/apply! {:seon.config/connection connection
-                            :seon.config/manifest (config/defaults)
-                            :seon.boot/cluster-name cluster-name})))))
+        instance (publish! (merge instance recovery))
+        instance (publish!
+                  (assoc instance
+                         :seon.boot/config-result
+                         (config/apply!
+                          {:seon.config/connection connection
+                           :seon.config/manifest (config/defaults)
+                           :seon.boot/cluster-name cluster-name})))
+        ;; AFTER the dials are facts, because the root agent is who the
+        ;; escalation dial names, and BEFORE the loop is armed, because
+        ;; an armed loop may need to address it on its first pass
+        _ (seed-root-agent! connection)]
+    (publish! (merge instance (arm-loop! instance connection cluster-name)))))
 
 (defn start!
   "Start one cluster instance in this JVM, REPL FIRST, then the tower.
@@ -572,6 +803,9 @@
         marker (Object.)]
     (when (claim-stop! cluster-name instance marker)
       (try
+        ;; the armed layers first: nothing new may be derived while the
+        ;; database resources are being released
+        (disarm-loop! instance)
         (when-let [connection (:seon.boot/cluster-connection instance)]
           (d/release connection))
         (when (:seon.store/store instance)

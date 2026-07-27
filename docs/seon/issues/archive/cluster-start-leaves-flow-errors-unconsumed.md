@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, flow, boot, error, agent-runtime]
 ---
@@ -45,3 +45,34 @@ Cluster boot composition in `seon.cluster/start!`, using the existing
   boot order.
 - A live fault reaches durable facts and its addressed agent through the
   existing message/wake mechanism.
+
+## Resolved 2026-07-27 — the loop and the fault path are installed at boot
+
+`seon.cluster/start!` now arms three layers after config applies:
+the root agent is seeded (one datom, no process, no tokens), the loop
+graph is created and started with a handle DERIVED FROM THE EFFECTIVE
+DIALS, and `seon.flow/start-error-fanout!` consumes flow's error channel
+into `seon.error/commit-tx` facts. The wake listener is registered LAST,
+with the fan-out's own fault channel — the listener's failures land
+where every other fault lands rather than in a channel somebody
+invented. `stop!` disarms in reverse.
+
+Armed is not busy: the wake is primed once, and a wake only says look,
+so a cluster with no triggers makes no model call
+(`booting-spends-nothing` asserts exactly that with a counting
+`ai/complete`).
+
+Behavioural proof, on a REAL booted cluster
+(`test/seon/cluster/armed_test.clj`): a Throwable injected at the loop's
+own seam produces exactly one error fact carrying kind, class, proc,
+process and a signature, whose `data-edn` reads back as EDN (proving the
+one codec ran and the proc's live state did not escape); exactly one
+root-addressed explanation message naming the fact; the proc still
+`:running` afterwards with nothing dropped.
+
+Found while proving it, and fixed in the same change: the loop declared
+a `::turn-report` out that nothing connected, so `send-outputs` threw
+`can't resolve channel with io-id` on EVERY completed turn — and because
+that throw went to the unread error channel, it had been invisible for
+exactly as long as this issue was open. The report now rides
+`::flow/report`.

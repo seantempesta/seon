@@ -7,7 +7,11 @@
 
   `refusal` is pure and needs no database — the whole point of probe
   D's finding is that a transition's own data survives at the third
-  link of the cause chain, so classification is a walk over values.
+  link of the cause chain, so classification is a walk over values. It
+  now LIVES in `seon.error` (2026-07-27: it is about throwables, not
+  stores, and moving it made the dependency one-way so the error owner
+  could stay pure); these tests follow the function to its owner rather
+  than being duplicated there.
   `transact!` is then live against a real connection, because the
   outcome that matters most (a refusing transaction function) can only
   be produced by a real writer."
@@ -17,6 +21,7 @@
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
             [seon.cluster.store :as store]
+            [seon.error :as error]
             [seon.schema]
             [seon.schema.datahike :as schema.datahike]))
 
@@ -41,14 +46,14 @@
            (let [buried (wrap (ex-info "refused" {:seon.error/kind ::refused
                                                   :rule rule})
                               depth)]
-             (= rule (:rule (store/refusal buried)))))
+             (= rule (:rule (error/refusal buried)))))
          :seed 20260727)]
     (is (true? (:result check)) (str "refusal walk failed: " (pr-str check)))))
 
 (deftest a-clean-throwable-carries-no-refusal
-  (is (nil? (store/refusal (RuntimeException. "no data"))))
-  (is (nil? (store/refusal (wrap (RuntimeException. "no data") 3))))
-  (is (nil? (store/refusal (ex-info "empty" {})))))
+  (is (nil? (error/refusal (RuntimeException. "no data"))))
+  (is (nil? (error/refusal (wrap (RuntimeException. "no data") 3))))
+  (is (nil? (error/refusal (ex-info "empty" {})))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; C5 — four outcomes, four shapes, never a throw

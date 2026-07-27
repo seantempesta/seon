@@ -15,10 +15,11 @@
  :seon.config.eval/time-limit-ms
  [:int {:min 1}]
 
- ; WHO hears a fault nobody else can be told about. There is no root
- ; agent in the fresh tree, so escalation names an agent id explicitly.
- ; ABSENT = no escalation message: absence is the state, and a cluster
- ; with nobody to escalate to still commits the fault fact.
+ ; WHO hears a fault nobody else can be told about. It names an agent
+ ; id, and boot seeds `"root"` so the shipped default names something
+ ; that really exists. Still OPTIONAL: a manifest may drop it, and
+ ; absence is then the state — the error fact is committed and no
+ ; escalation message is sent.
  :seon.config.error/escalate-to
  [:string {:min 1}]
 
@@ -26,6 +27,28 @@
  ; the same fault also escalates. Counted by query over committed
  ; facts, never a stored tally.
  :seon.config.error/recurrence-limit
+ [:int {:min 1}]
+
+ ; THE MODEL SEAM, as four dials rather than a map hard-coded in a
+ ; drive script. The run loop is installed at BOOT now, so the provider
+ ; it calls has to be derivable from facts like everything else it
+ ; carries; these are the descriptor row the loop's provider is built
+ ; from. The credential is NEVER here — only the NAME of the
+ ; environment variable that holds it, which is what keeps a key out of
+ ; the database and out of Git.
+ :seon.config.ai/endpoint
+ [:string {:min 1}]
+
+ :seon.config.ai/model
+ [:string {:min 1}]
+
+ :seon.config.ai/api-key-variable
+ [:string {:min 1}]
+
+ ; The deadline on a genuinely unobservable external call — the one
+ ; place a clock is the honest mechanism rather than a stand-in for an
+ ; event we could have watched.
+ :seon.config.ai/timeout-ms
  [:int {:min 1}]
 
  :seon.config/manifest
@@ -58,7 +81,12 @@
    :seon.config.error/recurrence-limit]
   [:seon.config/on-core-error
    {:optional true}
-   :seon.config/on-core-error]]
+   :seon.config/on-core-error]
+  [:seon.config.ai/endpoint {:optional true} :seon.config.ai/endpoint]
+  [:seon.config.ai/model {:optional true} :seon.config.ai/model]
+  [:seon.config.ai/api-key-variable
+   {:optional true} :seon.config.ai/api-key-variable]
+  [:seon.config.ai/timeout-ms {:optional true} :seon.config.ai/timeout-ms]]
 
  :seon.config/effective
  [:map {:closed true}
@@ -81,7 +109,11 @@
   [:seon.config.error/recurrence-limit
    :seon.config.error/recurrence-limit]
   [:seon.config/on-core-error
-   :seon.config/on-core-error]]
+   :seon.config/on-core-error]
+  [:seon.config.ai/endpoint :seon.config.ai/endpoint]
+  [:seon.config.ai/model :seon.config.ai/model]
+  [:seon.config.ai/api-key-variable :seon.config.ai/api-key-variable]
+  [:seon.config.ai/timeout-ms :seon.config.ai/timeout-ms]]
 
  :seon.config/entity
  [:map {:closed true :seon.db/entity true}
@@ -107,7 +139,11 @@
   [:seon.config.error/recurrence-limit
    :seon.config.error/recurrence-limit]
   [:seon.config/on-core-error
-   :seon.config/on-core-error]]
+   :seon.config/on-core-error]
+  [:seon.config.ai/endpoint :seon.config.ai/endpoint]
+  [:seon.config.ai/model :seon.config.ai/model]
+  [:seon.config.ai/api-key-variable :seon.config.ai/api-key-variable]
+  [:seon.config.ai/timeout-ms :seon.config.ai/timeout-ms]]
 
  :seon.config/apply-request
  [:map {:closed true}
