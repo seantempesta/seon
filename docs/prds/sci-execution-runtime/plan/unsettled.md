@@ -54,7 +54,21 @@ requires the old `seon.db` facade. `seon.flow` owns its config dials
 locally (the `config.resolve` seam cut). Verified: `bin/test` 11/55/0/0;
 hook selects exactly the affected fresh suite per edited file.
 
-UNBUILT right now, in order: **B0+B1 contract packages** (launch
+**Quality-review-1 verdict (2026-07-27, `d91dab541`): the N2 contract
+revision is now FIRST**, ahead of B0/B1 — two live-reproduced correctness
+holes (takeover eligibility not fenced in the transition; agent pointer
+not fenced at open/close) plus the property gaps that let them through
+(no takeover/close/heartbeat coverage; terminal-preservation unproven)
+and the Gemini-corroborated nil-epoch takeover. One revision wave,
+orchestrator-authored: eligibility moves INTO the database transition
+(the invalid state unrepresentable, per the quarry's run-fence), one
+required takeover map, and a state-machine generative property over
+transition sequences that observes durable facts. Separate bounded lane:
+adopt the surviving flow suite out of `test-old/` (15/72 green against
+fresh source, currently invisible to `bin/test`). B2 design input:
+replace the `core-process-identities` allowlist with a computed rule.
+
+UNBUILT right after: **B0+B1 contract packages** (launch
 signature `bin/seon start [cluster] [--config path]`, two-phase config
 with the closed bootstrap schema, per-instance REPL advertisement,
 store rung with the flock-per-store verdict from
