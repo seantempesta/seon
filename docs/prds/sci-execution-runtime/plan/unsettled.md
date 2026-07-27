@@ -335,11 +335,24 @@ CONSUMER exactly like the render contract — ai steering prose
 (stored at commit time; it IS the failover "you are the backup"
 message and the explanation message content), log line (derived),
 html at N4 via the ONE render contract (design the fact to permit,
-build nothing). A FRESH Opus drafting agent IS LAUNCHED and drafting step 1 RIGHT NOW
-(SendMessage name a072b05ef16cbadcd; the exhausted predecessor was
-a96513c593d3a6a83; spec is self-contained — seon.error normalizer +
-totality property + generic projection ROUTER (qualified-symbol
-routing) + ai/log projections + the fault.edn→error rename). The
+build nothing). STEP 1 DRAFTED (5ac6cf4ef, agent a072b05ef16cbadcd — the exhausted
+predecessor was a96513c593d3a6a83): seon.error normalizer (four
+families detected STRUCTURALLY, fail-closed :seon.error/unclassified;
+kind from deepest ex-data, no enumeration; signature excludes the
+message so recurrence is countable; THE RECORDER NEVER PANICS —
+orchestrator-ruled: the dial governs the failing site, the error
+system is the loudness mechanism, "the fire alarm doesn't burn" —
+present to owner), seon.render generic router (kinds computed from
+:seon.render/* qualified-symbol keys; late requiring-resolve of the
+VAR; wrapped {kind,output}; undiscovered fixture proves
+resolve-loads-owner), notice carries reason + projection keys
+(derived), fault.edn merged into error.edn (and its bare-ref
+message/about defect caught+fixed in-draft). All seven taste calls
+ruled as drafted. Gate 198/822 with exactly 33 stub errors.
+IN FLIGHT: the same agent applies authorized seal revisions
+(:seon.config.fault/*→error dial rename across five files; admit
+record {:optional true}; ui.md accretion drafted as a SEPARATE commit
+for isolated review) then implements step 1 to full-gate 0/0. The
 orchestrator seals on its return. OWNER DIRECTION (night, routing):
 the router's delivery substrate is COMMITTED FACTS + listen!
 attribute interest (the wake mechanism generalized — subscribe to the
