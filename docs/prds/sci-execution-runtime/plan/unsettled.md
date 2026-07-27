@@ -151,17 +151,31 @@ GC experiment is ANSWERED (4a70900e1): retire ~50-60ms, reclaiming GC
 ~160-255ms, storage halved, survivors exact — retire casually at
 teardown, coalesce full-store GC. N3 rulings recorded (858436ca8):
 interrupted+adapt no auto-retry, my.run = complete/wait only, run-why
-= trigger ref as tx-meta. IN FLIGHT (three file-disjoint lanes): the Opus agent drafts the N3
-value-admission package contracts (ruled: own small package, FIRST;
-its WIP src/seon/sci/ + schema/admit.edn poisons full-gate activation
-until it lands — expected); sol lane trust-derivation-design writes
-the computed core-vs-agent admission rule design (the literal trust
-list is inert — keyword set vs string identity); sol lane
-issue-triage-2 reconciles all open issue notes against today's
-landings. ALSO LANDED: sci on the default classpath (858d6bf86,
-n3-plan §6.2; load 2.1s, boot bound re-proven in-suite at the
-admission seal review); n5-plan 909394481 awaiting deep review at its
-rung; GC verdict recorded above. Its accepted design: process-local
+= trigger ref as tx-meta. ADMISSION SEALED (6caf0f5fe): the draft (884c0ca6e,
+src/seon/sci/admit.clj + schema/admit.edn + admit_test.clj,
+probe-grounded: realization calls the interrupt-fn at EVERY node;
+IDeref never dereferenced; cycles unrepresentable by construction;
+node budget primary) sealed with the activation seam KILLED AT THE
+GATE — seon.schema.edn requiring-resolves a [:fn] predicate's owner
+namespace before refusing (the computed rule; falsifier pair sealed,
+edn_test_fixture.clj deliberately undiscovered). Four cap dials wired
+into manifest/effective/entity + config/default.edn (12/64/4096/4096,
+probe provenance). OPEN OWNER QUESTION (drafted choice stands):
+projection failure = marker, never dev-panic — R41 tension flagged.
+Full gate LOADS clean: 96/386, red = exactly the 11 admit
+awaits-implementation stubs. sci on default classpath (858d6bf86).
+TRIAGE DONE (2fef74665): 5 resolved archived, 10 open-current,
+3 deferred, 2 N3-owned, one extracted
+(cluster-stop-release-failure-becomes-unaddressable). TRUST DESIGN
+DONE (0e71d42b5): core = first assertion precedes the ancestor
+digest-seal tx, fail-closed :agent, literal list dies.
+IN FLIGHT (two lanes): the Opus agent implements admit to green
+(sealed suite, path-limited to admit.clj); sol lane
+trust-derivation-impl implements the trust design against the issue's
+acceptance rows (owns schema.cljc admission + new test file). NEXT
+AFTER ADMIT GREEN: I author the N3 loop contracts (C1-C10 minus C7)
+from n3-plan + the night rulings. n5-plan 909394481 awaits deep
+review at its rung; GC verdict recorded above. Its accepted design: process-local
 store holder + refcount under ONE lock with running-instances;
 stop! also releases branch connection, last instance releases the
 store (stop!'s docstring needs that revision — seal owner's). Its
