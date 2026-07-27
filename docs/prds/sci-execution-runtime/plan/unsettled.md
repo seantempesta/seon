@@ -267,9 +267,24 @@ three forms), fold ran, receipts durable with full sci diagnostics,
 run closed. Form 1 defn :done (Gauss!); forms 0/2 errored on two
 base-ctx gaps — (in-ns): evaluator must evaluate IN my.agents.<id> by
 construction + prompt says so; (println): sci *out*/*err* unbound in
-the fork. FIX LANE IN FLIGHT (the Opus agent): namespace-by-
-construction, output vars bound (capture preferred), credential nil
-guard, model-error durability + falsifiers. Then the drive reruns.
+the fork. Base-ctx fixes landed 020966ea4 (namespace-by-construction with ONE
+derivation shared by prompt+eval; in-ns WORKS contained by the fork —
+flagged, not forbidden; sci *out*/*err* captured as bounded
+:seon.cluster.eval/output receipt evidence; credential nil guard;
+model error closes the run WITH :seon.cluster.run/error in the same
+tx; the class-killer caught that new attribute too; turn_test fixture
+now installs canonical-database-attributes). **PHASE 1 COMPLETE
+(97a0824b5, research/n3-live-proof-2026-07-27.md): first full live
+turn — boot 1.28s, claim +0.65s, DeepSeek plan +2.68s, 4/4 receipts
+:done, (my.run/complete "55"), run closed +2.41s, faults nil.**
+PHASE 2 (kill -9 → interrupted+adapt) IN PREP: drill scripts
+tmp/n3-crash-{child,verify}.clj; the Opus agent is correcting the
+verify choreography (interruption requires an UNCLAIMED run — what
+settles claimed-by-dead-pid, lease 60s, may interact with the
+run-contract-hardening lane's lease-expiry fix). IN FLIGHT (two
+lanes): that correction; sol run-contract-hardening on run.cljc
+(lease-expiry + takeover/terminal-preservation acceptance issues,
+one owner file — the Opus agent is fenced OFF run.cljc meanwhile).
 N4 PLAN REVISED (ab2911caa): all 25 review findings dispositioned,
 composed with the landed N3 owners, socket/reset/child-loss proofs
 moved in-suite, EIGHT owner decisions consolidated — both N4 and N5
