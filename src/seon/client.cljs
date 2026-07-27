@@ -1591,7 +1591,7 @@
   "Reconcile one resolved manifest into the config-managed database subset.
 
    This is the single declarative operation used by cold boot and the live
-   development operator. Routes, skills, the flattened config singleton, and
+   development operator. Routes, the flattened config singleton, and
    a declared cluster-default LLM row land through one provenance-scoped
    `seon.runtime.state/reconcile!`; a converged apply submits no transaction.
    An absent `:seon.config/ai` section contributes no desired entity. The
@@ -1601,8 +1601,6 @@
         desired (-> (vec (config/resolve-routes
                            (route/core-routes-tx)
                            manifest))
-                    (into (my.skills/seed-skills-tx-data
-                            (config/skills-dir manifest)))
                     (conj singleton)
                     (into ai-rows))
         reconcile-request

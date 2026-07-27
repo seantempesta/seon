@@ -37,6 +37,12 @@ namespace:
   deletes the overlapping `my.kb`, provider-generation, driver, and web-serve
   tests.
 
+One missed consumer surfaced 2026-07-27: `src/seon/client.cljs`
+`reconcile-config!` still called the deleted
+`my.skills/seed-skills-tx-data`, wedging the watcher rebuild and blocking
+`bin/seon up` entirely; the seeding step was removed at the dying consumer
+(seam fix, no pod path restored).
+
 The issue remains open because deletion is blocked at two already-scheduled
 owners:
 
