@@ -335,10 +335,12 @@ CONSUMER exactly like the render contract — ai steering prose
 (stored at commit time; it IS the failover "you are the backup"
 message and the explanation message content), log line (derived),
 html at N4 via the ONE render contract (design the fact to permit,
-build nothing). NEXT SESSION OPENS WITH: launch a FRESH Opus drafting
-agent (the current one — SendMessage a96513c593d3a6a83 — is context-
-exhausted; give the fresh one BOTH research reports + the slice-1
-commit + this order): (1) seon.error normalizer + totality property
+build nothing). A FRESH Opus drafting agent IS LAUNCHED and drafting step 1 RIGHT NOW
+(SendMessage name a072b05ef16cbadcd; the exhausted predecessor was
+a96513c593d3a6a83; spec is self-contained — seon.error normalizer +
+totality property + generic projection ROUTER (qualified-symbol
+routing) + ai/log projections + the fault.edn→error rename). The
+orchestrator seals on its return. Remaining order after step 1: (1) seon.error normalizer + totality property
 + ai/log projections + fault.edn→error family rename; (2)
 seon.error/commit! + boot wiring as a cluster.clj revision (D4);
 (3) seon.problems; (4) seon.instrument (near-mechanical from the
