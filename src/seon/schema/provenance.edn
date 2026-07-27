@@ -1,5 +1,12 @@
 {; Verdict: State A stored both transaction-metadata values as refs.
  ; Keep that shape: provenance resolves to durable user/process entities,
- ; never denormalized strings on the transaction entity.
- :seon.db/user :seon.db/ref
- :seon.db/process :seon.db/ref}
+ ; never denormalized strings on the transaction entity. The :seon.db/index
+ ; facet admits both into canonical-database-attributes by the computed
+ ; persistence-facet rule (a bare :seon.db/ref carries no facet and would
+ ; never install).
+ :seon.db/user [:seon.db/ref {:seon.db/index true}]
+ :seon.db/process [:seon.db/ref {:seon.db/index true}]
+ ; the process entity provenance refs resolve to; identities are the
+ ; owner-ruled literal core set (:seon.db.process/{boot,config,core})
+ ; seeded as GENESIS DATA in the ancestor, where bootstrap content lives
+ :seon.db.process/id [:string {:min 1 :seon.db/identity true}]}
