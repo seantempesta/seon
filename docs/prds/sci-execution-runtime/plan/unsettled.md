@@ -35,6 +35,11 @@ legitimate, no schema or test weakened. First rung metrics: 1 namespace,
 Non-blocking friction on record: claim-tx's two observed takeover fields
 are independently optional but required together — tighten to one
 optional takeover map at the next contract revision, not before.
+Corroborated 2026-07-27 by the first live Gemini hook review
+(tmp/reviews/20260727T112009): a nil `observed-epoch` in takeover mode
+emits `[:db.fn/cas ... ::claim-epoch nil 1]` against a non-nil epoch —
+the takeover map must carry a REQUIRED epoch. Fold into the same
+revision.
 
 **R0 EXECUTED 2026-07-27** under the session-2 rulings (fresh tree IS the
 project): fresh `src/` = seon.cluster.run + seon.schema{,.form,.internal,
