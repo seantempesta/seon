@@ -169,13 +169,23 @@ TRIAGE DONE (2fef74665): 5 resolved archived, 10 open-current,
 (cluster-stop-release-failure-becomes-unaddressable). TRUST DESIGN
 DONE (0e71d42b5): core = first assertion precedes the ancestor
 digest-seal tx, fail-closed :agent, literal list dies.
-IN FLIGHT (two lanes): the Opus agent implements admit to green
-(sealed suite, path-limited to admit.clj); sol lane
-trust-derivation-impl implements the trust design against the issue's
-acceptance rows (owns schema.cljc admission + new test file). NEXT
-AFTER ADMIT GREEN: I author the N3 loop contracts (C1-C10 minus C7)
-from n3-plan + the night rulings. n5-plan 909394481 awaits deep
-review at its rung; GC verdict recorded above. Its accepted design: process-local
+ADMIT GREEN (171a94e02, one file): suite 9/57/0 re-verified
+independently; full gate 101/453/0 at the lane's run. The lane went
+past the sealed suite (5 seeds × 200 trials + an idempotence property)
+and fixed three self-found defects — depth-through-markers off-by-one,
+node-budget overrun by marker cost, sci.lang require (caught BY the
+new predicate-owner resolution). Documented tensions live in the
+admit.clj docstring/risk notes: ::elided is scalar (capped? is the
+honest signal), Instant normalizes to Date, host java.util.Map
+projects opaque, record tag costs one width slot, test/prod node
+accounting deliberately independent. IN FLIGHT (two lanes): the Opus
+agent drafts the N3 LOOP contract packages (C1-C10 minus C7; pure
+derivation package first, effectful proc package sketched; the three
+night rulings + late rulings bind; it may NOT touch schema.cljc or
+cluster.clj — the sol trust-derivation-impl lane holds those,
+implementing genesis-by-construction core classification against the
+issue's acceptance rows). n5-plan 909394481 awaits deep review at its
+rung; GC verdict recorded above. Its accepted design: process-local
 store holder + refcount under ONE lock with running-instances;
 stop! also releases branch connection, last instance releases the
 store (stop!'s docstring needs that revision — seal owner's). Its
