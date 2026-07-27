@@ -34,6 +34,13 @@
       (is (not (seon.schema/valid-candidate-value? :my.run/value value))
           "and the loop cannot mistake it for a disposition"))))
 
+(deftest a-wrong-type-is-the-same-error-value-never-a-throw
+  ; agent-facing boundary: (complete 123) must answer, not
+  ; ClassCastException out of str/blank?
+  (doseq [wrong [123 :kw {:a 1} nil [""]]]
+    (is (string? (:seon.error/message (run/complete wrong))))
+    (is (string? (:seon.error/message (run/wait wrong))))))
+
 (deftest the-surface-is-exactly-two-functions
   ;; the ruling is a countable fact: no start!, no pause/resume/terminate
   ;; until an agent-lifecycle entity exists
