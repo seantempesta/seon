@@ -437,9 +437,17 @@ only — values the driver interprets, requests through the door, facts the
 driver commits. Three processes carry all seven: cluster JVM, web-render JVM,
 disposable leaves (`architecture.md:239-262`).
 
-## 2. Where we are
+## 2. The quarry map — State A as it was (historical, kept for mining)
 
-The live path is four files, 1,181 lines measured today:
+**AMENDED 2026-07-27: this section and §2b describe STATE A — the old
+system under `src-old/` — as it stood before the tree split. They are no
+longer "where we are"; they are the MAP OF THE QUARRY. The system is
+built bottom-up in fresh `src/` (§3); before implementing any rung, mine
+here and in git history for the previous implementation, pull the good
+parts, and translate them into the better design — never implement from
+scratch, and never port a shape unexamined (owner rulings, 2026-07-27).**
+
+The live path was four files, 1,181 lines measured 2026-07-26:
 `seon.agent.driver` (888) → `seon.sci.eval` (146) → `seon.sci.ctx` (42) +
 `seon.sci.interrupt` (105), with `seon.repl.parse` the pure parser.
 Constructs 1–4 work and are proven: the fold survived six kill positions plus
@@ -460,13 +468,13 @@ the JVM `/data` feed. Bounding is incomplete: `terminal-receipt-data`
 lost; lazy values realize outside the armed boundary. `bin/test-writer`
 discovers 0 tests. Five supervised processes; the target is three.
 
-## 2b. The piece map — State A → State B
+## 2b. The piece map — where each State A piece's lesson lands
 
-State B is small: the four-file live path, plus a door, an admission
-operation, a corpus resolver, one scheduler, and a web-render tier — three
-processes, seven constructs, an agent surface of three shapes. The distance
-from here to there is not new machinery; it is pieces that already exist
-wearing the wrong name or the wrong shape. This table names each one, says
+**AMENDED 2026-07-27: read this as a mining index, not a conversion
+plan.** Each row names an old piece, what it really is, and the fresh
+rung whose authoring must read it. The old framing ("the distance from
+here to there") is superseded by the bottom-up build; the rows survive
+because they say WHERE the lessons are buried. This table names each one, says
 which base construct (§1) it really is, and points at the step that
 discharges it. **It sequences nothing — order lives only in §3.** Verify a
 row against the live tree (`rg`/`find`) before acting on it.
@@ -493,9 +501,53 @@ names: the write half of a primitive exists and the read half does not, or
 one object is doing two constructs' jobs. Nothing here needs an eighth
 construct.
 
-## 3. The nucleus — the one ordering (rewritten 2026-07-26 s3)
+## 3. The construction ladder — the one ordering (amended 2026-07-27)
 
-The State B nucleus is built spec-first, per namespace, from a small base.
+**The build is BOTTOM-UP in the fresh tree** (owner ruling 2026-07-27:
+the fresh tree IS the project; stop thinking temporary; State A is
+quarry only). Each rung: the orchestrator authors the contract package
+(data model + `:=>` contracts + sealed generative tests + crash walk,
+quarrying the old implementation first), one implementation lane makes
+it green (stop-on-friction; sol and Opus 5 both proven), the
+orchestrator reviews, proves live, and a recurring quality-review lane
+audits the standing result.
+
+**Rung status (verify against `bin/test`, not this prose):**
+
+- **R0 — DONE** (`f25e34594`): the tree split; fresh default project,
+  own `deps.edn`, `bin/test` gate, old system behind aliases.
+- **N2 (run model) — GREEN, revised** (`c65ddeeda` + `ba5cb0c1e`):
+  transitions inside the transaction via `[:db.fn/call #'f request]`;
+  model-based state-machine suite.
+- **B0 (entry) — GREEN** (`f1956f8f6` + `1e3aff7d6`): REPL at second
+  zero, closed bootstrap schema, `(pid, start-instant)`-fenced
+  advertisements, shared root executors; ten-second bound asserted
+  in-suite.
+- **B1 (store) — sealed, implementation in flight** (`c82f790f4` +
+  `5bfc0e73f`): flock-before-everything on the canonical path, genesis
+  window repaired by recreate, child-JVM cross-process falsifier.
+- **B2 — NEXT authoring: config → facts + the bootstrap ancestor.**
+  Two-phase config (closed bootstrap schema exists in B0; the database
+  phase reconciles a manifest into facts, converged = zero writes);
+  schema EDN under `src/seon/schema/` with the one admission gate; and
+  the SHARED BOOTSTRAP ANCESTOR (owner 2026-07-27): one deliberate
+  build indexes all code into the ancestor store; a new cluster is a
+  near-instant FORK of it, never a re-index. QUARRY: the template
+  store (`c669c2f6b` — State A's "reset = template clone" is the
+  working prior art), `src-old/seon/config/resolve.cljc`, the runtime
+  state reconciler, and the JVM program indexer.
+- **B3 — dev loop closure**: `bin/repl` + MCP eval_clj discovery of
+  fresh advertisements (in flight), function-level test selection
+  later (task #6).
+- **N3 (run loop as flow proc), N4 (render), N5 (corpus), N6 (final
+  gates/leaves)** — as specified below, each with its own quarry read
+  and port manifest.
+
+The remainder of this section is the original rung detail; where it
+says "old step N", that content is design truth carried forward, not a
+conversion instruction.
+
+The system is built spec-first, per namespace, from a small base.
 Each phase names its trusted libraries, its falsifier, and absorbs what the
 old capability-ordered steps still owed. The old steps are superseded — do
 not resurrect them; their surviving content is named inside each phase.
