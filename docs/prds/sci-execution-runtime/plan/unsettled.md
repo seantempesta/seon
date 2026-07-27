@@ -254,8 +254,13 @@ N4 PLAN REVISED (ab2911caa): all 25 review findings dispositioned,
 composed with the landed N3 owners, socket/reset/child-loss proofs
 moved in-suite, EIGHT owner decisions consolidated — both N4 and N5
 plans are now review-hardened and wait only on their owner-decision
-batches. IN FLIGHT (one lane): digest-unify gives the triplicated
-SHA-256 helper one owner (byte-identical proof required). NEXT SESSION'S SPINE, in order: (1) the N3
+batches. IN FLIGHT (two lanes): the Opus agent builds the seon.sci.eval
+adoption — C7's evaluator owner, the LAST dependency before the N3
+integration proof (never throws, deadline the only limit, admission
+inside the armed boundary; proof = turn_test's injected symbol points
+at the REAL evaluator, driving a real sci eval end to end with no
+model call); digest-unify gives the triplicated SHA-256 helper one
+owner (byte-identical proof required). NEXT SESSION'S SPINE, in order: (1) the N3
 integration proof, orchestrator-owned — bin/repl or clojure -M:dev,
 start! a cluster, install a live flow graph with the loop proc, drive
 one REAL turn (one live DeepSeek call proving request/response
