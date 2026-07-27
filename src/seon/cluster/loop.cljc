@@ -168,7 +168,7 @@
 ;;; The proc
 ;;; ---------------------------------------------------------------------------
 
-(declare turn)
+(declare turn settle-interruption!)
 
 (defn- digest
   "The plan digest: SHA-256 over the ordered sources, so the same reply
@@ -243,8 +243,16 @@
          request {:seon.cluster.run/process
                   (:seon.cluster.run/process cluster)
                   :seon.cluster.work/now now}
-         ;; ONE database value for the whole pass: everything this pass
-         ;; decides, it decides against one basis
+         ;; SETTLE BEFORE DERIVING. An orphaned run keeps its agent
+         ;; busy, so a pass that derived work first would find nothing
+         ;; to do for that agent and leave it wedged forever — which is
+         ;; exactly what the crash drill measured.
+         _ (doseq [orphan (work/interruptions @connection)]
+             (settle-interruption! cluster
+                                   (:seon.cluster.run/id orphan)
+                                   now))
+         ;; ONE database value for the derivation: everything this pass
+         ;; decides after settling, it decides against one basis
          work (work/next-work @connection request)]
      (if (nil? work)
        [state nil]
@@ -258,6 +266,50 @@
            (async/offer! (:seon.cluster.wake/channel cluster) ::wake))
          [(update state :seon.cluster.loop/turns inc)
           {:seon.cluster.loop/turn-report [report]}])))))
+
+(defn settle-interruption!
+  "Bury one orphaned run so its agent stops being busy.
+  A run whose process died before its plan existed lost a paid model
+  call that NOTHING re-calls, so there is no work to resume — only an
+  agent held busy by a run nobody owns. Settling is claim-then-close
+  through the ordinary transitions: a survivor cannot close a run it
+  does not hold (`close-call` refuses `::not-the-holder`), so it takes
+  custody by the takeover path first and closes as the holder.
+
+  Boot recovery released the dead custody; this releases the AGENT.
+  The two are deliberately separate: recovery states who no longer
+  holds what, and settlement decides what to do about it — and only
+  the loop is entitled to decide that.
+
+  Settle-only for N3. The explanation an agent reads is derived from
+  the settled run's own shape (no plan, closed) by
+  `seon.cluster.prompt`; when a richer reason is wanted, this
+  transaction is where it would ride."
+  {:malli/schema [:=> [:cat :seon.cluster.loop/cluster
+                       :seon.cluster.run/id :inst]
+                  :boolean]}
+  [cluster run-id now]
+  (let [connection (:seon.store/branch-connection cluster)
+        process (:seon.cluster.run/process cluster)
+        claimed (store/transact!
+                 connection
+                 (run/claim-tx {:seon.cluster.run/id run-id
+                                :seon.cluster.run/process process
+                                :seon.cluster.run/lease-until
+                                (Date. (+ (inst-ms now) 60000))
+                                :seon.cluster.run/now now}))]
+    (if (:seon.error/kind claimed)
+      false
+      (let [run (d/pull @connection '[*] [:seon.cluster.run/id run-id])
+            closed (store/transact!
+                    connection
+                    (run/close-tx {:seon.cluster.run/id run-id
+                                   :seon.cluster.run/process process
+                                   :seon.cluster.run/claim-epoch
+                                   (:seon.cluster.run/claim-epoch run)
+                                   :seon.cluster.run/closed-at (Date.)
+                                   :seon.cluster.run/now now}))]
+        (not (:seon.error/kind closed))))))
 
 (defn turn
   "Run one turn to its next durable boundary; returns the turn report.

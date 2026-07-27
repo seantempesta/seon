@@ -217,6 +217,32 @@
                (nil? (:seon.cluster.run/plan-digest run)))
       {:seon.cluster.run/id (:seon.cluster.run/id run)})))
 
+(defn interruptions
+  "Every agent's open, unclaimed, unplanned run — the wreckage to settle.
+  The plural of `interruption`, and the loop's entry point: a pass
+  settles what a dead process left before it derives work, because an
+  unsettled orphan keeps its agent BUSY and no trigger for that agent
+  can ever be answered. One query rather than a scan, because the loop
+  runs it every pass."
+  {:malli/schema [:=> [:cat :any]
+                  [:vector [:map
+                            [:seon.cluster.agent/id :seon.cluster.agent/id]
+                            [:seon.cluster.run/id :seon.cluster.run/id]]]]}
+  [db]
+  (->> (d/q '[:find ?agent-id ?run-id
+              :where
+              [?agent :seon.cluster.agent/id ?agent-id]
+              [?agent :seon.cluster.agent/run ?run]
+              [?run :seon.cluster.run/id ?run-id]
+              (not [?run :seon.cluster.run/closed-at _])
+              (not [?run :seon.cluster.run/process _])
+              (not [?run :seon.cluster.run/plan-digest _])]
+            db)
+       (sort-by second)
+       (mapv (fn [[agent-id run-id]]
+               {:seon.cluster.agent/id agent-id
+                :seon.cluster.run/id run-id}))))
+
 (defn unanswered-triggers
   "The trigger messages for `agent-id` that no run-opening transaction
   points at, oldest first.

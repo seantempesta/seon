@@ -14,6 +14,7 @@
             [datahike.api :as d]
             [my.run :as my.run]
             [seon.ai :as ai]
+            [seon.cluster :as cluster]
             [seon.cluster.loop :as cluster.loop]
             [seon.cluster.prompt :as prompt]
             [seon.cluster.run :as run]
@@ -29,7 +30,12 @@
 ;;; its own list is exactly how the missing entity maps stayed invisible
 ;;; until a real drive hit them.
 
-(def ^:private process "process/one")
+;;; the holder string production uses: <pid>-<start-millis>. A bare
+;;; pid is recyclable, and a recycled pid claiming to hold a run is the
+;;; one confusion recovery must not have.
+(def ^:private process
+  (cluster/process-identity {:seon.boot/pid 4242
+                             :seon.boot/start-instant (Date. 1700000000000)}))
 (def ^:private now (Date. 1700000000000))
 
 ;;; the injected evaluator: whatever the current fixture wants the form
@@ -93,6 +99,24 @@
 
 (defn- request [connection]
   {:seon.cluster.run/process process :seon.cluster.work/now (Date.)})
+
+(defn- drive-passes!
+  "Run the loop's own pass — settle, then derive, then turn — until idle.
+  This drives what `step` drives, so a test sees what production sees."
+  [cluster limit]
+  (let [connection (:seon.store/branch-connection cluster)]
+    (loop [passes 0]
+      (let [now (Date.)]
+        (doseq [orphan (work/interruptions @connection)]
+          (cluster.loop/settle-interruption! cluster
+                                             (:seon.cluster.run/id orphan)
+                                             now))
+        (when-let [work (work/next-work @connection (request connection))]
+          (when (< passes limit)
+            (cluster.loop/turn {:seon.cluster.loop/cluster cluster
+                                :seon.cluster.work/next work}
+                               now)
+            (recur (inc passes))))))))
 
 (defn- drive!
   "Run passes until the loop says idle, or `limit` passes have run."
@@ -198,6 +222,63 @@
             (is (some? (d/q '[:find ?c . :where
                               [_ :seon.cluster.run/closed-at ?c]]
                             @connection)))))))))
+
+(deftest a-settled-orphan-stops-wedging-the-agent
+  ;; The crash drill's headline: a process died holding a claimed,
+  ;; unplanned run. Boot recovery released the dead CUSTODY, but until
+  ;; the loop settles the run the AGENT is still busy — next-work finds
+  ;; nothing to do for it and every later trigger goes unanswered
+  ;; forever. This is that whole sequence, end to end.
+  (with-cluster
+    (fn [cluster]
+      (let [connection (:seon.store/branch-connection cluster)
+            now (Date.)]
+        ;; the wreckage a crash leaves, AFTER boot recovery has released
+        ;; the dead holder: open, unclaimed, unplanned
+        (d/transact connection
+                    [{:seon.cluster.run/id "run-crashed"
+                      :seon.cluster.run/agent [:seon.cluster.agent/id "agent-a"]
+                      :seon.cluster.run/opened-at (Date. 1000)
+                      :seon.cluster.run/claim-epoch 1}
+                     {:seon.cluster.agent/id "agent-a"
+                      :seon.cluster.agent/run [:seon.cluster.run/id "run-crashed"]}])
+        (testing "the agent is WEDGED: it is busy, and nothing is work"
+          (is (nil? (work/next-work @connection (request connection))))
+          (is (= ["run-crashed"]
+                 (mapv :seon.cluster.run/id
+                       (work/interruptions @connection)))))
+
+        ;; the loop's own pass settles it before deriving anything
+        (with-redefs [ai/complete
+                      (fn [_] {:seon.ai/text "(my.run/complete \"answered\")"})]
+          (binding [*evaluation* {:seon.cluster.eval/status :done
+                                  :seon.cluster.eval/result-edn
+                                  (pr-str (my.run/complete "answered"))
+                                  :seon.sci.admit/value (my.run/complete "answered")}]
+            (drive-passes! cluster 8)))
+
+        (testing "the orphan is settled — closed, and no longer an
+                  interruption"
+          (is (empty? (work/interruptions @connection)))
+          (is (some? (d/q '[:find ?c . :in $ ?id :where
+                            [?r :seon.cluster.run/id ?id]
+                            [?r :seon.cluster.run/closed-at ?c]]
+                          @connection "run-crashed"))))
+        (testing "and the trigger that was waiting behind it is ANSWERED
+                  by a new run that ran to completion"
+          (is (empty? (work/unanswered-triggers @connection "agent-a")))
+          (let [new-runs (d/q '[:find [?id ...] :where
+                                [?r :seon.cluster.run/id ?id]
+                                [?r :seon.cluster.run/plan-digest _]]
+                              @connection)]
+            (is (= 1 (count new-runs)))
+            (is (not= "run-crashed" (first new-runs))
+                "the crashed run was buried, never re-planned")))
+        (testing "nothing re-executed: receipts belong only to the new run"
+          (is (= 1 (count (d/q '[:find ?run-id (count ?e) :where
+                                 [?e :seon.cluster.eval/run ?r]
+                                 [?r :seon.cluster.run/id ?run-id]]
+                               @connection)))))))))
 
 (deftest a-lost-model-call-leaves-a-durable-readable-reason
   ;; the drive sat claimed-with-no-plan for 120 s and the operator had to

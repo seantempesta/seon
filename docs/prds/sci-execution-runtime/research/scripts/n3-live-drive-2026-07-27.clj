@@ -53,7 +53,9 @@
 (def handle
   {:seon.store/branch-connection connection
    :seon.cluster.run/process
-   (str (:seon.boot/pid (:seon.boot/advertisement instance)))
+   ;; <pid>-<start-millis>: the holder string boot recovery judges
+   ;; against, so a run's holder and the live set are the same value
+   (cluster/process-identity (:seon.boot/advertisement instance))
    :seon.cluster.wake/channel wake-channel
    :seon.cluster.loop/provider
    {:seon.ai/endpoint "https://api.deepseek.com/chat/completions"
