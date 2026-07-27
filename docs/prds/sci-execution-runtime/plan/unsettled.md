@@ -226,9 +226,16 @@ ORCHESTRATOR-OWNED integration falsifiers, out of bin/test.
 QUEUED MINE: delete seon.flow/database-proc + its testbed pins at a
 lane-quiet point (n3-plan §4.1); the R41-vs-marker and [:maybe]-in-fn-
 returns owner questions; task #3 MCP verify (needs Sean's restart).
-IN FLIGHT (two lanes): the Opus agent (seal revision + package-2
-implementation); sol lane revises the N5 plan against its 19-finding
-review (d500c8bfb). n5-plan 909394481 awaits deep review at its
+N5 PLAN REVISED (aa6759fd3): all 19 review findings dispositioned —
+12 fixed in place (schema-refs duplicate removed, acquisition
+composes the landed projection/admission owners, ancestor population
+matches today's provenance order, reset + process-kill proofs moved
+IN-SUITE), 7 promoted to one "Owner decisions required before seal"
+section (7 decisions, options + recommendation each) for a single
+batch ruling when N5's rung opens. IN FLIGHT (two lanes): the Opus
+agent (package-2 seal revision + implementation to green); sol lane
+n4-plan-review falsifies the N4 plan against today's landings, same
+treatment as N5's. n5-plan 909394481 awaits deep review at its
 rung; GC verdict recorded above. Its accepted design: process-local
 store holder + refcount under ONE lock with running-instances;
 stop! also releases branch connection, last instance releases the
