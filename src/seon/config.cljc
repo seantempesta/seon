@@ -45,9 +45,12 @@
 
 (defn- dial-attributes
   []
+  ; entries are the [attr props? schema] vectors; filtering by shape
+  ; instead of position keeps this correct whether or not the :map
+  ; form carries a properties map
   (into #{}
-        (map first)
-        (drop 2 (schema/schema-definition :seon.config/manifest))))
+        (comp (filter vector?) (map first))
+        (schema/schema-definition :seon.config/manifest)))
 
 (defn- refuse!
   [rule data cause]
