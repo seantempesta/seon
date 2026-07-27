@@ -6,11 +6,19 @@ tags: [reference]
 
 # Seon Code Conventions
 
-This is the agent-facing standards doc AND the rubric a code audit uses. It
-describes the system as it actually is on the current branch — a dual CLJ +
-CLJS system backed by datahike, with always-on instrumentation. If a convention
-here disagrees with the running code, the running code wins and this doc is a
-bug — flag it.
+This is the agent-facing standards doc AND the rubric a code audit uses. If a
+convention here disagrees with the running code, the running code wins and this
+doc is a bug — flag it.
+
+**Where the code is (owner rulings, 2026-07-27).** Fresh `src/` and `test/` are
+the system and the default project; `bin/test` is the gate. **The CLJS build is
+OFF — CLJ and the JVM only**, and the `:cljs` alias is dead. The old system is
+the quarry under `src-old/`/`test-old/`, reachable only behind explicitly
+old-facing aliases; nothing new invests in it. When this doc cites a `src-old/`
+file it is citing the quarry as a worked example, not a live owner. Two
+mechanisms the old system owned — always-on instrumentation (`seon.instrument`)
+and the `seon.db` facade — do **not** exist in the fresh tree yet; the sections
+below say so where it matters.
 
 ## Why These Conventions Matter
 
@@ -20,7 +28,7 @@ write reliable software**.
 When every function has:
 
 - **Namespaced keys** → Agents can query "what accepts `:seon.agent.search/pattern`?" instead of guessing
-- **Malli schemas** → Contracts are machine-readable. Property tests validate automatically. Every schema'd fn is instrumented at runtime.
+- **Malli schemas** → Contracts are machine-readable, generatively testable, and the thing a review checks a call against.
 - **Fully spec'd args (the hard rule)** → Contracts are complete. Map-in/map-out helps API *accretion* (add an optional field without breaking callers); fully-spec'd positional (`:catn`) is often the better shape for utilities. Pick by fit; the invariant is that every arg is named, spec'd, and validated.
 - **Registered schemas** → A queryable database of all data shapes in the system. `schema/register!` derives the datahike attribute schema for free.
 
@@ -47,8 +55,10 @@ Datastar element patches and has no database or application runtime.
 Store open takes one `flock` assertion before Datahike is opened. A second
 cluster JVM for the same store refuses loudly. This is the one fenced exception
 where coordination precedes the database. Supervision, bounded evals, and
-Integrant component restart protect the cluster JVM; a separate render process
-is not a containment boundary.
+component restart protect the cluster JVM; a separate render process is not a
+containment boundary. Lifecycle is `core.async.flow`'s, not Integrant's — the
+fresh tree has no Integrant dependency, and `seon.flow` is the foundation the
+boot design grows from.
 
 `core.async.flow` is the one scheduling substrate. Runtime owners are procs
 with `step-fn`s; bounded channels and `conns` form the `graph-def`; the report
@@ -62,7 +72,8 @@ the one `:interrupt-fn`, a platform thread, and its admitted permit.
 Choose a source extension by the runtime that owns the code:
 
 - **`.clj`** — cluster-JVM owners and JVM platform leaves.
-- **`.cljs`** — JavaScript leaf-runtime owners only.
+- **`.cljs`** — JavaScript leaf-runtime owners only. None exist in the fresh
+  tree, and no new `.cljs` may be added while the CLJS build is off.
 - **`.cljc`** — the default for genuinely portable capability cores and pure
   transformations. Reader conditionals occur only at the entry expression that
   bridges platform ceremony.
@@ -75,10 +86,12 @@ namespace** — un-whitelisted, not rendered into context, free to be as
 intricate as it needs to be. The public ns is the discoverable contract; the
 `.internal` ns is the machinery.
 
-- `seon.db` (public, taught) ↔ `seon.db.internal` (commit machinery, arg
-  normalization, conn resolution).
-- `seon.agent.search` (public `grep`) ↔ `seon.agent.search.internal` (hard
-  caps, envelope helpers, the rg `--json` parser, the allowlist gate).
+- `seon.schema` (public `register!`, the registry) ↔ `seon.schema.internal`
+  (form gates and decomposition), with `seon.schema.form` and
+  `seon.schema.datahike` as the other siblings — the live example in `src/`.
+- Quarry example: `seon.agent.search` (public `grep`) ↔
+  `seon.agent.search.internal` (hard caps, envelope helpers, the rg `--json`
+  parser, the allowlist gate).
 
 Reach for `.internal` whenever a public fn's helpers would otherwise bloat the
 context the agent reads. Keep the public surface to the named request/response
@@ -90,8 +103,8 @@ schemas plus the function fns.
 
 All public APIs use Malli schemas for contract specification. This enables:
 
-- **Always-on instrumentation** — every public fn with `:malli/schema` is validated at runtime (see [Always-On Instrumentation](#always-on-instrumentation)).
-- Generative testing via `mg/sample` + `m/validate` (JVM-track; see Testing Strategy)
+- **A machine-checkable contract** — the `:malli/schema` is what a test, a generator, and a reviewer check the function against (see [Instrumentation](#instrumentation)).
+- Generative testing via `mg/sample` + `m/validate` (see Testing Strategy)
 - Self-documenting APIs for agents
 - **Function discovery** — "What functions return `::grep-response`?" is a database query.
 
@@ -147,18 +160,21 @@ Identity attributes are declared via `{:seon.db/identity true}` on the
 registered shape — there is **no** magic `:seon/id` key:
 
 ```clojure
-(schema/register! ::doc-id
-                  [:and {:seon.db/identity true
-                         :seon.db.id/generator
-                         :seon.db.id.generator/compact}
-                   :seon.db.id/compact-value])
+(schema/register! ::doc-id [:string {:min 1 :seon.db/identity true}])
 ;; entities addressed by lookup-ref: [::doc-id "d1a2b3c4e5f6"]
 ```
 
-Generated creation goes through `seon.db.id/allocate!`. Its pure transaction
-builder receives a candidate matching the identity attribute's registered
-generator policy; the serialized writer rejects collisions before committing
-the complete entity. Known-id reconciliation remains an intentional upsert.
+The other facets are properties on the same registered shape:
+`{:seon.db/unique true}` (`:db.unique/value`), `{:seon.db/component true}`,
+`{:seon.db/index true}`, and `{:seon.db/no-history? true}`. The complete
+derivation is `seon.schema.datahike/malli->datahike-attr` — read it rather than
+guessing which property maps to which facet.
+
+Centralized id allocation (`seon.db.id/allocate!`, a candidate matching the
+identity attribute's registered generator policy, a serialized writer rejecting
+collisions) is a **quarry** mechanism in `src-old/seon/db/id.cljc`; the fresh
+tree has no id allocator yet. Known-id reconciliation remains an intentional
+upsert.
 
 ### Shared schema shapes — register once, reference everywhere
 
@@ -168,26 +184,28 @@ or legacy identity syntax across multiple `register!` calls is a smell.
 
 ```clojure
 ;; ONE canonical shape (lives in its owning ns)
-(schema/register! :seon.db.id/compact-value
-                  [:or :seon.db.id/legacy-value
-                   [:and :string [:re #"^[a-z][a-z0-9]{11}$"]]])
+(schema/register! ::compact-value [:and :string [:re #"^[a-z][a-z0-9]{11}$"]])
 
 ;; EVERY id attr references it — no inline shape
-(schema/register! ::agent-id   :seon.db/id)
-(schema/register! ::session-id :seon.db/id)
+(schema/register! ::agent-id   [:and {:seon.db/identity true} ::compact-value])
+(schema/register! ::session-id [:and {:seon.db/identity true} ::compact-value])
 ```
 
 If the Malli→datahike bridge doesn't yet handle a reference shape you need, fix
-the bridge — never duct-tape by inlining the shape at each site.
+the bridge (`src/seon/schema/datahike.cljc`) — never duct-tape by inlining the
+shape at each site. `resolve-malli-form` there is what follows a keyword
+reference to its stored shape.
 
 ### Provenance attrs are a smell — the tx entity already records it
 
-Before registering `created-by`/`created-at`/`updated-by`/`source-turn`: every
-`db/transact!` auto-stamps the active agent/turn scope as tx-meta datoms on the
-**transaction entity** (plus `:db/txInstant`), so who/when-wrote-this is a join
-through the datom's tx, not a domain attribute. The only legitimate stored form
-is a pre-event snapshot coordinate. Full rule + join recipe: the `/datahike`
-skill, "Transaction metadata".
+Before registering `created-by`/`created-at`/`updated-by`/`source-turn`:
+Datahike's transaction is a real entity, it is stamped with `:db/txInstant`, and
+Seon writes exactly two durable provenance refs on it — `:seon.db/user` and
+`:seon.db/process`. Who, through which stable process, and when wrote a datom is
+a join through the datom's transaction, not a domain attribute. Turn, eval,
+replay, and test details are not provenance and are never copied onto domain
+entities. The only legitimate stored form is a pre-event snapshot coordinate.
+Full rule + join recipe: the `/datahike` skill, "Transaction metadata".
 
 ### Request/Response Schema Pattern
 
@@ -335,40 +353,45 @@ This is a hard convention, not a style: an agent's eval must survive a bad call
 and read the failure as data, the same way `seon.db/transact!` and
 `seon.agent.search/grep` do. Two consequences:
 
-1. **The fn's body owns SEMANTIC failures; instrumentation owns SHAPE.** A
+1. **The fn's body owns SEMANTIC failures; the schema owns SHAPE.** A
    semantically-bad call (blank content, denied path, unknown id) returns the
-   `::ok? false` envelope from the body's guards; a shape-invalid call trips
-   the instrumentation validator, which the eval boundary surfaces as a
-   structured `:seon/error` value — data, never a crash. The only fns with NO
-   wrapper are the structurally unwrappable async shapes
-   (`seon.instrument/async-unwrappable?` — an `^:async` fn that is variadic /
-   multi-arity, e.g. `seon.db/transact!`); for those the `:malli/schema` stays
-   the discoverable contract and the body's guards enforce shape too.
-2. **Callers MUST read the envelope.** An eval can succeed while the write
+   `::ok? false` envelope from the body's guards. A shape-invalid call is the
+   `:malli/schema`'s business — checked by tests and generators today, and by
+   the instrumentation wrapper once it re-lands; either way the eval boundary
+   surfaces it as a structured `:seon/error` value, never a crash.
+2. **Callers MUST read the envelope.** A call can succeed while the write
    didn't happen (`::ok? false`). Translate cryptic underlying errors into a
    guiding `::error` and preserve the original at `::raw-error`.
-3. **A specced `^:async` fn must NEVER reject with an expected error.** The
-   instrument wrapper records a Promise rejection as a `:core` fault — under
-   the dev pod's `:seon.config/on-core-error :crash` dial that EXITS the pod.
-   Expected errors (transport failures, timeouts, non-2xx, invalid input) ride
-   the VALUE channel as the surface's existing envelope (`:seon.ai/error`,
-   `{:seon.db/ok? false}`, `:seon/error`). Rejection is reserved for genuine
-   bugs and the deliberate boot fail-loud gates. Canonical fix:
-   `seon.ai.openai-compat/stream-until-form!` (e6295ecd).
+3. **Never signal an expected error out of band.** Transport failures,
+   timeouts, non-2xx responses, and invalid input ride the VALUE channel as the
+   surface's envelope (`{:seon.db/ok? false}`, `:seon/error`). Throwing — or,
+   in a `.cljs` leaf, rejecting a Promise — is reserved for genuine bugs and
+   deliberate fail-loud boot gates.
+
+Not everything is agent-facing. Core code that runs INSIDE a transaction is the
+deliberate exception: a `[:db.fn/call ...]` transition REFUSES an ineligible
+request by throwing, which aborts the whole transaction atomically. That is the
+database enforcing a fence, not an error-handling style — see
+`src/seon/cluster/run.cljc`.
 
 When an error is genuinely a caller bug to fix vs. a core bug to report, tag it:
 `:seon.error/data` carries `:seon.error/kind` (`:user-input` vs `:core-bug`).
 
 ---
 
-## Always-On Instrumentation
+## Instrumentation
 
-All public functions with `:malli/schema` metadata are **instrumented at
-runtime**. Every call validates inputs, outputs, and arity. **There is no "off"
-mode** (a `SEON_INSTRUMENT` env var is a kill-switch for debugging only,
-defaults ON).
+**Current state: the fresh tree has no runtime instrumentation.** `src/` carries
+no `seon.instrument`, so a `:malli/schema` today is checked by tests,
+generators, and review — not by a wrapper on every call. Write the schema
+anyway and write it correctly: it is the contract of record, the generator
+source, and the thing the instrumentation rung will switch on. Never treat "it
+isn't enforced yet" as licence for a loose or absent schema.
 
-Instrumentation is **DB-driven**, not a compile-time macro. The mechanism reads
+The rest of this section describes the mechanism the old system ran and the
+fresh tree will re-land; it is the design target, not today's behaviour.
+
+Instrumentation was **DB-driven**, not a compile-time macro. The mechanism reads
 the **program graph** — the `:seon.fn/spec` rows the analyzer persists for every
 schema'd fn — and wraps from there. Two lifecycle points:
 
@@ -405,8 +428,17 @@ wrapper registers no wrapper at all. There is no hand-maintained symbol set.
 
 ## Database Access
 
-`seon.db` is the **sole database API**. Never touch `datahike.api` directly
-outside `src-old/seon/db/`. Everything else uses `db/transact!`, `db/query`,
+**Current state: the fresh tree has no `seon.db`.** Until the store owner lands,
+`src/` and `test/` call `datahike.api` directly (see
+`test/seon/cluster/run_test.clj`) and derive their attribute declarations with
+`seon.schema.datahike/malli->datahike-schema`. That is correct today; it is not
+a licence to spread connection handling — keep Datahike calls in the namespace
+that owns the store or the fixture, never scattered through domain logic.
+
+The target below is the rule the moment `seon.db` exists.
+
+`seon.db` is the **sole database API**. Nothing outside its own namespace tree
+touches `datahike.api`. Everything else uses `db/transact!`, `db/query`,
 `db/pull`, `db/entity`, `db/listen!`.
 
 Inside the cluster JVM, `seon.db` is co-located with the transaction owner:
@@ -448,9 +480,9 @@ retraction.
 
 Provider namespaces extend base namespaces by referencing their schemas. This is
 the EAV pattern: entities are bags of namespaced attributes. (The `seon.ai` /
-`seon.ai.claude` example below is real **JVM-track** code — `.clj`, currently
-paused. On the active CLJS pod the provider adapters are `seon.ai.anthropic` /
-`seon.ai.openai-compat`. The schema-composition *pattern* is track-independent.)
+`seon.ai.claude` names below are illustrative — no `seon.ai` namespace exists in
+the fresh tree; the quarry's live provider adapters are `seon.ai.anthropic` /
+`seon.ai.openai-compat`. The schema-composition *pattern* is what to take.)
 
 ### Base + Provider Pattern
 
@@ -528,7 +560,8 @@ nudge; at a genuine boundary that warning is an accepted judgment call.
 
 ### Test Code Exemptions
 
-Test namespaces (`*_test.cljs` / `*_test.clj`) are exempt from most conventions:
+Test namespaces (`*_test.clj` / `*_test.cljc` — the shapes `bin/test`
+discovers) are exempt from most conventions:
 
 - **No `:malli/schema`** on `deftest` or test helper functions
 - **No required arg shape** — test helpers may use bare positional args
@@ -538,8 +571,8 @@ Test namespaces (`*_test.cljs` / `*_test.clj`) are exempt from most conventions:
 Conventions that **do** apply in tests:
 
 - **Namespaced keys when calling production functions** — match the real API
-- **Example tests at minimum** — generative tests where the schema is the unit
-  (JVM-track); see Testing Strategy
+- **Example tests at minimum** — generative tests where the schema is the unit;
+  see Testing Strategy
 - **Meaningful test names** — `grep-finds-matches-test`, not `test1`
 
 ---
@@ -591,12 +624,14 @@ converters you expect to grow new optional inputs.
 
 ## Provider Multimethod Pattern
 
-(The `seon.ai.agent` / `seon.ai.claude` multimethods shown here are real
-**JVM-track** code — `.clj`, currently paused; `:claude` is the live dispatch
-value there. The active CLJS pod uses the simpler adapter-fn shape in
-`seon.ai.anthropic` / `seon.ai.openai-compat` rather than this multimethod
-registry. The pattern is documented because it's the sanctioned way to build an
-extensible provider surface when one is needed.)
+(The `seon.ai.agent` / `seon.ai.claude` multimethods shown here are
+illustrative; neither namespace exists in the fresh tree, and the quarry's
+provider surface is the simpler descriptor-row + adapter-fn shape in
+`seon.ai.anthropic` / `seon.ai.openai-compat`, not a multimethod registry. The
+pattern is documented because it's the sanctioned way to build an extensible
+provider surface when one is needed. Note the standing boundary: a hosted
+provider is a descriptor ROW selecting one of two wire cores, never a new
+adapter arm.)
 
 For extensible provider systems (like AI providers), use multimethods with
 keyword dispatch. This allows adding new providers without modifying existing
@@ -655,92 +690,89 @@ code.
 Tests serve two purposes:
 
 1. **Example tests** — document intended usage, show how functions compose.
-   The bread-and-butter of the active CLJS suite.
-2. **Generative tests** — find edge cases, validate schema contracts. A
-   **JVM-track** idiom today (`mg/sample` + `m/validate` in `.clj` tests); the
-   CLJS pod relies on always-on instrumentation for runtime contract checks.
+2. **Generative tests** — find edge cases and validate schema contracts
+   (`mg/sample` + `m/validate`, and seeded `test.check` properties over the
+   production boundary).
 
-On the CLJS side, write example tests; reach for generative tests on the JVM
-where the schema is the unit under test. (Example tests alone don't prove the
-schema's edges; generative tests alone don't show real-world usage.)
+Both run on the JVM in the same `clojure.test` suite. Example tests alone don't
+prove the schema's edges; generative tests alone don't show real-world usage.
 
 ### Running tests
 
-- **CLJS suite (active track):** `bin/test-cljs` runs the full `.cljs` suite in
-  a fresh `:node-test` JVM (no live-pod contention, ~160s). Use it as the batch
-  checkpoint — **once, after a unit of work**, not after each sub-step. Never
-  fire overlapping `cljs.test/run-tests` in the live pod (it wedges the shared
-  async continuation; restart the pod for a pristine run).
-- **Live verification:** to verify a single behavior fast, eval the fn directly
-  against the live pod rather than running a whole test namespace. **Live proof,
-  not inference** — read a datom back, observe the running system.
-- **JVM track (paused):** tests run inside the running JVM via REPL functions —
-  `(user/run-tests 'seon.foo-test)`, `(user/test-affected 'seon.foo)` — never by
-  spawning a separate process.
+`bin/test` is the gate. It runs every `*_test.clj` / `*_test.cljc` namespace
+under `test/` on the source classpath with in-memory Datahike — no artifact, no
+operator, seconds per cycle. Its exit code is the verdict.
+
+```bash
+bin/test                        # every suite under test/
+bin/test seon.cluster.run-test  # exactly these namespaces
+```
+
+Use the selection while iterating and the full run at the natural unit
+boundary. `bin/test-cljs` and `bin/test-writer` belong to the quarry and are
+**not** the gate — the CLJS build is off.
+
+**Live verification still outranks a green suite.** Falsify a change with an
+observed datom, log line, or REPL result, not by inference.
 
 See the `/clojure-testing` skill for fixtures, generators, and debugging.
 
 ### Example Tests (Documentation + Integration)
 
-Show the intended workflow — executable documentation. For a behavior that
-doesn't touch the DB, a plain `cljs.test/async` test is enough — the
-capability functions return Promises, so await them (`<p!` / `.then`) and read the
-envelope:
+Plain, synchronous `clojure.test` — no async ceremony, no Promises. A
+database-backed test opens its **own in-memory Datahike** connection, transacts
+the derived attribute declarations, and releases in a `finally`. There is no
+ambient connection to `set!`: pass the connection.
 
 ```clojure
-(deftest grep-finds-matches-test
-  (testing "grep returns a matches envelope for a real pattern"
-    (async done
-      (-> (search/grep {::search/pattern "defn ^:async" ::search/max-results 5})
-          (.then (fn [{::search/keys [ok? matches]}]
-                   (is (true? ok?))
-                   (is (vector? matches))
-                   (done)))))))
+(ns seon.cluster.run-test
+  (:require [clojure.test :refer [deftest is testing]]
+            [datahike.api :as d]
+            [seon.schema.datahike :as schema.datahike]))
+
+(defn- with-model-database [body]
+  (let [configuration {:store {:backend :memory :id (random-uuid)}
+                       :schema-flexibility :write}
+        _ (d/create-database configuration)
+        connection (d/connect configuration)]
+    (try
+      ;; Under :schema-flexibility :write an attribute must be INSTALLED before
+      ;; it is transacted — a registered-but-uninstalled attr throws.
+      (d/transact connection
+                  (schema.datahike/malli->datahike-schema [::name]))
+      (body connection)
+      (finally
+        (d/release connection)
+        (d/delete-database configuration)))))
+
+(deftest reads-back-a-row
+  (testing "a transacted value comes back out"
+    (with-model-database
+      (fn [connection]
+        (d/transact connection [{::name "Alpha"}])
+        (is (= "Alpha" (d/q '[:find ?n . :where [_ ::name ?n]] @connection)))))))
 ```
 
-**DB-backed CLJS tests** open a fresh **in-memory datahike** conn per test and
-`set!` it as the root `db/*conn*` (CLJS has no `binding` across async hops, so
-`set!` the root, not `binding`). There is no shared `with-test-db` fixture on
-the CLJS side — `with-test-db` / `with-test-node` live in `seon.test-utils`
-(`.clj`, JVM track). Each CLJS test ns defines a small local helper; the
-canonical shape (see `test-old/seon/db_test.cljs` `fresh-conn` and
-`test-old/seon/ctx_test.cljs`):
-
-```clojure
-(defn- fresh-conn []                                  ; returns a Promise of a conn
-  (let [cfg {:store {:backend :memory :id (random-uuid)}
-             :schema-flexibility :write}]
-    (-> (d/create-database cfg)
-        (.then (fn [_] (d/connect cfg {:sync? false}))))))
-
-(deftest reads-back-a-row-test
-  (async done
-    (-> (fresh-conn)
-        (.then (fn [conn]
-                 (set! db/*conn* conn)                ; root set!, not binding
-                 (schema/register! ::name :string)
-                 (-> (db/transact! {::db/tx-data [{::name "Alpha"}]})
-                     (.then (fn [_]
-                              (is (= #{["Alpha"]}
-                                     (db/query {::db/query '[:find ?n :where [_ ::name ?n]]})))
-                              (done)))))))))
-```
+`test/seon/cluster/run_test.clj` is the worked example: fixture, deterministic
+clock, and a seeded state-machine property over the real database.
 
 ### Generative Tests (Contract Validation)
 
-**JVM-track idiom.** Generative tests over registered schemas — `mg/sample`
-to enumerate valid shapes, `m/validate` to check them — run on the JVM (`.clj`
-tests); the CLJS suite doesn't currently use them. Frame contract-checking as a
-JVM-side concern and lean on always-on instrumentation for runtime validation
-on the pod.
+A registered schema is a generator. Enumerate valid shapes with `mg/sample` and
+check them with `m/validate`; for anything involving two calls, a commit, or
+recovery, write an explicit seeded `test.check` property that invokes the
+production boundary and observes database facts independently of the returned
+value.
 
 ```clojure
-;; .clj test (JVM): find edge cases the schema allows but you didn't think of
 (deftest grep-request-generative-test
   (testing "every valid request shape round-trips through the schema"
-    (doseq [request (mg/sample ::search/grep-request {:size 20})]
+    (doseq [request (mg/sample ::search/grep-request {:seed 20260727 :size 20})]
       (is (m/validate ::search/grep-request request)))))
 ```
+
+Pin the seed so a failure is reproducible, and print the schema key, seed, size,
+generated value, and shrunk check on failure.
 
 ---
 
@@ -772,14 +804,16 @@ on the pod.
 (defn process [{::keys [model] :or {model "default"}}]
   ...)  ; doesn't apply when {::model nil} is passed
 
-;; BAD (JVM-track): only generative tests, no example tests
+;; BAD: only generative tests, no example tests
 (deftest foo-test
   (doseq [input (mg/sample ::input)]
     (is (m/validate ::output (foo input)))))
 ;; Missing: example tests showing intended usage patterns!
 
-;; BAD: touching datahike.api directly outside src-old/seon/db/
-(d/transact conn tx-data)   ; use seon.db/transact!
+;; BAD: scattering datahike.api through domain logic. Today the store owner
+;; and the test fixture call it directly; once seon.db exists it is the sole
+;; database API and nothing outside it touches datahike.api.
+(defn summarize [conn] (d/transact conn tx-data) ...)
 ```
 
 ---
@@ -789,19 +823,20 @@ on the pod.
 Keep it simple — one file per namespace with schemas and functions together.
 Promote heavy plumbing to a sibling `<ns>.internal` namespace (see
 [The `.internal` namespace pattern](#the-internal-namespace-pattern)); don't
-split into `core.cljs` / `schema.cljs` prematurely.
+split into `core.clj` / `schema.clj` prematurely.
 
 ```
-src-old/seon/
-├── agent/
-│   ├── search.cljs            ; seon.agent.search (public grep + schemas)
-│   └── search/internal.cljs   ; seon.agent.search.internal (plumbing)
-└── db.cljs                    ; seon.db (read-local + write-forward face)
-    db/internal.cljs           ; seon.db.internal (commit machinery)
+src/seon/
+├── schema.cljc                ; seon.schema (public register! + registry)
+└── schema/
+    ├── internal.cljc          ; seon.schema.internal (form gates)
+    ├── form.cljc              ; seon.schema.form (shared form inspection)
+    └── datahike.cljc          ; seon.schema.datahike (the Datahike bridge)
 ```
 
-New nucleus tests mirror fresh `src/` under `test/`. State A tests mirror
-`src-old/` under `test-old/` until explicitly adopted into the fresh pair.
+`test/` mirrors `src/`. The quarry keeps its own mirrored pair — `test-old/`
+mirrors `src-old/` — until a namespace is explicitly adopted into `src/` by
+`git mv`.
 
 ---
 
@@ -860,13 +895,12 @@ current-state discipline — see [Namespace Docstrings](#namespace-docstrings).
 
 ## Context, Render, and the System Message
 
-How agent-facing context is assembled — sections as functions of the DB at
-render time, the soul/AGENTS sections, and the LLM system message — is being
-decoupled right now (a generic file-section loader; the system message becomes
-hardcoded system-specific content; soul/AGENTS become ordinary context
-sections). For the current model see
-[[docs/prds/agent-fsm/context-render.md]] (P3). Don't pin specifics here while
-it's in flux.
+How agent-facing context is assembled — sections as functions of the database
+value at render time, and the LLM system message — is unbuilt in the fresh
+tree. The intended target is
+[[docs/seon/architecture/context.md]]; the ordering lives in
+[[docs/prds/sci-execution-runtime/plan/README.md]]. Don't pin specifics here.
+The comment grammar below is settled and applies now.
 
 ### Comment levels — prose vs code
 
@@ -905,6 +939,10 @@ the prose `;` lines; don't hand-roll a `(str ";; " …)` prefixer in a section f
 
 ## SSE Patterns
 
+**Unbuilt.** web-render is cut from the dev process set (owner ruling
+2026-07-27) and the UI arrives later as an in-process pipeline. This is the
+target shape, recorded so nothing invents a different one.
+
 The web UI uses the cluster JVM's one in-process render Flow: transaction →
 `listen!` interest wake through `(sliding-buffer 1)` → guarded render proc →
 equality suppression → `mult` → per-tab `(sliding-buffer 1)` tap → per-tab
@@ -916,13 +954,14 @@ Rendered snapshots are never stored.
 
 ## Reload Lifecycle Hooks for `defonce` State
 
-**(JVM / clj-reload track.)** Seon is a runtime system where agents live-code
-and update namespaces. On the JVM track, `defonce` atoms survive `user/reload`
-(clj-reload) but may hold stale references — old closures, dead channels,
-orphaned threads. Every `defonce` with mutable runtime state **must** have
-lifecycle hooks. (On the CLJS pod, shadow hot-reload re-evaluates top-level
-forms; `defonce` guards load-bearing runtime state like `seon.db/*conn*` so a
-reload doesn't wipe the live connection.)
+**Not wired in the fresh tree** — there is no `clj-reload` dependency and no
+`user/reload` today. Keep the rule anyway, because it is what makes a namespace
+reloadable when the dev loop lands: Seon is a runtime system where agents
+live-code and update namespaces, and a `defonce` atom survives a reload holding
+stale references — old closures, dead channels, orphaned threads. Every
+`defonce` with mutable runtime state gets lifecycle hooks. Better still, prefer
+not to hold runtime state in a `defonce` at all: the database owns durable
+state, and a flow graph owns its own procs and channels.
 
 clj-reload calls two per-namespace 0-arg hooks if they exist:
 
