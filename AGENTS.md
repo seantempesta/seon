@@ -193,50 +193,80 @@ Localized files contain durable ownership, invariants, runbooks, and links—not
 status diaries. One fact lives in the deepest file that owns it. If a change
 invalidates that fact, update the localized authority in the same commit.
 
-## Current runtime and boundary
+## How Seon runs at its core
 
-Seon is one application. Each cluster is a **store** — its own
-`data/clusters/<name>/`, its own process directory, its own ports — and
-that store is the isolation boundary: clusters share no mutable state, so
-one crashing or being reset cannot touch another. Datahike supplies `:self`
-and `:datahike-server` writer backends; a `:self` writer belongs to one
-connection. The invariant is exactly **one live write connection per store**;
-one process may host many. It is required because two JVMs writing one store
-both won the same epoch CAS, then 40 of 40 successfully returned parent commits
-vanished with zero transaction errors and a pristine reopen. One writer per
-store is structural; one store per process is not (owner rulings O1/O9,
-2026-07-25).
+One JVM process runs everything, from source, REPL-first. CLJ only — the
+CLJS build is off (owner, 2026-07-27). Fresh `src/`+`test/` are the
+system; `src-old/`/`test-old/` are the quarry, disabled by default.
 
-Processes under the one `bin/seon` operator:
+Boot is a tower; each layer reads only the one below it and publishes
+its own readiness:
 
-- the **cluster JVM** owns transactions, the committed-transaction feed,
-  and every running agent. Agent evals are CO-LOCATED with the database
-  (O1): reads are a pointer into an immutable database value, writes are
-  a function call — no wire on the agent path. Runs are claimable
-  database state (`:seon.agent.run/process` + epoch CAS, lease, durable
-  receipts); sci evals run under the one `:interrupt-fn` on `:compute`
-  platform threads, where allocation is measurable;
-- the **web-render JVM** serves the Datastar web UI as pure derivation
-  over a replica session; nothing agent-controlled runs there;
-- **leaf runtimes** are disposable package processes, started on demand
-  and reaped freely (scheduled after the JVM system is solid, O10);
-- the **browser** receives static assets and morphed HTML only.
+1. **Process.** Start reads a closed, tiny bootstrap config (store
+   path, prepl bind, log dir — nothing the database could own) and
+   opens its REPL at second zero. Identity is (cluster-name, pid,
+   start-instant); every path derives from the cluster name.
+2. **Store.** Each cluster is one Datahike store
+   (`data/clusters/<name>/`), opened in-process (`:self` writer) under
+   a lifetime `flock`. Datahike's writer is its own serial loop per
+   connection — we never build writers, we call `transact` and it
+   serializes. Exactly one live write connection per store (two JVMs on
+   one store once destroyed 40/40 commits silently); one JVM may host
+   many clusters, and nothing may assume "the" cluster. Clusters share
+   no mutable state — reset one, the others never notice.
+3. **Facts.** A config manifest reconciles into database facts;
+   runtime reads the database, never files or env vars. A new cluster
+   forks the shared bootstrap ancestor (indexed code + initialization
+   pages) — near-instant, never a re-index. Clusters always RESET to
+   current code and pages; there is no data migration.
+4. **Flow.** Per cluster, one `core.async.flow` graph of a few
+   long-lived procs (run loop, render, fault committer), derived from
+   facts at a basis. The process root owns one bounded `:compute`
+   executor and one `:io` executor shared by every graph.
 
-All coordination is database data; any process may die at any time and a
-survivor resumes from receipts. Clusters always RESET to the latest code
-and schema — never data migration.
+**Live update is two cases, one mechanism each.** Graph definitions
+reference transforms as vars (`#'f`), so re-evaluating a `defn` against
+the running system changes proc behavior immediately — zero restart.
+Topology changes (procs, conns, buffers) rebuild the graph — stop →
+`create-flow` → start, measured ~0.3 ms — which is safe because
+channels carry only disposable values; all durable work re-derives from
+database facts.
 
-**Never say "claimant".** It is a Seon coinage with no basis in Datahike
-or anywhere else. The process that holds a run is
-`:seon.agent.run/process`, grounded on both sides:
-`script/seon/dev/process.clj` (process record, generation, (pid,
-start-instant) identity) ↔ JDK `ProcessHandle`.
+**Crash model: nothing re-executes.** Recovery = reopen the store, mark
+dangling receipts `:interrupted`, re-derive the graph; the agent adapts
+from derived context. Runs are claimable database state (CAS + epoch +
+lease + receipts held on `:seon.agent.run/process` — never say
+"claimant").
 
-Sci containment catches model mistakes; it is not a security boundary.
-Isolation comes from processes and the database capability surface. Seon
-is the core: consumer-specific UI, vendor integrations, and domain
-models belong in downstream repositories, never `src/`, `docs/`, or
-`pod-host/`.
+**Errors are two classes, never mixed.** An agent mistake becomes a flat
+`:seon.error` value the agent sees — nothing throws into the loop, and
+sci containment catches mistakes but is not a security boundary. A core
+fault rides flow's error-chan into the fault-committer proc, which
+commits it as a durable fact with provenance — so "who should fix this"
+is a query. One config dial: dev panics, prod degrades.
+
+**Scheduling is core.async's own enum, derived never declared.**
+`:compute` = bounded ≈ cores, must never block — sci evals run here on
+platform threads under the one `:interrupt-fn`; `:io` = blocking
+transport (model calls, SSE writes), must never compute; `:mixed` =
+fail-closed default for code the graph cannot resolve.
+
+Deeper: `docs/prds/sci-execution-runtime/plan/handbook.md` (the
+construction discipline), plan `README.md` (rulings + ladder), research
+docs `flow-per-cluster-2026-07-27.md`,
+`datahike-multistore-2026-07-27.md`, `flow-dynamic-update-2026-07-27.md`
+(every claim above carries file:line evidence there), and the sources
+themselves: `reference-code/core.async/.../flow.clj` + `flow/impl.clj` +
+`flow/spi.clj`, `reference-code/datahike/src/datahike/writer.cljc` +
+`writing.cljc`, `reference-code/konserve/`.
+
+Gotchas: the `flock` is ours — nothing in Datahike stops a second
+process opening the same store; `listen!` fires on transact only, so
+register interest before deriving current work; never block a
+`:compute` thread or compute on `:io`.
+
+Seon is the core: consumer-specific UI, vendor integrations, and domain
+models belong in downstream repositories, never `src/` or `docs/`.
 
 ## Portable code, platform edges, and SCI
 
