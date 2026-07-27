@@ -62,7 +62,10 @@
                   (not= lock dir)
                   ;; a sibling, never inside the store directory
                   (not (str/starts-with? lock (str dir "/")))
-                  (= lock (store/lock-file dir)))))
+                  (= lock (store/lock-file dir))
+                  ;; every spelling of one physical directory yields
+                  ;; the ONE lock file — two spellings, one fence
+                  (= lock (store/lock-file (str "./" dir))))))
          :seed 20260727)]
     (is (true? (:result check))
         (str "lock-file derivation failed: " (pr-str check)))))
@@ -70,7 +73,11 @@
 (deftest configuration-is-the-one-shape
   (let [configuration (store/datahike-configuration "tmp/x/store")]
     (is (= :file (get-in configuration [:store :backend])))
-    (is (= "tmp/x/store" (get-in configuration [:store :path])))
+    (is (= (.getCanonicalPath (io/file "tmp/x/store"))
+           (get-in configuration [:store :path]))
+        "the path is canonical: every spelling is the ONE store")
+    (is (= configuration
+           (store/datahike-configuration "./tmp/x/store")))
     (is (= :write (:schema-flexibility configuration)))))
 
 ;;; ---------------------------------------------------------------------------

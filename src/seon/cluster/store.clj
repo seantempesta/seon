@@ -66,9 +66,14 @@
 (schema/register! :seon.store/lock-file [:string {:min 1}])
 
 (defn connection?
-  "True for a live Datahike connection."
+  "True for a live (unreleased) Datahike connection.
+  Grounded in the fork's own connection spec: a datahike.connector
+  Connection whose wrapped state is not `:released`
+  (reference-code/datahike/src/datahike/connector.cljc:104)."
   [value]
-  (some? (:conn (meta value))))
+  (and (instance? datahike.connector.Connection value)
+       (some? (:wrapped-atom value))
+       (not= @(:wrapped-atom value) :released)))
 
 (defn file-lock?
   "True for a held java.nio.channels.FileLock."
@@ -97,7 +102,10 @@
 
 (defn lock-file
   "The store's lock-file path.
-  A sibling of the store directory (`<store-dir>.lock`) so it never enters Konserve's key namespace.
+  A sibling of the CANONICAL store directory (`<canonical>.lock`) so it
+  never enters Konserve's key namespace, and so every spelling of one
+  physical directory (relative, `./`-prefixed, absolute) yields the ONE
+  lock file — two spellings must never hold two locks on one store.
   One derivation — no other code builds this path."
   {:malli/schema [:=> [:cat :seon.store/dir] :seon.store/lock-file]}
   [store-dir]
@@ -105,8 +113,10 @@
 
 (defn datahike-configuration
   "The one Datahike configuration for a cluster store.
-  `:file` backend at `store-dir`, `:self` writer, write-time schema flexibility. Pure
-  data — the single place the configuration shape lives."
+  `:file` backend at the CANONICAL path of `store-dir` (the store id
+  derives from the path, so every spelling of one physical directory
+  must be the ONE store), write-time schema flexibility. Pure data —
+  the single place the configuration shape lives."
   {:malli/schema [:=> [:cat :seon.store/dir] [:map]]}
   [store-dir]
   {:store {:backend :file
