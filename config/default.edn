@@ -4,12 +4,12 @@
  ; submitter and loses no work.
  :seon.config.flow.compute/queue-depth 10
 
- ; Unit: simultaneously executing compute submissions.
- ; Calibration: 2026-07-25 measurements recorded 18 available processors;
- ; 22 concurrent evals therefore queued 4, with 71 ms maximum wait and
- ; 88 ms total. This literal is the measured current default, not a code
- ; fallback.
- :seon.config.flow.compute/concurrency 18
+ ; :seon.config.flow.compute/concurrency is deliberately ABSENT here:
+ ; its default is COMPUTED at (seon.config/defaults) — the machine's
+ ; available processors — because a shipped literal is only ever right
+ ; on the machine that shipped it. A manifest may override with an
+ ; explicit integer. (Calibration context: 2026-07-25 measured 18 cores
+ ; here; 22 concurrent evals queued 4 with 71 ms max wait.)
 
  ; Unit: categorical core-fault disposition.
  ; Provenance: the 2026-07-27 error ruling requires development to fail

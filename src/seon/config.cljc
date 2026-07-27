@@ -1,8 +1,11 @@
 (ns seon.config
   "Database configuration contracts: one manifest, one singleton row.
 
-  CONTRACT DRAFT (2026-07-27, B2). Implementations are deliberately absent
-  until the orchestrator seals this namespace with its suites.
+  CONTRACT LAYER (drafted 2026-07-27, ORCHESTRATOR-SEALED same day —
+  one revision at seal: the machine-derived concurrency default moved
+  from a shipped literal into `defaults`' computed half). The
+  implementation lane fills the stub bodies until the sealed suites
+  are green and may not loosen a schema or a test.
 
   `config/default.edn` is THE defaults document. It is complete and explicit;
   user manifests are override maps whose absent keys inherit that document.
@@ -34,7 +37,13 @@
   "seon.db.process/config")
 
 (defn defaults
-  "The complete manifest from THE shipped defaults document."
+  "The complete default manifest — THE defaults document.
+  The static half is `config/default.edn` (every constant with units
+  and provenance); the computed half fills machine-derived dials —
+  `:seon.config.flow.compute/concurrency` = available processors —
+  because a shipped literal is only right on the machine that shipped
+  it. The returned manifest is COMPLETE: every registered dial has a
+  value."
   {:malli/schema [:=> [:cat] :seon.config/manifest]}
   []
   (throw (ex-info "awaits implementation" {::fn `defaults})))
