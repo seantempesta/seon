@@ -349,6 +349,28 @@ resolve-loads-owner), notice carries reason + projection keys
 (derived), fault.edn merged into error.edn (and its bare-ref
 message/about defect caught+fixed in-draft). All seven taste calls
 ruled as drafted. Gate 198/822 with exactly 33 stub errors.
+STEP 1 GREEN (44435f07b + seal revisions 74a8efb08 + ui.md accretion
+de59da156; gate 199/873/0 INDEPENDENTLY VERIFIED): normalizer +
+router implemented; the agent read ACTUAL outputs and fixed two
+things tests missed (root-cause prose over the wrapper word;
+capped? = elided-or-truncated asserted both halves); the ai prose
+sample ends "Nothing will retry this for you: read error err-7f21
+and decide from the current facts." OWNER RULINGS (night): boot =
+live agent host with ZERO token cost (loop armed-idle; agents are
+ROWS not processes — root agent seeded free at boot; models called
+only on real triggers); two-cluster live proof right after step 2;
+CONCURRENT AGENTS PER CLUSTER is the target end state — "the
+database is the intermediary... design it correctly with flow and it
+should just work" — safe dial-bounded version first, measured;
+one-user-per-workspace, maybe multiple. IN FLIGHT (three): the error
+agent lands STEP 2 (fault consumer at boot + root seed + armed-idle
+graph install + store/refusal move + D1/D3); sol
+turn-dispatcher-design docs the end-state loop-as-dispatcher
+(per-agent serial fence, concurrency dial, measurement plan); the N4
+agent drafts render-pipeline contracts (first visible proof = the
+PROBLEMS PAGE in a browser; adopted recommendations listed for owner
+veto at seal). THEN: two-cluster proof; projection-review experiment;
+steps 3-5. Earlier step-1 note follows:
 IN FLIGHT: the same agent applies authorized seal revisions
 (:seon.config.fault/*→error dial rename across five files; admit
 record {:optional true}; ui.md accretion drafted as a SEPARATE commit
