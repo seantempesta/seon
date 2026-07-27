@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, runtime, testing, database]
 ---
@@ -55,3 +55,23 @@ projection in `test/seon/cluster/run_test.clj`.
   `src/seon/cluster/run.cljc:426-474` currently owns recovery only, so N3 must
   add absent→`:running` and `:running`→terminal transitions plus the model
   projection before this can close.
+
+## Closed 2026-07-27
+
+`seon.cluster.run` now owns `receipt-start-tx` and `receipt-settle-tx` as
+transactions-as-transitions. Start requires an absent receipt and the run's
+exact current epoch; settlement requires that same epoch and a currently
+`:running` receipt. Identity derives from run id, ordinal, and epoch, so a
+terminal receipt cannot restart or change outcome.
+
+The run loop commits start before evaluation and settlement atomically with
+any disposition. The seeded state-machine model independently queries and
+compares every receipt's identity, run, ordinal, epoch, and status after every
+command. Its generated commands cover duplicate starts, duplicate and
+conflicting settlements, stale epochs, recovery, and expired takeover.
+
+Evidence:
+
+- `bin/test seon.cluster.run-test seon.cluster.loop-test
+  seon.cluster.turn-test` → 25 tests / 126 assertions / 0 failures / 0 errors.
+- `bin/test` → 169 tests / 773 assertions / 0 failures / 0 errors.

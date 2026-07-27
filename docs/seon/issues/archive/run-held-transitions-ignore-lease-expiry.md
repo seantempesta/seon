@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, runtime, database, testing]
 ---
@@ -49,3 +49,22 @@ The `seon.cluster.run/held-run` transition family and its model oracle.
   still accepts no `::now` and reads no `::lease-until`; heartbeat, release,
   close, and plan requests at `:285-405` therefore still permit an expired
   holder.
+
+## Closed 2026-07-27
+
+`held-run` now requires the request's first-party `::now` and refuses
+`::lease-expired` unless the exact process and epoch still hold a live lease.
+Heartbeat, release, close, and plan make `::now` mandatory.
+
+The run-loop pass creates one instant and threads that same value through
+next-work, plan, receipt settlement, release, and close; no transition reads
+the wall clock. The seeded state machine includes an expired takeover followed
+by the old holder's stale heartbeat, and the focused regression independently
+proves all four expired-holder transitions refuse without changing durable
+custody.
+
+Evidence:
+
+- `bin/test seon.cluster.run-test seon.cluster.loop-test
+  seon.cluster.turn-test` → 25 tests / 126 assertions / 0 failures / 0 errors.
+- `bin/test` → 169 tests / 773 assertions / 0 failures / 0 errors.

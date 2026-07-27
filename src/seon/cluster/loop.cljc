@@ -131,29 +131,24 @@
   disposition's own facts (close + completion message, or release) ride
   in this same commit — one transaction, no torn window. When it does
   not, this is the receipt alone."
-  {:malli/schema [:=> [:cat :seon.cluster.loop/terminal-request]
+  {:malli/schema [:=> [:cat :seon.cluster.loop/terminal-request :inst]
                   [:vector :some]]}
   [{:keys [:seon.cluster.run/id :seon.cluster.run/process
            :seon.cluster.run/claim-epoch :seon.cluster.run.form/ordinal
            :seon.cluster.eval/status :seon.cluster.eval/result-edn
            :seon.cluster.eval/error :seon.cluster.eval/output
-           :my.run/value]}]
-  (let [receipt (cond-> {:seon.cluster.eval/id
-                         ;; identity is DERIVED from (run, ordinal, epoch),
-                         ;; so a re-run of the same step cannot mint a
-                         ;; second receipt for one form
-                         (pr-str [id ordinal claim-epoch])
-                         :seon.cluster.eval/run [:seon.cluster.run/id id]
+           :my.run/value]}
+   now]
+  (let [receipt (cond-> {:seon.cluster.run/id id
+                         :seon.cluster.run/claim-epoch claim-epoch
                          :seon.cluster.eval/ordinal ordinal
-                         :seon.cluster.eval/claim-epoch claim-epoch
-                         :seon.cluster.eval/at (Date.)
                          :seon.cluster.eval/status status}
                   result-edn (assoc :seon.cluster.eval/result-edn result-edn)
                   error (assoc :seon.cluster.eval/error error)
                   ;; what the form printed is evidence, and evidence is
                   ;; durable or it is nothing
                   output (assoc :seon.cluster.eval/output output))]
-    (into [receipt]
+    (into (run/receipt-settle-tx receipt)
           ;; ONE transaction: the disposition's own transition rides
           ;; here, so the receipt and what it means are never two
           ;; commits with a window between them.
@@ -161,10 +156,12 @@
             :completed (run/close-tx {:seon.cluster.run/id id
                                       :seon.cluster.run/process process
                                       :seon.cluster.run/claim-epoch claim-epoch
-                                      :seon.cluster.run/closed-at (Date.)})
+                                      :seon.cluster.run/closed-at now
+                                      :seon.cluster.run/now now})
             :wait (run/release-tx {:seon.cluster.run/id id
                                    :seon.cluster.run/process process
-                                   :seon.cluster.run/claim-epoch claim-epoch})
+                                   :seon.cluster.run/claim-epoch claim-epoch
+                                   :seon.cluster.run/now now})
             nil))))
 
 ;;; ---------------------------------------------------------------------------
@@ -242,16 +239,18 @@
   ([state _input-id _message]
    (let [cluster (:seon.cluster.loop/cluster state)
          connection (:seon.store/branch-connection cluster)
+         now (Date.)
          request {:seon.cluster.run/process
                   (:seon.cluster.run/process cluster)
-                  :seon.cluster.work/now (Date.)}
+                  :seon.cluster.work/now now}
          ;; ONE database value for the whole pass: everything this pass
          ;; decides, it decides against one basis
          work (work/next-work @connection request)]
      (if (nil? work)
        [state nil]
        (let [report (turn {:seon.cluster.loop/cluster cluster
-                           :seon.cluster.work/next work})]
+                           :seon.cluster.work/next work}
+                          now)]
          ;; self-rewake, coalescing on the (sliding-buffer 1) in-port:
          ;; it cannot recurse, because the pass is only re-entered after
          ;; this transform returns
@@ -269,9 +268,10 @@
   Every failure inside it is a VALUE: a model error, an unreadable
   reply, and a refused transaction each end the turn with facts the
   agent reads on its next wake. Nothing throws into the loop."
-  {:malli/schema [:=> [:cat :seon.cluster.loop/turn-request]
+  {:malli/schema [:=> [:cat :seon.cluster.loop/turn-request :inst]
                   :seon.cluster.loop/turn-report]}
-  [{:keys [:seon.cluster.loop/cluster] work :seon.cluster.work/next}]
+  [{:keys [:seon.cluster.loop/cluster] work :seon.cluster.work/next}
+   now]
   (let [connection (:seon.store/branch-connection cluster)
         process (:seon.cluster.run/process cluster)
         agent-id (:seon.cluster.agent/id work)
@@ -289,7 +289,6 @@
       ;; answeredness needs no flag.
       :open
       (let [id (str (random-uuid))
-            now (Date.)
             outcome (store/transact!
                      connection
                      {:tx-data
@@ -329,7 +328,8 @@
                                :seon.cluster.run/process process
                                :seon.cluster.run/claim-epoch
                                (:seon.cluster.run/claim-epoch run)
-                               :seon.cluster.run/closed-at (Date.)})))
+                               :seon.cluster.run/closed-at now
+                               :seon.cluster.run/now now})))
                       (report :error 0)))
             text (prompt/prompt @connection
                                 {:seon.cluster.agent/id agent-id
@@ -355,7 +355,8 @@
                                (:seon.cluster.run/claim-epoch run)
                                :seon.cluster.run/plan-digest
                                (digest sources)
-                               :seon.cluster.run/sources sources}))]
+                               :seon.cluster.run/sources sources
+                               :seon.cluster.run/now now}))]
                 (report (if (:seon.error/kind outcome) :error :released) 0))))))
 
       ;; THE FOLD, in one turn, over ONE ctx. sci's fork copies the env,
@@ -376,55 +377,64 @@
             ctx (sci/fork (sci.eval/base))]
         (loop [ordinal (:seon.cluster.run.form/ordinal work)
                ran 0]
-          (let [source (form-source @connection run-id ordinal)
-                evaluation (evaluate
-                            {:seon.cluster.run.form/source source
-                             :seon.sci.admit/caps
-                             (:seon.sci.admit/caps cluster)
-                             :seon.sci.eval/ctx ctx
-                             :seon.cluster.agent/id agent-id
-                             :seon.sci.eval/time-limit-ms
-                             (:seon.config.eval/time-limit-ms cluster)
-                             :seon.config/on-core-error
-                             (:seon.config/on-core-error cluster)})
-                settled (disposition (:seon.sci.admit/value evaluation))
-                outcome (store/transact!
+          (let [started (store/transact!
                          connection
-                         (terminal-tx
-                          (cond-> {:seon.cluster.run/id run-id
-                                   :seon.cluster.run/process process
-                                   :seon.cluster.run/claim-epoch epoch
-                                   :seon.cluster.run.form/ordinal ordinal
-                                   :seon.cluster.eval/status
-                                   (:seon.cluster.eval/status evaluation)}
-                            (:seon.cluster.eval/result-edn evaluation)
-                            (assoc :seon.cluster.eval/result-edn
-                                   (:seon.cluster.eval/result-edn evaluation))
-                            (:seon.cluster.eval/error evaluation)
-                            (assoc :seon.cluster.eval/error
-                                   (:seon.cluster.eval/error evaluation))
-                            (:seon.cluster.eval/output evaluation)
-                            (assoc :seon.cluster.eval/output
-                                   (:seon.cluster.eval/output evaluation))
-                            settled
-                            (assoc :my.run/value settled))))
-                ran (inc ran)
-                next-ordinal (when-not (or settled (:seon.error/kind outcome))
-                               (:seon.cluster.run.form/ordinal
-                                (work/next-work @connection
-                                                {:seon.cluster.run/process
-                                                 process
-                                                 :seon.cluster.work/now
-                                                 (Date.)})))]
-            (cond
-              (:seon.error/kind outcome) (report :error ran)
-              settled (report (if (= :completed
-                                     (:my.run/disposition settled))
-                                :closed
-                                :released)
-                              ran)
-              next-ordinal (recur next-ordinal ran)
-              :else (report :released ran)))))
+                         (run/receipt-start-tx
+                          {:seon.cluster.run/id run-id
+                           :seon.cluster.run/claim-epoch epoch
+                           :seon.cluster.eval/ordinal ordinal
+                           :seon.cluster.eval/at now}))]
+            (if (:seon.error/kind started)
+              (report :error ran)
+              (let [source (form-source @connection run-id ordinal)
+                    evaluation (evaluate
+                                {:seon.cluster.run.form/source source
+                                 :seon.sci.admit/caps
+                                 (:seon.sci.admit/caps cluster)
+                                 :seon.sci.eval/ctx ctx
+                                 :seon.cluster.agent/id agent-id
+                                 :seon.sci.eval/time-limit-ms
+                                 (:seon.config.eval/time-limit-ms cluster)
+                                 :seon.config/on-core-error
+                                 (:seon.config/on-core-error cluster)})
+                    settled (disposition (:seon.sci.admit/value evaluation))
+                    outcome (store/transact!
+                             connection
+                             (terminal-tx
+                              (cond-> {:seon.cluster.run/id run-id
+                                       :seon.cluster.run/process process
+                                       :seon.cluster.run/claim-epoch epoch
+                                       :seon.cluster.run.form/ordinal ordinal
+                                       :seon.cluster.eval/status
+                                       (:seon.cluster.eval/status evaluation)}
+                                (:seon.cluster.eval/result-edn evaluation)
+                                (assoc :seon.cluster.eval/result-edn
+                                       (:seon.cluster.eval/result-edn evaluation))
+                                (:seon.cluster.eval/error evaluation)
+                                (assoc :seon.cluster.eval/error
+                                       (:seon.cluster.eval/error evaluation))
+                                (:seon.cluster.eval/output evaluation)
+                                (assoc :seon.cluster.eval/output
+                                       (:seon.cluster.eval/output evaluation))
+                                settled
+                                (assoc :my.run/value settled))
+                              now))
+                    ran (inc ran)
+                    next-ordinal
+                    (when-not (or settled (:seon.error/kind outcome))
+                      (:seon.cluster.run.form/ordinal
+                       (work/next-work @connection
+                                       {:seon.cluster.run/process process
+                                        :seon.cluster.work/now now})))]
+                (cond
+                  (:seon.error/kind outcome) (report :error ran)
+                  settled (report (if (= :completed
+                                         (:my.run/disposition settled))
+                                    :closed
+                                    :released)
+                                  ran)
+                  next-ordinal (recur next-ordinal ran)
+                  :else (report :released ran)))))))
 
       ;; the fold is done and nothing said otherwise: close it, so the
       ;; agent stops being busy
@@ -436,5 +446,6 @@
                                     :seon.cluster.run/process process
                                     :seon.cluster.run/claim-epoch
                                     (:seon.cluster.run/claim-epoch run)
-                                    :seon.cluster.run/closed-at (Date.)}))]
+                                    :seon.cluster.run/closed-at now
+                                    :seon.cluster.run/now now}))]
         (report (if (:seon.error/kind outcome) :error :closed) 0)))))

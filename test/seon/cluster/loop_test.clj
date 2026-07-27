@@ -29,6 +29,9 @@
 ;;; The pure parts
 ;;; ---------------------------------------------------------------------------
 
+(def ^:private now (Date. 1700000000000))
+(def ^:private process "process/one")
+
 (deftest the-committed-set-is-computed-and-covers-what-the-loop-writes
   (let [committed (cluster.loop/committed-attributes)]
     (is (set? committed))
@@ -57,9 +60,10 @@
               :seon.cluster.run.form/ordinal 0
               :seon.cluster.eval/status :done
               :seon.cluster.eval/result-edn "1"}
-        without (cluster.loop/terminal-tx base)
+        without (cluster.loop/terminal-tx base now)
         with (cluster.loop/terminal-tx
-              (assoc base :my.run/value (my.run/complete "all done")))]
+              (assoc base :my.run/value (my.run/complete "all done"))
+              now)]
     (is (vector? without))
     (is (seq without) "a receipt is always written")
     (testing "the disposition rides in the SAME tx-data, never a second one"
@@ -69,10 +73,11 @@
                       (= :db.fn/call (first %)))
                 with)
           "and it goes through a transition, so the run's own fence
-           applies to the close as much as to the claim"))))
-
-(def ^:private now (Date. 1700000000000))
-(def ^:private process "process/one")
+           applies to the close as much as to the claim")
+      (is (= [now]
+             (keep (comp :seon.cluster.run/now last)
+                   with))
+          "the close receives the exact pass instant, not a second clock"))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; THE CLASS-KILLER: what boot installs must cover what the loop writes

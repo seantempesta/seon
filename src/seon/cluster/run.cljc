@@ -174,10 +174,11 @@
   "The run's current facts when `request` names its exact live custody.
   The shared fence of heartbeat/release/close/plan: the run must exist,
   be open, and be held by exactly `::process` at exactly
-  `::claim-epoch`. Refuses otherwise — a displaced or stale holder never
-  resurrects custody by asserting it."
+  `::claim-epoch` under a lease live at the supplied `::now`. Refuses
+  otherwise — an expired, displaced, or stale holder never resurrects
+  custody by asserting it."
   [db transition request]
-  (let [{::keys [id process claim-epoch]} request
+  (let [{::keys [id process claim-epoch now]} request
         run (current-run db id)]
     (cond
       (nil? run) (refuse! transition ::no-such-run request)
@@ -187,6 +188,9 @@
 
       (not= claim-epoch (::claim-epoch run))
       (refuse! transition ::stale-epoch request)
+
+      (not (claimed? run now))
+      (refuse! transition ::lease-expired request)
 
       :else run)))
 
@@ -203,7 +207,7 @@
 ;; the var, so redefining a transition against the running system updates
 ;; behavior immediately — the flow-dynamics live-update pattern.
 (declare claim-call heartbeat-call release-call close-call plan-call
-         open-call)
+         open-call receipt-start-call receipt-settle-call)
 
 (defn open-call
   "Open one run for an agent, inside the transaction.
@@ -288,7 +292,8 @@
                              [::id ::id]
                              [::process ::process]
                              [::claim-epoch ::claim-epoch]
-                             [::lease-until ::lease-until]]]
+                             [::lease-until ::lease-until]
+                             [::now :inst]]]
                   [:vector :some]]}
   [request]
   [[:db.fn/call #'heartbeat-call request]])
@@ -303,7 +308,8 @@
                         [::id ::id]
                         [::process ::process]
                         [::claim-epoch ::claim-epoch]
-                        [::lease-until ::lease-until]]]
+                        [::lease-until ::lease-until]
+                        [::now :inst]]]
                   [:vector :some]]}
   [db request]
   (let [run (held-run db `heartbeat-call request)]
@@ -314,7 +320,8 @@
   {:malli/schema [:=> [:cat [:map {:closed true}
                              [::id ::id]
                              [::process ::process]
-                             [::claim-epoch ::claim-epoch]]]
+                             [::claim-epoch ::claim-epoch]
+                             [::now :inst]]]
                   [:vector :some]]}
   [request]
   [[:db.fn/call #'release-call request]])
@@ -327,7 +334,8 @@
                        [:map {:closed true}
                         [::id ::id]
                         [::process ::process]
-                        [::claim-epoch ::claim-epoch]]]
+                        [::claim-epoch ::claim-epoch]
+                        [::now :inst]]]
                   [:vector :some]]}
   [db request]
   (retract-custody (held-run db `release-call request)))
@@ -338,7 +346,8 @@
                              [::id ::id]
                              [::process ::process]
                              [::claim-epoch ::claim-epoch]
-                             [::closed-at ::closed-at]]]
+                             [::closed-at ::closed-at]
+                             [::now :inst]]]
                   [:vector :some]]}
   [request]
   [[:db.fn/call #'close-call request]])
@@ -358,7 +367,8 @@
                         [::id ::id]
                         [::process ::process]
                         [::claim-epoch ::claim-epoch]
-                        [::closed-at ::closed-at]]]
+                        [::closed-at ::closed-at]
+                        [::now :inst]]]
                   [:vector :some]]}
   [db request]
   (let [run (held-run db `close-call request)
@@ -380,7 +390,8 @@
                              [::process ::process]
                              [::claim-epoch ::claim-epoch]
                              [::plan-digest ::plan-digest]
-                             [::sources [:vector [:string {:min 1}]]]]]
+                             [::sources [:vector [:string {:min 1}]]]
+                             [::now :inst]]]
                   [:vector :some]]}
   [request]
   [[:db.fn/call #'plan-call request]])
@@ -398,7 +409,8 @@
                         [::process ::process]
                         [::claim-epoch ::claim-epoch]
                         [::plan-digest ::plan-digest]
-                        [::sources [:vector [:string {:min 1}]]]]]
+                        [::sources [:vector [:string {:min 1}]]]
+                        [::now :inst]]]
                   [:vector :some]]}
   [db request]
   (let [{::keys [id plan-digest sources]} request
@@ -432,6 +444,132 @@
                   [:vector :some]]}
   [request]
   [[:db.fn/call #'open-call request]])
+
+(defn- current-receipt
+  "The receipt identified by run, ordinal, and epoch, or nil."
+  [db id ordinal claim-epoch]
+  (d/pull db '[*]
+          [:seon.cluster.eval/id (pr-str [id ordinal claim-epoch])]))
+
+(defn- receipt-run
+  "The open run at the receipt request's exact epoch, or refuse."
+  [db transition request]
+  (let [{::keys [id claim-epoch]} request
+        run (current-run db id)]
+    (cond
+      (nil? run) (refuse! transition ::no-such-run request)
+      (not (open? run)) (refuse! transition ::run-closed request)
+      (not= claim-epoch (::claim-epoch run))
+      (refuse! transition ::stale-epoch request)
+      :else run)))
+
+(defn receipt-start-tx
+  "Transaction data starting one absent receipt at `:running`."
+  {:malli/schema
+   [:=> [:cat [:map {:closed true}
+               [::id ::id]
+               [::claim-epoch ::claim-epoch]
+               [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
+               [:seon.cluster.eval/at :seon.cluster.eval/at]]]
+    [:vector :some]]}
+  [request]
+  [[:db.fn/call #'receipt-start-call request]])
+
+(defn receipt-start-call
+  "Start one receipt, inside the transaction.
+  The receipt must be absent and its epoch must be the run's exact
+  current epoch. Identity derives from run, ordinal, and epoch."
+  {:malli/schema
+   [:=> [:cat :any
+         [:map {:closed true}
+          [::id ::id]
+          [::claim-epoch ::claim-epoch]
+          [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
+          [:seon.cluster.eval/at :seon.cluster.eval/at]]]
+    [:vector :some]]}
+  [db request]
+  (let [{::keys [id claim-epoch]
+         :seon.cluster.eval/keys [ordinal at]} request
+        run (receipt-run db `receipt-start-call request)
+        receipt-id (pr-str [id ordinal claim-epoch])]
+    (when (some? (current-receipt db id ordinal claim-epoch))
+      (refuse! `receipt-start-call ::receipt-exists request))
+    [{:seon.cluster.eval/id receipt-id
+      :seon.cluster.eval/run (:db/id run)
+      :seon.cluster.eval/ordinal ordinal
+      :seon.cluster.eval/claim-epoch claim-epoch
+      :seon.cluster.eval/at at
+      :seon.cluster.eval/status :running}]))
+
+(defn receipt-settle-tx
+  "Transaction data settling one running receipt exactly once."
+  {:malli/schema
+   [:=> [:cat
+         [:map {:closed true}
+          [::id ::id]
+          [::claim-epoch ::claim-epoch]
+          [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
+          [:seon.cluster.eval/status
+           [:enum :done :error :interrupted]]
+          [:seon.cluster.eval/result-edn {:optional true}
+           :seon.cluster.eval/result-edn]
+          [:seon.cluster.eval/error {:optional true}
+           :seon.cluster.eval/error]
+          [:seon.cluster.eval/output {:optional true}
+           :seon.cluster.eval/output]]]
+    [:vector :some]]}
+  [request]
+  [[:db.fn/call #'receipt-settle-call request]])
+
+(defn receipt-settle-call
+  "Settle one running receipt, inside the transaction.
+  The run and receipt must both name the request's exact current epoch;
+  a terminal receipt never returns to running or changes outcome."
+  {:malli/schema
+   [:=> [:cat :any
+         [:map {:closed true}
+          [::id ::id]
+          [::claim-epoch ::claim-epoch]
+          [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
+          [:seon.cluster.eval/status
+           [:enum :done :error :interrupted]]
+          [:seon.cluster.eval/result-edn {:optional true}
+           :seon.cluster.eval/result-edn]
+          [:seon.cluster.eval/error {:optional true}
+           :seon.cluster.eval/error]
+          [:seon.cluster.eval/output {:optional true}
+           :seon.cluster.eval/output]]]
+    [:vector :some]]}
+  [db request]
+  (let [{::keys [id claim-epoch]
+         :seon.cluster.eval/keys [ordinal status]} request
+        run (receipt-run db `receipt-settle-call request)
+        receipt (current-receipt db id ordinal claim-epoch)]
+    (cond
+      (nil? receipt)
+      (refuse! `receipt-settle-call ::no-such-receipt request)
+
+      (not= (:db/id run) (:db/id (:seon.cluster.eval/run receipt)))
+      (refuse! `receipt-settle-call ::receipt-run-mismatch request)
+
+      (not= ordinal (:seon.cluster.eval/ordinal receipt))
+      (refuse! `receipt-settle-call ::receipt-ordinal-mismatch request)
+
+      (not= claim-epoch (:seon.cluster.eval/claim-epoch receipt))
+      (refuse! `receipt-settle-call ::stale-receipt-epoch request)
+
+      (not= :running (:seon.cluster.eval/status receipt))
+      (refuse! `receipt-settle-call ::receipt-terminal request))
+    (cond-> [[:db/add (:db/id receipt) :seon.cluster.eval/status status]]
+      (:seon.cluster.eval/result-edn request)
+      (conj [:db/add (:db/id receipt) :seon.cluster.eval/result-edn
+             (:seon.cluster.eval/result-edn request)])
+      (:seon.cluster.eval/error request)
+      (conj [:db/add (:db/id receipt) :seon.cluster.eval/error
+             (:seon.cluster.eval/error request)])
+      (:seon.cluster.eval/output request)
+      (conj [:db/add (:db/id receipt) :seon.cluster.eval/output
+             (:seon.cluster.eval/output request)]))))
 
 (defn recover-tx
   "Boot recovery for one run against dead-process facts.

@@ -99,14 +99,16 @@
   [cluster limit]
   (let [connection (:seon.store/branch-connection cluster)]
     (loop [passes 0 reports []]
-      (let [work (work/next-work @connection (request connection))]
+      (let [request (request connection)
+            work (work/next-work @connection request)]
         (if (or (nil? work) (>= passes limit))
           reports
           (recur (inc passes)
                  (conj reports
                        (cluster.loop/turn
                         {:seon.cluster.loop/cluster cluster
-                         :seon.cluster.work/next work}))))))))
+                         :seon.cluster.work/next work}
+                        (:seon.cluster.work/now request)))))))))
 
 (deftest a-whole-turn-runs-a-REAL-sci-evaluation-end-to-end
   ;; the injection seam, proven: the same qualified symbol the cluster
