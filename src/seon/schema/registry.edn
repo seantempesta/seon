@@ -1,0 +1,8 @@
+{:seon.cluster.registry/branch-request [:map {:closed true} [:seon.store/store :seon.store/store] [:seon.cluster.registry/from :seon.cluster.registry/from] [:seon.store/branch :seon.store/branch]]
+ :seon.cluster.registry/branch-result [:map {:closed true} [:seon.store/branch :seon.store/branch] [:seon.cluster/created? :seon.cluster/created?]]
+ :seon.cluster.registry/cluster-request [:map {:closed true} [:seon.store/store :seon.store/store] [:seon.boot/cluster-name :seon.boot/cluster-name] [:seon.ancestor/branch :seon.ancestor/branch]]
+ :seon.cluster.registry/from [:or :keyword :uuid]
+ :seon.cluster.registry/retire-request [:map {:closed true} [:seon.store/store :seon.store/store] [:seon.store/branch :seon.store/branch]]
+ :seon.cluster.registry/roster [:set :keyword]
+ :seon.cluster.registry/swept [:int {:min 0}]
+ :seon.cluster/created? :boolean}

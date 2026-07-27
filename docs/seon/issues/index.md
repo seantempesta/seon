@@ -36,8 +36,9 @@ See `README.md` for the convention.
 | [And-wrapped secondary Datahike attribute is rejected](and-wrapped-secondary-datahike-attribute-is-rejected.md) | friction | Core |
 | [Keep the old source tree off Babashka's default classpath](babashka-default-classpath-exposes-src-old.md) | friction | general |
 
-## Cleanup (1)
+## Cleanup (2)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Give (pid, start-instant) liveness one owner](process-liveness-check-has-no-single-owner.md) | cleanup | general |
 | [Give Flow configuration dials one registration owner](flow-config-dials-have-two-registration-owners.md) | cleanup | Core |
