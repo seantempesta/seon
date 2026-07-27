@@ -11,6 +11,20 @@
  ; explicit integer. (Calibration context: 2026-07-25 measured 18 cores
  ; here; 22 concurrent evals queued 4 with 71 ms max wait.)
 
+ ; The eval result caps: how much of an agent value `seon.sci.admit`
+ ; projects into a receipt's result-edn. Units below; provenance: the
+ ; 2026-07-27 admission probes (tmp/n3-admission-probe/) — a naive
+ ; recursive walk dies at ~5000 depth and pr-str at ~20000, so the node
+ ; budget is the real bound and depth/width merely shape it.
+ ; Unit: nesting levels.
+ :seon.config.eval.result/max-depth 12
+ ; Unit: elements retained per collection.
+ :seon.config.eval.result/max-collection 64
+ ; Unit: characters retained per string.
+ :seon.config.eval.result/max-string 4096
+ ; Unit: total nodes visited across the whole projection.
+ :seon.config.eval.result/max-nodes 4096
+
  ; Unit: categorical core-fault disposition.
  ; Provenance: the 2026-07-27 error ruling requires development to fail
  ; loudly and production to degrade only by explicit configuration.

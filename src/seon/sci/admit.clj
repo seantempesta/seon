@@ -1,14 +1,27 @@
 (ns seon.sci.admit
   "Value admission: the ONE thing that leaves a sci evaluation.
 
-  DRAFT CONTRACT LAYER FOR ORCHESTRATOR SEAL (drafted 2026-07-27 — the
-  N3 rung's one genuinely new mechanism, ruled a small package of its
-  own landing BEFORE the run loop; grounded in
+  CONTRACT LAYER (drafted + ORCHESTRATOR-SEALED 2026-07-27 — the N3
+  rung's one genuinely new mechanism, ruled a small package of its own
+  landing BEFORE the run loop; grounded in
   research/n3-plan-2026-07-27.md §6.1, §10 row C7, §11 risk 1 and the
-  2026-07-27 late ruling). Nothing here is implemented: every body
-  throws `awaits implementation`. Once sealed, the implementation lane
-  fills the stubs until test/seon/sci/admit_test.clj is green and may
-  not loosen a schema or a test.
+  2026-07-27 late ruling). The implementation lane fills the stub
+  bodies until test/seon/sci/admit_test.clj is green and may not
+  loosen a schema or a test. Seal dispositions on the drafted taste
+  calls: the activation seam died at the gate itself
+  (seon.schema.edn `requiring-resolve`s a predicate's owner — the
+  computed rule, no boot require added); the four cap dials are wired
+  into :seon.config/manifest and config/default.edn; caps stay
+  CHARACTER counts (they are storage/projection bounds — the
+  tokens-for-display rule governs rendering, which converts, and is
+  untouched); the one projection (raw graph never escapes) and
+  sci.impl.types naming stand as drafted; diagnostics register here as
+  :seon.eval/* per the vocabulary table while receipt attributes stay
+  :seon.cluster.eval/* — the prefix unification is a queued rename
+  question, not this package's. OPEN OWNER QUESTION (reversible in one
+  line, drafted choice stands meanwhile): a projection failure is a
+  marker, never a dev-panic — hostile agent values are agent INPUT,
+  not system degradation, so R41's dev-panic dial does not fire here.
 
   THE ONE OPERATION. `admit` runs INSIDE the armed boundary, before
   disarm, and is the only door a value uses to leave. It realizes and

@@ -26,11 +26,20 @@
                [:seon.config.flow.compute/queue-depth
                 :seon.config.flow.compute/concurrency])
   (select-keys (schema-resource "seon/schema/boot.edn")
-               [:seon.boot/cluster-name])))
+               [:seon.boot/cluster-name])
+  (select-keys (schema-resource "seon/schema/admit.edn")
+               [:seon.config.eval.result/max-depth
+                :seon.config.eval.result/max-collection
+                :seon.config.eval.result/max-string
+                :seon.config.eval.result/max-nodes])))
 
 (def ^:private expected-dial-attributes
   #{:seon.config.flow.compute/queue-depth
     :seon.config.flow.compute/concurrency
+    :seon.config.eval.result/max-depth
+    :seon.config.eval.result/max-collection
+    :seon.config.eval.result/max-string
+    :seon.config.eval.result/max-nodes
     :seon.config/on-core-error})
 
 (def ^:private dial-attributes
@@ -51,6 +60,10 @@
    :seon.config/applied-manifest-digest
    :seon.config.flow.compute/queue-depth
    :seon.config.flow.compute/concurrency
+   :seon.config.eval.result/max-depth
+   :seon.config.eval.result/max-collection
+   :seon.config.eval.result/max-string
+   :seon.config.eval.result/max-nodes
    :seon.config/on-core-error])
 
 (defn- with-config-database
@@ -161,7 +174,10 @@
         row (first rows)]
     (is (= 1 (count rows)))
     (is (.equals "alpha" (:seon.config/cluster row)))
-    (is (= manifest (select-keys row dial-attributes)))
+    (is (= (merge (config/defaults) manifest)
+           (select-keys row dial-attributes))
+        "the row is the COMPLETE effective manifest — the override
+         merged over defaults, never the override alone")
     (is (re-matches #"[0-9a-f]{64}"
                     (:seon.config/applied-manifest-digest row)))
     (is (schema/valid-candidate-value? :seon.config/entity row))))

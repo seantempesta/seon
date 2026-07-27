@@ -234,6 +234,25 @@
         extra)
         file (assoc ::file file))))))
 
+(defn- predicate-registered?
+  "True when the `[:fn]` symbol names a registered core predicate,
+  loading its owner namespace first if needed. A qualified symbol
+  carries its owner; `requiring-resolve` loads that namespace, whose
+  load-time `register-core-predicate!` call registers the predicate —
+  the same symbols-as-data idiom as `:seon.ancestor/populate`. This is
+  the COMPUTED rule that removes load-order from admission: no
+  activation site needs to require every package whose EDN file names
+  a predicate. (Dormant cycle risk, stated: a predicate owner that
+  itself activates the population would recurse — `load!` does not
+  activate, so registering predicates at load time cannot cycle.)"
+  [predicate]
+  (and (qualified-symbol? predicate)
+       (or (schema/core-predicate-registered? predicate)
+           (and (some? (try
+                         (requiring-resolve predicate)
+                         (catch Throwable _ nil)))
+                (schema/core-predicate-registered? predicate)))))
+
 (defn- assert-predicates!
   [forms]
   (doseq [[identity definition] (sort-by key forms)
@@ -242,8 +261,7 @@
     (when-not honest-generator?
       (refusal! ::dishonest-generator identity definition
                 {::predicate predicate ::path path}))
-    (when-not (and (qualified-symbol? predicate)
-                   (schema/core-predicate-registered? predicate))
+    (when-not (predicate-registered? predicate)
       (refusal! ::unregistered-predicate identity definition
                 {::predicate predicate ::path path}))))
 

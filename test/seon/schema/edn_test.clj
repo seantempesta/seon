@@ -91,6 +91,23 @@
                    {:seon.schema.edn.gate/dangling
                     :seon.schema.edn.gate/nowhere}}))]
       (is (map? data))))
+  (testing "a [:fn] whose UNLOADED owner namespace registers the
+            predicate at load admits — the gate requiring-resolves the
+            owner instead of demanding load-order (nothing requires
+            seon.schema.edn-test-fixture; admission loads it)"
+    (is (vector?
+         (schema.edn/admit
+          {:seon.schema/forms
+           {:seon.schema.edn.gate/late
+            [:fn {:gen/schema :inst}
+             'seon.schema.edn-test-fixture/late-instant?]}}))))
+  (testing "a [:fn] in a namespace that does not exist still refuses"
+    (is (map? (refusal-data
+               #(schema.edn/admit
+                 {:seon.schema/forms
+                  {:seon.schema.edn.gate/phantom
+                   [:fn {:gen/schema :inst}
+                    'seon.schema.no-such-namespace/predicate?]}})))))
   (testing "a [:fn] naming no registered core predicate refuses"
     (is (map? (refusal-data
                #(schema.edn/admit

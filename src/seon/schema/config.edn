@@ -15,6 +15,18 @@
   [:seon.config.flow.compute/concurrency
    {:optional true}
    :seon.config.flow.compute/concurrency]
+  [:seon.config.eval.result/max-depth
+   {:optional true}
+   :seon.config.eval.result/max-depth]
+  [:seon.config.eval.result/max-collection
+   {:optional true}
+   :seon.config.eval.result/max-collection]
+  [:seon.config.eval.result/max-string
+   {:optional true}
+   :seon.config.eval.result/max-string]
+  [:seon.config.eval.result/max-nodes
+   {:optional true}
+   :seon.config.eval.result/max-nodes]
   [:seon.config/on-core-error
    {:optional true}
    :seon.config/on-core-error]]
@@ -25,6 +37,14 @@
    :seon.config.flow.compute/queue-depth]
   [:seon.config.flow.compute/concurrency
    :seon.config.flow.compute/concurrency]
+  [:seon.config.eval.result/max-depth
+   :seon.config.eval.result/max-depth]
+  [:seon.config.eval.result/max-collection
+   :seon.config.eval.result/max-collection]
+  [:seon.config.eval.result/max-string
+   :seon.config.eval.result/max-string]
+  [:seon.config.eval.result/max-nodes
+   :seon.config.eval.result/max-nodes]
   [:seon.config/on-core-error
    :seon.config/on-core-error]]
 
@@ -37,6 +57,14 @@
    :seon.config.flow.compute/queue-depth]
   [:seon.config.flow.compute/concurrency
    :seon.config.flow.compute/concurrency]
+  [:seon.config.eval.result/max-depth
+   :seon.config.eval.result/max-depth]
+  [:seon.config.eval.result/max-collection
+   :seon.config.eval.result/max-collection]
+  [:seon.config.eval.result/max-string
+   :seon.config.eval.result/max-string]
+  [:seon.config.eval.result/max-nodes
+   :seon.config.eval.result/max-nodes]
   [:seon.config/on-core-error
    :seon.config/on-core-error]]
 
