@@ -151,9 +151,17 @@ GC experiment is ANSWERED (4a70900e1): retire ~50-60ms, reclaiming GC
 ~160-255ms, storage halved, survivors exact — retire casually at
 teardown, coalesce full-store GC. N3 rulings recorded (858436ca8):
 interrupted+adapt no auto-retry, my.run = complete/wait only, run-why
-= trigger ref as tx-meta. IN FLIGHT: the Opus agent drafts the N3
-value-admission package contracts (ruled: own small package, FIRST);
-n5-plan landed 909394481 awaiting deep review at its rung. Its accepted design: process-local
+= trigger ref as tx-meta. IN FLIGHT (three file-disjoint lanes): the Opus agent drafts the N3
+value-admission package contracts (ruled: own small package, FIRST;
+its WIP src/seon/sci/ + schema/admit.edn poisons full-gate activation
+until it lands — expected); sol lane trust-derivation-design writes
+the computed core-vs-agent admission rule design (the literal trust
+list is inert — keyword set vs string identity); sol lane
+issue-triage-2 reconciles all open issue notes against today's
+landings. ALSO LANDED: sci on the default classpath (858d6bf86,
+n3-plan §6.2; load 2.1s, boot bound re-proven in-suite at the
+admission seal review); n5-plan 909394481 awaiting deep review at its
+rung; GC verdict recorded above. Its accepted design: process-local
 store holder + refcount under ONE lock with running-instances;
 stop! also releases branch connection, last instance releases the
 store (stop!'s docstring needs that revision — seal owner's). Its
