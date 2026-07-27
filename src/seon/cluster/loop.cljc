@@ -162,9 +162,7 @@
   "The plan digest: SHA-256 over the ordered sources, so the same reply
   freezes to the same plan and N2's absent-to-digest fence is exact."
   [sources]
-  (let [bytes (.digest (java.security.MessageDigest/getInstance "SHA-256")
-                       (.getBytes (pr-str sources) "UTF-8"))]
-    (apply str (map #(format "%02x" %) bytes))))
+  (schema/sha-256 [(.getBytes (pr-str sources) "UTF-8")]))
 
 (defn- form-source
   "The source of one form of a run, by ordinal."

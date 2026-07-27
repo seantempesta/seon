@@ -32,8 +32,7 @@
             [datahike.api :as d]
             [seon.reconcile :as reconcile]
             [seon.schema :as schema])
-  (:import [java.nio.charset StandardCharsets]
-           [java.security MessageDigest]))
+  (:import [java.nio.charset StandardCharsets]))
 
 (def default-manifest-path
   "The one repository/artifact-relative shipped defaults document."
@@ -99,15 +98,6 @@
   {:seon.config.flow.compute/concurrency
    (long (.availableProcessors (Runtime/getRuntime)))})
 
-(defn- sha-256
-  [value]
-  (let [digest (MessageDigest/getInstance "SHA-256")
-        bytes (.digest
-               digest
-               (.getBytes ^String value StandardCharsets/UTF_8))]
-    (apply str
-           (map #(format "%02x" (bit-and 0xff %)) bytes))))
-
 (defn defaults
   "The complete default manifest — THE defaults document.
   The static half is `config/default.edn` (every constant with units
@@ -159,8 +149,10 @@
     [(assoc effective-manifest
             :seon.config/cluster cluster-name
             :seon.config/applied-manifest-digest
-            (sha-256
-             (schema/canonical-data-string effective-manifest)))]))
+            (schema/sha-256
+             [(.getBytes
+               ^String (schema/canonical-data-string effective-manifest)
+               StandardCharsets/UTF_8)]))]))
 
 (defn apply!
   "Reconcile one manifest into the cluster's config singleton.

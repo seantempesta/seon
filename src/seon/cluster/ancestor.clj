@@ -74,10 +74,10 @@
             [datahike.api :as d]
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
+            [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn])
-  (:import [java.nio.file Files]
-           [java.security MessageDigest]))
+  (:import [java.nio.file Files]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — src/seon/schema/ancestor.edn
@@ -99,12 +99,6 @@
 ;;; hand-written.
 (def ^:private ancestor-attributes
   [:seon.ancestor/digest :seon.ancestor/built-at])
-
-(defn- sha256 ^bytes [^bytes bytes]
-  (.digest (MessageDigest/getInstance "SHA-256") bytes))
-
-(defn- hex [^bytes bytes]
-  (apply str (map #(format "%02x" %) bytes)))
 
 ;;; What the ancestor is built FROM: source and schema files. One rule,
 ;;; not a list of names — anything else under a root (notes, artifacts,
@@ -135,8 +129,7 @@
   (let [directories (->> roots
                          (map #(.getCanonicalFile (io/file %)))
                          distinct
-                         (sort-by #(.getPath ^java.io.File %)))
-        digester (MessageDigest/getInstance "SHA-256")]
+                         (sort-by #(.getPath ^java.io.File %)))]
     (doseq [^java.io.File root directories]
       (when-not (.isDirectory root)
         (refuse! ::root-absent
@@ -144,20 +137,20 @@
                       " is not a directory")
                  {::root (.getPath root)
                   :seon.ancestor/roots roots})))
-    (doseq [^java.io.File root directories]
-      (let [prefix (inc (count (.getPath root)))]
-        (doseq [entry (->> (file-seq root)
-                           (filter #(.isFile ^java.io.File %))
-                           (filter #(source-file? (.getName ^java.io.File %)))
-                           (sort-by #(subs (.getPath ^java.io.File %) prefix)))]
-          (.update digester
-                   (.getBytes (str (subs (.getPath ^java.io.File entry) prefix)
-                                   "\u0000"
-                                   (hex (sha256 (Files/readAllBytes
-                                                 (.toPath ^java.io.File entry))))
-                                   "\n")
-                              "UTF-8")))))
-    (hex (.digest digester))))
+    (schema/sha-256
+     (for [^java.io.File root directories
+           :let [prefix (inc (count (.getPath root)))]
+           entry (->> (file-seq root)
+                      (filter #(.isFile ^java.io.File %))
+                      (filter #(source-file? (.getName ^java.io.File %)))
+                      (sort-by #(subs (.getPath ^java.io.File %) prefix)))]
+       (.getBytes
+        (str (subs (.getPath ^java.io.File entry) prefix)
+             "\u0000"
+             (schema/sha-256 [(Files/readAllBytes
+                               (.toPath ^java.io.File entry))])
+             "\n")
+        "UTF-8")))))
 
 (defn ancestor-branch
   "The ONE branch name for a digest: `:ancestor-<digest>`.

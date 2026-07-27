@@ -24,7 +24,8 @@
             [seon.schema.form :as form]
             [seon.schema.internal :as internal]
             #?(:clj [clojure.edn :as edn]
-               :cljs [cljs.reader :as reader])))
+               :cljs [cljs.reader :as reader]))
+  #?(:clj (:import [java.security MessageDigest])))
 
 (defn- direct-references*
   "Canonical registry keys directly referenced by one compiled schema.
@@ -169,6 +170,16 @@
                      :seon.schema/noncanonical-projection-data
                      :seon.schema/value value
                      :seon.error/kind :core-bug}))))
+
+(defn sha-256
+  "Lowercase SHA-256 hex digest of ordered byte arrays."
+  [byte-arrays]
+  (let [digester (MessageDigest/getInstance "SHA-256")]
+    (doseq [bytes byte-arrays]
+      (.update digester ^bytes bytes))
+    (apply str
+           (map #(format "%02x" (bit-and 0xff %))
+                (.digest digester)))))
 
 (defn- projection-fingerprint
   [forms function-contracts schema-admissions function-admissions
