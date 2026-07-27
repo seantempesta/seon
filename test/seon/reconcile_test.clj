@@ -247,13 +247,15 @@
              (assoc (config-row (str "generated-" ordinal) queue-depth)
                     :seon.config/on-core-error mode))
            entries))
-   (gen/vector-distinct
+   ;; distinct BY IDENTITY ordinal — gen/vector-distinct has no :key
+   ;; option; vector-distinct-by is the supported API
+   (gen/vector-distinct-by
+    first
     (gen/tuple (gen/choose 0 40)
                (gen/choose 1 100)
                (gen/elements [:record :panic]))
     {:min-elements 0
-     :max-elements 12
-     :key first})))
+     :max-elements 12})))
 
 (deftest apply-then-reapply-converges-over-generated-populations
   (let [check
