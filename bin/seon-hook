@@ -429,6 +429,8 @@
     (when (pos? dropped)
       (log! "REVIEW_BATCH_TRUNCATED" (str "dropped-oldest=" dropped)))
     (str
+     "Do not call tools or inspect the filesystem. Review only the supplied "
+     "rubric and file blocks.\n\n"
      "You are a code reviewer for the Seon project. Review the edited "
      "file(s) below. Find REAL DEFECTS first: correctness bugs, concurrency "
      "hazards, and silent failure paths. Then check project-convention "
@@ -444,11 +446,11 @@
       (map #(render-file-block % max-code-length) ordered)))))
 
 (defn- call-agy
-  "Call `agy` with the prompt on stdin, bounded by `timeout-ms`."
+  "Call `agy` with the bounded prompt argument, bounded by `timeout-ms`."
   [prompt timeout-ms]
   (try
-    (let [child (process/process ["agy" "-p" ""]
-                                 {:in prompt :out :string :err :string})
+    (let [child (process/process ["agy" "-p" prompt]
+                                 {:out :string :err :string})
           finished (deref child timeout-ms ::timeout)]
       (if (= finished ::timeout)
         (do
