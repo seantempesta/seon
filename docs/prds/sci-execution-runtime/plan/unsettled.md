@@ -208,9 +208,27 @@ operator and dies with it. N5 PLAN REVIEWED (d500c8bfb): 19 findings
 (6 confirmed defects incl. :seon.fn/schema-refs duplicate owner and
 the namespace-row derivation, 6 stale-vs-today, 7 owner questions),
 NOT ready to seal — revision lane running with the review as work
-order. IN FLIGHT (two lanes): the Opus agent drafts N3 package 2
-(wake, loop proc, seon.ai, store transact!/refusal accretion,
-:seon.error registered once); sol lane revises the N5 plan in place. n5-plan 909394481 awaits deep review at its
+order. N3 PACKAGE 2 DRAFTED (997252038: seon.cluster.wake C1-C3 with both
+prohibitions measured, seon.cluster.loop C9 with crash rows as
+kill-positions-over-facts, seon.ai C10 with countable one-attempt +
+credential as the one env read, store.clj transact!/refusal ACCRETION
+below a banner, :seon.error registered once in error.edn; full gate
+143/593 with 36 awaits-implementation red). SEAL RULINGS SENT (the
+Opus agent applies as one bounded seal-revision commit, then
+implements to green): (1) :seon.error/value re-point blessed
+everywhere incl. sealed my.run/complete; (2) loop's turn/step may not
+contract as bare [:map] — named shapes in loop.edn; (3) wake_test's
+throwing-handler falsifier must assert fault DELIVERY (review-caught);
+(4) wire pins: JDK java.net.http + org.clojure/data.json (landed
+91d45256e), string JSON keys at the one :any boundary. The live
+seon.ai call and the kill -9 process-boundary proof stay
+ORCHESTRATOR-OWNED integration falsifiers, out of bin/test.
+QUEUED MINE: delete seon.flow/database-proc + its testbed pins at a
+lane-quiet point (n3-plan §4.1); the R41-vs-marker and [:maybe]-in-fn-
+returns owner questions; task #3 MCP verify (needs Sean's restart).
+IN FLIGHT (two lanes): the Opus agent (seal revision + package-2
+implementation); sol lane revises the N5 plan against its 19-finding
+review (d500c8bfb). n5-plan 909394481 awaits deep review at its
 rung; GC verdict recorded above. Its accepted design: process-local
 store holder + refcount under ONE lock with running-instances;
 stop! also releases branch connection, last instance releases the
