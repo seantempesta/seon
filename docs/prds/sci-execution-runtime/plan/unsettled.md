@@ -178,13 +178,17 @@ new predicate-owner resolution). Documented tensions live in the
 admit.clj docstring/risk notes: ::elided is scalar (capped? is the
 honest signal), Instant normalizes to Date, host java.util.Map
 projects opaque, record tag costs one width slot, test/prod node
-accounting deliberately independent. IN FLIGHT (two lanes): the Opus
-agent drafts the N3 LOOP contract packages (C1-C10 minus C7; pure
+accounting deliberately independent. TRUST DERIVATION LANDED (eda73bead, full gate 101/453/0
+independently verified): admission derives core from d/history (first
+assertion strictly precedes the unique ancestor seal tx), everything
+fails closed :agent, the literal roster DELETED, ancestor population
+reordered so canonical schema rows carry core provenance; issue
+closed+archived (c2db0e61f). IN FLIGHT (two lanes): the Opus agent
+drafts the N3 LOOP contract packages (C1-C10 minus C7; pure
 derivation package first, effectful proc package sketched; the three
-night rulings + late rulings bind; it may NOT touch schema.cljc or
-cluster.clj — the sol trust-derivation-impl lane holds those,
-implementing genesis-by-construction core classification against the
-issue's acceptance rows). n5-plan 909394481 awaits deep review at its
+night rulings + late rulings bind; new files only — schema.cljc and
+cluster.clj edits get NAMED, not made); sol lane bb-classpath-fix
+closes the src-old-ambient-in-bb defect at bb.edn. n5-plan 909394481 awaits deep review at its
 rung; GC verdict recorded above. Its accepted design: process-local
 store holder + refcount under ONE lock with running-instances;
 stop! also releases branch connection, last instance releases the
