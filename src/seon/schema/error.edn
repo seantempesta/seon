@@ -1,10 +1,151 @@
-{; THE ONE FLAT ERROR VALUE. Registered once, referenced everywhere:
- ; nothing throws into the run loop, so every failure an agent or the
- ; loop can encounter arrives as this shape. `kind` is the namespaced
- ; rule that failed, `message` is what a reader (agent or human) is
- ; told, and `data` carries whatever the owner of that rule attached.
- ; Producers stay closed maps of their own; this is the shared floor.
+{; ---------------------------------------------------------------------------
+ ; ONE FAMILY. `:seon.fault/*` merged in here 2026-07-27 (orchestrator
+ ; ruling) BEFORE anything referenced those names: an error is an error
+ ; whether it arrived as a flat value an agent reads, a transition's
+ ; refusal, or a Throwable that escaped our own code onto flow's error
+ ; channel. Two shapes in one family, and the relation between them is
+ ; a projection, not a conversion:
+ ;
+ ;   :seon.error/value — the FLAT value. Nothing throws into the run
+ ;     loop, so this is what a caller branches on and what an agent is
+ ;     shown. Producers keep their own closed maps under `data`.
+ ;   :seon.error/fact  — the DURABLE fact. One committed entity per
+ ;     error worth remembering, carrying the projected evidence and
+ ;     refs to what it interrupted. `seon.error/value` projects a fact
+ ;     back down to the flat shape, which is why the totality property
+ ;     asserts both of one normalization.
+ ;
+ ; KINDS ARE NEVER ENUMERATED HERE. `:seon.error/kind` stays `:keyword`
+ ; on purpose: the kind population is the set of namespaced keywords the
+ ; producing sites already carry (`::no-credential`, `:seon.db/rejected`,
+ ; `:seon.cluster.run/refused`, …). A `[:enum]` here would be a
+ ; hand-maintained list of everyone else's vocabulary and would go stale
+ ; the first time a site is added. N5's program graph makes the real
+ ; enumeration QUERYABLE from the corpus; until then it is discoverable
+ ; by reading the producers, and neither answer is a list in this file.
+ ; ---------------------------------------------------------------------------
+
+ ; --- the flat value -------------------------------------------------------
+ ; `kind` is the namespaced rule that failed, `message` is what a reader
+ ; (agent or human) is told, and `data` carries whatever the owner of
+ ; that rule attached. Producers stay closed maps of their own; this is
+ ; the shared floor.
  :seon.error/data :map
  :seon.error/kind :keyword
  :seon.error/message [:string {:min 1}]
- :seon.error/value [:map {:closed true} [:seon.error/kind :seon.error/kind] [:seon.error/message :seon.error/message] [:seon.error/data {:optional true} :seon.error/data]]}
+ :seon.error/value [:map {:closed true} [:seon.error/kind :seon.error/kind] [:seon.error/message :seon.error/message] [:seon.error/data {:optional true} :seon.error/data]]
+
+ ; --- the durable fact -----------------------------------------------------
+ ; Classification is the CHANNEL, not a predicate — `seon.sci.eval/evaluate`
+ ; never throws, so an agent's mistake is a VALUE and can only become a
+ ; receipt; anything arriving on ::flow/error is definitionally ours. No
+ ; kind list, no ambient scope, no authorship inference.
+ :seon.error/id [:string {:min 1 :seon.db/identity true}]
+ :seon.error/at :inst
+ ; the ONE holder string, `seon.cluster/process-identity`
+ :seon.error/process [:string {:min 1}]
+ :seon.error/proc :keyword
+ :seon.error/op :keyword
+ :seon.error/cid :keyword
+ :seon.error/class [:string {:min 1}]
+ :seon.error/basis-t [:int {:min 0}]
+ ; the projected source, printed. NEVER a raw pr-str: two of flow's three
+ ; report shapes carry ::flow/state, which for the run loop holds a live
+ ; Datahike connection and executors. One codec — `seon.sci.admit/admit`.
+ :seon.error/data-edn :string
+ ; the honest signal that `data-edn` is not the whole source, so a reader
+ ; never has to guess whether an elision marker was the original value
+ :seon.error/capped? :boolean
+ ; a derivation of the error's OWN content, committed with it — never a
+ ; mutable tally. Recurrence is counted by query. Deliberately excludes
+ ; the message: a message carrying an id or a timestamp would make every
+ ; occurrence unique and recurrence undetectable.
+ :seon.error/signature [:re {:seon.db/index true} "^[0-9a-f]{64}$"]
+ :seon.error/agent [:and {:seon.db/index true} :seon.db/ref]
+ :seon.error/run [:and {:seon.db/index true} :seon.db/ref]
+
+ ; The entity map is not decoration: canonical-database-attributes
+ ; installs entity-map entries BY CONSTRUCTION, and a family declared
+ ; only as standalone leaves installs nothing but its identity —
+ ; the fixture-vs-live-boot class that cost the N3 drive two rounds.
+ :seon.error/fact
+ [:map {:seon.db/entity true}
+  [:seon.error/id :seon.error/id]
+  [:seon.error/at :seon.error/at]
+  [:seon.error/process :seon.error/process]
+  ; REQUIRED, where the merged draft had it optional: normalization is
+  ; fail-closed, so a source carrying no discoverable kind gets
+  ; `:seon.error/unclassified` rather than an absent key. That is what
+  ; makes "every fact projects to a valid flat value" true by
+  ; construction, and it means a kind query can never silently miss.
+  [:seon.error/kind :seon.error/kind]
+  [:seon.error/message :seon.error/message]
+  [:seon.error/signature :seon.error/signature]
+  [:seon.error/data-edn :seon.error/data-edn]
+  [:seon.error/capped? :seon.error/capped?]
+  ; absent when the error was never a Throwable — a flat value and a
+  ; transition refusal have no class, and absence is the state
+  [:seon.error/class {:optional true} :seon.error/class]
+  ; absent for everything that did not arrive on flow's error channel,
+  ; and `op`/`cid` are absent for two of its three report shapes
+  [:seon.error/proc {:optional true} :seon.error/proc]
+  [:seon.error/op {:optional true} :seon.error/op]
+  [:seon.error/cid {:optional true} :seon.error/cid]
+  ; absent when no database value was pinned at the error
+  [:seon.error/basis-t {:optional true} :seon.error/basis-t]
+  ; absent when no claimed-open run existed at the error's basis
+  [:seon.error/run {:optional true} :seon.error/run]
+  [:seon.error/agent {:optional true} :seon.error/agent]]
+
+ ; --- normalization --------------------------------------------------------
+ ; `:any` at the ONE genuine third-party boundary of this family: the
+ ; source is whatever went wrong — a Throwable from any library, one of
+ ; core.async.flow's three incompatible report maps, a flat value, or a
+ ; transition's ex-data. A schema here would be a second classifier, and
+ ; the whole point of one normalizer is that there is no second one.
+ :seon.error/source :any
+ ; NOTE what is NOT a key here: `:seon.config/on-core-error`. The error
+ ; path may not panic — a panic while recording an error destroys the
+ ; one record of the original failure (the quarry's recursion fence,
+ ; src-old/seon/error.cljc:738-745). Admission is therefore called in
+ ; `:record` mode unconditionally, and a codec hole stays visible as a
+ ; projection marker plus `capped?` rather than as a throw.
+ :seon.error/normalize-request [:map {:closed true} [:seon.error/source :seon.error/source] [:seon.error/id :seon.error/id] [:seon.error/at :seon.error/at] [:seon.error/process :seon.error/process] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.error/basis-t {:optional true} :seon.error/basis-t] [:seon.cluster.run/id {:optional true} :seon.cluster.run/id] [:seon.cluster.agent/id {:optional true} :seon.cluster.agent/id]]
+
+ ; --- the notice: the derived routing unit ---------------------------------
+ ; WHY an agent is being told. A derived clause, never boilerplate — and
+ ; the reason IS the escalation rule, so the two cannot drift. It is not
+ ; an attribute of the fact because it is per-RECIPIENT: one fact can be
+ ; :your-run to the interrupted agent and :recurring to the escalation
+ ; owner in the same transaction.
+ :seon.error/reason [:enum :your-run :no-attributable-agent :recurring]
+ :seon.error/notice-request [:map {:closed true} [:seon.error/fact :seon.error/fact] [:seon.error/reason {:optional true} :seon.error/reason] [:seon.cluster.agent/id {:optional true} :seon.cluster.agent/id]]
+ ; The notice is DERIVED and never stored: a fact plus the projection
+ ; declarations, which is what makes it routable through the one generic
+ ; router (`seon.render`). The projection keys ride on the notice rather
+ ; than on the entity because a stored symbol identical on every row is
+ ; stored-derived data, and because the ai projection needs the reason
+ ; the entity cannot carry.
+ :seon.error/notice [:map {:closed true} [:seon.error/fact :seon.error/fact] [:seon.render/ai :seon.render/projection] [:seon.render/log :seon.render/projection] [:seon.error/reason {:optional true} :seon.error/reason] [:seon.cluster.agent/id {:optional true} :seon.cluster.agent/id]]
+
+ ; --- step 2's commit, renamed here, NOT drafted here ----------------------
+ ; `seon.error/commit!` (the boot-wired fault committer, D4) is the next
+ ; slice's owner; these two shapes landed with slice 1 and are renamed in
+ ; place so that nothing ever references `:seon.fault/*`. Its author
+ ; revises them against the normalizer above.
+ :seon.error/messages [:int {:min 0}]
+ :seon.error/commit-request [:map {:closed true} [:seon.store/branch-connection :seon.store/branch-connection] [:seon.error/source :seon.error/source] [:seon.error/process :seon.error/process] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.config/on-core-error :seon.config/on-core-error] [:seon.config.fault/escalate-to {:optional true} :seon.config.fault/escalate-to] [:seon.config.fault/recurrence-limit {:optional true} :seon.config.fault/recurrence-limit]]
+ :seon.error/committed [:map {:closed true} [:seon.error/id :seon.error/id] [:seon.error/messages :seon.error/messages] [:seon.error/reason {:optional true} :seon.error/reason]]
+
+ ; An explanation message carries a ref to what it explains. A user
+ ; message has none — absence is the state, and it is what makes the
+ ; storm fence computable without a flag. The `:and` wrap is the one
+ ; idiom for a facet on a referenced form, and the facet is not
+ ; decoration: a BARE `:seon.db/ref` carries no persistence facet and
+ ; would never install as a canonical database attribute (the computed
+ ; rule provenance.edn documents). Slice 1 declared it bare, so a
+ ; fault-explanation message would have been untransactable on the live
+ ; boot path and no fixture would have seen it. Indexed because the
+ ; storm fence and "which messages explain this error" both query BY
+ ; the ref.
+ :seon.cluster.message/about [:and {:seon.db/index true} :seon.db/ref]}

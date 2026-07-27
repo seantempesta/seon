@@ -1,0 +1,115 @@
+(ns seon.render
+  "THE ONE PROJECTION ROUTER. A map declares what it can become; this
+  resolves and applies it.
+
+  CONTRACT LAYER (drafted 2026-07-27 for ORCHESTRATOR SEAL — step 1 of
+  the error-wiring order, from the owner's night direction generalizing
+  the projections concept). Nothing here is implemented: every body
+  throws `awaits implementation`.
+
+  THE WHOLE MECHANISM, in one sentence: a UNIT is any map carrying, per
+  OUTPUT KIND, the fully qualified symbol of the function that projects
+  the unit into that kind, and `render` resolves the symbol and applies
+  it to the unit. That is the entire contract — there is no
+  registration table, no dispatch map, no per-kind namespace and no
+  protocol.
+
+  WHY THIS EXISTS AS ITS OWN TINY NAMESPACE. The render contract
+  (`docs/seon/architecture/ui.md`, \"The block and its two renders\")
+  already had exactly this shape for exactly two kinds: `:seon.render/ai`
+  → prompt text, `:seon.render/html` → a surface, selected by key
+  presence with no stored discriminator, the symbol \"late-resolved each
+  render\". The owner's direction is to admit that this was never about
+  the UI: an error fact wants an `ai` projection (steering prose) and a
+  `log` projection (a line), a failover notice wants `ai`, a metric
+  wants something else. So the two-render rule becomes the special case
+  of one open kind set, and the render contract keeps its two keys
+  unchanged. Each new kind names its consumer; nothing here changes.
+
+  RESOLUTION IS LATE AND VAR-BACKED, and that is load-bearing rather
+  than incidental. `requiring-resolve` returns the VAR, and this
+  namespace INVOKES the var rather than a fn it dereferenced earlier:
+  re-evaluating the projection's `defn` against the running system
+  changes the next render with no re-registration, which is the same
+  hot-reload property `:seon.ancestor/populate`,
+  `:seon.cluster.loop/evaluate` and the schema gate's predicate-owner
+  rule already rely on. A cached fn value would silently serve the old
+  projection after a reload — the failure would look like a stale UI, so
+  it is stated as a prohibition: NOTHING here memoizes a resolution.
+
+  IT IS TOTAL, because it is on the error path. `seon.error`'s notices
+  route through this router, so a router that threw would turn recording
+  an error into a second error — the quarry's recursion fence
+  (`src-old/seon/error.cljc:738-745`) restated for this owner. Every
+  failure is therefore a flat `:seon.error/value`, and there is no
+  `:seon.config/on-core-error` key: this namespace never panics, in any
+  mode. A projection that throws is reported as a value naming its
+  class, with the unit's declared symbol, so the broken projection is
+  named rather than the caller.
+
+  THE KIND SET IS COMPUTED, never listed. `kinds` derives what a unit
+  can become from the unit itself — every key in the `seon.render`
+  namespace whose value is a qualified symbol — so adding a kind to a
+  producer makes it discoverable everywhere with no edit here. This is
+  the no-hand-maintained-lists rule applied to the one place a registry
+  would have been the obvious design.
+
+  NOT YET ADMISSIBLE, and named so the accretion is visible: ui.md also
+  allows an ai render to be a VERBATIM STRING rather than a symbol. That
+  is a literal projection, and folding it in is one `:or` in
+  `:seon.render/projection` plus one branch here (a non-symbol
+  declaration is its own output). It is deliberately out of step 1: N4
+  owns the block renders and should take that accretion with the ui.md
+  revision the seal writes.
+
+  Crash walk: pure resolution plus one call. Nothing here opens,
+  commits, or holds anything, so a kill during a render loses a value
+  that was never durable. Whether the PROJECTION is pure is the
+  projection's own contract; the ones this repository ships are."
+  (:require [seon.schema.edn :as schema.edn]))
+
+;;; ---------------------------------------------------------------------------
+;;; Schemas — src/seon/schema/render.edn
+;;; ---------------------------------------------------------------------------
+
+(schema.edn/load! {})
+
+;;; ---------------------------------------------------------------------------
+;;; Contract
+;;; ---------------------------------------------------------------------------
+
+(defn kinds
+  "The output kinds `unit` declares.
+  Every key in the `seon.render` namespace whose value is a qualified
+  symbol. COMPUTED from the unit, so a producer that adds a kind is discoverable
+  without an edit here and without a registry. The router's own request
+  keys (`:seon.render/unit`, `:seon.render/kind`) can never be mistaken
+  for declarations — a map and a keyword are not qualified symbols —
+  which is why the rule needs no exclusion list.
+  Returns the empty set for a map that declares nothing; a unit with no
+  projections is an ordinary value, not an error."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:set :seon.render/kind]]}
+  [unit]
+  (throw (ex-info "awaits implementation" {::fn `kinds})))
+
+(defn render
+  "Project `:seon.render/unit` into `:seon.render/kind`.
+  Resolves the unit's declared symbol with `requiring-resolve` — loading
+  the owning namespace if needed — and INVOKES THE VAR with the unit,
+  so a re-evaluated projection takes effect immediately. On success:
+  `{:seon.render/kind <kind> :seon.render/output <the projection>}`.
+
+  Flat `:seon.error` values, never throws — this router runs on the
+  error path and may not fault into it:
+  - `::kind-not-declared` — the unit declares no such kind, naming the
+    kinds it does declare so the caller can see what it has;
+  - `::unresolvable` — the declared symbol does not resolve, naming the
+    symbol. This is the same failure `:seon.ancestor/populate` refuses
+    on, and it is a bug in the producer, not in the caller;
+  - `::projection-failed` — the projection itself threw, naming the
+    symbol and the throwable's class. The projection is named because
+    the projection is what is broken."
+  {:malli/schema [:=> [:cat :seon.render/request]
+                  [:or :seon.render/rendered :seon.error/value]]}
+  [request]
+  (throw (ex-info "awaits implementation" {::fn `render})))

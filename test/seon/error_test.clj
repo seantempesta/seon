@@ -1,0 +1,387 @@
+(ns seon.error-test
+  "Sealed acceptance draft for the ONE error normalizer and its
+  projections.
+
+  DRAFT FOR ORCHESTRATOR SEAL (drafted 2026-07-27, step 1 of the
+  error-wiring order). The implementation lane makes these green by
+  implementing `seon.error` and `seon.render` ONLY — schemas and tests
+  are byte-sealed; friction is reported, never resolved by weakening.
+
+  THE STANDING PROPERTY is `normalization-is-total`: over all three
+  input families, every normalization validates `:seon.error/fact`,
+  projects to a valid flat `:seon.error/value`, and prints a `data-edn`
+  that READS BACK through `clojure.edn/read-string`. That last clause
+  is what proves the one codec ran — a raw `pr-str` of a flow report
+  carrying `::flow/state` does not read back, and for a state holding a
+  reference cycle it does not even return (`admit.clj:82-92`, probed).
+  Fixed seed 20260727, per-trial isolation by construction: the
+  normalizer is pure, opens nothing and writes nothing, so a trial's
+  only state is the source it is handed.
+
+  THE FLOW SHAPES ARE BUILT LITERALLY, and that is deliberate. Their
+  authority is `reference-code/core.async/.../flow/impl.clj:106-110`
+  (xform) and `:312-320` (transform / proc-loop), which
+  `test/seon/flow_test.clj:496-522` already proves flow really emits;
+  re-proving flow here would test flow, not the normalizer, and would
+  hide the point — that the three shapes do NOT share a key set and the
+  normalizer must be total over all of them anyway.
+
+  Nothing here needs a database, a cluster, a store, or sci: the whole
+  unit under test is pure."
+  (:require [clojure.core.async.flow :as-alias flow]
+            [clojure.edn :as edn]
+            [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
+            [clojure.test.check :as tc]
+            [clojure.test.check.generators :as gen]
+            [clojure.test.check.properties :as prop]
+            [seon.error :as error]
+            [seon.render :as render]
+            [seon.schema]))
+
+;;; ---------------------------------------------------------------------------
+;;; Fixtures — the three families, plus the hostile values
+;;; ---------------------------------------------------------------------------
+
+(def ^:private caps
+  {:seon.config.eval.result/max-depth 6
+   :seon.config.eval.result/max-collection 8
+   :seon.config.eval.result/max-string 64
+   :seon.config.eval.result/max-nodes 512})
+
+(def ^:private process "test-cluster-4242-1753650000000")
+
+(defn- request
+  "A normalize request over `source`, with optional attribution."
+  ([source] (request source {}))
+  ([source extra]
+   (merge {:seon.error/source source
+           :seon.error/id "err-1"
+           :seon.error/at #inst "2026-07-27T21:00:00.000-00:00"
+           :seon.error/process process
+           :seon.sci.admit/caps caps}
+          extra)))
+
+(defn- cyclic-state
+  "A proc state shaped like the run loop's, holding a live-object stand-in
+  that CANNOT be printed: an atom holding the map that holds it.
+  `pr-str` of this raises StackOverflowError — an Error, which a
+  `catch Exception` does not see. The production value is worse (a live
+  Datahike connection and executors, `loop.cljc:226-229`); this is the
+  same class, buildable without a store."
+  []
+  (let [connection (atom nil)
+        state {:seon.cluster.loop/cluster {:seon.store/branch-connection connection}
+               :seon.cluster.loop/turns 7}]
+    (reset! connection state)
+    state))
+
+(defn- transform-error
+  "Shape 1 — a transform threw (`impl.clj:312-316`). The only shape
+  carrying `:op` and `:msg`."
+  [throwable]
+  {::flow/pid :seon.cluster.loop/loop
+   ::flow/status :running
+   ::flow/state (cyclic-state)
+   ::flow/count 12
+   ::flow/cid :wake
+   ::flow/msg {:seon.cluster.wake/at #inst "2026-07-27T20:59:00.000-00:00"}
+   ::flow/op :step
+   ::flow/step [:some :step]
+   ::flow/ex throwable})
+
+(defn- proc-loop-error
+  "Shape 2 — anything else in the proc loop threw (`impl.clj:317-320`).
+  No `:cid`, no `:msg`, no `:op`."
+  [throwable]
+  {::flow/pid :seon.cluster.loop/loop
+   ::flow/status :running
+   ::flow/state (cyclic-state)
+   ::flow/count 12
+   ::flow/ex throwable})
+
+(defn- xform-error
+  "Shape 3 — a channel xform threw (`impl.clj:106-110`). No `:status`,
+  no `:state`, no `:count`."
+  [throwable]
+  {::flow/ex throwable
+   ::flow/pid :seon.cluster.loop/loop
+   ::flow/cid :wake
+   ::flow/xform :some-xform})
+
+(defn- refused-chain
+  "A Throwable whose DEEPEST ex-data carries the rule, the way a
+  transition refusal arrives through Datahike's writer wrappers
+  (`store.clj:398-412`)."
+  [kind]
+  (ex-info "wrapper"
+           {}
+           (ex-info "writer"
+                    {:error :transact/cas}
+                    (ex-info "the transition refused"
+                             {:seon.error/kind kind
+                              :seon.cluster.run/id "run-9"}))))
+
+;;; ---------------------------------------------------------------------------
+;;; Generators — honest, by constructing the real things
+;;; ---------------------------------------------------------------------------
+
+(def ^:private throwable-gen
+  (gen/fmap (fn [[message kind]]
+              (ex-info message {:seon.error/kind kind}))
+            (gen/tuple (gen/not-empty gen/string-alphanumeric)
+                       (gen/elements [:seon.cluster.run/refused
+                                      :seon.db/rejected
+                                      :seon.ai/timeout
+                                      :seon.boot/refused]))))
+
+(def ^:private flow-error-gen
+  (gen/fmap (fn [[shape throwable]] (shape throwable))
+            (gen/tuple (gen/elements [transform-error
+                                      proc-loop-error
+                                      xform-error])
+                       throwable-gen)))
+
+(def ^:private flat-value-gen
+  (gen/fmap (fn [[kind message data]]
+              (cond-> {:seon.error/kind kind :seon.error/message message}
+                data (assoc :seon.error/data data)))
+            (gen/tuple (gen/elements [:seon.ai/no-credential
+                                      :seon.db/unknown-failure
+                                      :seon.config/refused])
+                       (gen/not-empty gen/string-alphanumeric)
+                       (gen/one-of [(gen/return nil)
+                                    (gen/map gen/keyword-ns gen/small-integer)]))))
+
+(def ^:private refusal-gen
+  (gen/fmap (fn [kind] (ex-data (ex-cause (ex-cause (refused-chain kind)))))
+            (gen/elements [:seon.cluster.run/stale-epoch
+                           :seon.cluster.run/run-closed
+                           :seon.cluster.run/agent-pointer-broken])))
+
+(def ^:private unclassifiable-gen
+  "Family 4 by exclusion — nothing recognizes these, and normalization
+  must still produce a fact."
+  (gen/one-of [(gen/return nil)
+               (gen/return 42)
+               (gen/return "a bare string nobody classified")
+               (gen/return {:not-an-error true})
+               throwable-gen]))
+
+(def ^:private source-gen
+  (gen/one-of [flow-error-gen flat-value-gen refusal-gen unclassifiable-gen]))
+
+;;; ---------------------------------------------------------------------------
+;;; THE TOTALITY PROPERTY — the standing suite member
+;;; ---------------------------------------------------------------------------
+
+(deftest normalization-is-total
+  (let [result
+        (tc/quick-check
+         200
+         (prop/for-all
+          [source source-gen
+           attributed? gen/boolean]
+          (let [fact (error/normalize
+                      (request source
+                               (when attributed?
+                                 {:seon.cluster.run/id "run-9"
+                                  :seon.cluster.agent/id "agent-3"})))
+                ;; the codec ran: the projection READS BACK as EDN. The
+                ;; read is the assertion — a projection that did not
+                ;; survive the codec throws here and fails the trial —
+                ;; and its VALUE is not, because `nil` is a perfectly
+                ;; good projection of a source that was nil
+                _read-back (edn/read-string (:seon.error/data-edn fact))]
+            (and (seon.schema/valid-candidate-value? :seon.error/fact fact)
+                 (seon.schema/valid-candidate-value? :seon.error/value
+                                                     (error/value fact))
+                 ;; fail-closed, so a kind query can never silently miss
+                 (keyword? (:seon.error/kind fact))
+                 (re-matches #"^[0-9a-f]{64}$" (:seon.error/signature fact))
+                 ;; attribution rides exactly when it was supplied
+                 (= attributed? (contains? fact :seon.error/run))
+                 (= attributed? (contains? fact :seon.error/agent)))))
+         :seed 20260727)]
+    (is (:pass? result) (pr-str (:shrunk result)))))
+
+;;; ---------------------------------------------------------------------------
+;;; The codec, and what must never escape
+;;; ---------------------------------------------------------------------------
+
+(deftest the-proc-state-never-escapes-raw
+  (let [fact (error/normalize (request (transform-error (ex-info "boom" {}))))
+        printed (:seon.error/data-edn fact)]
+    (testing "a value pr-str cannot survive reads back as EDN"
+      (is (some? (edn/read-string printed))))
+    (testing "the reference is NAMED, never entered"
+      (is (str/includes? printed ":seon.sci.admit/reference")))
+    (testing "and the honest signal says the print is not the whole source"
+      (is (true? (:seon.error/capped? fact))))))
+
+(deftest capping-is-honest-in-both-directions
+  (let [small (error/normalize (request {:seon.error/kind :seon.ai/timeout
+                                         :seon.error/message "slow"}))]
+    (is (false? (:seon.error/capped? small))
+        "a source that fits is not reported as capped")))
+
+(deftest normalization-never-throws
+  ;; the recursion fence, stated as a test: a source whose realization
+  ;; throws must still produce a fact. Admission is called in :record
+  ;; mode unconditionally, so there is no dial under which this becomes
+  ;; a second error.
+  (let [exploding (lazy-seq (throw (ex-info "realizing me throws" {})))
+        fact (error/normalize (request {:seon.error/kind :seon.db/rejected
+                                        :seon.error/message "rejected"
+                                        :seon.error/data {:rows exploding}}))]
+    (is (seon.schema/valid-candidate-value? :seon.error/fact fact))
+    (is (str/includes? (:seon.error/data-edn fact) "projection-error"))))
+
+;;; ---------------------------------------------------------------------------
+;;; The three shapes lift exactly what they carry
+;;; ---------------------------------------------------------------------------
+
+(deftest flow-keys-ride-exactly-when-the-shape-carries-them
+  (let [throwable (ex-info "boom" {})
+        one (error/normalize (request (transform-error throwable)))
+        two (error/normalize (request (proc-loop-error throwable)))
+        three (error/normalize (request (xform-error throwable)))]
+    (testing "a transform throw carries pid, op and cid"
+      (is (= :seon.cluster.loop/loop (:seon.error/proc one)))
+      (is (= :step (:seon.error/op one)))
+      (is (= :wake (:seon.error/cid one))))
+    (testing "a proc-loop throw carries neither op nor cid — absence is the state"
+      (is (= :seon.cluster.loop/loop (:seon.error/proc two)))
+      (is (not (contains? two :seon.error/op)))
+      (is (not (contains? two :seon.error/cid))))
+    (testing "an xform throw carries cid but no op"
+      (is (= :wake (:seon.error/cid three)))
+      (is (not (contains? three :seon.error/op))))
+    (testing "all three name the Throwable's class"
+      (is (= "clojure.lang.ExceptionInfo" (:seon.error/class one)))
+      (is (= "clojure.lang.ExceptionInfo" (:seon.error/class three))))))
+
+(deftest a-value-that-was-never-a-throwable-has-no-class
+  (let [fact (error/normalize (request {:seon.error/kind :seon.ai/no-credential
+                                        :seon.error/message "unset"}))]
+    (is (not (contains? fact :seon.error/class)))
+    (is (= :seon.ai/no-credential (:seon.error/kind fact)))
+    (is (= "unset" (:seon.error/message fact)))))
+
+(deftest the-kind-comes-from-the-deepest-ex-data
+  (let [fact (error/normalize
+              (request (transform-error
+                        (refused-chain :seon.cluster.run/stale-epoch))))]
+    (is (= :seon.cluster.run/stale-epoch (:seon.error/kind fact))
+        "the wrappers carry :error and {} — the rule is at the bottom")))
+
+(deftest an-unclassifiable-source-is-fail-closed-never-absent
+  (doseq [source [42 "a string" {:not-an-error true} nil]]
+    (let [fact (error/normalize (request source))]
+      (is (= :seon.error/unclassified (:seon.error/kind fact))
+          (str "source: " (pr-str source)))
+      (is (seon.schema/valid-candidate-value? :seon.error/fact fact)))))
+
+(deftest attribution-is-a-lookup-ref-or-nothing
+  (let [with (error/normalize (request {:seon.error/kind :seon.db/rejected
+                                        :seon.error/message "no"}
+                                       {:seon.cluster.run/id "run-9"
+                                        :seon.cluster.agent/id "agent-3"}))
+        without (error/normalize (request {:seon.error/kind :seon.db/rejected
+                                           :seon.error/message "no"}))]
+    (is (= [:seon.cluster.run/id "run-9"] (:seon.error/run with)))
+    (is (= [:seon.cluster.agent/id "agent-3"] (:seon.error/agent with)))
+    (is (not (contains? without :seon.error/run)))
+    (is (not (contains? without :seon.error/agent))
+        "no attributable agent is a state, not a nil")))
+
+;;; ---------------------------------------------------------------------------
+;;; The signature is content, and recurrence must be countable
+;;; ---------------------------------------------------------------------------
+
+(deftest the-signature-ignores-the-message
+  (let [signature (fn [message]
+                    (:seon.error/signature
+                     (error/normalize
+                      (request {:seon.error/kind :seon.db/rejected
+                                :seon.error/message message}))))]
+    (is (= (signature "run 8b1c failed at 21:00:01")
+           (signature "run 44de failed at 21:00:09"))
+        "an id or a timestamp in the message must not make every occurrence unique")))
+
+(deftest the-signature-separates-different-errors
+  (let [signature (fn [kind]
+                    (:seon.error/signature
+                     (error/normalize (request {:seon.error/kind kind
+                                                :seon.error/message "same"}))))]
+    (is (not= (signature :seon.db/rejected) (signature :seon.ai/timeout)))))
+
+;;; ---------------------------------------------------------------------------
+;;; Projections, through the ONE router
+;;; ---------------------------------------------------------------------------
+
+(defn- fact []
+  (error/normalize (request (transform-error (refused-chain
+                                              :seon.cluster.run/stale-epoch))
+                            {:seon.cluster.run/id "run-9"
+                             :seon.cluster.agent/id "agent-3"})))
+
+(deftest a-notice-declares-its-projections-and-routes
+  (let [notice (error/notice {:seon.error/fact (fact)
+                              :seon.error/reason :your-run
+                              :seon.cluster.agent/id "agent-3"})]
+    (is (seon.schema/valid-candidate-value? :seon.error/notice notice))
+    (is (= #{:seon.render/ai :seon.render/log} (render/kinds notice)))
+    (testing "the error family reaches its prose through the generic router"
+      (is (= (error/ai-prose notice)
+             (:seon.render/output
+              (render/render {:seon.render/unit notice
+                              :seon.render/kind :seon.render/ai})))))))
+
+(deftest the-projection-keys-are-derived-never-stored
+  (let [fact (fact)]
+    (is (not (contains? fact :seon.render/ai)))
+    (is (not (contains? fact :seon.render/log))
+        "a symbol identical on every row is stored-derived data")))
+
+(deftest the-prose-says-what-happened-and-where-the-evidence-is
+  (let [fact (fact)
+        prose (error/ai-prose (error/notice {:seon.error/fact fact
+                                             :seon.error/reason :your-run}))]
+    (is (str/includes? prose (:seon.error/message fact)))
+    (is (str/includes? prose (:seon.error/id fact)) "the evidence is nameable")
+    (is (str/includes? prose "run-9") "the run it interrupted")
+    (testing "and it does not claim more than it knows"
+      (is (str/includes? prose "may")
+          "a fault mid-transform may or may not have completed its work"))))
+
+(deftest the-why-clause-is-derived-from-the-reason
+  (let [fact (fact)
+        prose (fn [reason]
+                (error/ai-prose
+                 (error/notice (cond-> {:seon.error/fact fact}
+                                 reason (assoc :seon.error/reason reason)))))
+        none (prose nil)
+        reasons (map prose [:your-run :no-attributable-agent :recurring])]
+    (is (= 3 (count (distinct reasons)))
+        "three reasons, three different sentences — never boilerplate")
+    (is (not-any? #(= none %) reasons))
+    (is (every? #(< (count none) (count %)) reasons)
+        "with nobody being contacted there is no why-clause at all")))
+
+(deftest the-log-line-is-one-line-and-derived
+  (let [fact (fact)
+        line (error/log-line (error/notice {:seon.error/fact fact}))]
+    (is (not (str/includes? line "\n")) "a log line that wraps is two log lines")
+    (is (str/includes? line (:seon.error/id fact)))
+    (is (str/includes? line (:seon.error/signature fact)))
+    (is (str/includes? line (str (:seon.error/kind fact))))))
+
+(deftest the-flat-value-projects-from-the-fact
+  (let [fact (fact)
+        value (error/value fact)]
+    (is (seon.schema/valid-candidate-value? :seon.error/value value))
+    (is (= (:seon.error/kind fact) (:seon.error/kind value)))
+    (is (= (:seon.error/message fact) (:seon.error/message value)))
+    (is (= (:seon.error/id fact) (:seon.error/id (:seon.error/data value)))
+        "the value points at the durable evidence rather than copying it")))

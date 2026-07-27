@@ -1,0 +1,48 @@
+{; ---------------------------------------------------------------------------
+ ; THE PROJECTION CONTRACT, generic (owner direction, 2026-07-27 night).
+ ; A unit is any map that declares, per OUTPUT KIND, the fully qualified
+ ; symbol of the function that projects it into that kind. One router
+ ; resolves and applies. The render contract's `:seon.render/ai` +
+ ; `:seon.render/html` pair (docs/seon/architecture/ui.md, "The block and
+ ; its two renders") is the SPECIAL CASE of this, not a separate
+ ; mechanism; new kinds — log, sms, metrics — are accretion: add a key,
+ ; write the fn, no router change and no registration table.
+ ; ---------------------------------------------------------------------------
+
+ ; A kind IS its key: `:seon.render/ai` is both the declaration key on a
+ ; unit and the kind a caller asks for. Nothing maps short names to keys,
+ ; because a second naming is a second place to drift.
+ :seon.render/kind :qualified-keyword
+ ; The declaration: a fully qualified symbol naming the projection fn,
+ ; resolved LATE on every render so a re-`defn` takes effect with no
+ ; re-registration — the proven `:seon.ancestor/populate` /
+ ; `:seon.cluster.loop/evaluate` / predicate-owner idiom.
+ :seon.render/projection :qualified-symbol
+
+ ; `:any` twice, at this router's one genuinely polymorphic boundary and
+ ; for the same reason value admission gives: IN, a unit is any map any
+ ; owner declares (naming a shape here would defeat the mechanism — the
+ ; whole point is that a family the router has never heard of routes);
+ ; OUT, the projection's grammar belongs to the KIND'S CONSUMER — prose
+ ; for `ai`, a line for `log`, hiccup for `html` — and restating it here
+ ; would be a second contract that drifts from the consumer's.
+ ; The keys are `:qualified-keyword` rather than `:any`, because fully
+ ; namespaced map keys are the house rule and this is where it is
+ ; enforceable for free.
+ :seon.render/unit [:map-of :qualified-keyword :any]
+ :seon.render/output :any
+
+ :seon.render/request [:map {:closed true} [:seon.render/unit :seon.render/unit] [:seon.render/kind :seon.render/kind]]
+ ; The output is WRAPPED, and that is deliberate: an unwrapped return
+ ; would be indistinguishable from a flat `:seon.error/value` for any
+ ; projection whose own output is a map. With the wrap, "did this
+ ; render?" is `:seon.error/kind` presence, by construction.
+ :seon.render/rendered [:map {:closed true} [:seon.render/kind :seon.render/kind] [:seon.render/output :seon.render/output]]
+
+ ; The two kinds the error family declares today. Registered here, in the
+ ; router's own file, because a kind is a contract between the router and
+ ; a consumer rather than a property of any one producer — and because
+ ; the loader is global, an owner declaring a new kind adds one line to
+ ; whichever file owns that consumer.
+ :seon.render/ai :seon.render/projection
+ :seon.render/log :seon.render/projection}
