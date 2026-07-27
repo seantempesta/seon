@@ -444,7 +444,12 @@
   `::record` is returned IDENTICAL to the one supplied: admission
   carries `:seon.eval/fn-entries` and `:seon.eval/allocated-bytes`
   through untouched, because dropping them is precisely the quarry
-  defect this package exists to end (`driver.clj:160-173`).
+  defect this package exists to end (`driver.clj:160-173`). It is
+  OPTIONAL (seal revision, 2026-07-27): the diagnostics are eval-shaped
+  and admission now has a caller that is not an eval —
+  `seon.error/normalize` runs an arbitrary error source through this
+  same codec — so an absent record stays absent rather than becoming a
+  zeroed measurement nobody took.
 
   Never throws for a value it cannot project — that node becomes a
   marker. The one throwable it deliberately does NOT catch is sci's
@@ -460,10 +465,11 @@
                                              caps))))
                :capped? (volatile! false)}
         projection (project value 0 state)]
-    {::value projection
-     ;; finite by construction: the projection is depth-bounded,
-     ;; width-bounded, deref-free and cycle-free, so this print cannot
-     ;; run away and cannot overflow the stack
-     :seon.cluster.eval/result-edn (pr-str projection)
-     ::capped? @(:capped? state)
-     ::record record}))
+    (cond-> {::value projection
+             ;; finite by construction: the projection is depth-bounded,
+             ;; width-bounded, deref-free and cycle-free, so this print
+             ;; cannot run away and cannot overflow the stack
+             :seon.cluster.eval/result-edn (pr-str projection)
+             ::capped? @(:capped? state)}
+      ;; absent in, absent out — never a stored nil
+      record (assoc ::record record))))

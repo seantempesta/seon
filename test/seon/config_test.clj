@@ -41,8 +41,8 @@
     :seon.config.eval.result/max-string
     :seon.config.eval.result/max-nodes
     :seon.config.eval/time-limit-ms
-    :seon.config.fault/escalate-to
-    :seon.config.fault/recurrence-limit
+    :seon.config.error/escalate-to
+    :seon.config.error/recurrence-limit
     :seon.config/on-core-error})
 
 (def ^:private dial-attributes
@@ -54,7 +54,7 @@
 ;;; shape: every manifest entry is optional by design, so deriving this
 ;;; from the manifest would make the rule vacuous. A dial the effective
 ;;; shape marks optional may be absent, and absence is the state — the
-;;; first is :seon.config.fault/escalate-to, which names an agent id and
+;;; first is :seon.config.error/escalate-to, which names an agent id and
 ;;; has no honest shipped value because no root agent exists.
 (def ^:private required-dial-attributes
   (into #{}
@@ -83,8 +83,8 @@
    :seon.config.eval.result/max-string
    :seon.config.eval.result/max-nodes
    :seon.config.eval/time-limit-ms
-   :seon.config.fault/escalate-to
-   :seon.config.fault/recurrence-limit
+   :seon.config.error/escalate-to
+   :seon.config.error/recurrence-limit
    :seon.config/on-core-error])
 
 (defn- with-config-database
@@ -134,7 +134,7 @@
         "the registered manifest owns exactly today's honest dial population")
     (is (= required-dial-attributes (set (keys manifest)))
         "every REQUIRED dial has a value and no operational quarry key leaks")
-    (is (not (contains? manifest :seon.config.fault/escalate-to))
+    (is (not (contains? manifest :seon.config.error/escalate-to))
         "and an optional dial with no honest default stays absent —
          absence is the state, not a nil")
     (doseq [dial dial-attributes]

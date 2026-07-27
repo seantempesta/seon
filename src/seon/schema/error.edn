@@ -134,7 +134,7 @@
  ; place so that nothing ever references `:seon.fault/*`. Its author
  ; revises them against the normalizer above.
  :seon.error/messages [:int {:min 0}]
- :seon.error/commit-request [:map {:closed true} [:seon.store/branch-connection :seon.store/branch-connection] [:seon.error/source :seon.error/source] [:seon.error/process :seon.error/process] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.config/on-core-error :seon.config/on-core-error] [:seon.config.fault/escalate-to {:optional true} :seon.config.fault/escalate-to] [:seon.config.fault/recurrence-limit {:optional true} :seon.config.fault/recurrence-limit]]
+ :seon.error/commit-request [:map {:closed true} [:seon.store/branch-connection :seon.store/branch-connection] [:seon.error/source :seon.error/source] [:seon.error/process :seon.error/process] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.config/on-core-error :seon.config/on-core-error] [:seon.config.error/escalate-to {:optional true} :seon.config.error/escalate-to] [:seon.config.error/recurrence-limit {:optional true} :seon.config.error/recurrence-limit]]
  :seon.error/committed [:map {:closed true} [:seon.error/id :seon.error/id] [:seon.error/messages :seon.error/messages] [:seon.error/reason {:optional true} :seon.error/reason]]
 
  ; An explanation message carries a ref to what it explains. A user

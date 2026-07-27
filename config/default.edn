@@ -44,9 +44,9 @@
  ; noise, twice was bad luck, and three times is a pattern the
  ; escalation owner must hear about. Counted by query over committed
  ; facts; there is no stored tally to drift.
- :seon.config.fault/recurrence-limit 3
+ :seon.config.error/recurrence-limit 3
 
- ; :seon.config.fault/escalate-to is deliberately ABSENT: there is no
+ ; :seon.config.error/escalate-to is deliberately ABSENT: there is no
  ; root agent in the fresh tree, and a shipped default naming an agent
  ; that may not exist would be a lie. Absent = the fault fact is still
  ; committed, no escalation message is sent.

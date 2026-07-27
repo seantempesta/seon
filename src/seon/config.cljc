@@ -55,7 +55,7 @@
   "The dials the defaults document must carry a value for.
   A dial the EFFECTIVE shape marks `{:optional true}` may be absent from
   `config/default.edn`, and absence is then the state — the first case
-  is `:seon.config.fault/escalate-to`, which names an agent id: there
+  is `:seon.config.error/escalate-to`, which names an agent id: there
   is no root agent in the fresh tree, so a shipped default would name
   something that may not exist. Every REQUIRED dial must still carry a
   provenanced value; that is the completeness rule that matters.

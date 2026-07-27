@@ -31,6 +31,14 @@
  ; development, :record degrades reasonably in production. It is a
  ; required key because a caller that has not decided has not thought
  ; about it.
- :seon.sci.admit/request [:map {:closed true} [:seon.sci.admit/value :any] [:seon.sci.admit/interrupt-fn :seon.sci.admit/interrupt-fn] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.sci.admit/record :seon.sci.admit/record] [:seon.config/on-core-error :seon.config/on-core-error]]
- :seon.sci.admit/admitted [:map {:closed true} [:seon.sci.admit/value :any] [:seon.cluster.eval/result-edn :seon.cluster.eval/result-edn] [:seon.sci.admit/capped? :seon.sci.admit/capped?] [:seon.sci.admit/record :seon.sci.admit/record]]
+ ; The DIAGNOSTICS are optional (seal revision, 2026-07-27): they are
+ ; eval-shaped, and admission now has a caller that is not an eval —
+ ; `seon.error/normalize` projects an arbitrary error source through
+ ; this same one codec, and fabricating a zeroed `fn-entries` /
+ ; `duration-ms` / `allocated-bytes` record for it would be inventing
+ ; measurements nobody took. Absent in, absent out: admission carries
+ ; the record through untouched, and an absent record stays absent
+ ; rather than becoming a stored nil.
+ :seon.sci.admit/request [:map {:closed true} [:seon.sci.admit/value :any] [:seon.sci.admit/interrupt-fn :seon.sci.admit/interrupt-fn] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.config/on-core-error :seon.config/on-core-error] [:seon.sci.admit/record {:optional true} :seon.sci.admit/record]]
+ :seon.sci.admit/admitted [:map {:closed true} [:seon.sci.admit/value :any] [:seon.cluster.eval/result-edn :seon.cluster.eval/result-edn] [:seon.sci.admit/capped? :seon.sci.admit/capped?] [:seon.sci.admit/record {:optional true} :seon.sci.admit/record]]
  :seon.sci.admit/value :any}
