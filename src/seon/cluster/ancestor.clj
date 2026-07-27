@@ -1,10 +1,9 @@
 (ns seon.cluster.ancestor
   "The ancestor: one branch every cluster is born from, built once.
 
-  DRAFT CONTRACT LAYER FOR ORCHESTRATOR SEAL (drafted 2026-07-27 — the
-  B2 rung, grounded in research/b2-plan-2026-07-27.md §0, §5.2-§5.3 and
-  §9). Nothing here is implemented: every body throws
-  `awaits implementation`. Once sealed, the implementation lane fills
+  CONTRACT LAYER (drafted + SEALED 2026-07-27 — the B2 rung, grounded
+  in research/b2-plan-2026-07-27.md §0, §5.2-§5.3 and §9; implemented
+  green a35c95d0a). The implementation lane fills
   the stubs until test/seon/cluster/ancestor_test.clj is green and may
   not loosen a schema or a test. Friction is reported, never resolved
   by weakening.
@@ -259,9 +258,11 @@
   and the build proceeds; one whose owner is ALIVE refuses
   `::build-in-progress` with that branch named — two builds of one
   digest must never race.
-  A population function that throws leaves the scratch branch behind
-  and propagates: the ancestor name did not appear, so the next
-  `ensure!` reclaims and retries. A `:seon.ancestor/populate` symbol
+  A population function that throws retires its own scratch branch and
+  propagates: the ancestor name did not appear, and the next `ensure!`
+  simply rebuilds. (A kill -9 mid-population DOES leave the scratch
+  behind — the dead-owner reclaim in the crash walk covers exactly
+  that.) A `:seon.ancestor/populate` symbol
   that does not resolve refuses `::populate-unresolvable` BEFORE any
   branch is created."
   {:malli/schema [:=> [:cat :seon.ancestor/ensure-request]

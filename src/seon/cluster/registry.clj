@@ -1,7 +1,7 @@
 (ns seon.cluster.registry
   "The registry: the ONE owner of branch lifecycle on a physical store.
 
-  DRAFT CONTRACT LAYER FOR ORCHESTRATOR SEAL (drafted 2026-07-27 — the
+  CONTRACT LAYER (drafted + SEALED 2026-07-27, implemented green a35c95d0a — the
   B2 rung, grounded in research/b2-plan-2026-07-27.md §0, §5 and §9;
   every rule below carries file:line evidence there or in a committed
   probe). Nothing here is implemented: every body throws

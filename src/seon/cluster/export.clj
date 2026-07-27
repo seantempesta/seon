@@ -1,7 +1,7 @@
 (ns seon.cluster.export
   "Export: a self-contained copy of a store, re-identified to its new path.
 
-  DRAFT CONTRACT LAYER FOR ORCHESTRATOR SEAL (drafted 2026-07-27 — the
+  CONTRACT LAYER (drafted + SEALED 2026-07-27, implemented green a35c95d0a — the
   B2 rung, grounded in research/b2-plan-2026-07-27.md §0.8, §2.1-§2.4,
   §5.6 and §9). Nothing here is implemented: every body throws
   `awaits implementation`. Once sealed, the implementation lane fills
