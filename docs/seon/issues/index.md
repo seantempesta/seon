@@ -23,11 +23,12 @@ See `README.md` for the convention.
 | [Replace bare flow callback predicates with honest contracts](flow-callback-schemas-are-not-generatively-constructible.md) | blocker | Core |
 | [`bin/seon up` exits 0 after a readiness timeout](operator-up-exits-zero-on-readiness-timeout.md) | blocker | general |
 
-## Friction (2)
+## Friction (3)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Align vendored Malli source with the pinned dependency](malli-vendor-is-ahead-of-pinned-dependency.md) | friction | general |
+| [Full gate has a one-in-three flake post error step 2](full-gate-has-a-one-in-three-flake-post-step-2.md) | friction | general |
 | [Keep the old source tree off Babashka's default classpath](babashka-default-classpath-exposes-src-old.md) | friction | general |
 
 ## Cleanup (3)
