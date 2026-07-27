@@ -10,12 +10,4 @@
  ; because an idempotently re-asserted value emits no datom and would
  ; therefore emit no wake (probe B Q10).
  :seon.cluster.message/to :seon.db/ref
-
- ; A RUN'S WHY IS TRANSACTION METADATA (owner ruling, 2026-07-27 night):
- ; the run-opening transaction carries a ref to the message that caused
- ; it, so "has this trigger been answered?" is "does any run-opening
- ; transaction point at it". The one deliberate extension of minimal
- ; provenance (user + process) on ONE transition — never copied onto the
- ; run entity, which is why this key is NOT :seon.cluster.run/*.
- ; Seal question in the report: its final home may be provenance.edn.
- :seon.db/trigger :seon.db/ref}
+}

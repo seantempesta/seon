@@ -1,7 +1,7 @@
 (ns seon.cluster.work
   "What the loop should do next, derived from one database value.
 
-  DRAFT CONTRACT LAYER FOR ORCHESTRATOR SEAL (drafted 2026-07-27 — N3,
+  CONTRACT LAYER (drafted + ORCHESTRATOR-SEALED 2026-07-27 — N3,
   package 1, from n3-plan §4.3, §9 and the 2026-07-27 night rulings).
   Nothing here is implemented: every body throws
   `awaits implementation`.

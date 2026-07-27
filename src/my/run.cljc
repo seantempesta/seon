@@ -1,7 +1,7 @@
 (ns my.run
   "What an agent says about its own run: two values, nothing else.
 
-  DRAFT CONTRACT LAYER FOR ORCHESTRATOR SEAL (drafted 2026-07-27 — N3,
+  CONTRACT LAYER (drafted + ORCHESTRATOR-SEALED 2026-07-27 — N3,
   package 1). Nothing here is implemented: every body throws
   `awaits implementation`.
 
