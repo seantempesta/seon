@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Persistent fresh-system dev-loop REPL host until full bin/seon start lands.
+# Agents reach this cluster instance through the MCP eval_clj tool.
+
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+cluster="${1:-default}"
+if [[ ! "$cluster" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "bin/repl: invalid cluster name: $cluster" >&2
+  exit 2
+fi
+
+exec clojure -M:dev -e \
+  "(do
+     (require 'seon.cluster)
+     (seon.cluster/start! {:seon.boot/cluster-name \"$cluster\"})
+     (println \"seon $cluster ready — REPL advertised\")
+     @(promise))"

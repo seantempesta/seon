@@ -86,9 +86,11 @@
 ;; agent-id (string) -> {:nrepl-session "<uuid>" :client-id <int> :build "<:client>" (:cluster "<name>")}
 (def agent-sessions (atom {}))
 
-;; [cluster session-id] -> one stateful io-prepl socket and its bound port.
+;; [cluster session-id] -> one stateful io-prepl socket and its endpoint.
 (def clj-sessions (atom {}))
 (def writer-port-file-override (System/getenv "SEON_WRITER_REPL_PORT_FILE"))
+(def ^:private fresh-cluster-root
+  (io/file project-root "data/clusters"))
 
 (def stdout-lock (Object.))
 (def ^:dynamic *requested-output-tokens* default-output-tokens)
@@ -718,6 +720,57 @@
 (defn- valid-cluster? [cluster]
   (boolean (re-matches #"[A-Za-z0-9._-]+" cluster)))
 
+(def ^:private fresh-advertisement-keys
+  #{:seon.boot/cluster-name
+    :seon.boot/prepl-host
+    :seon.boot/prepl-port
+    :seon.boot/pid
+    :seon.boot/start-instant})
+
+(defn- fresh-advertisement-file
+  "Return the fresh system's conventional advertisement file."
+  [cluster]
+  (io/file fresh-cluster-root cluster "prepl.edn"))
+
+(defn- matching-live-process?
+  "True when an advertisement names its live originating JVM process."
+  [advertisement]
+  (try
+    (let [optional
+          (java.lang.ProcessHandle/of
+           (long (:seon.boot/pid advertisement)))]
+      (when (.isPresent optional)
+        (let [handle (.get optional)
+              start (.startInstant (.info handle))]
+          (and (.isAlive handle)
+               (.isPresent start)
+               (= (.getTime
+                   ^java.util.Date (:seon.boot/start-instant advertisement))
+                  (.toEpochMilli ^java.time.Instant (.get start)))))))
+    (catch Throwable _
+      false)))
+
+(defn- read-fresh-advertisement
+  "Read one live fresh-system io-prepl advertisement, or nil."
+  [cluster]
+  (try
+    (let [advertisement
+          (edn/read-string (slurp (fresh-advertisement-file cluster)))]
+      (when (and (map? advertisement)
+                 (= fresh-advertisement-keys (set (keys advertisement)))
+                 (= cluster (:seon.boot/cluster-name advertisement))
+                 (string? (:seon.boot/prepl-host advertisement))
+                 (not (str/blank? (:seon.boot/prepl-host advertisement)))
+                 (integer? (:seon.boot/prepl-port advertisement))
+                 (<= 1 (:seon.boot/prepl-port advertisement) 65535)
+                 (integer? (:seon.boot/pid advertisement))
+                 (pos? (:seon.boot/pid advertisement))
+                 (inst? (:seon.boot/start-instant advertisement))
+                 (matching-live-process? advertisement))
+        advertisement))
+    (catch Throwable _
+      nil)))
+
 (defn- runtime-writer-owner!
   "Resolve one runtime cluster to its immutable advertised writer owner."
   [cluster]
@@ -797,19 +850,49 @@
                          :seon.dev.mcp/port-file (.getPath file)})))
       port)))
 
+(defn- read-clj-endpoint
+  "Discover the fresh io-prepl first, then the old writer fallback."
+  [cluster]
+  (when-not (valid-cluster? cluster)
+    (throw (ex-info "Invalid cluster name."
+                    {:seon.dev.mcp/cluster cluster})))
+  (if-let [advertisement (read-fresh-advertisement cluster)]
+    {:host (:seon.boot/prepl-host advertisement)
+     :port (:seon.boot/prepl-port advertisement)
+     :seon.dev.mcp/source :fresh-system}
+    (try
+      {:host "127.0.0.1"
+       :port (read-writer-port cluster)
+       :seon.dev.mcp/source :old-writer}
+      (catch Throwable old-writer-error
+        (let [advertisement-file (fresh-advertisement-file cluster)]
+          (throw
+           (ex-info
+            (str "No live CLJ REPL is available for cluster '" cluster
+                 "'. Start a persistent fresh-system REPL with: bin/repl "
+                 cluster)
+            {:seon.dev.mcp/cluster cluster
+             :seon.dev.mcp/fresh-advertisement-file
+             (.getPath advertisement-file)
+             :seon.dev.mcp/old-writer-error
+             (ex-message old-writer-error)}
+            old-writer-error)))))))
+
 (defn- close-clj-session! [key]
   (when-let [{:keys [socket]} (get @clj-sessions key)]
     (swap! clj-sessions dissoc key)
     (try (.close ^Socket socket) (catch Throwable _))))
 
-(defn- open-clj-session! [cluster session-id port]
+(defn- open-clj-session! [cluster session-id endpoint]
   (let [socket (Socket.)]
-    (.connect socket (InetSocketAddress. "127.0.0.1" (int port))
+    (.connect socket
+              (InetSocketAddress. ^String (:host endpoint)
+                                  (int (:port endpoint)))
               connect-timeout-ms)
     (let [session {:socket socket
                    :reader (PushbackReader. (io/reader socket))
                    :writer (io/writer socket)
-                   :port port
+                   :endpoint endpoint
                    :cluster cluster
                    :session-id session-id}]
       (swap! clj-sessions assoc [cluster session-id] session)
@@ -817,23 +900,23 @@
 
 (defn- current-clj-session! [cluster session-id]
   (let [key [cluster session-id]
-        port (read-writer-port cluster)
+        endpoint (read-clj-endpoint cluster)
         cached (get @clj-sessions key)]
     (cond
-      (and cached (= port (:port cached))) cached
+      (and cached (= endpoint (:endpoint cached))) cached
 
       cached
       (do
         (close-clj-session! key)
         (if (= "default" session-id)
-          (open-clj-session! cluster session-id port)
+          (open-clj-session! cluster session-id endpoint)
           (throw (ex-info "Named CLJ session ended with the writer restart."
                           {:seon.dev.mcp/cluster cluster
                            :seon.dev.mcp/session-id session-id
                            :seon.dev.mcp/retry-with-new-session true}))))
 
       :else
-      (open-clj-session! cluster session-id port))))
+      (open-clj-session! cluster session-id endpoint))))
 
 (defn- require-single-clj-form! [code]
   ;; io-prepl emits exactly one :ret PER FORM, not per socket write. Sending
@@ -1419,10 +1502,10 @@
                   :required ["code"]}}
 
    {:name "eval_clj"
-    :description "Evaluate one Clojure form through the writer advertised by the selected runtime cluster. Branch runtimes deliberately use their source writer. The default session reconnects after writer restart; named sessions report that their state was lost."
+    :description "Evaluate one Clojure form through the selected cluster's fresh-system io-prepl, falling back to the old writer while it remains available. The default session reconnects after runtime restart; named sessions report that their state was lost."
     :inputSchema {:type "object"
                   :properties {:code {:type "string"}
-                               :cluster {:type "string" :description "Runtime cluster name. A live branch runtime selects its advertised source writer; defaults to this MCP server's own cluster."}
+                               :cluster {:type "string" :description "Cluster name. Fresh discovery reads data/clusters/<name>/prepl.edn; defaults to this MCP server's own cluster."}
                                :session_id {:type "string" :description "Stateful io-prepl session id. Defaults to 'default'."}
                                :timeout_ms {:type "integer" :minimum 1 :maximum 120000}
                                :max_output_tokens {:type "integer" :minimum 64 :maximum 16000}}
