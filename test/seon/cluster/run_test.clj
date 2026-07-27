@@ -501,29 +501,32 @@
   (gen/elements [:running :done :error]))
 
 (deftest recovery-preserves-terminal-receipts-exactly
-  (with-model-database
-    (fn [connection]
-      (d/transact connection [{:seon.cluster.agent/id "keeper"}])
-      (let [pull-terminals
-            (fn [run-id]
-              (->> (d/q '[:find [?r ...]
-                          :in $ ?run-id
-                          :where
-                          [?run :seon.cluster.run/id ?run-id]
-                          [?r :seon.cluster.eval/run ?run]]
-                        (d/db connection) run-id)
-                   (mapv #(d/pull (d/db connection) '[*] %))
-                   (filterv #(contains? #{:done :error}
-                                        (:seon.cluster.eval/status %)))
-                   (sort-by :seon.cluster.eval/ordinal)
-                   vec))
-            check
-            (tc/quick-check
-             30
-             (prop/for-all [statuses (gen/vector receipt-status-gen 1 5)
-                            dead? gen/boolean
-                            round gen/nat]
-               (let [run-id (str "keep-" round "-" (random-uuid))
+  ;; One FRESH database per trial (the shared-database class, already
+  ;; fixed once in the state machine, does not get a second life), and
+  ;; ids derive from generated values only — replayable under the seed.
+  (let [pull-terminals
+        (fn [connection run-id]
+          (->> (d/q '[:find [?r ...]
+                      :in $ ?run-id
+                      :where
+                      [?run :seon.cluster.run/id ?run-id]
+                      [?r :seon.cluster.eval/run ?run]]
+                    (d/db connection) run-id)
+               (mapv #(d/pull (d/db connection) '[*] %))
+               (filterv #(contains? #{:done :error}
+                                    (:seon.cluster.eval/status %)))
+               (sort-by :seon.cluster.eval/ordinal)
+               vec))
+        check
+        (tc/quick-check
+         30
+         (prop/for-all [statuses (gen/vector receipt-status-gen 1 5)
+                        dead? gen/boolean
+                        round gen/nat]
+           (with-model-database
+             (fn [connection]
+               (let [run-id (str "keep-" round "-" (count statuses)
+                                 "-" dead?)
                      agent-id (str "keeper-" run-id)
                      holder (if dead? "dead-process" "live-process")]
                  (d/transact connection
@@ -551,7 +554,7 @@
                            :seon.cluster.eval/status status
                            :seon.cluster.eval/result-edn (str ordinal)})
                         statuses)))
-                 (let [terminals-before (pull-terminals run-id)
+                 (let [terminals-before (pull-terminals connection run-id)
                        recovery
                        (run/recover-tx
                         {::run/run (run-entity connection run-id)
@@ -579,14 +582,14 @@
                     ;; no receipt stays :running
                     (not (contains? statuses-after :running))
                     ;; terminal receipts are IDENTICAL, whole entities
-                    (= terminals-before (pull-terminals run-id))
+                    (= terminals-before (pull-terminals connection run-id))
                     ;; dead holders released; live holders keep custody
                     (if dead?
                       (nil? (::run/process entity))
-                      (= "live-process" (::run/process entity)))))))
-             :seed 20260727)]
-        (is (true? (:result check))
-            (str "recovery property failed: " (pr-str check)))))))
+                      (= "live-process" (::run/process entity)))))))))
+         :seed 20260727)]
+    (is (true? (:result check))
+        (str "recovery property failed: " (pr-str check)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema admissibility — the model refuses what it must
