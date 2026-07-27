@@ -67,19 +67,39 @@
          [?message :seon.cluster.message/content ?content]]
        db message-id))
 
-(defn- latest-run
-  "The agent's most recently opened run, pulled whole, or nil.
-  The warning is about the LAST run, not any run: an agent that was cut
-  once, recovered, and worked for a week is not still interrupted."
+(defn- previous-run
+  "The agent's most recent run OTHER than the one being planned, or nil.
+  The warning is about the LAST run, not any run: an agent cut once,
+  recovered, and working for a week is not still interrupted.
+
+  EXCLUDING THE RUN BEING PLANNED is the whole correction, and it
+  was measured rather than reasoned: the loop CLAIMS BEFORE it calls the
+  model, so by the time a prompt is derived the agent's newest run is
+  the one this prompt is for. Taking the newest run therefore inspected
+  a run with no receipts and no error and found nothing to warn about —
+  the warning was derivable before the run opened and gone after it, so
+  the live agent never saw it. The run being planned is exactly the one
+  the agent POINTER names, so excluding that leaves the run the warning
+  is actually about. When no run is open (a prompt derived before the
+  claim, as a probe or a test does) nothing is excluded and the newest
+  run is the previous one — the same answer by the same rule."
   [db agent-id]
-  (->> (d/q '[:find [(pull ?run [*]) ...]
-              :in $ ?agent-id
-              :where
-              [?agent :seon.cluster.agent/id ?agent-id]
-              [?run :seon.cluster.run/agent ?agent]]
-            db agent-id)
-       (sort-by #(inst-ms (:seon.cluster.run/opened-at %)))
-       last))
+  (let [current (d/q '[:find ?id .
+                       :in $ ?agent-id
+                       :where
+                       [?agent :seon.cluster.agent/id ?agent-id]
+                       [?agent :seon.cluster.agent/run ?run]
+                       [?run :seon.cluster.run/id ?id]]
+                     db agent-id)]
+    (->> (d/q '[:find [(pull ?run [*]) ...]
+                :in $ ?agent-id
+                :where
+                [?agent :seon.cluster.agent/id ?agent-id]
+                [?run :seon.cluster.run/agent ?agent]]
+              db agent-id)
+         (remove #(= current (:seon.cluster.run/id %)))
+         (sort-by #(inst-ms (:seon.cluster.run/opened-at %)))
+         last)))
 
 (defn- run-receipts
   [db run-id]
@@ -105,7 +125,7 @@
   the crash walk are indistinguishable from the facts and a confident
   claim would be a lie the agent then reasons from."
   [db agent-id]
-  (when-let [previous (latest-run db agent-id)]
+  (when-let [previous (previous-run db agent-id)]
     (let [run-id (:seon.cluster.run/id previous)]
       (if-let [cut (run/interrupted-warning (run-forms db run-id)
                                             (run-receipts db run-id))]

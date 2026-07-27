@@ -15,6 +15,7 @@
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
+            [datahike.api :as d]
             [seon.cluster :as cluster]
             [seon.cluster.store :as store]
             [seon.schema]))
@@ -326,5 +327,97 @@
         (testing "the carried instance stops like any other"
           (is (nil? (cluster/stop! degraded)))
           (is (nil? (cluster/read-advertisement root "wreck")))))
+      (finally
+        (delete-recursively! root)))))
+
+;;; ---------------------------------------------------------------------------
+;;; Boot recovery — a dead holder's wreckage is settled before anything resumes
+;;; ---------------------------------------------------------------------------
+
+(deftest a-dead-holders-run-is-unclaimed-by-the-time-start-returns
+  ;; The live crash drill found this gap: `recover-tx` existed with no
+  ;; caller, so a process that died holding a claimed run left the agent
+  ;; wedged — `work/next-work` sees a run held by someone else and
+  ;; returns nothing, forever. Recovery is BY FACT: the drill measured
+  ;; the dead holder's 60-second lease still in the future when the fix
+  ;; fires, so nothing here waits a lease out.
+  (let [root (fresh-root)]
+    (try
+      ;; a first boot writes the wreckage a kill -9 mid-model-call leaves:
+      ;; an open run claimed by a process that will not exist afterwards,
+      ;; a live lease, and a dangling :running receipt
+      (let [instance (cluster/start! {:seon.boot/cluster-name "recov"
+                                      :seon.boot/root root})
+            connection (:seon.boot/cluster-connection instance)
+            now (java.util.Date.)]
+        (d/transact connection [{:seon.cluster.agent/id "alice"}])
+        (d/transact connection
+                    [{:seon.cluster.run/id "run-crashed"
+                      :seon.cluster.run/agent [:seon.cluster.agent/id "alice"]
+                      :seon.cluster.run/opened-at now
+                      :seon.cluster.run/claim-epoch 1
+                      :seon.cluster.run/process "99999-1"
+                      :seon.cluster.run/lease-until
+                      (java.util.Date. (+ (inst-ms now) 600000))
+                      :seon.cluster.run/plan-digest (apply str (repeat 64 "a"))}
+                     {:seon.cluster.agent/id "alice"
+                      :seon.cluster.agent/run [:seon.cluster.run/id "run-crashed"]}
+                     {:seon.cluster.run.form/id "f-0"
+                      :seon.cluster.run.form/run [:seon.cluster.run/id "run-crashed"]
+                      :seon.cluster.run.form/ordinal 0
+                      :seon.cluster.run.form/source "(+ 1 1)"}
+                     {:seon.cluster.eval/id "e-0"
+                      :seon.cluster.eval/run [:seon.cluster.run/id "run-crashed"]
+                      :seon.cluster.eval/ordinal 0
+                      :seon.cluster.eval/claim-epoch 1
+                      :seon.cluster.eval/at now
+                      :seon.cluster.eval/status :running}])
+        (cluster/stop! instance))
+
+      ;; the next boot must settle it, with no lease wait
+      (let [started (System/nanoTime)
+            instance (cluster/start! {:seon.boot/cluster-name "recov"
+                                      :seon.boot/root root})
+            connection (:seon.boot/cluster-connection instance)
+            elapsed-ms (/ (- (System/nanoTime) started) 1e6)]
+        (try
+          (testing "the dead holder's custody is gone"
+            (is (nil? (d/q (quote [:find ?p . :where
+                                   [_ :seon.cluster.run/process ?p]])
+                           @connection)))
+            (is (nil? (d/q (quote [:find ?l . :where
+                                   [_ :seon.cluster.run/lease-until ?l]])
+                           @connection))))
+          (testing "its dangling receipt reads :interrupted, never :running"
+            (is (= [:interrupted]
+                   (d/q (quote [:find [?s ...] :where
+                                [_ :seon.cluster.eval/status ?s]])
+                        @connection))))
+          (testing "and the run is still OPEN with its plan intact —
+                    recovery settles custody, it does not re-plan or
+                    re-execute anything"
+            (is (nil? (d/q (quote [:find ?c . :where
+                                   [_ :seon.cluster.run/closed-at ?c]])
+                           @connection)))
+            (is (some? (d/q (quote [:find ?d . :where
+                                    [_ :seon.cluster.run/plan-digest ?d]])
+                            @connection))))
+          (testing "the lease was still LIVE — nothing waited it out"
+            (is (< elapsed-ms 10000)
+                (str "boot+recovery took " elapsed-ms "ms")))
+          (testing "and the instance reports what recovery did"
+            (is (= 1 (:seon.boot/recovered-runs instance)))
+            (is (pos? (:seon.boot/recovery-operations instance))))
+          (finally
+            (cluster/stop! instance))))
+
+      ;; a clean boot commits nothing
+      (let [instance (cluster/start! {:seon.boot/cluster-name "clean"
+                                      :seon.boot/root root})]
+        (try
+          (is (= 0 (:seon.boot/recovery-operations instance))
+              "a store with no wreckage is not written to at boot")
+          (finally
+            (cluster/stop! instance))))
       (finally
         (delete-recursively! root)))))

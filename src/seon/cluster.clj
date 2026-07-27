@@ -65,6 +65,7 @@
   process table rather than trusting the file. `stop!` is idempotent;
   a killed process's next boot simply re-advertises."
   (:require [clojure.core.server]
+            [seon.cluster.run :as run]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.test.check.generators :as gen]
@@ -358,6 +359,62 @@
                                 {:seon.ancestor/roots ancestor-roots})
          :seon.ancestor/populate `populate-ancestor!}))))
 
+;;; ---------------------------------------------------------------------------
+;;; Recovery — the pass that runs before anything resumes
+;;; ---------------------------------------------------------------------------
+
+(defn process-identity
+  "This process's identity as a run holder: `<pid>-<start-millis>`.
+  (pid, start-instant) is the process identity the whole system already
+  uses; a bare pid is recyclable and a recycled pid claiming to hold a
+  run is the one confusion recovery must not have. The run loop's
+  handle should carry THIS value as `:seon.cluster.run/process`, so the
+  holder a run names and the holder recovery judges are the same string."
+  {:malli/schema [:=> [:cat :seon.boot/advertisement] :seon.cluster.run/process]}
+  [advertisement]
+  (str (:seon.boot/pid advertisement) "-"
+       (inst-ms (:seon.boot/start-instant advertisement))))
+
+(defn- recover-runs!
+  "Settle every run held by a dead process, before anything resumes.
+  BY FACT, NEVER BY CLOCK: a run whose holder is not in the live set is
+  released immediately, and its dangling `:running` receipts become
+  `:interrupted` — the 60-second lease is not waited out, because the
+  lease exists to bound a holder we cannot ask about and here we can:
+  this process just started, so on this branch every other holder is
+  provably gone (one connection per branch, one process per store).
+
+  Nothing here re-opens, re-plans, or re-executes. `recover-tx` is pure
+  over the values it is handed and returns [] for a run needing
+  nothing, so a clean boot commits nothing at all."
+  [connection process]
+  (let [db @connection
+        open-runs (d/q '[:find [(pull ?run [*]) ...]
+                         :where
+                         [?run :seon.cluster.run/id _]
+                         (not [?run :seon.cluster.run/closed-at _])]
+                       db)
+        receipts-of (fn [run-id]
+                      (d/q '[:find [(pull ?receipt [*]) ...]
+                             :in $ ?run-id
+                             :where
+                             [?run :seon.cluster.run/id ?run-id]
+                             [?receipt :seon.cluster.eval/run ?run]]
+                           db run-id))
+        operations (into []
+                         (mapcat
+                          (fn [run]
+                            (run/recover-tx
+                             {:seon.cluster.run/run run
+                              :seon.cluster.run/receipts
+                              (receipts-of (:seon.cluster.run/id run))
+                              :seon.cluster.run/live-processes #{process}})))
+                         open-runs)]
+    (when (seq operations)
+      (d/transact connection operations))
+    {:seon.boot/recovered-runs (count open-runs)
+     :seon.boot/recovery-operations (count operations)}))
+
 (defn- stack-tower!
   "Stack store → ancestor → fork → connection → config onto `instance`.
   Each layer is assoc'd as it stands, and the whole value is republished
@@ -374,7 +431,14 @@
                  :seon.ancestor/branch (ancestor-branch! store config)})
         connection (store/open-branch! store (:seon.store/branch forked))
         instance (publish!
-                  (assoc instance :seon.boot/cluster-connection connection))]
+                  (assoc instance :seon.boot/cluster-connection connection))
+        ;; BEFORE anything resumes: a previous process's wreckage is
+        ;; settled here, so the first pass of any loop derives work from
+        ;; facts that already tell the truth about who holds what
+        recovery (recover-runs!
+                  connection
+                  (process-identity (:seon.boot/advertisement instance)))
+        instance (publish! (merge instance recovery))]
     (publish!
      (assoc instance
             :seon.boot/config-result
