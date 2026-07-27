@@ -55,6 +55,12 @@ harness and full min/max distribution are recorded in
 
 ## Owner
 
+**Corrected 2026-07-27 (n4-plan §12 R3):** the plan is attribute-only BY
+CONSTRUCTION in Datahike (`query-dependency-plan` returns per-source
+attribute sets and nothing else, query.cljc:2877-2903) — the owner is
+the DEPENDENCY (a Datahike fork plan change), not Seon's interest
+tables. Original text below is superseded.
+
 The JVM writer's per-scope interest tables and the Datahike read-evidence
 projection that feeds them. The future web-tier-slice-2 unit should preserve
 attribute indexing while adding the entity constraints required to select
