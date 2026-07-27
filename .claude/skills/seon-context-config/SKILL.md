@@ -11,10 +11,10 @@ code reads those database facts after the connection is attached.
 
 Read these sources before changing configuration:
 
-- src/seon/config.cljs
+- src-old/seon/config.cljs
 - config/system.edn
-- src/seon/agent/ctx.cljs
-- src/seon/agent/ctx/namespaces.cljs
+- src-old/seon/agent/ctx.cljs
+- src-old/seon/agent/ctx/namespaces.cljs
 
 ## Select one manifest
 

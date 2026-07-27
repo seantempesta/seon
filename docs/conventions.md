@@ -406,7 +406,7 @@ wrapper registers no wrapper at all. There is no hand-maintained symbol set.
 ## Database Access
 
 `seon.db` is the **sole database API**. Never touch `datahike.api` directly
-outside `src/seon/db/`. Everything else uses `db/transact!`, `db/query`,
+outside `src-old/seon/db/`. Everything else uses `db/transact!`, `db/query`,
 `db/pull`, `db/entity`, `db/listen!`.
 
 Inside the cluster JVM, `seon.db` is co-located with the transaction owner:
@@ -703,8 +703,8 @@ envelope:
 `set!` the root, not `binding`). There is no shared `with-test-db` fixture on
 the CLJS side — `with-test-db` / `with-test-node` live in `seon.test-utils`
 (`.clj`, JVM track). Each CLJS test ns defines a small local helper; the
-canonical shape (see `test/seon/db_test.cljs` `fresh-conn` and
-`test/seon/ctx_test.cljs`):
+canonical shape (see `test-old/seon/db_test.cljs` `fresh-conn` and
+`test-old/seon/ctx_test.cljs`):
 
 ```clojure
 (defn- fresh-conn []                                  ; returns a Promise of a conn
@@ -778,7 +778,7 @@ on the pod.
     (is (m/validate ::output (foo input)))))
 ;; Missing: example tests showing intended usage patterns!
 
-;; BAD: touching datahike.api directly outside src/seon/db/
+;; BAD: touching datahike.api directly outside src-old/seon/db/
 (d/transact conn tx-data)   ; use seon.db/transact!
 ```
 
@@ -792,7 +792,7 @@ Promote heavy plumbing to a sibling `<ns>.internal` namespace (see
 split into `core.cljs` / `schema.cljs` prematurely.
 
 ```
-src/seon/
+src-old/seon/
 ├── agent/
 │   ├── search.cljs            ; seon.agent.search (public grep + schemas)
 │   └── search/internal.cljs   ; seon.agent.search.internal (plumbing)
@@ -800,7 +800,8 @@ src/seon/
     db/internal.cljs           ; seon.db.internal (commit machinery)
 ```
 
-Tests mirror the `src/` structure under `test/`.
+New nucleus tests mirror fresh `src/` under `test/`. State A tests mirror
+`src-old/` under `test-old/` until explicitly adopted into the fresh pair.
 
 ---
 

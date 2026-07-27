@@ -1,7 +1,7 @@
 (ns bench.writer-throughput
   "File-backed Datahike and admitted-writer throughput probes.
 
-   This is measurement only. Writer correctness remains in `test/seon/db`.
+   This is measurement only. Writer correctness remains in `test-old/seon/db`.
 
    Run with the retained writer basis:
 

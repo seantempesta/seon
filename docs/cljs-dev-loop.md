@@ -69,7 +69,7 @@ The presence of a non-nil `:heartbeat-id` confirms `start-heartbeat!` ran. The p
 
 ## Hot-reload
 
-Edit any `.cljs` file in `src/seon/`, save. The watcher recompiles within ~1s; the running runtime gets a websocket message; `^:dev/before-load` fires (stops the heartbeat in `seon.client`), namespaces re-load, `^:dev/after-load` fires (increments `:reload-count`, restarts the heartbeat). `defonce` state survives.
+Edit any `.cljs` file in `src-old/seon/`, save. The watcher recompiles within ~1s; the running runtime gets a websocket message; `^:dev/before-load` fires (stops the heartbeat in `seon.client`), namespaces re-load, `^:dev/after-load` fires (increments `:reload-count`, restarts the heartbeat). `defonce` state survives.
 
 ```clojure
 ;; Verify reload landed:
@@ -93,7 +93,7 @@ pkill -f "node out/client/main.js"
 
 **`no shadow-cljs watcher running (no .shadow-cljs/nrepl.port)`** — watcher isn't up. Start Terminal 1.
 
-**`Use of undeclared Var seon.client/foo`** — function doesn't exist (or was renamed). Check `src/seon/client.cljs` for the actual name.
+**`Use of undeclared Var seon.client/foo`** — function doesn't exist (or was renamed). Check `src-old/seon/client.cljs` for the actual name.
 
 **`InternalError: stack overflow`** — would only show up under Wasmer-EdgeJS (V0.5+). Doesn't apply in raw Node V0.
 

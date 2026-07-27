@@ -63,7 +63,7 @@ What's broken or missing. Impact. Why now.
 | Resource | What's There |
 |----------|--------------|
 | `reference-code/foo/` | Library source to study |
-| `src/seon/bar.clj` | Existing code to build on |
+| `src-old/seon/bar.clj` | Existing State A code to build on or explicitly adopt |
 
 ## Solution Design
 

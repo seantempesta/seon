@@ -101,6 +101,6 @@ executed as shell code. All child processes receive the same derived environment
 
 - Operator launcher: `bin/seon`
 - Operator implementation: `script/seon/dev/`
-- Database process: `src/seon/db/server.clj`
-- Pod boot: `src/seon/client.cljs`
+- Database process: `src-old/seon/db/server.clj`
+- Pod boot: `src-old/seon/client.cljs`
 - Active roadmap: [[../prds/archive/runtime-reliability/roadmap]]

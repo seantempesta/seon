@@ -7,8 +7,8 @@ in **pod idiom**: ONE connection, map-in `transact!` returning an envelope,
 synchronous reads with the db auto-injected. The modeling principles are
 Datomic-compatible and unchanged; only the call shapes are pod-native.
 
-`src/my/kb.cljs` is the runnable version of everything below (every recipe
-compiles and is exercised by `my.kb-test`). `src/seon/agent/todo.cljs` is the
+`src-old/my/kb.cljs` is the runnable version of everything below (every recipe
+compiles and is exercised by `my.kb-test`). `src-old/seon/agent/todo.cljs` is the
 exemplar of a tree/DAG model with derived datalog rules.
 
 ## The `::` + deep-namespace convention (read this first)

@@ -7,8 +7,8 @@ description: "Test patterns for Seon. Use when writing or debugging .cljs tests,
 
 The application suite is **ClojureScript**, run in a fresh isolated Node test
 runtime via `bin/test-cljs`. Tests double as the worked manual for the surface they
-cover — read `test/seon/db_test.cljs`, `test/seon/ctx_test.cljs`,
-`test/my/kb_test.cljs`, `test/my/skills_test.cljs` as the canonical examples.
+cover — read `test-old/seon/db_test.cljs`, `test-old/seon/ctx_test.cljs`,
+`test-old/my/kb_test.cljs`, `test-old/my/skills_test.cljs` as the canonical examples.
 
 > Hand-offs: `^:async`/`await`/Promise semantics → **`clojurescript`**; what
 > `db/transact!` / `db/query` actually do + the envelope shape →
@@ -139,11 +139,43 @@ namespace and run it through `bin/test-cljs`. Database properties should use a
 fresh connection and exercise the same `schema/register!` → lazy install →
 transact → read-back boundary as the application.
 
+A generator gate is three separate assertions, never one:
+
+1. the generator constructs and runs at fixed seeds and several sizes;
+2. every emitted value validates against the exact compiled schema/registry
+   (`:gen/*` overrides REPLACE generation — Malli never checks their output);
+3. owner-named domain partitions and recursive size bounds are exercised.
+
+Every predicate schema needs an honest `:gen/schema`/`:gen/gen` —
+`:gen/return`, `:gen/elements`, or a token placeholder do not satisfy the
+house rule for an open domain. On failure print the schema key, seed, size,
+generated value, explanation, and the complete shrunk check.
+
+Function contracts split by what the property must observe:
+
+- **One-call `[args result]` relations**: a three-child `:=>` guard; assert
+  `(nil? (mi/check ...))` inside a discovered `deftest` with explicit
+  `:data` — never populate or scan Malli's process-global function-schema
+  registry, and never merely *call* `mi/check` (it returns failures; a suite
+  must assert them). Malli 0.20.0 runs 100 trials and does not forward
+  generator options.
+- **State transitions** (replay, idempotency, "twice", "after resume",
+  committed facts): explicit `(tc/quick-check ... :seed fixed-seed)` invoking
+  the production boundary, observing database facts independently of returned
+  envelopes, asserting `(:result check)` and printing the complete check.
+
+A CLJ-only generator pass cannot certify CLJS — tier-dependent schemas (regex
+above all) need recurring coverage on every owning runner. Grounding and the
+pitfall catalog:
+`docs/prds/sci-execution-runtime/research/malli-generative-patterns-2026-07-26.md`
++ `research/spec-authorship-relational-properties-2026-07-26.md` (the guard
+vs state-transition boundary).
+
 ## Key test files
 
 | File | What it teaches |
 |---|---|
-| `test/seon/db_test.cljs` | `fresh-conn`, instrument-in-test setup, the envelope contract, query/pull shapes |
-| `test/seon/ctx_test.cljs` | `with-conn` root-`set!`, context composition contracts |
-| `test/my/kb_test.cljs` | `pinned` re-pin pattern, append/read-back, the DB-as-manual idiom |
-| `test/my/skills_test.cljs` | derived-state assertions (no stored flags), corpus-scan-can't-bit-rot |
+| `test-old/seon/db_test.cljs` | `fresh-conn`, instrument-in-test setup, the envelope contract, query/pull shapes |
+| `test-old/seon/ctx_test.cljs` | `with-conn` root-`set!`, context composition contracts |
+| `test-old/my/kb_test.cljs` | `pinned` re-pin pattern, append/read-back, the DB-as-manual idiom |
+| `test-old/my/skills_test.cljs` | derived-state assertions (no stored flags), corpus-scan-can't-bit-rot |

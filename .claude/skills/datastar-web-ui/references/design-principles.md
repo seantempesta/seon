@@ -73,7 +73,7 @@ Use **dot + text**, not pill badges:
 ## Rendering in the active pod
 
 The pod renders hiccup in `.cljs` and serializes with `seon.ui.html/->string`
-(`src/seon/ui/html.cljc`). Build the web UI directly as hiccup and route typed
+(`src-old/seon/ui/html.cljc`). Build the web UI directly as hiccup and route typed
 content through `seon.render/block`:
 
 ```clojure
@@ -111,6 +111,6 @@ variables in `input.css` when a surface opts into `prose prose-sm max-w-none`.
 | File | Purpose |
 |------|---------|
 | `resources/public/css/input.css` | Maintained Tailwind theme tokens and animations |
-| `src/seon/ui/agent_view.cljs` · `header.cljs` | Live Phosphor agent layout, context surfaces, and status bar |
-| `src/seon/render.cljs` | `block`/`slot` — the shared typed-value renderer |
+| `src-old/seon/ui/agent_view.cljs` · `header.cljs` | Live Phosphor agent layout, context surfaces, and status bar |
+| `src-old/seon/render.cljs` | `block`/`slot` — the shared typed-value renderer |
 | `resources/public/css/input.css` | Tailwind v4 theme source (`@theme` + `@source`) |

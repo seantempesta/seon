@@ -255,7 +255,7 @@ wasmtime run -S http=y \
 
 ### Hot reload
 
-Edit any `.cljs` in `src/seon/`, save. shadow-cljs recompiles in ~1s;
+Edit any `.cljs` in `src-old/seon/`, save. shadow-cljs recompiles in ~1s;
 the running runtime gets a websocket message; `^:dev/before-load`
 cleanup runs (heartbeat, broadcast watcher, agent kick listener);
 namespaces re-load; `^:dev/after-load` rewires.

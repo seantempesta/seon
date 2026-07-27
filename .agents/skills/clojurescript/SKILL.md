@@ -11,7 +11,7 @@ description: "ClojureScript semantics for the Seon CLJS pod. Use when writing or
 The pod is a long-running Bun CLJS process. It compiles itself two ways, and
 the difference is the source of almost every surprise:
 
-- **The shadow build** (`.cljs` files in `src/seon/`) is compiled ahead-of-time
+- **The shadow build** (`.cljs` files in `src-old/seon/`) is compiled ahead-of-time
   by the JVM shadow-cljs compiler. This is the pod's own code.
 - **Agent-eval'd forms** are compiled at runtime by the **self-host / bootstrap
   compiler** (`cljs.js`, a cljs-in-cljs compiler) against the process-shared
@@ -69,7 +69,7 @@ auto-await mechanism (below) resolve it.
 
 Agents should get DATA, not Promises. `seon.eval` enforces this:
 
-- `maybe-await-value` (`src/seon/eval.cljs:1192-1226`), called on the
+- `maybe-await-value` (`src-old/seon/eval.cljs:1192-1226`), called on the
   eval-batch path (`eval-form-entry!`, `eval.cljs:2433`): if a form's value is
   `(instance? js/Promise v)`, it awaits and records the **resolved value**.
   Agents never type `await`; calls to `^:async` core verbs (`seon.db/transact!`,
@@ -183,5 +183,5 @@ shadow.
 | `:async` analyzer flag / `defn` meta threading | `cljs/analyzer.cljc:2336`, `:2118`; `cljs/core.cljc:3374` |
 | `async function` emission | `reference-code/clojurescript/src/main/clojure/cljs/compiler.cljc:945` |
 | self-host compile/eval pipeline | `reference-code/clojurescript/src/main/cljs/cljs/js.cljs:843,1138` |
-| seon's eval / auto-await / result stash | `src/seon/eval.cljs` (`maybe-await-value` :1192, `eval-form-entry!` :2358) |
-| async instrumentation + the wedge | `src/seon/instrument.cljc:202-376` |
+| seon's eval / auto-await / result stash | `src-old/seon/eval.cljs` (`maybe-await-value` :1192, `eval-form-entry!` :2358) |
+| async instrumentation + the wedge | `src-old/seon/instrument.cljc:202-376` |

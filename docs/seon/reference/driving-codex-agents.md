@@ -241,11 +241,11 @@ sandbox flag, which would also stop it writing its report.
 codex exec -m gpt-5.6-sol -c model_reasoning_effort=low \
   --dangerously-bypass-approvals-and-sandbox \
   --skip-git-repo-check -o summary.txt \
-  "List the .cljs and .cljc files directly inside src/seon/db/ (not subdirs).
+  "List the .cljs and .cljc files directly inside src-old/seon/db/ (not subdirs).
    Filenames one per line, then a count. Change no source." < /dev/null
 
 # Verify independently — did its claim match reality?
-ls -1 src/seon/db/ | grep -E '\.(cljs|cljc)$'
+ls -1 src-old/seon/db/ | grep -E '\.(cljs|cljc)$'
 
 ```
 

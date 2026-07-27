@@ -144,10 +144,11 @@ edits**:
 - **Everything your agents build** — schemas, functions, knowledge —
   lands in `my.*` namespaces that survive restarts.
 
-`src/seon/` is the core — treat it like a runtime you installed, not a
-library you fork. The universal agent mechanics (how the REPL-as-output
-works) are baked into the core's system prompt, so you can freely edit
-or even empty your identity files without breaking anything.
+Fresh `src/seon/` is the nucleus and the default project;
+`src-old/seon/` is the disabled State A quarry. Treat the nucleus like a
+runtime you installed, not a library you fork. The universal agent mechanics
+(how the REPL-as-output works) are baked into the core's system prompt, so you
+can freely edit or even empty your identity files without breaking anything.
 
 `bin/seon status|logs|down` operate the complete local system; database state
 lives under `data/clusters/`. Use the scoped `bin/seon cluster reset <name>`

@@ -127,8 +127,8 @@ Inside namespace `my.kb.source` you write `::id` and the reader expands it to
 (db/entity [::id "s1"])                   ;=> touched plain map
 ```
 
-`my.kb` (`src/my/kb.cljs`) is the runnable, test-exercised manual — every
-recipe compiles. `seon.agent.todo` (`src/seon/agent/todo.cljs`) is the exemplar
+`my.kb` (`src-old/my/kb.cljs`) is the runnable, test-exercised manual — every
+recipe compiles. `seon.agent.todo` (`src-old/seon/agent/todo.cljs`) is the exemplar
 database-backed namespace (identity, refs, tree/DAG queries, derived datalog rules).
 Read those for live idiom.
 
@@ -170,7 +170,7 @@ the Malli registry — see the uninstalled-attr gotcha below).
 Shapes used in two+ schemas get **registered once and referenced** — never
 inlined twice. The canonical examples: `:seon.db/ref` (every ref attr
 references it) and `:seon.db/id` (every id attr). If the bridge can't map a
-shape you need, **fix the bridge** (`src/seon/db/internal.cljs`) — don't inline.
+shape you need, **fix the bridge** (`src-old/seon/db/internal.cljs`) — don't inline.
 
 ### Banned types
 
@@ -358,11 +358,11 @@ reaction is an agent's wake-up on new `:seon.agent.message/to` datoms.
 
 | File | Purpose |
 |------|---------|
-| `src/seon/db.cljs` | The whole agent-facing API — read its docstrings, they're the reference |
-| `src/seon/schema.cljc` | `register!`, the registry, entity-schema decomposition |
-| `src/seon/db/internal.cljs` | the Malli→datahike bridge + tx validation gate |
-| `src/my/kb.cljs` | runnable manual — copy a recipe, swap your attrs |
-| `src/seon/agent/todo.cljs` (+ `todo/internal.cljs`) | EXEMPLAR: identity, refs, tree/DAG, rules |
+| `src-old/seon/db.cljs` | The whole agent-facing API — read its docstrings, they're the reference |
+| `src-old/seon/schema.cljc` | `register!`, the registry, entity-schema decomposition |
+| `src-old/seon/db/internal.cljs` | the Malli→datahike bridge + tx validation gate |
+| `src-old/my/kb.cljs` | runnable manual — copy a recipe, swap your attrs |
+| `src-old/seon/agent/todo.cljs` (+ `todo/internal.cljs`) | EXEMPLAR: identity, refs, tree/DAG, rules |
 | `reference-code/datahike/` | the fork's source — read it, don't guess semantics |
 
 ## When to read references

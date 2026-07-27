@@ -35,7 +35,7 @@ History is on, so retractions remain queryable via `db/history` (5-tuple
 
 In datahike, schema is entity maps with `:db/ident`, `:db/valueType`,
 `:db/cardinality`, optionally `:db/unique` / `:db/isComponent`. **You never
-write these** — the Malli→datahike bridge (`src/seon/db/internal.cljs`,
+write these** — the Malli→datahike bridge (`src-old/seon/db/internal.cljs`,
 `malli->datahike-attr`) derives them from `schema/register!`, and `transact!`
 installs them lazily at an attr's first use. Illustrative output:
 
@@ -104,7 +104,7 @@ transaction.cljc:873`; on mismatch it raises `{:error :transact/cas, :old …,
 `(d/q query db)`, `(d/pull db sel eid)`, `(d/entity db ref)` take an immutable
 db value, not a conn. In seon the conn (`seon.db/*conn*`) is bound once; `db/`
 reads deref it for you. You never call `datahike.api` directly outside
-`src/seon/db/` — if a primitive you need isn't surfaced in `seon.db`, ADD the
+`src-old/seon/db/` — if a primitive you need isn't surfaced in `seon.db`, ADD the
 wrapper there (that's "porting the function" — keeps the one-API rule).
 
 ## History and as-of
@@ -141,4 +141,4 @@ on basis-t alone across db shapes (`datahike-primer.md` §4).
 | `:db.fn/cas`, `:db.fn/call`, `:db.fn/retractEntity`, tx expansion, `:db/current-tx` | `…/db/transaction.cljc` |
 | public surface: `with`, `as-of`, `since`, `history`, `tx-range` | `…/api/specification.cljc` |
 | pull (incl. reverse-ref expansion) | `…/pull_api.cljc` |
-| The Seon seam | `src/seon/db.cljs`, `src/seon/db/internal.cljs`, `src/seon/db/replica.cljs`, `src/seon/db/protocol.cljc`, `src/seon/db/transport/uds.{cljs,clj}`, `src/seon/db/writer.clj`, `src/seon/db/server.clj` |
+| The Seon seam | `src-old/seon/db.cljs`, `src-old/seon/db/internal.cljs`, `src-old/seon/db/replica.cljs`, `src-old/seon/db/protocol.cljc`, `src-old/seon/db/transport/uds.{cljs,clj}`, `src-old/seon/db/writer.clj`, `src-old/seon/db/server.clj` |

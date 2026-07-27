@@ -19,8 +19,8 @@ must wait or terminate. No process-local loop, promise registry, or attempt
 buffer is an authority. Killing the cluster JVM loses only transient compute;
 its replacement resumes from the database facts.
 
-The runtime has one run loop. Its current code owner remains
-`src/seon/agent/driver.clj` until the namespace-rename wave. Platform leaves
+The runtime has one run loop. Its State A code owner remains
+`src-old/seon/agent/driver.clj` until the namespace-rename wave. Platform leaves
 supply only the native work for phases the cluster JVM can execute.
 The JVM runs one virtual thread per held claim. A virtual thread may park on
 database, model, or bounded eval work without consuming a platform thread for

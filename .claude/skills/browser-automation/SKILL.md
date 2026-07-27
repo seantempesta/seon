@@ -84,6 +84,6 @@ invalidate on navigation — re-`find` after navigating.
 
 | File | Purpose |
 |---|---|
-| `src/seon/web/serve.cljs` | the pod HTTP server (port 7890) + POST handlers |
-| `src/seon/web/datastar.cljs` | root + agent pages and their shared gzip SSE mechanism |
-| `src/seon/web/router.cljs` | reitit routes from `:seon.route/*` datoms |
+| `src-old/seon/web/serve.cljs` | the pod HTTP server (port 7890) + POST handlers |
+| `src-old/seon/web/datastar.cljs` | root + agent pages and their shared gzip SSE mechanism |
+| `src-old/seon/web/router.cljs` | reitit routes from `:seon.route/*` datoms |

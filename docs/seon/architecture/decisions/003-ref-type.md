@@ -39,6 +39,6 @@ many, and `{:seon.db/component true}` derives component ownership.
 
 ## Owners
 
-- `src/seon/schema.cljc` — registered reference grammar.
-- `src/seon/db/internal.cljs` — Malli-to-Datahike derivation.
+- `src-old/seon/schema.cljc` — registered reference grammar.
+- `src-old/seon/db/internal.cljs` — Malli-to-Datahike derivation.
 - [[data-model]] — reference, identity, and component semantics.

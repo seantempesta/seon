@@ -30,7 +30,7 @@ repeated values still count:
 (db/query '[:find (sum ?r) . :with ?e :where [?e ::rating ?r]])
 ```
 
-(Live example: `my.kb/source-stats` in `src/my/kb.cljs`.)
+(Live example: `my.kb/source-stats` in `src-old/my/kb.cljs`.)
 
 ## Order and Limit
 
@@ -63,7 +63,7 @@ alone cannot express.
           rules)
 ```
 
-`seon.agent.todo/rules` (`src/seon/agent/todo.cljs`) is the live exemplar: a
+`seon.agent.todo/rules` (`src-old/seon/agent/todo.cljs`) is the live exemplar: a
 recursive `descendant` closure, plus `leaf`/`open-work`/`blocked`/`ready`
 derived entirely from two refs — the whole work-queue is pure Datalog over the
 tree/DAG, nothing precomputed. Note its comment: negations (`leaf`, `not

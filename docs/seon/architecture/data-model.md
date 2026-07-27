@@ -85,7 +85,7 @@ retract:** on `[:db.fn/retractEntity parent]`, datahike's `retract-components`
 and retracting a turn retracts its evals. The owned-children attrs:
 `:seon.agent/ctx`, `:seon.agent/schedules`, `:seon.agent.turn/evals`,
 `:seon.render/children`. **Ground in** `transaction.cljc:730` (`retract-components`)
-and our bridge `src/seon/db/internal.cljs:344-350` (the component/identity facet) —
+and our bridge `src-old/seon/db/internal.cljs:344-350` (the component/identity facet) —
 [[library-grounding]]. (Contrast `:my.plan/parent`, a PLAIN ref: no cascade.)
 
 To REPLACE a whole component relationship (reconcile, `install!`/`remove!`) so its owned

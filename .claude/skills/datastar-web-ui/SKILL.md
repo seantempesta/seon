@@ -47,7 +47,7 @@ channel:
 
 The render fn is **pure of external state** and **NEVER throws** — a render
 error degrades to a visible `#app-view-error` card inside the same element, because
-the morph engine must be crash-proof. Source: `src/seon/web/datastar.cljs`
+the morph engine must be crash-proof. Source: `src-old/seon/web/datastar.cljs`
 (`patch-elements`, `open-feed!`, `serve-root!`, `serve-agent-page!`,
 `open-agent-feed!`).
 
@@ -119,7 +119,7 @@ Surfaces are hiccup vectors built in `.cljs` and serialized by
 
 ## The render engine — `seon.render/block` and `slot`
 
-`src/seon/render.cljs` is the typed renderer every surface shares. Two ideas:
+`src-old/seon/render.cljs` is the typed renderer every surface shares. Two ideas:
 
 - **`(block view x)`** — `view` is `:html` (→ hiccup) or `:ai` (→ prompt
   String). It dispatches on the value's tagged shape via the namespaced key the value
@@ -186,13 +186,13 @@ Full palette, type scale, density rules, component patterns, and anti-patterns:
 
 | File | Purpose |
 |---|---|
-| `src/seon/web/serve.cljs` | HTTP server on 7890; POST handlers (`/chat`, `/agents`, `/stop`, …); same-origin gate |
-| `src/seon/web/datastar.cljs` | shared gzip morph feeds, render units, root/agent shims, and human input bar |
-| `src/seon/web/router.cljs` | reitit over `:seon.route/*` datoms; the Node↔Ring adapter + hijack sentinel |
-| `src/seon/web/debug.cljs` | operator dev tools: `/agent/{id}/debug` (the exact LLM bytes) + `/data` (datom browser) |
-| `src/seon/web/brand.cljs` | downstream brand seam (name/tagline/theme as DATA, read at render time) |
-| `src/seon/render.cljs` | `block` (typed-value renderer) + `slot` + the recursive guarded engine |
-| `src/seon/ui/agent_view.cljs` · `header.cljs` · `markdown.cljs` · `clojure.cljs` | the layout, status bar, and content renderers |
+| `src-old/seon/web/serve.cljs` | HTTP server on 7890; POST handlers (`/chat`, `/agents`, `/stop`, …); same-origin gate |
+| `src-old/seon/web/datastar.cljs` | shared gzip morph feeds, render units, root/agent shims, and human input bar |
+| `src-old/seon/web/router.cljs` | reitit over `:seon.route/*` datoms; the Node↔Ring adapter + hijack sentinel |
+| `src-old/seon/web/debug.cljs` | operator dev tools: `/agent/{id}/debug` (the exact LLM bytes) + `/data` (datom browser) |
+| `src-old/seon/web/brand.cljs` | downstream brand seam (name/tagline/theme as DATA, read at render time) |
+| `src-old/seon/render.cljs` | `block` (typed-value renderer) + `slot` + the recursive guarded engine |
+| `src-old/seon/ui/agent_view.cljs` · `header.cljs` · `markdown.cljs` · `clojure.cljs` | the layout, status bar, and content renderers |
 | `reference-code/datastar-clojure/` · `reference-code/datastar/` | datastar source — the `patch-elements`/gzip idioms (`tiny_gzip.clj`); read it, don't guess |
 
 ## When to read which reference

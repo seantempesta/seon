@@ -13,17 +13,17 @@ This project uses a layered linting approach with two complementary tools:
 ## Quick Start
 
 ```bash
-# Run both linters on src/ and test/
+# Run both linters on src/, src-old/, test/, and test-old/
 ./bin/lint
 
 # Run only on specific paths
-./bin/lint src/seon/dev
+./bin/lint src-old/seon/dev
 
 # Auto-fix safe issues
-./bin/lint --fix src
+./bin/lint --fix
 
 # Check only complexity metrics
-./bin/lint --metrics src
+./bin/lint --metrics
 
 # Run only clj-kondo (bugs)
 ./bin/lint --kondo
@@ -71,14 +71,14 @@ Located at `.clj-kondo/config.edn`. Key settings:
 ### Running Directly
 
 ```bash
-# Lint entire src
-clj-kondo --lint src
+# Lint all project roots
+clj-kondo --lint src src-old test test-old
 
 # Output as EDN for programmatic use
-clj-kondo --lint src --config '{:output {:format :edn}}'
+clj-kondo --lint src src-old test test-old --config '{:output {:format :edn}}'
 
 # Get analysis data
-clj-kondo --lint src --config '{:output {:analysis true}}'
+clj-kondo --lint src src-old test test-old --config '{:output {:analysis true}}'
 
 ```
 
@@ -138,19 +138,19 @@ Located at `.splint.edn`. Key settings:
 ```bash
 # Via Babashka (recommended, faster)
 bb -Sdeps '{:deps {io.github.noahtheduke/splint {:mvn/version "1.22.0"}}}' \
-   -m noahtheduke.splint src
+   -m noahtheduke.splint src src-old test test-old
 
 # With auto-fix
 bb -Sdeps '{:deps {io.github.noahtheduke/splint {:mvn/version "1.22.0"}}}' \
-   -m noahtheduke.splint --autocorrect src
+   -m noahtheduke.splint --autocorrect src src-old test test-old
 
 # Only check metrics
 bb -Sdeps '{:deps {io.github.noahtheduke/splint {:mvn/version "1.22.0"}}}' \
-   -m noahtheduke.splint --only metrics src
+   -m noahtheduke.splint --only metrics src src-old test test-old
 
 # Output as clj-kondo compatible format
 bb -Sdeps '{:deps {io.github.noahtheduke/splint {:mvn/version "1.22.0"}}}' \
-   -m noahtheduke.splint -o clj-kondo src
+   -m noahtheduke.splint -o clj-kondo src src-old test test-old
 
 ```
 
@@ -159,7 +159,7 @@ bb -Sdeps '{:deps {io.github.noahtheduke/splint {:mvn/version "1.22.0"}}}' \
 Splint can automatically fix many style issues:
 
 ```bash
-./bin/lint --fix src
+./bin/lint --fix
 
 ```
 
@@ -222,7 +222,7 @@ This happens when running Splint via `clj` instead of `bb`. Splint requires Baba
 **Solution**: Always use Babashka:
 
 ```bash
-bb -Sdeps '{:deps {io.github.noahtheduke/splint {:mvn/version "1.22.0"}}}' -m noahtheduke.splint src
+bb -Sdeps '{:deps {io.github.noahtheduke/splint {:mvn/version "1.22.0"}}}' -m noahtheduke.splint src src-old test test-old
 
 ```
 

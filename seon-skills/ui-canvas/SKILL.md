@@ -9,7 +9,7 @@ The canvas is the focal view on an agent page. Use it for content that should
 remain visible or interactive. A normal message belongs in the transcript.
 Smaller renderable context views are surfaces; a card is only a visual grouping.
 
-There is one public agent API: src/my/canvas.cljs. Do not create a route, call
+There is one public agent API: src-old/my/canvas.cljs. Do not create a route, call
 the web server directly, or write an agent id into the request. The runtime
 injects :seon.agent/id, and renderers receive the frozen :seon.db/db value.
 

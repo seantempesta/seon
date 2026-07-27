@@ -92,7 +92,7 @@ What the bridge installs for each (verify live with
 
 The bridge maps `:enum` (keyword members only), `:and` (bridges on its base),
 and same-type `:or`; an unmappable shape THROWS — extend the bridge
-(`src/seon/db/internal.cljs`), never hand-write a `:db.type/*`. Full table +
+(`src-old/seon/db/internal.cljs`), never hand-write a `:db.type/*`. Full table +
 query/transact mechanics: the **`datahike`** skill.
 
 ### Three design rules the type system enforces
@@ -315,17 +315,17 @@ shared **author**).
                    [:my.kb.source/rating :my.kb.source/rating]])
 ```
 
-`src/my/kb.cljs` is the runnable, test-exercised version of exactly this — read
-it for live idiom. `src/seon/agent/todo.cljs` is the exemplar for refs + tree/DAG
+`src-old/my/kb.cljs` is the runnable, test-exercised version of exactly this — read
+it for live idiom. `src-old/seon/agent/todo.cljs` is the exemplar for refs + tree/DAG
 modeling.
 
 ## Key files
 
 | File | What it gives you |
 |---|---|
-| `src/seon/schema.cljc` | `register!`, the registry, entity-schema decomposition |
-| `src/seon/db/internal.cljs` | `malli->datahike-attr` — the bridge (extend it here) |
-| `src/my/kb.cljs` | runnable schema-design manual — copy a recipe |
+| `src-old/seon/schema.cljc` | `register!`, the registry, entity-schema decomposition |
+| `src-old/seon/db/internal.cljs` | `malli->datahike-attr` — the bridge (extend it here) |
+| `src-old/my/kb.cljs` | runnable schema-design manual — copy a recipe |
 | `docs/conventions.md` | Malli patterns, base+provider, request/response, `:any` boundary |
 | `reference-code/malli/src/malli/{core,generator}.cljc` | schema syntax + generator derivation |
 | `reference-code/spectomic`, `reference-code/malli-datomic` | the upstream spec/malli→datomic bridges this generalizes |

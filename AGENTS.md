@@ -482,11 +482,11 @@ Use discoverable code names, not umbrella nouns or synonyms:
 | `:io` / `:compute` / `:mixed` | eval pool, wait pool | core.async's workload tags: `:io` may block but must not compute, `:compute` must not block; `reference-code/core.async/.../impl/dispatch.clj:122-134` |
 | `:seon.agent.run/process` | **claimant** | the process holding a run; `script/seon/dev/process.clj` ↔ JDK `ProcessHandle` |
 | accretion / breakage | graduation, nursery, graduated | a change that requires no more and provides no less. **Attribution to Rich Hickey's Spec-ulation is UNVERIFIED** — do not cite it as established |
-| initialization pages, rows, transaction data | seed bundle, sidecar | paged database population; `src/seon/db/protocol.cljc` (pages/phases) ↔ Datahike tx-data |
+| initialization pages, rows, transaction data | seed bundle, sidecar | paged database population; `src-old/seon/db/protocol.cljc` (pages/phases) ↔ Datahike tx-data |
 | process record, generation, (pid, start-instant) identity | orphan registry, liveness flag | operator-managed process descriptors; `script/seon/dev/process.clj` + `state.clj` ↔ JDK `ProcessHandle` |
 | pre-processing, apply, resume | warmup, hydration | the explicit derive-once/install/attach operations (R45); `docs/prds/sci-execution-runtime/research/preprocessing-design-2026-07-23.md` until code owners land |
 | reduce (plan execution) | fold | executing a plan is a reduce over its forms; the accumulator is the basis; `clojure.core/reduce` ↔ the Datahike transaction report's `:db-after` (`r/fold` is parallel — wrong word) |
-| run loop | driver, driving | the loop claiming runs via `:db.fn/cas` and reducing plans; `src/seon/agent/driver.clj` until the rename wave |
+| run loop | driver, driving | the loop claiming runs via `:db.fn/cas` and reducing plans; `src-old/seon/agent/driver.clj` until the rename wave |
 | `seon.effect`, `effect/request!` | the door, capability dispatch, call center | the one system-side owner every flat `my.*` tool call enters; effects carry the one request identity |
 | program graph | corpus | the collective name for `:seon.fn`/`:seon.ns`/`:seon.schema` facts; owners rename to `seon.code.fn`/`.ns`/`.schema`/`.test` |
 | proc, step-fn, conns, graph-def, report channel | invented scheduler nouns | `clojure.core.async.flow`'s own vocabulary — adopted Path A, `seon.flow` implements `flow.spi`; `reference-code/core.async/src/main/clojure/clojure/core/async/flow/spi.clj` |
@@ -541,7 +541,7 @@ is transaction data for initialization pages, not a novel noun). Invented
 vocabulary drifts from the dependency and causes integration and debugging
 mistakes; grounded vocabulary is free documentation.
 
-Current route truth is database data in `src/seon/route.cljs`: `/` is root's
+Current route truth is database data in `src-old/seon/route.cljs`: `/` is root's
 system view, `POST /agents` creates an agent, and `/agent/{id}` is its page.
 
 ## Data-oriented Clojure rules
@@ -569,7 +569,7 @@ Register shared shapes once and reference them. If the Malli→Datahike bridge
 cannot express the required referenced shape, fix the bridge rather than
 inlining copies.
 
-`seon.db` is the sole application database API. Outside `src/seon/db/`, never
+`seon.db` is the sole application database API. Outside `src-old/seon/db/`, never
 call `datahike.api` directly. The pod forwards writes through
 `seon.db.replica`; the JVM server alone owns durable Datahike resources.
 
@@ -662,7 +662,7 @@ code-block comment above a form, and `;;;` is runtime-structure demarcation.
   `seon.ai.tokens/estimate`, never raw character counts. Storage may keep a
   character projection, but display converts it.
 
-Detailed ownership belongs in `src/seon/AGENTS.md` and its child authorities.
+Detailed ownership belongs in `src-old/seon/AGENTS.md` and its child authorities.
 
 ## Git and shared-tree safety
 
@@ -776,7 +776,7 @@ The edit hook parses changed Clojure files and requests conservative affected
 tests through one public operation:
 
 ```bash
-bin/seon test changed --path src/seon/example.cljs
+bin/seon test changed --path src/seon/cluster/run.cljc
 ```
 
 Parse errors may block malformed edits. Test results are advisory and never
@@ -855,8 +855,9 @@ Everything goes in the repository from the first keystroke:
   PRD's `research/` directory, because an unreproducible number is an
   anecdote;
 - anything that will run again — a crash harness, an adversarial suite,
-  a regression — is real code and belongs under `test/` or its own
-  top-level package, never in a scratch directory.
+  a regression — is real code. New nucleus tests belong under fresh `test/`;
+  State A tests remain under `test-old/` until explicitly adopted. A separate
+  top-level package is also valid; a scratch directory is not.
 
 The test: if the machine were wiped right now, what would be lost? If the
 answer is anything, it was in the wrong place. Leave ACME
@@ -882,7 +883,7 @@ dispatch. DiffusionGemma is opt-in only through
 explicit provider configuration; never activate it as a side effect. Embeddings
 use the one `seon.embed`/Vertex path when `SEON_EMBED` is enabled. Credentials,
 project IDs, and service-account files stay outside Git. Details live in
-`src/seon/ai/AGENTS.md`, `docs/seon/reference/llm-adapters.md`, and the
+`src-old/seon/ai/AGENTS.md`, `docs/seon/reference/llm-adapters.md`, and the
 embeddings PRD.
 
 ## Key entry points
@@ -892,6 +893,6 @@ embeddings PRD.
   plan, generated `state.md`, `unsettled.md`, `history.md`;
 - `docs/prds/sci-execution-runtime/AGENTS.md` — current chunk runbook;
 - `docs/conventions.md` — code/schema patterns;
-- `src/seon/AGENTS.md` — one-mechanism and runtime ownership table;
-- `src/my/AGENTS.md` — agent-facing toolkit constraints;
+- `src-old/seon/AGENTS.md` — State A one-mechanism and runtime ownership table;
+- `src-old/my/AGENTS.md` — State A agent-facing toolkit constraints;
 - `AGENT.md` — thin delegated-lane compatibility adapter.

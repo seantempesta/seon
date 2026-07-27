@@ -527,8 +527,8 @@ the block. Index every ns's valid forms; render `my.*` in full. See [[data-model
 ### Agent runtime — [[agent-runtime]]
 
 Runs are claimable database state. `:seon.agent.run/process`, monotonic epoch,
-and heartbeat lease live on the run; expiry is derived. The run loop, currently
-implemented in `src/seon/agent/driver.clj`, reduces over the frozen form plan.
+and heartbeat lease live on the run; expiry is derived. The State A run loop,
+implemented in `src-old/seon/agent/driver.clj`, reduces over the frozen form plan.
 Its basis accumulator begins at the plan transaction's `:db-after`; each
 form's transaction report supplies the next basis through its `:db-after`.
 Provider and eval receipts open before dispatch and terminalize through
