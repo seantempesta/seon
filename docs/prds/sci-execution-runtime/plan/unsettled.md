@@ -250,6 +250,26 @@ helpers + four schema rows + pinning tests in the same commit per the
 deletion doctrine; gate 147/640/0 INDEPENDENTLY VERIFIED; lost
 incidental coverage named honestly in the commit — the surviving
 owner is seon.cluster.loop + wake under their own suites).
+THE LIVE DRIVE (tmp/n3-live-drive.clj, owner watching, four rounds):
+(1) trigger REFUSED — the fixture-vs-live-boot class: message/eval/
+form/agent families had no entity maps so canonical-database-
+attributes never installed them live; FIXED 38ab48470 (four entity
+maps + the non-vacuous class-killer: loop's declared write set ⊆
+installable, plus a boot-derivation database test; gate 164/723/0).
+(2) same refusal — the cluster branch pre-existed in the roster,
+found never re-forked; drives now use a fresh root per run. (3) run
+opened+claimed but stalled claimed-with-no-plan 120s: ai/complete
+returned no-credential invisibly (DEEPSEEK_API_KEY lives in .env,
+never in the tool shell — `set -o allexport; source .env` before
+drives) and the error value DIED WITH THE TURN — durability gap
+dispatched. (4) REAL TURN: claim 0.6s, plan frozen +2.7s (DeepSeek,
+three forms), fold ran, receipts durable with full sci diagnostics,
+run closed. Form 1 defn :done (Gauss!); forms 0/2 errored on two
+base-ctx gaps — (in-ns): evaluator must evaluate IN my.agents.<id> by
+construction + prompt says so; (println): sci *out*/*err* unbound in
+the fork. FIX LANE IN FLIGHT (the Opus agent): namespace-by-
+construction, output vars bound (capture preferred), credential nil
+guard, model-error durability + falsifiers. Then the drive reruns.
 N4 PLAN REVISED (ab2911caa): all 25 review findings dispositioned,
 composed with the landed N3 owners, socket/reset/child-loss proofs
 moved in-suite, EIGHT owner decisions consolidated — both N4 and N5
