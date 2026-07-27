@@ -124,8 +124,13 @@ seon.cluster.export. Note for the ancestor contract: the BUILD half's
 program-facts producer is N5's indexer — B2's ancestor seals with the
 build population injected (schema facts now, program facts at N5) so
 the fork mechanics don't wait. Then implementation lanes. Revision
-chunk implemented GREEN (5c95e259c, 25/90/0); schema-edn-impl lane in
-flight (loader+gate+register! wiring+99-form conversion) — config→
+chunk GREEN (5c95e259c); schema-EDN GREEN (b432bd07f — 103 declarations
+converted, one gate live on both producers, honest generators
+throughout). FULL GATE 52/212/0. B2 remaining: ancestor/registry/export
+contracts (author), config + reconcile suite (needs fresh provenance
+attributes), their implementation, then the rung falsifier: a second
+cluster forks from the ancestor near-instantly and a converged re-apply
+leaves :max-tx unchanged — config→
 facts (pure plan before transact; empty plan = NO transaction; :max-tx
 unchanged = converged), schema-EDN loader + one admission gate,
 branch-per-cluster (open-branch!, ancestor genesis, the ~15-line fork
