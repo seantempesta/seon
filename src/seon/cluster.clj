@@ -65,10 +65,15 @@
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.test.check.generators :as gen]
+            [datahike.api :as d]
+            [seon.cluster.ancestor :as ancestor]
+            [seon.cluster.registry :as registry]
             [seon.cluster.run]
-            [seon.cluster.store]
+            [seon.cluster.store :as store]
+            [seon.config :as config]
             [seon.flow :as flow]
             [seon.schema :as schema]
+            [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
@@ -254,6 +259,119 @@
   (spit (:seon.boot/advertisement-file paths)
         (str (pr-str advertisement) "\n")))
 
+;;; ---------------------------------------------------------------------------
+;;; The process-root store — opened once, shared by every instance
+;;; ---------------------------------------------------------------------------
+
+;;; Deliberately process-global, the same sanctioned kind as the root
+;;; executors: a genuinely process-local artifact (a connection under a
+;;; lifetime flock) that clusters SHARE rather than each opening. The
+;;; count is the holder count, not a status flag — the last instance out
+;;; releases the store, and the flock with it.
+(defonce ^:private root-store-holder (atom {}))
+
+(defn- acquire-root-store!
+  "The ONE store at `store-dir`, opened on first use and shared after."
+  [store-dir]
+  (locking root-store-holder
+    (if-let [held (get @root-store-holder store-dir)]
+      (do
+        (swap! root-store-holder update-in [store-dir ::holders] inc)
+        (:seon.store/store held))
+      ; open OUTSIDE the map first: a failed open must leave no entry
+      (let [store (store/open-store! {:seon.store/dir store-dir})]
+        (swap! root-store-holder assoc store-dir
+               {:seon.store/store store ::holders 1})
+        store))))
+
+(defn- release-root-store!
+  "Drop one holder; the LAST one releases the store and its flock."
+  [store-dir]
+  (locking root-store-holder
+    (when-let [held (get @root-store-holder store-dir)]
+      (let [remaining (dec (long (::holders held)))]
+        (if (pos? remaining)
+          (swap! root-store-holder assoc-in [store-dir ::holders] remaining)
+          (do
+            ; drop the entry FIRST: a failing release must not leave a
+            ; released store advertised as held
+            (swap! root-store-holder dissoc store-dir)
+            (store/release-store! (:seon.store/store held)))))))
+  nil)
+
+;;; ---------------------------------------------------------------------------
+;;; The default ancestor population
+;;; ---------------------------------------------------------------------------
+
+(defn populate-ancestor!
+  "The default ancestor content: this code's own schema population.
+  Named by symbol in `ancestor/ensure!`'s request, so the producer is
+  data and N5's program-graph indexer replaces it without touching the
+  boot path. Three transactions, each DERIVED and none hand-written:
+  the Datahike declarations of every registered database attribute, the
+  canonical schema rows themselves, and the core process entities the
+  provenance refs resolve to (genesis data — bootstrap content lives in
+  the ancestor)."
+  [{connection :seon.store/branch-connection}]
+  (d/transact connection
+              {:tx-data (schema.datahike/malli->datahike-schema
+                         (schema/canonical-database-attributes))})
+  (d/transact connection
+              {:tx-data (schema/canonical-schema-rows (java.util.Date.))})
+  (d/transact connection
+              {:tx-data [{:seon.db.process/id
+                          config/managing-process-identity}]})
+  nil)
+
+;;; ---------------------------------------------------------------------------
+;;; The tower above the REPL
+;;; ---------------------------------------------------------------------------
+
+;;; The roots the ancestor's identity is computed over. Today the
+;;; population above is derived from these sources; at N5 the indexer
+;;; reads the same tree, so one digest keeps answering "what was I born
+;;; from?" without a second mechanism.
+(def ^:private ancestor-roots ["src"])
+
+(defn- ancestor-branch!
+  "The ancestor branch this cluster forks from.
+  A supplied `:seon.boot/ancestor-branch` is used AS GIVEN — the caller
+  named an existing ancestor and `ensure-cluster!` refuses if it is not
+  in the roster. Absent, the ancestor of this source tree is ensured
+  (idempotent; the roster is the whole cache)."
+  [store config]
+  (or (:seon.boot/ancestor-branch config)
+      (:seon.ancestor/branch
+       (ancestor/ensure!
+        {:seon.store/store store
+         :seon.ancestor/digest (ancestor/digest
+                                {:seon.ancestor/roots ancestor-roots})
+         :seon.ancestor/populate `populate-ancestor!}))))
+
+(defn- stack-tower!
+  "Stack store → ancestor → fork → connection → config onto `instance`.
+  Each layer is assoc'd as it stands, and the whole value is republished
+  to the registry at every step, so the instance a failure carries is
+  exactly what stands: absence marks where boot stopped."
+  [instance publish!]
+  (let [config (:seon.boot/config instance)
+        cluster-name (:seon.boot/cluster-name config)
+        store (acquire-root-store! (:seon.boot/store-dir config))
+        instance (publish! (assoc instance :seon.store/store store))
+        forked (registry/ensure-cluster!
+                {:seon.store/store store
+                 :seon.boot/cluster-name cluster-name
+                 :seon.ancestor/branch (ancestor-branch! store config)})
+        connection (store/open-branch! store (:seon.store/branch forked))
+        instance (publish!
+                  (assoc instance :seon.boot/cluster-connection connection))]
+    (publish!
+     (assoc instance
+            :seon.boot/config-result
+            (config/apply! {:seon.config/connection connection
+                            :seon.config/manifest (config/defaults)
+                            :seon.boot/cluster-name cluster-name})))))
+
 (defn start!
   "Start one cluster instance in this JVM, REPL FIRST, then the tower.
   Order: resolve paths and create directories → open the io-prepl
@@ -278,39 +396,68 @@
         name (server-name cluster-name)]
     (create-directories! config paths)
     (reserve-cluster! cluster-name)
-    (let [server (volatile! nil)]
+    (let [server (volatile! nil)
+          ;; LAYER 0 — the REPL. Its own failure unwinds completely
+          ;; (socket closed, reservation released); once it succeeds,
+          ;; nothing below may take it down.
+          instance
+          (try
+            (let [prepl-server
+                  (clojure.core.server/start-server
+                   {:accept 'clojure.core.server/io-prepl
+                    :port (:seon.boot/prepl-port config)
+                    :name name
+                    :address (:seon.boot/prepl-host config)})
+                  _ (vreset! server prepl-server)
+                  advertisement
+                  (merge
+                   {:seon.boot/cluster-name cluster-name
+                    :seon.boot/prepl-host (:seon.boot/prepl-host config)
+                    :seon.boot/prepl-port (.getLocalPort prepl-server)}
+                   (current-process-identity))
+                  instance
+                  {:seon.boot/config config
+                   :seon.boot/advertisement advertisement
+                   :seon.boot/prepl-server prepl-server
+                   :seon.boot/executors (root-executors)}
+                  instance
+                  (require-candidate-value
+                   :seon.boot/instance
+                   instance
+                   "The started cluster instance was refused.")]
+              (write-advertisement! paths advertisement)
+              (swap! running-instances assoc cluster-name instance)
+              instance)
+            (catch Throwable throwable
+              (when @server
+                (clojure.core.server/stop-server name))
+              (release-reservation! cluster-name)
+              (throw throwable)))
+          ;; the registry always holds the instance AS IT STANDS, so a
+          ;; stop! of the carried value and a stop! of the registered
+          ;; one release the same resources
+          published (volatile! instance)
+          publish! (fn [value]
+                     (vreset! published value)
+                     (swap! running-instances
+                            (fn [instances]
+                              (if (contains? instances cluster-name)
+                                (assoc instances cluster-name value)
+                                instances)))
+                     value)]
       (try
-        (let [prepl-server
-              (clojure.core.server/start-server
-               {:accept 'clojure.core.server/io-prepl
-                :port (:seon.boot/prepl-port config)
-                :name name
-                :address (:seon.boot/prepl-host config)})
-              _ (vreset! server prepl-server)
-              advertisement
-              (merge
-               {:seon.boot/cluster-name cluster-name
-                :seon.boot/prepl-host (:seon.boot/prepl-host config)
-                :seon.boot/prepl-port (.getLocalPort prepl-server)}
-               (current-process-identity))
-              instance
-              {:seon.boot/config config
-               :seon.boot/advertisement advertisement
-               :seon.boot/prepl-server prepl-server
-               :seon.boot/executors (root-executors)}
-              instance
-              (require-candidate-value
-               :seon.boot/instance
-               instance
-               "The started cluster instance was refused.")]
-          (write-advertisement! paths advertisement)
-          (swap! running-instances assoc cluster-name instance)
-          instance)
-        (catch Throwable throwable
-          (when @server
-            (clojure.core.server/stop-server name))
-          (release-reservation! cluster-name)
-          (throw throwable))))))
+        (stack-tower! instance publish!)
+        (catch Throwable failure
+          ;; LOUD, and the REPL survives: the degraded instance rides the
+          ;; refusal so the caller can diagnose over the live socket and
+          ;; stop it like any other instance.
+          (throw (ex-info
+                  (str "The cluster instance failed above the REPL: "
+                       (ex-message failure))
+                  {:seon.error/kind :seon.boot/refused
+                   :seon.boot/offense {:seon.boot/cluster-name cluster-name}
+                   :seon.boot/instance @published}
+                  failure)))))))
 
 (defn- active-instance?
   [registered instance]
@@ -332,12 +479,18 @@
 
 (defn stop!
   "Stop exactly THIS instance, instance-addressed never name-addressed.
-  Closes ITS prepl server socket and deletes ITS advertisement; a
-  delayed stop! of an old instance value must not touch a replacement
-  started under the same cluster name (the replacement's socket,
-  advertisement, and registry entry all survive). Idempotent — stopping
-  a stopped instance is a no-op returning nil. Never touches the shared
-  root executors."
+  Unwinds the tower in reverse: releases ITS cluster branch connection,
+  drops its hold on the process-root store — the LAST instance out
+  releases the store and with it the lifetime flock, a sibling's hold
+  keeps it open — then closes ITS prepl server socket and deletes ITS
+  advertisement. The database resources go FIRST so a failure to release
+  one still leaves the REPL up to diagnose it. A DEGRADED instance stops
+  the same way: absence marks what was never built, so each layer is
+  released only if it stands. A delayed stop! of an old instance value
+  must not touch a replacement started under the same cluster name (the
+  replacement's socket, advertisement, and registry entry all survive).
+  Idempotent — stopping a stopped instance is a no-op returning nil.
+  Never touches the shared root executors."
   {:malli/schema [:=> [:cat :seon.boot/instance] :nil]}
   [instance]
   (let [config (:seon.boot/config instance)
@@ -345,6 +498,10 @@
         marker (Object.)]
     (when (claim-stop! cluster-name instance marker)
       (try
+        (when-let [connection (:seon.boot/cluster-connection instance)]
+          (d/release connection))
+        (when (:seon.store/store instance)
+          (release-root-store! (:seon.boot/store-dir config)))
         (.close ^java.net.ServerSocket (:seon.boot/prepl-server instance))
         (let [advertisement-file
               (io/file
