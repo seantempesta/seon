@@ -32,140 +32,6 @@
   (when (fs/regular-file? path)
     (mapv edn/read-string (fs/read-all-lines path))))
 
-(def manifest
-  {:seon.dev.test.artifact/path "out/test/artifacts/example/test.js"
-   :seon.dev.test.artifact/program-source-path
-   "out/test/artifacts/example/program-sources.edn"
-   :seon.dev.test.artifact/program-source-digest
-   "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-   :seon.dev.test.artifact/test-namespaces
-   ['example.alpha-test 'example.beta-test 'unrelated-test]
-   :seon.dev.test.artifact/resources
-   [{:seon.dev.test.resource/path "src/example/alpha.cljs"
-     :seon.dev.test.resource/namespace 'example.alpha
-     :seon.dev.test.resource/cache-key ["alpha"]
-     :seon.dev.test.resource/requires []}
-    {:seon.dev.test.resource/path "src/example/beta.cljs"
-     :seon.dev.test.resource/namespace 'example.beta
-     :seon.dev.test.resource/cache-key ["beta"]
-     :seon.dev.test.resource/requires ['example.alpha]}
-    {:seon.dev.test.resource/path "test/example/alpha_test.cljs"
-     :seon.dev.test.resource/namespace 'example.alpha-test
-     :seon.dev.test.resource/cache-key ["alpha-test"]
-     :seon.dev.test.resource/requires ['example.alpha]}
-    {:seon.dev.test.resource/path "test/example/beta_test.cljs"
-     :seon.dev.test.resource/namespace 'example.beta-test
-     :seon.dev.test.resource/cache-key ["beta-test"]
-     :seon.dev.test.resource/requires ['example.beta]}
-    {:seon.dev.test.resource/path "test/unrelated_test.cljs"
-     :seon.dev.test.resource/namespace 'unrelated-test
-     :seon.dev.test.resource/cache-key ["unrelated"]
-     :seon.dev.test.resource/requires []}]})
-
-(deftest impact-follows-shadow-dependencies-reverse-transitively
-  (is (= ['example.alpha-test 'example.beta-test]
-         (:seon.dev.changed-test/test-namespaces
-           (changed/impact manifest ["src/example/alpha.cljs"])))))
-
-(deftest test-edit-selects-that-test
-  (is (= ['example.beta-test]
-         (:seon.dev.changed-test/test-namespaces
-           (changed/impact manifest ["test/example/beta_test.cljs"])))))
-
-(deftest unknown-cljs-path-widens-explicitly
-  (let [result (changed/impact manifest ["src/example/new.cljs"])]
-    (is (true? (:seon.dev.changed-test/full? result)))
-    (is (= (set (:seon.dev.test.artifact/test-namespaces manifest))
-           (set (:seon.dev.changed-test/test-namespaces result))))
-    (is (= :unknown-cljs-resource
-           (get-in result [:seon.dev.changed-test/widening 0
-                           :seon.dev.changed-test/reason])))))
-
-(deftest broad-input-runs-the-unfiltered-shadow-artifact
-  (let [result (changed/impact manifest ["deps.edn"])]
-    (is (true? (:seon.dev.changed-test/full? result))
-        "a broad input must run Shadow's complete test data, including required probe namespaces")
-    (is (= (set (:seon.dev.test.artifact/test-namespaces manifest))
-           (set (:seon.dev.changed-test/test-namespaces result))))))
-
-(deftest bun-test-environment-matches-the-canonical-runner
-  (is (= {"SEON_CONFIG" "config/test.edn"
-          "SEON_RENDER_STRICT" "1"
-          "SEON_PROGRAM_SOURCE_PATH"
-          "root/out/test/artifacts/example/program-sources.edn"
-          "SEON_PROGRAM_SOURCE_DIGEST"
-          "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}
-         (changed/test-process-environment
-          {:seon.dev.config/root "root"} manifest)))
-  (is (= {"SEON_CONFIG" "config/custom.edn"
-          "SEON_RENDER_STRICT" "0"
-          "SEON_PROGRAM_SOURCE_PATH"
-          "root/out/test/artifacts/example/program-sources.edn"
-          "SEON_PROGRAM_SOURCE_DIGEST"
-          "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}
-         (changed/test-process-environment
-           {:seon.dev.config/root "root"
-            :seon.dev.config/environment
-            {"SEON_CONFIG" "config/custom.edn"
-             "SEON_RENDER_STRICT" "0"
-             "SEON_PROGRAM_SOURCE_PATH" "/stale/source.edn"
-             "SEON_PROGRAM_SOURCE_DIGEST" "stale"}}
-           manifest))
-      "an explicit caller selection still wins, as it does in bin/test-cljs"))
-
-(deftest bun-test-environment-rejects-an-unbound-artifact
-  (is (thrown-with-msg?
-       clojure.lang.ExceptionInfo
-       #"no program-source identity"
-       (changed/test-process-environment
-        {:seon.dev.config/root "root"}
-        (dissoc manifest :seon.dev.test.artifact/program-source-digest)))))
-
-(deftest full-javascript-command-does-not-filter-shadow-test-data
-  (let [artifact {:seon.dev.test.artifact/path "out/test/artifact/test.js"}]
-    (is (= ["/exact/bun" "root/out/test/artifact/test.js"]
-           (changed/javascript-argv "/exact/bun" "root" artifact :all)))
-    (is (= ["/exact/bun" "root/out/test/artifact/test.js"
-            "--test=example.alpha-test"]
-           (changed/javascript-argv
-            "/exact/bun" "root" artifact ['example.alpha-test])))))
-
-(deftest shared-cljc-input-uses-the-shadow-graph-when-known
-  (let [shared (assoc-in manifest
-                         [:seon.dev.test.artifact/resources 0
-                          :seon.dev.test.resource/path]
-                         "src/example/alpha.cljc")
-        result (changed/impact shared ["src/example/alpha.cljc"])]
-    (is (= #{'example.alpha-test 'example.beta-test}
-           (set (:seon.dev.changed-test/test-namespaces result))))
-    (is (empty? (:seon.dev.changed-test/widening result)))))
-
-(deftest clj-macro-change-seeds-the-existing-shadow-graph
-  (let [with-macro (update-in manifest
-                              [:seon.dev.test.artifact/resources 1
-                               :seon.dev.test.resource/requires]
-                              conj 'example.macro)
-        host-selection
-        {:seon.dev.changed-test/host-namespaces #{'example.macro}
-         :seon.dev.changed-test/host-graph
-         {:seon.dev.changed-test/path->namespace
-          {"src/example/macro.clj" 'example.macro}}}
-        plan (changed/shadow-plan with-macro host-selection
-                                  ["src/example/macro.clj"])
-        result (changed/impact with-macro
-                               ["src/example/macro.clj"]
-                               (:seon.dev.changed-test/shadow-seeds plan))]
-    (is (= ["src/example/macro.clj"]
-           (:seon.dev.changed-test/shadow-paths plan)))
-    (is (= #{'example.macro}
-           (:seon.dev.changed-test/shadow-seeds plan)))
-    (is (= ['example.beta-test]
-           (:seon.dev.changed-test/test-namespaces result)))))
-
-(deftest missing-shadow-graph-treats-source-clj-as-a-possible-macro
-  (is (true? (changed/potential-shadow-input? "src/example/macros.clj")))
-  (is (false? (changed/potential-shadow-input? "test/example/tool_test.clj"))))
-
 (deftest maintained-reference-sources-are-not-root-runtime-inputs
   (is (false?
         (changed/root-runtime-path?
@@ -211,7 +77,7 @@
 
 (deftest failure-feedback-keeps-actionable-values-and-bounds-the-index
   (let [failure (fn [n]
-                  (str "FAIL in (example-" n ") (example_test.cljs:10)\n"
+                  (str "FAIL in (example-" n ") (example_test.clj:10)\n"
                        "expected: (= " n " 1)\n"
                        "  actual: (not (= " n " 1))\n\n"))
         excerpts (changed/failure-excerpts
@@ -259,7 +125,7 @@
         expression
         (str "(do (require 'seon.dev.changed-test) "
              "(let [run (deref (ns-resolve 'seon.dev.changed-test "
-             "'run-command!))] (run " (pr-str root) " :pod "
+             "'run-command!))] (run " (pr-str root) " :operator "
              (pr-str ["bash" "-c" child-command]) " {})))")
         _ (fs/create-dirs directory)
         owner

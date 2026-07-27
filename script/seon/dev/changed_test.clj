@@ -1,20 +1,16 @@
 (ns seon.dev.changed-test
-  "Select and run affected pod, database-server, and operator tests."
+  "Select and run affected writer and operator tests."
   (:require [babashka.fs :as fs]
             [babashka.process :as process]
             [clojure.edn :as edn]
             [clojure.set :as set]
             [clojure.string :as str]
-            [seon.dev.artifact :as runtime-artifact]
             [seon.dev.state :as state]
-            [seon.dev.test-artifact :as artifact]
             [seon.dev.test-roots :as test-roots])
-  (:import [java.io File FileInputStream]
-           [java.security MessageDigest]
+  (:import [java.io File]
            [java.time Instant]
            [java.util.concurrent TimeUnit]))
 
-(def manifest-wait-ms 3000)
 (def test-timeout-ms 300000)
 (def termination-wait-ms 2000)
 (def hook-publication-timeout-ms 3000)
@@ -122,20 +118,6 @@
 (def host-analysis-config
   "{:output {:format :edn} :analysis {:var-usages false :var-definitions {:shallow true}}}")
 
-(defn- hex-digest [^MessageDigest digest]
-  (apply str (map #(format "%02x" (bit-and 0xff %)) (.digest digest))))
-
-(defn- file-sha1 [path]
-  (let [digest (MessageDigest/getInstance "SHA-1")
-        buffer (byte-array 65536)]
-    (with-open [input (FileInputStream. (str path))]
-      (loop []
-        (let [read (.read input buffer)]
-          (when (pos? read)
-            (.update digest buffer 0 read)
-            (recur)))))
-    (hex-digest digest)))
-
 (defn normalize-paths
   "Return distinct repository-relative paths and reject paths outside root."
   [root paths]
@@ -161,64 +143,13 @@
 
    `reference-code/` contains independent maintained dependency repositories.
    Their own tests prove edits there; the root graph becomes responsible only
-   after `deps.edn` advances to a dependency commit. Treating those sources as
-   unknown root CLJS resources needlessly widens every library edit to the
-   complete pod gate."
+   after `deps.edn` advances to a dependency commit."
   [path]
   (not (str/starts-with? path "reference-code/")))
-
-(defn- resource-index [manifest]
-  (into {} (map (juxt :seon.dev.test.resource/path identity))
-        (:seon.dev.test.artifact/resources manifest)))
-
-(defn- cljs-path? [path]
-  (or (str/ends-with? path ".cljs")
-      (str/ends-with? path ".cljc")))
 
 (defn- host-path? [path]
   (or (str/ends-with? path ".clj")
       (str/ends-with? path ".cljc")))
-
-(defn- broad-input? [path]
-  (or (str/starts-with? path "config/")
-      (#{"deps.edn" "shadow-cljs.edn" "package.json" "bun.lock"
-         "bb.edn"} path)))
-
-(defn- manifest-published-after? [manifest path]
-  (let [published (some-> (:seon.dev.test.artifact/published-at manifest)
-                          Instant/parse .toEpochMilli)
-        modified (when (fs/regular-file? path)
-                   (.toMillis (fs/last-modified-time path)))]
-    (or (nil? modified) (and published (<= modified published)))))
-
-(defn- manifest-path-current? [root manifest index path]
-  (let [file (fs/path root path)
-        resource (get index path)]
-    (cond
-      (not (cljs-path? path)) (manifest-published-after? manifest file)
-      (fs/regular-file? file)
-      (and resource
-           (= (file-sha1 file)
-              (first (:seon.dev.test.resource/cache-key resource))))
-      :else (nil? resource))))
-
-(defn manifest-current?
-  "True when the manifest's Shadow checksums match every changed CLJS path."
-  [root manifest paths]
-  (let [index (resource-index manifest)]
-    (every? #(manifest-path-current? root manifest index %) paths)))
-
-(defn wait-current
-  "Wait for the managed Shadow watcher to publish facts for current files."
-  [root paths timeout-ms]
-  (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
-    (loop []
-      (let [manifest (artifact/read-current root)]
-        (cond
-          (and manifest (manifest-current? root manifest paths)) manifest
-          (< (System/currentTimeMillis) deadline)
-          (do (Thread/sleep 100) (recur))
-          :else nil)))))
 
 (defn- host-source-file? [path]
   (and (fs/regular-file? path)
@@ -394,41 +325,6 @@
        (conj {:seon.dev.changed-test/reason :unknown-host-resource
               :seon.dev.changed-test/paths unknown}))}))
 
-(defn impact
-  "Derive the conservative reverse-transitive affected CLJS test namespaces."
-  ([manifest paths] (impact manifest paths #{}))
-  ([manifest paths seed-namespaces]
-   (let [resources (:seon.dev.test.artifact/resources manifest)
-         by-path (resource-index manifest)
-         test-namespaces (set (:seon.dev.test.artifact/test-namespaces manifest))
-         changed-rows (keep by-path paths)
-         changed-namespaces
-         (into (set seed-namespaces)
-               (keep :seon.dev.test.resource/namespace changed-rows))
-         unknown (->> paths (filter cljs-path?) (remove by-path) vec)
-         broad (->> paths (filter broad-input?) vec)
-         requires (into {}
-                        (map (juxt :seon.dev.test.resource/namespace
-                                   #(set (:seon.dev.test.resource/requires %))))
-                        resources)
-         affected (reverse-closure requires changed-namespaces)
-         full? (boolean (or (seq unknown) (seq broad)))
-         selected (if full?
-                    test-namespaces
-                    (set/intersection affected test-namespaces))]
-     {:seon.dev.changed-test/paths (vec paths)
-      :seon.dev.changed-test/full? full?
-      :seon.dev.changed-test/test-namespaces (vec (sort-by str selected))
-      :seon.dev.changed-test/widening
-      (cond-> []
-        (seq unknown)
-        (conj {:seon.dev.changed-test/reason :unknown-cljs-resource
-               :seon.dev.changed-test/paths unknown})
-
-        (seq broad)
-        (conj {:seon.dev.changed-test/reason :shared-or-build-input
-               :seon.dev.changed-test/paths broad}))})))
-
 (defn- prune-logs! [directory]
   (doseq [path (->> (fs/list-dir directory "changed-*.log")
                     (sort-by fs/last-modified-time)
@@ -498,7 +394,7 @@
           (await-process-absence expanded termination-wait-ms)))))
 
 (defn failure-excerpts
-  "Return bounded cljs.test failure blocks with expected and actual values."
+  "Return bounded clojure.test failure blocks with expected and actual values."
   [output]
   (loop [lines (str/split-lines output)
          excerpts []]
@@ -512,32 +408,6 @@
                          (str/join "\n"))]
           (recur (drop 4 lines) (conj excerpts block)))
         (recur (rest lines) excerpts)))))
-
-(defn test-process-environment
-  "Return the canonical Bun environment for one admitted test artifact."
-  [configuration manifest]
-  (let [environment (:seon.dev.config/environment configuration)
-        base {"SEON_CONFIG" (get environment "SEON_CONFIG" "config/test.edn")
-              "SEON_RENDER_STRICT"
-              (get environment "SEON_RENDER_STRICT" "1")}]
-    (if-not manifest
-      base
-      (let [root (:seon.dev.config/root configuration)
-            path (:seon.dev.test.artifact/program-source-path manifest)
-            digest (:seon.dev.test.artifact/program-source-digest manifest)]
-        (when-not (and (string? root)
-                       (string? path)
-                       (string? digest)
-                       (re-matches #"[0-9a-f]{64}" digest))
-          (throw
-           (ex-info
-            "The admitted test artifact has no program-source identity."
-            {:seon.dev.config/root root
-             :seon.dev.test.artifact/program-source-path path
-             :seon.dev.test.artifact/program-source-digest digest})))
-        (assoc base
-               "SEON_PROGRAM_SOURCE_PATH" (str (fs/path root path))
-               "SEON_PROGRAM_SOURCE_DIGEST" digest)))))
 
 (defn- run-command! [root boundary argv environment]
   (let [log-dir (fs/path root "tmp/test-changed")
@@ -601,24 +471,6 @@
     (prune-logs! log-dir)
     result))
 
-(defn javascript-argv
-  "Return an unfiltered full command or an explicitly focused JavaScript command."
-  [bun-executable root manifest test-namespaces]
-  (cond-> [bun-executable
-           (str (fs/path root (:seon.dev.test.artifact/path manifest)))]
-    (not= :all test-namespaces)
-    (into (map #(str "--test=" %) test-namespaces))))
-
-(defn- run-javascript! [configuration manifest test-namespaces]
-  (let [root (:seon.dev.config/root configuration)
-        bun-executable (:seon.dev.artifact/bun-executable
-                        (runtime-artifact/bun-identity! configuration))]
-    (assoc (run-command! root :pod
-                         (javascript-argv bun-executable root manifest
-                                          test-namespaces)
-                         (test-process-environment configuration manifest))
-           :seon.dev.changed-test/test-namespaces test-namespaces)))
-
 (defn- run-operator! [root test-namespaces]
   (let [argv (cond-> ["bb" "--config" (str (fs/path root "bb.edn"))
                       "--deps-root" root "-m" "seon.dev.test-runner"]
@@ -634,54 +486,12 @@
     (assoc (run-command! root :writer argv {})
            :seon.dev.changed-test/test-namespaces test-namespaces)))
 
-(defn- run-pod-fallback! [configuration]
-  (let [root (:seon.dev.config/root configuration)]
-    (assoc (run-command! root :pod [(str (fs/path root "bin/test-cljs"))]
-                         (test-process-environment configuration nil))
-         :seon.dev.changed-test/test-namespaces :all
-         :seon.dev.changed-test/reason
-         "The managed Shadow manifest was unavailable; ran the full one-shot pod gate.")))
-
-(defn- shadow-build-input? [path]
-  (or (str/starts-with? path "config/")
-      (#{"deps.edn" "shadow-cljs.edn" "package.json" "bun.lock"}
-       path)))
-
-(defn shadow-plan
-  "Select changed Shadow inputs and CLJ macro namespaces from current facts."
-  [manifest host-selection paths]
-  (let [resources (:seon.dev.test.artifact/resources manifest)
-        dependencies (set (mapcat :seon.dev.test.resource/requires resources))
-        host-namespaces (:seon.dev.changed-test/host-namespaces host-selection)
-        macro-seeds (set/intersection dependencies host-namespaces)
-        path->namespace
-        (get-in host-selection
-                [:seon.dev.changed-test/host-graph
-                 :seon.dev.changed-test/path->namespace])
-        relevant-paths (filterv #(or (cljs-path? %)
-                                     (shadow-build-input? %)
-                                     (contains? macro-seeds
-                                                (path->namespace %)))
-                                paths)]
-    {:seon.dev.changed-test/shadow? (boolean (seq relevant-paths))
-     :seon.dev.changed-test/shadow-paths relevant-paths
-     :seon.dev.changed-test/shadow-seeds macro-seeds}))
-
-(defn potential-shadow-input?
-  "True when a path may affect the pod without a current Shadow graph."
-  [path]
-  (or (cljs-path? path)
-      (shadow-build-input? path)
-      (and (str/starts-with? path "src/")
-           (str/ends-with? path ".clj"))))
-
 (defn- aggregate-status [boundary-results]
   (let [statuses (set (map :seon.dev.changed-test/status boundary-results))]
     (cond
       (contains? statuses :cleanup-failed) :cleanup-failed
       (contains? statuses :timed-out) :timed-out
       (contains? statuses :failed) :failed
-      (contains? statuses :build-unavailable) :build-unavailable
       (contains? statuses :passed) :passed
       :else :no-affected-tests)))
 
@@ -702,25 +512,6 @@
         host-selection (assoc (host-impact host-result paths)
                               :seon.dev.changed-test/host-graph
                               (:seon.dev.changed-test/host-graph host-result))
-        current-manifest (artifact/read-current root)
-        shadow (if current-manifest
-                 (shadow-plan current-manifest host-selection paths)
-                 {:seon.dev.changed-test/shadow?
-                  (boolean (some potential-shadow-input? paths))
-                  :seon.dev.changed-test/shadow-paths
-                  (filterv potential-shadow-input? paths)
-                  :seon.dev.changed-test/shadow-seeds #{}})
-        manifest (when (:seon.dev.changed-test/shadow? shadow)
-                   (wait-current root
-                                 (:seon.dev.changed-test/shadow-paths shadow)
-                                 manifest-wait-ms))
-        pod-selection (when manifest
-                        (impact manifest paths
-                                (:seon.dev.changed-test/shadow-seeds shadow)))
-        pod-tests (when pod-selection
-                    (if (:seon.dev.changed-test/full? pod-selection)
-                      :all
-                      (:seon.dev.changed-test/test-namespaces pod-selection)))
         operator-tests
         (:seon.dev.changed-test/operator-tests host-selection)
         writer-tests
@@ -731,18 +522,12 @@
           (conj (run-operator! root operator-tests))
 
           (or (= :all writer-tests) (seq writer-tests))
-          (conj (run-writer! root writer-tests))
-
-          (and manifest (or (= :all pod-tests) (seq pod-tests)))
-          (conj (run-javascript! configuration manifest pod-tests))
-
-          (and (:seon.dev.changed-test/shadow? shadow) (nil? manifest))
-          (conj (run-pod-fallback! configuration)))]
+          (conj (run-writer! root writer-tests)))]
     {:seon.dev.changed-test/paths requested-paths
      :seon.dev.changed-test/status (aggregate-status boundary-results)
      :seon.dev.changed-test/boundaries boundary-results
      :seon.dev.changed-test/test-namespaces
-     (vec (:seon.dev.changed-test/test-namespaces pod-selection))
+     (if (= :all writer-tests) [] (vec writer-tests))
      :seon.dev.changed-test/host-status
      (:seon.dev.changed-test/host-status host-result)
      :seon.dev.changed-test/widening
@@ -752,14 +537,13 @@
          [{:seon.dev.changed-test/reason
            :independent-reference-repository
            :seon.dev.changed-test/paths dependency-source-paths}])
-       (:seon.dev.changed-test/widening host-selection)
-       (:seon.dev.changed-test/widening pod-selection)))}))
+       (:seon.dev.changed-test/widening host-selection)))}))
 
 (def changed-test-lock-timeout-ms
-  (+ manifest-wait-ms (* 3 test-timeout-ms) 10000))
+  (+ (* 2 test-timeout-ms) 10000))
 
 (defn run-changed!
-  "Run affected pod, writer, and operator tests from current graph facts."
+  "Run affected writer and operator tests from current host graph facts."
   [configuration paths]
   (let [root (:seon.dev.config/root configuration)
         requested-paths (normalize-paths root paths)]
