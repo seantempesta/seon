@@ -183,12 +183,25 @@ independently verified): admission derives core from d/history (first
 assertion strictly precedes the unique ancestor seal tx), everything
 fails closed :agent, the literal roster DELETED, ancestor population
 reordered so canonical schema rows carry core provenance; issue
-closed+archived (c2db0e61f). IN FLIGHT (two lanes): the Opus agent
-drafts the N3 LOOP contract packages (C1-C10 minus C7; pure
-derivation package first, effectful proc package sketched; the three
-night rulings + late rulings bind; new files only — schema.cljc and
-cluster.clj edits get NAMED, not made); sol lane bb-classpath-fix
-closes the src-old-ambient-in-bb defect at bb.edn. n5-plan 909394481 awaits deep review at its
+closed+archived (c2db0e61f). N3 PACKAGE 1 (pure derivation) DRAFTED (0f5f5607e: my.run,
+seon.cluster.{reply,work,prompt}, five schema EDNs, sealed suites
+with fixed seeds) and SEALED (6cf1d7317: :seon.db/trigger moved to
+provenance.edn with the indexed :and wrap; work-namespace split,
+interruption/next-work split, crashed-run answeredness all blessed as
+drafted). Package-2 rulings sent: transact!/refusal accrete INTO
+store.clj (new fns only); the flat :seon.error shape registers ONCE
+in package 2. ALSO LANDED: bridge :and-unwrap fix at the choke point
+(7012c595d, class-wide parity checks, issue archived);
+dial-attributes shape fix + archive status fix (8372d64be);
+bb-classpath fix BLOCKED on old-operator launchers (evidence
+6a9b5a452, issue open — the seam dies with the operator). QUEUED
+OWNER QUESTIONS: R41 vs marker-not-panic at admission; does the
+[:maybe] ban extend to fn return contracts (next-work nil = idle,
+read-advertisement)? IN FLIGHT (two lanes): the Opus agent implements
+package 1 to green then drafts package 2 (wake, loop proc, seon.ai,
+store accretion); sol lane hook-changed-test-fix repairs the broken
+changed-test hook (hashCombine + stale ns→file mapping — velocity
+incident). n5-plan 909394481 awaits deep review at its
 rung; GC verdict recorded above. Its accepted design: process-local
 store holder + refcount under ONE lock with running-instances;
 stop! also releases branch connection, last instance releases the
