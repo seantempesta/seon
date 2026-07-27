@@ -1,9 +1,7 @@
 (ns seon.cluster.wake
   "The wake: a commit says LOOK, and the loop derives what to do.
 
-  DRAFT CONTRACT LAYER FOR ORCHESTRATOR SEAL (drafted 2026-07-27 — N3,
-  package 2, from n3-plan §5 and its probes A and B). Nothing here is
-  implemented: every body throws `awaits implementation`.
+  This contract layer is fully implemented and live-proven.
 
   EVENT-DRIVEN, NOT POLLED. Datahike's own `listen!` fires on every
   commit, so the loop never asks \"is there work?\" on a timer. The wake

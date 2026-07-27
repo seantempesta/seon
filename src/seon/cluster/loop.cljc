@@ -1,9 +1,7 @@
 (ns seon.cluster.loop
   "The run loop: one proc, one wake, one turn at a time.
 
-  DRAFT CONTRACT LAYER FOR ORCHESTRATOR SEAL (drafted 2026-07-27 — N3,
-  package 2, from n3-plan §4, §9 and the 2026-07-27 rulings). Nothing
-  here is implemented: every body throws `awaits implementation`.
+  This contract layer is fully implemented and live-proven.
 
   AN ORDINARY `flow/process`, NOT A CUSTOM LAUNCHER. The wake arrives
   through `::flow/in-ports` — real channel objects returned in initial
