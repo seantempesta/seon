@@ -46,7 +46,8 @@
   before its plan commits (recovery sees an open unplanned run — the
   known unowned issue), and a receipt written `:running` before its
   eval settles (recovery marks it `:interrupted`)."
-  (:require [seon.schema :as schema]))
+  (:require [datahike.api :as d]
+            [seon.schema :as schema]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The agent pointer — owned HERE. Port manifest: old `:seon.agent/*`
@@ -210,10 +211,50 @@
 ;;; own one-liners and are complete.
 ;;; ---------------------------------------------------------------------------
 
-(defn- awaits-implementation!
-  [transition request]
-  (throw (ex-info "awaits implementation"
-                  {::transition transition ::request request})))
+(defn- refuse!
+  "Abort the whole transaction, naming the rule the request violated."
+  [transition rule request]
+  (throw (ex-info (str "run transition refused: " (name rule))
+                  {:seon.error/kind ::refused
+                   ::transition transition
+                   ::rule rule
+                   ::request request})))
+
+(defn- current-run
+  "The run's current facts on `db`, or nil when no such run exists.
+  The mid-transaction pull IS the eligibility read: a missing lookup ref
+  pulls to nil rather than throwing, so absence is an ordinary value."
+  [db id]
+  (d/pull db '[*] [::id id]))
+
+(defn- held-run
+  "The run's current facts when `request` names its exact live custody.
+  The shared fence of heartbeat/release/close/plan: the run must exist,
+  be open, and be held by exactly `::process` at exactly
+  `::claim-epoch`. Refuses otherwise — a displaced or stale holder never
+  resurrects custody by asserting it."
+  [db transition request]
+  (let [{::keys [id process claim-epoch]} request
+        run (current-run db id)]
+    (cond
+      (nil? run) (refuse! transition ::no-such-run request)
+      (not (open? run)) (refuse! transition ::run-closed request)
+      (not= process (::process run))
+      (refuse! transition ::not-the-holder request)
+
+      (not= claim-epoch (::claim-epoch run))
+      (refuse! transition ::stale-epoch request)
+
+      :else run)))
+
+(defn- retract-custody
+  "Retraction ops dropping `run`'s process and lease, keeping the epoch.
+  Retracts the values the mid-transaction read actually found, so the
+  ops are exact rather than attribute-wide."
+  [run]
+  (cond-> [[:db/retract (:db/id run) ::process (::process run)]]
+    (some? (::lease-until run))
+    (conj [:db/retract (:db/id run) ::lease-until (::lease-until run)])))
 
 ;; The *-tx wrappers reference their *-call VARS (#'f): datahike applies
 ;; the var, so redefining a transition against the running system updates
@@ -235,7 +276,24 @@
                         [::opened-at ::opened-at]]]
                   [:vector :some]]}
   [db request]
-  (awaits-implementation! `open-call request))
+  (let [{::keys [id agent opened-at]} request
+        agent-eid (:db/id (d/pull db [:db/id] agent))
+        run-tempid (str "seon.cluster.run/" id)]
+    (cond
+      (nil? agent-eid) (refuse! `open-call ::no-such-agent request)
+      (some? (current-run db id)) (refuse! `open-call ::run-exists request)
+
+      (some? (:seon.cluster.agent/run
+              (d/pull db [:seon.cluster.agent/run] agent-eid)))
+      (refuse! `open-call ::agent-already-running request)
+
+      ; the pointer and the run's own ::agent are the SAME resolved
+      ; entity, so they cannot disagree
+      :else [{:db/id run-tempid
+              ::id id
+              ::agent agent-eid
+              ::opened-at opened-at}
+             {:db/id agent-eid :seon.cluster.agent/run run-tempid}])))
 
 (defn claim-tx
   "Transaction data claiming `::id` for `::process` until `::lease-until`."
@@ -268,7 +326,18 @@
                         [::now :inst]]]
                   [:vector :some]]}
   [db request]
-  (awaits-implementation! `claim-call request))
+  (let [{::keys [id process lease-until now]} request
+        run (current-run db id)]
+    (cond
+      (nil? run) (refuse! `claim-call ::no-such-run request)
+      (not (open? run)) (refuse! `claim-call ::run-closed request)
+      ; a LIVE claim is not stealable; a lapsed one is taken over, and
+      ; the unheld case falls through the same branch
+      (claimed? run now) (refuse! `claim-call ::lease-live request)
+      :else [[:db/add (:db/id run) ::claim-epoch
+              (inc (or (::claim-epoch run) 0))]
+             [:db/add (:db/id run) ::process process]
+             [:db/add (:db/id run) ::lease-until lease-until]])))
 
 (defn heartbeat-tx
   "Transaction data renewing `::process`'s lease under its epoch."
@@ -294,7 +363,8 @@
                         [::lease-until ::lease-until]]]
                   [:vector :some]]}
   [db request]
-  (awaits-implementation! `heartbeat-call request))
+  (let [run (held-run db `heartbeat-call request)]
+    [[:db/add (:db/id run) ::lease-until (::lease-until request)]]))
 
 (defn release-tx
   "Transaction data cleanly releasing `::process`'s custody."
@@ -317,7 +387,7 @@
                         [::claim-epoch ::claim-epoch]]]
                   [:vector :some]]}
   [db request]
-  (awaits-implementation! `release-call request))
+  (retract-custody (held-run db `release-call request)))
 
 (defn close-tx
   "Transaction data closing the run held by `::process`."
@@ -346,7 +416,16 @@
                         [::closed-at ::closed-at]]]
                   [:vector :some]]}
   [db request]
-  (awaits-implementation! `close-call request))
+  (let [run (held-run db `close-call request)
+        ; the run's OWN connection names the agent whose pointer this
+        ; close retracts — the request carries no agent id to disagree
+        agent-eid (:db/id (::agent run))
+        pointer (:seon.cluster.agent/run
+                 (d/pull db [:seon.cluster.agent/run] agent-eid))]
+    (cond-> (conj (retract-custody run)
+                  [:db/add (:db/id run) ::closed-at (::closed-at request)])
+      (= (:db/id run) (:db/id pointer))
+      (conj [:db/retract agent-eid :seon.cluster.agent/run (:db/id run)]))))
 
 (defn plan-tx
   "Transaction data freezing one ordered form plan on the held run."
@@ -376,7 +455,27 @@
                         [::sources [:vector [:string {:min 1}]]]]]
                   [:vector :some]]}
   [db request]
-  (awaits-implementation! `plan-call request))
+  (let [{::keys [id plan-digest sources]} request
+        run (held-run db `plan-call request)
+        run-eid (:db/id run)]
+    (when (some? (::plan-digest run))
+      (refuse! `plan-call ::plan-frozen request))
+    (let [forms (into []
+                      (map-indexed
+                       (fn [ordinal source]
+                         (let [form-id (pr-str [id ordinal])]
+                           {:db/id form-id
+                            :seon.cluster.run.form/id form-id
+                            :seon.cluster.run.form/run run-eid
+                            :seon.cluster.run.form/ordinal ordinal
+                            :seon.cluster.run.form/source source})))
+                      sources)]
+      (into [[:db/add run-eid ::plan-digest plan-digest]]
+            cat
+            [forms
+             (map (fn [form]
+                    [:db/add run-eid ::forms (:db/id form)])
+                  forms)]))))
 
 (defn open-tx
   "Transaction data opening one run for an agent."
