@@ -131,22 +131,21 @@ night).** The boot COMPOSITION (task #9) is sealed (f2fecffea: start!
 threads the whole tower, REPL survives any later-layer failure, the
 throw carries the degraded instance under :seon.boot/instance) with
 seal-side EDN fixes at 35a938872 (boot.edn instance gains the three
-optional tower keys; provenance.edn gains :seon.db.process/id identity
-+ :seon.db/index facets on the two refs). KNOWN BROKEN RIGHT NOW:
-(require 'seon.cluster) FAILS activation after 35a938872 — almost
-certainly boot.edn's reference to :seon.reconcile/result, which is
-registered in CODE (reconcile.cljc) and unloaded at seon.cluster
-activation (the load-order coupling the composition agent flagged,
-with its offered fix: inline the result shape in boot.edn, or move
-reconcile's result/converged?/operations registrations to a reconcile
-EDN file — prefer the EDN move, one authority). FIRST ACTION
-POST-COMPACTION: diagnose that require, apply the fix, prove
-(require 'seon.cluster 'seon.config) clean + bin/test. THEN resume the
-composition agent (the Opus agent that drafted+implemented the fork
-machinery — it stopped correctly on the two blockers, both now fixed;
-its tower probe: ancestor build 717ms, fork 19ms, converged re-apply
-:max-tx unchanged; its message queue has the full implementation spec)
-to implement start!/stop! to green. Its accepted design: process-local
+optional tower keys; provenance.edn gains the :seon.db.process/id
+identity plus :seon.db/index facets on the two refs). ACTIVATION FIXED (e02dcfd9b,
+2026-07-27 night): the load-order coupling was real — ALL of
+reconcile's registrations moved to seon/schema/reconcile.edn (one
+authority; code register! block deleted), and provenance.edn's
+`[:seon.db/ref {props}]` was invalid Malli — facet properties attach
+to TYPES only, so the two refs use the one supported idiom
+`[:and {:seon.db/index true} :seon.db/ref]` (the datahike bridge
+recurses through :and heads). PROVEN: (require 'seon.cluster
+'seon.config) clean; bin/test 87/359/7 where the 7 failures are
+EXACTLY the sealed composition falsifiers awaiting implementation.
+The composition agent (the Opus agent that drafted+implemented the
+fork machinery; tower probe: ancestor build 717ms, fork 19ms,
+converged re-apply :max-tx unchanged) is RESUMED and implementing
+start!/stop! to green. Its accepted design: process-local
 store holder + refcount under ONE lock with running-instances;
 stop! also releases branch connection, last instance releases the
 store (stop!'s docstring needs that revision — seal owner's). Its
