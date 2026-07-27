@@ -53,3 +53,33 @@ ambient for every Babashka task.
 - **OPEN-CURRENT.** `bb.edn:1` still places `src-old` on plain Babashka's
   ambient classpath, whereas `deps.edn:1-5,75-84` keeps the quarry behind the
   explicit old-system alias.
+
+## Bounded fix-lane findings 2026-07-27
+
+Inventory covered the root `bb.edn` task, first-party `bb` launchers under
+`bin/`, `.codex/hooks.json`, and Babashka calls in `script/`. Maintained
+operator helpers load from `script/`; the edit hook is a standalone script;
+the operator runner and operator tests are quarry consumers.
+
+The root-only candidate removed `src-old/` from the default paths and gave
+`operator-test` task-local `src-old/` and `test-old/` paths. Its focused proof
+passed:
+
+- `printf '{}\n' | bin/seon-hook` returns `{"continue":true}`.
+- `bb operator-test seon.dev.issues-test` passes 2 tests and 6 assertions.
+- `bb -e "(require 'seon.time)"` exits 1 because the quarry-only namespace is
+  absent from the default classpath.
+
+However, `bin/seon --help` then exits 1: `bin/seon` directly invokes
+`bb --config bb.edn --deps-root ... -m seon.dev.cli`, whose script dependency
+chain still requires quarry-only `seon.config.resolve` and other old operator
+namespaces. The direct operator-test subprocess commands in
+`script/seon/dev/cli.clj` and `script/seon/dev/changed_test.clj` likewise bypass
+the task-local opt-in. A correct fix therefore requires changing old-facing
+launchers to select one explicit old Babashka entry, outside this lane's
+`bb.edn`-and-issue ownership. The breaking root-only candidate was reverted.
+
+There is also a separate proof seam: the no-selector operator runner discovers
+`test/seon/dev` and reports zero tests after operator tests moved to
+`test-old/`. That split work is already specified in
+`docs/prds/sci-execution-runtime/research/src-split-audit-2026-07-26.md`.
