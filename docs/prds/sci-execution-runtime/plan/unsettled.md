@@ -340,7 +340,16 @@ build nothing). A FRESH Opus drafting agent IS LAUNCHED and drafting step 1 RIGH
 a96513c593d3a6a83; spec is self-contained — seon.error normalizer +
 totality property + generic projection ROUTER (qualified-symbol
 routing) + ai/log projections + the fault.edn→error rename). The
-orchestrator seals on its return. Remaining order after step 1: (1) seon.error normalizer + totality property
+orchestrator seals on its return. OWNER DIRECTION (night, routing):
+the router's delivery substrate is COMMITTED FACTS + listen!
+attribute interest (the wake mechanism generalized — subscribe to the
+projection-key attribute set; any committed entity carrying one
+routes; never a second channel, processes commit what they want
+routed). Keys are the ROUTING authority (deterministic, no-kinds
+rule); malli schema-matching (filter registered-schemas by
+valid-candidate-value? — multiple matches always possible since open
+shapes subsume) is a DIAGNOSTIC surface for inspector/steering, never
+routing. Remaining order after step 1: (1) seon.error normalizer + totality property
 + ai/log projections + fault.edn→error family rename; (2)
 seon.error/commit! + boot wiring as a cluster.clj revision (D4);
 (3) seon.problems; (4) seon.instrument (near-mechanical from the
