@@ -51,6 +51,60 @@
  :seon.config.ai/timeout-ms
  [:int {:min 1}]
 
+ ; ---------------------------------------------------------------------
+ ; THE BACKUP DESCRIPTOR ROW — the four dials above, a second time, for
+ ; the OPTIONAL second target. Three of the four are optional OVERRIDES
+ ; that inherit the primary's value, and that is what makes a partial
+ ; backup UNREPRESENTABLE rather than merely refused: a backup exists
+ ; exactly when `:seon.config.ai.backup/model` is present, so there is
+ ; no state in which three backup dials are configured and the fourth
+ ; silently voids them. It also makes the common case honest — a backup
+ ; model at the same provider is ONE dial, not four copied lines.
+ ;
+ ; This is a deliberate departure from research/model-failover
+ ; §"Provider descriptors" option 2 (provider + model-target ENTITY rows
+ ; joined by refs). The manifest is a flat dial map validated key by
+ ; key, and `:seon.db/ref` admits an eid, a tempid or a lookup ref —
+ ; never an inline map — so entity rows would need the config gate, the
+ ; reconciler's desired-row identity rule and the ref candidate form all
+ ; changed at once. Two roles do not need a join table; when a third
+ ; role or per-agent overrides arrive, THAT is the change that earns the
+ ; entity rows.
+ :seon.config.ai.backup/model
+ [:string {:min 1}]
+
+ :seon.config.ai.backup/endpoint
+ [:string {:min 1}]
+
+ :seon.config.ai.backup/api-key-variable
+ [:string {:min 1}]
+
+ :seon.config.ai.backup/timeout-ms
+ [:int {:min 1}]
+
+ ; ---------------------------------------------------------------------
+ ; THE BACKOFF STRATEGY. It runs on exactly ONE path — an unpaid,
+ ; transient failure with NO backup configured — and it is data so that
+ ; the schedule is a value a seeded property pins rather than a constant
+ ; in a call site.
+ :seon.config.ai.retry/base-delay-ms
+ :seon.ai.retry/base-delay-ms
+
+ :seon.config.ai.retry/multiplier
+ :seon.ai.retry/multiplier
+
+ :seon.config.ai.retry/jitter-fraction
+ :seon.ai.retry/jitter-fraction
+
+ :seon.config.ai.retry/maximum-delay-ms
+ :seon.ai.retry/maximum-delay-ms
+
+ :seon.config.ai.retry/maximum-retries
+ :seon.ai.retry/maximum-retries
+
+ :seon.config.ai.retry/maximum-total-delay-ms
+ :seon.ai.retry/maximum-total-delay-ms
+
  :seon.config/manifest
  [:map {:closed true}
   [:seon.config.flow.compute/queue-depth
@@ -86,7 +140,27 @@
   [:seon.config.ai/model {:optional true} :seon.config.ai/model]
   [:seon.config.ai/api-key-variable
    {:optional true} :seon.config.ai/api-key-variable]
-  [:seon.config.ai/timeout-ms {:optional true} :seon.config.ai/timeout-ms]]
+  [:seon.config.ai/timeout-ms {:optional true} :seon.config.ai/timeout-ms]
+  [:seon.config.ai.backup/model
+   {:optional true} :seon.config.ai.backup/model]
+  [:seon.config.ai.backup/endpoint
+   {:optional true} :seon.config.ai.backup/endpoint]
+  [:seon.config.ai.backup/api-key-variable
+   {:optional true} :seon.config.ai.backup/api-key-variable]
+  [:seon.config.ai.backup/timeout-ms
+   {:optional true} :seon.config.ai.backup/timeout-ms]
+  [:seon.config.ai.retry/base-delay-ms
+   {:optional true} :seon.config.ai.retry/base-delay-ms]
+  [:seon.config.ai.retry/multiplier
+   {:optional true} :seon.config.ai.retry/multiplier]
+  [:seon.config.ai.retry/jitter-fraction
+   {:optional true} :seon.config.ai.retry/jitter-fraction]
+  [:seon.config.ai.retry/maximum-delay-ms
+   {:optional true} :seon.config.ai.retry/maximum-delay-ms]
+  [:seon.config.ai.retry/maximum-retries
+   {:optional true} :seon.config.ai.retry/maximum-retries]
+  [:seon.config.ai.retry/maximum-total-delay-ms
+   {:optional true} :seon.config.ai.retry/maximum-total-delay-ms]]
 
  :seon.config/effective
  [:map {:closed true}
@@ -113,7 +187,29 @@
   [:seon.config.ai/endpoint :seon.config.ai/endpoint]
   [:seon.config.ai/model :seon.config.ai/model]
   [:seon.config.ai/api-key-variable :seon.config.ai/api-key-variable]
-  [:seon.config.ai/timeout-ms :seon.config.ai/timeout-ms]]
+  [:seon.config.ai/timeout-ms :seon.config.ai/timeout-ms]
+  ; OPTIONAL, and absence is the whole contract: no backup dial means no
+  ; backup target, which means `disposition` never returns
+  ; `:failover-now`. `model` is the one that decides — the other three
+  ; inherit the primary's when absent.
+  [:seon.config.ai.backup/model
+   {:optional true} :seon.config.ai.backup/model]
+  [:seon.config.ai.backup/endpoint
+   {:optional true} :seon.config.ai.backup/endpoint]
+  [:seon.config.ai.backup/api-key-variable
+   {:optional true} :seon.config.ai.backup/api-key-variable]
+  [:seon.config.ai.backup/timeout-ms
+   {:optional true} :seon.config.ai.backup/timeout-ms]
+  [:seon.config.ai.retry/base-delay-ms :seon.config.ai.retry/base-delay-ms]
+  [:seon.config.ai.retry/multiplier :seon.config.ai.retry/multiplier]
+  [:seon.config.ai.retry/jitter-fraction
+   :seon.config.ai.retry/jitter-fraction]
+  [:seon.config.ai.retry/maximum-delay-ms
+   :seon.config.ai.retry/maximum-delay-ms]
+  [:seon.config.ai.retry/maximum-retries
+   :seon.config.ai.retry/maximum-retries]
+  [:seon.config.ai.retry/maximum-total-delay-ms
+   :seon.config.ai.retry/maximum-total-delay-ms]]
 
  :seon.config/entity
  [:map {:closed true :seon.db/entity true}
@@ -143,7 +239,25 @@
   [:seon.config.ai/endpoint :seon.config.ai/endpoint]
   [:seon.config.ai/model :seon.config.ai/model]
   [:seon.config.ai/api-key-variable :seon.config.ai/api-key-variable]
-  [:seon.config.ai/timeout-ms :seon.config.ai/timeout-ms]]
+  [:seon.config.ai/timeout-ms :seon.config.ai/timeout-ms]
+  [:seon.config.ai.backup/model
+   {:optional true} :seon.config.ai.backup/model]
+  [:seon.config.ai.backup/endpoint
+   {:optional true} :seon.config.ai.backup/endpoint]
+  [:seon.config.ai.backup/api-key-variable
+   {:optional true} :seon.config.ai.backup/api-key-variable]
+  [:seon.config.ai.backup/timeout-ms
+   {:optional true} :seon.config.ai.backup/timeout-ms]
+  [:seon.config.ai.retry/base-delay-ms :seon.config.ai.retry/base-delay-ms]
+  [:seon.config.ai.retry/multiplier :seon.config.ai.retry/multiplier]
+  [:seon.config.ai.retry/jitter-fraction
+   :seon.config.ai.retry/jitter-fraction]
+  [:seon.config.ai.retry/maximum-delay-ms
+   :seon.config.ai.retry/maximum-delay-ms]
+  [:seon.config.ai.retry/maximum-retries
+   :seon.config.ai.retry/maximum-retries]
+  [:seon.config.ai.retry/maximum-total-delay-ms
+   :seon.config.ai.retry/maximum-total-delay-ms]]
 
  :seon.config/apply-request
  [:map {:closed true}

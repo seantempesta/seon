@@ -80,4 +80,56 @@
  ; Unit: milliseconds. Provenance: the live drives measured a real plan
  ; reply at 2.7 s; sixty seconds is the deadline on an unobservable
  ; remote call, not a target.
- :seon.config.ai/timeout-ms 60000}
+ :seon.config.ai/timeout-ms 60000
+
+ ; THE BACKUP DESCRIPTOR ROW IS DELIBERATELY ABSENT. A shipped backup
+ ; would be a second provider this repository picked for everybody, and
+ ; the honest default is "one target, no failover": with no
+ ; :seon.config.ai.backup/model, `disposition` never returns
+ ; :failover-now and the no-backup path below is the only resilience
+ ; there is. A cluster that wants failover sets ONE dial when the backup
+ ; is another model at the same provider, or three more when it is not.
+ ; Absence is the state; there is no nil to read.
+
+ ; THE BACKOFF STRATEGY, and it runs on exactly one path: a
+ ; conclusively UNPAID transient failure with no backup configured.
+ ; Nothing here can re-call a transmitted request — `seon.ai/disposition`
+ ; returns :backoff for exactly three error classes, and a request that
+ ; may have cost money is not one of them.
+ ;
+ ; Unit: milliseconds before the first retry.
+ ; Provenance: DeepSeek's live plan replies measured 2.7 s, so a first
+ ; wait shorter than a second would re-ask a busy provider inside its
+ ; own service time; 500 ms is half of that floor and the smallest wait
+ ; that is not effectively "immediately".
+ :seon.config.ai.retry/base-delay-ms 500
+
+ ; Unit: dimensionless growth factor per retry.
+ ; Provenance: doubling is the standard exponential backoff shape and is
+ ; what `again`'s multiplicative-strategy composes; anything gentler
+ ; makes the retry count the bound instead of the wait.
+ :seon.config.ai.retry/multiplier 2.0
+
+ ; Unit: fraction of each delay applied as random spread.
+ ; Provenance: jitter exists so N clusters retrying one outage do not
+ ; re-synchronize; a quarter of the delay decorrelates them without
+ ; making the schedule unrecognizable to somebody reading the log.
+ :seon.config.ai.retry/jitter-fraction 0.25
+
+ ; Unit: milliseconds; the cap on any single wait.
+ :seon.config.ai.retry/maximum-delay-ms 4000
+
+ ; Unit: count of retries after the first attempt.
+ ; Provenance: a rate limit or a 503 either clears in seconds or is an
+ ; outage; two retries distinguishes those two cases and a third only
+ ; delays telling the agent.
+ :seon.config.ai.retry/maximum-retries 2
+
+ ; Unit: milliseconds of TOTAL waiting across all retries.
+ ; Provenance: THE BINDING BOUND, and it is bound by the run lease, not
+ ; by patience. A turn holds its run under a 60 s lease and the model
+ ; call itself may take the full 60 s deadline, so the waiting budget
+ ; has to be small enough that a backed-off turn does not routinely
+ ; outlive its own claim. Three seconds is under 5% of the lease and
+ ; still covers the base + one doubled wait.
+ :seon.config.ai.retry/maximum-total-delay-ms 3000}

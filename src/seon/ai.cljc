@@ -1,16 +1,28 @@
 (ns seon.ai
-  "One provider, one attempt, one deadline. Failure is a value.
-
-  DRAFT CONTRACT LAYER FOR ORCHESTRATOR SEAL (drafted 2026-07-27 — N3,
-  package 2, from n3-plan §7.3). Nothing here is implemented: every
-  body throws `awaits implementation`.
+  "One call, one attempt, one deadline. Failure is a value.
 
   NOTHING RETRIES A PAID CALL (owner ruling, 2026-07-27 late). Not
   here, not in the loop, not on crash recovery. A lost call is lost;
-  the agent is told and adapts. That single sentence deletes the
-  quarry's whole retry authority (`seon.agent.turn/call-llm!`), its
-  attempt entity, and the backoff policy that came with them — and it
-  is why this namespace has no attempt count, no jitter, and no state.
+  the agent is told and adapts.
+
+  What that ruling forbids is re-calling a model that MAY HAVE DONE
+  PAID WORK. It does not forbid a second call after a conclusively
+  unpaid refusal, and `disposition` is the one place that distinction
+  is computed — from transport-phase EVIDENCE the leaf recorded, never
+  from a list of error kinds. Everything else in this namespace is data
+  the caller reduces:
+
+  - `targets` derives the primary descriptor row and the OPTIONAL
+    backup from the effective config dials. ONE derivation for both
+    roles, so a role can never drift into its own assembly code;
+  - `disposition` answers `:failover-now` / `:backoff` / `:fail`;
+  - `delays` derives the finite backoff schedule as a vector of waits.
+
+  `complete` STILL MAKES EXACTLY ONE ATTEMPT. Failover and backoff are
+  the CALLER's reduce over these values (`seon.cluster.loop`'s `:call`
+  branch), which is why this namespace holds no attempt count and no
+  state: every attempt is one `complete` call and one durable
+  `:seon.ai/attempt` fact.
 
   THE ONE LEGITIMATE DEADLINE. A remote HTTP call is genuinely
   unobservable external state — the process cannot see the other end
@@ -20,11 +32,12 @@
   something the agent can read. (Contrast the submission backstop in
   the eval path, whose firing IS a bug report.)
 
-  THE SEAM TO B2 IS EXACTLY THREE FACTS: endpoint, model, and the NAME
-  of the environment variable holding the credential. The credential is
-  read at the leaf, never becomes a datom, and never enters Git. When
-  B2's provider descriptor rows absorb those three, this call site does
-  not change.
+  THE DESCRIPTOR ROW IS FOUR FACTS: endpoint, model, timeout, and the
+  NAME of the environment variable holding the credential. The
+  credential is read at the leaf, never becomes a datom, and never
+  enters Git. A `:seon.ai/request` is a `:seon.ai/target` plus what to
+  say, which is why the call site is `(assoc target :seon.ai/prompt …)`
+  and there is no adapter in between.
 
   ERRORS ARE VALUES, ALWAYS. Timeout, transport failure, non-2xx,
   unparseable body — one flat `:seon.error` value each, none throwing.
@@ -57,6 +70,110 @@
 ;;; ---------------------------------------------------------------------------
 ;;; Contracts
 ;;; ---------------------------------------------------------------------------
+
+(defn targets
+  "The primary descriptor row and the OPTIONAL backup, from the dials.
+  PURE, and the ONE assembly for both roles — a second hand-written
+  provider map somewhere else is how two roles start to disagree about
+  what a target is.
+
+  THE BACKUP IS OVERRIDES OVER THE PRIMARY, and that shape is chosen to
+  make a PARTIAL backup unrepresentable rather than merely refused.
+  `:seon.config.ai.backup/model` decides whether a backup exists at
+  all; endpoint, credential variable and deadline are optional and
+  inherit the primary's. So there is no configuration in which three
+  backup dials are set and the fourth silently voids them, and the
+  common case — a different model at the same provider — is one dial
+  rather than four copied lines.
+
+  Absence, never nil: with no backup the key is simply not there, which
+  is exactly what `:seon.ai/backup?` reads downstream."
+  {:malli/schema [:=> [:cat :seon.config/effective] :seon.ai/targets]}
+  [dials]
+  (let [primary {:seon.ai/endpoint (:seon.config.ai/endpoint dials)
+                 :seon.ai/model (:seon.config.ai/model dials)
+                 :seon.ai/api-key-variable
+                 (:seon.config.ai/api-key-variable dials)
+                 :seon.ai/timeout-ms (:seon.config.ai/timeout-ms dials)}]
+    (cond-> {:seon.ai/primary primary}
+      (:seon.config.ai.backup/model dials)
+      (assoc :seon.ai/backup
+             (cond-> (assoc primary :seon.ai/model
+                            (:seon.config.ai.backup/model dials))
+               (:seon.config.ai.backup/endpoint dials)
+               (assoc :seon.ai/endpoint
+                      (:seon.config.ai.backup/endpoint dials))
+               (:seon.config.ai.backup/api-key-variable dials)
+               (assoc :seon.ai/api-key-variable
+                      (:seon.config.ai.backup/api-key-variable dials))
+               (:seon.config.ai.backup/timeout-ms dials)
+               (assoc :seon.ai/timeout-ms
+                      (:seon.config.ai.backup/timeout-ms dials)))))))
+
+(defn retry-strategy
+  "The backoff strategy row, from the dials. Pure projection.
+  Its own function for the same reason `targets` is: the strategy is
+  read in two places (the loop's handle and a seeded property) and
+  neither may build it by hand."
+  {:malli/schema [:=> [:cat :seon.config/effective] :seon.ai.retry/strategy]}
+  [dials]
+  {:seon.ai.retry/base-delay-ms (:seon.config.ai.retry/base-delay-ms dials)
+   :seon.ai.retry/multiplier (:seon.config.ai.retry/multiplier dials)
+   :seon.ai.retry/jitter-fraction
+   (:seon.config.ai.retry/jitter-fraction dials)
+   :seon.ai.retry/maximum-delay-ms
+   (:seon.config.ai.retry/maximum-delay-ms dials)
+   :seon.ai.retry/maximum-retries (:seon.config.ai.retry/maximum-retries dials)
+   :seon.ai.retry/maximum-total-delay-ms
+   (:seon.config.ai.retry/maximum-total-delay-ms dials)})
+
+(defn delays
+  "The finite backoff schedule as a vector of waits in milliseconds.
+  PURE — randomness is INJECTED as a zero-arg function returning
+  `[0,1)`, so a seeded property pins the whole schedule and there is no
+  hidden clock or hidden generator anywhere in the retry path.
+
+  The composition is `again`'s, read from
+  `reference-code`-equivalent shape rather than reinvented:
+  multiplicative growth, randomized by a jitter fraction, each delay
+  clamped, the count bounded, and the CUMULATIVE budget bounded — the
+  last one is what actually binds, because a turn holds its run under a
+  lease and a backed-off turn that outlives its claim is worse than a
+  turn that gave up.
+
+  The result is a VALUE, not a control structure: the caller reduces
+  over it, each element is one wait before one more attempt, and an
+  empty vector means `:backoff` degenerates to `:fail` with nothing
+  special-cased."
+  {:malli/schema [:=> [:cat :seon.ai.retry/strategy [:=> [:cat] :double]]
+                  :seon.ai.retry/delays]}
+  [{:seon.ai.retry/keys [base-delay-ms multiplier jitter-fraction
+                         maximum-delay-ms maximum-retries
+                         maximum-total-delay-ms]}
+   random]
+  (loop [remaining maximum-retries
+         raw (double base-delay-ms)
+         spent 0
+         schedule []]
+    (if (zero? remaining)
+      schedule
+      ;; jitter is SYMMETRIC around the raw delay — `again`'s
+      ;; randomize-strategy spreads either side rather than only
+      ;; lengthening, so the mean schedule is the schedule
+      (let [spread (* raw jitter-fraction)
+            jittered (+ (- raw spread) (* 2.0 spread (random)))
+            clamped (long (min (double maximum-delay-ms) (max 0.0 jittered)))
+            ;; the cumulative budget is a HARD stop, not a trim: a
+            ;; final wait shortened to fit would be a wait nobody
+            ;; configured, and the honest answer to "no budget left" is
+            ;; to stop retrying
+            budgeted (+ spent clamped)]
+        (if (> budgeted maximum-total-delay-ms)
+          schedule
+          (recur (dec remaining)
+                 (* raw multiplier)
+                 budgeted
+                 (conj schedule clamped)))))))
 
 (defn request-body
   "The provider request document for one completion. Pure.

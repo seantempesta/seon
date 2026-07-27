@@ -451,7 +451,7 @@
                                              (work/unanswered-triggers
                                               @connection agent-id)))})
             completion (ai/complete
-                        (assoc (:seon.cluster.loop/provider cluster)
+                        (assoc (:seon.ai/primary cluster)
                                :seon.ai/prompt text))]
         (if (:seon.error/kind completion)
           (fail! completion)

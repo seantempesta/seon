@@ -3,7 +3,7 @@
  ; (the same symbols-as-data idiom as :seon.ancestor/populate), so the
  ; loop's mechanics do not wait on the seon.sci.eval adoption and a
  ; suite can drive a turn with a fake evaluator.
- :seon.cluster.loop/cluster [:map {:closed true} [:seon.store/branch-connection :seon.store/branch-connection] [:seon.cluster.run/process :seon.cluster.run/process] [:seon.cluster.wake/channel :seon.flow/channel] [:seon.cluster.loop/provider :seon.cluster.loop/provider] [:seon.cluster.loop/evaluate :qualified-symbol] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.config.eval/time-limit-ms :seon.config.eval/time-limit-ms] [:seon.config/on-core-error :seon.config/on-core-error] [:seon.config.error/recurrence-limit :seon.config.error/recurrence-limit] [:seon.config.error/escalate-to {:optional true} :seon.config.error/escalate-to] [:clojure.core.async.flow/pid {:optional true} :keyword]]
+ :seon.cluster.loop/cluster [:map {:closed true} [:seon.store/branch-connection :seon.store/branch-connection] [:seon.cluster.run/process :seon.cluster.run/process] [:seon.cluster.wake/channel :seon.flow/channel] [:seon.ai/primary :seon.ai/target] [:seon.ai/backup {:optional true} :seon.ai/target] [:seon.ai.retry/strategy :seon.ai.retry/strategy] [:seon.cluster.loop/evaluate :qualified-symbol] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.config.eval/time-limit-ms :seon.config.eval/time-limit-ms] [:seon.config/on-core-error :seon.config/on-core-error] [:seon.config.error/recurrence-limit :seon.config.error/recurrence-limit] [:seon.config.error/escalate-to {:optional true} :seon.config.error/escalate-to] [:clojure.core.async.flow/pid {:optional true} :keyword]]
  ; `::flow/pid` is FLOW'S, added to the args map it hands the init
  ; arity (`flow/impl.clj:155`: `:args (assoc args ::flow/pid pid)`), so
  ; the handle a running proc holds genuinely has one and the closed
@@ -11,10 +11,20 @@
  ; handle itself and flow adds the key only at start. Instrumentation
  ; found this the first time it ran against a real boot — the contract
  ; was wrong about its own live input and nothing had ever checked.
- :seon.cluster.loop/provider [:map {:closed true} [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai/api-key-variable :seon.ai/api-key-variable] [:seon.ai/timeout-ms :seon.ai/timeout-ms]]
- :seon.cluster.loop/evaluation [:map {:closed true} [:seon.sci.admit/value :any] [:seon.cluster.eval/status :seon.cluster.eval/status] [:seon.cluster.eval/result-edn {:optional true} :seon.cluster.eval/result-edn] [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error]]
+ ; `:seon.cluster.loop/provider` is DELETED, not deprecated. It was this
+ ; exact four-key map under a second name, and once `seon.ai/targets`
+ ; derives both roles from the dials there is nothing for a loop-local
+ ; copy of the shape to be. The handle now carries `:seon.ai/primary`
+ ; and the OPTIONAL `:seon.ai/backup` — `targets`' own keys, merged in
+ ; whole, so the handle cannot re-key them wrongly.
+ ; `:seon.cluster.eval/output` is what the form PRINTED, captured as
+ ; bounded receipt evidence. Both closed shapes below omitted it while
+ ; the code has threaded it since the base-ctx fixes — a contract wrong
+ ; about its own live input, exactly the class instrumentation found
+ ; four of at step 4. Review-caught 2026-07-27.
+ :seon.cluster.loop/evaluation [:map {:closed true} [:seon.sci.admit/value :any] [:seon.cluster.eval/status :seon.cluster.eval/status] [:seon.cluster.eval/result-edn {:optional true} :seon.cluster.eval/result-edn] [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error] [:seon.cluster.eval/output {:optional true} :seon.cluster.eval/output]]
  :seon.cluster.loop/turn-request [:map {:closed true} [:seon.cluster.loop/cluster :seon.cluster.loop/cluster] [:seon.cluster.work/next :seon.cluster.work/next]]
- :seon.cluster.loop/terminal-request [:map {:closed true} [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.run/process :seon.cluster.run/process] [:seon.cluster.run/claim-epoch :seon.cluster.run/claim-epoch] [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal] [:seon.cluster.eval/status :seon.cluster.eval/status] [:seon.cluster.eval/result-edn {:optional true} :seon.cluster.eval/result-edn] [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error] [:my.run/value {:optional true} :my.run/value]]
+ :seon.cluster.loop/terminal-request [:map {:closed true} [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.run/process :seon.cluster.run/process] [:seon.cluster.run/claim-epoch :seon.cluster.run/claim-epoch] [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal] [:seon.cluster.eval/status :seon.cluster.eval/status] [:seon.cluster.eval/result-edn {:optional true} :seon.cluster.eval/result-edn] [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error] [:seon.cluster.eval/output {:optional true} :seon.cluster.eval/output] [:my.run/value {:optional true} :my.run/value]]
  ; The proc's own state. ::flow/in-ports is core.async.flow's key, and
  ; it is declared here rather than hidden behind an open map: the state
  ; is ours, only the channel objects inside it are foreign.

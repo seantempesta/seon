@@ -105,9 +105,18 @@
             (is (seon.schema/valid-candidate-value? :seon.cluster.loop/cluster
                                                     handle))
             (is (str/starts-with?
-                 (:seon.ai/endpoint (:seon.cluster.loop/provider handle))
+                 (:seon.ai/endpoint (:seon.ai/primary handle))
                  "https://"))
-            (is (= "root" (:seon.config.error/escalate-to handle)))))))))
+            (is (= "root" (:seon.config.error/escalate-to handle)))
+            (testing "and the shipped document configures NO backup, so
+            the handle simply has no backup key — absence, never nil"
+              (is (not (contains? handle :seon.ai/backup))))
+            (testing "while the backoff strategy IS derived from the
+            dials, because the no-backup path is the only resilience a
+            default cluster has"
+              (is (seon.schema/valid-candidate-value?
+                   :seon.ai.retry/strategy
+                   (:seon.ai.retry/strategy handle))))))))))
 
 (deftest booting-spends-nothing
   ;; owner-explicit: an armed loop must not cost tokens. It is armed and

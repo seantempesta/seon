@@ -16,6 +16,40 @@
  :seon.ai/completion [:or [:map {:closed true} [:seon.ai/text :seon.ai/text]] :seon.error/value]
 
  ; ---------------------------------------------------------------------
+ ; THE DESCRIPTOR ROW. A target is one callable model: the four wire
+ ; facts and nothing else. A `:seon.ai/request` IS a target plus what to
+ ; say, which is why `complete` takes `(assoc target :seon.ai/prompt …)`
+ ; and no adapter sits between them.
+ ; The two ROLES are registered in their own right so every key in
+ ; `:seon.ai/targets` resolves through the registry like every other
+ ; key here. Neither carries a persistence facet, so neither becomes a
+ ; database attribute — the roles are a shape, not a row.
+ :seon.ai/primary :seon.ai/target
+ :seon.ai/backup :seon.ai/target
+ :seon.ai/target [:map {:closed true} [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai/api-key-variable :seon.ai/api-key-variable] [:seon.ai/timeout-ms :seon.ai/timeout-ms]]
+ ; TWO ROLES, and the backup is ABSENT rather than nil when there is
+ ; none — absence is the state, and `:seon.ai/backup?` downstream is
+ ; literally `(contains? targets :seon.ai/backup)`.
+ :seon.ai/targets [:map {:closed true} [:seon.ai/primary :seon.ai/target] [:seon.ai/backup {:optional true} :seon.ai/target]]
+
+ ; ---------------------------------------------------------------------
+ ; THE BACKOFF STRATEGY, as data. Composed the way `again` composes it
+ ; (multiplicative → randomize → clamp → max-retries → max-duration),
+ ; but DERIVED rather than executed: `seon.ai/delays` turns these six
+ ; facts plus injected randomness into a finite vector of waits, so the
+ ; whole schedule is one value a seeded property can pin.
+ :seon.ai.retry/base-delay-ms [:int {:min 1}]
+ :seon.ai.retry/multiplier [:double {:min 1.0}]
+ :seon.ai.retry/jitter-fraction [:double {:min 0.0 :max 1.0}]
+ :seon.ai.retry/maximum-delay-ms [:int {:min 1}]
+ ; zero retries is a legitimate configuration: it turns `:backoff` into
+ ; `:fail` by data rather than by a code branch.
+ :seon.ai.retry/maximum-retries [:int {:min 0}]
+ :seon.ai.retry/maximum-total-delay-ms [:int {:min 0}]
+ :seon.ai.retry/strategy [:map {:closed true} [:seon.ai.retry/base-delay-ms :seon.ai.retry/base-delay-ms] [:seon.ai.retry/multiplier :seon.ai.retry/multiplier] [:seon.ai.retry/jitter-fraction :seon.ai.retry/jitter-fraction] [:seon.ai.retry/maximum-delay-ms :seon.ai.retry/maximum-delay-ms] [:seon.ai.retry/maximum-retries :seon.ai.retry/maximum-retries] [:seon.ai.retry/maximum-total-delay-ms :seon.ai.retry/maximum-total-delay-ms]]
+ :seon.ai.retry/delays [:vector [:int {:min 0}]]
+
+ ; ---------------------------------------------------------------------
  ; THE EVIDENCE A FAILOVER DECISION NEEDS, and the reason it lives here:
  ; only the leaf knows what actually happened on the wire. The five flat
  ; kinds are unchanged and stay the agent-facing shape; these are

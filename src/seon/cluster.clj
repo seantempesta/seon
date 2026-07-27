@@ -73,6 +73,7 @@
   process table rather than trusting the file. `stop!` is idempotent;
   a killed process's next boot simply re-advertises."
   (:require [clojure.core.async :as async]
+            [seon.ai :as ai]
             [clojure.core.async.flow :as flow.core]
             [clojure.core.server]
             [seon.cluster.loop :as cluster.loop]
@@ -509,25 +510,28 @@
   where production does it."
   [connection cluster-name process wake-channel]
   (let [dials (config/effective @connection cluster-name)]
-    (cond-> {:seon.store/branch-connection connection
-             :seon.cluster.run/process process
-             :seon.cluster.wake/channel wake-channel
-             :seon.cluster.loop/provider
-             {:seon.ai/endpoint (:seon.config.ai/endpoint dials)
-              :seon.ai/model (:seon.config.ai/model dials)
-              :seon.ai/api-key-variable (:seon.config.ai/api-key-variable dials)
-              :seon.ai/timeout-ms (:seon.config.ai/timeout-ms dials)}
-             :seon.cluster.loop/evaluate 'seon.sci.eval/evaluate
-             :seon.sci.admit/caps
-             (select-keys dials [:seon.config.eval.result/max-depth
-                                 :seon.config.eval.result/max-collection
-                                 :seon.config.eval.result/max-string
-                                 :seon.config.eval.result/max-nodes])
-             :seon.config.eval/time-limit-ms
-             (:seon.config.eval/time-limit-ms dials)
-             :seon.config/on-core-error (:seon.config/on-core-error dials)
-             :seon.config.error/recurrence-limit
-             (:seon.config.error/recurrence-limit dials)}
+    (cond-> (merge
+             ;; MERGED WHOLE, never re-keyed: `seon.ai/targets` owns the
+             ;; role names, so a backup cannot arrive here under a name
+             ;; only this function knows. Its `:seon.ai/backup` key is
+             ;; ABSENT when no backup is configured, and that absence is
+             ;; the whole failover contract.
+             (ai/targets dials)
+             {:seon.store/branch-connection connection
+              :seon.cluster.run/process process
+              :seon.cluster.wake/channel wake-channel
+              :seon.ai.retry/strategy (ai/retry-strategy dials)
+              :seon.cluster.loop/evaluate 'seon.sci.eval/evaluate
+              :seon.sci.admit/caps
+              (select-keys dials [:seon.config.eval.result/max-depth
+                                  :seon.config.eval.result/max-collection
+                                  :seon.config.eval.result/max-string
+                                  :seon.config.eval.result/max-nodes])
+              :seon.config.eval/time-limit-ms
+              (:seon.config.eval/time-limit-ms dials)
+              :seon.config/on-core-error (:seon.config/on-core-error dials)
+              :seon.config.error/recurrence-limit
+              (:seon.config.error/recurrence-limit dials)})
       (:seon.config.error/escalate-to dials)
       (assoc :seon.config.error/escalate-to
              (:seon.config.error/escalate-to dials)))))

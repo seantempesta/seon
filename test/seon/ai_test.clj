@@ -10,8 +10,12 @@
   runs once by hand; a suite that needs a paid call to be green is a
   suite nobody runs."
   (:require [clojure.test :refer [deftest is testing]]
+            [clojure.test.check.clojure-test :refer [defspec]]
+            [clojure.test.check.generators :as gen]
+            [clojure.test.check.properties :as prop]
             [seon.ai :as ai]
-            [seon.schema]))
+            [seon.config :as config]
+            [seon.schema :as schema]))
 
 (def ^:private base
   {:seon.ai/endpoint "http://127.0.0.1:1/chat/completions"
@@ -23,6 +27,157 @@
 (defn- error? [value]
   (and (map? value) (keyword? (:seon.error/kind value))
        (string? (:seon.error/message value))))
+
+;;; ---------------------------------------------------------------------------
+;;; The descriptor rows: one derivation, two roles
+;;; ---------------------------------------------------------------------------
+
+(def ^:private dials
+  "The shipped defaults — the real document, not a fixture of it. A
+  suite that invents its own dial map cannot catch a default that
+  stopped being derivable."
+  (delay (config/defaults)))
+
+(deftest the-shipped-cluster-has-one-target-and-no-backup
+  (let [targets (ai/targets @dials)]
+    (is (schema/valid-candidate-value? :seon.ai/targets targets))
+    (is (= {:seon.ai/endpoint (:seon.config.ai/endpoint @dials)
+            :seon.ai/model (:seon.config.ai/model @dials)
+            :seon.ai/api-key-variable (:seon.config.ai/api-key-variable @dials)
+            :seon.ai/timeout-ms (:seon.config.ai/timeout-ms @dials)}
+           (:seon.ai/primary targets))
+        "the primary IS the four dials, and nothing reshapes them")
+    (is (not (contains? targets :seon.ai/backup))
+        "ABSENT, never nil — a nil backup would read as `configured, and
+         broken` at every downstream site that asks whether one exists")
+    (testing "and a target is a request minus what to say, which is why
+    the call site is one assoc"
+      (is (schema/valid-candidate-value?
+           :seon.ai/request
+           (assoc (:seon.ai/primary targets) :seon.ai/prompt "hello"))))))
+
+(deftest one-dial-configures-a-backup-and-the-rest-inherit
+  ;; the shape that makes a PARTIAL backup unrepresentable: `model`
+  ;; decides, everything else is an override
+  (let [targets (ai/targets (assoc @dials :seon.config.ai.backup/model
+                                   "deepseek-reasoner"))
+        {:seon.ai/keys [primary backup]} targets]
+    (is (schema/valid-candidate-value? :seon.ai/targets targets))
+    (is (.equals "deepseek-reasoner" (:seon.ai/model backup)))
+    (is (= (dissoc primary :seon.ai/model) (dissoc backup :seon.ai/model))
+        "same provider, same credential, same deadline — one dial said
+         everything that differs, so nothing was copied to drift")))
+
+(deftest a-backup-at-another-provider-overrides-what-differs
+  (let [{:seon.ai/keys [primary backup]}
+        (ai/targets (assoc @dials
+                           :seon.config.ai.backup/model "claude-probe"
+                           :seon.config.ai.backup/endpoint
+                           "https://example.invalid/v1/messages"
+                           :seon.config.ai.backup/api-key-variable
+                           "OTHER_PROVIDER_KEY"
+                           :seon.config.ai.backup/timeout-ms 30000))]
+    (is (= {:seon.ai/endpoint "https://example.invalid/v1/messages"
+            :seon.ai/model "claude-probe"
+            :seon.ai/api-key-variable "OTHER_PROVIDER_KEY"
+            :seon.ai/timeout-ms 30000}
+           backup))
+    (is (not= (:seon.ai/api-key-variable primary)
+              (:seon.ai/api-key-variable backup))
+        "and a second credential is a second VARIABLE NAME — never a key
+         in the database, never in this repository")))
+
+(deftest a-backup-dial-without-a-model-configures-nothing
+  ;; the unrepresentable-partial rule, stated as a falsifier: setting
+  ;; three of four backup dials cannot produce a half-built target
+  (doseq [dial [:seon.config.ai.backup/endpoint
+                :seon.config.ai.backup/api-key-variable]]
+    (is (not (contains? (ai/targets (assoc @dials dial "set-but-alone"))
+                        :seon.ai/backup))
+        (str dial " alone is not a backup, and it is not half of one"))))
+
+;;; ---------------------------------------------------------------------------
+;;; The backoff schedule: a finite value, never a control structure
+;;; ---------------------------------------------------------------------------
+
+(def ^:private strategy
+  {:seon.ai.retry/base-delay-ms 100
+   :seon.ai.retry/multiplier 2.0
+   :seon.ai.retry/jitter-fraction 0.0
+   :seon.ai.retry/maximum-delay-ms 1000
+   :seon.ai.retry/maximum-retries 5
+   :seon.ai.retry/maximum-total-delay-ms 100000})
+
+(deftest the-shipped-strategy-is-derived-from-the-shipped-dials
+  (let [derived (ai/retry-strategy @dials)]
+    (is (schema/valid-candidate-value? :seon.ai.retry/strategy derived))
+    (testing "and the shipped budget is bounded by the RUN LEASE, not by
+    patience: a backed-off turn that outlives its own claim is worse
+    than a turn that gave up"
+      (is (< (:seon.ai.retry/maximum-total-delay-ms derived) 60000)))))
+
+(deftest with-no-jitter-the-schedule-is-exactly-the-doubling
+  (is (= [100 200 400 800 1000]
+         (ai/delays strategy (constantly 0.5)))
+      "five retries, doubling, and the fifth CLAMPED at the maximum
+       delay rather than continuing to 1600"))
+
+(deftest each-bound-is-a-real-bound
+  (testing "the retry count"
+    (is (= 2 (count (ai/delays (assoc strategy :seon.ai.retry/maximum-retries 2)
+                               (constantly 0.5))))))
+  (testing "zero retries makes :backoff degenerate to :fail with no
+  special case anywhere — the empty vector IS the behaviour"
+    (is (= [] (ai/delays (assoc strategy :seon.ai.retry/maximum-retries 0)
+                         (constantly 0.5)))))
+  (testing "and the CUMULATIVE budget stops the schedule rather than
+  trimming its last wait to fit: a shortened final wait is a wait
+  nobody configured"
+    (let [schedule (ai/delays
+                    (assoc strategy :seon.ai.retry/maximum-total-delay-ms 250)
+                    (constantly 0.5))]
+      (is (= [100] schedule))
+      (is (<= (reduce + 0 schedule) 250)))))
+
+(defspec every-schedule-is-finite-bounded-and-inside-its-jitter-band 200
+  (prop/for-all
+   [base (gen/choose 1 500)
+    retries (gen/choose 0 8)
+    jitter (gen/elements [0.0 0.1 0.25 0.5 1.0])
+    maximum (gen/choose 1 5000)
+    budget (gen/choose 0 20000)
+    randoms (gen/vector (gen/elements [0.0 0.25 0.5 0.75 0.999]) 1 12)]
+   (let [strategy {:seon.ai.retry/base-delay-ms base
+                   :seon.ai.retry/multiplier 2.0
+                   :seon.ai.retry/jitter-fraction jitter
+                   :seon.ai.retry/maximum-delay-ms maximum
+                   :seon.ai.retry/maximum-retries retries
+                   :seon.ai.retry/maximum-total-delay-ms budget}
+         drawn (atom (cycle randoms))
+         schedule (ai/delays strategy
+                             (fn [] (let [v (first @drawn)]
+                                      (swap! drawn rest)
+                                      v)))]
+     (and (schema/valid-candidate-value? :seon.ai.retry/delays schedule)
+          ;; FINITE, and never longer than the configured count
+          (<= (count schedule) retries)
+          ;; every single wait is clamped
+          (every? #(<= 0 % maximum) schedule)
+          ;; the whole schedule fits the cumulative budget
+          (<= (reduce + 0 schedule) budget)
+          ;; and each wait is inside the jitter band around its own
+          ;; undelayed geometric value, clamped — this is what proves
+          ;; the randomness is SPREAD rather than merely added
+          (every? true?
+                  (map-indexed
+                   (fn [index delay]
+                     (let [raw (* (double base) (Math/pow 2.0 index))]
+                       (<= (long (min (double maximum)
+                                      (max 0.0 (* raw (- 1.0 jitter)))))
+                           delay
+                           (long (min (double maximum)
+                                      (* raw (+ 1.0 jitter)))))))
+                   schedule))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The pure halves

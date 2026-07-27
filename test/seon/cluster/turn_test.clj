@@ -80,11 +80,24 @@
              :seon.cluster.run/process process
              :seon.cluster.wake/channel
              (clojure.core.async/chan (clojure.core.async/sliding-buffer 1))
-             :seon.cluster.loop/provider
+             ;; ONE target and NO backup: the default shape, where
+             ;; `disposition` can never return :failover-now. The
+             ;; failover fixtures add :seon.ai/backup explicitly.
+             :seon.ai/primary
              {:seon.ai/endpoint "http://127.0.0.1:1/v1"
               :seon.ai/model "probe"
               :seon.ai/api-key-variable "SEON_AI_TEST_KEY"
               :seon.ai/timeout-ms 200}
+             ;; a strategy with ZERO retries: the fixtures that want
+             ;; backoff configure it, and every other test proves the
+             ;; no-wait path without sleeping
+             :seon.ai.retry/strategy
+             {:seon.ai.retry/base-delay-ms 1
+              :seon.ai.retry/multiplier 2.0
+              :seon.ai.retry/jitter-fraction 0.0
+              :seon.ai.retry/maximum-delay-ms 1
+              :seon.ai.retry/maximum-retries 0
+              :seon.ai.retry/maximum-total-delay-ms 0}
              :seon.cluster.loop/evaluate 'seon.cluster.turn-test/fake-evaluate
              :seon.config.eval/time-limit-ms 2000
              :seon.config/on-core-error :panic

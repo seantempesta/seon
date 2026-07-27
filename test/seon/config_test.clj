@@ -47,7 +47,22 @@
     :seon.config.ai/endpoint
     :seon.config.ai/model
     :seon.config.ai/api-key-variable
-    :seon.config.ai/timeout-ms})
+    :seon.config.ai/timeout-ms
+    ;; THE BACKUP DESCRIPTOR ROW — four optional dials, and the shipped
+    ;; document sets none of them. `model` is the one that decides a
+    ;; backup exists; the other three are overrides that inherit the
+    ;; primary's, which is what makes a PARTIAL backup unrepresentable.
+    :seon.config.ai.backup/model
+    :seon.config.ai.backup/endpoint
+    :seon.config.ai.backup/api-key-variable
+    :seon.config.ai.backup/timeout-ms
+    ;; the backoff strategy, on the no-backup path only
+    :seon.config.ai.retry/base-delay-ms
+    :seon.config.ai.retry/multiplier
+    :seon.config.ai.retry/jitter-fraction
+    :seon.config.ai.retry/maximum-delay-ms
+    :seon.config.ai.retry/maximum-retries
+    :seon.config.ai.retry/maximum-total-delay-ms})
 
 (def ^:private dial-attributes
   (into #{}
@@ -95,7 +110,17 @@
    :seon.config.ai/endpoint
    :seon.config.ai/model
    :seon.config.ai/api-key-variable
-   :seon.config.ai/timeout-ms])
+   :seon.config.ai/timeout-ms
+   :seon.config.ai.backup/model
+   :seon.config.ai.backup/endpoint
+   :seon.config.ai.backup/api-key-variable
+   :seon.config.ai.backup/timeout-ms
+   :seon.config.ai.retry/base-delay-ms
+   :seon.config.ai.retry/multiplier
+   :seon.config.ai.retry/jitter-fraction
+   :seon.config.ai.retry/maximum-delay-ms
+   :seon.config.ai.retry/maximum-retries
+   :seon.config.ai.retry/maximum-total-delay-ms])
 
 (defn- with-config-database
   [body]
