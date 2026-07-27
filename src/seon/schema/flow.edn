@@ -13,7 +13,6 @@
  :seon.flow/commit-fault! fn?
  :seon.flow/compile-namespace-fn fn?
  :seon.flow/compute-timeout-ms [:int {:min 1}]
- :seon.flow/database-proc-request [:map [:seon.flow/read-facts :seon.flow/read-facts] [:seon.flow/step-fn :seon.flow/step-fn] [:seon.flow/stopped! :seon.flow/stopped!]]
  :seon.flow/deliver! fn?
  :seon.flow/error-fanout [:map [:seon.flow/graph :seon.flow/graph] [:seon.flow/fault-graph :seon.flow/graph] [:seon.flow/application-report-channel :seon.flow/channel] [:seon.flow/monitor-report-channel :seon.flow/channel] [:seon.flow/monitor-error-channel :seon.flow/channel] [:seon.flow/fault-channel :seon.flow/channel]]
  :seon.flow/error-fanout-request [:map [:seon.flow/graph :seon.flow/graph] [:seon.flow/started [:map [:report-chan :seon.flow/channel] [:error-chan :seon.flow/channel]]] [:seon.flow/fault-buffer-capacity :seon.flow/buffer-capacity] [:seon.flow/monitor-buffer-capacity :seon.flow/buffer-capacity] [:seon.flow/read-core-error-mode :seon.flow/read-core-error-mode] [:seon.flow/commit-fault! :seon.flow/commit-fault!] [:seon.flow/commit-drop! :seon.flow/commit-drop!] [:seon.flow/panic! :seon.flow/panic!]]
@@ -43,14 +42,11 @@
  :seon.flow/plan-step-fn fn?
  :seon.flow/planner-proc-request [:map [:seon.flow/plan-step-fn :seon.flow/plan-step-fn]]
  :seon.flow/read-core-error-mode fn?
- :seon.flow/read-facts fn?
  :seon.flow/read-sources fn?
  :seon.flow/seed :int
  :seon.flow/seeded-outcome-request [:map [:seon.flow/seed :seon.flow/seed] [:seon.flow/owner-ordinal :seon.flow/owner-ordinal] [:seon.flow/attempt :seon.flow/attempt]]
  :seon.flow/source-enumerator-proc-request [:map [:seon.flow/read-sources :seon.flow/read-sources]]
  :seon.flow/sources [:map-of :symbol :string]
- :seon.flow/step-fn fn?
- :seon.flow/stopped! fn?
  :seon.flow/submission-id [:or :uuid :keyword :string]
  :seon.flow/successful-owners [:set :keyword]
  :seon.flow/turn-count [:int {:min 0}]

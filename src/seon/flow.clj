@@ -2,9 +2,8 @@
   "Production-shaped core.async.flow launchers used by the standing testbed.
 
    This namespace deliberately does not own durable runtime state. Ordinary
-   Flow processes retain only disposable counters and handles; the custom
-   database process obtains facts and commits facts through supplied
-   functions. Flow channels carry scheduling and wake signals."
+   Flow processes retain only disposable counters and handles. Flow channels
+   carry scheduling and wake signals."
   (:require [clojure.core.protocols :as core.protocols]
             [clojure.core.async :as async]
             [clojure.core.async.flow :as flow]
@@ -814,93 +813,3 @@
      (fn [state _input message]
        (deliver! message)
        [(update state ::delivered inc) nil])})))
-
-(defn- addressed?
-  [pid command]
-  (contains? #{pid ::flow/all} (::flow/to command)))
-
-(defn- ping-map
-  [pid status count ins outs facts]
-  (walk/postwalk
-   datafy/datafy
-   #::flow{:pid pid
-           :status status
-           :state facts
-           :count count
-           :ins (dissoc ins ::flow/control ::flow/casts)
-           :outs (dissoc outs ::flow/error ::flow/report)}))
-
-(defn- next-status
-  [pid status command facts-fn count ins outs]
-  (if-not (addressed? pid command)
-    status
-    (case (::flow/command command)
-      ::flow/stop ::exit
-      ::flow/pause :paused
-      ::flow/resume :running
-      ::flow/ping
-      (do
-        (async/>!! (::flow/reply-chan command)
-                   (ping-map pid status count ins outs (facts-fn)))
-        status)
-      status)))
-
-(defn database-proc
-  "Create a Flow SPI proc whose durable state lives behind functions."
-  {:malli/schema
-   [:=> [:catn [::request ::database-proc-request]] ::launcher]}
-  [{::keys [read-facts step-fn stopped!]}]
-  (reify
-    core.protocols/Datafiable
-    (datafy [_]
-      {::launcher ::database})
-
-    flow.spi/ProcLauncher
-    (describe [_]
-      {:ins {::wake "A process-local wake signal; facts hold the work."}
-       :outs {::facts-changed
-              "A disposable wake signal for database-derived consumers."}})
-    (start [_ {:keys [pid ins outs resolver]}]
-      (let [control (::flow/control ins)
-            wake (::wake ins)
-            error (::flow/error outs)
-            facts-changed (::facts-changed outs)
-            run
-            (fn []
-              (try
-                (loop [status :paused
-                       count 0]
-                  (let [[message channel]
-                        (async/alts!!
-                         (if (= status :paused)
-                           [control]
-                           [control wake])
-                         :priority true)]
-                    (if (= channel control)
-                      (let [status'
-                            (next-status
-                             pid status message read-facts count ins outs)]
-                        (when-not (= status' ::exit)
-                          (recur status' count)))
-                      (let [committed?
-                            (try
-                              (step-fn (read-facts) message)
-                              true
-                              (catch Throwable throwable
-                                (async/>!!
-                                 error
-                                 #::flow{:pid pid
-                                         :status status
-                                         :count count
-                                         :cid ::wake
-                                         :msg message
-                                         :op ::database-step
-                                         :ex throwable})
-                                false))
-                            _ (when (and committed? facts-changed)
-                                (async/offer! facts-changed ::facts-changed))
-                            count' (if committed? (inc count) count)]
-                        (recur status (long count'))))))
-                (finally
-                  (stopped! {::pid pid}))))]
-        (.execute ^Executor (flow.spi/get-exec resolver :io) ^Runnable run)))))

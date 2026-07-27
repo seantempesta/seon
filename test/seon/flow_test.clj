@@ -19,24 +19,6 @@
   ;; into a named failure instead of wedging the recurring writer gate.
   20)
 
-(def ^:private durable-schema
-  [{:db/ident ::durable-id
-    :db/valueType :db.type/string
-    :db/cardinality :db.cardinality/one
-    :db/unique :db.unique/identity}
-   {:db/ident ::durable-count
-    :db/valueType :db.type/long
-    :db/cardinality :db.cardinality/one}])
-
-(def ^:private event-schema
-  [{:db/ident ::event-id
-    :db/valueType :db.type/string
-    :db/cardinality :db.cardinality/one
-    :db/unique :db.unique/identity}
-   {:db/ident ::event-value
-   :db/valueType :db.type/long
-    :db/cardinality :db.cardinality/one}])
-
 (def ^:private fault-schema
   [{:db/ident ::core-error-config-id
     :db/valueType :db.type/string
@@ -99,48 +81,8 @@
         {::event event})))
     value))
 
-(defn- with-database
-  [body]
-  (let [configuration
-        {:store {:backend :memory :id (random-uuid)}
-         :schema-flexibility :write}
-        _ (d/create-database configuration)
-        connection (d/connect configuration)]
-    (try
-      (d/transact connection durable-schema)
-      (d/transact connection
-                  [{::durable-id "flow-testbed"
-                    ::durable-count 0}])
-      (body connection)
-      (finally
-        (d/release connection)
-        (d/delete-database configuration)))))
-
-(defn- durable-facts
-  [connection]
-  (d/pull @connection
-          [::durable-id ::durable-count]
-          [::durable-id "flow-testbed"]))
-
-(defn- durable-step!
-  [connection facts _wake]
-  (d/transact connection
-              [{::durable-id "flow-testbed"
-                ::durable-count (inc (::durable-count facts))}]))
-
-(defn- statuses
-  [graph]
-  (into {}
-        (map (fn [[pid ping]]
-               [pid (::flow/status ping)]))
-        (flow/ping graph :timeout-ms 250)))
-
-(defn- await-statuses!
-  [graph expected]
-  (await-condition! ::statuses #(= expected (statuses graph))))
-
 (defn- testbed-procs
-  [{::keys [parallelism active-evals database-launcher deliver!]}]
+  [{::keys [parallelism active-evals deliver!]}]
   {:eval
    {:proc
     (sut/eval-proc
@@ -149,10 +91,6 @@
       ::sut/compute-timeout-ms 10000})
     :chan-opts
     {::sut/submission {:buf-or-n 2}}}
-   :database
-   {:proc database-launcher
-    :chan-opts
-    {::sut/wake {:buf-or-n 2}}}
    :mailbox
    {:proc (sut/mailbox-proc {::sut/deliver! deliver!})
     :chan-opts
@@ -169,8 +107,7 @@
   [procs compute-executor]
   (flow/create-flow
    {:procs procs
-    :conns [[[:eval ::sut/result] [:mailbox ::sut/mailbox]]
-            [[:database ::sut/facts-changed] [:observer ::sut/observe]]]
+    :conns [[[:eval ::sut/result] [:mailbox ::sut/mailbox]]]
     :compute-exec compute-executor}))
 
 (defn- stop-executor!
@@ -182,124 +119,6 @@
      (ex-info
       "The bounded Flow compute executor did not terminate."
       {::event ::executor-termination}))))
-
-(deftest public-lifecycle-and-durable-recreation
-  (with-database
-    (fn [connection]
-      (let [parallelism 2
-            compute-executor (sut/bounded-platform-executor parallelism)
-            active-evals (atom {})
-            deliveries (atom [])
-            mailbox-delivered (CountDownLatch. 1)
-            eval-work-finished (CountDownLatch. 1)
-            database-stopped (CountDownLatch. 2)
-            database-launcher
-            (sut/database-proc
-             {::sut/read-facts #(durable-facts connection)
-              ::sut/step-fn #(durable-step! connection %1 %2)
-              ::sut/stopped! (fn [_] (.countDown database-stopped))})
-            deliver!
-            (fn [message]
-              (swap! deliveries conj message)
-              (.countDown mailbox-delivered))
-            procs
-            (testbed-procs
-             {::parallelism parallelism
-              ::active-evals active-evals
-              ::database-launcher database-launcher
-              ::deliver! deliver!})
-            expected-paused
-            {:eval :paused
-             :database :paused
-             :mailbox :paused
-             :observer :paused}
-            expected-running
-            (update-vals expected-paused (constantly :running))]
-        (try
-          (let [graph (create-testbed-flow procs compute-executor)
-                started (flow/start graph)]
-            (testing "start, resume, pause, ping, and per-proc controls"
-              (is (= #{:report-chan :error-chan} (set (keys started))))
-              (await-statuses! graph expected-paused)
-              @(flow/inject
-                graph
-                [:mailbox ::sut/mailbox]
-                [{::mailbox-value 1}
-                 {::mailbox-value 2}
-                 {::mailbox-value 3}])
-              (is (empty? @deliveries)
-                  "a paused proc does not consume its buffered input")
-              (flow/resume graph)
-              (await-statuses! graph expected-running)
-              (await-latch! mailbox-delivered ::mailbox-delivery)
-              (is (= {::mailbox-value 3} (first @deliveries))
-                  "a sliding buffer of one keeps only the newest snapshot")
-
-              @(flow/inject
-                graph
-                [:eval ::sut/submission]
-                [{::sut/work-fn
-                  (fn [{::sut/keys [interrupt-fn]}]
-                    (interrupt-fn)
-                    (.countDown eval-work-finished)
-                    ::bounded-result)
-                  ::sut/wedged? false}])
-              (await-latch! eval-work-finished ::eval-work)
-              (let [report
-                    (take-event!
-                     (:report-chan started)
-                     ::eval-report)]
-                (is (= :eval (::sut/pid report)))
-                (is (= ::sut/eval-complete (::sut/event report)))
-                (is (= ::bounded-result (::sut/result report))))
-              (is (empty? @active-evals)
-                  "the guarded transform releases its launcher slot in finally")
-
-              @(flow/inject graph [:database ::sut/wake] [::wake])
-              (await-condition!
-               ::first-database-commit
-               #(= 1 (::durable-count (durable-facts connection))))
-              (await-condition!
-               ::database-fact-wake
-               #(= 1 (::flow/count (flow/ping-proc graph :observer))))
-
-              (flow/pause graph)
-              (await-statuses! graph expected-paused)
-              @(flow/inject graph [:database ::sut/wake] [::wake])
-              (is (= 1 (::durable-count (durable-facts connection)))
-                  "a paused database proc leaves a buffered wake unconsumed")
-              (flow/resume-proc graph :database)
-              (await-condition!
-               ::resumed-database-commit
-               #(= 2 (::durable-count (durable-facts connection))))
-              (flow/pause-proc graph :database)
-              (await-condition!
-               ::database-paused
-               #(= :paused (::flow/status
-                            (flow/ping-proc graph :database))))
-              (flow/resume graph)
-              (await-statuses! graph expected-running))
-
-            (testing "stop then graph recreation resumes from database facts"
-              (is (true? (flow/stop graph)))
-              (let [recreated (create-testbed-flow procs compute-executor)]
-                (flow/start recreated)
-                (await-statuses! recreated expected-paused)
-                (let [database-ping (flow/ping-proc recreated :database)]
-                  (is (= 2
-                         (get-in database-ping
-                                 [::flow/state ::durable-count])))
-                  (is (zero? (::flow/count database-ping))
-                      "Flow-local diagnostics reset on graph recreation"))
-                (flow/resume-proc recreated :database)
-                @(flow/inject recreated [:database ::sut/wake] [::wake])
-                (await-condition!
-                 ::post-recreation-commit
-                 #(= 3 (::durable-count (durable-facts connection))))
-                (is (true? (flow/stop recreated)))))
-            (await-latch! database-stopped ::database-procs-stopped))
-          (finally
-            (stop-executor! compute-executor)))))))
 
 (defn- eval-procs
   [count parallelism active-evals]
@@ -369,21 +188,6 @@
     (catch Throwable _))
   (stop-executor! compute-executor))
 
-(defn- with-event-database
-  [body]
-  (let [configuration
-        {:store {:backend :memory :id (random-uuid)}
-         :schema-flexibility :write
-         :keep-history? true}
-        _ (d/create-database configuration)
-        connection (d/connect configuration)]
-    (try
-      (d/transact connection event-schema)
-      (body connection)
-      (finally
-        (d/release connection)
-        (d/delete-database configuration)))))
-
 (defn- with-fault-database
   [body]
   (let [configuration
@@ -452,13 +256,6 @@
      :where
      [?counter :seon.flow-test/fault-drop-id "fault-committer"]
      [?counter :seon.flow-test/fault-drop-count ?count]]
-   @connection))
-
-(defn- event-count
-  [connection]
-  (d/q
-   '[:find (count ?event) .
-     :where [?event :seon.flow-test/event-id]]
    @connection))
 
 (deftest production-launcher-wedges-degrade-capacity-by-exactly-n
@@ -996,69 +793,6 @@
         (finally
           (stop-testbed! testbed))))))
 
-(deftest concurrent-database-procs-share-one-serial-writer
-  (testing "concurrent proc steps return distinct ordered transaction reports"
-    (with-event-database
-      (fn [connection]
-        (let [reports (atom [])
-              proc-count 8
-              events-per-proc 30
-              stopped (CountDownLatch. proc-count)
-              procs
-              (into
-               {}
-               (map
-                (fn [proc-ordinal]
-                  (let [pid (keyword (str "writer-" proc-ordinal))]
-                    [pid
-                     {:proc
-                      (sut/database-proc
-                       {::sut/step-fn
-                        (fn [_facts event-ordinal]
-                          (let [report
-                                (d/transact
-                                 connection
-                                 [{::event-id
-                                   (str proc-ordinal "/" event-ordinal)
-                                   ::event-value (long event-ordinal)}])]
-                            (swap! reports
-                                   conj
-                                   {::transaction-id
-                                    (:tx (first (:tx-data report)))
-                                    ::reported-basis
-                                    (:max-tx (:db-after report))})))
-                        ::sut/read-facts
-                        (fn [] {::durable-count
-                                (event-count connection)})
-                        ::sut/stopped!
-                        (fn [_] (.countDown stopped))})
-                      :chan-opts
-                      {::sut/wake {:buf-or-n events-per-proc}}}]))
-                (range proc-count)))
-              graph (flow/create-flow {:procs procs :conns []})]
-          (try
-            (flow/start graph)
-            (flow/resume graph)
-            (doseq [proc-ordinal (range proc-count)]
-              @(flow/inject
-                graph
-                [(keyword (str "writer-" proc-ordinal)) ::sut/wake]
-                (vec (range events-per-proc))))
-            (let [expected (* proc-count events-per-proc)]
-              (await-condition! ::writer-contention
-                                #(= expected (event-count connection)))
-              (let [transaction-ids (mapv ::transaction-id @reports)
-                    reported-bases (mapv ::reported-basis @reports)]
-                (is (= expected (count @reports)))
-                (is (= expected (count (distinct transaction-ids))))
-                (is (= (apply max transaction-ids)
-                       (:max-tx @connection)))
-                (is (every? #(<= % (:max-tx @connection))
-                            reported-bases))))
-            (finally
-              (flow/stop graph)
-              (await-latch! stopped ::database-writers-stopped))))))))
-
 (deftest stopping-one-flow-does-not-affect-another
   (testing "two Flow graph lifecycles in one JVM remain isolated"
     (let [a (single-eval-testbed 2)
@@ -1160,50 +894,6 @@
                       [?entity :seon.flow.kill/id "durable-step"]
                       [?entity :seon.flow.kill/count ?count]]
                     @connection)))
-            (let [stopped (CountDownLatch. 1)
-                  read-facts
-                  (fn []
-                    {::durable-count
-                     (d/q
-                      '[:find ?count .
-                        :where
-                        [?entity :seon.flow.kill/id "durable-step"]
-                        [?entity :seon.flow.kill/count ?count]]
-                      @connection)})
-                  launcher
-                  (sut/database-proc
-                   {::sut/step-fn
-                    (fn [_facts _wake]
-                      (d/transact
-                       connection
-                       [{:seon.flow.kill/id "durable-step"
-                         :seon.flow.kill/count 2}]))
-                    ::sut/read-facts read-facts
-                    ::sut/stopped!
-                    (fn [_] (.countDown stopped))})
-                  replacement
-                  (flow/create-flow
-                   {:procs {:durable {:proc launcher}}
-                    :conns []})]
-              (try
-                (flow/start replacement)
-                (is (= 1
-                       (get-in
-                        (flow/ping-proc replacement :durable)
-                        [::flow/state ::durable-count])))
-                (flow/resume replacement)
-                @(flow/inject replacement
-                              [:durable ::sut/wake]
-                              [::reexecute])
-                (await-condition!
-                 ::reexecuted
-                 #(= 2
-                     (get-in
-                      (flow/ping-proc replacement :durable)
-                      [::flow/state ::durable-count])))
-                (finally
-                  (flow/stop replacement)
-                  (await-latch! stopped ::replacement-stopped))))
             (finally
               (d/release connection))))
         (finally
@@ -1247,40 +937,31 @@
     [socket @complete-messages]))
 
 (deftest flow-monitor-attaches-and-publishes-the-render-graph
-  (with-database
-    (fn [connection]
-      (let [parallelism 1
-            compute-executor (sut/bounded-platform-executor parallelism)
-            active-evals (atom {})
-            database-stopped (CountDownLatch. 1)
-            database-launcher
-            (sut/database-proc
-             {::sut/read-facts #(durable-facts connection)
-              ::sut/step-fn #(durable-step! connection %1 %2)
-              ::sut/stopped! (fn [_] (.countDown database-stopped))})
-            procs
-            (testbed-procs
-             {::parallelism parallelism
-              ::active-evals active-evals
-              ::database-launcher database-launcher
-              ::deliver! (fn [_])})
-            graph (create-testbed-flow procs compute-executor)
-            port (free-port)
-            client (HttpClient/newHttpClient)
-            wedge-started (CountDownLatch. 1)
-            release-wedge (CountDownLatch. 1)
-            post-wedge-results (atom [])
-            started (flow/start graph)
-            fanout
-            (sut/start-error-fanout!
-             {::sut/graph graph
-              ::sut/started started
-              ::sut/fault-buffer-capacity 8
-              ::sut/monitor-buffer-capacity 8
-              ::sut/read-core-error-mode (constantly :record)
-              ::sut/commit-fault! (fn [_])
-              ::sut/commit-drop! (fn [_])
-              ::sut/panic! (fn [_])})]
+  (let [parallelism 1
+        compute-executor (sut/bounded-platform-executor parallelism)
+        active-evals (atom {})
+        procs
+        (testbed-procs
+         {::parallelism parallelism
+          ::active-evals active-evals
+          ::deliver! (fn [_])})
+        graph (create-testbed-flow procs compute-executor)
+        port (free-port)
+        client (HttpClient/newHttpClient)
+        wedge-started (CountDownLatch. 1)
+        release-wedge (CountDownLatch. 1)
+        post-wedge-results (atom [])
+        started (flow/start graph)
+        fanout
+        (sut/start-error-fanout!
+         {::sut/graph graph
+          ::sut/started started
+          ::sut/fault-buffer-capacity 8
+          ::sut/monitor-buffer-capacity 8
+          ::sut/read-core-error-mode (constantly :record)
+          ::sut/commit-fault! (fn [_])
+          ::sut/commit-drop! (fn [_])
+          ::sut/panic! (fn [_])})]
         (flow/resume graph)
         @(flow/inject
           graph
@@ -1327,7 +1008,7 @@
               (is (= 200 (.statusCode response)))
               (is (str/includes? (.body response) "<title>Flow Monitor</title>"))
               (is (str/includes? graph-message "~:datafy"))
-              (doseq [pid ["~:eval" "~:database" "~:mailbox" "~:observer"]]
+              (doseq [pid ["~:eval" "~:mailbox" "~:observer"]]
                 (is (str/includes? graph-message pid)
                     (str "monitor graph data names " pid)))
               (is (str/includes? rendered-evidence "FixedBuffer"))
@@ -1354,5 +1035,4 @@
                #(= 3 (count @post-wedge-results)))
               (sut/stop-error-fanout! fanout)
               (flow/stop graph)
-              (await-latch! database-stopped ::monitor-database-stopped)
-              (stop-executor! compute-executor))))))))
+              (stop-executor! compute-executor))))))
