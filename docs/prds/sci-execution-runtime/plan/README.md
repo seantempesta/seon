@@ -15,7 +15,6 @@ else.**
 |---|---|---|
 | **this file** | the ONE ordering: the rulings, the nucleus ladder, the landmines | current as of its last edit |
 | [handbook.md](handbook.md) | the UNDERSTANDING: why the fresh tree, how the construction loop runs, the mentality, where things are defined — read it to GET IT without re-deriving a week of conversation | current |
-| [state.md](state.md) | what is TRUE right now, **generated** by `bin/plan-state` from the live tree, every row carrying the command that produced it | **highest — regenerate it and it cannot be stale** |
 | [unsettled.md](unsettled.md) | what is UNDECIDED (needs a ruling), UNKNOWN (needs an experiment), UNBUILT — and where the primitives do not yet compose | current |
 | [history.md](history.md) | what was tried before, with commit hashes, and the mistakes worth not repeating | permanent |
 
@@ -23,10 +22,12 @@ else.**
 everything is colocated. The originals stay in `../research/`; neither is
 deleted. Cite them, do not re-derive them.
 
-**If [state.md](state.md) disagrees with this file, state.md wins.** Run
-`bin/plan-state` first — this session repeatedly found plan rows that a
-one-day-old document had made wrong, and six of six assumptions falsified in a
-single sitting. Verify against the tree, not against prose.
+**The tree is the state document (owner ruling 2026-07-27: `bin/plan-state`
+and its generated `state.md` are DELETED — a cached snapshot of the tree is
+stored derived state; derive on demand instead).** When this file makes a
+claim about the tree, verify it with one live command (`rg`, `find`,
+`bin/test`) before acting on it — this program repeatedly found one-day-old
+prose wrong, six of six assumptions falsified in a single sitting.
 
 **A second ordered list anywhere in this chunk is a defect.** Seven once existed
 across six files in five naming schemes, which is why "follow the plan" had no
@@ -468,7 +469,7 @@ from here to there is not new machinery; it is pieces that already exist
 wearing the wrong name or the wrong shape. This table names each one, says
 which base construct (§1) it really is, and points at the step that
 discharges it. **It sequences nothing — order lives only in §3.** Verify a
-row against [state.md](state.md) before acting on it.
+row against the live tree (`rg`/`find`) before acting on it.
 
 | piece today (State A) | what it really is | State B shape | discharged by |
 |---|---|---|---|
@@ -480,7 +481,7 @@ row against [state.md](state.md) before acting on it.
 | `terminal-receipt-data`'s unbounded `pr-str`, dropped `fn-entries`/`allocated-bytes`, and the `persisted-value?` / wire-predicate split | value admission scattered across consumers instead of one choke point (L3) | one admission operation inside `evaluate` before disarm; one `ordinary-wire-value?` | step 3 |
 | reply message with a freshly allocated id; ~~wake filtered on `:origin :human`~~ (fixed `4dbaeda0e`) | allocated identity where derived identity belongs | message identity = sending receipt `(run, ordinal, epoch)`; idempotency proof is a step-1 acceptance item (`research/double-send-experiment-2026-07-26.md`) | step 2 |
 | run opened before its plan commits | custody split across two transactions that recovery reads as one | the pre-plan window recoverable (or run+plan one commit) | **no step owns it end to end** — [[../../../seon/issues/run-is-unrecoverable-before-its-plan-commits]] |
-| `:seon.ai.attempt/*` 24 used / 0 registered; `:seon.agent.turn/*` 17 / 9; `:seon.agent/run` registered twice, once in a `.cljs` | facts written without their schema half; a registration on the deletion list | one surviving `.cljc` owner per attribute, moved before the pod cut | step 6 precondition (state.md §10–11) |
+| `:seon.ai.attempt/*` 24 used / 0 registered; `:seon.agent.turn/*` 17 / 9; `:seon.agent/run` registered twice, once in a `.cljs` | facts written without their schema half; a registration on the deletion list | one surviving `.cljc` owner per attribute, moved before the pod cut | step 6 precondition (verify live with `rg`) |
 | hand-rolled `newCachedThreadPool` called `:compute` | borrowed vocabulary without the mechanism | core.async's own `executor-for :compute`, or the name goes | §5 flow ruling |
 | the "or derive from raw initialization" branch | a second pages producer | deleted; missing pages fail loudly (O16) | step 5 |
 | five supervised processes | writer+host+web-render are one construct split by history; the pod is the three jobs above | **two** process kinds: cluster JVM(s) + disposable leaves (ruled 2026-07-26 PM) | steps 6, 8 |

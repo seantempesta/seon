@@ -56,8 +56,9 @@ store rung with the flock-per-store verdict from
 `research/datahike-multistore-2026-07-27.md` and the per-cluster-flow
 topology from `research/flow-per-cluster-2026-07-27.md`; the shared
 bootstrap-ancestor fork ruling lands in B2). R0 follow-ups, owned but
-not blocking: `bin/plan-state` repointing at `src-old` (its State A rows
-now scan the fresh tree and report nonsense); maintained-doc/skill path
+not blocking: ~~`bin/plan-state` repointing~~ (RESOLVED by deletion —
+owner ruled 2026-07-27 the generated state snapshot dies; verify against
+the live tree instead); maintained-doc/skill path
 updates from the split audit's tables; MCP REPL advertisement for the
 fresh system (B0); `src-inspect-ai`/`src-needle` stale-path risks
 (recorded in the audit, downstream follow-up).
@@ -193,7 +194,7 @@ testbed's scenario matrix (`flow-testbed-2026-07-26.md`, in flight).
   The registration fix, the frozen-prompt fixture fix, and the
   ordered-collection reshape (5 sets, 2 positions) landed same-day; the
   original note below is history.
-- **The JVM gate is RESTORED and RED** *(2026-07-26 — see [state.md](state.md) §8,
+- **The JVM gate is RESTORED and RED** *(2026-07-26 — see the 2026-07-26 gate evidence (state.md deleted 2026-07-27),
   regenerated from the retained log)*. **544 tests / 3,676 assertions, 3 failures,
   1 error.** All four are named and filed. Restoring it paid immediately: six
   stored attributes declaring ordered collections had been invisible for as long
@@ -207,7 +208,7 @@ testbed's scenario matrix (`flow-testbed-2026-07-26.md`, in flight).
   owed proofs. The **pod** failed readiness on a release-digest mismatch
   (`this cluster was applied at release 596b6c1d; this artifact is dbdb10f7`,
   remedy `bin/seon cluster apply default`), which is expected: the pod is on the
-  deletion list and the startgate is doing its job. Re-run `bin/plan-state` for
+  deletion list and the startgate is doing its job. Verify against the live tree for
   the suite count rather than trusting this bullet.
 - **The wire is still on the agent path.** `seon.db.host/writer-session` opens a
   UDS session to a separate `writer` process, so every agent read and write
