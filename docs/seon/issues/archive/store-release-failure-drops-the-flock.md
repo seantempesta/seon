@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, runtime, database, concurrency]
 ---
@@ -54,3 +54,16 @@ must leave the resource ADDRESSABLE, never advertised as gone.
 Corroborated independently by the Gemini hook review
 (tmp/reviews/20260727T164926.037Z.md, finding 2). Fix belongs to the
 same stop-semantics pass as the acceptance rows above.
+
+The still-current addressability defect was separated during second-pass
+triage into [[../cluster-stop-release-failure-becomes-unaddressable]] so this
+resolved store-fence issue does not conceal a second root cause.
+
+## Closed 2026-07-27
+
+Resolved by `5c95e259c`: `src/seon/cluster/store.clj:317-334` calls
+`d/release` before `release-flock!`, so a thrown Datahike release leaves the
+flock valid and retryable. `test/seon/cluster/store_test.clj:259-278` injects
+the failure, proves a second open is refused, then proves a later successful
+release permits reopen. The distinct cluster-stop addressability seam remains
+open in [[../cluster-stop-release-failure-becomes-unaddressable]].

@@ -47,3 +47,9 @@ ambient for every Babashka task.
   named old-system entry.
 - Hook and operator tests prove their intended classpath rather than passing
   because quarry source is ambient.
+
+## Triage 2026-07-27
+
+- **OPEN-CURRENT.** `bb.edn:1` still places `src-old` on plain Babashka's
+  ambient classpath, whereas `deps.edn:1-5,75-84` keeps the quarry behind the
+  explicit old-system alias.

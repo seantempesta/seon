@@ -48,3 +48,10 @@ identity, and answer whether a given identity is live.
   reclaim both call it; neither carries its own `ProcessHandle` code.
 - A recycled pid with a different start instant reads as dead in both callers,
   proven once rather than per caller.
+
+## Triage 2026-07-27
+
+- **OPEN-CURRENT.** Boot still owns private identity/liveness code at
+  `src/seon/cluster.clj:244-252,530-545`, while ancestor independently repeats
+  both halves at `src/seon/cluster/ancestor.clj:182-213`; the completed B2
+  implementation made the predicted duplicate real.

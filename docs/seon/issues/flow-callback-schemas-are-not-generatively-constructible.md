@@ -35,3 +35,9 @@ The `seon.flow` function contracts and the schema admission lint.
 Each callback has a truthful input/output function schema and generated
 functions validate, or the architecture records and enforces one computed
 runtime-boundary exclusion. No bare `fn?` registration remains in schema EDN.
+
+## Triage 2026-07-27
+
+- **OPEN-CURRENT.** `src/seon/schema/flow.edn:12-14,17,27,41,43,45-47,52-53,57`
+  still declares all thirteen callback shapes as bare `fn?`, outside the
+  `[:fn ...]` honesty check in `src/seon/schema/edn.clj:193-248`.

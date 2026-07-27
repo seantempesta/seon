@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, runtime, database, agent]
 ---
@@ -44,3 +44,11 @@ that exact run.
 - A successful close removes the exact real pointer in the same transaction.
 - A relational property generates absent, foreign, and correct pointers and
   proves only the exact connection can commit.
+
+## Closed 2026-07-27
+
+Resolved by `5c95e259c`: `src/seon/cluster/run.cljc:346-374` derives the owning
+agent from the run, refuses `::agent-pointer-broken` unless that agent points
+to the exact run, and retracts the exact pointer in the closing transaction.
+`test/seon/cluster/run_test.clj:616-643` severs the pointer, observes the
+refusal, and proves `closed-at` was not committed.

@@ -47,3 +47,11 @@ projection in `test/seon/cluster/run_test.clj`.
   run, ordinal, epoch, and status after each receipt or recovery command.
 - Generated sequences include duplicate start, duplicate settlement,
   conflicting terminal outcomes, stale epochs, and recovery.
+
+## Triage 2026-07-27
+
+- **N3-OWNED.** The N3 receipt-transition contract must replace the direct
+  upsert at `test/seon/cluster/run_test.clj:391-399`; fresh
+  `src/seon/cluster/run.cljc:426-474` currently owns recovery only, so N3 must
+  add absent→`:running` and `:running`→terminal transitions plus the model
+  projection before this can close.

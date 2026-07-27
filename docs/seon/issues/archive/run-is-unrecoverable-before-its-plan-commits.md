@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: blocker
 tags: [issue, agent, runtime, database]
 ---
@@ -139,3 +139,16 @@ process-local state; recorded here because a lane summary is not a durable
 record.
 
 Related: [[agent-messages-never-wake-the-jvm-driver]].
+
+## Closed 2026-07-27
+
+Superseded by owner ruling `858436ca8`, recorded at
+`docs/prds/sci-execution-runtime/plan/README.md:419-435`: a run is created and
+claimed at wake, a mid-turn death becomes `:interrupted`, nothing retries a
+paid call, and the next independently triggered turn carries one derived
+warning. The retry-oriented attempt design in this note is therefore no longer
+the contract. Fresh behavioral evidence is
+`src/seon/cluster/run.cljc:102-137,426-474` plus
+`test/seon/cluster/run_test.clj:111-129,497-589`: interrupted receipts derive
+one warning, recovery changes only dangling `:running` receipts, and terminal
+receipts remain byte-for-byte preserved.

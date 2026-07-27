@@ -49,3 +49,11 @@ kept in a process/classpath that cannot load the fresh owner twice.
   population gate rather than winning by load order.
 - The acquired values and descriptions remain identical to the current
   queue-depth and hardware-core defaults.
+
+## Triage 2026-07-27
+
+- **OPEN-DEFERRED.** Fresh ownership has moved to
+  `src/seon/schema/flow.edn:1-2`, but the duplicate declarations remain only in
+  quarry configuration at `src-old/seon/config/resolve.cljc:343-365`; the
+  explicit old-system alias at `deps.edn:75-84` is the remaining collision
+  surface and dies with that machinery.

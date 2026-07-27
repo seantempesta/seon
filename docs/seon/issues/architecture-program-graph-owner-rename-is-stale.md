@@ -46,3 +46,12 @@ The program-graph vocabulary in `docs/seon/architecture/architecture.md` and
 - A repository search for `seon.code.fn`, `seon.code.ns`,
   `seon.code.schema`, and `seon.code.test` returns only historical research or
   archived evidence, not active target documentation.
+
+## Triage 2026-07-27
+
+- **OPEN-CURRENT.** The superseded rename is still active target prose at
+  `docs/seon/architecture/architecture.md:231,504`,
+  `docs/seon/architecture/context.md:297-298`, and
+  `docs/seon/architecture/data-model.md:821-822`, while the current ruling at
+  `docs/prds/sci-execution-runtime/plan/README.md:384-386` keeps the program
+  graph owners top-level.

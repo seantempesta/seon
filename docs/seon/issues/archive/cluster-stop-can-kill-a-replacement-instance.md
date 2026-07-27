@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, runtime, concurrency]
 ---
@@ -43,3 +43,11 @@ must identify the exact generation whose external resources a stop may touch.
   advertisement, or remove its registry entry.
 - A recurring concurrency test controls the interleaving rather than relying
   on a timing stress loop.
+
+## Closed 2026-07-27
+
+Resolved by `5c95e259c`: `src/seon/cluster.clj:469-527` now atomically claims
+the exact instance with an identity marker before touching its resources, and
+conditionally removes only that marker. Behavioral evidence is
+`test/seon/cluster/boot_test.clj:235-257`: a delayed stop of the old instance
+leaves the replacement REPL and advertisement alive.

@@ -57,3 +57,11 @@ the owner of computation coalescing and equality suppression.
   still performs an unconditional repaint.
 - The proof exercises the selected http-kit 2.9.0-beta2 implementation through
   the Datastar Clojure adapter, not a mock writer.
+
+## Triage 2026-07-27
+
+- **OPEN-DEFERRED.** The cited feed now exists only in the quarry at
+  `src-old/seon/web/feed.clj:22-29,112-153`; the maintained fresh tree has no
+  `src/seon/web/feed.clj`, and N4 must measure the still-unbounded dependency
+  queue at `reference-code/http-kit/src/java/org/httpkit/server/ServerAtta.java:7`
+  before adopting or forking that transport.

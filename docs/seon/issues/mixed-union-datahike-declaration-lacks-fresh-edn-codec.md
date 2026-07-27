@@ -53,3 +53,10 @@ single declaration bridge.
   loudly.
 - The issue closes only when the fresh transaction boundary, not this pure
   declaration bridge, owns that proof.
+
+## Triage 2026-07-27
+
+- **OPEN-CURRENT.** `src/seon/schema/datahike.cljc:73-90` still deliberately
+  maps heterogeneous unions to `:db.type/string` while documenting the absent
+  fresh codec, and `test/seon/schema/datahike_test.clj:16-20` proves only the
+  declaration rather than a heterogeneous logical-value round trip.

@@ -42,6 +42,11 @@ The transaction-provenance model and `seon.schema` projection admission. Add
 or derive the authoritative provenance fact at the producer boundary; do not
 replace the list with a `:kind` field or a second registry.
 
+## Design
+
+The computed replacement is designed in
+[[../../prds/sci-execution-runtime/research/trust-derivation-design-2026-07-27]].
+
 ## Acceptance
 
 - Core versus agent admission follows an explicit durable provenance or
@@ -66,3 +71,11 @@ broken comparison today — the composition seeds only
 `seon.config/managing-process-identity` (the string reconcile actually
 uses) — but the computed-provenance replacement this issue demands is
 now also the bug fix, not just the design cleanup.
+
+## Triage 2026-07-27
+
+- **OPEN-CURRENT.** `src/seon/schema.cljc:269-286` still classifies with the
+  literal keyword set and compares it to the transaction's string process id;
+  the owner ruling at
+  `docs/prds/sci-execution-runtime/plan/README.md:409-413` explicitly ships the
+  three-name list only until its computed-rule follow-up.

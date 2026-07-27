@@ -87,3 +87,11 @@ in this fix.
 
 Corrected 2026-07-27 from the complete cause-chain evidence in the N3 plan §8.
 The `datahike` and `clojure-testing` skills carry the same cause-chain guidance.
+
+## Triage 2026-07-27
+
+- **N3-OWNED.** The N3 transaction-boundary contract owns
+  `seon.cluster.store/transact!` and the cause-chain classifier; fresh
+  `src/seon/cluster/store.clj:317-345` still has no application transaction
+  wrapper, and `test/seon/cluster/run_test.clj:73-81` still catches only the
+  outer exception data.

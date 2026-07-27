@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, runtime, database, agent]
 ---
@@ -59,3 +59,14 @@ closed/live-foreign run.
 - A renewal racing the expired-claim transaction wins and the takeover fails.
 - A generated state-machine property covers fresh claim, release, reacquire,
   heartbeat, expired takeover, close, and stale writes.
+
+## Closed 2026-07-27
+
+Resolved by `ba5cb0c1e` on the sealed N2 transition contract:
+`src/seon/cluster/run.cljc:241-283` routes claims through
+`:db.fn/call`, reads open/holder/lease eligibility from the
+mid-transaction database value, refuses closed or live-held runs, and
+increments the epoch only for an unheld or lapsed run. The recurring generated
+model at `test/seon/cluster/run_test.clj:208-490` exercises claim, heartbeat,
+release, close, plan, stale epochs, and lease spans against a fresh database
+per trial.

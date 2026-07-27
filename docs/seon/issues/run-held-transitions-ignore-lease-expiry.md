@@ -41,3 +41,11 @@ The `seon.cluster.run/held-run` transition family and its model oracle.
   takeover increments the epoch and permanently fences the old holder.
 - The generated state machine emits commands on both sides of the lease
   boundary, including a stale heartbeat racing an expired takeover.
+
+## Triage 2026-07-27
+
+- **OPEN-CURRENT.** The current shared fence at
+  `src/seon/cluster/run.cljc:173-191` checks open state, process, and epoch but
+  still accepts no `::now` and reads no `::lease-until`; heartbeat, release,
+  close, and plan requests at `:285-405` therefore still permit an expired
+  holder.

@@ -36,3 +36,11 @@ non-zero; a green boot exits 0. One regression at the operator boundary.
 Note: the operator chain is condemned by the nucleus ladder (B0, the
 ten-second start ruling 2026-07-27); if `bin/seon start` replaces `up`
 before this is fixed, close this with that commit.
+
+## Triage 2026-07-27
+
+- **OPEN-DEFERRED.** The old operator still owns the timed readiness path at
+  `script/seon/dev/process.clj:1215-1264`, but `deps.edn:75-84` confines that
+  machinery to the explicit quarry alias and fresh boot is now
+  `seon.cluster/start!` (`src/seon/cluster.clj:392-467`); archive only when the
+  condemned `bin/seon up` path is deleted or its exit contract is fixed.

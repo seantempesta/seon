@@ -28,3 +28,9 @@ No recurring test currently parks a queued submission before executor start.
 
 A latch-driven test holds a submission before executor start and proves the
 declared time limit settles it without a sleep or an unbounded wait.
+
+## Triage 2026-07-27
+
+- **OPEN-CURRENT.** `src/seon/flow.clj:387-407` still performs the unbounded
+  `@started` dereference before the timed result dereference, so the declared
+  time limit does not cover executor-queue delay.

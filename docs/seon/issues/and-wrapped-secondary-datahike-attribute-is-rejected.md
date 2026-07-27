@@ -42,3 +42,11 @@ the same resolved value type as declaration.
   `:seon.error/kind :user-input`.
 - One regression covers the wrapper class through the public
   `malli->datahike-attr` call.
+
+## Triage 2026-07-27
+
+- **OPEN-CURRENT.** `src/seon/schema/datahike.cljc:118-146` still tests the
+  unresolved `form-head` for `:float`/`:double`, while the value-type path at
+  `:55-102` is the code that unwraps `:and`; the described rejection remains
+  representable and `test/seon/schema/datahike_test.clj:1-46` has no secondary
+  wrapper regression.
