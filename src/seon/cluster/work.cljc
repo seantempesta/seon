@@ -25,6 +25,12 @@
     before the expensive part, so a second trigger during a model call
     cannot start a second turn (the claim-early half of n3-plan §9.1,
     which the night ruling kept);
+  - `:close` — an open run whose every form already has a terminal
+    receipt. The fold is done. This is its own situation rather than a
+    `:resume` carrying no ordinal, because fold-vs-close is a different
+    instruction to the loop and an instruction must be visible in the
+    value, never inferred from an absent key (seal revision,
+    2026-07-27);
   - `nil` — idle.
 
   NO AUTO-RETRY, EVER (owner ruling, 2026-07-27 night). This is the
@@ -53,8 +59,8 @@
     receipt. Rows 6 and 7 are indistinguishable from the facts — the
     effect MAY have happened — and the derived warning says exactly
     that;
-  - kill after the last terminal receipt, before close: `:resume` with
-    no next ordinal, which is the loop's signal to close;
+  - kill after the last terminal receipt, before close: `:close`, and
+    the completion lands one wake later;
   - kill during recovery itself: `recover-tx` is idempotent and every
     terminal receipt is byte-untouched, so the derivation is unchanged."
   (:require [datahike.api :as d]
@@ -128,13 +134,29 @@
 
 (declare unanswered-triggers)
 
+(defn- fold-or-close
+  "The instruction for a planned run: fold on, or close it.
+  One place decides, so `:resume` always carries a real ordinal and
+  `:close` never carries one."
+  [db run agent-id]
+  (let [run-id (:seon.cluster.run/id run)]
+    (if-let [ordinal (next-ordinal db run-id)]
+      {:seon.cluster.work/situation :resume
+       :seon.cluster.run/id run-id
+       :seon.cluster.agent/id agent-id
+       :seon.cluster.run.form/ordinal ordinal}
+      {:seon.cluster.work/situation :close
+       :seon.cluster.run/id run-id
+       :seon.cluster.agent/id agent-id})))
+
 (defn next-work
   "The ONE thing to do next on `db`, or nil when idle.
   Pure. The situations are ordered by what is already committed, not by
   preference: a held run outranks a trigger, because finishing what is
   started is what makes the busy fence mean anything.
   `:resume` carries the ordinal the fold restarts at — the first form
-  ordinal with no terminal receipt — so the loop never recomputes it."
+  ordinal with no terminal receipt — so the loop never recomputes it;
+  when no such ordinal remains the situation is `:close`."
   {:malli/schema [:=> [:cat :any :seon.cluster.work/request]
                   [:maybe :seon.cluster.work/next]]}
   [db {:keys [:seon.cluster.run/process]}]
@@ -146,11 +168,7 @@
          ;; is started is what makes the busy fence mean anything
          (and run (= process (:seon.cluster.run/process run)))
          (if (:seon.cluster.run/plan-digest run)
-           {:seon.cluster.work/situation :resume
-            :seon.cluster.run/id (:seon.cluster.run/id run)
-            :seon.cluster.agent/id agent-id
-            :seon.cluster.run.form/ordinal
-            (next-ordinal db (:seon.cluster.run/id run))}
+           (fold-or-close db run agent-id)
            {:seon.cluster.work/situation :call
             :seon.cluster.run/id (:seon.cluster.run/id run)
             :seon.cluster.agent/id agent-id})
@@ -160,11 +178,7 @@
          ;; `interruption`'s business, never ours
          (and run (nil? (:seon.cluster.run/process run)))
          (when (:seon.cluster.run/plan-digest run)
-           {:seon.cluster.work/situation :resume
-            :seon.cluster.run/id (:seon.cluster.run/id run)
-            :seon.cluster.agent/id agent-id
-            :seon.cluster.run.form/ordinal
-            (next-ordinal db (:seon.cluster.run/id run))})
+           (fold-or-close db run agent-id))
 
          ;; another process holds it: not ours to touch
          (some? run) nil

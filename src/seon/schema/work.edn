@@ -1,7 +1,7 @@
 {; WHAT THE LOOP SHOULD DO NEXT, as one derived value. The four
- ; situations are total and mutually exclusive over any database value;
- ; `nil` is idle, and nothing else is representable.
- :seon.cluster.work/situation [:enum :resume :call :open]
+ ; situations below are total and mutually exclusive over any database
+ ; value; `nil` is idle, and nothing else is representable.
+ :seon.cluster.work/situation [:enum :resume :call :open :close]
  ; :resume — an open run this process holds, with a plan: fold on at the
  ;           first ordinal lacking a terminal receipt
  ; :call   — an open run this process holds, no plan: derive the prompt,
@@ -9,9 +9,15 @@
  ;           retried)
  ; :open   — an unanswered trigger and an idle agent: open + claim first,
  ;           model second (the claim-early fence)
+ ; :close  — an open run whose every form has a terminal receipt: the
+ ;           fold is done. Its own situation rather than a :resume with
+ ;           a missing ordinal, because fold-vs-close is a different
+ ;           instruction and must be visible in the VALUE, never inferred
+ ;           from an absent key (seal revision, 2026-07-27)
  :seon.cluster.work/next [:multi {:dispatch :seon.cluster.work/situation}
                           [:resume [:map {:closed true} [:seon.cluster.work/situation [:= :resume]] [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal]]]
                           [:call [:map {:closed true} [:seon.cluster.work/situation [:= :call]] [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.agent/id :seon.cluster.agent/id]]]
-                          [:open [:map {:closed true} [:seon.cluster.work/situation [:= :open]] [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.message/id :seon.cluster.message/id]]]]
+                          [:open [:map {:closed true} [:seon.cluster.work/situation [:= :open]] [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.message/id :seon.cluster.message/id]]]
+                          [:close [:map {:closed true} [:seon.cluster.work/situation [:= :close]] [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.agent/id :seon.cluster.agent/id]]]]
  :seon.cluster.work/request [:map {:closed true} [:seon.cluster.run/process :seon.cluster.run/process] [:seon.cluster.work/now :inst]]
  :seon.cluster.work/now :inst}

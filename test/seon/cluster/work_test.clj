@@ -190,17 +190,17 @@
               :seon.cluster.agent/id agent-id
               :seon.cluster.run.form/ordinal 1}}
 
-   {::label "row 9 — every receipt terminal, run still open: no ordinal left"
+   {::label "row 9 — every receipt terminal, run still open: the fold is
+             done, and that is its OWN instruction (seal revision)"
     ::build (fn [connection]
               (add-trigger! connection)
               (open-run! connection {:holder process :planned? true
                                      :triggered? true})
               (terminal-receipt! connection 0)
               (terminal-receipt! connection 1))
-    ::expect {:seon.cluster.work/situation :resume
+    ::expect {:seon.cluster.work/situation :close
               :seon.cluster.run/id run-id
-              :seon.cluster.agent/id agent-id
-              :seon.cluster.run.form/ordinal nil}}
+              :seon.cluster.agent/id agent-id}}
 
    {::label "rows 2-4 — dead custody released, unplanned: NOT work.
              The paid call is lost and nothing re-calls it."

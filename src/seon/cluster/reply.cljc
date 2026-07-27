@@ -24,6 +24,15 @@
     symbol, so an unstripped ```` ```clojure ```` reply yields three
     \"forms\" — the failure is silent and produces plausible garbage.
 
+  PROSE IS A REPLY-LEVEL VERDICT, never a per-form filter. Every
+  top-level token reads as something — an English sentence reads as a
+  run of symbols — so `did the agent write code?` is answered by
+  structure: a plan has at least one form with a body (a list, vector,
+  map or set). Once one exists, EVERY form is kept, so the REPL shape
+  `(def a 1)` then `a` keeps its last line. A per-form filter would
+  pass the same tests and quietly eat that `a`, which is the
+  silent-drop class this system does not tolerate.
+
   SOURCES, NOT FORMS. The return is a vector of strings. The evaluator
   parses each one inside its own armed context, so the reply is read
   once for splitting and once for evaluation — never handed across as
