@@ -82,6 +82,11 @@
             (when (and (= 1 (count types))
                        (not (contains? types ::unmappable)))
               (first types))
+            ;; Mixed unions deliberately store their logical values as EDN
+            ;; strings.  The quarry's `seon.db.internal/edn-encoded-attr?`
+            ;; selected the matching `pr-str`/`read-string` codec.  The fresh
+            ;; transaction path does not own that codec half yet; see
+            ;; `mixed-union-datahike-declaration-lacks-fresh-edn-codec.md`.
             :db.type/string))
       (schema.form/nilable-value-schema? resolved)
       (throw (ex-info (str "Stored attributes cannot use `:maybe`. Register the "
@@ -120,8 +125,9 @@
                              " with the intended concrete type before "
                              "transacting it.")
                         {::attr attr :seon.error/kind :user-input})))
-        props (schema.form/attr-form-properties raw)
-        value-form (-> raw resolve-malli-form form->child-form resolve-malli-form)
+        resolved (resolve-malli-form raw)
+        props (schema.form/attr-form-properties resolved)
+        value-form (-> resolved form->child-form resolve-malli-form)
         secondary? (boolean (:db.secondary/only props))]
     (when (and secondary?
                (not (contains? #{:float :double} (form-head value-form))))
@@ -136,7 +142,7 @@
                              (form->datahike-value-type value-form))
              :db/cardinality (if secondary?
                                :db.cardinality/one
-                               (form->cardinality (resolve-malli-form raw)))}
+                               (form->cardinality resolved))}
       secondary? (assoc :db.secondary/only true)
       (:seon.db/identity props) (assoc :db/unique :db.unique/identity)
       (:seon.db/unique props) (assoc :db/unique :db.unique/value)

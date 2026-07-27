@@ -1,0 +1,39 @@
+---
+type: issue
+status: active
+tags: [issue, database, schema]
+severity: medium
+---
+
+# And-wrapped secondary Datahike attribute is rejected
+
+## Evidence
+
+An automatic review of the bounded schema-bridge change noticed that
+`malli->datahike-attr` validates `:db.secondary/only` by comparing
+`(form-head value-form)` with `#{:float :double}`. Unlike
+`form->datahike-value-type`, that check does not unwrap Malli `:and`.
+
+The shortest real-registration probe confirms the inherited defect:
+
+```clojure
+(schema/register! ::secondary
+                  [:and {:db.secondary/only true} :double])
+(schema.datahike/malli->datahike-attr ::secondary)
+;; throws:
+;; A secondary-only attribute must contain floats.
+```
+
+The underlying value type is `:db.type/double`, but the guard sees the form
+head `:and`. This is independent of the alias-property defect and was not
+expanded into that bounded implementation.
+
+## Acceptance
+
+- Secondary-only admission derives from the same resolved value type used for
+  the Datahike declaration.
+- Direct and `:and`-wrapped `:float` and `:double` shapes are accepted.
+- A non-floating secondary-only shape still refuses with
+  `:seon.error/kind :user-input`.
+- One regression covers the wrapper class through the public
+  `malli->datahike-attr` call.
