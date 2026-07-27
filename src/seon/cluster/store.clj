@@ -49,8 +49,13 @@
     all present (the child-process falsifier proves exactly this);
   - a live holder is NEVER displaced: the flock refusal is immediate
     and loud, no waiting, no takeover."
-  (:require [datahike.api :as d]
-            [seon.schema :as schema]))
+  (:require [clojure.java.io :as io]
+            [datahike.api :as d]
+            [konserve.core :as k]
+            [konserve.filestore :as filestore]
+            [seon.schema :as schema])
+  (:import [java.nio.channels FileChannel FileLock OverlappingFileLockException]
+           [java.nio.file OpenOption StandardOpenOption]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas
@@ -96,7 +101,7 @@
   One derivation — no other code builds this path."
   {:malli/schema [:=> [:cat :seon.store/dir] :seon.store/lock-file]}
   [store-dir]
-  (throw (ex-info "awaits implementation" {::fn `lock-file})))
+  (str store-dir ".lock"))
 
 (defn datahike-configuration
   "The one Datahike configuration for a cluster store.
@@ -104,11 +109,91 @@
   data — the single place the configuration shape lives."
   {:malli/schema [:=> [:cat :seon.store/dir] [:map]]}
   [store-dir]
-  (throw (ex-info "awaits implementation" {::fn `datahike-configuration})))
+  {:store {:backend :file
+           :path store-dir
+           ; Konserve requires a UUID store id, and Datahike keys its
+           ; connection registry, schema caches, and GC guard on it. The
+           ; id must therefore be a pure function of the path, or a
+           ; reopen would present itself as a different store.
+           :id (java.util.UUID/nameUUIDFromBytes
+                (.getBytes ^String store-dir "UTF-8"))}
+   :writer {:backend :self}
+   :schema-flexibility :write})
 
 ;;; ---------------------------------------------------------------------------
 ;;; Lifecycle
 ;;; ---------------------------------------------------------------------------
+
+(defn- refuse!
+  "Refuse loudly with the one store error shape."
+  [rule message data]
+  (throw (ex-info message
+                  (assoc data
+                         :seon.error/kind ::refused
+                         ::rule rule))))
+
+;;; The flock. Non-blocking and exclusive: a foreign holder makes
+;;; `.tryLock` return nil, a holder in THIS JVM makes it throw
+;;; OverlappingFileLockException (a JVM holds one lock per file region
+;;; for the whole process). Both are the same refusal.
+(defn- acquire-flock!
+  "Acquire the exclusive flock on `lock-path`, or nil when it is held."
+  [lock-path]
+  (let [file (io/file lock-path)]
+    (some-> (.getParentFile file) (.mkdirs))
+    (let [channel (FileChannel/open
+                   (.toPath file)
+                   (into-array OpenOption [StandardOpenOption/CREATE
+                                           StandardOpenOption/WRITE]))
+          lock (try
+                 (.tryLock channel)
+                 (catch OverlappingFileLockException _ nil)
+                 (catch Throwable failure
+                   (.close channel)
+                   (throw failure)))]
+      (if lock
+        lock
+        (do (.close channel) nil)))))
+
+(defn- release-flock!
+  "Release a held flock and close its channel."
+  [^FileLock lock]
+  (let [channel (.channel lock)]
+    (when (.isValid lock)
+      (.release lock))
+    (.close channel)
+    nil))
+
+(defn- delete-store-directory!
+  "Delete the store directory and everything under it."
+  [store-dir]
+  (let [root (io/file store-dir)]
+    (when (.exists root)
+      (doseq [entry (reverse (file-seq root))]
+        (.delete ^java.io.File entry))))
+  nil)
+
+;;; Genesis writes the immutable commit, then the mutable `:db` branch
+;;; head, then the `:branches` roster LAST. `database-exists?` reads only
+;;; `:db`, so `:branches` presence is the one fact that separates a
+;;; complete store from the first-create kill window.
+(defn- genesis-complete?
+  "True when the store's `:branches` roster was written."
+  [store-dir]
+  (let [konserve (filestore/connect-fs-store store-dir :opts {:sync? true})]
+    (some? (k/get konserve :branches nil {:sync? true}))))
+
+(defn- create-store!
+  "Create a fresh store at `store-dir`, verifying genesis completed."
+  [store-dir configuration]
+  (delete-store-directory! store-dir)
+  (d/create-database configuration)
+  (when-not (genesis-complete? store-dir)
+    (refuse! ::initialization-incomplete
+             (str "the store at " store-dir
+                  " has no branch roster after creation")
+             {::dir store-dir}))
+  nil)
 
 (defn open-store!
   "Open (creating if absent) the one store at `store-dir`, fenced.
@@ -123,7 +208,41 @@
   `release-store!`."
   {:malli/schema [:=> [:cat :seon.store/dir] :seon.store/store]}
   [store-dir]
-  (throw (ex-info "awaits implementation" {::fn `open-store!})))
+  (let [lock-path (lock-file store-dir)
+        lock (or (acquire-flock! lock-path)
+                 (refuse! ::held-elsewhere
+                          (str "the store at " store-dir
+                               " is held by a live process")
+                          {::dir store-dir ::lock-file lock-path}))]
+    (try
+      (let [configuration (datahike-configuration store-dir)
+            created? (cond
+                       (not (d/database-exists? configuration))
+                       (do (create-store! store-dir configuration) true)
+
+                       (genesis-complete? store-dir)
+                       false
+
+                       ; :db without :branches — killed mid-genesis, so
+                       ; nothing durable ever existed. Recreate.
+                       :else
+                       (do (create-store! store-dir configuration) true))
+            connection (d/connect configuration)]
+        ; readiness is a COMPLETE connection over a COMPLETE store: the
+        ; main branch must be readable before this value escapes
+        (try
+          (d/db connection)
+          (catch Throwable failure
+            (d/release connection)
+            (throw failure)))
+        {:seon.store/dir store-dir
+         :seon.store/lock-file lock-path
+         :seon.store/connection connection
+         :seon.store/lock lock
+         :seon.store/created? created?})
+      (catch Throwable failure
+        (release-flock! lock)
+        (throw failure)))))
 
 (defn release-store!
   "Release the store: Datahike release first, then the flock.
@@ -132,4 +251,10 @@
   again."
   {:malli/schema [:=> [:cat :seon.store/store] :nil]}
   [store]
-  (throw (ex-info "awaits implementation" {::fn `release-store!})))
+  ; the flock's own validity IS the released? fact — no second flag, and
+  ; nothing in the (closed, immutable) store value has to change
+  (let [^FileLock lock (:seon.store/lock store)]
+    (when (.isValid lock)
+      (d/release (:seon.store/connection store))
+      (release-flock! lock)))
+  nil)
