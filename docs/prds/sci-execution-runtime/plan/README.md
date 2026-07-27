@@ -436,6 +436,18 @@ may reintroduce a shadow build into the dev feedback path.
   tx point at it) — the one deliberate extension of minimal tx-meta
   (user + process) on one transition; never copied onto the run
   entity.
+  **Ruling 2026-07-27 night (owner, plain language): FAIL LOUD ≠ FALL
+  DOWN.** "Fail loud in development" means everyone using the system
+  KNOWS immediately that shit has hit the fan — the failing operation
+  halts loudly, the error fact commits, the surfaces scream — while
+  the SYSTEM STAYS UP: the REPL and the html interface survive
+  precisely so the error can be dug into and understood. Dev :panic
+  stops the offending activity (the eval errors, the turn aborts),
+  never the process, the REPL, or the UI. Corollaries already
+  consistent: the REPL survives failed boot (B0 ruling); the recorder
+  never panics ("the fire alarm doesn't burn" — orchestrator carve-out
+  confirmed by this ruling); error facts are durable and projectable
+  so the digging has something to dig.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
