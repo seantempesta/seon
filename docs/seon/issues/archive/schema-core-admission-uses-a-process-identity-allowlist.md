@@ -79,3 +79,19 @@ now also the bug fix, not just the design cleanup.
   the owner ruling at
   `docs/prds/sci-execution-runtime/plan/README.md:409-413` explicitly ships the
   three-name list only until its computed-rule follow-up.
+
+## Closed 2026-07-27
+
+Resolved by `0e71d42b5` (design: core = the process identity's first
+assertion precedes the unique ancestor digest-seal transaction, from
+`d/history`; fail-closed `:agent`) and `eda73bead` (implementation:
+the literal `core-process-identities` roster DELETED; ancestor
+population reordered so canonical schema rows carry core process
+provenance; `test/seon/schema/admission_test.clj` covers genesis-core,
+post-genesis and trusted-looking replay, missing/malformed provenance,
+the production ancestor order, and the bare pre-genesis database —
+all fail-closed rows proven). Full gate 101/453/0. The silently-inert
+keyword-vs-string comparison died with the roster. The design doc's
+optional hardening (explicit store-history configuration, guarded
+database-capability audit) is follow-on polish, not part of this
+issue's acceptance.

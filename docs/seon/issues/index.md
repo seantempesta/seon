@@ -10,14 +10,13 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (10)
+## Blocker (9)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [A refused transaction needs value-based classification at the transact wrapper](transaction-refusal-loses-its-ex-data.md) | blocker | Core |
 | [Bound http-kit streaming writes for slow SSE consumers](http-kit-streaming-writes-have-an-unbounded-socket-queue.md) | blocker | UI |
 | [Bound submission startup by the declared time limit](flow-submit-waits-forever-before-time-limit.md) | blocker | Core |
-| [Derive core schema admission without an identity allowlist](schema-core-admission-uses-a-process-identity-allowlist.md) | blocker | Core |
 | [Fence held-run transitions by the live lease](run-held-transitions-ignore-lease-expiry.md) | blocker | Core |
 | [Fence terminal receipt state and observe it in the run model](run-acceptance-properties-miss-takeover-and-terminal-preservation.md) | blocker | Core |
 | [Keep a failed cluster stop addressable](cluster-stop-release-failure-becomes-unaddressable.md) | blocker | Core |
