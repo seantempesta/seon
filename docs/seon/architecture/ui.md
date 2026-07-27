@@ -44,14 +44,37 @@ suppression, `mult`, per-tab `(sliding-buffer 1)` tap, and Datastar morph chain
 therefore own every visible outcome; reconnecting derives the same surface
 from database truth.
 
+## The projection contract — one router, an open kind set
+
+Rendering is not a UI mechanism that other things borrow; it is one contract
+the UI is the largest consumer of. A **unit** is any map that declares, per
+**output kind**, the fully qualified symbol of the function projecting that
+unit into that kind. `seon.render/render` resolves the symbol late — with
+`requiring-resolve`, invoking the var, so re-evaluating a projection's `defn`
+changes the next render — and applies it to the unit; `seon.render/kinds`
+derives what a unit can become from the unit itself, so nothing keeps a
+registry of kinds or of producers.
+
+The kind set is therefore open, and each kind names its consumer:
+`:seon.render/ai` is read by the prompt, `:seon.render/html` by a surface,
+`:seon.render/log` by the process log. Adding a kind is one key at the producer
+and one function; the router never changes. Declarations ride on the value
+being projected — derived when the projection depends on who is asking, as an
+error notice's steering prose does — and never as a stored symbol repeated on
+every row.
+
+Failures are flat `:seon.error` values, never throws: the router runs on the
+error path, so an undeclared kind, an unresolvable symbol, and a projection
+that throws are each a value naming what is broken.
+
 ## The block and its two renders
 
-A **block** (`:seon.agent.ctx/block`, registered in [[data-model]]) carries up to
-two **renders**, selected by key presence — there is no stored discriminator:
+A **block** (`:seon.agent.ctx/block`, registered in [[data-model]]) is the
+UI's unit, and it declares two of the kinds above — selected by key presence,
+with no stored discriminator:
 
 - **ai render** (`:seon.render/ai`) → **prompt** text: a verbatim string, or a
-  qualified symbol late-resolved each render through
-  `seon.render.core/resolve-compiled`.
+  qualified symbol the router resolves late.
 - **html render** (`:seon.render/html`) → a **surface**: a symbol, a literal hiccup
   vector, else the structural pretty-print.
 
