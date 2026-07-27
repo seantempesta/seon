@@ -41,12 +41,29 @@
     :seon.config.eval.result/max-string
     :seon.config.eval.result/max-nodes
     :seon.config.eval/time-limit-ms
+    :seon.config.fault/escalate-to
+    :seon.config.fault/recurrence-limit
     :seon.config/on-core-error})
 
 (def ^:private dial-attributes
   (into #{}
         (map first)
         (drop 2 (schema/schema-definition :seon.config/manifest))))
+
+;;; The dials the defaults document must carry, read from the EFFECTIVE
+;;; shape: every manifest entry is optional by design, so deriving this
+;;; from the manifest would make the rule vacuous. A dial the effective
+;;; shape marks optional may be absent, and absence is the state — the
+;;; first is :seon.config.fault/escalate-to, which names an agent id and
+;;; has no honest shipped value because no root agent exists.
+(def ^:private required-dial-attributes
+  (into #{}
+        (comp (filter vector?)
+              (keep (fn [entry]
+                      (when-not (and (map? (second entry))
+                                     (:optional (second entry)))
+                        (first entry)))))
+        (drop 2 (schema/schema-definition :seon.config/effective))))
 
 (def ^:private process-identity-schema
   {:db/ident :seon.db.process/id
@@ -66,6 +83,8 @@
    :seon.config.eval.result/max-string
    :seon.config.eval.result/max-nodes
    :seon.config.eval/time-limit-ms
+   :seon.config.fault/escalate-to
+   :seon.config.fault/recurrence-limit
    :seon.config/on-core-error])
 
 (defn- with-config-database
@@ -113,12 +132,16 @@
   (let [manifest (config/defaults)]
     (is (= expected-dial-attributes dial-attributes)
         "the registered manifest owns exactly today's honest dial population")
-    (is (= dial-attributes (set (keys manifest)))
-        "zero registered dials are missing and no operational quarry key leaks")
+    (is (= required-dial-attributes (set (keys manifest)))
+        "every REQUIRED dial has a value and no operational quarry key leaks")
+    (is (not (contains? manifest :seon.config.fault/escalate-to))
+        "and an optional dial with no honest default stays absent —
+         absence is the state, not a nil")
     (doseq [dial dial-attributes]
       (is (schema/registered? dial) (str dial " has one registered schema"))
-      (is (schema/valid-candidate-value? dial (get manifest dial))
-          (pr-str (schema/explain-candidate-value dial (get manifest dial)))))
+      (when (contains? manifest dial)
+        (is (schema/valid-candidate-value? dial (get manifest dial))
+            (pr-str (schema/explain-candidate-value dial (get manifest dial))))))
     (is (schema/valid-candidate-value? :seon.config/effective manifest))))
 
 (deftest read-manifest-resolves-one-override-against-the-default-document
@@ -128,7 +151,7 @@
     (spit path "{:seon.config/on-core-error :record}\n")
     (try
       (let [manifest (config/read-manifest (str path))]
-        (is (= dial-attributes (set (keys manifest))))
+        (is (= required-dial-attributes (set (keys manifest))))
         (is (= :record (:seon.config/on-core-error manifest)))
         (is (= 10 (:seon.config.flow.compute/queue-depth manifest)))
         (is (= 18 (:seon.config.flow.compute/concurrency manifest))))

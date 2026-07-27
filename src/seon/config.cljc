@@ -51,6 +51,30 @@
         (comp (filter vector?) (map first))
         (schema/schema-definition :seon.config/manifest)))
 
+(defn- required-dial-attributes
+  "The dials the defaults document must carry a value for.
+  A dial the EFFECTIVE shape marks `{:optional true}` may be absent from
+  `config/default.edn`, and absence is then the state — the first case
+  is `:seon.config.fault/escalate-to`, which names an agent id: there
+  is no root agent in the fresh tree, so a shipped default would name
+  something that may not exist. Every REQUIRED dial must still carry a
+  provenanced value; that is the completeness rule that matters.
+
+  READ FROM `:seon.config/effective`, NOT THE MANIFEST. Every manifest
+  entry is `{:optional true}` by design — a user manifest declares only
+  overrides — so deriving requiredness from it makes the rule vacuously
+  empty and a defaults document missing every dial would pass. The
+  effective shape is where a dial is required unless it genuinely is
+  not, which is exactly the question being asked."
+  []
+  (into #{}
+        (comp (filter vector?)
+              (keep (fn [entry]
+                      (when-not (and (map? (second entry))
+                                     (:optional (second entry)))
+                        (first entry)))))
+        (schema/schema-definition :seon.config/effective)))
+
 (defn- refuse!
   [rule data cause]
   (throw
@@ -112,8 +136,8 @@
         (validate-manifest
          (merge (read-edn-map default-manifest-path)
                 (computed-defaults)))
-        dials (dial-attributes)]
-    (when-not (= dials (set (keys manifest)))
+        dials (required-dial-attributes)]
+    (when-not (empty? (set/difference dials (set (keys manifest))))
       (refuse!
        ::invalid-value
        {::explanation

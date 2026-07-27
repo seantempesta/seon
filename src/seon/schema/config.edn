@@ -15,6 +15,19 @@
  :seon.config.eval/time-limit-ms
  [:int {:min 1}]
 
+ ; WHO hears a fault nobody else can be told about. There is no root
+ ; agent in the fresh tree, so escalation names an agent id explicitly.
+ ; ABSENT = no escalation message: absence is the state, and a cluster
+ ; with nobody to escalate to still commits the fault fact.
+ :seon.config.fault/escalate-to
+ [:string {:min 1}]
+
+ ; How many faults of one SIGNATURE since this process started before
+ ; the same fault also escalates. Counted by query over committed
+ ; facts, never a stored tally.
+ :seon.config.fault/recurrence-limit
+ [:int {:min 1}]
+
  :seon.config/manifest
  [:map {:closed true}
   [:seon.config.flow.compute/queue-depth
@@ -38,6 +51,11 @@
   [:seon.config.eval/time-limit-ms
    {:optional true}
    :seon.config.eval/time-limit-ms]
+  [:seon.config.fault/escalate-to
+   {:optional true} :seon.config.fault/escalate-to]
+  [:seon.config.fault/recurrence-limit
+   {:optional true}
+   :seon.config.fault/recurrence-limit]
   [:seon.config/on-core-error
    {:optional true}
    :seon.config/on-core-error]]
@@ -58,6 +76,10 @@
    :seon.config.eval.result/max-nodes]
   [:seon.config.eval/time-limit-ms
    :seon.config.eval/time-limit-ms]
+  [:seon.config.fault/escalate-to
+   {:optional true} :seon.config.fault/escalate-to]
+  [:seon.config.fault/recurrence-limit
+   :seon.config.fault/recurrence-limit]
   [:seon.config/on-core-error
    :seon.config/on-core-error]]
 
@@ -80,6 +102,10 @@
    :seon.config.eval.result/max-nodes]
   [:seon.config.eval/time-limit-ms
    :seon.config.eval/time-limit-ms]
+  [:seon.config.fault/escalate-to
+   {:optional true} :seon.config.fault/escalate-to]
+  [:seon.config.fault/recurrence-limit
+   :seon.config.fault/recurrence-limit]
   [:seon.config/on-core-error
    :seon.config/on-core-error]]
 
