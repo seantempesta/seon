@@ -1,36 +1,58 @@
 (ns seon.cluster.run
-  "The nucleus run data model: claimable database state, pure transitions.
+  "The run data model: claimable database state, transitions inside the
+  transaction.
 
-  CONTRACT LAYER (orchestrator-authored, 2026-07-26 s3 — the first
-  per-namespace construction unit). The schemas and the function
-  contracts here are SEALED: the N2 implementation lane fills the
+  CONTRACT LAYER (orchestrator-authored; revised 2026-07-27 after
+  quality-review-1 live-reproduced two correctness holes — takeover
+  eligibility and agent-pointer fencing — and the first Gemini hook
+  review corroborated the nil-epoch takeover). The schemas and function
+  contracts are SEALED: the implementation lane fills the `*-call`
   bodies until test/seon/cluster/run_test.clj is green and may not
-  loosen a schema or a test. Friction with a contract is reported,
-  never resolved by weakening it.
+  loosen a schema or a test. Friction is reported, never resolved by
+  weakening.
 
-  The model (crash rulings, plan README session 3):
+  The model (crash rulings, plan README sessions 3 + 2026-07-27):
 
-  - A run is the bounded work unit a trigger opens. Its state is
-    DERIVED from primitives — open = no closed-at; claimed = a process
-    with a live lease — never a stored status label.
-  - Custody is `:db.fn/cas`: one process wins the claim; claim epoch is
-    a monotonic fence; a displaced process's later transaction fails
-    the fence at the writer.
+  - A run is the bounded work unit a trigger opens. Its state is DERIVED
+    from primitives — open = no closed-at; claimed = a process with a
+    live lease — never a stored status label.
+  - EVERY transition decision happens INSIDE the transaction. Each
+    transition is one pure function of the mid-transaction database
+    value and a small request map, invoked as `[:db.fn/call f request]`
+    on the one serial writer: it reads current run state from `db`,
+    REFUSES ineligible transitions by throwing (the whole transaction
+    aborts atomically), and returns plain tx-data otherwise. There are
+    no observed-* request fields and no caller pre-reads — the invalid
+    states are unrepresentable, not double-checked.
+  - The run's own connections are the authority: close derives the
+    agent pointer to retract from the run's `::agent` ref; open derives
+    the pointer CAS from the same `::agent` value that lands on the
+    entity. Correlated caller inputs do not exist.
+  - `::now` is the run loop's clock, an explicit request input so every
+    transition stays a deterministic pure function (generative tests
+    supply it). The transition fences STATE; time is first-party input
+    from core code — agents never reach this layer.
   - Crashes are rare and NOTHING re-executes: boot recovery marks
     dangling `:running` eval receipts `:interrupted` and releases
-    claims held by dead processes. A form has AT MOST ONE terminal
-    receipt, ever. The interrupted state surfaces to the agent as one
-    derived warning, not per-eval markers.
-  - Every transition is a pure function returning transaction data;
-    the caller commits through the one writer. Errors are values."
+    custody held by dead processes, leaving every terminal receipt
+    untouched. A form has AT MOST ONE terminal receipt, ever. The
+    interrupted state surfaces as ONE derived warning, never per-eval
+    markers.
+
+  Crash walk: every transition here is ONE atomic transaction (a single
+  `[:db.fn/call ...]`), so a kill at any instant leaves it either fully
+  committed or absent — there is no partial window inside this
+  namespace. The two windows that remain live OUTSIDE it: a run opened
+  before its plan commits (recovery sees an open unplanned run — the
+  known unowned issue), and a receipt written `:running` before its
+  eval settles (recovery marks it `:interrupted`)."
   (:require [seon.schema :as schema]))
 
 ;;; ---------------------------------------------------------------------------
-;;; The nucleus agent pointer — owned HERE, deliberately not ported.
-;;; Port manifest: old `:seon.agent/*` attrs are DEAD for the nucleus;
-;;; the agent entity model is re-decided at its own rung. The run model
-;;; needs exactly an identity to point from and the current-run pointer
-;;; its opens race on.
+;;; The agent pointer — owned HERE. Port manifest: old `:seon.agent/*`
+;;; attrs are DEAD for this model; the agent entity is re-decided at its
+;;; own rung. The run model needs exactly an identity to point from and
+;;; the current-run pointer opens race on.
 ;;; ---------------------------------------------------------------------------
 
 (schema/register! :seon.cluster.agent/id
@@ -50,7 +72,7 @@
 (schema/register! ::process [:string {:min 1}])
 (schema/register! ::claim-epoch [:int {:min 1}])
 (schema/register! ::lease-until :inst)
-; frozen reply plan identity; CAS from absent — concurrent replies are
+; frozen reply plan identity; asserted once — concurrent replies are
 ; mutually exclusive by construction
 (schema/register! ::plan-digest [:string {:min 1}])
 
@@ -88,6 +110,9 @@
 (schema/register! :seon.cluster.eval/status
                   [:enum :running :done :error :interrupted])
 (schema/register! :seon.cluster.eval/result-edn :string)
+; derived-only value returned by interrupted-warning; registered so the
+; one warning shape is schema-checked like everything else
+(schema/register! ::missing-results [:int {:min 0}])
 (schema/register! :seon.cluster.eval/error :string)
 
 ;;; ---------------------------------------------------------------------------
@@ -104,7 +129,11 @@
 
 (defn claimed?
   "True when a process holds the run under a live lease at `now`."
-  {:malli/schema [:=> [:cat [:map] :inst] :boolean]}
+  {:malli/schema [:=> [:cat [:map
+                             [::process {:optional true} ::process]
+                             [::lease-until {:optional true} ::lease-until]]
+                       :inst]
+                  :boolean]}
   [run now]
   (boolean
    (and (some? (::process run))
@@ -113,7 +142,12 @@
 
 (defn expired?
   "True when the run is open and its holder's lease lapsed at `now`."
-  {:malli/schema [:=> [:cat [:map] :inst] :boolean]}
+  {:malli/schema [:=> [:cat [:map
+                             [::closed-at {:optional true} ::closed-at]
+                             [::process {:optional true} ::process]
+                             [::lease-until {:optional true} ::lease-until]]
+                       :inst]
+                  :boolean]}
   [run now]
   (boolean
    (and (open? run)
@@ -130,8 +164,20 @@
   The caller supplies one run's forms and receipts and knows which run
   they belong to. This is the whole resume presentation — never
   per-eval markers."
-  {:malli/schema [:=> [:cat [:sequential :map] [:sequential :map]]
-                  [:maybe :map]]}
+  {:malli/schema [:=> [:cat
+                       [:sequential
+                        [:map [:seon.cluster.run.form/ordinal
+                               :seon.cluster.run.form/ordinal]]]
+                       [:sequential
+                        [:map
+                         [:seon.cluster.eval/ordinal
+                          :seon.cluster.eval/ordinal]
+                         [:seon.cluster.eval/status
+                          :seon.cluster.eval/status]]]]
+                  [:maybe [:map
+                           [:seon.cluster.eval/ordinal
+                            :seon.cluster.eval/ordinal]
+                           [::missing-results ::missing-results]]]]}
   [forms receipts]
   (when-let [ordinal
              (->> receipts
@@ -147,69 +193,85 @@
               forms))}))
 
 ;;; ---------------------------------------------------------------------------
-;;; Pure transitions — each returns transaction data for the one writer
+;;; Transitions — pure functions OF THE MID-TRANSACTION DATABASE VALUE,
+;;; each invoked as [:db.fn/call f request] on the one serial writer.
+;;;
+;;; Shared contract, every `*-call`:
+;;; - reads the current run/agent state from `db` (datahike.api/pull or
+;;;   entity over the db value it is handed);
+;;; - THROWS ex-info {:seon.error/kind :seon.cluster.run/refused, ...}
+;;;   naming the violated rule when the transition is ineligible — the
+;;;   writer aborts the whole transaction atomically;
+;;; - otherwise returns plain tx-data (the serial writer makes the read
+;;;   atomic with the write; no nested CAS is needed or wanted).
+;;;
+;;; Awaits implementation: every `*-call` body below throws until the
+;;; implementation lane lands. The `*-tx` wrappers are the contract's
+;;; own one-liners and are complete.
 ;;; ---------------------------------------------------------------------------
 
-(defn open-tx
-  "Open one run for an agent: identity, agent ref, opened-at.
-  Composes the agent's current-run CAS (absent → this run) so
-  concurrent opens race and exactly one wins."
-  {:malli/schema [:=> [:cat [:map {:closed true}
-                             [::id ::id]
-                             [::agent ::agent]
-                             [::opened-at ::opened-at]
-                             [:seon.cluster.agent/id [:string {:min 1}]]]]
+(defn- awaits-implementation!
+  [transition request]
+  (throw (ex-info "awaits implementation"
+                  {::transition transition ::request request})))
+
+;; The *-tx wrappers reference their *-call VARS (#'f): datahike applies
+;; the var, so redefining a transition against the running system updates
+;; behavior immediately — the flow-dynamics live-update pattern.
+(declare claim-call heartbeat-call release-call close-call plan-call
+         open-call)
+
+(defn open-call
+  "Open one run for an agent, inside the transaction.
+  Refuses when the run id already exists, or when the agent's
+  current-run pointer is present (an agent holds at most one open run).
+  Returns the run entity assertion plus the agent pointer assertion —
+  BOTH derived from the one `::agent` ref in the request; there is no
+  separate agent-id field to disagree with it."
+  {:malli/schema [:=> [:cat :any
+                       [:map {:closed true}
+                        [::id ::id]
+                        [::agent ::agent]
+                        [::opened-at ::opened-at]]]
                   [:vector :some]]}
-  [request]
-  (let [{::keys [id agent opened-at]} request
-        agent-id (:seon.cluster.agent/id request)
-        run-ref [::id id]]
-    [{::id id
-      ::agent agent
-      ::opened-at opened-at}
-     [:db.fn/cas
-      [:seon.cluster.agent/id agent-id]
-      :seon.cluster.agent/run
-      nil
-      run-ref]]))
+  [db request]
+  (awaits-implementation! `open-call request))
 
 (defn claim-tx
-  "Claim an unheld run through the custody CAS.
-  Process absent→holder, epoch observed→+1, lease asserted. A live
-  foreign claim is not stealable. Takeover of an EXPIRED claim supplies
-  the observed holder and lease: the CAS asserts those exact heartbeat
-  facts unchanged while replacing them, so a holder that renewed in the
-  meantime wins and the takeover fails loudly. Absent observed fields =
-  the fresh/reacquire case (process CAS from absent)."
+  "Transaction data claiming `::id` for `::process` until `::lease-until`."
   {:malli/schema [:=> [:cat [:map {:closed true}
                              [::id ::id]
                              [::process ::process]
-                             [::observed-epoch [:maybe ::claim-epoch]]
-                             [::observed-process {:optional true} ::process]
-                             [::observed-lease-until {:optional true}
-                              ::lease-until]
-                             [::lease-until ::lease-until]]]
+                             [::lease-until ::lease-until]
+                             [::now :inst]]]
                   [:vector :some]]}
   [request]
-  (let [{::keys [id process observed-epoch observed-process
-                 observed-lease-until lease-until]} request
-        run-ref [::id id]
-        takeover? (and (contains? request ::observed-process)
-                       (contains? request ::observed-lease-until))]
-    (cond-> [[:db.fn/cas run-ref ::claim-epoch
-              observed-epoch (inc (or observed-epoch 0))]
-             [:db.fn/cas run-ref ::process
-              (when takeover? observed-process)
-              process]]
-      takeover?
-      (conj [:db.fn/cas run-ref ::lease-until
-             observed-lease-until lease-until])
+  [[:db.fn/call #'claim-call request]])
 
-      (not takeover?)
-      (conj [:db/add run-ref ::lease-until lease-until]))))
+(defn claim-call
+  "Claim the run, inside the transaction; eligibility IS the read.
+  - the run must exist and be open (a closed run is never claimable);
+  - unheld (no `::process`) → claim: epoch (inc (or current 0)),
+    process and lease asserted;
+  - held under a LIVE lease at `::now` → refuse, regardless of who
+    holds it (a live claim is not stealable; the holder renews through
+    heartbeat, never through a second claim);
+  - held under a LAPSED lease at `::now` → takeover: same assertions,
+    epoch incremented past the previous holder's, custody replaced.
+  There are no observed-* fields; the mid-transaction db is the only
+  truth consulted."
+  {:malli/schema [:=> [:cat :any
+                       [:map {:closed true}
+                        [::id ::id]
+                        [::process ::process]
+                        [::lease-until ::lease-until]
+                        [::now :inst]]]
+                  [:vector :some]]}
+  [db request]
+  (awaits-implementation! `claim-call request))
 
 (defn heartbeat-tx
-  "Renew the holder's lease under the run fence."
+  "Transaction data renewing `::process`'s lease under its epoch."
   {:malli/schema [:=> [:cat [:map {:closed true}
                              [::id ::id]
                              [::process ::process]
@@ -217,56 +279,77 @@
                              [::lease-until ::lease-until]]]
                   [:vector :some]]}
   [request]
-  (let [{::keys [id process claim-epoch lease-until]} request
-        run-ref [::id id]]
-    [[:db.fn/cas run-ref ::claim-epoch claim-epoch claim-epoch]
-     [:db.fn/cas run-ref ::process process process]
-     [:db/add run-ref ::lease-until lease-until]]))
+  [[:db.fn/call #'heartbeat-call request]])
+
+(defn heartbeat-call
+  "Renew the holder's lease, inside the transaction.
+  Refuses unless the run is open and currently held by exactly
+  `::process` at exactly `::claim-epoch` — a displaced or stale holder's
+  heartbeat fails loudly, it never resurrects custody."
+  {:malli/schema [:=> [:cat :any
+                       [:map {:closed true}
+                        [::id ::id]
+                        [::process ::process]
+                        [::claim-epoch ::claim-epoch]
+                        [::lease-until ::lease-until]]]
+                  [:vector :some]]}
+  [db request]
+  (awaits-implementation! `heartbeat-call request))
 
 (defn release-tx
-  "Cleanly release custody: retract process + lease, keep the epoch."
+  "Transaction data cleanly releasing `::process`'s custody."
   {:malli/schema [:=> [:cat [:map {:closed true}
                              [::id ::id]
                              [::process ::process]
                              [::claim-epoch ::claim-epoch]]]
                   [:vector :some]]}
   [request]
-  (let [{::keys [id process claim-epoch]} request
-        run-ref [::id id]]
-    [[:db.fn/cas run-ref ::claim-epoch claim-epoch claim-epoch]
-     [:db.fn/cas run-ref ::process process process]
-     [:db/retract run-ref ::process process]
-     [:db.fn/retractAttribute run-ref ::lease-until]]))
+  [[:db.fn/call #'release-call request]])
+
+(defn release-call
+  "Release custody, inside the transaction.
+  Retracts process + lease, keeps the epoch. Refuses unless the run is
+  open and held by exactly `::process` at exactly `::claim-epoch`."
+  {:malli/schema [:=> [:cat :any
+                       [:map {:closed true}
+                        [::id ::id]
+                        [::process ::process]
+                        [::claim-epoch ::claim-epoch]]]
+                  [:vector :some]]}
+  [db request]
+  (awaits-implementation! `release-call request))
 
 (defn close-tx
-  "Close the run in one fenced transaction.
-  Asserts closed-at, retracts custody, retracts the agent's current-run
-  pointer."
+  "Transaction data closing the run held by `::process`."
   {:malli/schema [:=> [:cat [:map {:closed true}
                              [::id ::id]
                              [::process ::process]
                              [::claim-epoch ::claim-epoch]
-                             [::closed-at ::closed-at]
-                             [:seon.cluster.agent/id [:string {:min 1}]]]]
+                             [::closed-at ::closed-at]]]
                   [:vector :some]]}
   [request]
-  (let [{::keys [id process claim-epoch closed-at]} request
-        agent-id (:seon.cluster.agent/id request)
-        run-ref [::id id]]
-    [[:db.fn/cas run-ref ::claim-epoch claim-epoch claim-epoch]
-     [:db.fn/cas run-ref ::process process process]
-     [:db/add run-ref ::closed-at closed-at]
-     [:db/retract run-ref ::process process]
-     [:db.fn/retractAttribute run-ref ::lease-until]
-     [:db/retract
-      [:seon.cluster.agent/id agent-id]
-      :seon.cluster.agent/run
-      run-ref]]))
+  [[:db.fn/call #'close-call request]])
+
+(defn close-call
+  "Close the run, inside the transaction.
+  Assert closed-at, retract
+  custody, retract the owning agent's current-run pointer. The agent is
+  the run's OWN `::agent` connection read from `db` — the request
+  carries no agent id, so a wrong one cannot exist. Refuses unless the
+  run is open and held by exactly `::process` at exactly
+  `::claim-epoch`."
+  {:malli/schema [:=> [:cat :any
+                       [:map {:closed true}
+                        [::id ::id]
+                        [::process ::process]
+                        [::claim-epoch ::claim-epoch]
+                        [::closed-at ::closed-at]]]
+                  [:vector :some]]}
+  [db request]
+  (awaits-implementation! `close-call request))
 
 (defn plan-tx
-  "Freeze one ordered form plan through the absent→digest CAS.
-  Commits the owned form entities with it; a losing concurrent reply
-  commits nothing."
+  "Transaction data freezing one ordered form plan on the held run."
   {:malli/schema [:=> [:cat [:map {:closed true}
                              [::id ::id]
                              [::process ::process]
@@ -275,31 +358,45 @@
                              [::sources [:vector [:string {:min 1}]]]]]
                   [:vector :some]]}
   [request]
-  (let [{::keys [id process claim-epoch plan-digest sources]} request
-        run-ref [::id id]
-        forms (mapv (fn [ordinal source]
-                      (let [form-id (pr-str [id ordinal])]
-                        {:db/id form-id
-                         :seon.cluster.run.form/id form-id
-                         :seon.cluster.run.form/run run-ref
-                         :seon.cluster.run.form/ordinal ordinal
-                         :seon.cluster.run.form/source source}))
-                    (range)
-                    sources)]
-    (into [[:db.fn/cas run-ref ::claim-epoch claim-epoch claim-epoch]
-           [:db.fn/cas run-ref ::process process process]
-           [:db.fn/cas run-ref ::plan-digest nil plan-digest]]
-          (concat
-           forms
-           (map (fn [{form-id :seon.cluster.run.form/id}]
-                  [:db/add run-ref ::forms form-id])
-                forms)))))
+  [[:db.fn/call #'plan-call request]])
+
+(defn plan-call
+  "Freeze the plan, inside the transaction.
+  Assert the digest and the
+  owned ordered form entities. Refuses unless the run is open, held by
+  exactly `::process` at exactly `::claim-epoch`, and has NO existing
+  `::plan-digest` — concurrent replies are mutually exclusive because
+  the second one reads the first one's digest and refuses."
+  {:malli/schema [:=> [:cat :any
+                       [:map {:closed true}
+                        [::id ::id]
+                        [::process ::process]
+                        [::claim-epoch ::claim-epoch]
+                        [::plan-digest ::plan-digest]
+                        [::sources [:vector [:string {:min 1}]]]]]
+                  [:vector :some]]}
+  [db request]
+  (awaits-implementation! `plan-call request))
+
+(defn open-tx
+  "Transaction data opening one run for an agent."
+  {:malli/schema [:=> [:cat [:map {:closed true}
+                             [::id ::id]
+                             [::agent ::agent]
+                             [::opened-at ::opened-at]]]
+                  [:vector :some]]}
+  [request]
+  [[:db.fn/call #'open-call request]])
 
 (defn recover-tx
   "Boot recovery for one run against dead-process facts.
-  Every `:running` receipt becomes `:interrupted`, and custody held by
-  a process outside `live-processes` is released. Returns [] for a run
-  needing nothing. NOTHING here re-opens, re-plans, or re-executes."
+  Every `:running` receipt becomes `:interrupted`; custody held by a
+  process outside `::live-processes` is released; EVERY terminal
+  receipt (`:done`/`:error`/`:interrupted`) is left byte-untouched.
+  Returns [] for a run needing nothing. Pure over supplied values (the
+  boot pass reads once and recovers every run from one basis), so this
+  stays a plain data function rather than a `:db.fn/call`. NOTHING here
+  re-opens, re-plans, or re-executes."
   {:malli/schema [:=> [:cat [:map {:closed true}
                              [::run [:map]]
                              [::receipts [:sequential :map]]
