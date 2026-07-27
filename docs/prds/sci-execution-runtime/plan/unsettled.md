@@ -118,8 +118,14 @@ algorithm quarried): seon.schema.edn, seon.reconcile (plan/reconcile!
 — pure plan BEFORE transact, empty = NO transaction, :max-tx unchanged
 = converged; reuses the N2 [:db.fn/call #'f] idiom), seon.config (+ THE
 default manifest — honest dials = seon.flow's + on-core-error, never
-State A's 39), seon.cluster.ancestor, seon.cluster.registry (needs the
-fork fix landed), seon.cluster.export. Then implementation lanes — config→
+State A's 39), seon.cluster.ancestor, seon.cluster.registry (UNBLOCKED — fork roster
+fix landed 357ffc87/a6434ecee, falsifier-first, issue closed),
+seon.cluster.export. Note for the ancestor contract: the BUILD half's
+program-facts producer is N5's indexer — B2's ancestor seals with the
+build population injected (schema facts now, program facts at N5) so
+the fork mechanics don't wait. Then implementation lanes. Revision
+chunk implemented GREEN (5c95e259c, 25/90/0); schema-edn-impl lane in
+flight (loader+gate+register! wiring+99-form conversion) — config→
 facts (pure plan before transact; empty plan = NO transaction; :max-tx
 unchanged = converged), schema-EDN loader + one admission gate,
 branch-per-cluster (open-branch!, ancestor genesis, the ~15-line fork
