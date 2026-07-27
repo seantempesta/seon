@@ -126,11 +126,20 @@ build population injected (schema facts now, program facts at N5) so
 the fork mechanics don't wait. Then implementation lanes. Revision
 chunk GREEN (5c95e259c); schema-EDN GREEN (b432bd07f — 103 declarations
 converted, one gate live on both producers, honest generators
-throughout). FULL GATE 52/212/0. B2 remaining: ancestor/registry/export
-contracts (author), config + reconcile suite (needs fresh provenance
-attributes), their implementation, then the rung falsifier: a second
-cluster forks from the ancestor near-instantly and a converged re-apply
-leaves :max-tx unchanged — config→
+throughout). **B2 COMPLETE (2026-07-27 late): FULL GATE 85/345/0.** Every package
+sealed AND green: config+reconcile (18a27e816, converged=zero-writes
+proven by :max-tx), fork machinery (a35c95d0a — ancestor rename-at-end
+builds, registry as the one branch-lifecycle owner, export with the
+loud create+re-transact fallback proven by hand), provenance attrs,
+THE defaults document with the computed concurrency default. Sealed
+falsifiers cover fork+isolation+GC-survival in-suite against real
+:file stores. NEXT UNIT: the boot COMPOSITION (task #9) — start!
+threads resolve-bootstrap → open-store! → ancestor/ensure! →
+ensure-cluster! → open-branch! → config/apply! → advertisement; B0
+contract revision by the author, then a lane; falsifier = the full
+tower via bin/repl <10s + near-instant second cluster + kill -9 reboot.
+Then N3 from its reviewed plan (value-admission package first).
+Open experiment owed: GC/retire cost over ten warm clusters — config→
 facts (pure plan before transact; empty plan = NO transaction; :max-tx
 unchanged = converged), schema-EDN loader + one admission gate,
 branch-per-cluster (open-branch!, ancestor genesis, the ~15-line fork
