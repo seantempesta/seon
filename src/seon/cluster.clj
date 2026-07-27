@@ -179,13 +179,17 @@
                   :seon.boot/prepl-host "127.0.0.1"
                   :seon.boot/prepl-port 0}
         base (merge defaults overrides)
+        derived-store-dir
+        (str (io/file (:seon.boot/root base) "store"))
         derived-log-dir
         (:seon.boot/log-dir
          (cluster-paths (:seon.boot/root base)
                         (:seon.boot/cluster-name base)))]
     (require-candidate-value
      :seon.boot/config
-     (merge {:seon.boot/log-dir derived-log-dir} base)
+     (merge {:seon.boot/log-dir derived-log-dir
+             :seon.boot/store-dir derived-store-dir}
+            base)
      "The resolved bootstrap configuration was refused.")))
 
 (defn cluster-paths
@@ -203,7 +207,6 @@
   [root cluster-name]
   (let [cluster-dir (io/file root cluster-name)]
     {:seon.boot/cluster-dir (str cluster-dir)
-     :seon.boot/store-dir (str (io/file cluster-dir "store"))
      :seon.boot/advertisement-file
      (str (io/file cluster-dir "prepl.edn"))
      :seon.boot/log-dir (str (io/file cluster-dir "logs"))}))
@@ -280,7 +283,6 @@
 (defn- create-directories!
   [config paths]
   (doseq [path [(:seon.boot/cluster-dir paths)
-                (:seon.boot/store-dir paths)
                 (:seon.boot/log-dir config)]]
     (.mkdirs (io/file path))))
 
@@ -348,6 +350,18 @@
        (identical? (:seon.boot/prepl-server registered)
                    (:seon.boot/prepl-server instance))))
 
+(defn- claim-stop!
+  [cluster-name instance marker]
+  (loop []
+    (let [instances @running-instances]
+      (if-not (active-instance? (get instances cluster-name) instance)
+        false
+        (if (compare-and-set! running-instances
+                              instances
+                              (assoc instances cluster-name marker))
+          true
+          (recur))))))
+
 (defn stop!
   "Stop exactly THIS instance, instance-addressed never name-addressed.
   Closes ITS prepl server socket and deletes ITS advertisement; a
@@ -360,18 +374,25 @@
   [instance]
   (let [config (:seon.boot/config instance)
         cluster-name (:seon.boot/cluster-name config)
-        registered (get @running-instances cluster-name)]
-    (when (active-instance? registered instance)
-      (clojure.core.server/stop-server (server-name cluster-name))
-      (.delete
-       (io/file
-        (:seon.boot/advertisement-file
-         (cluster-paths (:seon.boot/root config) cluster-name))))
-      (swap! running-instances
-             (fn [instances]
-               (if (active-instance? (get instances cluster-name) instance)
-                 (dissoc instances cluster-name)
-                 instances)))))
+        marker (Object.)]
+    (when (claim-stop! cluster-name instance marker)
+      (try
+        (.close ^java.net.ServerSocket (:seon.boot/prepl-server instance))
+        (let [advertisement-file
+              (io/file
+               (:seon.boot/advertisement-file
+                (cluster-paths (:seon.boot/root config) cluster-name)))]
+          (when (= (:seon.boot/advertisement instance)
+                   (try
+                     (edn/read-string (slurp advertisement-file))
+                     (catch Throwable _ nil)))
+            (.delete advertisement-file)))
+        (finally
+          (swap! running-instances
+                 (fn [instances]
+                   (if (identical? marker (get instances cluster-name))
+                     (dissoc instances cluster-name)
+                     instances)))))))
   nil)
 
 (defn- matching-live-process?

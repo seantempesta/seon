@@ -424,10 +424,11 @@
         agent-eid (:db/id (::agent run))
         pointer (:seon.cluster.agent/run
                  (d/pull db [:seon.cluster.agent/run] agent-eid))]
-    (cond-> (conj (retract-custody run)
-                  [:db/add (:db/id run) ::closed-at (::closed-at request)])
-      (= (:db/id run) (:db/id pointer))
-      (conj [:db/retract agent-eid :seon.cluster.agent/run (:db/id run)]))))
+    (when-not (= (:db/id run) (:db/id pointer))
+      (refuse! `close-call ::agent-pointer-broken request))
+    (conj (retract-custody run)
+          [:db/add (:db/id run) ::closed-at (::closed-at request)]
+          [:db/retract agent-eid :seon.cluster.agent/run (:db/id run)])))
 
 (defn plan-tx
   "Transaction data freezing one ordered form plan on the held run."

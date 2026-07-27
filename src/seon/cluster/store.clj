@@ -51,6 +51,8 @@
     and loud, no waiting, no takeover."
   (:require [clojure.java.io :as io]
             [datahike.api :as d]
+            [datahike.connections :as connections]
+            [datahike.store :as datahike.store]
             [konserve.core :as k]
             [konserve.filestore :as filestore]
             [seon.schema :as schema])
@@ -268,11 +270,10 @@
   {:malli/schema [:=> [:cat [:map {:closed true}
                              [:seon.store/dir :seon.store/dir]]]
                   :seon.store/store]}
-  [request]
+  [{store-dir :seon.store/dir}]
   ; one physical spelling for the whole lifecycle: the fence, the store
   ; id, the genesis probe, and the returned value all name one directory
-  (let [store-dir (:seon.store/dir request)
-        dir (canonical-path store-dir)
+  (let [dir (canonical-path store-dir)
         lock-path (lock-file dir)
         lock (or (acquire-flock! lock-path)
                  (refuse! ::held-elsewhere
@@ -324,13 +325,11 @@
   ; nothing in the (closed, immutable) store value has to change
   (let [^FileLock lock (:seon.store/lock store)]
     (when (.isValid lock)
-      ; a Datahike release that throws must never strand the fence: the
-      ; failure propagates, but the store is openable again
-      (try
-        (d/release (:seon.store/connection store))
-        (finally
-          (release-flock! (:seon.store/lock-file store) lock)))))
+      (d/release (:seon.store/connection store))
+      (release-flock! (:seon.store/lock-file store) lock)))
   nil)
+
+(defonce ^:private branch-open-monitor (Object.))
 
 (defn open-branch!
   "A connection to one branch of this already-open, flock-held store.
@@ -343,4 +342,21 @@
   {:malli/schema [:=> [:cat :seon.store/store :seon.store/branch]
                   :seon.store/branch-connection]}
   [store branch]
-  (throw (ex-info "awaits implementation" {::fn `open-branch!})))
+  (locking branch-open-monitor
+    (let [main-connection (:seon.store/connection store)
+          configuration (assoc (datahike-configuration
+                                (:seon.store/dir store))
+                               :branch branch)
+          connection-id (datahike.store/connection-id configuration)]
+      (when-not (contains? (d/branches main-connection) branch)
+        (refuse! ::branch-absent
+                 (str "branch " branch " is absent from the store roster")
+                 {::dir (:seon.store/dir store)
+                  ::branch branch}))
+      (when (contains? @connections/*connections* connection-id)
+        (refuse! ::branch-already-open
+                 (str "branch " branch
+                      " already has a connection in this process")
+                 {::dir (:seon.store/dir store)
+                  ::branch branch}))
+      (d/connect configuration))))
