@@ -45,6 +45,8 @@
   the file. `stop!` is idempotent; a killed process's next boot simply
   re-advertises."
   (:require [clojure.core.server]
+            [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [seon.flow :as flow]
             [seon.schema :as schema]))
 
@@ -125,6 +127,24 @@
 ;;; Pure resolution — defaults are THE defaults document for this layer
 ;;; ---------------------------------------------------------------------------
 
+(defn- refused!
+  [message offense]
+  (throw (ex-info message
+                  {:seon.error/kind :seon.boot/refused
+                   :seon.boot/offense offense})))
+
+(defn- require-candidate-value
+  [schema-key value message]
+  (if (schema/valid-candidate-value? schema-key value)
+    value
+    (refused! message
+              {:seon.boot/schema schema-key
+               :seon.boot/value value
+               :seon.boot/explanation
+               (schema/explain-candidate-value schema-key value)})))
+
+(declare cluster-paths)
+
 (defn resolve-bootstrap
   "Resolve overrides into one complete bootstrap configuration.
   Every key optional; absent = default. Defaults: cluster-name
@@ -136,8 +156,23 @@
   a convention."
   {:malli/schema [:=> [:cat :seon.boot/overrides] :seon.boot/config]}
   [overrides]
-  (throw (ex-info "awaits implementation" {::fn `resolve-bootstrap
-                                           ::overrides overrides})))
+  (require-candidate-value
+   :seon.boot/overrides
+   overrides
+   "The bootstrap overrides were refused.")
+  (let [defaults {:seon.boot/cluster-name "default"
+                  :seon.boot/root "data/clusters"
+                  :seon.boot/prepl-host "127.0.0.1"
+                  :seon.boot/prepl-port 0}
+        base (merge defaults overrides)
+        derived-log-dir
+        (:seon.boot/log-dir
+         (cluster-paths (:seon.boot/root base)
+                        (:seon.boot/cluster-name base)))]
+    (require-candidate-value
+     :seon.boot/config
+     (merge {:seon.boot/log-dir derived-log-dir} base)
+     "The resolved bootstrap configuration was refused.")))
 
 (defn cluster-paths
   "Derive every per-cluster path from (root, cluster-name).
@@ -151,11 +186,23 @@
                    [:seon.boot/advertisement-file :string]
                    [:seon.boot/log-dir :string]]]}
   [root cluster-name]
-  (throw (ex-info "awaits implementation" {::fn `cluster-paths})))
+  (let [cluster-dir (io/file root cluster-name)]
+    {:seon.boot/cluster-dir (str cluster-dir)
+     :seon.boot/store-dir (str (io/file cluster-dir "store"))
+     :seon.boot/advertisement-file
+     (str (io/file cluster-dir "prepl.edn"))
+     :seon.boot/log-dir (str (io/file cluster-dir "logs"))}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The shared root executors — created once per JVM, never per cluster
 ;;; ---------------------------------------------------------------------------
+
+(defonce ^:private root-executor-pair
+  (delay
+    {:compute
+     (flow/bounded-platform-executor
+      (.availableProcessors (Runtime/getRuntime)))
+     :io (java.util.concurrent.Executors/newCachedThreadPool)}))
 
 (defn root-executors
   "The process root's two shared executors.
@@ -171,11 +218,61 @@
                    [:compute [:fn 'seon.flow/executor?]]
                    [:io [:fn 'seon.flow/executor?]]]]}
   []
-  (throw (ex-info "awaits implementation" {::fn `root-executors})))
+  @root-executor-pair)
 
 ;;; ---------------------------------------------------------------------------
 ;;; The instance lifecycle
 ;;; ---------------------------------------------------------------------------
+
+(defonce ^:private running-instances (atom {}))
+
+(def ^:private starting ::starting)
+
+(defn- server-name
+  [cluster-name]
+  (str "seon.cluster/" cluster-name))
+
+(defn- reserve-cluster!
+  [cluster-name]
+  (loop []
+    (let [instances @running-instances]
+      (if (contains? instances cluster-name)
+        (refused! "The cluster already has an instance in this process."
+                  {:seon.boot/cluster-name cluster-name})
+        (when-not (compare-and-set! running-instances
+                                    instances
+                                    (assoc instances cluster-name starting))
+          (recur))))))
+
+(defn- release-reservation!
+  [cluster-name]
+  (swap! running-instances
+         (fn [instances]
+           (if (= starting (get instances cluster-name))
+             (dissoc instances cluster-name)
+             instances))))
+
+(defn- current-process-identity
+  []
+  (let [handle (java.lang.ProcessHandle/current)
+        optional (.startInstant (.info handle))]
+    (when-not (.isPresent optional)
+      (refused! "The process start instant is unavailable."
+                {:seon.boot/pid (.pid handle)}))
+    {:seon.boot/pid (.pid handle)
+     :seon.boot/start-instant (java.util.Date/from (.get optional))}))
+
+(defn- create-directories!
+  [config paths]
+  (doseq [path [(:seon.boot/cluster-dir paths)
+                (:seon.boot/store-dir paths)
+                (:seon.boot/log-dir config)]]
+    (.mkdirs (io/file path))))
+
+(defn- write-advertisement!
+  [paths advertisement]
+  (spit (:seon.boot/advertisement-file paths)
+        (str (pr-str advertisement) "\n")))
 
 (defn start!
   "Start one cluster instance in this JVM, REPL FIRST.
@@ -190,7 +287,51 @@
   JVM already has running (one instance per cluster per process)."
   {:malli/schema [:=> [:cat :seon.boot/overrides] :seon.boot/instance]}
   [overrides]
-  (throw (ex-info "awaits implementation" {::fn `start!})))
+  (let [config (resolve-bootstrap overrides)
+        cluster-name (:seon.boot/cluster-name config)
+        paths (cluster-paths (:seon.boot/root config) cluster-name)
+        name (server-name cluster-name)]
+    (create-directories! config paths)
+    (reserve-cluster! cluster-name)
+    (let [server (volatile! nil)]
+      (try
+        (let [prepl-server
+              (clojure.core.server/start-server
+               {:accept 'clojure.core.server/io-prepl
+                :port (:seon.boot/prepl-port config)
+                :name name
+                :address (:seon.boot/prepl-host config)})
+              _ (vreset! server prepl-server)
+              advertisement
+              (merge
+               {:seon.boot/cluster-name cluster-name
+                :seon.boot/prepl-host (:seon.boot/prepl-host config)
+                :seon.boot/prepl-port (.getLocalPort prepl-server)}
+               (current-process-identity))
+              instance
+              {:seon.boot/config config
+               :seon.boot/advertisement advertisement
+               :seon.boot/prepl-server prepl-server
+               :seon.boot/executors (root-executors)}
+              instance
+              (require-candidate-value
+               :seon.boot/instance
+               instance
+               "The started cluster instance was refused.")]
+          (write-advertisement! paths advertisement)
+          (swap! running-instances assoc cluster-name instance)
+          instance)
+        (catch Throwable throwable
+          (when @server
+            (clojure.core.server/stop-server name))
+          (release-reservation! cluster-name)
+          (throw throwable))))))
+
+(defn- active-instance?
+  [registered instance]
+  (and (map? registered)
+       (identical? (:seon.boot/prepl-server registered)
+                   (:seon.boot/prepl-server instance))))
 
 (defn stop!
   "Stop one instance: close the prepl server, delete the advertisement.
@@ -198,7 +339,38 @@
   Never touches the shared root executors (other instances ride them)."
   {:malli/schema [:=> [:cat :seon.boot/instance] :nil]}
   [instance]
-  (throw (ex-info "awaits implementation" {::fn `stop!})))
+  (let [config (:seon.boot/config instance)
+        cluster-name (:seon.boot/cluster-name config)
+        registered (get @running-instances cluster-name)]
+    (when (active-instance? registered instance)
+      (clojure.core.server/stop-server (server-name cluster-name))
+      (.delete
+       (io/file
+        (:seon.boot/advertisement-file
+         (cluster-paths (:seon.boot/root config) cluster-name))))
+      (swap! running-instances
+             (fn [instances]
+               (if (active-instance? (get instances cluster-name) instance)
+                 (dissoc instances cluster-name)
+                 instances)))))
+  nil)
+
+(defn- matching-live-process?
+  [advertisement]
+  (try
+    (let [optional
+          (java.lang.ProcessHandle/of
+           (long (:seon.boot/pid advertisement)))]
+      (when (.isPresent optional)
+        (let [handle (.get optional)
+              start (.startInstant (.info handle))]
+          (and (.isAlive handle)
+               (.isPresent start)
+               (= (.getTime
+                   ^java.util.Date (:seon.boot/start-instant advertisement))
+                  (.toEpochMilli ^java.time.Instant (.get start)))))))
+    (catch Throwable _
+      false)))
 
 (defn read-advertisement
   "Read and validate one cluster's advertisement, or nil.
@@ -211,4 +383,15 @@
   {:malli/schema [:=> [:cat :seon.boot/root :seon.boot/cluster-name]
                   [:maybe :seon.boot/advertisement]]}
   [root cluster-name]
-  (throw (ex-info "awaits implementation" {::fn `read-advertisement})))
+  (try
+    (let [path (:seon.boot/advertisement-file
+                (cluster-paths root cluster-name))
+          advertisement (edn/read-string (slurp path))]
+      (when (and
+             (schema/valid-candidate-value?
+              :seon.boot/advertisement advertisement)
+             (= cluster-name (:seon.boot/cluster-name advertisement))
+             (matching-live-process? advertisement))
+        advertisement))
+    (catch Throwable _
+      nil)))
