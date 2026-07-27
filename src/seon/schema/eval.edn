@@ -11,9 +11,9 @@
  ; The error disposition is REQUIRED and is passed straight to
  ; admission: R41 decides what a projection failure does, and a caller
  ; that has not decided has not thought about it.
- :seon.sci.eval/request [:map {:closed true} [:seon.cluster.run.form/source :seon.cluster.run.form/source] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.sci.eval/time-limit-ms :seon.sci.eval/time-limit-ms] [:seon.config/on-core-error :seon.config/on-core-error] [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx]]
+ :seon.sci.eval/request [:map {:closed true} [:seon.cluster.run.form/source :seon.cluster.run.form/source] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.sci.eval/time-limit-ms :seon.sci.eval/time-limit-ms] [:seon.config/on-core-error :seon.config/on-core-error] [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx] [:seon.cluster.agent/id {:optional true} :seon.cluster.agent/id]]
  ; What one evaluation leaves behind: a status the receipt stores, the
  ; admitted value the loop reads a disposition out of, the printed
  ; projection, and the diagnostics. Nothing here is optional-by-nil —
  ; an absent key means the evaluation had no such thing.
- :seon.sci.eval/evaluation [:map {:closed true} [:seon.cluster.eval/status :seon.cluster.eval/status] [:seon.sci.admit/value :any] [:seon.cluster.eval/result-edn :seon.cluster.eval/result-edn] [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error] [:seon.sci.admit/capped? :seon.sci.admit/capped?] [:seon.sci.admit/record :seon.sci.admit/record]]}
+ :seon.sci.eval/evaluation [:map {:closed true} [:seon.cluster.eval/status :seon.cluster.eval/status] [:seon.sci.admit/value :any] [:seon.cluster.eval/result-edn :seon.cluster.eval/result-edn] [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error] [:seon.cluster.eval/output {:optional true} :seon.cluster.eval/output] [:seon.sci.admit/capped? :seon.sci.admit/capped?] [:seon.sci.admit/record :seon.sci.admit/record]]}

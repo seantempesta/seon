@@ -136,7 +136,8 @@
   [{:keys [:seon.cluster.run/id :seon.cluster.run/process
            :seon.cluster.run/claim-epoch :seon.cluster.run.form/ordinal
            :seon.cluster.eval/status :seon.cluster.eval/result-edn
-           :seon.cluster.eval/error :my.run/value]}]
+           :seon.cluster.eval/error :seon.cluster.eval/output
+           :my.run/value]}]
   (let [receipt (cond-> {:seon.cluster.eval/id
                          ;; identity is DERIVED from (run, ordinal, epoch),
                          ;; so a re-run of the same step cannot mint a
@@ -148,7 +149,10 @@
                          :seon.cluster.eval/at (Date.)
                          :seon.cluster.eval/status status}
                   result-edn (assoc :seon.cluster.eval/result-edn result-edn)
-                  error (assoc :seon.cluster.eval/error error))]
+                  error (assoc :seon.cluster.eval/error error)
+                  ;; what the form printed is evidence, and evidence is
+                  ;; durable or it is nothing
+                  output (assoc :seon.cluster.eval/output output))]
     (into [receipt]
           ;; ONE transaction: the disposition's own transition rides
           ;; here, so the receipt and what it means are never two
@@ -307,7 +311,27 @@
       ;; nothing and re-derives nothing — the run stays claimed, and the
       ;; error is what the agent reads next.
       :call
-      (let [text (prompt/prompt @connection
+      (let [fail! (fn [failure]
+                    ;; ONE transaction: the run closes and WHY it closed
+                    ;; lands with it. Before this the error value
+                    ;; evaporated — the drive sat claimed-with-no-plan
+                    ;; for two minutes and the operator had to reproduce
+                    ;; the call by hand to learn it was a missing key.
+                    (let [run (d/pull @connection '[*]
+                                      [:seon.cluster.run/id run-id])]
+                      (store/transact!
+                       connection
+                       (into [[:db/add [:seon.cluster.run/id run-id]
+                               :seon.cluster.run/error
+                               (:seon.error/message failure)]]
+                             (run/close-tx
+                              {:seon.cluster.run/id run-id
+                               :seon.cluster.run/process process
+                               :seon.cluster.run/claim-epoch
+                               (:seon.cluster.run/claim-epoch run)
+                               :seon.cluster.run/closed-at (Date.)})))
+                      (report :error 0)))
+            text (prompt/prompt @connection
                                 {:seon.cluster.agent/id agent-id
                                  :seon.cluster.message/id
                                  (first (map :seon.cluster.message/id
@@ -317,10 +341,10 @@
                         (assoc (:seon.cluster.loop/provider cluster)
                                :seon.ai/prompt text))]
         (if (:seon.error/kind completion)
-          (report :error 0)
+          (fail! completion)
           (let [sources (reply/sources (:seon.ai/text completion))]
             (if (:seon.error/kind sources)
-              (report :error 0)
+              (fail! sources)
               (let [run (d/pull @connection '[*] [:seon.cluster.run/id run-id])
                     outcome (store/transact!
                              connection
@@ -358,6 +382,7 @@
                              :seon.sci.admit/caps
                              (:seon.sci.admit/caps cluster)
                              :seon.sci.eval/ctx ctx
+                             :seon.cluster.agent/id agent-id
                              :seon.sci.eval/time-limit-ms
                              (:seon.config.eval/time-limit-ms cluster)
                              :seon.config/on-core-error
@@ -378,6 +403,9 @@
                             (:seon.cluster.eval/error evaluation)
                             (assoc :seon.cluster.eval/error
                                    (:seon.cluster.eval/error evaluation))
+                            (:seon.cluster.eval/output evaluation)
+                            (assoc :seon.cluster.eval/output
+                                   (:seon.cluster.eval/output evaluation))
                             settled
                             (assoc :my.run/value settled))))
                 ran (inc ran)

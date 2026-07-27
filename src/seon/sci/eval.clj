@@ -51,6 +51,24 @@
   seal revision, flagged in the report rather than taken, because
   `admit.clj` is sealed.
 
+  AN AGENT EVALUATES IN ITS OWN NAMESPACE, by construction. The eval
+  binds sci's own `*ns*` to `my.agents.<id>` for the whole form, so a
+  `defn` lands where the prompt says it lands and the model never needs
+  to write `(in-ns …)` — which is what the first live drive tried, and
+  what failed with `Can't change/establish root binding of
+  clojure.core/*ns*`. The namespace name has ONE derivation
+  (`agent-namespace`) shared with the prompt, because an agent told one
+  name and evaluated in another would reason from a lie.
+
+  OUTPUT IS CAPTURED, NOT DISCARDED. sci's `*out*` and `*err*` are
+  unbound by default — `println` fails with `SciUnbound cannot be cast
+  to java.io.Writer` — so both are bound to one `StringWriter` per
+  evaluation and what the form printed rides back on the evaluation as
+  `:seon.cluster.eval/output`, bounded by the same `max-string` cap the
+  projection uses. Printed output is evidence an agent produced about
+  its own work; a sink would have made it disappear, and the drive
+  showed exactly how expensive disappeared evidence is.
+
   THE CALLER OWNS CTX LIFETIME, and that is not a detail: `sci/fork`
   copies the env into a NEW atom, so vars created in a fork are
   invisible to the original (`reference-code/sci/src/sci/core.cljc:318-323`).
@@ -133,6 +151,15 @@
                   'java.lang.Throwable Throwable
                   'Error Error
                   'java.lang.Error Error}}))))
+
+(defn agent-namespace
+  "The ONE namespace name for an agent: `my.agents.<id>`.
+  One derivation, because the prompt tells the agent this name and the
+  evaluator evaluates in it — if those two ever disagreed the agent
+  would be told a lie it then reasons from."
+  {:malli/schema [:=> [:cat :seon.cluster.agent/id] :symbol]}
+  [agent-id]
+  (symbol (str "my.agents." agent-id)))
 
 (defn base
   "The process-shared base context every evaluation forks.
@@ -222,6 +249,17 @@
 ;;; The one operation
 ;;; ---------------------------------------------------------------------------
 
+(defn- bounded-output
+  "What the form printed, capped by the projection's own string cap.
+  One cap, not a second dial: output and projected strings are the same
+  kind of agent-visible text and are bounded the same way."
+  [writer caps]
+  (let [text (str writer)
+        limit (:seon.config.eval.result/max-string caps)]
+    (if (<= (count text) limit)
+      text
+      (subs text 0 limit))))
+
 (defn- diagnosis
   [throwable record]
   (if (= :time (:seon.eval/outcome record))
@@ -270,6 +308,7 @@
                   :seon.sci.eval/evaluation]}
   [{:keys [:seon.cluster.run.form/source :seon.sci.admit/caps]
     ctx :seon.sci.eval/ctx
+    agent-id :seon.cluster.agent/id
     time-limit-ms :seon.sci.eval/time-limit-ms
     on-core-error :seon.config/on-core-error}]
   (let [{:keys [interrupt-fn] stop! ::stop! record ::record}
@@ -278,10 +317,19 @@
         ;; discard the caller's accumulated defs, which is the bug this
         ;; contract exists to not repeat
         evaluation-ctx (assoc (or ctx (sci/fork (base)))
-                              :interrupt-fn interrupt-fn)]
+                              :interrupt-fn interrupt-fn)
+        printed (java.io.StringWriter.)
+        ;; the agent's own namespace, established for the eval so a def
+        ;; lands where the prompt promised it would
+        namespace-object (sci/create-ns (if agent-id
+                                          (agent-namespace agent-id)
+                                          'user))]
     (try
       (let [form (sci/parse-string evaluation-ctx source)
-              value (sci/eval-form evaluation-ctx form)
+              value (sci/binding [sci/ns namespace-object
+                                  sci/out printed
+                                  sci/err printed]
+                      (sci/eval-form evaluation-ctx form))
               ;; INSIDE the boundary, BEFORE disarm: an infinite lazy
               ;; sequence dies at the time limit here rather than in the
               ;; receipt writer
@@ -294,23 +342,31 @@
                          ;; evaluator does not default one
                          :seon.config/on-core-error on-core-error
                          :seon.sci.admit/record (record :ok)})]
-          {:seon.cluster.eval/status :done
-           :seon.sci.admit/value (:seon.sci.admit/value admitted)
-           :seon.cluster.eval/result-edn
-           (:seon.cluster.eval/result-edn admitted)
-           :seon.sci.admit/capped? (:seon.sci.admit/capped? admitted)
-           :seon.sci.admit/record (:seon.sci.admit/record admitted)})
+          (cond-> {:seon.cluster.eval/status :done
+                   :seon.sci.admit/value (:seon.sci.admit/value admitted)
+                   :seon.cluster.eval/result-edn
+                   (:seon.cluster.eval/result-edn admitted)
+                   :seon.sci.admit/capped? (:seon.sci.admit/capped? admitted)
+                   :seon.sci.admit/record (:seon.sci.admit/record admitted)}
+            (seq (str printed))
+            (assoc :seon.cluster.eval/output
+                   (bounded-output printed caps))))
       (catch Throwable throwable
           (let [record (record (if (interrupted? throwable) :time :error))
                 value (failure-value throwable record)]
-            {:seon.cluster.eval/status
-             (if (= :time (:seon.eval/outcome record))
-               :interrupted
-               :error)
-             :seon.sci.admit/value value
-             :seon.cluster.eval/result-edn (pr-str value)
-             :seon.cluster.eval/error (:seon.error/message value)
-             :seon.sci.admit/capped? false
-             :seon.sci.admit/record record}))
+            (cond-> {:seon.cluster.eval/status
+                     (if (= :time (:seon.eval/outcome record))
+                       :interrupted
+                       :error)
+                     :seon.sci.admit/value value
+                     :seon.cluster.eval/result-edn (pr-str value)
+                     :seon.cluster.eval/error (:seon.error/message value)
+                     :seon.sci.admit/capped? false
+                     :seon.sci.admit/record record}
+              ;; whatever it printed BEFORE it failed is often the whole
+              ;; story of why
+              (seq (str printed))
+              (assoc :seon.cluster.eval/output
+                     (bounded-output printed caps)))))
       (finally
         (stop!)))))

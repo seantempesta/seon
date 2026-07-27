@@ -11,8 +11,12 @@
   three things:
 
   1. the trigger's content — what the agent was asked;
-  2. the agent's namespace — where its `defn`s land, so the agent can
-     name its own work;
+  2. the agent's namespace — where its `defn`s land, stated as a fact
+     about where evaluation ALREADY happens rather than as something to
+     arrange. The first live drive's model read `your namespace is X`
+     and dutifully emitted `(in-ns X)`, which failed; the fix was to
+     evaluate there by construction (`seon.sci.eval/agent-namespace`,
+     the one derivation shared with the evaluator) and to say so;
   3. THE INTERRUPTED WARNING, when a prior run was cut.
 
   THE WARNING IS THE WHOLE RESUME PRESENTATION. One derived sentence,
@@ -29,13 +33,19 @@
     nothing re-called it (the night ruling). There are no receipts to
     derive from, so the warning comes from the settled run itself. An
     agent that is never told about this case simply sees its request
-    vanish.
+    vanish;
+  - a run that ENDED before its plan existed because the turn failed —
+    a lost model call, an unreadable reply. `:seon.cluster.run/error`
+    carries why, and the next prompt says it. The live drive is the
+    argument: an error value that only existed in a returned map left
+    an operator reproducing the call by hand to find out what happened.
 
   Nothing about this is stored, so nothing about it can go stale: the
   warning is present exactly while the facts that cause it are."
   (:require [clojure.string :as str]
             [datahike.api :as d]
             [seon.cluster.run :as run]
+            [seon.sci.eval :as sci.eval]
             [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
@@ -106,8 +116,15 @@
              " result(s) are missing. Nothing was retried — adapt from here.")
         ;; no receipts to derive from: the run was cut before its plan
         ;; existed, so the model call was lost and nothing re-called it
-        (when (and (nil? (:seon.cluster.run/plan-digest previous))
-                   (some? (:seon.cluster.run/closed-at previous)))
+        (cond
+          ;; the turn failed for a reason we recorded — say the reason
+          (:seon.cluster.run/error previous)
+          (str "Your previous request did not run: "
+               (:seon.cluster.run/error previous)
+               " Nothing was retried, and nothing you asked for ran.")
+
+          (and (nil? (:seon.cluster.run/plan-digest previous))
+               (some? (:seon.cluster.run/closed-at previous)))
           (str "Your previous request was interrupted before you replied, "
                "and nothing was retried. Nothing you asked for ran."))))))
 

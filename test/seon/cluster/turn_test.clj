@@ -9,34 +9,25 @@
   without touching a line here. The model call is stubbed for the same
   reason the sealed AI suite has no network: a suite that needs a paid
   call is a suite nobody runs."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [my.run :as my.run]
             [seon.ai :as ai]
             [seon.cluster.loop :as cluster.loop]
+            [seon.cluster.prompt :as prompt]
             [seon.cluster.run :as run]
             [seon.cluster.work :as work]
             [sci.core :as sci.core]
             [seon.sci.eval :as sci.eval]
-            [seon.schema]
+            [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike])
   (:import [java.util Date]))
 
-(def ^:private attributes
-  [:seon.cluster.agent/id :seon.cluster.agent/run
-   :seon.cluster.run/id :seon.cluster.run/agent :seon.cluster.run/opened-at
-   :seon.cluster.run/closed-at :seon.cluster.run/process
-   :seon.cluster.run/claim-epoch :seon.cluster.run/lease-until
-   :seon.cluster.run/plan-digest :seon.cluster.run/forms
-   :seon.cluster.run.form/id :seon.cluster.run.form/run
-   :seon.cluster.run.form/ordinal :seon.cluster.run.form/source
-   :seon.cluster.eval/id :seon.cluster.eval/run :seon.cluster.eval/ordinal
-   :seon.cluster.eval/claim-epoch :seon.cluster.eval/at
-   :seon.cluster.eval/status :seon.cluster.eval/result-edn
-   :seon.cluster.eval/error
-   :seon.cluster.message/id :seon.cluster.message/to
-   :seon.cluster.message/content :seon.cluster.message/at
-   :seon.db/trigger])
+;;; NO explicit attribute list. The live boot path installs whatever
+;;; `canonical-database-attributes` derives, and a fixture that installs
+;;; its own list is exactly how the missing entity maps stayed invisible
+;;; until a real drive hit them.
 
 (def ^:private process "process/one")
 (def ^:private now (Date. 1700000000000))
@@ -70,7 +61,9 @@
         _ (d/create-database configuration)
         connection (d/connect configuration)]
     (try
-      (d/transact connection (schema.datahike/malli->datahike-schema attributes))
+      (d/transact connection
+                  (schema.datahike/malli->datahike-schema
+                   (schema/canonical-database-attributes)))
       (d/transact connection
                   [{:seon.cluster.agent/id "agent-a"}
                    {:seon.cluster.message/id "m-1"
@@ -142,10 +135,12 @@
                                          [?e :seon.cluster.eval/ordinal ?ordinal]
                                          [?e :seon.cluster.eval/result-edn ?edn]]
                                        @connection))]
-                (is (= "#:seon.sci.admit{:reference \"sci.lang.Var\", :name \"#'user/widgets\"}"
+                (is (= (str "#:seon.sci.admit{:reference \"sci.lang.Var\", "
+                            ":name \"#'my.agents.agent-a/widgets\"}")
                        (get results 0))
-                    "a def evaluates to a VAR, and admission names it
-                     without dereferencing it")
+                    "a def evaluates to a VAR, admission names it without
+                     dereferencing it, and it landed in the AGENT'S
+                     namespace — no in-ns anywhere")
                 (is (= "[1 2 3]" (get results 1))
                     "form 1 SAW form 0's def — one ctx per run, not per
                      form — and its lazy sequence came back REALIZED")
@@ -160,6 +155,75 @@
             (is (some? (d/q '[:find ?c . :where
                               [_ :seon.cluster.run/closed-at ?c]] @connection))
                 "and the run closed")))))))
+
+(deftest agent-code-with-defn-and-println-folds-green-without-in-ns
+  ;; the live drive's two wiring failures, as one falsifier: the model
+  ;; writes ordinary Clojure — a defn, a println, a call — and never
+  ;; mentions a namespace, because it does not have to.
+  (with-cluster
+    (fn [cluster]
+      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
+                           'seon.sci.eval/evaluate)
+            connection (:seon.store/branch-connection cluster)]
+        (with-redefs [ai/complete
+                      (fn [_] {:seon.ai/text
+                               (str "(defn widget-count [n] (* n 3))\n"
+                                    "(println \"counting\" (widget-count 4)"
+                                    " \"in\" (str *ns*))\n"
+                                    "(my.run/complete (str \"there are \""
+                                    " (widget-count 4)))")})]
+          (drive! cluster 10)
+          (testing "every form ran"
+            (is (= #{:done}
+                   (set (d/q '[:find [?s ...] :where
+                               [_ :seon.cluster.eval/status ?s]] @connection)))))
+          (testing "the def landed in the agent's namespace"
+            (is (re-find #"my\.agents\.agent-a/widget-count"
+                         (d/q '[:find ?edn . :where
+                                [?e :seon.cluster.eval/ordinal 0]
+                                [?e :seon.cluster.eval/result-edn ?edn]]
+                              @connection))))
+          (testing "and what it PRINTED is durable, not dropped"
+            (let [output (d/q '[:find ?out . :where
+                                [?e :seon.cluster.eval/ordinal 1]
+                                [?e :seon.cluster.eval/output ?out]]
+                              @connection)]
+              ;; content, not exact whitespace: sci's println does not
+              ;; leave its trailing newline in the writer, and pinning
+              ;; that would be pinning sci's io rather than our contract
+              (is (= "counting 12 in my.agents.agent-a" (str/trim output)))))
+          (testing "and the disposition closed the run"
+            (is (some? (d/q '[:find ?c . :where
+                              [_ :seon.cluster.run/closed-at ?c]]
+                            @connection)))))))))
+
+(deftest a-lost-model-call-leaves-a-durable-readable-reason
+  ;; the drive sat claimed-with-no-plan for 120 s and the operator had to
+  ;; reproduce the call by hand to learn it was a missing credential.
+  ;; The reason is now a fact, and the next prompt says it.
+  (with-cluster
+    (fn [cluster]
+      (let [connection (:seon.store/branch-connection cluster)]
+        (with-redefs [ai/complete
+                      (fn [_] {:seon.error/kind :seon.ai/no-credential
+                               :seon.error/message
+                               "The environment variable DEEPSEEK_API_KEY is not set."
+                               :seon.error/data {}})]
+          (drive! cluster 4))
+        (testing "the run closed rather than sitting claimed"
+          (is (some? (d/q '[:find ?c . :where
+                            [_ :seon.cluster.run/closed-at ?c]] @connection)))
+          (is (nil? (d/q '[:find ?p . :where
+                           [_ :seon.cluster.run/process ?p]] @connection))))
+        (testing "and WHY is readable from the database"
+          (is (re-find #"DEEPSEEK_API_KEY"
+                       (d/q '[:find ?e . :where
+                              [_ :seon.cluster.run/error ?e]] @connection))))
+        (testing "so the agent's next prompt tells it what happened"
+          (is (re-find #"DEEPSEEK_API_KEY"
+                       (prompt/prompt @connection
+                                      {:seon.cluster.agent/id "agent-a"
+                                       :seon.cluster.message/id "m-1"}))))))))
 
 (deftest a-real-evaluation-that-runs-away-is-stopped-and-recorded
   ;; the loop's honest failure path, end to end: an agent writes an

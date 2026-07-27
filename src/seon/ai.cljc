@@ -106,8 +106,13 @@
   without exporting anything."
   {:malli/schema [:=> [:cat :seon.ai/api-key-variable] [:maybe :string]]}
   [variable]
-  #?(:clj (System/getenv variable)
-     :cljs (some-> js/process .-env (aget variable))))
+  ;; a nil name is our own configuration mistake, and errors-as-values
+  ;; covers our mistakes too: (System/getenv nil) throws an NPE, which
+  ;; would reach the loop as an unclassifiable failure instead of the
+  ;; no-credential value the caller already knows how to read
+  (when (string? variable)
+    #?(:clj (System/getenv variable)
+       :cljs (some-> js/process .-env (aget variable)))))
 
 (defn complete
   "Call the model once and return its text, or a flat error value.
@@ -171,6 +176,8 @@
                                    (.getName (class failure)))
            :seon.error/data {:seon.ai/endpoint endpoint}})))
     {:seon.error/kind ::no-credential
-     :seon.error/message (str "The environment variable "
-                              api-key-variable " is not set.")
+     :seon.error/message (if (string? api-key-variable)
+                           (str "The environment variable "
+                                api-key-variable " is not set.")
+                           "No credential variable was configured.")
      :seon.error/data {:seon.ai/api-key-variable api-key-variable}}))
