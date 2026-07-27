@@ -77,23 +77,39 @@ adopt the surviving flow suite out of `test-old/` (15/72 green against
 fresh source, currently invisible to `bin/test`). B2 design input:
 replace the `core-process-identities` allowlist with a computed rule.
 
-UNBUILT right after: **B0+B1 contract packages** (launch
-signature `bin/seon start [cluster] [--config path]`, two-phase config
-with the closed bootstrap schema, per-instance REPL advertisement,
-store rung with the flock-per-store verdict from
-`research/datahike-multistore-2026-07-27.md` and the per-cluster-flow
-topology from `research/flow-per-cluster-2026-07-27.md`; the shared
-bootstrap-ancestor fork ruling lands in B2). R0 follow-ups, owned but
-not blocking: ~~`bin/plan-state` repointing~~ (RESOLVED by deletion —
-owner ruled 2026-07-27 the generated state snapshot dies; verify against
-the live tree instead); maintained-doc/skill path
-updates from the split audit's tables; MCP REPL advertisement for the
-fresh system (B0); `src-inspect-ai`/`src-needle` stale-path risks
-(recorded in the audit, downstream follow-up).
-OPEN and unowned: function-level test selection spec (task #6),
-cluster-apply-no-longer-births-root-agent (old system), the build
-audit's remaining owner questions, the adversarial design-review lane,
-architecture-doc alignment.
+**BOUNDARY 2026-07-27 EOD — the tower stands; B2 sealing is next.**
+GREEN via bin/test (42/182/0 + the fcntl falsifier): N2 run model
+(transactions-as-transitions, model-based state machine), B0 entry
+(REPL-first, ten-second bound in-suite), B1 store (flock + genesis
+repair + cross-process falsifiers), adopted flow suite, bridge
+regressions. FOUR PLAN DOCS delivered and owner-reviewed under the
+planning-agent workflow (plan → orchestrator fixes → seal → delegate):
+b2-plan (branch-per-cluster ADOPTED, fork fix blocking+falsifier-first),
+n3-plan (parser shed to sci reader, no lease clock, 4-line wake), n4-plan
+(zero new attributes, mult-not-flow fanout, listener-on-commit-path
+measured), test-selection-spec. ALL RULINGS in README ('Rulings
+2026-07-27' ×3 batches — read every one before sealing).
+
+NEXT, in order: **B2 contract sealing by the orchestrator** — config→
+facts (pure plan before transact; empty plan = NO transaction; :max-tx
+unchanged = converged), schema-EDN loader + one admission gate,
+branch-per-cluster (open-branch!, ancestor genesis, the ~15-line fork
+roster fix WRITTEN FALSIFIER-FIRST, issue
+datahike-branch-roster-read-modify-write-race), plus the B0/B1 author
+revisions the verdict requires (store moves to the process root,
+cluster-paths drops store-dir). Then implementation lanes (A/B: sol +
+Opus both proven; effort medium default). Then N3 (value-admission gate
+as its own small package first — owner-scoped: force + size-cap at the
+choke point; allocation = O4 watermark), N4 behind it, N5 after B2.
+
+WORKFLOW (proven today, keep the cadence): planning agent per rung →
+orchestrator fixes plan → sealed contracts → implementation lane →
+friction stops are usually AUTHOR defects (5 of 5 today) — fix the
+defect, never relax the bar → quality-review lane at every rung
+boundary (#2 in flight covering B0/B1) → Gemini hook reviews run
+per-edit with 4 skills dynamically loaded. Owner wants rulings via
+AskUserQuestion in PLAIN LANGUAGE with options. MCP eval_clj reaches
+fresh instances after a client restart (bin/repl starts one).
 
 Owner instruction, 2026-07-26: *"I feel like we are close to representing
 everything witht he same primitves and composing them together but we aren't
