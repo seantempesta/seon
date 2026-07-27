@@ -4,8 +4,11 @@
  ; facet admits both into canonical-database-attributes by the computed
  ; persistence-facet rule (a bare :seon.db/ref carries no facet and would
  ; never install).
- :seon.db/user [:seon.db/ref {:seon.db/index true}]
- :seon.db/process [:seon.db/ref {:seon.db/index true}]
+ ; the :and wrap is the one idiom for facet properties on a referenced
+ ; form — properties attach to Malli TYPES, and :seon.db/ref is a
+ ; registered alias, not a type
+ :seon.db/user [:and {:seon.db/index true} :seon.db/ref]
+ :seon.db/process [:and {:seon.db/index true} :seon.db/ref]
  ; the process entity provenance refs resolve to; identities are the
  ; owner-ruled literal core set (:seon.db.process/{boot,config,core})
  ; seeded as GENESIS DATA in the ancestor, where bootstrap content lives

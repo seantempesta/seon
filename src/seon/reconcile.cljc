@@ -47,31 +47,8 @@
             [seon.schema :as schema]))
 
 ;;; ---------------------------------------------------------------------------
-;;; Schemas
+;;; Schemas: seon/schema/reconcile.edn owns this namespace's registrations.
 ;;; ---------------------------------------------------------------------------
-
-; the managing process identity that scopes the managed population;
-; opaque here — B2's config owner supplies the one core identity
-(schema/register! ::process [:string {:min 1}])
-(schema/register! ::desired [:vector [:map]])
-; identities the caller explicitly adopts into the managed scope even
-; though their first assertion predates management
-(schema/register! ::adopt-identities [:set [:vector :any]])
-(schema/register! ::converged? :boolean)
-(schema/register! ::operations [:int {:min 0}])
-
-(schema/register!
- ::request
- [:map {:closed true}
-  [::desired ::desired]
-  [::process ::process]
-  [::adopt-identities {:optional true} ::adopt-identities]])
-
-(schema/register!
- ::result
- [:map {:closed true}
-  [::converged? ::converged?]
-  [::operations ::operations]])
 
 ;;; ---------------------------------------------------------------------------
 ;;; Contracts
