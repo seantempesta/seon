@@ -1,0 +1,16 @@
+{; ONE PROVIDER, ONE ATTEMPT, ONE DEADLINE. The seam to B2 is exactly
+ ; three facts — endpoint, model, and the NAME of the environment
+ ; variable holding the credential. The credential itself is read at
+ ; the leaf and never becomes a datom.
+ :seon.ai/api-key-variable [:string {:min 1}]
+ :seon.ai/endpoint [:string {:min 1}]
+ :seon.ai/model [:string {:min 1}]
+ :seon.ai/prompt [:string {:min 1}]
+ :seon.ai/system [:string {:min 1}]
+ ; The one legitimate deadline in the rung: a remote HTTP call is
+ ; genuinely unobservable external state. Its firing is an ordinary
+ ; error value, never a bug report.
+ :seon.ai/timeout-ms [:int {:min 1}]
+ :seon.ai/text [:string {:min 1}]
+ :seon.ai/request [:map {:closed true} [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai/api-key-variable :seon.ai/api-key-variable] [:seon.ai/system {:optional true} :seon.ai/system] [:seon.ai/prompt :seon.ai/prompt] [:seon.ai/timeout-ms :seon.ai/timeout-ms]]
+ :seon.ai/completion [:or [:map {:closed true} [:seon.ai/text :seon.ai/text]] :seon.error/value]}

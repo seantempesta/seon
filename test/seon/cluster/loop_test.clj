@@ -1,0 +1,186 @@
+(ns seon.cluster.loop-test
+  "Sealed acceptance draft for the run loop (N3, C9).
+
+  DRAFT FOR ORCHESTRATOR SEAL (drafted 2026-07-27). Two surfaces, for
+  two different reasons:
+
+  1. THE PURE PARTS are tested directly — the committed-attribute set
+     (which the wake suite's disjointness property consumes), the
+     disposition reader, and the ONE terminal transaction.
+  2. THE CRASH WALK is driven as KILL POSITIONS OVER FACTS: each row of
+     n3-plan §9.3 is the exact committed state a kill at that point
+     leaves, and the assertion is what the loop does next. This is
+     deterministic and needs no child JVM, because the rows are defined
+     by what is committed — not by how the process died. The live
+     `kill -9` falsifier against a real child stays the orchestrator's
+     integration proof, in the style of `store_child.clj`; it proves
+     the process boundary, and this proves the derivation."
+  (:require [clojure.test :refer [deftest is testing]]
+            [datahike.api :as d]
+            [my.run :as my.run]
+            [seon.cluster.loop :as cluster.loop]
+            [seon.cluster.work :as work]
+            [seon.schema]
+            [seon.schema.datahike :as schema.datahike])
+  (:import [java.util Date]))
+
+;;; ---------------------------------------------------------------------------
+;;; The pure parts
+;;; ---------------------------------------------------------------------------
+
+(deftest the-committed-set-is-computed-and-covers-what-the-loop-writes
+  (let [committed (cluster.loop/committed-attributes)]
+    (is (set? committed))
+    (testing "every family the turn commits is in it"
+      (is (some #(= "seon.cluster.run" (namespace %)) committed))
+      (is (some #(= "seon.cluster.run.form" (namespace %)) committed))
+      (is (some #(= "seon.cluster.eval" (namespace %)) committed)))
+    (testing "and the trigger is NOT — that is the wake, not our write"
+      (is (not (contains? committed :seon.cluster.message/to))))))
+
+(deftest a-disposition-is-read-only-when-it-really-is-one
+  (is (= (my.run/wait "later") (cluster.loop/disposition (my.run/wait "later"))))
+  (is (= (my.run/complete "done")
+         (cluster.loop/disposition (my.run/complete "done"))))
+  (testing "and anything else is not a disposition"
+    (doseq [value [42 nil "done" {:my.run/disposition :invented}
+                   {:seon.error/message "boom" :seon.error/kind :x}
+                   {:my.run/disposition :completed}]]
+      (is (nil? (cluster.loop/disposition value))
+          (str "must not read as a disposition: " (pr-str value))))))
+
+(deftest the-terminal-transaction-is-one-transaction
+  (let [base {:seon.cluster.run/id "run-1"
+              :seon.cluster.run/process "process/one"
+              :seon.cluster.run/claim-epoch 1
+              :seon.cluster.run.form/ordinal 0
+              :seon.cluster.eval/status :done
+              :seon.cluster.eval/result-edn "1"}
+        without (cluster.loop/terminal-tx base)
+        with (cluster.loop/terminal-tx
+              (assoc base :my.run/value (my.run/complete "all done")))]
+    (is (vector? without))
+    (is (seq without) "a receipt is always written")
+    (testing "the disposition rides in the SAME tx-data, never a second one"
+      (is (> (count with) (count without))
+          "the completion's facts are in this vector, not a later commit")
+      (is (some #(and (sequential? %)
+                      (= :db.fn/call (first %)))
+                with)
+          "and it goes through a transition, so the run's own fence
+           applies to the close as much as to the claim"))))
+
+;;; ---------------------------------------------------------------------------
+;;; The crash walk, as kill positions over facts
+;;; ---------------------------------------------------------------------------
+
+(def ^:private attributes
+  [:seon.cluster.agent/id :seon.cluster.agent/run
+   :seon.cluster.run/id :seon.cluster.run/agent :seon.cluster.run/opened-at
+   :seon.cluster.run/closed-at :seon.cluster.run/process
+   :seon.cluster.run/claim-epoch :seon.cluster.run/lease-until
+   :seon.cluster.run/plan-digest :seon.cluster.run/forms
+   :seon.cluster.run.form/id :seon.cluster.run.form/run
+   :seon.cluster.run.form/ordinal :seon.cluster.run.form/source
+   :seon.cluster.eval/id :seon.cluster.eval/run :seon.cluster.eval/ordinal
+   :seon.cluster.eval/claim-epoch :seon.cluster.eval/at
+   :seon.cluster.eval/status :seon.cluster.eval/result-edn
+   :seon.cluster.eval/error
+   :seon.cluster.message/id :seon.cluster.message/to
+   :seon.cluster.message/content :seon.cluster.message/at
+   :seon.db/trigger])
+
+(def ^:private now (Date. 1700000000000))
+(def ^:private process "process/one")
+(def ^:private request {:seon.cluster.run/process process
+                        :seon.cluster.work/now now})
+
+(defn- with-database [body]
+  (let [configuration {:store {:backend :memory :id (random-uuid)}
+                       :schema-flexibility :write}
+        _ (d/create-database configuration)
+        connection (d/connect configuration)]
+    (try
+      (d/transact connection (schema.datahike/malli->datahike-schema attributes))
+      (d/transact connection
+                  [{:seon.cluster.agent/id "agent-a"}
+                   {:seon.cluster.message/id "m-1"
+                    :seon.cluster.message/to [:seon.cluster.agent/id "agent-a"]
+                    :seon.cluster.message/content "go"
+                    :seon.cluster.message/at now}])
+      (body connection)
+      (finally
+        (d/release connection)
+        (d/delete-database configuration)))))
+
+(defn- commit-run! [connection {:keys [held? planned? receipts closed?]}]
+  (d/transact
+   connection
+   {:tx-data
+    (cond-> [(cond-> {:seon.cluster.run/id "run-1"
+                      :seon.cluster.run/agent [:seon.cluster.agent/id "agent-a"]
+                      :seon.cluster.run/opened-at now
+                      :seon.cluster.run/claim-epoch 1}
+               held? (assoc :seon.cluster.run/process process
+                            :seon.cluster.run/lease-until
+                            (Date. (+ (inst-ms now) 60000)))
+               planned? (assoc :seon.cluster.run/plan-digest
+                               (apply str (repeat 64 "a")))
+               closed? (assoc :seon.cluster.run/closed-at now))]
+      (not closed?)
+      (conj {:seon.cluster.agent/id "agent-a"
+             :seon.cluster.agent/run [:seon.cluster.run/id "run-1"]})
+
+      planned?
+      (into (map (fn [ordinal]
+                   {:seon.cluster.run.form/id (str "f-" ordinal)
+                    :seon.cluster.run.form/run [:seon.cluster.run/id "run-1"]
+                    :seon.cluster.run.form/ordinal ordinal
+                    :seon.cluster.run.form/source "(+ 1 1)"})
+                 (range 2)))
+
+      (seq receipts)
+      (into (map (fn [[ordinal status]]
+                   {:seon.cluster.eval/id (str "e-" ordinal)
+                    :seon.cluster.eval/run [:seon.cluster.run/id "run-1"]
+                    :seon.cluster.eval/ordinal ordinal
+                    :seon.cluster.eval/claim-epoch 1
+                    :seon.cluster.eval/at now
+                    :seon.cluster.eval/status status})
+                 receipts)))
+    :tx-meta {:seon.db/trigger [:seon.cluster.message/id "m-1"]}}))
+
+(deftest every-kill-position-has-one-next-action
+  (doseq [[row state expected]
+          [["1 — trigger only" nil :open]
+           ["2-4 — claimed, no plan, custody died" {} nil]
+           ["5 — planned, no receipts" {:held? true :planned? true} :resume]
+           ["6-7 — running receipt recovered to :interrupted"
+            {:held? true :planned? true :receipts [[0 :interrupted]]} :resume]
+           ["8 — one terminal receipt"
+            {:held? true :planned? true :receipts [[0 :done]]} :resume]
+           ["9 — every receipt terminal, run open"
+            {:held? true :planned? true
+             :receipts [[0 :done] [1 :done]]} :close]
+           ["10 — closed"
+            {:held? true :planned? true :closed? true
+             :receipts [[0 :done] [1 :done]]} nil]]]
+    (with-database
+      (fn [connection]
+        (when state (commit-run! connection state))
+        (let [derived (work/next-work (d/db connection) request)]
+          (testing (str "crash walk row " row)
+            (is (= expected (:seon.cluster.work/situation derived)))))))))
+
+(deftest an-interrupted-form-is-never-re-executed
+  ;; rows 6 and 7 are indistinguishable from the facts, and that is
+  ;; correct: the effect MAY have happened, so the fold moves PAST the
+  ;; interrupted ordinal rather than retrying it
+  (with-database
+    (fn [connection]
+      (commit-run! connection {:held? true :planned? true
+                        :receipts [[0 :interrupted]]})
+      (let [derived (work/next-work (d/db connection) request)]
+        (is (= :resume (:seon.cluster.work/situation derived)))
+        (is (= 1 (:seon.cluster.run.form/ordinal derived))
+            "past the interrupted form, never back onto it")))))

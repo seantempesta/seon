@@ -1,0 +1,7 @@
+{; The wake channel carries no information: it says "look", never
+ ; "here is what changed". Work is derived from facts, so a wake that
+ ; lost its payload lost nothing.
+ :seon.cluster.wake/attributes [:set :keyword]
+ :seon.cluster.wake/listen-request [:map {:closed true} [:seon.cluster.wake/connection :seon.store/branch-connection] [:seon.cluster.wake/attributes :seon.cluster.wake/attributes] [:seon.cluster.wake/channel :seon.flow/channel] [:seon.cluster.wake/fault-channel :seon.flow/channel] [:seon.cluster.wake/key :seon.cluster.wake/key]]
+ :seon.cluster.wake/key :keyword
+ :seon.cluster.wake/unlisten-request [:map {:closed true} [:seon.cluster.wake/connection :seon.store/branch-connection] [:seon.cluster.wake/key :seon.cluster.wake/key]]}

@@ -364,3 +364,51 @@
                  {::dir (:seon.store/dir store)
                   ::branch branch}))
       (d/connect configuration))))
+
+;;; ---------------------------------------------------------------------------
+;;; Writing — ACCRETION (drafted 2026-07-27, N3 package 2, from n3-plan §8)
+;;;
+;;; New functions only; nothing above this line changed. The store owns
+;;; "how we write", so the one transaction wrapper and its refusal
+;;; classification live here rather than in a second owner.
+;;;
+;;; THE ISSUE'S CONCLUSION WAS WRONG, and probe D shows why: the
+;;; transition's own ex-data is INTACT at the third link of the cause
+;;; chain. `throwable-promise`'s deref
+;;; (`reference-code/datahike/src/datahike/tools.cljc:93-107`) wraps the
+;;; ExecutionException in a fresh ex-info with empty data — it WRAPS, it
+;;; does not discard. Datahike's own aborts (`:transact/cas`,
+;;; `:transact/schema`) are equally distinguishable by value. No fork
+;;; change is required; the issue note is corrected at seal.
+;;; ---------------------------------------------------------------------------
+
+(defn refusal
+  "The deepest non-empty `ex-data` in a throwable's cause chain, or nil.
+  Pure, and unit-testable with no database: a refusal is a value buried
+  under wrappers, and finding it is a walk, not a guess. Returns nil for
+  a throwable that carries no data anywhere in its chain — which is
+  itself information, and the caller treats it as unclassifiable."
+  {:malli/schema [:=> [:cat :any] [:maybe :map]]}
+  [throwable]
+  (throw (ex-info "awaits implementation" {::fn `refusal})))
+
+(defn transact!
+  "Commit tx-data. Returns a value on success AND on refusal; never throws.
+  Nothing throws into the run loop, so this is the one door every write
+  goes through. Four outcomes, four shapes:
+
+  - committed → the transaction report;
+  - OUR transition refused → the transition's own map, verbatim, under
+    `{:seon.error/kind :seon.cluster.run/refused ::rule … ::transition …}`
+    — a caller can branch on the exact rule it predicted, which is what
+    makes a fence test honest rather than green-for-the-wrong-reason;
+  - datahike aborted (`:transact/cas`, `:transact/schema`, …) →
+    `{:seon.error/kind :seon.db/rejected :seon.error/data <its own data>}`;
+  - nothing classifiable → `{:seon.error/kind :seon.db/unknown-failure …}`
+    and, on the `:seon.config/on-core-error` dial, dev PANICS. An
+    unclassifiable transaction failure is a bug, not a condition, and
+    absorbing it is how a typo passes for a fence."
+  {:malli/schema [:=> [:cat :seon.store/branch-connection [:vector :any]]
+                  [:or [:map] :seon.error/value]]}
+  [connection tx-data]
+  (throw (ex-info "awaits implementation" {::fn `transact!})))

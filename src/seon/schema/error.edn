@@ -1,0 +1,10 @@
+{; THE ONE FLAT ERROR VALUE. Registered once, referenced everywhere:
+ ; nothing throws into the run loop, so every failure an agent or the
+ ; loop can encounter arrives as this shape. `kind` is the namespaced
+ ; rule that failed, `message` is what a reader (agent or human) is
+ ; told, and `data` carries whatever the owner of that rule attached.
+ ; Producers stay closed maps of their own; this is the shared floor.
+ :seon.error/data :map
+ :seon.error/kind :keyword
+ :seon.error/message [:string {:min 1}]
+ :seon.error/value [:map {:closed true} [:seon.error/kind :seon.error/kind] [:seon.error/message :seon.error/message] [:seon.error/data {:optional true} :seon.error/data]]}

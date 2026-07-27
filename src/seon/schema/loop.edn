@@ -1,0 +1,6 @@
+{; One completed turn, for observation only — the loop's out port
+ ; carries a report nothing depends on, so a dropped report costs
+ ; nothing and no consumer can backpressure the loop.
+ :seon.cluster.loop/turn-report [:map {:closed true} [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.work/situation :seon.cluster.work/situation] [:seon.cluster.loop/forms-run [:int {:min 0}]] [:seon.cluster.loop/outcome [:enum :closed :released :error :interrupted]]]
+ :seon.cluster.loop/forms-run [:int {:min 0}]
+ :seon.cluster.loop/outcome [:enum :closed :released :error :interrupted]}
