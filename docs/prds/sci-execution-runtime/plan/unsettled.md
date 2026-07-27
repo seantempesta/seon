@@ -232,10 +232,22 @@ composes the landed projection/admission owners, ancestor population
 matches today's provenance order, reset + process-kill proofs moved
 IN-SUITE), 7 promoted to one "Owner decisions required before seal"
 section (7 decisions, options + recommendation each) for a single
-batch ruling when N5's rung opens. IN FLIGHT (two lanes): the Opus
-agent (package-2 seal revision + implementation to green); sol lane
-n4-plan-review falsifies the N4 plan against today's landings, same
-treatment as N5's. n5-plan 909394481 awaits deep review at its
+batch ruling when N5's rung opens. N3 PACKAGE 2 GREEN (seal revision 97e28e675 + implementation
+93aa9d6de): FULL GATE 148/648/0 INDEPENDENTLY VERIFIED. wake's
+offer!-false = closed-channel fault (honest, not manufactured);
+author-written turn coverage drives [:open :call :resume :resume
+:close] end to end with the evaluator injected as a qualified symbol
+(the seon.sci.eval adoption plugs in untouched); my.run seal fixes
+e167c6bc8 (honest close-only docstring, wrong-type guard on both
+dispositions — review-caught ClassCastException). N3 REMAINING: the
+ORCHESTRATOR-OWNED integration proofs (one live DeepSeek call proving
+request/response shapes; a live flow graph driving step; the kill -9
+child); the seon.sci.eval adoption rung; digest SHA-256 helper
+triplicated (ancestor/config/loop — wants one owner, queue). N4 PLAN
+REVIEWED (399e818b4): NOT ready to seal — revision lane running.
+IN FLIGHT (three lanes): flow-deletion cuts seon.flow/database-proc +
+helpers + schema row + pinning tests (deletion doctrine, same
+commit); n4-plan revision; the Opus agent idle-until-next-assignment. n5-plan 909394481 awaits deep review at its
 rung; GC verdict recorded above. Its accepted design: process-local
 store holder + refcount under ONE lock with running-instances;
 stop! also releases branch connection, last instance releases the
