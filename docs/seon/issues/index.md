@@ -10,7 +10,7 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (66)
+## Blocker (72)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -25,13 +25,17 @@ See `README.md` for the convention.
 | [Contract predicate transitive purity awaits execution planner](contract-predicate-transitive-purity-awaits-execution-planner.md) | blocker | Core |
 | [Datahike force branch does not preserve secondary root](datahike-force-branch-does-not-preserve-secondary-root.md) | blocker | Core |
 | [Deliver a formless cluster JVM reply through the transcript](formless-claimant-reply-is-not-delivered-to-the-transcript.md) | blocker | agent |
+| [Derive core schema admission without an identity allowlist](schema-core-admission-uses-a-process-identity-allowlist.md) | blocker | Core |
 | [Derive read dependencies from Datahike's parsed semantics](datahike-read-dependencies-miss-valid-query-and-pull-inputs.md) | blocker | UI |
 | [Fence accepted writes before retained-head preparation](restore-intent-lacks-exclusive-writer-fence.md) | blocker | Core |
+| [Fence the agent pointer when opening and closing a run](run-close-does-not-fence-the-agent-pointer.md) | blocker | agent |
 | [Freeze one turn input across provider retries](turn-retries-reread-provider-inputs.md) | blocker | agent |
 | [Freeze the restore pod artifact in confirmed intent](restore-intent-does-not-freeze-client-artifact.md) | blocker | Core |
 | [Full writer gate fails during runtime lane integration](full-writer-gate-fails-during-runtime-lane-integration.md) | blocker | Core |
+| [Give agent birth a surviving owner after the pod's cluster apply lost it](cluster-apply-no-longer-births-root-agent.md) | blocker | agent |
 | [Give each effect in a form a distinct replay identity](effect-operation-id-collides-within-one-form.md) | blocker | agent |
 | [Give each named cluster its own writer process](named-clusters-share-one-writer-process.md) | blocker | Core |
+| [Ground the store connection predicate in Datahike's own connection type](store-connection-predicate-rejects-every-datahike-connection.md) | blocker | Core |
 | [Implement browser-session navigation provenance](web-session-navigation-provenance-is-missing.md) | blocker | UI |
 | [Install durable corpus functions into the shared SCI base](cluster-jvm-boot-does-not-install-durable-corpus-functions.md) | blocker | agent |
 | [Invalidate a cached failed Datastar render after its owner reloads](datastar-feed-retains-failed-render-after-hot-reload.md) | blocker | UI |
@@ -43,6 +47,7 @@ See `README.md` for the convention.
 | [Keep restore publication closed through completion](restore-completion-cannot-precede-admission.md) | blocker | Core |
 | [Let the common Inspect pod solver address an existing agent](inspect-pod-solver-cannot-address-existing-agent.md) | blocker | agent |
 | [Make Step-1 relational properties executable](step1-relational-properties-are-comments.md) | blocker | Core |
+| [Make run acceptance properties cover the claimed state transitions](run-acceptance-properties-miss-takeover-and-terminal-preservation.md) | blocker | Core |
 | [Make the downstream runtime package self-contained](downstream-runtime-package-is-not-self-contained.md) | blocker | Core |
 | [Make writer drain proof consumable by the operator](planned-restart-cannot-observe-writer-drain-result.md) | blocker | Core |
 | [Plan a visible cluster JVM reply on an inspected tier](jvm-claimant-rejects-visible-reply-without-exact-execution-plan.md) | blocker | agent |
@@ -53,6 +58,7 @@ See `README.md` for the convention.
 | [Projected map keys are not drill paths](projected-map-keys-are-not-drill-paths.md) | blocker | UI |
 | [Prove agent-message identity under form re-execution](agent-message-reexecution-idempotency-is-unproven.md) | blocker | agent |
 | [Pull cluster JVM limits from the cluster config identity](jvm-claimant-pulls-config-with-wrong-identity.md) | blocker | agent |
+| [Put run-claim eligibility in one fenced transition](run-claim-eligibility-is-not-in-the-cas.md) | blocker | agent |
 | [Read-side attribute admission fails open (silent empty results, :all fallback)](read-side-attribute-admission-fails-open.md) | blocker | Core |
 | [Realize authored values deeply before disarming the interrupt](lazy-authored-values-escape-the-armed-interrupt-boundary.md) | blocker | agent |
 | [Recover a run opened before its plan commits](run-is-unrecoverable-before-its-plan-commits.md) | blocker | agent |
@@ -81,7 +87,7 @@ See `README.md` for the convention.
 | [seon.agent.ctx file reads bypass the filesystem grant](agent-ctx-file-reads-bypass-fs-grant.md) | blocker | agent |
 | [tools.reader executes agent source at read time, outside SCI entirely](tools-reader-evaluates-agent-source-at-read-time.md) | blocker | general |
 
-## Friction (76)
+## Friction (78)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -117,6 +123,7 @@ See `README.md` for the convention.
 | [Include new CLJS namespaces in changed-test runtime artifacts](changed-test-new-cljs-namespace-misses-runtime-file.md) | friction | Core |
 | [Inspect product snapshot assumes nonexistent evidence](inspect-product-snapshot-assumes-nonexistent-evidence.md) | friction | agent |
 | [Installed schema map misclassified as database error](installed-schema-map-misclassified-as-database-error.md) | friction | agent |
+| [Keep the old source tree off Babashka's default classpath](babashka-default-classpath-exposes-src-old.md) | friction | general |
 | [LoRA audit runner depends on a retired Shadow target and pinned checkout](lora-audit-runner-drift.md) | friction | general |
 | [Make UDS frame accumulation linear](uds-fragment-accumulation-recopies-complete-prefix.md) | friction | Core |
 | [Make dependency preparation deterministic under concurrent development](dependency-preparation-can-crash-inside-clojure-hashmap.md) | friction | Core |
@@ -133,6 +140,7 @@ See `README.md` for the convention.
 | [Planner lacks a per-root purity projection](planner-lacks-per-root-purity-projection.md) | friction | agent |
 | [Planner self-done bypasses generated terminal delivery](planner-self-done-bypasses-generated-terminal-delivery.md) | friction | agent |
 | [Prepare selected git dependencies before test compilation](test-runner-does-not-prepare-selected-git-dependencies.md) | friction | Core |
+| [Preserve concurrent edits in the Gemini review backlog](gemini-review-pending-state-loses-concurrent-edits.md) | friction | agent |
 | [Preserve distinct large BigInts in cardinality-many attributes](datahike-cljs-cardinality-many-collapses-large-bigints.md) | friction | Core |
 | [Prevent output data from becoming a phantom callable arity](callable-contract-output-data-becomes-phantom-arity.md) | friction | agent |
 | [Prove Kimi K3 completion and continuation compatibility](kimi-k3-continuation-compatibility.md) | friction | agent |
@@ -162,7 +170,7 @@ See `README.md` for the convention.
 | [test-cljs compile failure retains a live lock owner](test-cljs-compile-failure-retains-live-lock-owner.md) | friction | general |
 | [try in expression position inside a compiled ^:async fn auto-awaits](async-try-expression-iife-auto-awaits.md) | friction | agent |
 
-## Cleanup (14)
+## Cleanup (15)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -170,6 +178,7 @@ See `README.md` for the convention.
 | [Bun 1.3.14 segfaults on AsyncLocalStorage.enterWith in ESM top-level continuations](bun-enterwith-toplevel-segfault.md) | cleanup | Core |
 | [Delete consumers of attributes removed with the run and turn stacks](pod-attempt-ordinal-consumers-reference-an-unregistered-attribute.md) | cleanup | UI |
 | [Delete unreachable runtime code left by the deletion waves](deletion-waves-left-unreachable-runtime-code.md) | cleanup | general |
+| [Give Flow configuration dials one registration owner](flow-config-dials-have-two-registration-owners.md) | cleanup | Core |
 | [Inspect concurrent attributed agent messages](inspect-concurrent-agent-messages.md) | cleanup | agent |
 | [Move product routes out of the static router supplement](static-routes-bypass-database-route-authority.md) | cleanup | UI |
 | [Partially-Stale Reference Docs Need Updates](stale-reference-docs.md) | cleanup | docs |
