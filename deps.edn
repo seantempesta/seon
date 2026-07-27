@@ -41,6 +41,11 @@
         ;; reply splitter and the value-admission gate are system code.
         org.babashka/sci {:local/root "reference-code/sci"}
 
+        ;; The model wire's JSON codec (seon.ai) — Clojure-official,
+        ;; zero-dependency. The HTTP client is JDK java.net.http (no
+        ;; coordinate needed): plain synchronous, virtual threads park.
+        org.clojure/data.json {:mvn/version "2.5.1"}
+
         com.taoensso/timbre {:mvn/version "6.5.0"}
         com.cognitect/transit-clj {:mvn/version "1.0.333"}
         org.slf4j/slf4j-simple {:mvn/version "2.0.16"}}
