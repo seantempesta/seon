@@ -1,6 +1,6 @@
 ---
 name: data-oriented-clojure
-description: "Foundational mindset for writing Clojure/ClojureScript the Seon way — data-oriented, immutable, schema-first, EAV, errors-as-values, derive-don't-store. Use this BEFORE writing or reviewing ANY seon .clj/.cljs, designing a data model, or implementing an agent verb, AND whenever you catch an imperative/OO reflex: a mutable accumulator loop, a :type/:kind discriminator, a 'table' of records, bare (non-namespaced) map keys, a thrown exception in an agent-facing fn, :pre/:post or hand-rolled validation, stored/cached derived state or a 'mark-as-seen' flag, threading a db/conn through call sites, a bare top-level await, or a foo-v2/parallel namespace to 'house a fix'. Use when you're about to guess a library's behavior from memory instead of reading reference-code/. For EAV query syntax see the datahike skill; for ^:async/self-host see the clojurescript skill — this is the mindset that links them."
+description: "Foundational mindset for writing Clojure the Seon way — data-oriented, immutable, schema-first, EAV, errors-as-values, derive-don't-store. Use this BEFORE writing or reviewing ANY seon .clj/.cljc, designing a data model, or implementing a capability, AND whenever you catch an imperative/OO reflex: a mutable accumulator loop, a :type/:kind discriminator, a 'table' of records, bare (non-namespaced) map keys, a thrown exception at an agent-facing boundary, :pre/:post or hand-rolled validation, stored/cached derived state or a 'mark-as-seen' flag, threading a db/conn through call sites, a caller pre-read where a transaction function belongs, or a foo-v2/parallel namespace to 'house a fix'. Use when you're about to guess a library's behavior from memory instead of reading reference-code/. For EAV query syntax see the datahike skill; for what shape to register see data-modeling — this is the mindset that links them."
 ---
 
 # Data-Oriented Clojure — the Seon mindset
@@ -11,28 +11,34 @@ instincts, those instincts will betray you here in predictable ways. This skill
 rewires the most common ones. It is mostly *why*, because once you see why the
 grain runs this direction, the right code is obvious.
 
-The deep, file:line-grounded version is
-`docs/prds/agent-fsm/research/clojure-idioms-for-agents-2026-06-28.md`. Read it
-when you want the evidence behind a claim. For the specifics this skill defers
-to: **EAV queries / data modeling → the `datahike` skill; `^:async`/`await` and
-self-host eval → the `clojurescript` skill; test patterns → `clojure-testing`.**
+For the specifics this skill defers to: **EAV queries → the `datahike` skill;
+what shape to register and why → `data-modeling`; test patterns →
+`clojure-testing`.** The grounding is the vendored source under
+`reference-code/` and the live code in `src/`.
+
+**Where you are (owner rulings, 2026-07-27):** fresh `src/` and `test/` are the
+system, `bin/test` is the gate, and **the CLJS build is OFF — CLJ and the JVM
+only**. `src-old/` is the quarry: read it for idiom, never extend it, and never
+add a `.cljs`.
 
 ## The one habit that causes the most wrong code
 
 **Don't guess a library's behavior from training memory — read the vendored
-source in `reference-code/` and test in the REPL first.** Every dep
-(datahike, malli, clojurescript, sci, integrant, reitit, core.async) is checked
-out under `reference-code/`, grep-able, the same version we run. The default
+source in `reference-code/` and test in the REPL first.** Every dep that
+matters (datahike, malli, core.async + flow, sci) is checked out under
+`reference-code/`, grep-able, the same version we run; `clojure -M:test -e "…"`
+gives you a JVM with in-memory Datahike in seconds. The default
 failure mode is writing confident Clojure in a place/mutable mindset while
 *guessing* how a `:malli/schema` validates or what `:db.fn/cas` does — and being
 wrong. Ground the concept→file first, then write. A 30-second REPL experiment
 beats hours of debugging. (See the shared instructions, "Slow Is Fast".)
 
 Memory got these wrong recently, the source set them right: an inline tx-fn
-carries a closure and can't cross the wire (use `:db.fn/cas`, pure data);
-`as-of` reports its *origin* db's basis-t, not the as-of point; `memoize` on a db
-value walks the entire index on a cache *hit*. All three in
-`datahike-primer.md`.
+carries a closure and cannot cross a wire, so a fence that must travel is
+`:db.fn/cas`, pure data; `as-of` reports its *origin* db's basis-t, not the
+as-of point; `memoize` on a db value walks the entire index on a cache *hit*;
+and under `:schema-flexibility :write` an attribute is NOT installed lazily —
+transacting an uninstalled attribute throws.
 
 ## The reflexes, and what to write instead
 
@@ -78,16 +84,14 @@ data's schema.
   [{::keys [id option]}] ...)
 ```
 
-Every schema'd public fn is **instrumented at runtime** — the program graph is
-the canonical function-schema source (`seon.instrument/instrument-from-db!` at
-boot + after every hot reload; the eval-tee wraps agent fns inline) and the
-wrapper validates args + return on every call, *throwing* on a mismatch. The exceptions are structural,
-never a name list (see the envelope section below); `SEON_INSTRUMENT` is an
-emergency kill-switch, never a way to silence an error.
-So a wrong schema is a runtime *bug*, not a doc nit: read the instrumentation
-error and fix the root cause (you called it wrong, or the schema doesn't match
-reality). `:pre`/`:post` gets none of this — not instrumented, not discoverable,
-not generatively testable. Two sanctioned argument shapes: map-in/map-out
+The `:malli/schema` is the contract of record: tests check it, generators
+derive from it, review reads it, and the runtime instrumentation rung will
+switch on it. **The fresh tree does not instrument yet** — `src/` carries no
+`seon.instrument` — which is precisely why a wrong or missing schema is
+dangerous rather than harmless: nothing catches it for you today. Write it
+correctly and check it with a test. `:pre`/`:post` gets none of this — not
+discoverable, not generatively testable, not a database fact. Two sanctioned
+argument shapes: map-in/map-out
 (preferred for accreting API surfaces) or fully-spec'd positional via `:catn`;
 the invariant is that every arg is named, specced, validated — a bare/unspecced
 arg is the violation, not a positional one.
@@ -164,13 +168,18 @@ joining the datom's tx. See the **`datahike`** skill, "Transaction metadata".
 
 `d/q`/`d/pull`/`d/entity` are referentially transparent over a db value — it
 can't change under you, so the "race" you think you have is usually re-reading
-`@*conn*` three times instead of threading one snapshot. On the pod each deref
-*reconstitutes* a fresh value from durable database storage, so re-reading also
-costs. `db` is
-the **first** parameter to functions; the live `*conn*` is *bound* for you —
-never thread a connection or other opaque runtime object through agent-facing
-call sites. When you truly need a fence against a concurrent writer, the
-primitive is `:db.fn/cas` (pure data), not a re-read-and-check.
+the connection three times instead of threading one snapshot. `db` is the
+**first** parameter to functions; never thread a connection or other opaque
+runtime object through an agent-facing call site.
+
+**The strongest form of this: don't pre-read at all.** When a decision depends
+on current state, make the decision INSIDE the transaction — a
+`[:db.fn/call f request]` transition reads the mid-transaction database value,
+refuses an ineligible request by throwing (aborting the whole transaction
+atomically), and returns plain tx-data otherwise. No observed-* request fields,
+no caller pre-reads, no window between deciding and acting. `:db.fn/cas` is the
+same idea for a single value. `src/seon/cluster/run.cljc` is the worked
+example.
 
 ### Prefer `reduce`/`map`/`into` over mutable accumulator loops
 
@@ -179,13 +188,16 @@ place-oriented tell. Reach for `into` with a transducer, `reduce` (+ `reduced`
 for early exit), or a pure recursive helper with accumulator args. State lives in
 the call, not a mutable cell — output depends only on input.
 
-### Async: CLJS native `^:async`/`await`, never core.async in the pod
+### Concurrency: plain synchronous Clojure, `core.async.flow` for owners
 
-`await` only works *inside* an `^:async` fn body (it's a macro asserting an async
-env); a bare top-level `(await x)` throws "await can only be used in async
-contexts". Agents get data, not Promises — the eval batch path auto-awaits. Never
-run a second instrument pass in one process (it wedges async fns). Full detail in
-the **`clojurescript`** skill — read it before touching pod async.
+The JVM path is plain synchronous code — virtual threads park, so there is no
+callback colouring and no `^:async` marker anywhere in `src/`. When you need a
+long-running owner with its own lifecycle, the substrate is
+`core.async.flow` (`seon.flow`), using ITS vocabulary: procs with `step-fn`s,
+bounded channels, `conns`, a `graph-def`, `executor-for :io` vs
+`executor-for :compute`. Do not invent a scheduler noun and do not reach for a
+bare thread or future where a proc belongs. `^:async`/`await` was a pod
+construct; the CLJS build is off and no new code uses it.
 
 ### `:or` doesn't fill a present-nil key — use explicit `or`
 
@@ -205,45 +217,37 @@ parallel `foo-v2` leaves two versions, doubles the bug surface, and its
 explanatory comment outlives everyone who knew the reason. Same as "register the
 shape once, reference everywhere": duplication guarantees drift.
 
-### Authored namespaces receive real standard requires
+### Require what you use; full qualification is the always-correct floor
 
-The short aliases `db/`, `plan/`, `message/`, and `schema/` are wired into the
-agent's home namespace. The evaluation boundary augments each new authored
-namespace with those same real requires, so the aliases resolve after an
-`(ns my.<domain>)` or a fresh `in-ns`. Writing them explicitly is still valid
-and makes dependencies obvious:
+Write ordinary `ns` forms with explicit requires — they make the dependencies
+obvious and they are what the call-graph indexer reads:
 
 ```clojure
-(ns my.expense
-  (:require [seon.db :as db]
-            [my.plan :as plan]
-            [seon.agent.message :as message]
-            [seon.schema :as schema]))
+(ns seon.expense
+  (:require [seon.schema :as schema]))
 
 (defn total [xs] (reduce + xs))
 (schema/register! ::amount :int)
 ```
 
-**Full-qualification is the always-correct floor** — `seon.db/transact!`,
-`seon.agent.message/user`, `my.ui/status-line` work from ANY ns with no require.
-Use it whenever you skip the require, and ALWAYS for the `my.*` toolkit
-(`my.ui/…`, `my.canvas/…`, `my.data/…`, `my.kb/…`) — those are not aliased.
+A fully-qualified call (`seon.schema/register!`) works from any namespace with
+no require and is never wrong. (The agent-facing `my.*` toolkit and the
+convenience aliases wired into an agent's home namespace are quarry surfaces;
+they do not exist in the fresh tree.)
 
-The lifecycle verbs `wait` `complete` `pause` `resume` `terminate` are refer'd in
-your HOME ns only; call them from there, or fully-qualify
-`seon.agent.lifecycle/complete`. Do NOT switch namespaces to reach a verb.
+### Write a real test ns — `clojure.test/deftest`, not inline `assert`
 
-### Write a real test ns — `cljs.test/deftest`, not inline `assert`
-
-When you "write a test", put it in a `my.<domain>-test` ns using
-`cljs.test/deftest` + `is` — NOT a pile of inline `(assert …)` calls (one drive
-produced 494 inline asserts for one "write a test" request). A deftest is
-discoverable, re-runnable, and reports pass/fail as data:
+When you "write a test", put it in a `<ns>-test` namespace under `test/`,
+mirroring the source path, using `clojure.test/deftest` + `is` — NOT a pile of
+inline `(assert …)` calls (one drive produced 494 inline asserts for one "write
+a test" request). A deftest is discoverable by `bin/test`, re-runnable, and
+reports pass/fail as data. A test the gate cannot discover is NOT coverage:
 
 ```clojure
-(ns my.expense-test (:require [cljs.test :refer [deftest is]]))
+;; test/seon/expense_test.clj
+(ns seon.expense-test (:require [clojure.test :refer [deftest is]]))
 (deftest totals-sum
-  (is (= 101 (my.expense/total [45 18 38]))))
+  (is (= 101 (seon.expense/total [45 18 38]))))
 ```
 
 Test patterns (async, fresh in-memory conn, awaiting capability verbs) live in
@@ -253,10 +257,11 @@ the **`clojure-testing`** skill.
 
 | You're about to... | Read first |
 |---|---|
-| Model data, write a Datalog query, design identity/refs | the **`datahike`** skill + `docs/prds/agent-fsm/research/datahike-primer.md` |
-| Write/debug pod async, `^:async`/`await`, self-host eval | the **`clojurescript`** skill |
+| Write a Datalog query, transact, fence a transition | the **`datahike`** skill |
+| Decide what shape to register and why | the **`data-modeling`** skill |
 | Write tests, fixtures, generators | the **`clojure-testing`** skill |
+| Build a long-running owner, channel, or executor | `reference-code/core.async/.../flow/` + `src/seon/flow.clj` |
 | Confirm any library's actual behavior | the vendored source in `reference-code/<lib>/` — never guess |
-| See the file:line evidence behind every claim here | `docs/prds/agent-fsm/research/clojure-idioms-for-agents-2026-06-28.md` |
 | Full conventions (Malli shapes, `.internal`, schema composition) | `docs/conventions.md` |
+| What is settled, unsettled, and next | `docs/prds/sci-execution-runtime/plan/README.md` |
 </content>

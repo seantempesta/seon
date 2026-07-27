@@ -1,143 +1,154 @@
 ---
 name: clojure-testing
-description: "Test patterns for Seon. Use when writing or debugging .cljs tests, when an async/Promise test never finishes, when an ambient database read sees the wrong connection, or when setting up a fresh in-memory Datahike connection. Covers focused bin/test-cljs selection, cljs.test/async, capability-verb envelopes, root set! of db/*conn*, and the separate bin/test-writer database-server gate."
+description: "Test patterns for Seon. Use when writing or debugging a test, when a test needs a fresh in-memory Datahike connection, when choosing between an example test and a generative property, or when a suite is green for the wrong reason. Covers bin/test and its focused selection, clojure.test shape, the per-test database fixture, seeded test.check state-transition properties, and the honest-generator rules."
 ---
 
-# Clojure Testing — pod-first
+# Clojure Testing — JVM, synchronous, one gate
 
-The application suite is **ClojureScript**, run in a fresh isolated Node test
-runtime via `bin/test-cljs`. Tests double as the worked manual for the surface they
-cover — read `test-old/seon/db_test.cljs`, `test-old/seon/ctx_test.cljs`,
-`test-old/my/kb_test.cljs`, `test-old/my/skills_test.cljs` as the canonical examples.
+The suite is **Clojure on the JVM**, run by `bin/test`. Tests double as the
+worked manual for the surface they cover — read `test/seon/cluster/run_test.clj`
+as the canonical example: in-memory Datahike fixture, deterministic clock,
+example tests that teach the call shapes, and a seeded state-machine property
+over the real database.
 
-> Hand-offs: `^:async`/`await`/Promise semantics → **`clojurescript`**; what
-> `db/transact!` / `db/query` actually do + the envelope shape →
-> **`datahike`**; errors-as-values / no-bare-keys mindset →
-> **`data-oriented-clojure`**. How to run the suite is in the shared
-> repository instructions under "Testing".
+> Hand-offs: what a Datahike transaction/query actually does →
+> **`datahike`**; what shape to register and why → **`data-modeling`**;
+> errors-as-values / no-bare-keys mindset → **`data-oriented-clojure`**.
+
+**The CLJS build is OFF** (owner ruling 2026-07-27) — `bin/test-cljs` and
+`bin/test-writer` serve the `src-old/`/`test-old/` quarry and are NOT the gate.
+Nothing new goes there, and a `cljs.test` namespace is not a Seon test today.
 
 ## Running
 
 ```bash
-bin/test-cljs              # compile (DEV) + run every *-test ns
-bin/test-cljs --no-build   # skip compile; rerun out/test/test.js
-bin/test-cljs --test=seon.db-test
-bin/test-cljs --test=seon.db-test/one-behavior
-bin/test-writer            # retained JVM database-server boundary
+bin/test                        # every *_test.clj / *_test.cljc under test/
+bin/test seon.cluster.run-test  # exactly these namespaces
 ```
 
-It compiles **DEV, not release** on purpose: the core resolves fns by walking
-`goog.global` at munged paths (`seon.eval/lookup-value`, malli's CLJS
-instrument), which Closure `:simple`/`:advanced` would flatten away. Use it as
-the batch checkpoint **once per unit of work**, not after each sub-step
-(`Test cadence = token economy` in the shared instructions). To verify ONE
-behavior fast, eval
-the fn directly against the live pod instead of running a whole ns.
+Source classpath, in-memory Datahike, no artifact and no operator — seconds per
+cycle, and the exit code is the verdict. Use the selection while iterating and
+the full run at the natural unit boundary. There is no separate build step to
+wait on and no live process to contend with.
 
-**Never fire overlapping `cljs.test/run-tests` in the LIVE pod** — it wedges the
-shared async continuation. Restart (`bin/seon restart`) for a pristine run;
-`bin/test-cljs` is the isolated path (its own JVM, no live-pod contention).
+`bin/test` discovers a namespace by file name: a test file must end in
+`_test.clj` or `_test.cljc` under `test/`, mirroring its `src/` namespace. A
+test in any other location is invisible to the gate, which means **not
+covered** however green it looked when you ran it by hand.
 
-## Fresh in-memory datahike conn per test
+## Fresh in-memory Datahike per test
 
-The pod doesn't embed Datahike — but a test may open a real `:memory` Datahike
-connection directly (no database server), seeded like the pod boots. Each test gets its own
-instance (a fresh `:id` random-uuid) so they never see each other's data. This
-is a Promise (datahike connect is async):
+Every database test opens its own `:memory` store (a fresh random `:id`, so
+tests never see each other's data), installs the attributes it needs, and
+releases in a `finally`. There is no ambient connection and nothing to `set!` —
+pass the connection.
 
 ```clojure
-(require '[datahike.api :as d] '[seon.db :as db] '[seon.client :as client])
+(ns seon.cluster.run-test
+  (:require [clojure.test :refer [deftest is testing]]
+            [datahike.api :as d]
+            [seon.schema.datahike :as schema.datahike]))
 
-(defn- fresh-conn
-  "Promise of a fresh :memory conn carrying the pod's boot schema."
-  []
-  (let [cfg {:store {:backend :memory :id (random-uuid)}
-             :schema-flexibility :write
-             :keep-history? true}]
-    (-> (d/create-database cfg)
-        (.then (fn [_] (d/connect cfg {:sync? false})))
-        (.then (fn [conn]
-                 (-> (d/transact! conn {:tx-data (into (db/malli->datahike-schema
-                                                         client/agent-bootstrap-attrs)
-                                                        (db/tx-meta-datahike-schema))})
-                     (.then (fn [_] conn))))))))
+(def ^:private model-attributes
+  [:seon.cluster.run/id :seon.cluster.run/opened-at :seon.cluster.run/closed-at])
+
+(defn- with-model-database [body]
+  (let [configuration {:store {:backend :memory :id (random-uuid)}
+                       :schema-flexibility :write}
+        _ (d/create-database configuration)
+        connection (d/connect configuration)]
+    (try
+      (d/transact connection
+                  (schema.datahike/malli->datahike-schema model-attributes))
+      (body connection)
+      (finally
+        (d/release connection)
+        (d/delete-database configuration)))))
 ```
 
-Domain attrs need NOT be pre-installed — `db/transact!` lazy-installs an attr's
-schema on its first write. Pre-seed only the pod's boot schema (above).
+**Attributes must be INSTALLED before they are transacted.** Under
+`:schema-flexibility :write` a registered-but-uninstalled attribute throws
+`Bad entity attribute … not defined in current schema` (REPL-verified
+2026-07-27). `schema/register!` teaches the Malli registry; transacting
+`(schema.datahike/malli->datahike-schema attrs)` is what teaches the database.
+Listing the attributes explicitly, as above, is a feature: the list is the
+test's declared surface, and a missing entry fails loudly instead of silently
+widening.
 
-## The big CLJS gotcha: root `set!`, not `binding`
-
-The pod's verbs read `db/*conn*` **ambiently** (db-omitted), exactly as in
-production. To make those reads hit YOUR test conn you must `set!` the **root**
-binding — a `binding` form pops at the first `await`/microtask boundary, so it
-would not survive a single async hop:
+Give the test a **deterministic clock** rather than reading the wall clock —
+Seon's transitions take time as an explicit input precisely so a property can
+supply it:
 
 ```clojure
-(defn- with-conn
-  "Fresh seeded conn set! as the ROOT db/*conn* for body (conn → Promise);
-   prior root restored after. NOT binding — CLJS dynamic bindings don't
-   survive await."
-  [body]
-  (-> (fresh-conn)
-      (.then (fn [conn]
-               (let [orig db/*conn*]
-                 (set! db/*conn* conn)
-                 (-> (js/Promise.resolve (body conn))
-                     (.finally (fn [] (set! db/*conn* orig)))))))))
+(def ^:private t0-ms 1785000000000)
+(defn- at [offset-ms] (java.util.Date. (long (+ t0-ms offset-ms))))
 ```
 
-Because that root is a SHARED global the whole suite mutates, a concurrent
-test's fiber can `set!` it between your async hops. Guard each `.then` that does
-an ambient read by **re-pinning** the conn first — a synchronous read right
-after a `set!` can't be interleaved:
+## Example tests — plain and synchronous
+
+No `async`, no `done`, no Promise rails. Call the function, assert on the
+returned value AND on the durable facts, because a call can return something
+agreeable while the write did not happen:
 
 ```clojure
-(defn- pinned [conn f] (fn [x] (set! db/*conn* conn) (f x)))
+(deftest reads-back-a-row
+  (testing "a transacted value comes back out"
+    (with-model-database
+      (fn [connection]
+        (d/transact connection [{::name "Alpha"}])
+        (is (= "Alpha" (d/q '[:find ?n . :where [_ ::name ?n]] @connection)))))))
 ```
 
-## Async tests — `cljs.test/async` + the envelope
+For a boundary that returns an envelope, assert on `::ok?` explicitly —
+`(is (true? ok?))`, never a truthiness check that a map would also pass.
 
-`db/transact!` (and every `^:async` capability verb) ALWAYS resolves to a data
-**envelope** — it never rejects, never throws into the caller. Assert on the
-envelope's `:seon.db/ok?` (an eval can "succeed" yet the write did NOT happen):
+## Refusal is a result — assert both rails
+
+A transaction function that fences an ineligible transition ABORTS the whole
+transaction by throwing. That refusal is the contract, so a test asserts it as
+a value, not with a bare `thrown?`:
 
 ```clojure
-(deftest append-then-read-back
-  (async done
-    (-> (with-conn
-          (fn [_conn]
-            (-> (db/transact! {:seon.db/tx-data [{:my.kb.shared/id "shared"
-                                                  :my.kb.shared/instructions
-                                                  [{:my.kb.shared/text "store provenance"
-                                                    :my.kb.shared/at (js/Date. 1000)}]}]})
-                (.then (fn [{ok? :seon.db/ok?}]
-                         (is (true? ok?) "an append is ONE nested-map transact"))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+(defn- transact-or-refusal
+  "Commit tx-data; a refusal returns a value instead of propagating."
+  [connection tx-data]
+  (try
+    (d/transact connection tx-data)
+    ::committed
+    (catch Exception error {::refused (.getMessage error)})))
 ```
 
-Always call `done` on BOTH the success and the `.catch` rail — a forgotten
-`done` is the usual cause of an async test that "hangs" until the runner times
-out. A rejection should fail loudly (`(is false …)`), not silently pass.
+Then assert that the eligible command committed, the ineligible one refused,
+AND that the refused attempt left the database unchanged. A refusal test that
+only checks the throw does not prove atomicity.
+
+**Do not assert on `(ex-data error)`** — it is `{}`. Datahike's writer thread
+rethrows, so the original `ex-info`'s data survives only inside the message
+string, and `(ex-cause error)` is a bare `ExecutionException` (REPL-verified 2026-07-27;
+probe and output in
+`docs/seon/issues/transaction-refusal-loses-its-ex-data.md`). A test that reads
+`(:error (ex-data e))` sees `nil` for every refusal and therefore cannot tell a
+correct refusal from an unrelated crash. Assert on durable facts, and treat any
+`ex-data`-based refusal classification you find as a bug.
 
 ## Common failure patterns
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Async test never finishes | `done` not called on one rail (often the error rail) | call `done` in BOTH `.then` and `.catch` |
-| Ambient read sees another test's data | `binding` instead of root `set!`, or no re-pin before the read | use `with-conn` + `pinned` |
-| "Unregistered attributes in transaction" | missing `schema/register!` for an attr | register it in the owning ns |
-| `:malli.core/invalid-input/output` on a call | args/return don't match `:malli/schema` | read the explain — fix the call or the schema, don't coerce |
-| Empty `#{}` from a query that should match | attr misspelled, type mismatch, or ref-join-as-keyword | see the `datahike` skill's read traps |
+| `Bad entity attribute … not defined in current schema` | attribute registered but not installed on this connection | add it to the fixture's attribute list |
+| "Unregistered attributes" from a Seon boundary | missing `schema/register!` | register it in the owning ns |
+| Empty `#{}` from a query that should match | attr misspelled, type mismatch, or a ref-join written as keyword-in-slot | see the `datahike` skill's read traps |
+| A property passes but the code is wrong | the property observes only the returned value | observe durable facts independently of the return |
+| Tests pass alone, fail together | the fixture shares one store across trials | fresh `:id` per test AND per generative trial |
+| `:malli.core/invalid-input/output` | args/return don't match `:malli/schema` | read the explain — fix the call or the schema, don't coerce |
 
 ## Generative checks stay inside the same suite
 
-Malli generators work in ClojureScript (`mg/generate`, `mg/sample`), but they do
-not create a third test mechanism. Put the property in a normal `cljs.test`
-namespace and run it through `bin/test-cljs`. Database properties should use a
-fresh connection and exercise the same `schema/register!` → lazy install →
-transact → read-back boundary as the application.
+Malli generators do not create a third test mechanism. Put the property in a
+normal `clojure.test` namespace and run it through `bin/test`. Database
+properties use a fresh connection and exercise the same
+`schema/register!` → install → transact → read-back boundary as the
+application.
 
 A generator gate is three separate assertions, never one:
 
@@ -159,23 +170,35 @@ Function contracts split by what the property must observe:
   registry, and never merely *call* `mi/check` (it returns failures; a suite
   must assert them). Malli 0.20.0 runs 100 trials and does not forward
   generator options.
-- **State transitions** (replay, idempotency, "twice", "after resume",
-  committed facts): explicit `(tc/quick-check ... :seed fixed-seed)` invoking
-  the production boundary, observing database facts independently of returned
-  envelopes, asserting `(:result check)` and printing the complete check.
+- **State transitions** (idempotency, "twice", "after recovery", committed
+  facts): explicit `(tc/quick-check ... :seed fixed-seed)` invoking the
+  production boundary, observing database facts independently of returned
+  values, asserting `(:result check)` and printing the complete check.
 
-A CLJ-only generator pass cannot certify CLJS — tier-dependent schemas (regex
-above all) need recurring coverage on every owning runner. Grounding and the
-pitfall catalog:
+The state-transition shape that catches the most is a **model property**: a
+pure model decides, for every generated command, whether the transition must
+commit or refuse; the real database runs the same command; a disagreement in
+either direction is a counterexample, and durable invariants are re-asserted
+after every command. `test/seon/cluster/run_test.clj` implements exactly this.
+
+Grounding and the pitfall catalog:
 `docs/prds/sci-execution-runtime/research/malli-generative-patterns-2026-07-26.md`
 + `research/spec-authorship-relational-properties-2026-07-26.md` (the guard
 vs state-transition boundary).
+
+## Structure dissolves failure classes
+
+Before writing a test, ask which CLASS the failure belongs to and what
+construction makes the class unrepresentable. Move the invariant to one choke
+point — a total codec, an admission gate, a computed classification, a
+transition that refuses inside the transaction — and keep ONE regression per
+class. A pile of point tests fencing symptoms is the sign the invariant has no
+owner.
 
 ## Key test files
 
 | File | What it teaches |
 |---|---|
-| `test-old/seon/db_test.cljs` | `fresh-conn`, instrument-in-test setup, the envelope contract, query/pull shapes |
-| `test-old/seon/ctx_test.cljs` | `with-conn` root-`set!`, context composition contracts |
-| `test-old/my/kb_test.cljs` | `pinned` re-pin pattern, append/read-back, the DB-as-manual idiom |
-| `test-old/my/skills_test.cljs` | derived-state assertions (no stored flags), corpus-scan-can't-bit-rot |
+| `test/seon/cluster/run_test.clj` | the whole shape: fixture, deterministic clock, refusal-as-value, model-based state-machine property |
+| `test/seon/flow/loop_test.clj` | exercising a `core.async.flow` graph from a test |
+| `reference-code/datahike/` | the fork's source — read it, don't guess semantics |
