@@ -281,10 +281,30 @@ PHASE 2 (kill -9 → interrupted+adapt) IN PREP: drill scripts
 tmp/n3-crash-{child,verify}.clj; the Opus agent is correcting the
 verify choreography (interruption requires an UNCLAIMED run — what
 settles claimed-by-dead-pid, lease 60s, may interact with the
-run-contract-hardening lane's lease-expiry fix). IN FLIGHT (two
-lanes): that correction; sol run-contract-hardening on run.cljc
-(lease-expiry + takeover/terminal-preservation acceptance issues,
-one owner file — the Opus agent is fenced OFF run.cljc meanwhile).
+run-contract-hardening lane's lease-expiry fix). HARDENING LANDED (21215ce28: ::now threaded one-clock-per-pass,
+held-run refuses ::lease-expired, takeover/terminal-preservation
+acceptance; both issues archived). GAPS 1+3 LANDED (ba723b2d1:
+start! recovers dead custody AT BOOT by fact — falsifier plants a
+ten-minute future lease and boots in <10s; instance reports
+:seon.boot/recovered-runs counts; prompt warning no longer shadowed —
+excludes the run the agent pointer names; process-identity
+<pid>-<start-millis> added, bare-pid recyclability named). Gate
+171/777/0 verified. OWNER DIRECTION (evening): errors must surface
+the exact problem — wire flow's error channel via fault-committer,
+fault fact + explanation MESSAGE to the triggering agent in ONE tx
+(eval errors stay receipt-only), escalation recipient as a config
+dial, a `problems` derivation, malli instrumentation at dev boot
+(currently NOWHERE enabled) with reload-reapply; model-call
+resilience = primary/backup descriptor rows with instant failover on
+error-class (backup's context says the primary failed and why),
+backoff-without-secondary reconciled with the no-retry ruling.
+IN FLIGHT (three): Opus research agent grounds the error wiring in
+core.async.flow/sci/malli/quarry source
+(error-handling-grounding-2026-07-27.md); sol model-failover-research
+mines litellm-clj + again (model-failover-2026-07-27.md); the Opus
+drafting agent lands the final pre-drill unit (GAP 2 loop settling,
+process-identity agreement in handles+drill scripts, drill verify
+reconciled with boot recovery). THEN the kill -9 drill runs.
 N4 PLAN REVISED (ab2911caa): all 25 review findings dispositioned,
 composed with the landed N3 owners, socket/reset/child-loss proofs
 moved in-suite, EIGHT owner decisions consolidated — both N4 and N5
