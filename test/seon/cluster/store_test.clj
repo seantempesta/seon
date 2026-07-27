@@ -31,7 +31,7 @@
     dir))
 
 (defn- delete-recursively! [path]
-  (let [file (io/file path)]
+  (let [file (.getCanonicalFile (io/file path))]
     (when (.exists file)
       (doseq [child (reverse (file-seq file))]
         (.delete ^java.io.File child)))))
@@ -218,4 +218,40 @@
               (store/release-store! survivor)))))
       (finally
         (.destroyForcibly process)
+        (delete-recursively! (str (io/file dir) "/.."))))))
+
+(deftest an-in-process-refusal-never-drops-the-os-fence
+  ;; fcntl drops EVERY lock a process holds on a file when ANY of its
+  ;; descriptors closes — so the same-process refusal path must never
+  ;; open a second descriptor it then closes. The interaction proof:
+  ;; hold here, refuse here, and a foreign JVM must STILL be refused.
+  (let [dir (fresh-dir)
+        ready-file (io/file (str (io/file dir) "/../still-held.ready"))
+        java-command (.getPath
+                      (File. (System/getProperty "java.home") "bin/java"))]
+    (try
+      (let [held (store/open-store! dir)]
+        (try
+          (is (thrown? Exception (store/open-store! dir))
+              "the in-process second open refuses")
+          (let [process (-> (ProcessBuilder.
+                             ^java.util.List
+                             [java-command
+                              "-cp" (System/getProperty "java.class.path")
+                              "clojure.main"
+                              "-m" "seon.cluster.store-child"
+                              dir
+                              (.getPath ready-file)])
+                            (.redirectErrorStream true)
+                            (.start))]
+            (is (.waitFor process 30 TimeUnit/SECONDS)
+                "the child settles: refused opens exit, they never hang")
+            (is (not (.exists ready-file))
+                "the foreign JVM never acquired — the fence survived the
+                 in-process refusal")
+            (is (not (zero? (.exitValue process)))
+                "the child exited by refusal, not by success"))
+          (finally
+            (store/release-store! held))))
+      (finally
         (delete-recursively! (str (io/file dir) "/.."))))))

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: closed
 severity: blocker
 tags: [issue, database, testing]
 ---
@@ -75,3 +75,11 @@ A test in the sealed suite that fails against an `acquire-flock!` which answers
 against the current implementation. Behavioral, not prose: the assertion is
 that a foreign process is refused **after** this process has refused itself,
 not that any particular table or exception exists.
+
+## Resolution
+
+Admitted into the sealed suite same day by the contract owner:
+`an-in-process-refusal-never-drops-the-os-fence` (store_test.clj) —
+hold, refuse in-process, then a real child JVM must still be refused
+and exit nonzero without acquiring. Green against `31e38e12d`
+(8 tests / 25 assertions / 0 failures).
