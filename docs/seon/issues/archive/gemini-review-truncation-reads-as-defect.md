@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: minor
 tags: [issue, tooling]
 ---
@@ -36,3 +36,21 @@ Clojure source.
 A review of a >12k-char file that compiles reports no
 truncation/incompleteness finding; the review still covers the included
 prefix.
+
+## Resolution (2026-07-27)
+
+`bin/seon-hook` now cuts every over-cap block with an in-band
+`REVIEW TRUNCATION` marker written in that block's own comment syntax
+(`;;` for Clojure, `<!-- -->` for Markdown), and the review instructions
+state that a marked block is a partial view whose incompleteness must
+never be reported. `:max-code-length` also rose from 12k to 40k, so an
+ordinary Clojure source arrives WHOLE and the class cannot arise at all;
+the batch budget moved to its own `:max-batch-length` dial instead of
+silently reusing the per-file cap.
+
+Live proof: a `PostToolUse` review of `src/seon/cluster/run.cljc`
+(18,994 chars — the file the issue cites) produced
+`tmp/reviews/20260727T120217.175Z.md` with zero matches for
+`truncat|incomplete|cut off|unbalanced|syntax error`, while still
+reporting real findings against the file. A second run under a 500-char
+cap confirmed the marker renders in Clojure and Markdown blocks alike.

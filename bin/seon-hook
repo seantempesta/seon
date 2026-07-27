@@ -41,6 +41,7 @@
       (str (root-file ".claude/seon-hook.edn"))))
 
 (def conventions-path (root-file "docs/conventions.md"))
+(def skills-path (root-file ".agents/skills"))
 (def last-review-path (root-file "tmp/.last-review"))
 (def pending-review-path (root-file "tmp/.pending-review"))
 (def reviews-path (root-file "tmp/reviews"))
@@ -379,15 +380,54 @@
       (write-pending! (remove reviewed (read-pending))))
     (catch Exception _ nil)))
 
-(defn- load-conventions
-  "Load the conventions rubric with a safety length cap."
-  [max-length]
-  (let [file (io/file conventions-path)]
+(def ^:private truncation-notice
+  (str "REVIEW TRUNCATION — the prompt cut this text here. The real file "
+       "CONTINUES past this point and is NOT incomplete. Do NOT report a "
+       "syntax error, an unbalanced form, a missing closing paren, a cut-off "
+       "function, or any other incompleteness at or after this marker."))
+
+(defn- truncation-marker
+  "One unmissable in-band marker naming the prompt as the cause of the cut."
+  [language]
+  (if (= language "markdown")
+    (str "\n\n<!-- ===== " truncation-notice " ===== -->\n")
+    (str "\n\n;; ===== " truncation-notice " =====\n")))
+
+(defn- clip-with-marker
+  "`content` capped at `max-length`, marked in `language`'s comment syntax."
+  [content max-length language]
+  (if (> (count content) max-length)
+    (str (subs content 0 max-length) (truncation-marker language))
+    content))
+
+(defn- load-rubric
+  "Load one standing rubric document, capped and marked. Nil when absent."
+  [^java.io.File file max-length]
+  (try
     (when (.exists file)
       (let [content (slurp file)]
-        (if (> (count content) max-length)
-          (str (subs content 0 max-length) "\n[truncated]")
-          content)))))
+        (when (seq content)
+          (clip-with-marker content max-length "markdown"))))
+    (catch Exception error
+      (log! "REVIEW_RUBRIC_UNREADABLE" (.getPath file) (.getMessage error))
+      nil)))
+
+(defn- load-skills
+  "Load the configured skills' current SKILL.md text, in configured order.
+
+   The files are read at review time, so an edited skill reaches the very
+   next review with no rebuild. A missing or unreadable skill is one log
+   line and is skipped — a review never fails over its rubric."
+  [skill-names max-length]
+  (->> skill-names
+       (keep
+        (fn [skill-name]
+          (let [file (io/file skills-path (str skill-name) "SKILL.md")]
+            (if-let [content (load-rubric file max-length)]
+              {:name (str skill-name) :content content}
+              (do (log! "REVIEW_SKILL_MISSING" (str skill-name))
+                  nil)))))
+       vec))
 
 (defn- file-language [file-path]
   (if (str/ends-with? (str/lower-case file-path) ".md")
@@ -397,20 +437,24 @@
 (defn- render-file-block
   "Render one fenced review block, truncating its source when necessary."
   [{:keys [path content]} max-code-length]
-  (let [code (if (> (count content) max-code-length)
-               (str (subs content 0 max-code-length) "\n[truncated]")
-               content)]
+  (let [language (file-language path)]
     (str "=== EDITED FILE: " path " ===\n"
-         "```" (file-language path) "\n"
-         code
+         "```" language "\n"
+         (clip-with-marker content max-code-length language)
          "\n```\n")))
 
 (defn- build-review-prompt
-  "Build one bounded batch prompt with the conventions rubric included once."
-  [files {:keys [max-code-length max-conventions-length]
-          :or {max-code-length 12000
-               max-conventions-length 60000}}]
-  (let [conventions (load-conventions max-conventions-length)
+  "Build one bounded batch prompt with the standing rubric included once.
+
+   The rubric is the configured skills followed by `docs/conventions.md`,
+   both re-read on every review."
+  [files {:keys [skills max-code-length max-batch-length max-rubric-length]
+          :or {skills []
+               max-code-length 40000
+               max-batch-length 200000
+               max-rubric-length 60000}}]
+  (let [loaded-skills (load-skills skills max-rubric-length)
+        conventions (load-rubric (io/file conventions-path) max-rubric-length)
         files (vec files)
         {:keys [kept]}
         (reduce
@@ -418,7 +462,7 @@
            (let [block-length
                  (count (render-file-block file max-code-length))]
              (if (or (empty? kept)
-                     (<= (+ total block-length) max-code-length))
+                     (<= (+ total block-length) max-batch-length))
                {:kept (conj kept file)
                 :total (+ total block-length)}
                (reduced {:kept kept :total total}))))
@@ -428,6 +472,9 @@
         ordered (reverse kept)]
     (when (pos? dropped)
       (log! "REVIEW_BATCH_TRUNCATED" (str "dropped-oldest=" dropped)))
+    (log! "REVIEW_RUBRIC"
+          (str "skills=" (str/join "," (map :name loaded-skills)))
+          (str "conventions=" (boolean conventions)))
     (str
      "Do not call tools or inspect the filesystem. Review only the supplied "
      "rubric and file blocks.\n\n"
@@ -437,6 +484,17 @@
      "conformance using the rubric below. Be terse and high-signal; report "
      "only actionable issues, not style preferences. Review each file "
      "separately and name it. If a file is fine, say so in one line.\n\n"
+     "A file block may be a PARTIAL VIEW: the prompt has a size budget, so "
+     "long text is cut and the cut is labelled in-band with a "
+     "`REVIEW TRUNCATION` marker. Everything before such a marker is exact. "
+     "Never report incompleteness, an unbalanced form, or a syntax error "
+     "that is explained by a truncation marker — review only what you can "
+     "see.\n\n"
+     (str/join
+      ""
+      (map (fn [{:keys [name content]}]
+             (str "=== SEON SKILL: " name " (rubric) ===\n" content "\n\n"))
+           loaded-skills))
      (when conventions
        (str "=== PROJECT CONVENTIONS (rubric) ===\n"
             conventions
@@ -548,8 +606,13 @@
                 (let [prompt
                       (build-review-prompt
                        files
-                       {:max-code-length
-                        (get review-config :max-code-length 12000)})
+                       {:skills (get review-config :skills [])
+                        :max-code-length
+                        (get review-config :max-code-length 40000)
+                        :max-batch-length
+                        (get review-config :max-batch-length 200000)
+                        :max-rubric-length
+                        (get review-config :max-rubric-length 60000)})
                       _ (log! "REVIEW_BATCH"
                               (str "count=" (count files))
                               (str "files="

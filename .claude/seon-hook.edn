@@ -18,10 +18,23 @@
  :changed-tests
  {:enabled true}
 
+ ;; The standing review rubric is DATA: `:skills` names skill directories
+ ;; under `.agents/skills/`, each of whose `SKILL.md` is read fresh on every
+ ;; review (edit a skill and the next review sees it — nothing is baked in),
+ ;; followed by `docs/conventions.md`. The selection is the subset with real
+ ;; catch-power for a reviewer of the current JVM/Clojure tree; the pod-era
+ ;; skills (clojurescript, datastar-web-ui, ui-canvas, browser-automation,
+ ;; seon-context-config) and the agent-REPL skill are deliberately absent.
  :review
  {:enabled true
   :interval-seconds 120
-  :max-code-length 12000}
+  :skills ["data-oriented-clojure" "data-modeling" "datahike" "clojure-testing"]
+  ;; Per-document caps. Clojure sources under `:max-code-length` arrive
+  ;; WHOLE, which is what stops a reviewer reading a cut as a syntax error;
+  ;; anything longer is cut with an in-band truncation marker.
+  :max-code-length 40000
+  :max-batch-length 200000
+  :max-rubric-length 60000}
 
  :feedback
  {:max-tokens 300}}
