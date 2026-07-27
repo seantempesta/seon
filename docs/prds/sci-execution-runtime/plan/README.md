@@ -329,6 +329,19 @@ carried stale evidence within a day. Re-verify before starting.
   integrates, and proves live. This tests the generate-code thesis on our
   own core.
 
+### Ruling 2026-07-27 (owner) — the ten-second start
+
+**Starting the system must never take longer than 10 seconds.** This is a
+hard bound, not a wish: it is B0's primary falsifier (`bin/seon start` →
+REPL reachable and store open inside 10 s) and the standing measure the
+dev/publish split is judged by. The old operator chain structurally cannot
+meet it (serial shadow-cljs build → ~45 s AOT/CDS republish on any JVM
+edit → pod start-gates, with a downstream failure tearing the writer REPL
+down); that chain is condemned, not tuned. Context, same day: a deleted
+`my.skills` var wedged the watcher build and took the whole boot — and the
+JVM REPL — with it. The REPL must never be hostage to a downstream
+process's build or gate.
+
 ## 1. The base constructs
 
 Everything the runtime is made of. Every step below is an application of
@@ -521,7 +534,9 @@ path, no pod. N1 decomposes into the ladder:
   process-global singleton that assumes "the" cluster — connections,
   caches, and sessions are keyed by cluster/store, never ambient-one.
   Falsifier includes: start instances for clusters `a` and `b`
-  side-by-side, REPL into BOTH by name, prove isolation.
+  side-by-side, REPL into BOTH by name, prove isolation — and the
+  ten-second bound (owner, 2026-07-27): `bin/seon start` to a reachable
+  REPL in under 10 s, always.
 - **B1 — the store.** Open Datahike in-process (`:self` writer), the one
   `flock` single-writer assert, clean reopen after kill -9. Port decision
   rung: Datahike direct first; the `seon.db` facade is adopted
