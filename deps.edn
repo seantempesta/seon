@@ -19,7 +19,8 @@
         org.replikativ/datahike
         {:local/root "reference-code/datahike"
          :exclusions [org.clojure/clojurescript
-                      com.github.pkpkpk/cljs-cache]}
+                      com.github.pkpkpk/cljs-cache
+                      org.replikativ/konserve]}
         org.replikativ/konserve
         {:git/url "https://github.com/seantempesta/konserve"
          :git/sha "b5c99bc02a7175652a610324215288b78551801f"
@@ -32,7 +33,8 @@
          :exclusions [org.clojure/clojurescript]}
         org.replikativ/proximum
         {:git/url "https://github.com/seantempesta/proximum"
-         :git/sha "9846d3e79e1aee48474bc876d3d563d7137209c6"}
+         :git/sha "9846d3e79e1aee48474bc876d3d563d7137209c6"
+         :exclusions [org.replikativ/konserve]}
 
         com.taoensso/timbre {:mvn/version "6.5.0"}
         com.cognitect/transit-clj {:mvn/version "1.0.333"}
@@ -79,7 +81,8 @@
     org.replikativ/datahike
     {:local/root "reference-code/datahike"
      :exclusions [org.clojure/clojurescript
-                  com.github.pkpkpk/cljs-cache]}
+                  com.github.pkpkpk/cljs-cache
+                  org.replikativ/konserve]}
     org.replikativ/konserve
     {:git/url "https://github.com/seantempesta/konserve"
      :git/sha "b5c99bc02a7175652a610324215288b78551801f"
@@ -95,7 +98,8 @@
     com.cognitect/transit-clj {:mvn/version "1.0.333"}
     org.replikativ/proximum
     {:git/url "https://github.com/seantempesta/proximum"
-     :git/sha "9846d3e79e1aee48474bc876d3d563d7137209c6"}
+     :git/sha "9846d3e79e1aee48474bc876d3d563d7137209c6"
+     :exclusions [org.replikativ/konserve]}
     com.google.genai/google-genai {:mvn/version "1.59.0"}
     com.github.kkuegler/human-readable-ids-java {:mvn/version "0.4"}
     io.github.thibaultmeyer/cuid {:mvn/version "2.0.5"}
