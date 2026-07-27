@@ -96,22 +96,8 @@
   disposition's own facts (close + completion message, or release) ride
   in this same commit — one transaction, no torn window. When it does
   not, this is the receipt alone."
-  {:malli/schema [:=> [:cat [:map {:closed true}
-                             [:seon.cluster.run/id :seon.cluster.run/id]
-                             [:seon.cluster.run/process
-                              :seon.cluster.run/process]
-                             [:seon.cluster.run/claim-epoch
-                              :seon.cluster.run/claim-epoch]
-                             [:seon.cluster.run.form/ordinal
-                              :seon.cluster.run.form/ordinal]
-                             [:seon.cluster.eval/status
-                              :seon.cluster.eval/status]
-                             [:seon.cluster.eval/result-edn {:optional true}
-                              :seon.cluster.eval/result-edn]
-                             [:seon.cluster.eval/error {:optional true}
-                              :seon.cluster.eval/error]
-                             [:my.run/value {:optional true} :my.run/value]]]
-                  [:vector :any]]}
+  {:malli/schema [:=> [:cat :seon.cluster.loop/terminal-request]
+                  [:vector :some]]}
   [request]
   (throw (ex-info "awaits implementation" {::fn `terminal-tx})))
 
@@ -129,11 +115,18 @@
   `(state transition)` unlistens on `::flow/stop`.
   `(state input-id message)` runs ONE pass: pin a database value, derive
   work, do it, rewake if more remains."
+  ;; The zero-arity return is core.async.flow's OWN descriptor shape —
+  ;; the one genuinely third-party map here, so it stays open. Every
+  ;; shape that is ours is named and closed.
   {:malli/schema [:function
                   [:=> [:cat] [:map]]
-                  [:=> [:cat [:map]] [:map]]
-                  [:=> [:cat [:map] :keyword] [:map]]
-                  [:=> [:cat [:map] :keyword :any] [:tuple [:map] [:maybe [:map]]]]]}
+                  [:=> [:cat :seon.cluster.loop/cluster]
+                   :seon.cluster.loop/state]
+                  [:=> [:cat :seon.cluster.loop/state :keyword]
+                   :seon.cluster.loop/state]
+                  [:=> [:cat :seon.cluster.loop/state :keyword :any]
+                   [:tuple :seon.cluster.loop/state
+                    [:maybe [:map-of :keyword [:vector :some]]]]]]}
   ([] (throw (ex-info "awaits implementation" {::fn `step})))
   ([_args] (throw (ex-info "awaits implementation" {::fn `step})))
   ([_state _transition] (throw (ex-info "awaits implementation" {::fn `step})))
@@ -149,6 +142,7 @@
   Every failure inside it is a VALUE: a model error, an unreadable
   reply, and a refused transaction each end the turn with facts the
   agent reads on its next wake. Nothing throws into the loop."
-  {:malli/schema [:=> [:cat [:map]] [:map]]}
+  {:malli/schema [:=> [:cat :seon.cluster.loop/turn-request]
+                  :seon.cluster.loop/turn-report]}
   [request]
   (throw (ex-info "awaits implementation" {::fn `turn})))

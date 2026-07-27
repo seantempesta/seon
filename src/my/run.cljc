@@ -53,10 +53,11 @@
   The loop closes the run and commits the result as the completion
   message; there is no `:seon.cluster.run/result` attribute, because
   the message content already carries it (n3-plan §3.2).
-  Blank text returns `{:seon.error/message …}` — a flat value the agent
-  can see and correct on its next turn, never a throw."
+  Blank text returns the ONE registered flat error value
+  (`:seon.error/value`) — something the agent can see and correct on its
+  next turn, never a throw. One error shape, one owner (error.edn)."
   {:malli/schema [:=> [:cat :my.run/result]
-                  [:or :my.run/completed [:map [:seon.error/message :string]]]]}
+                  [:or :my.run/completed :seon.error/value]]}
   [result]
   (if (str/blank? result)
     {:seon.error/message

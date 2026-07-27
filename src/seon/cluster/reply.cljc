@@ -96,10 +96,13 @@
   (or (fenced-blocks text) text))
 
 (defn- refused
-  [kind message extra]
-  (merge {:seon.error/kind kind
-          :seon.error/message message}
-         extra))
+  "The ONE registered flat error value (`:seon.error/value`).
+  Detail rides under `:seon.error/data` rather than beside the message,
+  because the shape is closed and one owner (error.edn) decides it."
+  [kind message data]
+  {:seon.error/kind kind
+   :seon.error/message message
+   :seon.error/data data})
 
 ;;; ---------------------------------------------------------------------------
 ;;; Contract
@@ -118,8 +121,7 @@
   - `::no-forms` — the reply carried prose only. This is a real agent
     outcome, not a parse failure, and it must be distinguishable."
   {:malli/schema [:=> [:cat :seon.cluster.reply/text]
-                  [:or :seon.cluster.reply/sources
-                   [:map [:seon.error/message :string]]]]}
+                  [:or :seon.cluster.reply/sources :seon.error/value]]}
   [text]
   (let [source (unfenced text)
         ; parsing is not evaluation: a throwaway context with no

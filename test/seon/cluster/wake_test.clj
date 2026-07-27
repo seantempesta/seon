@@ -167,7 +167,14 @@
           (let [committed (future (d/transact connection (message-tx "m-9")))]
             (is (not= ::hung (deref committed 5000 ::hung))
                 "the committing caller returned — the handler swallowed
-                 its own failure instead of hanging the writer forever"))
+                 its own failure instead of hanging the writer forever")
+            ;; surviving is only half of it: a swallowed failure that
+            ;; reports nothing is an invisible fault, so the payload
+            ;; must ARRIVE
+            (let [fault (first (async/alts!! [faults (async/timeout 2000)]))]
+              (is (some? fault) "the fault reached the fault channel")
+              (is (instance? Throwable fault)
+                  "and it is the throwable itself, not a summary of it")))
           (finally
             (wake/unlisten! {:seon.cluster.wake/connection connection
                              :seon.cluster.wake/key key})))))))

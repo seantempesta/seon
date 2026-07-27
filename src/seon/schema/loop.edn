@@ -1,4 +1,20 @@
-{; One completed turn, for observation only — the loop's out port
+{; The cluster handle one proc carries: everything a turn needs and
+ ; nothing it does not. The EVALUATOR IS INJECTED as a qualified symbol
+ ; (the same symbols-as-data idiom as :seon.ancestor/populate), so the
+ ; loop's mechanics do not wait on the seon.sci.eval adoption and a
+ ; suite can drive a turn with a fake evaluator.
+ :seon.cluster.loop/cluster [:map {:closed true} [:seon.store/branch-connection :seon.store/branch-connection] [:seon.cluster.run/process :seon.cluster.run/process] [:seon.cluster.wake/channel :seon.flow/channel] [:seon.cluster.loop/provider :seon.cluster.loop/provider] [:seon.cluster.loop/evaluate :qualified-symbol] [:seon.sci.admit/caps :seon.sci.admit/caps]]
+ :seon.cluster.loop/provider [:map {:closed true} [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai/api-key-variable :seon.ai/api-key-variable] [:seon.ai/timeout-ms :seon.ai/timeout-ms]]
+ :seon.cluster.loop/evaluation [:map {:closed true} [:seon.sci.admit/value :any] [:seon.cluster.eval/status :seon.cluster.eval/status] [:seon.cluster.eval/result-edn {:optional true} :seon.cluster.eval/result-edn] [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error]]
+ :seon.cluster.loop/turn-request [:map {:closed true} [:seon.cluster.loop/cluster :seon.cluster.loop/cluster] [:seon.cluster.work/next :seon.cluster.work/next]]
+ :seon.cluster.loop/terminal-request [:map {:closed true} [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.run/process :seon.cluster.run/process] [:seon.cluster.run/claim-epoch :seon.cluster.run/claim-epoch] [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal] [:seon.cluster.eval/status :seon.cluster.eval/status] [:seon.cluster.eval/result-edn {:optional true} :seon.cluster.eval/result-edn] [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error] [:my.run/value {:optional true} :my.run/value]]
+ ; The proc's own state. ::flow/in-ports is core.async.flow's key, and
+ ; it is declared here rather than hidden behind an open map: the state
+ ; is ours, only the channel objects inside it are foreign.
+ :seon.cluster.loop/state [:map {:closed true} [:clojure.core.async.flow/in-ports [:map-of :keyword :seon.flow/channel]] [:seon.cluster.loop/cluster :seon.cluster.loop/cluster] [:seon.cluster.loop/turns [:int {:min 0}]]]
+ :seon.cluster.loop/turns [:int {:min 0}]
+
+ ; One completed turn, for observation only — the loop's out port
  ; carries a report nothing depends on, so a dropped report costs
  ; nothing and no consumer can backpressure the loop.
  :seon.cluster.loop/turn-report [:map {:closed true} [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.work/situation :seon.cluster.work/situation] [:seon.cluster.loop/forms-run [:int {:min 0}]] [:seon.cluster.loop/outcome [:enum :closed :released :error :interrupted]]]

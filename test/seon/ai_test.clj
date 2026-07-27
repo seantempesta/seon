@@ -31,18 +31,26 @@
 (deftest the-request-body-carries-the-model-and-the-messages
   (let [body (ai/request-body (assoc base :seon.ai/system "be brief"))]
     (is (map? body))
-    (is (= "probe-model" (get body "model" (get body :model))))
-    (is (some? (or (get body "messages") (get body :messages)))
-        "one non-streaming chat completion, nothing else")))
+    ;; STRING keys at the wire boundary, no keyword fallback: the body
+    ;; is the one :any third-party document and we project out of it
+    ;; immediately rather than pretending it is Clojure data
+    (is (= "probe-model" (get body "model")))
+    (is (vector? (get body "messages"))
+        "one non-streaming chat completion, nothing else")
+    (is (false? (get body "stream")))))
 
 (deftest a-foreign-document-either-yields-text-or-says-why
   (testing "the shape a provider actually returns"
     (is (= {:seon.ai/text "hello there"}
            (ai/completion-text
-            {:choices [{:message {:role "assistant" :content "hello there"}}]}))))
+            {"choices" [{"message" {"role" "assistant"
+                                    "content" "hello there"}}]}))))
   (testing "and anything else is an error value, never nil"
-    (doseq [body [{} {:choices []} {:choices [{:message {}}]}
-                  "a string" nil 42 {:error {:message "nope"}}]]
+    (doseq [body [{} {"choices" []} {"choices" [{"message" {}}]}
+                  "a string" nil 42 {"error" {"message" "nope"}}
+                  ;; keyword keys are NOT the wire shape and must not
+                  ;; sneak through a fallback
+                  {:choices [{:message {:content "hi"}}]}]]
       (let [outcome (ai/completion-text body)]
         (is (error? outcome) (str "must classify: " (pr-str body)))
         (is (= :seon.ai/unparseable-body (:seon.error/kind outcome)))))))
