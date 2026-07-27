@@ -36,19 +36,35 @@ Non-blocking friction on record: claim-tx's two observed takeover fields
 are independently optional but required together — tighten to one
 optional takeover map at the next contract revision, not before.
 
-UNBUILT right now, in order: **R0** — the atomic
-`src/`→`src-old/` split (orchestrator executes at the next lane-quiet
-point; the src-split-audit lane's inventory is the prerequisite); **B0+B1
-contract packages** (launch signature `bin/seon start [cluster]
-[--config path]`, two-phase config with the closed bootstrap schema,
-per-instance REPL advertisement, store rung with the facade port
-verdict); **N2 to green** (implementation lane in flight on the sealed
-run model). IN FLIGHT at the boundary: nucleus-run-impl, jvm-indexer
-(pages/facet fixes + full `cluster apply` proof owed), src-split-audit.
+**R0 EXECUTED 2026-07-27** under the session-2 rulings (fresh tree IS the
+project): fresh `src/` = seon.cluster.run + seon.schema{,.form,.internal,
+.datahike} + seon.flow; fresh `test/` = run-test + flow.loop-test; root
+`deps.edn` rewritten (fresh default + `:dev`/`:test`; old world behind
+repointed `:writer`/`:writer-test`/`:cljs` aliases); `bin/test` is the
+system gate (8.15 s full, selection via the edit hook in seconds); system
+load 2.23 s (10-second ruling already satisfied pre-B0). Contract
+revision on the sealed N2 test (author-owned): the malli→datahike bridge
+moved to its proper owner `seon.schema.datahike` — the test no longer
+requires the old `seon.db` facade. `seon.flow` owns its config dials
+locally (the `config.resolve` seam cut). Verified: `bin/test` 11/55/0/0;
+hook selects exactly the affected fresh suite per edited file.
+
+UNBUILT right now, in order: **B0+B1 contract packages** (launch
+signature `bin/seon start [cluster] [--config path]`, two-phase config
+with the closed bootstrap schema, per-instance REPL advertisement,
+store rung with the flock-per-store verdict from
+`research/datahike-multistore-2026-07-27.md` and the per-cluster-flow
+topology from `research/flow-per-cluster-2026-07-27.md`; the shared
+bootstrap-ancestor fork ruling lands in B2). R0 follow-ups, owned but
+not blocking: `bin/plan-state` repointing at `src-old` (its State A rows
+now scan the fresh tree and report nonsense); maintained-doc/skill path
+updates from the split audit's tables; MCP REPL advertisement for the
+fresh system (B0); `src-inspect-ai`/`src-needle` stale-path risks
+(recorded in the audit, downstream follow-up).
 OPEN and unowned: function-level test selection spec (task #6),
-cluster-apply-no-longer-births-root-agent, the build audit's remaining
-owner questions, the adversarial design-review lane, architecture-doc
-alignment (deferred until the nucleus reports).
+cluster-apply-no-longer-births-root-agent (old system), the build
+audit's remaining owner questions, the adversarial design-review lane,
+architecture-doc alignment.
 
 Owner instruction, 2026-07-26: *"I feel like we are close to representing
 everything witht he same primitves and composing them together but we aren't

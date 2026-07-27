@@ -13,7 +13,6 @@
             [clojure.core.async.impl.protocols :as async.impl]
             [clojure.datafy :as datafy]
             [clojure.walk :as walk]
-            [seon.config.resolve :as config.resolve]
             [seon.schema :as schema])
   (:import [clojure.lang Counted]
            [java.util LinkedList]
@@ -406,13 +405,30 @@
                  :else
                  nil)))))))))
 
+;;; The launcher's own config dials — schemas colocated with their owner.
+
+(schema/register! :seon.config.flow.compute/queue-depth
+  [:int
+   {:min 1
+    :description
+    "Queued compute submissions. Default 10 preserves core.async.flow's fixed per-channel default at alpha3; a full channel parks the submitter and loses no work."}])
+
+(schema/register! :seon.config.flow.compute/concurrency
+  [:int
+   {:min 1
+    :description
+    "Concurrent compute submissions. Default equals the acquired :seon.hardware/cores fact, preserving the measured pre-Flow availableProcessors bound without a runtime fallback."}])
+
+(def flow-workload-attributes
+  "Flat config-singleton attributes consumed by the work launcher."
+  [:seon.config.flow.compute/queue-depth
+   :seon.config.flow.compute/concurrency])
+
 (defn- required-launcher-configuration
   [configuration]
   (let [selected
-        (config.resolve/flow-workload-configuration configuration)
-        required
-        [:seon.config.flow.compute/queue-depth
-         :seon.config.flow.compute/concurrency]
+        (select-keys configuration flow-workload-attributes)
+        required flow-workload-attributes
         missing (remove #(contains? selected %) required)]
     (when (seq missing)
       (throw

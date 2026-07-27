@@ -263,7 +263,7 @@
       (str/starts-with? path "src/seon/embed")
       (str/starts-with? path "test/seon/db/")
       (= path "test/seon/embed_writer_test.clj")
-      (= path "bin/test-writer")))
+      (= path "bin/test")))
 
 (defn host-impact
   "Select retained operator and writer tests from host namespace facts."
@@ -290,7 +290,7 @@
                             paths)
         dependency-input? (some #{"deps.edn"} paths)
         force-operator? (some #{"bb.edn"} paths)
-        force-writer? (some #{"bin/test-writer"} paths)
+        force-writer? (some #{"bin/test"} paths)
         relevant-operator? (or shared-input? dependency-input?
                                (some operator-path? paths))
         relevant-writer? (or shared-input? dependency-input?
@@ -480,7 +480,7 @@
            :seon.dev.changed-test/test-namespaces test-namespaces)))
 
 (defn- run-writer! [root test-namespaces]
-  (let [argv (cond-> [(str (fs/path root "bin/test-writer"))]
+  (let [argv (cond-> [(str (fs/path root "bin/test"))]
                (not= :all test-namespaces)
                (into (map str test-namespaces)))]
     (assoc (run-command! root :writer argv {})

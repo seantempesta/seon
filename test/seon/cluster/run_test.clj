@@ -12,8 +12,8 @@
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
             [seon.cluster.run :as run]
-            [seon.db :as db]
-            [seon.schema]))
+            [seon.schema]
+            [seon.schema.datahike :as schema.datahike]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; In-memory database fixture — the same idiom as the wake tests
@@ -50,7 +50,8 @@
         _ (d/create-database configuration)
         connection (d/connect configuration)]
     (try
-      (d/transact connection (db/malli->datahike-schema model-attributes))
+      (d/transact connection
+                  (schema.datahike/malli->datahike-schema model-attributes))
       (body connection)
       (finally
         (d/release connection)

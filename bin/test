@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# The system test gate: every suite under test/, or an explicit selection.
+#
+#   bin/test                        # run everything under test/
+#   bin/test seon.cluster.run-test  # run exactly these namespaces
+#
+# Source classpath, in-memory Datahike, no artifact, no operator —
+# seconds per cycle. Exit code is the suite verdict.
+
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+source bin/_java-home-resolver
+
+if [ $# -gt 0 ]; then
+  namespaces=("$@")
+else
+  namespaces=()
+  while IFS= read -r file; do
+    ns=${file#test/}
+    ns=${ns%.clj}
+    ns=${ns%.cljc}
+    ns=${ns//\//.}
+    ns=${ns//_/-}
+    namespaces+=("$ns")
+  done < <(find test -type f \( -name '*_test.clj' -o -name '*_test.cljc' \) | sort)
+fi
+
+if [ ${#namespaces[@]} -eq 0 ]; then
+  echo "bin/test: no test namespaces found under test/" >&2
+  exit 1
+fi
+
+requires=""
+symbols=""
+for ns in "${namespaces[@]}"; do
+  requires+=" (require '$ns)"
+  symbols+=" '$ns"
+done
+
+exec clojure -M:test -e \
+  "$requires
+   (let [result (apply clojure.test/run-tests [$symbols])]
+     (System/exit (if (zero? (+ (:fail result) (:error result))) 0 1)))"

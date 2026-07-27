@@ -1,29 +1,79 @@
-{:paths ["src" "resources"]
+{;; THE SYSTEM (2026-07-27 tree split): fresh `src/` and `test/` are the
+ ;; default project — the target system, built up block by block, all
+ ;; lights green. The old system lives under `src-old/`/`test-old/` as the
+ ;; quarry (git is the archive) and is DISABLED by default: it loads only
+ ;; through the explicitly old-facing aliases below.
+ :paths ["src"]
 
  :mvn/repos {"central" {:url "https://repo1.maven.org/maven2/"}
              "clojars" {:url "https://repo.clojars.org/"}}
 
+ ;; The system's dependency closure. Every coordinate is deliberate; the
+ ;; maintained forks are vendored in reference-code/ and read, not guessed.
  :deps {org.clojure/clojure {:mvn/version "1.12.5"}
         metosin/malli {:mvn/version "0.20.0"}
-        org.replikativ/datalog-parser {:mvn/version "0.2.37"}}
+        ;; Flow is published from core.async's dev-flow-alpha branch under
+        ;; the same artifact as core.async; alpha3 adds :ping-map-fn.
+        org.clojure/core.async {:mvn/version "1.10.874-alpha3"}
+
+        org.replikativ/datahike
+        {:local/root "reference-code/datahike"
+         :exclusions [org.clojure/clojurescript
+                      com.github.pkpkpk/cljs-cache]}
+        org.replikativ/konserve
+        {:git/url "https://github.com/seantempesta/konserve"
+         :git/sha "b5c99bc02a7175652a610324215288b78551801f"
+         :exclusions [org.clojure/clojurescript
+                      org.clojars.mmb90/cljs-cache
+                      com.github.pkpkpk/cljs-node-io
+                      com.github.pkpkpk/fress]}
+        org.replikativ/hasch
+        {:mvn/version "0.4.100"
+         :exclusions [org.clojure/clojurescript]}
+        org.replikativ/proximum
+        {:git/url "https://github.com/seantempesta/proximum"
+         :git/sha "9846d3e79e1aee48474bc876d3d563d7137209c6"}
+
+        com.taoensso/timbre {:mvn/version "6.5.0"}
+        com.cognitect/transit-clj {:mvn/version "1.0.333"}
+        org.slf4j/slf4j-simple {:mvn/version "2.0.16"}}
 
  :aliases
- {;; JVM datahike writer. This alias is the complete server contract: it
-  ;; selects the maintained Datahike/Konserve/Proximum closure and carries
-  ;; the launch flags required by its SIMD implementation. Source launch,
-  ;; focused tests, the Docker classpath, and writer-uber all use this basis.
-  ;;
-  ;; Proximum's slf4j-simple is selected explicitly as the writer's sole SLF4J
-  ;; provider.
+ {;; Dev REPL on the system's source classpath — no AOT, no artifact, no
+  ;; operator. The JVM flags are Proximum's SIMD requirements plus the
+  ;; writer-calibrated heap; they ride every -M invocation that loads the
+  ;; database closure.
+  :dev
+  {:jvm-opts ["--add-modules" "jdk.incubator.vector"
+              "--enable-native-access=ALL-UNNAMED"
+              "--sun-misc-unsafe-memory-access=allow"
+              "-XX:+UseG1GC" "-Xmx512m"]}
+
+  ;; The system test gate: `bin/test` (all suites) or
+  ;; `bin/test seon.cluster.run-test` (selection). Source classpath,
+  ;; in-memory Datahike, seconds per cycle.
+  :test
+  {:extra-paths ["test"]
+   :extra-deps {org.clojure/test.check {:mvn/version "1.1.1"}}
+   :jvm-opts ["--add-modules" "jdk.incubator.vector"
+              "--enable-native-access=ALL-UNNAMED"
+              "--sun-misc-unsafe-memory-access=allow"
+              "-XX:+UseG1GC" "-Xmx512m"]}
+
+  ;; ---------------------------------------------------------------------
+  ;; OLD SYSTEM (quarry) — everything below serves src-old/ and is used
+  ;; only by explicitly old-facing entry points (bin/seon, old gates).
+  ;; Nothing new invests here; pieces are adopted OUT by git mv.
+  ;; ---------------------------------------------------------------------
+
+  ;; JVM datahike writer, repointed at the quarry. Old namespaces that the
+  ;; fresh tree adopted (seon.schema, seon.flow) resolve from "src".
   :writer
-  {:replace-paths ["src"]
+  {:replace-paths ["src" "src-old"]
    :replace-deps
    {org.clojure/clojure {:mvn/version "1.12.5"}
     metosin/malli {:mvn/version "0.20.0"}
     org.replikativ/datalog-parser {:mvn/version "0.2.37"}
-    ;; Flow is published from core.async's dev-flow-alpha branch under the
-    ;; same artifact as core.async. 1.9.865 is the latest stable release;
-    ;; alpha3 is the current Flow release and adds :ping-map-fn.
     org.clojure/core.async {:mvn/version "1.10.874-alpha3"}
 
     org.replikativ/datahike
@@ -56,13 +106,7 @@
               "--sun-misc-unsafe-memory-access=allow"
               "-XX:+UseG1GC" "-Xmx512m"]}
 
-  ;; JVM agent host (sci-execution-runtime U1). Composes onto :writer
-  ;; (`clojure -M:writer:host ...`): the host process runs on the writer
-  ;; family's exact dependency basis plus sci. Pin mirrors the :cljs alias'
-  ;; B2-experimental pin — :local/root against the reference checkout
-  ;; (HEAD be4021d, containing the JIT commit 45bcf0f). PACKAGING
-  ;; IMPLICATION: :local/root is not a publishable coordinate — production
-  ;; cutover needs a git dep on a pushed mirror (seantempesta model).
+  ;; JVM agent host — composes onto :writer (`clojure -M:writer:host ...`).
   :host
   {:extra-deps {org.babashka/sci {:local/root "reference-code/sci"}
                 parinferish/parinferish {:mvn/version "0.8.0"}
@@ -75,136 +119,53 @@
                 {:local/root
                  "reference-code/datastar-clojure/libraries/sdk-http-kit"}}}
 
-  ;; Focused writer tests add source only; clojure.test already rides Clojure.
-  ;; bin/test-writer selects exact retained namespaces without booting the
-  ;; server or discovering unrelated CLJS tests.
+  ;; Old writer tests (test-old) plus the fresh suites, on the old basis.
   :writer-test
-  {:extra-paths ["test" "script"]
-   ;; The monitor is a JVM-only testbed dependency. Its vendored source matches
-   ;; the current published v0.1.5@376d6ec coordinate exactly.
+  {:extra-paths ["test" "test-old" "script"]
    :extra-deps
-   {io.github.clojure/core.async.flow-monitor
+   {org.clojure/test.check {:mvn/version "1.1.1"}
+    io.github.clojure/core.async.flow-monitor
     {:local/root "reference-code/core.async.flow-monitor"}}}
-
-  ;; The database-writer test namespaces load against the exact :writer basis;
-  ;; there is no second writer dependency graph or broad JVM test discovery.
-  ;; Usage (JDK 26, pinned via bin/_java-home-resolver):
-  ;;   bin/test-writer seon.db.transport-uds-test
 
   :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.5"}}
           :ns-default build}
 
-  ;; Linting - run via Babashka for speed
-  ;; Usage: bb -M:lint src        (run Splint on src)
-  ;;        bb -M:lint --autocorrect src  (auto-fix safe issues)
-  ;;        clj-kondo --lint src  (system clj-kondo - already installed)
+  ;; Linting — run via Babashka for speed.
+  ;; Usage: bb -M:lint src src-old        (Splint)
+  ;;        clj-kondo --lint src src-old  (system clj-kondo)
   :lint {:extra-deps {io.github.noahtheduke/splint {:mvn/version "1.22.0"}}
          :main-opts ["-m" "noahtheduke.splint"]}
 
-  ;; CLJS build — pod side. Referenced two ways:
-  ;;   1. shadow-cljs.edn pulls these deps into the build classpath via
-  ;;      `{:deps {:aliases [:cljs]}}`.
-  ;;   2. `clj -M:cljs <args>` invokes shadow-cljs's CLI directly
-  ;;      (`shadow.cljs.devtools.cli/-main`), bypassing the npx wrapper.
-  ;; Usage: `clj -M:cljs watch client`, `clj -M:cljs compile client`,
-  ;;        `clj -M:cljs server`, `clj -M:cljs --help`.
-  ;;
-  ;; Two git/url overrides per spec-02 §5.2 — both reach for Sean's
-  ;; personal forks of upstream libs while the patches are in review.
-  ;; The direct dependency plus override makes a dependency-tree inspection
-  ;; show the forks resolving by :git/sha.
-  ;;   - datahike: feat/cljs-promise-api — selective Promise wrap on
-  ;;     the public API driven by :referentially-transparent?, plus
-  ;;     a chan->promise helper and a build.clj fix so deps/prep-lib
-  ;;     works cold.
-  ;;   - partial-cps: fix/ioc-await-probe-safety — defensive try/catch
-  ;;     around the three macro-probe sites in ioc.clj so CLJS 1.12.145's
-  ;;     cljs.core/await doesn't crash the CPS transformer.
-  :cljs {;; `test` is on shadow-cljs.edn :source-paths but must ALSO appear
-         ;; here so shadow's JVM classpath actually sees the test files
-         ;; — without it, `seon.test.runner-test` and friends resolve to
-         ;; "not available" even though the .cljs files exist on disk.
-         ;; The `seon.dev.test-preload` namespace requires the platform
-         ;; CLJS tests so they're reachable from the live `:client` pod.
-         ;; This alias owns every CLJS compiler JVM: the long-lived client
-         ;; watcher and one-shot test compilers. Host-sized JDK ergonomics on
-         ;; a 128 GiB workstation otherwise commit a 2 GiB initial heap and
-         ;; permit ~30 GiB per concurrent compiler. Keep one explicit bounded
-         ;; policy here; do not duplicate heap flags in launch scripts.
-         ;;
-         ;; B2-EXPERIMENTAL (sci-execution-runtime PRD): the sci dependency
-         ;; enters here per the chunk runbook, pinned as :local/root against
-         ;; the reference checkout (HEAD be4021d, which contains the CLJS
-         ;; JIT commit 45bcf0f). PACKAGING IMPLICATION: :local/root is not a
-         ;; publishable coordinate — a production cutover needs a git dep on
-         ;; a pushed mirror. "tmp/sci-probe/exec-src" carries ONLY the
-         ;; B2-experimental child variant namespaces; no production build
-         ;; requires anything from it.
-         :jvm-opts      ["--sun-misc-unsafe-memory-access=allow"
-                         "-Xms256m" "-Xmx3g"]
-         :extra-paths   ["test" "script" "tmp/sci-probe/exec-src"]
-         :extra-deps    {;; B2-EXPERIMENTAL sci pin — see the alias comment above.
-                         org.babashka/sci                     {:local/root "reference-code/sci"}
-                         org.clojure/clojurescript            {:mvn/version "1.12.145"}
-                         ;; Mirrors :writer: Flow remains JVM-only, but this
-                         ;; keeps the shared core.async coordinate identical.
-                         org.clojure/core.async               {:mvn/version "1.10.874-alpha3"}
-                         ;; Maintained upstream 3.4.11 fork with the exact-selector
-                         ;; symbol/hash fix and truthful Node reload completion.
-                         ;; The npm 3.4.10 package remains only the CLI shim.
-                         thheller/shadow-cljs
-                         {:git/url "https://github.com/seantempesta/shadow-cljs"
-                          :git/sha "c98bf60f70c102abda0fd385f78cc0fcd9c25408"}
-                         aero/aero                            {:mvn/version "1.1.6"}
-                         com.taoensso/timbre                  {:mvn/version "6.5.0"}
-                         parinferish/parinferish              {:mvn/version "0.8.0"}
-                         rewrite-clj/rewrite-clj              {:mvn/version "1.2.51"}
-                         org.replikativ/datahike              {:mvn/version "0.8.1681"}
-                         org.replikativ/persistent-sorted-set {:mvn/version "0.4.137"}
-                         ;; Transit-JSON for protocol values
-                         ;; (keywords, sets, instants, ratios) crossing the
-                         ;; Bun database client <-> JVM authority boundary. Mirrored by
-                         ;; com.cognitect/transit-clj in seon.db.transport.uds.
-                         com.cognitect/transit-cljs           {:mvn/version "0.8.280"}
-                         ;; reitit — the pod's HTTP front door (seon.web.router).
-                         ;; The published CLJS artifact is clean: reitit's trie
-                         ;; compiler forks `#?(:cljs clojure-trie :clj java-trie)`,
-                         ;; so the Bun pod always gets the pure-Clojure trie and
-                         ;; the :clj-only JavaSegmentRouter is never loaded. NOT
-                         ;; vendored on source-paths (that would drag the Java
-                         ;; trie onto the classpath). reitit-core + meta-merge come
-                         ;; transitively; reitit-malli rides our malli-everything
-                         ;; for future :parameters coercion.
-                         metosin/reitit-ring                  {:mvn/version "0.10.1"}
-                         metosin/reitit-malli                 {:mvn/version "0.10.1"}}
-         ;; Spec-02 §5.2 — point datahike at the patched fork (selective
-         ;; Promise wrap driven by :referentially-transparent?) and
-         ;; partial-cps at the cps-probe-safety patch (transitive via
-         ;; persistent-sorted-set + datahike's superv.async). Both are
-         ;; PR-shaped pending upstream review.
+  ;; CLJS build — DEAD (owner ruling 2026-07-27: the CLJS build is off;
+  ;; CLJ and the JVM only). Retained solely so the alias name still parses
+  ;; for historical scripts; nothing may invoke it.
+  :cljs {:jvm-opts ["--sun-misc-unsafe-memory-access=allow"
+                    "-Xms256m" "-Xmx3g"]
+         :extra-paths ["test-old" "script"]
+         :extra-deps {org.babashka/sci {:local/root "reference-code/sci"}
+                      org.clojure/clojurescript {:mvn/version "1.12.145"}
+                      org.clojure/core.async {:mvn/version "1.10.874-alpha3"}
+                      thheller/shadow-cljs
+                      {:git/url "https://github.com/seantempesta/shadow-cljs"
+                       :git/sha "c98bf60f70c102abda0fd385f78cc0fcd9c25408"}
+                      aero/aero {:mvn/version "1.1.6"}
+                      com.taoensso/timbre {:mvn/version "6.5.0"}
+                      parinferish/parinferish {:mvn/version "0.8.0"}
+                      rewrite-clj/rewrite-clj {:mvn/version "1.2.51"}
+                      org.replikativ/datahike {:mvn/version "0.8.1681"}
+                      org.replikativ/persistent-sorted-set {:mvn/version "0.4.137"}
+                      com.cognitect/transit-cljs {:mvn/version "0.8.280"}
+                      metosin/reitit-ring {:mvn/version "0.10.1"}
+                      metosin/reitit-malli {:mvn/version "0.10.1"}}
          :override-deps {org.replikativ/datahike
                          {:local/root "reference-code/datahike"}
-                         ;; Konserve 0.9.359 plus the shared CLJ/CLJS legacy
-                         ;; header reader and idempotent JavaScript filestore deletion.
                          org.replikativ/konserve
                          {:git/url "https://github.com/seantempesta/konserve"
                           :git/sha "b5c99bc02a7175652a610324215288b78551801f"}
                          org.replikativ/superv.async
-                         ;; Patched simple-supervisor's stale-pending
-                         ;; watchdog to be LAZY: instead of starting a
-                         ;; self-rescheduling setTimeout chain at
-                         ;; namespace load, the watchdog activates on
-                         ;; the first -track-exception call. Namespace
-                         ;; load is timer-free, which lets wasm-rquickjs
-                         ;; hosts under wstd::runtime::block_on (e.g.
-                         ;; wasmtime CLI's `run --invoke`) return cleanly.
-                         ;; Exception surfacing semantics preserved — the
-                         ;; watchdog kicks in the moment a real channel
-                         ;; exception needs tracking. Branch
-                         ;; `wasm/lazy-watchdog`. Upstream PR pending.
                          {:git/url "https://github.com/seantempesta/superv.async"
                           :git/sha "3e6ed755f83634c9e9bbb58707f9446420d32ce9"}
                          is.simm/partial-cps
                          {:git/url "https://github.com/simm-is/partial-cps"
                           :git/sha "1e119b03ea908ad925b98f9ba0a26371c65441e3"}}
-         :main-opts     ["-m" "shadow.cljs.devtools.cli"]}}}
+         :main-opts ["-m" "shadow.cljs.devtools.cli"]}}}

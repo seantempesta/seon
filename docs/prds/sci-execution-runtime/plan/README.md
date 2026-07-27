@@ -128,9 +128,8 @@ carried stale evidence within a day. Re-verify before starting.
   `:db.fn/cas`; the one system-side effect owner is **`seon.effect`**
   (`effect/request!`) — every "door"/"capability dispatch" phrase dies; the
   **program graph** is the collective name for `:seon.fn`/`:seon.ns`/
-  `:seon.schema` facts, whose owners rename to `seon.code.fn`/`.ns`/`.schema`/
-  `.test` (attribute rename included: search-and-replace + cluster reset,
-  L18); a "latest-wins mailbox" is a `(sliding-buffer 1)` tap; the cluster
+  `:seon.schema` facts, which stay TOP LEVEL — `seon.fn`/`seon.ns`/`seon.schema`/`seon.test`
+  (owner 2026-07-27, superseding the `seon.code.*` rename); a "latest-wins mailbox" is a `(sliding-buffer 1)` tap; the cluster
   JVM entry becomes **`seon.cluster`** at the merge; receipts move under
   `seon.agent.run`.
 - **Agent world is `my.*`, flat.** Tools are flat siblings (`my.fs`,
@@ -350,6 +349,49 @@ CLJS boundary. This applies O13 (the pod dies unconditionally) to the
 development loop today instead of waiting for the group-5 cut: nothing
 may reintroduce a shadow build into the dev feedback path.
 
+### Rulings 2026-07-27 session 2 (owner, conversational) — the fresh tree IS the project
+
+- **Stop thinking temporary; drop the "nucleus" vocabulary.** The fresh
+  tree is not a side experiment with a codename — it is SEON, set up as
+  if it was the target the entire time: a solid dev environment, a
+  production build, and a testing system, each done properly and then
+  improved on. No piling ideas on top of each other; no interim
+  constructs that a later rung deletes. (The ladder's rung names R0/B0…
+  remain as plan bookkeeping; the system itself is just Seon.)
+- **The fresh tree gets its own proper `deps.edn` story.** Fresh `src/`
+  and `test/` are the DEFAULT project (paths, REPL, tests); the old system
+  is DISABLED by default and reachable only behind an explicit alias for
+  quarrying and old gates. This inverts the R0 audit's keep-everything-
+  running posture — "disable the old system entirely if you need to" is
+  granted. bin/seon and the artifact machinery serve the old system only
+  until their replacements land; nothing new invests in them.
+- **web-render is cut from the dev process set.** UI comes later (N4's
+  in-process pipeline). The target boot has no wire protocol, no way to
+  crash, and efficient many-thread launch — reimagined on
+  `core.async.flow`, whose source is required reading.
+- **Boot starts from the flow testbed.** `seon.flow` (1,020 lines,
+  flow.spi launchers, suite green 4/31 on 2026-07-27) is the foundation
+  the boot design grows from, per the flow-per-cluster research: one
+  flow graph per cluster, root-owned shared executors, cluster reset
+  stops only its own graph.
+- **Standing discipline, owner's words:** we do not repeat the mistakes
+  we made before. Quarry first — assume a previous implementation exists
+  in `src-old/` or git history, read it, then design better. When unsure,
+  ask the owner with concrete options and concise pros/cons BEFORE
+  implementation bakes a taste call in.
+- **Program-graph namespaces stay TOP LEVEL (supersedes the
+  `seon.code.*` rename).** The core system's own names: `seon.fn`,
+  `seon.ns`, `seon.schema`, `seon.test`. Schema facts remain one global
+  population with derived reverse lookup (the N5 clause), unchanged.
+- **The bootstrap is a shared database ancestor.** One deliberate build
+  indexes ALL code and produces the bootstrap; a freshly started cluster
+  loads it, a restarted cluster resumes from it. Every cluster shares the
+  SAME bootstrap, so creating a new cluster is a database fork of that
+  ancestor — near-instant, never a re-index. This is the template-store
+  mechanism (`c669c2f6b`) named as what it is; O2 still holds (clusters
+  never share a LIVE store — the fork copies, the ancestor stays
+  immutable). Design lands in the B2 contract package.
+
 ## 1. The base constructs
 
 Everything the runtime is made of. Every step below is an application of
@@ -380,7 +422,7 @@ these and nothing else; a proposal that needs an eighth construct is wrong.
    graph, never listed. Effects carry the one request identity (`seon.db`
    operation IDs); the honest ceiling is at-least-once.
 6. **The program graph.** Code is facts: `:seon.fn`/`:seon.ns`/`:seon.schema`
-   (owners renaming to `seon.code.*`) committed like any data, acquired at a
+   (top-level names, owner 2026-07-27) committed like any data, acquired at a
    basis into a fresh fork. One graph answers "what exists?" and "load it."
    A compile-time JVM index is its first-party producer; agents are its
    runtime producer, overriding by later transaction — never by disk write.
@@ -656,7 +698,7 @@ one bounded eval and the agent learns why.
 defn in form 1 → committed program facts → callable in form 2 and by
 another agent after restart; acquisition at a basis; `:malli/schema`
 required for durable defns. **Falsifier:** old step 4 verbatim.
-**Schema facts stay GLOBAL in the `seon.code.*` port (owner, s3
+**Schema facts stay GLOBAL in the program-graph port (owner, s3
 close):** a schema is one row in the one global population, looked up
 on demand — never attached to or embedded in a fn/ns entity. Code
 entities carry REFERENCES to schema keys (a contract naming its
