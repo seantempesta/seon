@@ -126,7 +126,36 @@ build population injected (schema facts now, program facts at N5) so
 the fork mechanics don't wait. Then implementation lanes. Revision
 chunk GREEN (5c95e259c); schema-EDN GREEN (b432bd07f — 103 declarations
 converted, one gate live on both producers, honest generators
-throughout). **B2 COMPLETE (2026-07-27 late): FULL GATE 85/345/0.** Every package
+throughout). **IMMEDIATE WORKING EDGE (write-down before compaction, 2026-07-27
+night).** The boot COMPOSITION (task #9) is sealed (f2fecffea: start!
+threads the whole tower, REPL survives any later-layer failure, the
+throw carries the degraded instance under :seon.boot/instance) with
+seal-side EDN fixes at 35a938872 (boot.edn instance gains the three
+optional tower keys; provenance.edn gains :seon.db.process/id identity
++ :seon.db/index facets on the two refs). KNOWN BROKEN RIGHT NOW:
+(require 'seon.cluster) FAILS activation after 35a938872 — almost
+certainly boot.edn's reference to :seon.reconcile/result, which is
+registered in CODE (reconcile.cljc) and unloaded at seon.cluster
+activation (the load-order coupling the composition agent flagged,
+with its offered fix: inline the result shape in boot.edn, or move
+reconcile's result/converged?/operations registrations to a reconcile
+EDN file — prefer the EDN move, one authority). FIRST ACTION
+POST-COMPACTION: diagnose that require, apply the fix, prove
+(require 'seon.cluster 'seon.config) clean + bin/test. THEN resume the
+composition agent (the Opus agent that drafted+implemented the fork
+machinery — it stopped correctly on the two blockers, both now fixed;
+its tower probe: ancestor build 717ms, fork 19ms, converged re-apply
+:max-tx unchanged; its message queue has the full implementation spec)
+to implement start!/stop! to green. Its accepted design: process-local
+store holder + refcount under ONE lock with running-instances;
+stop! also releases branch connection, last instance releases the
+store (stop!'s docstring needs that revision — seal owner's). Its
+open risk: digest roots default ["src"] refuses on source-less
+deployments (answer at the publish build). ALSO STANDING: stop!
+docstring revision; the GC-cost experiment; issue
+process-liveness-check-has-no-single-owner.
+
+**B2 COMPLETE (2026-07-27 late): FULL GATE 85/345/0.** Every package
 sealed AND green: config+reconcile (18a27e816, converged=zero-writes
 proven by :max-tx), fork machinery (a35c95d0a — ancestor rename-at-end
 builds, registry as the one branch-lifecycle owner, export with the
