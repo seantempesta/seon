@@ -56,7 +56,11 @@
   ;; in-memory Datahike, seconds per cycle.
   :test
   {:extra-paths ["test"]
-   :extra-deps {org.clojure/test.check {:mvn/version "1.1.1"}}
+   :extra-deps {org.clojure/test.check {:mvn/version "1.1.1"}
+                ;; JVM-only testbed dependency; vendored source matches
+                ;; the published v0.1.5@376d6ec coordinate exactly.
+                io.github.clojure/core.async.flow-monitor
+                {:local/root "reference-code/core.async.flow-monitor"}}
    :jvm-opts ["--add-modules" "jdk.incubator.vector"
               "--enable-native-access=ALL-UNNAMED"
               "--sun-misc-unsafe-memory-access=allow"

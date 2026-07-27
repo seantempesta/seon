@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: closed
 severity: blocker
 tags: [issue, flow, testing, runtime]
 ---
@@ -60,3 +60,10 @@ keeping a second gate.
 - No current `seon.flow` public contract relies only on `test-old/`.
 - The default gate fails when any one of those surviving mechanisms is
   falsified.
+
+## Resolution
+
+Adopted 2026-07-27: `208a4a748` moved the suite; the orchestrator added
+flow-monitor to the `:test` alias and adopted the `kill_child` helper the
+child-JVM falsifier spawns. Full gate green: 47 tests / 225 assertions /
+0 failures / 0 errors via `bin/test`.
