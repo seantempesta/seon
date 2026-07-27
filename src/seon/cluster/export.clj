@@ -107,11 +107,13 @@
   through `seon.cluster.store/open-store!` with its own flock, its own
   store id, and every branch of the source intact.
   Refuses `::export-exists` (`<parent-dir>/store` is already present —
-  an export never overwrites a store) and `::clone-unsupported` (the
-  host OS has no known copy-on-write copy command). See the report's
-  open question: b2-plan §11 risk 6 proposes a loud create+re-transact
-  fallback before `::clone-unsupported`; that fallback is NOT drafted
-  here and awaits the owner's call."
+  an export never overwrites a store). A host with no known
+  copy-on-write command FALLS BACK, loudly (one warning naming the
+  fallback and the host): create a fresh store at the temp path and
+  re-transact every branch's datoms from the source — slower, never
+  unavailable (robust-and-roll-with-it is the standing owner lean;
+  b2-plan §9's original shape). `::clone-unsupported` refuses only
+  when the fallback ALSO fails, carrying both causes."
   {:malli/schema [:=> [:cat :seon.export/request] :seon.export/path]}
   [request]
   (throw (ex-info "awaits implementation" {::fn `export!})))
