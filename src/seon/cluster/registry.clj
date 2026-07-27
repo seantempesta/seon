@@ -71,6 +71,9 @@
     fix above. Without it this row was NOT DETECTABLE — the caller was
     told `:ok` and the branch was gone (b2-plan §0.3)."
   (:require [datahike.api :as d]
+            [datahike.connections :as connections]
+            [datahike.store :as datahike.store]
+            [konserve.core :as k]
             [seon.cluster.store :as store]
             [seon.schema.edn :as schema.edn]))
 
@@ -79,6 +82,14 @@
 ;;; ---------------------------------------------------------------------------
 
 (schema.edn/load! {})
+
+(defn- refuse!
+  "Refuse loudly with the one registry error shape."
+  [rule message data]
+  (throw (ex-info message
+                  (assoc data
+                         :seon.error/kind ::refused
+                         ::rule rule))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Pure derivations
@@ -90,7 +101,7 @@
   name and its branch can never disagree."
   {:malli/schema [:=> [:cat :seon.boot/cluster-name] :seon.store/branch]}
   [cluster-name]
-  (throw (ex-info "awaits implementation" {::fn `cluster-branch})))
+  (keyword (str "cluster-" cluster-name)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The roster
@@ -103,7 +114,76 @@
   (`reference-code/datahike/src/datahike/versioning.cljc:206-214`)."
   {:malli/schema [:=> [:cat :seon.store/store] :seon.cluster.registry/roster]}
   [store]
-  (throw (ex-info "awaits implementation" {::fn `roster})))
+  (set (d/branches (:seon.store/connection store))))
+
+;;; ---------------------------------------------------------------------------
+;;; Reading what the store already knows
+;;; ---------------------------------------------------------------------------
+
+(declare retire-branch!)
+
+;;; The connection's own konserve store instance. Two connections to one
+;;; physical store hold DIFFERENT instances (gc_guard.cljc:47-50), which
+;;; is exactly why the roster mutation is serialized by store id in the
+;;; fork; for plain reads either instance answers the same bytes.
+(defn- konserve-store [store]
+  (:store @(:seon.store/connection store)))
+
+(defn- head-record
+  "The stored record under a branch keyword or a commit id."
+  [konserve key]
+  (k/get konserve key nil {:sync? true}))
+
+(defn- branch-connected?
+  "True when THIS process already holds a connection to `branch`.
+  The same `[store-id branch]` connection-id lookup `open-branch!` uses
+  (`src/seon/cluster/store.clj:354,360`); Datahike reference-counts a
+  second connect into the SAME connection, so presence here is the only
+  honest answer to \"is anyone still holding it\"."
+  [store branch]
+  (let [configuration (assoc (store/datahike-configuration
+                              (:seon.store/dir store))
+                             :branch branch)]
+    (contains? @connections/*connections*
+               (datahike.store/connection-id configuration))))
+
+(defn- descends-strictly?
+  "True when `head` has `commit` STRICTLY above it in the commit graph.
+  Walks `[:meta :datahike/parents]` from the head's PARENTS — never the
+  head itself, which is what makes the relation asymmetric for two
+  branches sharing one head. `:max-tx` is monotone along the parent
+  chain, so a record older than the target cannot lead to it and its
+  parents are not expanded: the walk costs the history since `commit`,
+  not the whole graph."
+  [konserve head commit floor]
+  (loop [pending (vec (get-in head [:meta :datahike/parents]))
+         seen #{}]
+    (if-let [cid (first pending)]
+      (let [rest-pending (subvec pending 1)]
+        (cond
+          (= cid commit) true
+          (seen cid) (recur rest-pending seen)
+          :else
+          (let [record (head-record konserve cid)]
+            (recur (if (and record (>= (long (or (:max-tx record) 0)) floor))
+                     (into rest-pending (get-in record [:meta :datahike/parents]))
+                     rest-pending)
+                   (conj seen cid)))))
+      false)))
+
+(defn- strict-descendant
+  "The first other roster branch that strictly descends from `branch`."
+  [store branch]
+  (let [konserve (konserve-store store)
+        target (head-record konserve branch)
+        commit (get-in target [:meta :datahike/commit-id])
+        floor (long (or (:max-tx target) 0))]
+    (when commit
+      (some (fn [other]
+              (when-let [head (head-record konserve other)]
+                (when (descends-strictly? konserve head commit floor)
+                  other)))
+            (disj (roster store) branch)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Branch lifecycle — the one owner
@@ -126,8 +206,28 @@
   Refuses `::source-absent` (`::from` names no branch or commit)."
   {:malli/schema [:=> [:cat :seon.cluster.registry/branch-request]
                   :seon.cluster.registry/branch-result]}
-  [request]
-  (throw (ex-info "awaits implementation" {::fn `branch!})))
+  [{:keys [:seon.store/store :seon.store/branch]
+    source :seon.cluster.registry/from}]
+  (if (contains? (roster store) branch)
+    {:seon.store/branch branch :seon.cluster/created? false}
+    (try
+      (d/branch! (:seon.store/connection store) source branch)
+      {:seon.store/branch branch :seon.cluster/created? true}
+      (catch clojure.lang.ExceptionInfo failure
+        (case (:type (ex-data failure))
+          ; a lost race is idempotence, not a failure: the branch the
+          ; caller asked for is in the roster (versioning.cljc:233-235)
+          :branch-already-exists
+          {:seon.store/branch branch :seon.cluster/created? false}
+
+          (:branch-does-not-exist :commit-not-found)
+          (refuse! ::source-absent
+                   (str "no branch or commit " source " to branch from")
+                   {::dir (:seon.store/dir store)
+                    :seon.cluster.registry/from source
+                    :seon.store/branch branch})
+
+          (throw failure))))))
 
 (defn ensure-cluster!
   "Ensure `:cluster-<name>` exists, branching from the ancestor if absent.
@@ -140,8 +240,18 @@
   roster — a cluster is never silently branched from `:db`)."
   {:malli/schema [:=> [:cat :seon.cluster.registry/cluster-request]
                   :seon.cluster.registry/branch-result]}
-  [request]
-  (throw (ex-info "awaits implementation" {::fn `ensure-cluster!})))
+  [{:keys [:seon.store/store :seon.boot/cluster-name]
+    ancestor :seon.ancestor/branch}]
+  (when-not (contains? (roster store) ancestor)
+    (refuse! ::ancestor-absent
+             (str "the ancestor branch " ancestor
+                  " is absent from the store roster")
+             {::dir (:seon.store/dir store)
+              :seon.ancestor/branch ancestor
+              :seon.boot/cluster-name cluster-name}))
+  (branch! {:seon.store/store store
+            :seon.cluster.registry/from ancestor
+            :seon.store/branch (cluster-branch cluster-name)}))
 
 (defn reset-cluster!
   "Return a cluster to ancestor state: retire its branch, branch it again.
@@ -157,8 +267,19 @@
   `::ancestor-absent`."
   {:malli/schema [:=> [:cat :seon.cluster.registry/cluster-request]
                   :seon.cluster.registry/branch-result]}
-  [request]
-  (throw (ex-info "awaits implementation" {::fn `reset-cluster!})))
+  [{:keys [:seon.store/store :seon.boot/cluster-name]
+    ancestor :seon.ancestor/branch
+    :as request}]
+  (let [branch (cluster-branch cluster-name)]
+    (when-not (contains? (roster store) ancestor)
+      (refuse! ::ancestor-absent
+               (str "the ancestor branch " ancestor
+                    " is absent from the store roster")
+               {::dir (:seon.store/dir store)
+                :seon.ancestor/branch ancestor
+                :seon.boot/cluster-name cluster-name}))
+    (retire-branch! {:seon.store/store store :seon.store/branch branch})
+    (ensure-cluster! request)))
 
 (defn retire-branch!
   "Remove one branch from the roster. Idempotent; data survives until GC.
@@ -189,8 +310,29 @@
   entry seeds its head unconditionally in the GC mark
   (`gc.cljc:26,60-70`) and the two branches are byte-identical anyway."
   {:malli/schema [:=> [:cat :seon.cluster.registry/retire-request] :nil]}
-  [request]
-  (throw (ex-info "awaits implementation" {::fn `retire-branch!})))
+  [{:keys [:seon.store/store :seon.store/branch]}]
+  (when (= :db branch)
+    (refuse! ::cannot-retire-main
+             "the main :db branch is the store; it is never retired"
+             {::dir (:seon.store/dir store) :seon.store/branch branch}))
+  (when (contains? (roster store) branch)
+    (when (branch-connected? store branch)
+      (refuse! ::cluster-connected
+               (str "branch " branch " still has a connection in this process")
+               {::dir (:seon.store/dir store) :seon.store/branch branch}))
+    (when-let [descendant (strict-descendant store branch)]
+      (refuse! ::cannot-retire-live-ancestor
+               (str "branch " descendant " still descends from " branch)
+               {::dir (:seon.store/dir store)
+                :seon.store/branch branch
+                ::descendant descendant}))
+    (try
+      (d/delete-branch! (:seon.store/connection store) branch)
+      (catch clojure.lang.ExceptionInfo failure
+        ; the roster is the fact: a branch already gone is already done
+        (when-not (= :branch-does-not-exist (:type (ex-data failure)))
+          (throw failure)))))
+  nil)
 
 (defn collect!
   "Collect this store's unreachable objects; returns how many were swept.
@@ -202,4 +344,4 @@
   state sweeps zero (proven, b2-plan §0.7)."
   {:malli/schema [:=> [:cat :seon.store/store] :seon.cluster.registry/swept]}
   [store]
-  (throw (ex-info "awaits implementation" {::fn `collect!})))
+  (count @(d/gc-storage (:seon.store/connection store))))

@@ -65,8 +65,14 @@
   - after the atomic move: a complete, openable export. `reidentify!`
     is idempotent on a store already carrying its own path-derived id,
     so a re-run over the finished export is a no-op."
-  (:require [seon.cluster.store :as store]
-            [seon.schema.edn :as schema.edn]))
+  (:require [clojure.java.io :as io]
+            [datahike.api :as d]
+            [datahike.migrate :as migrate]
+            [konserve.core :as k]
+            [konserve.filestore :as filestore]
+            [seon.cluster.store :as store]
+            [seon.schema.edn :as schema.edn])
+  (:import [java.nio.file CopyOption Files StandardCopyOption]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — src/seon/schema/export.edn
@@ -74,9 +80,175 @@
 
 (schema.edn/load! {})
 
+(defn- refuse!
+  "Refuse loudly with the one export error shape."
+  [rule message data]
+  (throw (ex-info message
+                  (assoc data
+                         :seon.error/kind ::refused
+                         ::rule rule))))
+
+(defn- warn!
+  "Say loudly, on stderr, that the slow path is running.
+  The fresh tree has no logging owner yet; when it lands this becomes
+  one call to it. Silence here would be the real defect — a copy that
+  quietly takes minutes instead of milliseconds must announce itself."
+  [message data]
+  (binding [*out* *err*]
+    (println "WARNING" message (pr-str data))
+    (flush)))
+
+(defn- delete-recursively! [^java.io.File file]
+  (when (.exists file)
+    (doseq [entry (reverse (file-seq file))]
+      (.delete ^java.io.File entry)))
+  nil)
+
+;;; ---------------------------------------------------------------------------
+;;; Copying the bytes — the fast path and the never-unavailable one
+;;; ---------------------------------------------------------------------------
+
+;;; Quarried verbatim from State A's operator
+;;; (`script/seon/dev/cluster.clj:79-84`): copy-on-write where the
+;;; filesystem provides it, a byte copy where it does not, and the
+;;; command's own diagnostic when it fails.
+(defn- clone-command [source target]
+  (case (System/getProperty "os.name")
+    "Mac OS X" ["/bin/cp" "-cR" source target]
+    "Linux" ["cp" "--reflink=auto" "-a" source target]
+    nil))
+
+(defn- clone!
+  "Copy `source` to `target` with the host's clone command.
+  Returns false when the host has no known command; throws with the
+  command's own output when it has one and it fails."
+  [source ^java.io.File target]
+  (if-let [command (clone-command source (.getPath target))]
+    (let [process (.start (doto (ProcessBuilder. ^java.util.List command)
+                            (.redirectErrorStream true)))
+          output (slurp (.getInputStream process))
+          exit (.waitFor process)]
+      (when-not (zero? exit)
+        (throw (ex-info (str "the clone command failed: " command)
+                        {::command command ::exit exit ::output output})))
+      true)
+    false))
+
+(defn- retransact!
+  "Rebuild the source store at `target` by re-transacting its datoms.
+  The never-unavailable path: a fresh store, EVERY branch created while
+  `:db` is still empty genesis, then each branch's complete datom set
+  imported into its own branch through Datahike's own flat-file
+  migration (`reference-code/datahike/src/datahike/migrate.clj:8,32`).
+  Creating the branches first is what keeps this faithful — importing
+  into a branch forked from an already-populated `:db` would assert
+  every shared datom twice."
+  [store ^java.io.File target]
+  (let [source-connection (:seon.store/connection store)
+        others (disj (set (d/branches source-connection)) :db)
+        configuration (store/datahike-configuration (.getPath target))
+        datoms-dir (io/file (str (.getPath target) ".datoms"))]
+    (.mkdirs datoms-dir)
+    (try
+      (d/create-database configuration)
+      (let [target-main (d/connect configuration)]
+        (try
+          (doseq [branch others]
+            (d/branch! target-main :db branch))
+          (doseq [branch (cons :db others)]
+            (let [file (io/file datoms-dir (str (name branch) ".cbor"))
+                  reader (if (= :db branch)
+                           source-connection
+                           (store/open-branch! store branch))]
+              (try
+                (migrate/export-db reader (.getPath file))
+                (finally
+                  (when-not (= :db branch)
+                    (d/release reader))))
+              (let [writer (if (= :db branch)
+                             target-main
+                             (d/connect (assoc configuration :branch branch)))]
+                (try
+                  (migrate/import-db writer (.getPath file))
+                  (finally
+                    (when-not (= :db branch)
+                      (d/release writer)))))))
+          (finally
+            (d/release target-main))))
+      (finally
+        (delete-recursively! datoms-dir)))
+    nil))
+
+(defn- copy-store!
+  "Put a byte-equivalent of the source store at `target`.
+  Clone when the host can; otherwise re-transact, loudly. Only when
+  BOTH fail does the export refuse, carrying both causes."
+  [store ^java.io.File target]
+  (let [source (:seon.store/dir store)
+        cause (try
+                (when-not (clone! source target)
+                  (ex-info (str "no clone command for this host: "
+                                (System/getProperty "os.name"))
+                           {::os (System/getProperty "os.name")}))
+                (catch Throwable failure
+                  failure))]
+    (when cause
+      (warn! "export is falling back to create + re-transact; this is
+              slower by a factor of tens and is not copy-on-write"
+             {::os (System/getProperty "os.name")
+              ::cause (ex-message cause)})
+      ; a failed clone may have left a partial tree behind
+      (delete-recursively! target)
+      (try
+        (retransact! store target)
+        (catch Throwable fallback-failure
+          (refuse! ::clone-unsupported
+                   (str "this host can neither clone nor rebuild the store: "
+                       (ex-message fallback-failure))
+                   {:seon.store/dir source
+                    ::os (System/getProperty "os.name")
+                    ::clone-cause (ex-message cause)
+                    ::fallback-cause (ex-message fallback-failure)}))))
+    nil))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Contracts
 ;;; ---------------------------------------------------------------------------
+
+(defn- reidentify-at!
+  "Stamp the store in `store-dir` with the identity `identity-dir` derives.
+  The two differ for exactly one caller: `export!` stamps the FINAL
+  identity onto the directory while it still has its temp name, so the
+  move that publishes it is the last step and a mis-identified store is
+  never reachable under a name anything opens. Every other caller
+  passes one directory twice."
+  [store-dir identity-dir]
+  (let [path (.getCanonicalPath (io/file store-dir))
+        identity-path (.getCanonicalPath (io/file identity-dir))
+        konserve (filestore/connect-fs-store path :opts {:sync? true})
+        head (k/get konserve :db nil {:sync? true})
+        _ (when-not (some? head)
+            (refuse! ::no-branch-head
+                     (str "there is no :db branch head at " path
+                          " — this is not a store")
+                     {:seon.store/dir path}))
+        branches (k/get konserve :branches nil {:sync? true})
+        _ (when-not (some? branches)
+            (refuse! ::genesis-incomplete
+                     (str "the store at " path " has no branch roster")
+                     {:seon.store/dir path}))
+        identity (get-in (store/datahike-configuration identity-path)
+                         [:store :id])]
+    ; EVERY head, not only :db: each one carries its own stored config,
+    ; and connect compares the head it is opening (connector.cljc:159-169)
+    (doseq [branch (conj (set branches) :db)]
+      (when-let [record (k/get konserve branch nil {:sync? true})]
+        (k/assoc konserve branch
+                 (-> record
+                     (assoc-in [:config :store :id] identity)
+                     (assoc-in [:config :store :path] identity-path))
+                 {:sync? true})))
+    identity-path))
 
 (defn reidentify!
   "Rewrite a copied store's stored identity to match its own path.
@@ -95,7 +267,7 @@
   export must never carry forward)."
   {:malli/schema [:=> [:cat :seon.store/dir] :seon.store/dir]}
   [store-dir]
-  (throw (ex-info "awaits implementation" {::fn `reidentify!})))
+  (reidentify-at! store-dir store-dir))
 
 (defn export!
   "Copy an open store to `<parent-dir>/store` as an independent store.
@@ -115,5 +287,24 @@
   b2-plan §9's original shape). `::clone-unsupported` refuses only
   when the fallback ALSO fails, carrying both causes."
   {:malli/schema [:=> [:cat :seon.export/request] :seon.export/path]}
-  [request]
-  (throw (ex-info "awaits implementation" {::fn `export!})))
+  [{:keys [:seon.store/store] parent :seon.export/parent-dir}]
+  (let [target (io/file parent "store")]
+    (when (.exists target)
+      (refuse! ::export-exists
+               (str "a store already exists at " (.getPath target)
+                    "; an export never overwrites one")
+               {:seon.export/parent-dir parent
+                :seon.export/path (.getPath target)}))
+    (.mkdirs (io/file parent))
+    (let [temp (io/file parent (str ".store." (random-uuid) ".tmp"))]
+      (try
+        (copy-store! store temp)
+        (reidentify-at! (.getPath temp) (.getPath target))
+        ; the temp name is the fence: only a complete, re-identified
+        ; store ever takes the name anything opens
+        (Files/move (.toPath temp) (.toPath target)
+                    (into-array CopyOption [StandardCopyOption/ATOMIC_MOVE]))
+        (.getCanonicalPath target)
+        (catch Throwable failure
+          (delete-recursively! temp)
+          (throw failure))))))
