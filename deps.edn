@@ -36,6 +36,11 @@
          :git/sha "9846d3e79e1aee48474bc876d3d563d7137209c6"
          :exclusions [org.replikativ/konserve]}
 
+        ;; The one interpreter on every tier; our fork (interrupt-fn is
+        ;; the ONE guard). Default classpath since N3: the run loop's
+        ;; reply splitter and the value-admission gate are system code.
+        org.babashka/sci {:local/root "reference-code/sci"}
+
         com.taoensso/timbre {:mvn/version "6.5.0"}
         com.cognitect/transit-clj {:mvn/version "1.0.333"}
         org.slf4j/slf4j-simple {:mvn/version "2.0.16"}}
