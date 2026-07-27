@@ -3,7 +3,14 @@
  ; (the same symbols-as-data idiom as :seon.ancestor/populate), so the
  ; loop's mechanics do not wait on the seon.sci.eval adoption and a
  ; suite can drive a turn with a fake evaluator.
- :seon.cluster.loop/cluster [:map {:closed true} [:seon.store/branch-connection :seon.store/branch-connection] [:seon.cluster.run/process :seon.cluster.run/process] [:seon.cluster.wake/channel :seon.flow/channel] [:seon.cluster.loop/provider :seon.cluster.loop/provider] [:seon.cluster.loop/evaluate :qualified-symbol] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.config.eval/time-limit-ms :seon.config.eval/time-limit-ms] [:seon.config/on-core-error :seon.config/on-core-error] [:seon.config.error/recurrence-limit :seon.config.error/recurrence-limit] [:seon.config.error/escalate-to {:optional true} :seon.config.error/escalate-to]]
+ :seon.cluster.loop/cluster [:map {:closed true} [:seon.store/branch-connection :seon.store/branch-connection] [:seon.cluster.run/process :seon.cluster.run/process] [:seon.cluster.wake/channel :seon.flow/channel] [:seon.cluster.loop/provider :seon.cluster.loop/provider] [:seon.cluster.loop/evaluate :qualified-symbol] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.config.eval/time-limit-ms :seon.config.eval/time-limit-ms] [:seon.config/on-core-error :seon.config/on-core-error] [:seon.config.error/recurrence-limit :seon.config.error/recurrence-limit] [:seon.config.error/escalate-to {:optional true} :seon.config.error/escalate-to] [:clojure.core.async.flow/pid {:optional true} :keyword]]
+ ; `::flow/pid` is FLOW'S, added to the args map it hands the init
+ ; arity (`flow/impl.clj:155`: `:args (assoc args ::flow/pid pid)`), so
+ ; the handle a running proc holds genuinely has one and the closed
+ ; shape has to say so. Optional because a suite or a REPL builds the
+ ; handle itself and flow adds the key only at start. Instrumentation
+ ; found this the first time it ran against a real boot — the contract
+ ; was wrong about its own live input and nothing had ever checked.
  :seon.cluster.loop/provider [:map {:closed true} [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai/api-key-variable :seon.ai/api-key-variable] [:seon.ai/timeout-ms :seon.ai/timeout-ms]]
  :seon.cluster.loop/evaluation [:map {:closed true} [:seon.sci.admit/value :any] [:seon.cluster.eval/status :seon.cluster.eval/status] [:seon.cluster.eval/result-edn {:optional true} :seon.cluster.eval/result-edn] [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error]]
  :seon.cluster.loop/turn-request [:map {:closed true} [:seon.cluster.loop/cluster :seon.cluster.loop/cluster] [:seon.cluster.work/next :seon.cluster.work/next]]
@@ -14,9 +21,13 @@
  :seon.cluster.loop/state [:map {:closed true} [:clojure.core.async.flow/in-ports [:map-of :keyword :seon.flow/channel]] [:seon.cluster.loop/cluster :seon.cluster.loop/cluster] [:seon.cluster.loop/turns [:int {:min 0}]]]
  :seon.cluster.loop/turns [:int {:min 0}]
 
- ; One completed turn, for observation only — the loop's out port
+ ; One completed turn, for observation only. The run id is OPTIONAL
+ ; because an `:open` turn reports before a run exists — the report is
+ ; built by a `cond->` that omits it, and the closed shape said
+ ; required, so the contract had been wrong about its own most common
+ ; report since it was written (instrumentation found it) — the loop's out port
  ; carries a report nothing depends on, so a dropped report costs
  ; nothing and no consumer can backpressure the loop.
- :seon.cluster.loop/turn-report [:map {:closed true} [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.work/situation :seon.cluster.work/situation] [:seon.cluster.loop/forms-run [:int {:min 0}]] [:seon.cluster.loop/outcome [:enum :closed :released :error :interrupted]]]
+ :seon.cluster.loop/turn-report [:map {:closed true} [:seon.cluster.run/id {:optional true} :seon.cluster.run/id] [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.work/situation :seon.cluster.work/situation] [:seon.cluster.loop/forms-run [:int {:min 0}]] [:seon.cluster.loop/outcome [:enum :closed :released :error :interrupted]]]
  :seon.cluster.loop/forms-run [:int {:min 0}]
  :seon.cluster.loop/outcome [:enum :closed :released :error :interrupted]}

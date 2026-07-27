@@ -572,7 +572,13 @@
              (run/plan-tx
               {::run/id run-id
                ::run/process process
-               ::run/claim-epoch (get-in model [:runs run-id :epoch] 1)
+               ;; an UNCLAIMED run has no epoch, and the model writes 0
+               ;; for that — but 0 is not an epoch (`[:int {:min 1}]`),
+               ;; so sending it asks a malformed question instead of a
+               ;; wrong one. The refusal under test is "nobody holds
+               ;; this", which a valid non-matching epoch proves just as
+               ;; well. Instrumentation caught the malformed call.
+               ::run/claim-epoch (max 1 (get-in model [:runs run-id :epoch] 1))
                ::run/plan-digest digest
                ::run/sources ["(+ 1 1)"]
                ::run/now now})))

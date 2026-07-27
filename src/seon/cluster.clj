@@ -216,10 +216,12 @@
   This is deliberately process-global state — the one sanctioned kind:
   a genuinely process-local artifact, like a compiler state or a
   connection."
-  {:malli/schema [:=> [:cat]
-                  [:map {:closed true}
-                   [:compute [:fn 'seon.flow/executor?]]
-                   [:io [:fn 'seon.flow/executor?]]]]}
+  ;; the shape is REGISTERED (boot.edn), not inlined here: a
+  ;; `:malli/schema` goes straight to malli, which has no resolver for a
+  ;; bare `[:fn sym]`, so the inlined form could never compile and this
+  ;; contract had never once been checked until instrumentation
+  ;; collected it
+  {:malli/schema [:=> [:cat] :seon.boot/executors]}
   []
   @root-executor-pair)
 
@@ -674,7 +676,17 @@
         ;; AFTER the dials are facts, because the root agent is who the
         ;; escalation dial names, and BEFORE the loop is armed, because
         ;; an armed loop may need to address it on its first pass
-        _ (seed-root-agent! connection)]
+        _ (seed-root-agent! connection)
+        ;; INSTRUMENTATION IS NOT WIRED HERE, and the reason is
+        ;; evidence rather than taste. Wiring `seon.instrument/apply!`
+        ;; into boot was tried: every test that boots a cluster then
+        ;; instruments the whole JVM, so a suite's outcome depends on
+        ;; whether an earlier suite happened to boot one — and a
+        ;; CLUSTER-scoped dial silently mutating PROCESS-global var
+        ;; roots is the wrong seam besides. The dev loop turns it on
+        ;; (`bin/repl`, and the drive scripts), which is where a human
+        ;; is watching. See `seon.instrument`.
+        ]
     (publish! (merge instance (arm-loop! instance connection cluster-name)))))
 
 (defn start!

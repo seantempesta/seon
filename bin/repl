@@ -13,7 +13,25 @@ fi
 
 exec clojure -M:dev -e \
   "(do
-     (require 'seon.cluster)
-     (seon.cluster/start! {:seon.boot/cluster-name \"$cluster\"})
-     (println \"seon $cluster ready — REPL advertised\")
+     (require 'seon.cluster 'seon.config 'seon.instrument)
+     (let [instance (seon.cluster/start! {:seon.boot/cluster-name \"$cluster\"})
+           dials (seon.config/effective
+                  @(:seon.boot/cluster-connection instance)
+                  \"$cluster\")
+           ;; THE DEV LOOP is where instrumentation belongs: a human is
+           ;; watching, the dial says :panic, and a contract violation
+           ;; should stop the call it happens in. Re-run
+           ;; (seon.instrument/apply! {:seon.config/on-core-error :panic})
+           ;; after re-evaluating anything — a re-defn silently strips
+           ;; the wrapper and nothing warns.
+           applied (seon.instrument/apply!
+                    {:seon.config/on-core-error
+                     (:seon.config/on-core-error dials)
+                     :seon.sci.admit/caps
+                     (select-keys dials [:seon.config.eval.result/max-depth
+                                         :seon.config.eval.result/max-collection
+                                         :seon.config.eval.result/max-string
+                                         :seon.config.eval.result/max-nodes])})]
+       (println \"seon $cluster ready — REPL advertised; instrumented\"
+                (:seon.instrument/instrumented applied) \"vars\"))
      @(promise))"

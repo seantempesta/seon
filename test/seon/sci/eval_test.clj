@@ -181,7 +181,13 @@
                    [(gen/fmap pr-str gen/any-printable)
                     (gen/elements
                      ["(throw (Exception. \"x\"))" "(/ 1 0)" "((fn []))"
-                      "(recur)" "#{" "(let [x])" ":" "(def)" ""
+                      ;; NOT the empty string: a form source is
+                      ;; `[:string {:min 1}]` at the database attribute
+                      ;; and in `evaluate`'s request, so an empty source
+                      ;; cannot arrive — `reply/sources` never emits one
+                      ;; and nothing can store one. Generating it tested
+                      ;; an input the system makes unrepresentable.
+                      "(recur)" "#{" "(let [x])" ":" "(def)"
                       "(clojure.string/upper-case 42)"
                       "(assoc nil :a)" "(first 1)"])])]
           (let [evaluation (deadlined source 300)]

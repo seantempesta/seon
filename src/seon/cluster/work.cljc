@@ -88,7 +88,11 @@
                    [?agent :seon.cluster.agent/id ?agent-id]
                    [?agent :seon.cluster.agent/run ?run]]
                  db agent-id)]
-    (when (run/open? run) run)))
+    ;; ASK ONLY ABOUT A RUN THAT EXISTS. `open?` of nothing answered
+    ;; "true" (nil contains no closed-at) and the `when` then returned
+    ;; nil anyway — right answer, wrong question, and instrumentation
+    ;; named it the first time it ran.
+    (when (and run (run/open? run)) run)))
 
 (defn- agents-with-work
   "Every agent id that has an open run or an unanswered trigger."

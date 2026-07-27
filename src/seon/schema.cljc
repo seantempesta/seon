@@ -1343,7 +1343,12 @@
 
    This is the ordinary value stored by the divergence cache. Runtime objects
    and population-wide indexes are never included."
-  {:malli/schema [:=> [:catn [::projection :map] [::projection :map]] :map]}
+  ;; the two arguments are NAMED DISTINCTLY, which sounds obvious and
+  ;; was not: `:catn` refuses duplicate keys, so binding both to
+  ;; `::projection` made this contract uncompilable — and nothing ever
+  ;; compiled it, so it sat here unenforced until instrumentation
+  ;; collected it (2026-07-27, the first thing `seon.instrument` found)
+  {:malli/schema [:=> [:catn [::base :map] [::composed :map]] :map]}
   [base composed]
   (let [base (projection-pure-data base)
         composed (projection-pure-data composed)

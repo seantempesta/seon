@@ -1,0 +1,15 @@
+{; INSTRUMENTATION IS A PROCESS AFFORDANCE, and its counts are the
+ ; answer to "is it on right now?" — a question that must be answerable
+ ; rather than assumed. `registered` is how many function schemas the
+ ; collect pass found; `instrumented` is how many vars actually carry a
+ ; wrapper afterwards. They differ legitimately: malli refuses to
+ ; instrument a primitive-hinted fn, and a `:record` process
+ ; deliberately instruments nothing at all.
+ :seon.instrument/registered [:int {:min 0}]
+ :seon.instrument/instrumented [:int {:min 0}]
+
+ ; The dial decides, and the caps are optional because they are only
+ ; needed to bound a violation's arguments — a REPL caller with no caps
+ ; to hand gets a report with no args rather than an invented bound.
+ :seon.instrument/request [:map {:closed true} [:seon.config/on-core-error :seon.config/on-core-error] [:seon.sci.admit/caps {:optional true} :seon.sci.admit/caps]]
+ :seon.instrument/applied [:map {:closed true} [:seon.instrument/registered :seon.instrument/registered] [:seon.instrument/instrumented :seon.instrument/instrumented]]}

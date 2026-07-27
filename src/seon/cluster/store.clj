@@ -76,11 +76,27 @@
        (some? (:wrapped-atom value))
        (not= @(:wrapped-atom value) :released)))
 
+(defn connection-object?
+  "True for a Datahike connection, live or RELEASED.
+  A different question from `connection?`, and the difference is the
+  point: a started instance holds a connection that will outlive its
+  own liveness, and `stop!` must accept exactly that value — its
+  docstring promises idempotence, so the second call necessarily
+  receives a released one. Requiring liveness there made the contract
+  forbid the case the function exists to handle, which instrumentation
+  found on its first run. Liveness stays required where work is done
+  through it (`transact!`, the loop handle, the wake listener)."
+  [value]
+  (instance? datahike.connector.Connection value))
+
 (defn file-lock?
   "True for a held java.nio.channels.FileLock."
   [value]
   (and (instance? java.nio.channels.FileLock value)
        (.isValid ^java.nio.channels.FileLock value)))
+
+(schema/register-core-predicate! 'seon.cluster.store/connection-object?
+                                 connection-object?)
 
 (schema/register-core-predicate! 'seon.cluster.store/connection?
                                  connection?)
