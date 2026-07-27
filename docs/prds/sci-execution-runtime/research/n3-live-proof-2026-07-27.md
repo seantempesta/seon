@@ -44,3 +44,27 @@ The kill -9 half: crash a JVM mid-turn, reboot, prove the run reads
 `:interrupted` and the next prompt carries the derived warning —
 nothing re-executes. Then the flow-graph `step` drive (live graph, the
 one uncovered function) rides the same session.
+
+## Phase 2 — the kill -9 drill (COMPLETE, same day)
+
+Scripts: `scripts/n3-crash-{child,verify}-2026-07-27.clj`; orchestration:
+child in background → await TRIGGERED → sleep 1.2s → `kill -9` → verify.
+The verify only WATCHES production wiring (commit a6d426983 removed
+every hand-performed step).
+
+- Child murdered at +1.2s holding a CLAIMED run, no plan (mid-model-call).
+- Reboot: `start!` reported `{:recovered-runs 1, :recovery-operations 2}`
+  — dead custody released BY FACT (the lease was still ~50s in the
+  future), milliseconds after boot.
+- Wreckage exact: run open, no plan, no receipts; agent busy; trigger
+  reads answered (the run IS the answer); a survivor's direct close
+  refuses `::not-the-holder`.
+- The LOOP settled the orphan itself (claim-then-close through the
+  ordinary transitions) and drove a NEW run to completion — one real
+  DeepSeek call — within **3.1s of reboot**. Receipts exist only for
+  the new run; the crashed run closed and was never re-planned; the
+  interrupted warning was derivably in the new run's prompt (the
+  shadowing fix ba723b2d1 held).
+
+Interrupted+adapt is proven over real facts: nothing re-executes,
+nothing retries, one derived warning, the agent adapts.
