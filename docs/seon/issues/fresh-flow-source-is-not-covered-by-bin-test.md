@@ -65,5 +65,5 @@ keeping a second gate.
 
 Adopted 2026-07-27: `208a4a748` moved the suite; the orchestrator added
 flow-monitor to the `:test` alias and adopted the `kill_child` helper the
-child-JVM falsifier spawns. Full gate green: 47 tests / 225 assertions /
+child-JVM falsifier spawns. Full gate green: 32 tests / 158 assertions /
 0 failures / 0 errors via `bin/test`.
