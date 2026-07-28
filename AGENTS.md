@@ -219,18 +219,38 @@ its own readiness:
    forks the shared bootstrap ancestor (indexed code + initialization
    pages) — near-instant, never a re-index. Clusters always RESET to
    current code and pages; there is no data migration.
-4. **Flow.** Per cluster, one `core.async.flow` graph of a few
-   long-lived procs (run loop, render, fault committer), derived from
-   facts at a basis. The process root owns one bounded `:compute`
-   executor and one `:io` executor shared by every graph.
+4. **Flow.** EVERY AGENT IS ITS OWN FLOW GRAPH (owner ruling
+   2026-07-28), created with the agent from one blueprint, parked
+   between episodes (one virtual thread, ~8.5 KB — measured in
+   `flow-mechanics-2026-07-28.md`), kicked off by the messages it
+   receives, pausable/resumable per agent. Per cluster, a few shared
+   plumbing graphs: render pipeline, fault committer, schedule fires.
+   There is NO central loop, dispatcher, or scheduler — that shape is
+   rejected as "a JavaScript event loop inside Clojure." The process
+   root owns one bounded `:compute` executor and one `:io` (virtual
+   threads) executor shared by every graph. Every proc pins `:io` or
+   `:compute` explicitly — the `:mixed` default pins a platform thread
+   per proc and is the one scaling cliff.
 
 **Live update is two cases, one mechanism each.** Graph definitions
 reference transforms as vars (`#'f`), so re-evaluating a `defn` against
 the running system changes proc behavior immediately — zero restart.
 Topology changes (procs, conns, buffers) rebuild the graph — stop →
 `create-flow` → start, measured ~0.3 ms — which is safe because
-channels carry only disposable values; all durable work re-derives from
-database facts.
+channel contents are losable by construction; all durable work
+re-derives from database facts.
+
+**Transport law (owner ruling 2026-07-28, revising "disposable values
+only"):** anything recovery or another process could ever need is a
+DATABASE FACT — identities, receipts, messages, errors, the settled
+reply — with bulky payloads as blobs and the row carrying
+identity/digest/size. Everything IN FLIGHT rides channels however
+large (8 MB crosses a channel ~7,000× faster than a file-store
+transact), provided loss is free: re-derivable from facts or
+superseded by a newer complete value. The buffer encodes the loss
+semantics: sliding-1 for latest-wins (streamed tokens), fixed for
+backpressure, counted-dropping for observation. Any design where
+channel loss breaks recovery is wrong by definition.
 
 **Crash model: nothing re-executes.** Recovery = reopen the store, mark
 dangling receipts `:interrupted`, re-derive the graph; the agent adapts
@@ -249,11 +269,22 @@ is a query. One config dial: dev panics, prod degrades.
 `:compute` = bounded ≈ cores, must never block — sci evals run here on
 platform threads under the one `:interrupt-fn`; `:io` = blocking
 transport (model calls, SSE writes), must never compute; `:mixed` =
-fail-closed default for code the graph cannot resolve.
+fail-closed default for code the graph cannot resolve (its own
+platform thread — safe, expensive, the incentive to annotate).
+Classification is per-function and DERIVED (owner ruling 2026-07-28,
+`workload-classification-2026-07-28.md`): key capability leaves carry
+`^{:seon.workload :io}`/`:compute` defn metadata lifted into
+`:seon.fn/workload` at index time; chains derive by reachability over
+`:seon.fn/calls` — only-compute ⇒ `:compute`, only-io ⇒ `:io`, both in
+one chain ⇒ `:mixed`, unresolved ⇒ `:mixed`. Never annotate everything;
+scheduling acts at exactly two seams (proc workload tags and the eval/
+capability door) — per-function classification, per-proc execution.
 
 Deeper: `docs/prds/sci-execution-runtime/plan/handbook.md` (the
 construction discipline), plan `README.md` (rulings + ladder), research
-docs `flow-per-cluster-2026-07-27.md`,
+docs `flow-mechanics-2026-07-28.md`, `flow-inventory-2026-07-28.md`,
+`workload-classification-2026-07-28.md` (the agents-are-flows model,
+measured), `flow-per-cluster-2026-07-27.md`,
 `datahike-multistore-2026-07-27.md`, `flow-dynamic-update-2026-07-27.md`
 (every claim above carries file:line evidence there), and the sources
 themselves: `reference-code/core.async/.../flow.clj` + `flow/impl.clj` +
@@ -624,22 +655,22 @@ into stored-fast and derived-slow paths.
 Live/streaming-style updates stay on the ONE database path, made cheap by
 construction rather than by a side channel:
 
-- high-churn presentation state (streamed reply partials, progress text) is a
-  cardinality-one, unindexed attribute registered with the
-  `:seon.db/no-history?` facet (→ `:db/noHistory`): current value only, no
-  temporal accumulation, retracted at its terminal in the same tx that
-  settles the real fact;
-- writes are COALESCED complete-value snapshots (cadence is a config fact),
-  published by an isolated non-blocking sink — presentation can lag or drop,
-  it can never slow or fail the producing work;
+- high-churn presentation state (streamed reply partials, progress text)
+  rides CHANNELS under the transport law above (owner ruling 2026-07-28,
+  superseding the earlier no-history-attribute design): a sliding-1
+  channel into the render proc gives latest-wins by construction, the
+  database commits only the settled fact at the terminal, and a crash
+  loses nothing recovery needs;
 - efficiency is the existing chain, not new machinery: attribute-indexed
-  interest delivery wakes only subscribed feeds → `seon.reactive` equality
-  suppression skips unchanged renders → the per-connection latest-wins
-  mailbox gives a slow browser the newest morph only. The UI remains a pure
-  function of the database value; reconnect = repaint.
+  interest delivery wakes only subscribed renders → equality suppression
+  skips unchanged renders → the per-tab sliding-1 tap gives a slow
+  browser the newest morph only. The settled UI remains a pure function
+  of the database value; reconnect = repaint (in-flight partials are
+  superseded, never replayed).
 
-Never publish ephemeral display state through a second non-database channel
-without an explicit owner ruling fencing it.
+Ephemeral display state belongs on channels; durable truth belongs in the
+database. The transport law above is the one fence — do not add a second
+durable path and do not commit in-flight partials as facts.
 
 Core source, eval history, and analyzer state are views of one code corpus.
 `:seon.fn`, `:seon.ns`, and `:seon.schema` facts come from the analyzer plus
