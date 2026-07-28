@@ -596,8 +596,26 @@ run needs into the note). CONTEXT PLAN REVISED (cfb75bef3): all review findings 
 the morning batch properly REDUCED — eight decisions shrunk to FOUR
 genuine ones (block omission semantics, invocation shape, collision
 precedence, capture ownership); ready for the morning ruling, then
-contract drafting. IN FLIGHT (two): N4 PACKAGE 2; my.message Opus
-agent (mid-unit). MORNING BATCH accumulating:
+contract drafting. N4 PACKAGE 2, THREE SLICES SEALED (4 commits): **thesis proven on a
+REAL socket — one-block change = 1 patch/102 bytes; no-projection
+change = 0/0; initial paint 2/218** (every row a sealed test against
+real http-kit on ephemeral loopback). Router literal accretion
+proved the durable/runtime split AT THE BRIDGE (widening the schema
+to literals broke every block transaction — the schema IS the
+durable side; declaration? admits both in code). REF-FOLLOWING =
+entity-slot IS slot (one traversal); a pulled entity IS a unit
+(stored renderer routes, absent falls to the generic default — /data
+works with ZERO authoring); task #11's falsifier SEALED over real
+facts incl. the run↔form cycle. Web layer: server/routes/shell/
+listen!-repaint/byte-comparing suppression/latest-wins/coalescing
+floor dial. seon.render.web/not-yet ENUMERATES undone-by-design in
+code (interest matching, shared registration, per-tab graph,
+isolated sink — each designed, none open). Its suites 93/245/0;
+full-gate reds = my.message's mid-flight turn_test (722adb18e).
+IN FLIGHT (two): N4 continues (streaming exercises on seon.ai —
+FREE, failover landed — driven by local Qwen; /data pager);
+my.message Opus agent (mid-unit; holds config/default.edn + ui.md —
+root's seeded blocks + further ui.md accretion sequenced behind it). MORNING BATCH accumulating:
 context-blocks decisions (8, post-review), no-auth provider
 admission, font licensing remedy, N4/N5 decision batches,
 my.message's conversation-loop dial, R41-recorder carve-out
