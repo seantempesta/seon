@@ -364,6 +364,19 @@ refinement is one more `not`-clause if ever ruled (review point R3).
   triggers oldest-first, and the warning derives to nothing. No
   counter, no flag, no refusal message row — the audits proved the
   episode needs zero new facts, and this contract holds that line.
+  **Seal correction (orchestrator, 2026-07-28 — deadlock found in
+  review): trigger selection under the cap is NOT plain oldest-first.**
+  With the cap hit, an older deferred self-trigger evaluated first
+  derives nothing, and if selection stops there the newer OUTSIDE
+  trigger never opens, the count never resets, and the agent deadlocks
+  permanently. The derivation is: when
+  `(>= (episode-runs db agent) max)`, `next-agent-work`'s `:open` arm
+  selects only OUTSIDE triggers (oldest such first); below the cap it
+  selects oldest-first over all. Equivalent statement: a deferred
+  self-trigger is never a selection blocker — it is skipped, not
+  waited on. The `episode-cap-refusal-test` oracle adds the ordering
+  case: deferred self-trigger OLDER than the arriving outside trigger,
+  and the outside trigger still opens on the next pass.
 - **What the dial is NOT**: a safety net for a loop bug. Any race that
   could loop agents forever is a design defect to dissolve (P1/P2 are
   dissolved by the custody revision, not capped). The dial bounds
@@ -447,13 +460,19 @@ assert the surviving mechanism.
   stops being "before the next episode". If the owner prefers maximal
   frugality, the suite is unchanged except the pause test's timing
   assertions.
-- **R3 — "outside" includes the error recorder.** Kept as delivered
-  (recorder messages have no `from`, so they reset the episode). The
-  conservation doc's refinement (exclude rows carrying
-  `:seon.cluster.message/about`) is one `not`-clause away if the owner
-  wants human-only resets; note an error-message reset lets a
-  recorder-notified agent run a fresh episode, which can be argued
-  either way.
+- **R3 — SEAL CORRECTION (orchestrator, 2026-07-28): the error
+  recorder does NOT reset the episode.** The draft kept recorder
+  messages as episode-resetting "outside" input, but the error system
+  delivers explanation messages to the failing agent — so an agent in
+  an error loop would have its cap reset by its own failure
+  notifications, making the pathological case the dial exists for
+  immune to the dial. Adopt the conservation doc's refinement: the
+  episode derivation excludes rows carrying
+  `:seon.cluster.message/about` (recorder provenance) — "outside"
+  means outside the population's AUTONOMOUS activity: a human message
+  or a schedule fire. §7's derivation gains the one `not`-clause; the
+  episode-cap suite adds one case (recorder message mid-episode does
+  not reset the count).
 - **R4 — pause is not durable.** Graph commands only, per the F1
   charter; a crash/re-stamp resumes a paused agent. The durable
   alternative (a presence fact `next-agent-work` respects, the
