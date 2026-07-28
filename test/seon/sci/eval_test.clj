@@ -15,6 +15,7 @@
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
+            [sci.core :as sci]
             [seon.config :as config]
             [seon.schema]
             [seon.sci.eval :as eval]
@@ -126,6 +127,33 @@
            (get-in (:seon.sci.admit/value second-run)
                    [:seon.error/data :seon.sci.eval/data :sci.impl/callstack]))
         "SCI runtime objects project to stable markers across evaluations")))
+
+(deftest failure-receipts-use-the-total-admission-codec
+  (let [cycle (atom nil)
+        failure (ex-info "hostile failure"
+                         {::cycle cycle
+                          ::huge (vec (range 10000))})
+        _ (reset! cycle failure)]
+    (is (thrown? StackOverflowError (pr-str (ex-data failure)))
+        "the raw printer cannot serialize this failure")
+    (let [evaluation (with-redefs [sci/parse-string
+                                   (fn [& _] (throw failure))]
+                       (run "(never reached)"))
+          admitted-value (:seon.sci.admit/value evaluation)
+          result-edn (:seon.cluster.eval/result-edn evaluation)
+          projected-data (get-in admitted-value
+                                 [:seon.error/data :seon.sci.eval/data])]
+      (is (failed? evaluation))
+      (is (true? (:seon.sci.admit/capped? evaluation)))
+      (is (= admitted-value (edn/read-string result-edn))
+          "the durable projection is bounded, readable EDN")
+      (is (<= (count (::huge projected-data))
+              (:seon.config.eval.result/max-collection caps)))
+      (is (contains? (::cycle projected-data)
+                     :seon.sci.admit/reference)
+          "the self-reference becomes the codec's stable marker")
+      (is (seon.schema/valid-candidate-value?
+           :seon.sci.eval/evaluation evaluation)))))
 
 (deftest the-dispositions-are-callable-and-come-back-as-values
   (let [evaluation (run "(my.run/complete \"done\")")]
