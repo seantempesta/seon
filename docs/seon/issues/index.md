@@ -25,10 +25,11 @@ See `README.md` for the convention.
 | [Replace bare flow callback predicates with honest contracts](flow-callback-schemas-are-not-generatively-constructible.md) | blocker | Core |
 | [`bin/seon up` exits 0 after a readiness timeout](operator-up-exits-zero-on-readiness-timeout.md) | blocker | general |
 
-## Friction (8)
+## Friction (9)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [A failed form does not stop the fold, so a run can complete with a lie](a-failed-form-does-not-stop-the-fold.md) | friction | general |
 | [A self-referential registered schema overflows the stack instead of refusing](a-self-referential-schema-overflows-the-stack.md) | friction | Core |
 | [A turn's model work can outlive its own run lease](a-turns-model-work-can-outlive-its-own-run-lease.md) | friction | general |
 | [Align vendored Malli source with the pinned dependency](malli-vendor-is-ahead-of-pinned-dependency.md) | friction | general |
@@ -38,10 +39,11 @@ See `README.md` for the convention.
 | [The design language's font is redistributed without its license, and only at one weight](the-bundled-font-has-no-license-and-only-one-weight.md) | friction | UI |
 | [stop! may leave the prepl server name registered](stop-may-leave-the-prepl-server-name-registered.md) | friction | general |
 
-## Cleanup (3)
+## Cleanup (4)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Give (pid, start-instant) liveness one owner](process-liveness-check-has-no-single-owner.md) | cleanup | general |
 | [Give Flow configuration dials one registration owner](flow-config-dials-have-two-registration-owners.md) | cleanup | Core |
 | [Remove the stale program-graph owner rename](architecture-program-graph-owner-rename-is-stale.md) | cleanup | Core |
+| [my.run's error values are outside their own declared output schema](my-run-error-values-omit-their-kind.md) | cleanup | Core |
