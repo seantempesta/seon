@@ -36,6 +36,32 @@ no-retry ruling is trying to make rare.
 - `src/seon/cluster/run.cljc` already refuses a held run as `::lease-expired`,
   so the failure is detected; it is the WORK that is lost, not the facts.
 
+## Escalation (2026-07-28 trigger-conservation audit): the loss REPEATS
+
+The consequence is not one discarded answer — it is an unbounded
+duplicate-paid-call cycle. `work/next-work` selects `:call` for a run
+whose `:seon.cluster.run/process` equals ours WITHOUT checking the
+lease (`src/seon/cluster/work.cljc:173-178`), nothing in the loop ever
+calls `heartbeat-tx` or re-claims (zero call sites outside
+`run.cljc`), and a `::lease-expired` plan refusal leaves the run in
+exactly the held-unplanned state that re-derives `:call`. So once the
+pass START time is past `lease-until` (starvation behind other agents'
+serial turns is enough — the pass's `now` is pinned at pass start, so
+only the open→call GAP matters, not in-pass duration), every rewake
+pass makes one more PAID model call and one more refused freeze,
+forever, until process restart settles the run as an interruption.
+
+REPL-proven at the transition level: `tmp/trigger-conservation-probe.clj`
+P2 — `next-work` returns `:call` at lease+30s, `plan-tx` refuses
+`::lease-expired`, `next-work` returns the identical `:call` again.
+Full analysis:
+`docs/prds/sci-execution-runtime/research/trigger-conservation-2026-07-28.md`
+(property b violation).
+
+This raises the severity: the fix must make the cycle unconstructible
+(custody verified/renewed at `:call` entry, or `next-work` refusing to
+derive paid work for an expired holder), not merely rare.
+
 ## Why it is filed rather than fixed here
 
 The honest fix is not a bigger number. Under the runtime contract a lease is a
