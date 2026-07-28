@@ -656,22 +656,26 @@ stacks the web layer as the last tower rung — a plain bin/repl
 serves the root view, port dial defaults 0 (URL reported never
 assumed), seon.render.root = four render fns + a vector (no root
 route/template/branch anywhere), agents link to /data drills, bind
-failure throws like any layer. THE BLOCKER
-(booted-block-derivation-returns-one-of-four, filed with evidence
-incl. a recorded wrong first reading): identical boots report four
-blocks or ONE; no fixture reproduces (fixture-vs-live-boot again —
-acceptance = a test that BOOTS); relation-find returns four where
-collection-find returns one AGAINST THE SAME BOOTED STORE — smells
-Datahike-index/branch-fork level, we own the fork. A fresh Opus
-investigation agent is ON IT (evidence-first: the seeding
-transaction report's added-datom count distinguishes
-committed-one from committed-four-read-one; then datahike query/index
-paths vs the boot transact shape; loop-reproduce, minimize below
-Seon's layers, fix falsifier-first or design+owner for morning).
-The N4 agent STOPPED FOR THE NIGHT as instructed — package 5 (the
-agent-transcript page) waits for morning rulings. The morning
-localhost view works but shows 1-of-4 blocks until the blocker
-falls. MORNING BATCH accumulating:
+failure throws like any layer. **THE BLOCKER IS DEAD — a real DATAHIKE QUERY-PLANNER BUG in our
+fork, fixed falsifier-first on both sides (fork 9a7a9ef1 + Seon
+22440b5ca; gate 386/1502/0 VERIFIED).** Root cause: build-pipeline's
+fused :sorted-merge path asked cardinality only of the MERGE ops —
+a card-many attribute in the SCAN position emits N datoms with one
+e, the forward cursor passes the key after the first, rows silently
+drop. Costing put the card-many pattern in the scan exactly when the
+store was big enough (why no fixture ever saw it — small stores plan
+differently), and plan selection varying with variable-symbol hash
+on cost ties is what made it read as probabilistic (filed, with two
+more planner/cache defects, in
+datahike-planner-and-caches-carry-three-smaller-defects.md). The
+Seon-side regression BOOTS a real cluster (derivation == relation
+find == raw :eavt). Ten boots: four blocks through every read — THE
+MORNING DEMO IS WHOLE. Also filed from the boot loops:
+cluster-stop-races-an-in-flight-transact. "Datahike is PART of
+Seon" earned its keep tonight — the fix is ours, tested in the
+fork's own suite, CHANGELOG'd per its convention.
+The N4 agent stopped for the night; package 5 (agent-transcript
+page) waits for morning rulings. MORNING BATCH accumulating:
 context-blocks decisions (8, post-review), no-auth provider
 admission, font licensing remedy, N4/N5 decision batches,
 my.message's conversation-loop dial, R41-recorder carve-out
