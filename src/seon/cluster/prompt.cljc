@@ -1,23 +1,34 @@
 (ns seon.cluster.prompt
   "The prompt is a projection of the database, not a stored artifact.
 
-  CONTRACT LAYER (drafted + ORCHESTRATOR-SEALED 2026-07-27 — N3,
-  package 1, from n3-plan §7.2). Nothing here is implemented: every
-  body throws `awaits implementation`.
+  This contract layer is fully implemented and live-proven.
 
   A pure function of a database value and an agent. Nothing is stored,
   nothing is cached, and the context-block machinery is a later rung —
-  reaching for it here is how a rung overruns. For N3 the prompt is
-  three things:
+  reaching for it here is how a rung overruns. The prompt is five
+  derived pieces, each present exactly while the facts that cause it
+  are:
 
-  1. the trigger's content — what the agent was asked;
+  1. the trigger's content — what the agent was asked, and WHO asked
+     when the sender is another agent (`:seon.cluster.message/from`;
+     its absence means the human or the error recorder, and then the
+     prompt names no sender rather than inventing one);
   2. the agent's namespace — where its `defn`s land, stated as a fact
      about where evaluation ALREADY happens rather than as something to
      arrange. The first live drive's model read `your namespace is X`
      and dutifully emitted `(in-ns X)`, which failed; the fix was to
      evaluate there by construction (`seon.sci.eval/agent-namespace`,
      the one derivation shared with the evaluator) and to say so;
-  3. THE INTERRUPTED WARNING, when a prior run was cut.
+  3. THE INTERRUPTED WARNING, when a prior run was cut;
+  4. THE POPULATION — the other agents in this cluster, so delegation
+     is possible at all. Two sentences, derived from a query, and the
+     minimum that makes `my.message/send` usable; anything richer about
+     each peer belongs to the context-block rung;
+  5. THE PAUSE NOTE the agent left itself, when its previous run ended
+     in `my.run/wait`. This is the continuity a delegating agent needs
+     and the only continuity it has: a new run has a fresh sci ctx and
+     a freshly derived prompt, so a reply that says only \"25\" is
+     unanswerable without the note that says what 25 was for.
 
   THE WARNING IS THE WHOLE RESUME PRESENTATION. One derived sentence,
   never per-eval markers (the s3 crash model), and it has two sources
@@ -42,7 +53,8 @@
 
   Nothing about this is stored, so nothing about it can go stale: the
   warning is present exactly while the facts that cause it are."
-  (:require [clojure.string :as str]
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [datahike.api :as d]
             [seon.cluster.run :as run]
             [seon.sci.eval :as sci.eval]
@@ -66,6 +78,36 @@
          [?message :seon.cluster.message/id ?message-id]
          [?message :seon.cluster.message/content ?content]]
        db message-id))
+
+(defn- trigger-sender
+  "The agent that sent the trigger, or nil when it came from outside.
+  ABSENCE IS THE ANSWER, not a missing value to fill in: a message with
+  no `from` is the human's or the error recorder's, and the prompt says
+  \"you have been asked\" rather than naming a sender it would have to
+  invent."
+  [db message-id]
+  (d/q '[:find ?agent-id .
+         :in $ ?message-id
+         :where
+         [?message :seon.cluster.message/id ?message-id]
+         [?message :seon.cluster.message/from ?agent]
+         [?agent :seon.cluster.agent/id ?agent-id]]
+       db message-id))
+
+(defn- peers
+  "Every OTHER agent in this cluster, by id, ordered.
+  Derived on every prompt, so an agent created a minute ago is
+  addressable a minute later and one that never existed is never named.
+  This is the whole of \"who can I talk to\" for now: the context-block
+  machinery that would say more about each of them is a later rung, and
+  a prompt that reached for it here would be that rung overrunning."
+  [db agent-id]
+  (->> (d/q '[:find [?id ...]
+              :where [?agent :seon.cluster.agent/id ?id]]
+            db)
+       (remove #{agent-id})
+       sort
+       vec))
 
 (defn- previous-run
   "The agent's most recent run OTHER than the one being planned, or nil.
@@ -148,6 +190,34 @@
           (str "Your previous request was interrupted before you replied, "
                "and nothing was retried. Nothing you asked for ran."))))))
 
+(defn- paused-sentence
+  "The note the agent left itself when it paused, or nil.
+  CONTINUITY WITH NO MEMORY RUNG. A delegating agent's problem is that
+  its next run is a different run: the sci ctx is gone, the prompt is
+  derived fresh, and the reply that finally arrives says only \"25\".
+  `my.run/wait` already promised the fix in its own docstring — \"the
+  note is for the human and for the agent's own next prompt\" — and this
+  is that promise kept. Nothing new is stored: the disposition IS the
+  last form's admitted value, so the note is already durable in that
+  form's `result-edn`, and this reads it back.
+
+  Total by construction: unreadable EDN, a value that is not a wait,
+  and a run with no receipts all answer nil, because a prompt that
+  threw would take the turn down with it."
+  [db agent-id]
+  (when-let [previous (previous-run db agent-id)]
+    (let [last-value
+          (some->> (run-receipts db (:seon.cluster.run/id previous))
+                   (sort-by :seon.cluster.eval/ordinal)
+                   last
+                   :seon.cluster.eval/result-edn
+                   (#(try (edn/read-string %)
+                          (catch #?(:clj Throwable :cljs :default) _ nil))))]
+      (when (and (map? last-value)
+                 (= :wait (:my.run/disposition last-value)))
+        (str "You paused your previous run, leaving yourself this note: "
+             (:my.run/note last-value))))))
+
 (defn- refuse!
   [rule data]
   (throw (ex-info (str "prompt refused: " (name rule))
@@ -171,14 +241,35 @@
   (let [agent-id (:seon.cluster.agent/id request)
         message-id (:seon.cluster.message/id request)
         content (or (trigger-content db message-id)
-                    (refuse! ::no-trigger request))]
+                    (refuse! ::no-trigger request))
+        sender (trigger-sender db message-id)
+        others (peers db agent-id)]
     (->> [(str "You are agent " agent-id
                ". Your namespace is my.agents." agent-id
                " — defns you write land there.")
+          ;; WHO ELSE EXISTS, and it is a fact rather than an
+          ;; encouragement: an agent that is never told the population
+          ;; cannot delegate, and one told about an agent that does not
+          ;; exist writes a message the driver has to refuse. Omitted
+          ;; entirely when it is alone — the sentence is present exactly
+          ;; while the facts that cause it are.
+          (when (seq others)
+            (str "Other agents in this cluster: " (str/join ", " others)
+                 ". Send one a message by returning "
+                 "(my.message/send \"their-id\" \"what you want to say\") "
+                 "from a form — that delivers it and wakes them, and "
+                 "their reply comes back to you as a new request. "
+                 "Return a vector of sends to message several."))
           (interrupted-sentence db agent-id)
-          (str "You have been asked:\n\n" content)
+          (paused-sentence db agent-id)
+          (if sender
+            (str "Agent " sender " sent you:\n\n" content)
+            (str "You have been asked:\n\n" content))
           (str "Reply with Clojure forms to run, in order. "
                "Finish with (my.run/complete \"your reply\") when you are "
-               "done, or (my.run/wait \"why\") to pause this run.")]
+               "done, or (my.run/wait \"why\") to pause this run — pause "
+               "when you are waiting on another agent, and put everything "
+               "you will need to finish into the note, because your next "
+               "run starts fresh and that note is what it reads.")]
          (remove nil?)
          (str/join "\n\n"))))

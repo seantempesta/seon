@@ -29,6 +29,18 @@
  :seon.config.error/recurrence-limit
  [:int {:min 1}]
 
+ ; HOW LONG A CONVERSATION MAY RUN WITHOUT A HUMAN. Unit: agent-to-agent
+ ; hops in one causal chain. Delivery IS the wake, so alice messaging
+ ; bob wakes bob, whose reply wakes alice — a polite infinite
+ ; conversation is a REAL shape, and unlike the error storm it never
+ ; repeats a signature, so the recurrence fence cannot see it. Each hop
+ ; is also a paid model call, so the bound is a spend bound as much as
+ ; a liveness one. Counted by walking committed transaction metadata,
+ ; never a stored counter (the quarry stored `hops` on every message
+ ; and then needed a second rule to reset it).
+ :seon.config.message/max-chain
+ [:int {:min 1}]
+
  ; THE MODEL SEAM, as four dials rather than a map hard-coded in a
  ; drive script. The run loop is installed at BOOT now, so the provider
  ; it calls has to be derivable from facts like everything else it
@@ -133,6 +145,9 @@
   [:seon.config.error/recurrence-limit
    {:optional true}
    :seon.config.error/recurrence-limit]
+  [:seon.config.message/max-chain
+   {:optional true}
+   :seon.config.message/max-chain]
   [:seon.config/on-core-error
    {:optional true}
    :seon.config/on-core-error]
@@ -182,6 +197,7 @@
    {:optional true} :seon.config.error/escalate-to]
   [:seon.config.error/recurrence-limit
    :seon.config.error/recurrence-limit]
+  [:seon.config.message/max-chain :seon.config.message/max-chain]
   [:seon.config/on-core-error
    :seon.config/on-core-error]
   [:seon.config.ai/endpoint :seon.config.ai/endpoint]
@@ -234,6 +250,7 @@
    {:optional true} :seon.config.error/escalate-to]
   [:seon.config.error/recurrence-limit
    :seon.config.error/recurrence-limit]
+  [:seon.config.message/max-chain :seon.config.message/max-chain]
   [:seon.config/on-core-error
    :seon.config/on-core-error]
   [:seon.config.ai/endpoint :seon.config.ai/endpoint]

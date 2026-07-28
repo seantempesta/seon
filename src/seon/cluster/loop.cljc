@@ -61,6 +61,7 @@
             [clojure.core.async.flow :as flow]
             [datahike.api :as d]
             [seon.ai :as ai]
+            [seon.cluster.message :as message]
             [seon.cluster.prompt :as prompt]
             [seon.cluster.reply :as reply]
             [seon.cluster.run :as run]
@@ -92,6 +93,18 @@
   believe."
   {:malli/schema [:=> [:cat] [:set :keyword]]}
   []
+  ;; WHAT THIS SET IS NOT, since the messaging rung: it is the loop's
+  ;; ROUTINE bookkeeping, not everything the loop can ever commit. A
+  ;; turn that delivers an agent's message commits
+  ;; `:seon.cluster.message/to` DELIBERATELY, and that commit wakes the
+  ;; recipient — which is the whole transport, not a leak. The
+  ;; invariant C2 states is the one that matters and is unchanged: no
+  ;; ordinary turn wakes the loop as a side effect of recording itself,
+  ;; so an idle cluster stays idle. A deliberate delivery is caused by
+  ;; an agent, is bounded by `:seon.config.message/max-chain`, and is
+  ;; asserted from the other direction in the messaging suite —
+  ;; delivery MUST intersect the wake set or nothing would be woken.
+  ;;
   ;; COMPUTED from the DECLARED ENTITIES this loop writes — the run,
   ;; its forms, and its receipts — plus the agent pointer a close
   ;; retracts. Reading the entity maps rather than filtering the
@@ -128,6 +141,23 @@
   {:malli/schema [:=> [:cat :any] [:maybe :my.run/value]]}
   [value]
   (when (schema/valid-candidate-value? :my.run/value value)
+    value))
+
+(defn messages
+  "The messages an admitted eval value asks to send, or nil.
+  The exact counterpart of `disposition`, over the second agent-facing
+  value: one `my.message/send` result, or a vector of them. Anything
+  else is not a delivery, and a form that returns an ordinary value
+  simply sends nothing.
+
+  A form's value is ONE instruction, so a value is either a disposition
+  or a delivery and never both. That is not enforced here by a check —
+  the two schemas are closed maps with disjoint keys, so it is enforced
+  by the shapes, and a turn that both sends and finishes does it in two
+  forms, which is also how a reader can see the order it happened in."
+  {:malli/schema [:=> [:cat :any] [:maybe :my.message/value]]}
+  [value]
+  (when (schema/valid-candidate-value? :my.message/value value)
     value))
 
 (defn terminal-tx
@@ -716,6 +746,11 @@
             epoch (:seon.cluster.run/claim-epoch run)
             evaluate (requiring-resolve
                       (:seon.cluster.loop/evaluate cluster))
+            ;; the message this run is answering, read ONCE per turn: it
+            ;; is the head of the conversation chain every message this
+            ;; turn sends extends, and it cannot change while the run is
+            ;; held
+            trigger (message/trigger @connection run-id)
             ctx (sci/fork (sci.eval/base))]
         (loop [ordinal (:seon.cluster.run.form/ordinal work)
                ran 0]
@@ -742,32 +777,81 @@
                                  :seon.config/on-core-error
                                  (:seon.config/on-core-error cluster)})
                     settled (disposition (:seon.sci.admit/value evaluation))
-                    outcome (store/transact!
-                             connection
-                             (terminal-tx
-                              (cond-> {:seon.cluster.run/id run-id
-                                       :seon.cluster.run/process process
-                                       :seon.cluster.run/claim-epoch epoch
-                                       :seon.cluster.run.form/ordinal ordinal
-                                       :seon.cluster.eval/status
-                                       (:seon.cluster.eval/status evaluation)}
-                                (:seon.cluster.eval/result-edn evaluation)
-                                (assoc :seon.cluster.eval/result-edn
-                                       (:seon.cluster.eval/result-edn evaluation))
-                                (:seon.cluster.eval/error evaluation)
-                                (assoc :seon.cluster.eval/error
-                                       (:seon.cluster.eval/error evaluation))
-                                (:seon.error/kind
-                                 (:seon.sci.admit/value evaluation))
-                                (assoc :seon.error/kind
-                                       (:seon.error/kind
-                                        (:seon.sci.admit/value evaluation)))
-                                (:seon.cluster.eval/output evaluation)
-                                (assoc :seon.cluster.eval/output
-                                       (:seon.cluster.eval/output evaluation))
-                                settled
-                                (assoc :my.run/value settled))
-                              now))
+                    ;; THE SECOND AGENT-FACING VALUE, resolved against
+                    ;; the same database value this receipt is about.
+                    ;; Rows and refusal facts BOTH ride the terminal
+                    ;; transaction: a message that exists without the
+                    ;; receipt explaining where it came from is the torn
+                    ;; window this loop has closed everywhere else.
+                    delivery
+                    (when-let [asked (messages
+                                      (:seon.sci.admit/value evaluation))]
+                      (message/delivery
+                       @connection
+                       (cond-> {:my.message/value asked
+                                :seon.cluster.agent/id agent-id
+                                :seon.cluster.run/id run-id
+                                :seon.cluster.run.form/ordinal ordinal
+                                :seon.cluster.message/at now
+                                :seon.config.message/max-chain
+                                (:seon.config.message/max-chain cluster)}
+                         trigger (assoc :seon.cluster.message/trigger
+                                        trigger))))
+                    rows (:seon.cluster.message/rows delivery)
+                    ;; an undeliverable message is a durable fact, never
+                    ;; a drop — and `error/commit-tx` composes with
+                    ;; itself now that its tempid derives from the
+                    ;; error's own id rather than being a constant
+                    refusals
+                    (into []
+                          (mapcat
+                           (fn [failure]
+                             (error-tx cluster @connection failure now
+                                       {:seon.cluster.agent/id agent-id
+                                        :seon.cluster.run/id run-id})))
+                          (:seon.error/values delivery))
+                    receipt
+                    (cond-> {:seon.cluster.run/id run-id
+                             :seon.cluster.run/process process
+                             :seon.cluster.run/claim-epoch epoch
+                             :seon.cluster.run.form/ordinal ordinal
+                             :seon.cluster.eval/status
+                             (:seon.cluster.eval/status evaluation)}
+                      (:seon.cluster.eval/result-edn evaluation)
+                      (assoc :seon.cluster.eval/result-edn
+                             (:seon.cluster.eval/result-edn evaluation))
+                      (:seon.cluster.eval/error evaluation)
+                      (assoc :seon.cluster.eval/error
+                             (:seon.cluster.eval/error evaluation))
+                      (:seon.error/kind
+                       (:seon.sci.admit/value evaluation))
+                      (assoc :seon.error/kind
+                             (:seon.error/kind
+                              (:seon.sci.admit/value evaluation)))
+                      (:seon.cluster.eval/output evaluation)
+                      (assoc :seon.cluster.eval/output
+                             (:seon.cluster.eval/output evaluation))
+                      settled
+                      (assoc :my.run/value settled))
+                    outcome
+                    (store/transact!
+                     connection
+                     (cond-> {:tx-data (into (terminal-tx receipt now)
+                                             (concat rows refusals))}
+                       ;; THE CHAIN, RECORDED WHERE IT IS DERIVED FROM.
+                       ;; A delivering transaction names the message
+                       ;; being answered, exactly as the opening one
+                       ;; does — so conversation depth is a walk over
+                       ;; metadata already committed and no message
+                       ;; carries a hop counter. Absent when nothing is
+                       ;; delivered: an ordinary receipt has no cause to
+                       ;; restate, and answeredness is existential, so
+                       ;; naming the trigger twice changes nothing that
+                       ;; `unanswered-triggers` asks.
+                       (and trigger (seq rows))
+                       (assoc :tx-meta
+                              {:seon.db/trigger
+                               [:seon.cluster.message/id trigger]})))
                     ran (inc ran)
                     next-ordinal
                     (when-not (or settled (:seon.error/kind outcome))
@@ -790,17 +874,46 @@
                   :else (report :released ran)))))))
 
       ;; the fold is done and nothing said otherwise: close it, so the
-      ;; agent stops being busy
+      ;; agent stops being busy.
+      ;;
+      ;; CLAIM FIRST WHEN WE DO NOT HOLD IT, and this is a fix, not a
+      ;; flourish: `next-work` derives `:close` for any open planned run
+      ;; whose forms are all settled, INCLUDING one nobody holds — a run
+      ;; released by `my.run/wait`, or one whose holder died after the
+      ;; last receipt. `close-call` refuses a run it is not the holder
+      ;; of (`::not-the-holder`), so those closes failed, the derivation
+      ;; kept returning `:close`, and the self-rewake kept firing:
+      ;; a HOT LIVELOCK committing one error fact per pass. Measured on
+      ;; the wait path — twelve passes, nine error facts, `next-work`
+      ;; still saying `:close`. Taking custody first is the same
+      ;; takeover `settle-interruption!` already uses, and it is what
+      ;; makes "only the holder may close a run" a rule the loop can
+      ;; keep rather than one it repeatedly breaks.
       :close
-      (let [run (d/pull @connection '[*] [:seon.cluster.run/id run-id])
-            outcome (store/transact!
-                     connection
-                     (run/close-tx {:seon.cluster.run/id run-id
-                                    :seon.cluster.run/process process
-                                    :seon.cluster.run/claim-epoch
-                                    (:seon.cluster.run/claim-epoch run)
-                                    :seon.cluster.run/closed-at now
-                                    :seon.cluster.run/now now}))]
+      (let [held (d/pull @connection '[*] [:seon.cluster.run/id run-id])
+            claimed (when-not (= process (:seon.cluster.run/process held))
+                      (store/transact!
+                       connection
+                       (run/claim-tx {:seon.cluster.run/id run-id
+                                      :seon.cluster.run/process process
+                                      :seon.cluster.run/lease-until
+                                      (Date. (+ (inst-ms now) 60000))
+                                      :seon.cluster.run/now now})))
+            run (if claimed
+                  (d/pull @connection '[*] [:seon.cluster.run/id run-id])
+                  held)
+            outcome (if (:seon.error/kind claimed)
+                      ;; somebody else holds it under a live lease: not
+                      ;; ours to close, and not an error of ours either
+                      claimed
+                      (store/transact!
+                       connection
+                       (run/close-tx {:seon.cluster.run/id run-id
+                                      :seon.cluster.run/process process
+                                      :seon.cluster.run/claim-epoch
+                                      (:seon.cluster.run/claim-epoch run)
+                                      :seon.cluster.run/closed-at now
+                                      :seon.cluster.run/now now})))]
         (report (if (refused! cluster outcome now
                               {:seon.cluster.agent/id agent-id
                                :seon.cluster.run/id run-id})

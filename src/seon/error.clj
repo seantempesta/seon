@@ -630,7 +630,17 @@
 ;;; One string tempid, so the fact and the messages that explain it land
 ;;; in ONE transaction with the refs already resolved. A lookup ref to an
 ;;; entity created by the same transaction is not something to bet on.
-(def ^:private fact-tempid "seon.error/fact")
+;;;
+;;; DERIVED FROM THE ERROR'S OWN ID, never a constant. A constant made
+;;; `commit-tx` uncomposable with itself: two calls in one transaction
+;;; would put two different `:seon.error/id`s on ONE entity, silently,
+;;; because a shared tempid IS a shared entity. That is not hypothetical
+;;; — the messaging rung records one refusal per undeliverable message
+;;; and a form may hold several. The id is already unique per fact, so
+;;; deriving from it costs nothing and makes the function compose.
+(defn- fact-tempid
+  [id]
+  (str "seon.error/fact-" id))
 
 (defn- agent-exists?
   "True when this cluster really has that agent.
@@ -690,7 +700,7 @@
                    notification))
     :seon.render/ai)
    :seon.cluster.message/at (:seon.error/at fact)
-   :seon.cluster.message/about fact-tempid})
+   :seon.cluster.message/about (fact-tempid (:seon.error/id fact))})
 
 (defn commit-tx
   "Transaction data committing one error and everything it must say.
@@ -808,7 +818,7 @@
         tell (fn [recipient reason notification]
                (when (and recipient (agent-exists? db recipient))
                  (message-tx fact recipient reason notification)))]
-    (into [(assoc fact :db/id fact-tempid)]
+    (into [(assoc fact :db/id (fact-tempid id))]
           (remove nil?)
           [(when (and attributed interrupted-a-run?
                       (not recurring?) (not silent?))

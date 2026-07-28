@@ -46,6 +46,24 @@
  ; facts; there is no stored tally to drift.
  :seon.config.error/recurrence-limit 3
 
+ ; Unit: agent-to-agent hops in ONE causal chain, counted back through
+ ; committed transaction metadata to the last message that came from
+ ; outside the agent population.
+ ; Provenance: the quarry shipped 8 (`seon.warn/hop-cap`,
+ ; src-old/seon/agent/message.cljc:316) and its scar is recorded — a
+ ; GLOBAL newest-inbound count summed every wake-chain hop, so a routine
+ ; two-round delegation (parent→A→parent→B→parent) hit the cap and
+ ; silently deadlocked, and the fix was a per-peer count with a
+ ; human-message barrier. This chain walk is that fix arrived at
+ ; structurally instead: the barrier is free, because a message from
+ ; outside the population has no triggering transaction to walk back
+ ; through and therefore starts at zero by construction. 16 is that
+ ; hard-won 8 doubled, on the reasoning that the quarry's number was
+ ; calibrated against a count that OVERSTATED depth: eight rounds of
+ ; unattended ping-pong is a runaway, four is a conversation, and the
+ ; cost of being wrong low is a delegation that dies mid-thought.
+ :seon.config.message/max-chain 16
+
  ; WHO hears what nobody else can be told about. It names the root agent
  ; because boot now SEEDS one — the reason this was absent when the dial
  ; landed was that a default naming an agent that may not exist would be

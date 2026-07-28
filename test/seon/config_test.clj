@@ -43,6 +43,7 @@
     :seon.config.eval/time-limit-ms
     :seon.config.error/escalate-to
     :seon.config.error/recurrence-limit
+    :seon.config.message/max-chain
     :seon.config/on-core-error
     :seon.config.ai/endpoint
     :seon.config.ai/model
@@ -106,6 +107,7 @@
    :seon.config.eval/time-limit-ms
    :seon.config.error/escalate-to
    :seon.config.error/recurrence-limit
+   :seon.config.message/max-chain
    :seon.config/on-core-error
    :seon.config.ai/endpoint
    :seon.config.ai/model

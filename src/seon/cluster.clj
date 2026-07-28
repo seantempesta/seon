@@ -531,7 +531,13 @@
               (:seon.config.eval/time-limit-ms dials)
               :seon.config/on-core-error (:seon.config/on-core-error dials)
               :seon.config.error/recurrence-limit
-              (:seon.config.error/recurrence-limit dials)})
+              (:seon.config.error/recurrence-limit dials)
+              ;; the conversation bound: every delivery a turn makes is
+              ;; measured against it, so the loop must carry it the same
+              ;; way it carries every other dial — derived from facts
+              ;; once, here, never read at the call site
+              :seon.config.message/max-chain
+              (:seon.config.message/max-chain dials)})
       (:seon.config.error/escalate-to dials)
       (assoc :seon.config.error/escalate-to
              (:seon.config.error/escalate-to dials)))))

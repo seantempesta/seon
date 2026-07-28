@@ -1,15 +1,14 @@
 (ns my.run
   "What an agent says about its own run: two values, nothing else.
 
-  CONTRACT LAYER (drafted + ORCHESTRATOR-SEALED 2026-07-27 — N3,
-  package 1). Nothing here is implemented: every body throws
-  `awaits implementation`.
+  This contract layer is fully implemented and live-proven.
 
   THE AGENT-FACING SURFACE IS VALUES, NOT EFFECTS. These two functions
   are the first of the three agent-facing shapes — pure code returning
   a VALUE the driver interprets. They commit nothing, read nothing, and
   need no capability: an agent's last form evaluates to one of them and
-  the loop reads it out of the admitted value.
+  the loop reads it out of the admitted value. `my.message/send` is the
+  second member of the same family and works the same way.
 
   EXACTLY TWO (owner ruling, 2026-07-27 night): `complete` and `wait`.
   No `start!`, no `pause`/`resume`/`terminate` — those are the quarry's
@@ -39,10 +38,21 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn wait
-  "Leave this run open and unclaimed, with a note saying why.
-  The agent has said what it is waiting for; the loop releases custody
-  and the run resumes on a later wake. The note is for the human and
-  for the agent's own next prompt — it is not a status flag.
+  "End this run with no reply, leaving a note saying what you await.
+  MEASURED, not aspirational (2026-07-28): the loop releases custody
+  and its very next pass closes the run, because a run whose plan is
+  fully executed has nothing left to resume. What resumes is the AGENT,
+  on its next trigger — a peer's reply, a human's nudge — with a fresh
+  run and a freshly derived prompt. The earlier wording here promised
+  that \"the run resumes on a later wake\"; it does not, and an agent
+  reasoning from that would expect a continuity it does not have.
+
+  THE NOTE IS THAT CONTINUITY, and it is the only one there is. The
+  next prompt reads it back out of this form's receipt
+  (`seon.cluster.prompt`), so a delegating agent must put everything
+  its next run will need into the note: the fresh run has a fresh sci
+  ctx, so no def survives, and a peer's reply arriving as \"25\" is
+  unanswerable without it. It is not a status flag.
   A blank or non-string note returns the ONE registered flat error
   value, same as `complete` — an agent mistake answers, never throws
   and never yields a silently-invalid disposition."

@@ -29,6 +29,7 @@
    :seon.cluster.eval/error
    :seon.cluster.message/id :seon.cluster.message/to
    :seon.cluster.message/content :seon.cluster.message/at
+   :seon.cluster.message/from
    :seon.db/trigger])
 
 (def ^:private now (Date. 1700000000000))
@@ -212,3 +213,119 @@
                ::committed
                (catch Exception failure
                  (:seon.cluster.prompt/rule (ex-data failure)))))))))
+
+;;; ---------------------------------------------------------------------------
+;;; The collaboration pieces: who else exists, who asked, what I was doing
+;;; ---------------------------------------------------------------------------
+
+(deftest a-lone-agent-is-not-told-about-a-population-it-does-not-have
+  (with-database
+    (fn [connection]
+      (is (not (str/includes? (prompt/prompt (d/db connection) request)
+                              "Other agents"))
+          "the sentence is present exactly while the facts that cause
+           it are — an agent alone in a cluster is told nothing about
+           agents"))))
+
+(deftest peers-are-named-so-delegation-is-possible-at-all
+  (with-database
+    (fn [connection]
+      (d/transact connection [{:seon.cluster.agent/id "bob"}
+                              {:seon.cluster.agent/id "carol"}])
+      (let [text (prompt/prompt (d/db connection) request)]
+        (is (str/includes? text "bob"))
+        (is (str/includes? text "carol"))
+        (is (str/includes? text "my.message/send")
+            "and HOW to reach them, or naming them is a tease")
+        (is (not (str/includes? text (str "Other agents in this cluster: "
+                                          agent-id)))
+            "an agent is never listed as its own peer")))))
+
+(deftest the-sender-is-named-when-a-message-came-from-an-agent
+  (with-database
+    (fn [connection]
+      (d/transact connection
+                  [{:seon.cluster.agent/id "bob"}
+                   {:seon.cluster.message/id "from-bob"
+                    :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
+                    :seon.cluster.message/from [:seon.cluster.agent/id "bob"]
+                    :seon.cluster.message/content "there are 25"
+                    :seon.cluster.message/at now}])
+      (let [text (prompt/prompt (d/db connection)
+                                {:seon.cluster.agent/id agent-id
+                                 :seon.cluster.message/id "from-bob"})]
+        (is (str/includes? text "Agent bob sent you"))
+        (is (str/includes? text "there are 25")))))
+  (testing "and a message from outside names no sender rather than inventing one"
+    (with-database
+      (fn [connection]
+        (is (str/includes? (prompt/prompt (d/db connection) request)
+                           "You have been asked"))))))
+
+(deftest a-pause-note-is-the-continuity-a-delegating-agent-has
+  (with-database
+    (fn [connection]
+      ;; a previous run that ENDED in my.run/wait: the disposition is
+      ;; the last form's admitted value, so the note is already durable
+      ;; in that form's result-edn and nothing new is stored
+      (d/transact
+       connection
+       [{:seon.cluster.run/id "run-paused"
+         :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
+         :seon.cluster.run/opened-at (Date. 1000)
+         :seon.cluster.run/closed-at (Date. 2000)
+         :seon.cluster.run/plan-digest (apply str (repeat 64 "a"))}
+        {:seon.cluster.eval/id "run-paused-0"
+         :seon.cluster.eval/run [:seon.cluster.run/id "run-paused"]
+         :seon.cluster.eval/ordinal 0
+         :seon.cluster.eval/claim-epoch 1
+         :seon.cluster.eval/at (Date. 1500)
+         :seon.cluster.eval/status :done
+         :seon.cluster.eval/result-edn
+         (pr-str {:my.run/disposition :wait
+                  :my.run/note "asked bob for the prime count for the human"})}])
+      (let [text (prompt/prompt (d/db connection) request)]
+        (is (str/includes? text "asked bob for the prime count for the human")
+            "the note my.run/wait promised the agent's next prompt")
+        (is (str/includes? text "You paused your previous run")))))
+
+  (testing "a previous run that COMPLETED leaves no pause note"
+    (with-database
+      (fn [connection]
+        (d/transact
+         connection
+         [{:seon.cluster.run/id "run-done"
+           :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
+           :seon.cluster.run/opened-at (Date. 1000)
+           :seon.cluster.run/closed-at (Date. 2000)
+           :seon.cluster.run/plan-digest (apply str (repeat 64 "b"))}
+          {:seon.cluster.eval/id "run-done-0"
+           :seon.cluster.eval/run [:seon.cluster.run/id "run-done"]
+           :seon.cluster.eval/ordinal 0
+           :seon.cluster.eval/claim-epoch 1
+           :seon.cluster.eval/at (Date. 1500)
+           :seon.cluster.eval/status :done
+           :seon.cluster.eval/result-edn
+           (pr-str {:my.run/disposition :completed
+                    :my.run/result "done"})}])
+        (is (not (str/includes? (prompt/prompt (d/db connection) request)
+                                "You paused"))))))
+
+  (testing "and unreadable result-edn answers nil rather than taking the turn down"
+    (with-database
+      (fn [connection]
+        (d/transact
+         connection
+         [{:seon.cluster.run/id "run-junk"
+           :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
+           :seon.cluster.run/opened-at (Date. 1000)
+           :seon.cluster.run/closed-at (Date. 2000)
+           :seon.cluster.run/plan-digest (apply str (repeat 64 "c"))}
+          {:seon.cluster.eval/id "run-junk-0"
+           :seon.cluster.eval/run [:seon.cluster.run/id "run-junk"]
+           :seon.cluster.eval/ordinal 0
+           :seon.cluster.eval/claim-epoch 1
+           :seon.cluster.eval/at (Date. 1500)
+           :seon.cluster.eval/status :done
+           :seon.cluster.eval/result-edn "#not-a-tag{"}])
+        (is (string? (prompt/prompt (d/db connection) request)))))))

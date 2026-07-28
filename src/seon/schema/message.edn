@@ -11,6 +11,19 @@
  ; therefore emit no wake (probe B Q10).
  :seon.cluster.message/to :seon.db/ref
 
+ ; WHO SENT IT, and its ABSENCE is the other half of the contract: a
+ ; message with no `from` came from outside the agent population — the
+ ; human, or the system's own error recorder. That absence is what
+ ; makes a human nudge structurally distinguishable from an agent's
+ ; reply without a flag, an origin enum, or a `:from :human` stamp
+ ; (the quarry stored an origin keyword AND a hops integer for want of
+ ; this: src-old/seon/agent/message.cljc:48-64).
+ ;
+ ; Indexed for the same reason `:seon.cluster.message/about` is: a bare
+ ; ref carries no persistence facet and would never install, and
+ ; "what did bob send me" is a query BY the ref.
+ :seon.cluster.message/from [:and {:seon.db/index true} :seon.db/ref]
+
  ; THE ENTITY MAP, and it is not decoration: `canonical-database-
  ; attributes` installs entity-map entries BY CONSTRUCTION and
  ; standalone forms only when they carry a persistence facet. Without
@@ -25,4 +38,59 @@
   [:seon.cluster.message/id :seon.cluster.message/id]
   [:seon.cluster.message/to :seon.cluster.message/to]
   [:seon.cluster.message/content :seon.cluster.message/content]
-  [:seon.cluster.message/at :seon.cluster.message/at]]}
+  [:seon.cluster.message/at :seon.cluster.message/at]
+  [:seon.cluster.message/from {:optional true} :seon.cluster.message/from]]
+
+ ; --------------------------------------------------------------------
+ ; THE AGENT-FACING VALUE — `my.message/send` returns this and nothing
+ ; happens. It is the FIRST of the three agent-facing shapes (pure code
+ ; returning a value the driver interprets), exactly like `my.run`'s two
+ ; dispositions, and it is deliberately NOT the second shape: a message
+ ; is a durable FACT the driver commits, not a capability request that
+ ; needs a guarded door. Building `seon.effect` for one verb whose whole
+ ; effect is a transaction the loop already makes would be a door around
+ ; the inside of the house.
+ ;
+ ; The recipient is an AGENT ID string, not a ref: agent code holds
+ ; names, never entity ids, and resolving the name is the driver's job
+ ; — which is also where "no such agent" becomes an error fact instead
+ ; of a lookup ref that would fail the whole terminal transaction.
+ :my.message/to [:string {:min 1}]
+ :my.message/content [:string {:min 1}]
+ :my.message/message
+ [:map {:closed true}
+  [:my.message/to :my.message/to]
+  [:my.message/content :my.message/content]]
+
+ ; What a FORM may evaluate to and the loop will deliver: one message,
+ ; or several. The vector arm is not a convenience — a form's value is
+ ; the only channel, so `[(send "a" …) (send "b" …)]` is the ONLY way
+ ; to fan out in one form, and without it an agent would have to spend
+ ; a form per recipient.
+ :my.message/value
+ [:or :my.message/message [:vector {:min 1} :my.message/message]]
+
+ ; --------------------------------------------------------------------
+ ; THE DRIVER SIDE — what `seon.cluster.message/delivery` is asked and
+ ; what it answers. Rows are ordinary tx-data the loop rides in its own
+ ; terminal transaction; refusals are flat error VALUES the loop hands
+ ; to the error recorder, so a refused delivery is a durable fact and
+ ; never a silent drop.
+ :seon.cluster.message/delivery-request
+ [:map {:closed true}
+  [:my.message/value :my.message/value]
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.cluster.run/id :seon.cluster.run/id]
+  [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal]
+  [:seon.cluster.message/at :seon.cluster.message/at]
+  [:seon.config.message/max-chain :seon.config.message/max-chain]
+  ; the message this run is answering, when there is one: the chain the
+  ; new message extends. ABSENT means depth zero — a run whose trigger
+  ; cannot be found starts a fresh chain, which is the conservative
+  ; direction (it can only make the guard fire later, never never).
+  [:seon.cluster.message/trigger {:optional true} :seon.cluster.message/id]]
+
+ :seon.cluster.message/delivery
+ [:map {:closed true}
+  [:seon.cluster.message/rows [:vector :map]]
+  [:seon.error/values [:vector :seon.error/value]]]}

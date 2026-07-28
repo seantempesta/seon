@@ -82,7 +82,8 @@
 
   THE CTX IS SUPPLIED, NOT BUILT HERE. `base` is the minimum N3 needs —
   `clojure.core` and `clojure.string` in their interrupt-aware form
-  plus the two `my.run` dispositions — and a caller may pass its own.
+  plus the two `my.run` dispositions and `my.message/send` — and a
+  caller may pass its own.
   The computed binding table (capability functions derived from
   program-graph facts, filtered by a derived namespace policy) is N5's
   and is deliberately absent: a hand-listed callable surface here would
@@ -94,6 +95,7 @@
   crash walk stay indistinguishable, which is honest: the form's effect
   MAY have happened. Nothing re-executes."
   (:require [clojure.test.check.generators :as gen]
+            [my.message]
             [my.run]
             [sci.core :as sci]
             [sci.interrupt :as sci.interrupt]
@@ -132,7 +134,8 @@
 
 (defonce ^:private base-ctx
   (delay
-    (let [run-ns (sci/create-ns 'my.run)]
+    (let [run-ns (sci/create-ns 'my.run)
+          message-ns (sci/create-ns 'my.message)]
       (sci/init
        {;; the interrupt-aware core: a lazy sequence built by NATIVE
         ;; clojure.core enters no interpreted body, so `(range)` inside
@@ -143,7 +146,13 @@
         {'clojure.core sci.interrupt/clojure-core
          'clojure.string sci.interrupt/clojure-string
          'my.run {'wait (sci/copy-var my.run/wait run-ns)
-                  'complete (sci/copy-var my.run/complete run-ns)}}
+                  'complete (sci/copy-var my.run/complete run-ns)}
+         ;; the second agent-facing value family, bound the same way and
+         ;; for the same reason: it is a PURE function returning a map,
+         ;; so copying the var into the base ctx is the whole binding —
+         ;; there is no capability to thread, no connection to close
+         ;; over, and nothing an agent could hold onto after the eval
+         'my.message {'send (sci/copy-var my.message/send message-ns)}}
         ;; two broad roots rather than an enumeration of exception
         ;; subclasses — an agent needs to catch things, not to be given
         ;; a curated taxonomy

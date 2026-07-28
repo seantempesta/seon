@@ -18,6 +18,7 @@
             [seon.cluster.loop :as cluster.loop]
             [seon.error :as error]
             [seon.render :as render]
+            [seon.cluster.message :as message]
             [seon.cluster.prompt :as prompt]
             [seon.cluster.run :as run]
             [seon.cluster.work :as work]
@@ -108,6 +109,10 @@
              ;; recording needs. No escalate-to: this fixture has no
              ;; root agent, and absence is the state.
              :seon.config.error/recurrence-limit 3
+             ;; the conversation bound, carried like every other dial.
+             ;; Small on purpose: the fixture that proves the guard
+             ;; should not need sixteen turns to reach it.
+             :seon.config.message/max-chain 2
              :seon.sci.admit/caps
              {:seon.config.eval.result/max-depth 6
               :seon.config.eval.result/max-collection 8
@@ -393,7 +398,17 @@
                             @connection))
                 "the run closed in the SAME transaction as its receipt")))))))
 
-(deftest a-waiting-disposition-releases-custody-and-leaves-the-run-open
+(deftest a-waiting-disposition-frees-the-agent-and-keeps-its-note
+  ;; REPLACES a test that asserted the run stays open after a wait. It
+  ;; did stay open — because the close REFUSED, forever: `next-work`
+  ;; derives `:close` for the released run, `close-call` refuses a run
+  ;; the process does not hold, and the self-rewake fires again. Twelve
+  ;; passes produced nine error facts and `next-work` still said
+  ;; `:close`. A hot livelock is not "waiting"; the loop now takes
+  ;; custody before closing, and what a wait really means is that the
+  ;; run ENDS with no reply and the agent is free to be triggered again.
+  ;; Nothing could ever have resumed that run: its plan was fully
+  ;; executed.
   (with-cluster
     (fn [cluster]
       (with-redefs [ai/complete
@@ -402,14 +417,28 @@
                                :seon.cluster.eval/result-edn
                                (pr-str (my.run/wait "need input"))
                                :seon.sci.admit/value (my.run/wait "need input")}]
-          (let [connection (:seon.store/branch-connection cluster)]
-            (drive! cluster 10)
-            (is (nil? (d/q '[:find ?p . :where
-                             [_ :seon.cluster.run/process ?p]] @connection))
-                "custody released")
-            (is (nil? (d/q '[:find ?c . :where
-                             [_ :seon.cluster.run/closed-at ?c]] @connection))
-                "and the run is still open, waiting")))))))
+          (let [connection (:seon.store/branch-connection cluster)
+                reports (drive! cluster 12)]
+            (is (= [:open :call :resume :close]
+                   (mapv :seon.cluster.work/situation reports))
+                "four passes and then IDLE — the loop stops looking")
+            (is (= [:released :released :released :closed]
+                   (mapv :seon.cluster.loop/outcome reports)))
+            (is (nil? (work/next-work @connection (request connection)))
+                "and nothing is derivable afterwards: no spin")
+            (is (empty? (d/q '[:find ?e :where [?e :seon.error/kind _]]
+                             @connection))
+                "no error facts — the old path committed one per pass")
+            (is (nil? (d/q '[:find ?a . :where
+                             [?a :seon.cluster.agent/run _]] @connection))
+                "the agent is free: its pointer is retracted, so the next
+                 trigger can open a new run")
+            (is (str/includes?
+                 (d/q '[:find ?edn . :where
+                        [_ :seon.cluster.eval/result-edn ?edn]] @connection)
+                 "need input")
+                "and the note survives in the receipt, which is what the
+                 next prompt reads it back out of")))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Failover, backoff, and the attempt chain
@@ -760,3 +789,105 @@
           (is (= :error (:seon.cluster.loop/outcome (last reports))))
           (is (nil? (d/q '[:find ?d . :where
                            [_ :seon.cluster.run/plan-digest ?d]] @connection))))))))
+
+;;; ---------------------------------------------------------------------------
+;;; The second agent-facing value: a form that sends
+;;; ---------------------------------------------------------------------------
+
+(deftest a-turn-delivers-what-a-form-asks-to-send-and-still-finishes
+  ;; THE COMPOSITION QUESTION, answered by the fold rather than by a
+  ;; rule: a turn sends in one form and completes in another, because
+  ;; the loop reads EVERY form's value, not only the last.
+  (with-cluster
+    (fn [cluster]
+      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
+                           'seon.sci.eval/evaluate)
+            connection (:seon.store/branch-connection cluster)]
+        (d/transact connection [{:seon.cluster.agent/id "agent-b"}])
+        ;; ONE stub, two agents: the reply depends on WHOSE prompt it
+        ;; is, so the delegate answers instead of forwarding the same
+        ;; sentence back. (Without this the stub made agent-b message
+        ;; itself — which the loop happily delivered, and which is the
+        ;; cheapest possible proof that the wake really fires.)
+        (with-redefs [ai/complete
+                      (fn [{prompt :seon.ai/prompt}]
+                        {:seon.ai/text
+                         (if (str/includes? prompt "You are agent agent-b")
+                           "(my.run/complete \"there are three widgets\")"
+                           (str "(my.message/send \"agent-b\" "
+                                "\"please count the widgets\")\n"
+                                "(my.run/complete \"asked agent-b\")"))})]
+          (drive! cluster 10)
+          (testing "the message is a durable fact addressed to the peer"
+            (is (= #{["please count the widgets" "agent-b" "agent-a"]}
+                   (set (d/q '[:find ?content ?to-id ?from-id
+                               :where
+                               [?m :seon.cluster.message/content ?content]
+                               [?m :seon.cluster.message/to ?to]
+                               [?to :seon.cluster.agent/id ?to-id]
+                               [?m :seon.cluster.message/from ?from]
+                               [?from :seon.cluster.agent/id ?from-id]]
+                             @connection)))))
+          (testing "the run still completed — sending is not finishing"
+            (is (some? (d/q '[:find ?c . :where
+                              [_ :seon.cluster.run/closed-at ?c]]
+                            @connection))))
+          (testing "message and receipt rode ONE transaction"
+            (let [pairs (d/q '[:find ?mtx ?rtx
+                               :where
+                               [?m :seon.cluster.message/content
+                                "please count the widgets" ?mtx]
+                               [?m :seon.cluster.message/from ?agent]
+                               [?run :seon.cluster.run/agent ?agent]
+                               [?r :seon.cluster.eval/run ?run]
+                               [?r :seon.cluster.eval/ordinal 0]
+                               [?r :seon.cluster.eval/status :done ?rtx]]
+                             @connection)
+                  [message-tx receipt-tx] (first pairs)]
+              (is (= 1 (count pairs)) "exactly one sender's form to check")
+              (is (= message-tx receipt-tx)
+                  "no window in which the message exists and the receipt
+                   explaining where it came from does not")))
+          (testing "and that transaction names the trigger it answers"
+            (is (= 1 (message/chain-depth
+                      @connection
+                      (d/q '[:find ?id . :where
+                             [?m :seon.cluster.message/content
+                              "please count the widgets"]
+                             [?m :seon.cluster.message/id ?id]]
+                           @connection)))
+                "the conversation's depth is walkable from committed
+                 transaction metadata alone — no hop counter anywhere")))))))
+
+(deftest a-refused-delivery-becomes-a-durable-error-fact
+  ;; The bound itself is proven exhaustively in the messaging suite's
+  ;; ping-pong simulation. What this proves is the SEAM: a refusal the
+  ;; delivery rule returns as a value reaches the error recorder and
+  ;; commits, rather than evaporating in the fold — the D3 lesson
+  ;; applied to the new value family. The dial is set to a value the
+  ;; schema calls invalid on purpose, because fail-closed is the
+  ;; behaviour under a misconfigured bound and it is the one refusal a
+  ;; single turn can reach.
+  (with-cluster
+    (fn [cluster]
+      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
+                           'seon.sci.eval/evaluate
+                           ;; nothing may be delivered at all
+                           :seon.config.message/max-chain 0)
+            connection (:seon.store/branch-connection cluster)]
+        (d/transact connection [{:seon.cluster.agent/id "agent-b"}])
+        (with-redefs [ai/complete
+                      (fn [_] {:seon.ai/text
+                               (str "(my.message/send \"agent-b\" \"hi\")\n"
+                                    "(my.run/complete \"tried\")")})]
+          (drive! cluster 10)
+          (is (empty? (d/q '[:find ?c :where
+                             [?m :seon.cluster.message/content ?c]
+                             [?m :seon.cluster.message/from _]]
+                           @connection))
+              "nothing was delivered")
+          (is (= #{:seon.cluster.message/no-limit}
+                 (set (d/q '[:find [?kind ...] :where
+                             [?e :seon.error/kind ?kind]]
+                           @connection)))
+              "and the refusal is a durable error fact with its own kind"))))))
