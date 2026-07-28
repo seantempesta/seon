@@ -630,36 +630,118 @@ it green (stop-on-friction; sol and Opus 5 both proven), the
 orchestrator reviews, proves live, and a recurring quality-review lane
 audits the standing result.
 
-**Rung status (verify against `bin/test`, not this prose):**
+**THE PROGRAM (2026-07-28 evening — the one ordered ledger; verify
+against `bin/test` and `git log`, not this prose).**
 
-- **R0 — DONE** (`f25e34594`): the tree split; fresh default project,
-  own `deps.edn`, `bin/test` gate, old system behind aliases.
-- **N2 (run model) — GREEN, revised** (`c65ddeeda` + `ba5cb0c1e`):
-  transitions inside the transaction via `[:db.fn/call #'f request]`;
-  model-based state-machine suite.
-- **B0 (entry) — GREEN** (`f1956f8f6` + `1e3aff7d6`): REPL at second
-  zero, closed bootstrap schema, `(pid, start-instant)`-fenced
-  advertisements, shared root executors; ten-second bound asserted
-  in-suite.
-- **B1 (store) — sealed, implementation in flight** (`c82f790f4` +
-  `5bfc0e73f`): flock-before-everything on the canonical path, genesis
-  window repaired by recreate, child-JVM cross-process falsifier.
-- **B2 — NEXT authoring: config → facts + the bootstrap ancestor.**
-  Two-phase config (closed bootstrap schema exists in B0; the database
-  phase reconciles a manifest into facts, converged = zero writes);
-  schema EDN under `src/seon/schema/` with the one admission gate; and
-  the SHARED BOOTSTRAP ANCESTOR (owner 2026-07-27): one deliberate
-  build indexes all code into the ancestor store; a new cluster is a
-  near-instant FORK of it, never a re-index. QUARRY: the template
-  store (`c669c2f6b` — State A's "reset = template clone" is the
-  working prior art), `src-old/seon/config/resolve.cljc`, the runtime
-  state reconciler, and the JVM program indexer.
-- **B3 — dev loop closure**: `bin/repl` + MCP eval_clj discovery of
-  fresh advertisements (in flight), function-level test selection
-  later (task #6).
-- **N3 (run loop as flow proc), N4 (render), N5 (corpus), N6 (final
-  gates/leaves)** — as specified below, each with its own quarry read
-  and port manifest.
+**Standing — done and green (gate 403/1566/0 at `ec06ae760`):** R0 tree
+split; N2 run model (transitions in the transaction); B0 entry; B1
+store; B2 config→facts + ancestor fork; B3 dev loop (MCP restart
+verification still owner-action, task #3); N3 run loop end-to-end live
+(one DeepSeek turn + kill-9 recovery) — its SHAPE is superseded by the
+F-series below, its transaction fences and crash model carry forward;
+the error system (one normalizer, fault consumer, projections-per-
+consumer, failover, instrumentation); my.message subagents live; N4
+packages 1–2 + streaming + `/data` + root page + derived ports/banner;
+presence-not-kinds (receipts by presence + `interrupted-at`); render
+nil-unification; the simplified operator (`bin/seon-fresh`); the
+context-blocks CONTRACT sealed (`b05a6b9f6`+`a236eefc6`).
+
+**F — THE AGENTS-ARE-FLOWS REBUILD (owner-ruled 2026-07-28; the spine).**
+Research basis: `flow-mechanics`, `flow-inventory`,
+`workload-classification`, `trigger-conservation`,
+`zombie-constructibility` (all `-2026-07-28.md`).
+
+- **F0 — prerequisites (in flight / audit-gated):**
+  (a) var-backed step-fns + every proc pinned `:io`/`:compute`
+  (lane `flow-var-stepfns`, running);
+  (b) admission codec D2 — the sci failure arm joins the one bounded
+  codec (lane `admission-codec-d2`, running);
+  (c) every trigger-conservation violation fixed at its choke point
+  (SLOT — fills from the audit on return; a cap never fences a bug);
+  (d) the claim/epoch deletion slice, or the named incident that saves
+  each check (SLOT — fills from the zombie audit on return).
+- **F1 — the agent-graph blueprint (contract package, orchestrator-
+  authored):** one blueprint stamps every agent's graph at agent
+  creation — mailbox proc (`:io`, parks on its own wake; `listen!`
+  commit interest routes each trigger to the right agent's mailbox
+  put), turn proc (`:io`: derive prompt → provider call → reply fold),
+  evals through the existing `:compute` door under `:interrupt-fn`;
+  per-agent pause/resume as graph commands (pause lands between
+  transforms — the interrupt-fn remains the mid-eval stop); the
+  EPISODE DIAL: max consecutive runs per idle→running episode, derived
+  from run-opening trigger walks (the conservation audit delivers the
+  query), one config number, outside trigger starts a new episode;
+  graph error-chan pipelines into the cluster fault committer tagged
+  by agent. The one-open-run transaction fence and interrupted+adapt
+  recovery carry forward UNCHANGED. Crash walk: graphs are
+  re-stampable from facts at boot; channel contents losable by the
+  transport law. Sealed suite: N-agent parallel turns with per-trial
+  databases; park/wake; pause during in-flight call; episode-cap
+  refusal; hot-reload var proof composed with F0(a).
+- **F2 — transport conversions + the central-loop deletion (same
+  surgery area, one wave, after F1 green):** streamed tokens become
+  one `(sliding-buffer 1)` conn into the render proc — DELETE
+  `seon.ai.stream`'s database half (snapshot/settle txes, publisher
+  thread, `:seon.ai.stream/*` attributes); render fan-out = one
+  derivation → equality suppression → mult → per-tab sliding-1 taps —
+  DELETE per-connection `listen!` + hand-rolled mailboxes in
+  `render/web.clj`; DELETE the central loop pass in `cluster/loop.cljc`
+  (its pure derivations move into the blueprint's procs) and its
+  in-pass sleep backoff. Old tests pinning deleted paths die in the
+  same commits; the survivors assert the surviving mechanism.
+- **F3 — workload classification wiring:** capability leaves annotated
+  `^{:seon.workload :io}`/`:compute`; the ~15-line reachability query
+  (research-proven) lands with the program graph at N5 — F3 ships the
+  metadata convention + the two-seam consumption now, full derivation
+  activates when `:seon.fn/calls` facts exist. The `:mixed`-proc
+  computed check from F0(a) is the standing guard.
+- **F4 — live proofs and the dial:** same-cluster N-agent parallel
+  drive (real DeepSeek or local Qwen), two-cluster proof, ≥100 parked
+  agents with measured idle cost matching the research numbers,
+  kill -9 mid-parallel-turns recovery, episode-cap live refusal.
+  The concurrency behavior ships ON by construction (there is no
+  serial mode to flip — parallelism is per-agent graphs existing);
+  the episode-cap default is set here from drive evidence.
+
+**After F (re-sequenced, dependency order):**
+
+- **Context-blocks implementation** — lane running against the sealed
+  contract; review on return; its capture/census compose with F1's
+  turn proc (the pre-provider capture is a turn-proc step).
+- **N4 remainder** — agent-transcript page (gated on the two remaining
+  messaging rulings), bench rows wired to the committed harness,
+  home-cluster package.
+- **N5 corpus round trip** — defn → `:seon.fn` facts → callable;
+  activates F3's full derivation and the context-blocks invocation
+  seam's SCI half (named edges in the sealed contract §10); the
+  7 owner decisions at its rung.
+- **Test units 4–9** — after the owner reads units 1–3's result
+  (landed); the excluded-suite defect list from the
+  `test-constructions` lane report is the work inventory.
+- **The render-unit collapse** (catalog group 1) — prompt formatter,
+  stderr presentation, per-family pages; after context-blocks lands
+  its census (the prompt formatter IS a census consumer).
+- **N6 — the final system gate.**
+
+**Owner decisions, collected (nothing else is waiting on you):**
+
+1. Episode-cap default number (set at F4 with drive evidence; 16
+   proposed).
+2. Implicit `:compute` for computed-pure functions, or always-explicit
+   metadata (`workload-classification-2026-07-28.md` §recommendation:
+   implicit).
+3. Block attribute vocabulary pick — `:seon.block/*` vs
+   `:seon.agent.ctx/*` (issue
+   `block-attribute-vocabulary-splits-across-architecture-docs.md`;
+   the landed code uses `:seon.block/*`).
+4. Messaging leftovers: failed-send visibility (recommended: the
+   derived prompt line the context-blocks contract already enables —
+   plus cheap send-time validation for typo'd names); verbatim bare
+   reply confirm; `Math/sqrt` stays an N5 surface decision. (Ruled
+   already: wait closes directly in its terminal tx — a small sealed
+   revision folded into F1's suite; self-messaging KEPT.)
+5. No-auth local-provider admission
+   (`local-provider-2026-07-28.md` §"No-auth decision").
 
 The remainder of this section is the original rung detail; where it
 says "old step N", that content is design truth carried forward, not a
