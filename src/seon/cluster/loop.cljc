@@ -609,7 +609,30 @@
       ;; row. That is what makes "exactly two calls" and "exactly one
       ;; call" queryable facts rather than claims.
       :call
-      (let [fail! (fn [failure]
+      (let [;; STREAMING IS ON BY CONSTRUCTION (F2 §2.1): the sink is
+            ;; one `offer!` of the complete `:seon.ai/partial` snapshot
+            ;; onto the cluster's ONE sliding-1 stream conn — newest
+            ;; wins, a slow render pass can never backpressure the
+            ;; provider fold, and a streamed call and a one-shot call
+            ;; return the same completion value. There is no dial; a
+            ;; handle with no stream channel simply calls one-shot.
+            stream-channel (:seon.cluster.loop/stream-channel cluster)
+            sink (when stream-channel
+                   (fn [snapshot]
+                     (async/offer! stream-channel
+                                   {:seon.cluster.agent/id agent-id
+                                    :seon.ai/partial snapshot})))
+            ;; the CLEAR (F2 §2.1): presence of text IS the state, so an
+            ;; entry with no snapshot is the clear. Offered by the arm's
+            ;; two terminal owners (`freeze!`/`fail!`) — the settled
+            ;; facts commit, the database wake repaints from facts, and
+            ;; the render proc drops the snapshot.
+            clear! (fn []
+                     (when sink
+                       (async/offer! stream-channel
+                                     {:seon.cluster.agent/id agent-id})))
+            fail! (fn [failure]
+                    (clear!)
                     ;; ONE transaction: the run closes and WHY it closed
                     ;; lands with it. Before this the error value
                     ;; evaporated — the drive sat claimed-with-no-plan
@@ -627,6 +650,7 @@
                     (report :error 0))
             freeze!
             (fn [completion]
+              (clear!)
               ;; the reply became a plan, or it did not: unchanged, and
               ;; deliberately outside the attempt reduce — WHICH target
               ;; answered stops mattering the moment one did
@@ -718,7 +742,9 @@
                  system nil]
             (let [completion (ai/complete
                               (cond-> (assoc target :seon.ai/prompt text)
-                                system (assoc :seon.ai/system system)))
+                                system (assoc :seon.ai/system system)
+                                sink (assoc :seon.ai/stream? true
+                                            :seon.ai/sink sink)))
                   failure (when (:seon.error/kind completion) completion)
                   ;; a backup is only ever a target ONCE: the attempt that
                   ;; already failed over cannot fail over again, and that

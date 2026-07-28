@@ -3,7 +3,12 @@
  ; (the same symbols-as-data idiom as :seon.ancestor/populate), so the
  ; loop's mechanics do not wait on the seon.sci.eval adoption and a
  ; suite can drive a turn with a fake evaluator.
- :seon.cluster.loop/cluster [:map {:closed true} [:seon.store/branch-connection :seon.store/branch-connection] [:seon.cluster.run/process :seon.cluster.run/process] [:seon.cluster.wake/channel :seon.flow/channel] [:seon.cluster.loop/completion :seon.flow/channel] [:seon.ai/primary :seon.ai/target] [:seon.ai/backup {:optional true} :seon.ai/target] [:seon.ai.retry/strategy :seon.ai.retry/strategy] [:seon.cluster.loop/evaluate :qualified-symbol] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.config.eval/time-limit-ms :seon.config.eval/time-limit-ms] [:seon.config/on-core-error :seon.config/on-core-error] [:seon.config.error/recurrence-limit :seon.config.error/recurrence-limit] [:seon.config.message/max-chain :seon.config.message/max-chain] [:seon.config.error/escalate-to {:optional true} :seon.config.error/escalate-to] [:clojure.core.async.flow/pid {:optional true} :keyword]]
+ ; `:seon.cluster.loop/stream-channel` is the cluster's ONE stream conn
+ ; (F2 §2.1): a `(sliding-buffer 1)` in-port of the render proc onto
+ ; which the `:call` arm's sink offers complete `:seon.ai/partial`
+ ; snapshots. OPTIONAL because a suite or a REPL drives a turn without a
+ ; render pipeline — absent means the call runs one-shot.
+ :seon.cluster.loop/cluster [:map {:closed true} [:seon.store/branch-connection :seon.store/branch-connection] [:seon.cluster.run/process :seon.cluster.run/process] [:seon.cluster.wake/channel :seon.flow/channel] [:seon.cluster.loop/stream-channel {:optional true} :seon.flow/channel] [:seon.cluster.loop/completion :seon.flow/channel] [:seon.ai/primary :seon.ai/target] [:seon.ai/backup {:optional true} :seon.ai/target] [:seon.ai.retry/strategy :seon.ai.retry/strategy] [:seon.cluster.loop/evaluate :qualified-symbol] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.config.eval/time-limit-ms :seon.config.eval/time-limit-ms] [:seon.config/on-core-error :seon.config/on-core-error] [:seon.config.error/recurrence-limit :seon.config.error/recurrence-limit] [:seon.config.message/max-chain :seon.config.message/max-chain] [:seon.config.error/escalate-to {:optional true} :seon.config.error/escalate-to] [:clojure.core.async.flow/pid {:optional true} :keyword]]
  ; `::flow/pid` is FLOW'S, added to the args map it hands the init
  ; arity (`flow/impl.clj:155`: `:args (assoc args ::flow/pid pid)`), so
  ; the handle a running proc holds genuinely has one and the closed

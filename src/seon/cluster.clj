@@ -663,7 +663,7 @@
   Everything in it comes from the instance and the effective dials, so
   the assembly the live drives were doing by hand happens once, here,
   where production does it."
-  [connection cluster-name process wake-channel completion]
+  [connection cluster-name process wake-channel stream-channel completion]
   (let [dials (config/effective @connection cluster-name)]
     (cond-> (merge
              ;; MERGED WHOLE, never re-keyed: `seon.ai/targets` owns the
@@ -675,6 +675,10 @@
              {:seon.store/branch-connection connection
               :seon.cluster.run/process process
               :seon.cluster.wake/channel wake-channel
+              ;; the cluster's ONE stream conn (F2 §2.1): sliding-1, so
+              ;; the newest complete snapshot wins and the provider fold
+              ;; is never parked by presentation
+              :seon.cluster.loop/stream-channel stream-channel
               :seon.cluster.loop/completion completion
               :seon.ai.retry/strategy (ai/retry-strategy dials)
               :seon.cluster.loop/evaluate 'seon.sci.eval/evaluate
@@ -728,9 +732,10 @@
   [instance connection cluster-name]
   (let [process (process-identity (:seon.boot/advertisement instance))
         armer-channel (async/chan (async/sliding-buffer 1))
+        stream-channel (async/chan (async/sliding-buffer 1))
         completion (async/promise-chan)
         handle (loop-handle connection cluster-name process armer-channel
-                            completion)
+                            stream-channel completion)
         routing (cluster.agent/routing)
         drops (atom 0)
         graph (flow.core/create-flow
@@ -851,7 +856,8 @@
   (when-let [fanout (:seon.flow/error-fanout instance)]
     (flow/stop-error-fanout! fanout))
   (when-let [handle (:seon.cluster.loop/cluster instance)]
-    (async/close! (:seon.cluster.wake/channel handle)))
+    (async/close! (:seon.cluster.wake/channel handle))
+    (some-> (:seon.cluster.loop/stream-channel handle) async/close!))
   nil)
 
 (defn- stack-tower!

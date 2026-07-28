@@ -314,7 +314,11 @@
          (select-keys request [:seon.db/db
                                :seon.cluster.agent/id
                                :seon.sci.admit/caps
-                               :seon.cluster.run/live-processes])))
+                               :seon.cluster.run/live-processes
+                               ;; the TRANSIENT stream snapshot (F2 §2):
+                               ;; channel-borne presentation the render
+                               ;; pass threads through, never a fact
+                               :seon.ai/partial])))
 
 (defn surface
   "Render one block into one kind. Never throws.
@@ -417,7 +421,8 @@
                                   (select-keys request
                                                [:seon.cluster.agent/id
                                                 :seon.sci.admit/caps
-                                                :seon.cluster.run/live-processes]))
+                                                :seon.cluster.run/live-processes
+                                                :seon.ai/partial]))
                            block kind))))
           candidates)))
 

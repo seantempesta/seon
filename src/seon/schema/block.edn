@@ -154,11 +154,16 @@
  ; signature — one convention for "pure over a database value", not two.
  ; caps + trusted inputs now ride the request — the ONE builder threads
  ; them into every projection (review finding 3).
+ ; `:seon.ai/partial` is the TRANSIENT stream snapshot (F2 §2): the
+ ; render pass threads the channel-borne presentation value through the
+ ; one unit builder, so the streaming blocks read it exactly where every
+ ; block reads its inputs — never a query, never a fact.
  :seon.render/surfaces-request
  [:map {:closed true}
   [:seon.cluster.agent/id :seon.cluster.agent/id]
   [:seon.render/kind :seon.render/kind]
   [:seon.sci.admit/caps :seon.sci.admit/caps]
+  [:seon.ai/partial {:optional true} :seon.ai/partial]
   [:seon.cluster.run/live-processes {:optional true}
    :seon.cluster.run/live-processes]]
 
@@ -168,6 +173,7 @@
   [:seon.db/db :any]
   [:seon.cluster.agent/id :seon.cluster.agent/id]
   [:seon.sci.admit/caps :seon.sci.admit/caps]
+  [:seon.ai/partial {:optional true} :seon.ai/partial]
   [:seon.cluster.run/live-processes {:optional true}
    :seon.cluster.run/live-processes]]
 

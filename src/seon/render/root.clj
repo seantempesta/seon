@@ -108,6 +108,42 @@
            [:span {:class "seon-root-to"} (str "→ " to-id)]
            [:span {:class "seon-root-said"} content]])])]))
 
+(defn tokens-html
+  "A per-run token counter updating live while a model call streams.
+
+  An ordinary block reading the TRANSIENT `:seon.ai/partial` the render
+  pass placed on its unit — channel-borne presentation, never a fact
+  (F2 §2). The fact that its value changes twenty times a second is the
+  pipeline's problem rather than its own, which is the point of the
+  exercise: nothing here knows it is high-churn, and nothing here
+  queries, because there is no row to query."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
+  [unit]
+  (let [snapshot (:seon.ai/partial unit)]
+    [:div {:id (block/surface-id :tokens) :class "seon-stream-tokens"}
+     [:span {:class "seon-stream-label"} "tokens"]
+     [:span {:class "seon-stream-count"}
+      (str (or (:seon.ai/tokens snapshot) 0))]]))
+
+(defn text-html
+  "The model's reply streaming into the interface as it generates.
+
+  Deliberately the same shape as the counter: two exercises, one
+  mechanism, no streaming-specific render path. The blinking cursor is
+  CSS on an empty span rather than a character in the text, so the
+  reply's bytes are exactly the model's and a copy-paste does not pick
+  up decoration. When nothing streams the unit carries no
+  `:seon.ai/partial` and the block says idle — presence of text is the
+  state, so its absence is the clear."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
+  [unit]
+  (let [text (:seon.ai/text (:seon.ai/partial unit))]
+    [:div {:id (block/surface-id :reply) :class "seon-stream-reply"}
+     (if text
+       [:span {:class "seon-stream-text"} text]
+       [:span {:class "seon-stream-idle"} "idle"])
+     (when text [:span {:class "seon-stream-cursor"} ""])]))
+
 (defn problems-html
   "The problems strip. COMPOSES the landed owner rather than re-deriving.
 
@@ -150,7 +186,17 @@
     :seon.render/html `agents-html}
    {:seon.render.block/name :messages
     :seon.render.block/priority 30
-    :seon.render/html `messages-html}])
+    :seon.render/html `messages-html}
+   ;; the two streaming exercises, seeded rather than dark (F2 R3, the
+   ;; block-seed decision): the highest-churn thing in the system rides
+   ;; the same per-block morph every other surface gets, and now that it
+   ;; needs no facts either, the live page is the standing proof
+   {:seon.render.block/name :tokens
+    :seon.render.block/priority 40
+    :seon.render/html `tokens-html}
+   {:seon.render.block/name :reply
+    :seon.render.block/priority 50
+    :seon.render/html `text-html}])
 
 (defn seed-tx
   "Transaction data installing root's block set. PURE, and IDEMPOTENT.
