@@ -38,7 +38,11 @@
     (testing "every family the turn commits is in it"
       (is (some #(= "seon.cluster.run" (namespace %)) committed))
       (is (some #(= "seon.cluster.run.form" (namespace %)) committed))
-      (is (some #(= "seon.cluster.eval" (namespace %)) committed)))
+      (is (some #(= "seon.cluster.eval" (namespace %)) committed))
+      (is (some #(= "seon.ai.attempt" (namespace %)) committed)
+          "including the model-attempt chain — a durable row per call,
+           so a family boot never learned about is caught here rather
+           than by a live drive that loses its whole transaction"))
     (testing "and the trigger is NOT — that is the wake, not our write"
       (is (not (contains? committed :seon.cluster.message/to))))))
 
@@ -164,6 +168,35 @@
                               [{:seon.cluster.eval/id "e-0"
                                 :seon.cluster.eval/status :done
                                 :seon.cluster.eval/result-edn "2"}]))))
+      (testing "the model-attempt chain: a failed primary carrying its
+      transport evidence, and the backup that points back at it"
+        (is (map? (d/transact connection
+                              [{:seon.ai.attempt/id "run-live-attempt-0"
+                                :seon.ai.attempt/run
+                                [:seon.cluster.run/id "run-live"]
+                                :seon.ai.attempt/ordinal 0
+                                :seon.ai.attempt/at now
+                                :seon.ai/endpoint "https://example.invalid/v1"
+                                :seon.ai/model "primary-probe"
+                                :seon.ai.attempt/outcome :error
+                                :seon.ai/disposition :failover-now
+                                :seon.ai/error-class :transport-before-send
+                                :seon.ai/http-status 503
+                                :seon.ai/request-transmitted? false
+                                :seon.ai/response-started? false
+                                :seon.ai/output-observed? false}])))
+        (is (map? (d/transact connection
+                              [{:seon.ai.attempt/id "run-live-attempt-1"
+                                :seon.ai.attempt/run
+                                [:seon.cluster.run/id "run-live"]
+                                :seon.ai.attempt/ordinal 1
+                                :seon.ai.attempt/at now
+                                :seon.ai/endpoint "https://example.invalid/v2"
+                                :seon.ai/model "backup-probe"
+                                :seon.ai.attempt/outcome :success
+                                :seon.ai.attempt/delay-ms 0
+                                :seon.ai.attempt/failover-from
+                                [:seon.ai.attempt/id "run-live-attempt-0"]}]))))
       (testing "and an error receipt, whose result and error both land"
         (is (map? (d/transact connection
                               [{:seon.cluster.eval/id "e-1"

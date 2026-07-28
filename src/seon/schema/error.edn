@@ -118,7 +118,13 @@
  ; an attribute of the fact because it is per-RECIPIENT: one fact can be
  ; :your-run to the interrupted agent and :recurring to the escalation
  ; owner in the same transaction.
- :seon.error/reason [:enum :your-run :no-attributable-agent :recurring]
+ ; `:failover` is the fourth recipient reason and it is NOT a message
+ ; reason: nobody is mailed, the backup model READS it as the system
+ ; segment of the very request that replaces the failed one. Adding it
+ ; here rather than writing a bespoke failover notice is the whole
+ ; point — the primary's why-clause is the SAME derivation the agent,
+ ; the escalation owner and the log already get.
+ :seon.error/reason [:enum :your-run :no-attributable-agent :recurring :failover]
  :seon.error/notice-request [:map {:closed true} [:seon.error/fact :seon.error/fact] [:seon.error/reason {:optional true} :seon.error/reason] [:seon.cluster.agent/id {:optional true} :seon.cluster.agent/id]]
  ; The notice is DERIVED and never stored: a fact plus the projection
  ; declarations, which is what makes it routable through the one generic

@@ -420,14 +420,30 @@
          :recurring
          (str "You are being told because this same failure has now recurred"
               " often enough to be a pattern rather than bad luck.")
+         ;; the one reason with no recipient AGENT: the reader is the
+         ;; backup MODEL, and it reads this as the system segment of the
+         ;; request that replaces the one that failed
+         :failover
+         (str "You are being told because you are this cluster's configured"
+              " backup model and the primary model failed: this request was"
+              " moved to you. Answer the request that follows as it stands.")
          nil)
        (str "Evidence: error " id
             (when class (str ", " class))
             (when basis-t (str ", basis-t " basis-t))
             ".")
        ;; what you can do next — present exactly when somebody is being
-       ;; contacted, because it is advice to a reader and a log has none
-       (when reason
+       ;; contacted, because it is advice to a reader and a log has none.
+       ;; The advice is per-reader: an agent with a database can pull the
+       ;; fact, a backup MODEL cannot, and telling it to read a row it has
+       ;; no way to reach is the kind of boilerplate this prose may not
+       ;; carry.
+       (case reason
+         nil nil
+         :failover
+         (str "The primary call was not retried and will not be; answer the"
+              " request that follows on its own terms rather than waiting"
+              " for a primary answer that does not exist.")
          (str "Nothing will retry this for you: read error " id
               " and decide from the current facts."))]))))
 
