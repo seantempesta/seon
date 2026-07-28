@@ -14,13 +14,16 @@
   the one thing that must be proven dead."
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.set :as set]
+            [clojure.test.check :as tc]
+            [clojure.test.check.generators :as gen]
+            [clojure.test.check.properties :as prop]
             [datahike.api :as d]
             [my.message :as my.message]
             [seon.cluster.loop :as cluster.loop]
             [seon.cluster.message :as message]
             [seon.cluster.wake :as wake]
             [seon.schema :as schema]
-            [seon.schema.datahike :as schema.datahike])
+            [seon.test-support :as test-support])
   (:import [java.util Date]))
 
 (def ^:private now (Date. 1700000000000))
@@ -28,21 +31,12 @@
 
 (defn- with-database
   [body]
-  (let [configuration {:store {:backend :memory :id (random-uuid)}
-                       :schema-flexibility :write}
-        _ (d/create-database configuration)
-        connection (d/connect configuration)]
-    (try
-      (d/transact connection
-                  (schema.datahike/malli->datahike-schema
-                   (schema/canonical-database-attributes)))
+  (test-support/with-database
+    (fn [connection]
       (d/transact connection
                   [{:seon.cluster.agent/id "alice"}
                    {:seon.cluster.agent/id "bob"}])
-      (body connection)
-      (finally
-        (d/release connection)
-        (d/delete-database configuration)))))
+      (body connection))))
 
 (defn- ask!
   "Commit one message from OUTSIDE the agent population — a human's.
@@ -78,6 +72,239 @@
                            {:seon.db/trigger
                             [:seon.cluster.message/id trigger]}))))
     delivery))
+
+(def ^:private agent-ids ["alice" "bob" "carol" "dana"])
+
+(def ^:private message-command-generator
+  (gen/frequency
+   [[1 (gen/let [recipient gen/nat]
+         {::command :human ::recipient recipient})]
+    [4 (gen/let [sender gen/nat
+                 recipients (gen/vector gen/nat 1 4)
+                 ordinal (gen/choose 0 3)
+                 trigger? gen/boolean
+                 trigger-index gen/nat]
+         {::command :send
+          ::sender sender
+          ::recipients recipients
+          ::ordinal ordinal
+          ::trigger? trigger?
+          ::trigger-index trigger-index})]]))
+
+(def ^:private message-scenario-generator
+  (gen/let [population-size (gen/choose 2 4)
+            chain-limit (gen/one-of [(gen/return nil) (gen/choose 1 5)])
+            commands (gen/vector message-command-generator 1 14)]
+    {::population-size population-size
+     ::chain-limit chain-limit
+     ::commands commands}))
+
+(defn- model-depth
+  [messages message-id]
+  (loop [id message-id depth 0 seen #{}]
+    (if-let [parent (when-not (contains? seen id)
+                      (::parent (get messages id)))]
+      (recur parent (inc depth) (conj seen id))
+      depth)))
+
+(defn- command-data
+  [{::keys [population chain-limit message-order]} command command-index]
+  (let [population-size (count population)]
+    (case (::command command)
+      :human
+      {::message-id (str "human-" command-index)
+       ::to (nth population (mod (::recipient command) population-size))
+       ::content (str "human content " command-index)}
+
+      :send
+      (let [trigger (when (and (::trigger? command) (seq message-order))
+                      (nth message-order
+                           (mod (::trigger-index command)
+                                (count message-order))))
+            sender (nth population
+                        (mod (::sender command) population-size))
+            run-id (str "generated-run-" command-index)
+            recipients
+            (mapv (fn [candidate-index raw-index]
+                    (let [known? (< (mod raw-index (inc population-size))
+                                    population-size)]
+                      {::candidate-index candidate-index
+                       ::to (if known?
+                              (nth population
+                                   (mod raw-index population-size))
+                              (str "unknown-" command-index "-"
+                                   candidate-index))
+                       ::known? known?
+                       ::content (str "content-" command-index "-"
+                                     candidate-index)}))
+                  (range)
+                  (::recipients command))]
+        {::sender sender
+         ::trigger trigger
+         ::run-id run-id
+         ::ordinal (::ordinal command)
+         ::chain-limit chain-limit
+         ::recipients recipients}))))
+
+(defn- model-command
+  [{::keys [messages] :as model} command command-index]
+  (let [{::keys [message-id to content sender trigger run-id ordinal
+                 chain-limit recipients] :as data}
+        (command-data model command command-index)]
+    (if (= :human (::command command))
+      [(-> model
+           (assoc-in [::messages message-id]
+                     {::id message-id ::to to ::content content
+                      ::depth 0})
+           (update ::message-order conj message-id))
+       {::error-kinds []}]
+      (let [depth (if trigger (inc (model-depth messages trigger)) 1)
+            refused-kind (cond
+                           (not (pos-int? chain-limit))
+                           :seon.cluster.message/no-limit
+                           (> depth chain-limit)
+                           :seon.cluster.message/chain-limit)
+            deliverable (if refused-kind
+                          []
+                          (filterv ::known? recipients))
+            rows (mapv (fn [{::keys [candidate-index to content]}]
+                         (let [id (str run-id "-" ordinal "-message-"
+                                       candidate-index)]
+                           (cond-> {::id id ::to to ::from sender
+                                    ::content content
+                                    ::depth (if trigger depth 0)}
+                             trigger (assoc ::parent trigger))))
+                       deliverable)
+            unknown-count (if refused-kind
+                            0
+                            (count (remove ::known? recipients)))
+            error-kinds (if refused-kind
+                          [refused-kind]
+                          (vec (repeat unknown-count
+                                       :seon.cluster.message/unknown-recipient)))
+            next-model (reduce
+                        (fn [current row]
+                          (-> current
+                              (assoc-in [::messages (::id row)] row)
+                              (update ::message-order conj (::id row))))
+                        model
+                        rows)]
+        [next-model
+         {::data data
+          ::rows rows
+          ::error-kinds error-kinds}]))))
+
+(defn- actual-messages
+  [db]
+  (into {}
+        (map
+         (fn [entity]
+           (let [id (:seon.cluster.message/id entity)
+                 parent
+                 (d/q '[:find ?parent-id .
+                        :in $ ?id
+                        :where
+                        [?message :seon.cluster.message/id ?id ?tx]
+                        [?tx :seon.db/trigger ?parent]
+                        [?parent :seon.cluster.message/id ?parent-id]]
+                      db id)]
+             [id
+              (cond-> {::id id
+                       ::to (d/q '[:find ?agent-id .
+                                   :in $ ?to
+                                   :where [?to :seon.cluster.agent/id
+                                           ?agent-id]]
+                                 db
+                                 (:db/id (:seon.cluster.message/to entity)))
+                       ::content (:seon.cluster.message/content entity)
+                       ::depth (message/chain-depth db id)}
+                (:seon.cluster.message/from entity)
+                (assoc ::from (message/sender db id))
+                parent (assoc ::parent parent))]))
+         (d/q '[:find [(pull ?message [*]) ...]
+                :where [?message :seon.cluster.message/id _]]
+              db))))
+
+(defn- execute-command!
+  [connection model command command-index]
+  (let [[next-model expected] (model-command model command command-index)]
+    (if (= :human (::command command))
+      (let [{::keys [message-id to content]}
+            (command-data model command command-index)]
+        (ask! connection message-id to content)
+        [next-model
+         (= (::messages next-model) (actual-messages @connection))])
+      (let [{::keys [sender trigger run-id ordinal chain-limit recipients]}
+            (::data expected)
+            value (mapv (fn [{::keys [to content]}]
+                          (my.message/send to content))
+                        recipients)
+            request (cond-> {:my.message/value value
+                             :seon.cluster.agent/id sender
+                             :seon.cluster.run/id run-id
+                             :seon.cluster.run.form/ordinal ordinal
+                             :seon.cluster.message/at now
+                             :seon.config.message/max-chain chain-limit}
+                      trigger
+                      (assoc :seon.cluster.message/trigger trigger))
+            delivery (message/delivery @connection request)
+            rows (:seon.cluster.message/rows delivery)]
+        (when (seq rows)
+          (d/transact connection
+                      (cond-> {:tx-data rows}
+                        trigger
+                        (assoc :tx-meta
+                               {:seon.db/trigger
+                                [:seon.cluster.message/id trigger]}))))
+        [next-model
+         (and
+          (or (nil? chain-limit)
+              (schema/valid-candidate-value?
+               :seon.cluster.message/delivery-request request))
+          (= (mapv ::id (::rows expected))
+             (mapv :seon.cluster.message/id rows))
+          (= (::error-kinds expected)
+             (mapv :seon.error/kind (:seon.error/values delivery)))
+          (every? #(schema/valid-candidate-value? :seon.error/value %)
+                  (:seon.error/values delivery))
+          (= (::messages next-model) (actual-messages @connection))
+          (or (nil? chain-limit)
+              (every? #(<= (::depth %) chain-limit)
+                      (vals (::messages next-model)))))]))))
+
+(defn- generated-history-agrees-with-database?
+  [{::keys [population-size chain-limit commands] :as scenario}]
+  (let [population (subvec agent-ids 0 population-size)
+        database-id
+        (java.util.UUID/nameUUIDFromBytes
+         (.getBytes (pr-str scenario) java.nio.charset.StandardCharsets/UTF_8))]
+    (test-support/with-database
+      {:seon.test-support/database-id database-id}
+      (fn [connection]
+        (d/transact connection
+                    (mapv (fn [id] {:seon.cluster.agent/id id})
+                          population))
+        (second
+         (reduce
+          (fn [[model valid?] [command-index command]]
+            (let [[next-model step-valid?]
+                  (execute-command! connection model command command-index)]
+              [next-model (and valid? step-valid?)]))
+          [{::population population
+            ::chain-limit chain-limit
+            ::messages {}
+            ::message-order []}
+           true]
+          (map-indexed vector commands)))))))
+
+(deftest generated-message-histories-preserve-identity-fanout-and-depth
+  (test-support/assert-check!
+   (tc/quick-check
+    60
+    (prop/for-all [scenario message-scenario-generator]
+      (generated-history-agrees-with-database? scenario))
+    :seed 202607280501)
+   "Generated message history diverged from durable facts."))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Delivery IS the wake — asserted from the direction that can break
@@ -129,133 +356,13 @@
         (is (some? (:seon.cluster.message/to pulled)))
         (is (= now (:seon.cluster.message/at pulled)))))))
 
-(deftest a-message-from-outside-has-no-sender
-  (with-database
-    (fn [connection]
-      (ask! connection "m-0" "alice" "hello")
-      (is (nil? (d/q '[:find ?from .
-                       :where
-                       [?message :seon.cluster.message/id "m-0"]
-                       [?message :seon.cluster.message/from ?from]]
-                     @connection))
-          "absence is the state, and it is what makes a human nudge
-           structurally distinguishable from an agent's reply"))))
-
-(deftest a-vector-fans-out-and-ids-are-derived
-  (with-database
-    (fn [connection]
-      (d/transact connection [{:seon.cluster.agent/id "carol"}])
-      (ask! connection "m-0" "alice" "ask both")
-      (let [delivery (deliver! connection
-                               {:sender "alice" :trigger "m-0" :run "r-1"
-                                :ordinal 2
-                                :value [(my.message/send "bob" "one")
-                                        (my.message/send "carol" "two")]})
-            rows (:seon.cluster.message/rows delivery)]
-        (is (= 2 (count rows)))
-        (is (= ["r-1-2-message-0" "r-1-2-message-1"]
-               (mapv :seon.cluster.message/id rows))
-            "identity is a function of (run, ordinal, index) — nothing
-             allocates a uuid and a re-delivery would upsert")))))
-
 ;;; ---------------------------------------------------------------------------
 ;;; The refusals, each a fact
 ;;; ---------------------------------------------------------------------------
 
-(deftest a-stranger-costs-its-own-message-and-nothing-else
-  (with-database
-    (fn [connection]
-      (ask! connection "m-0" "alice" "ask both")
-      (let [delivery (message/delivery
-                      @connection
-                      {:my.message/value [(my.message/send "nobody" "hi")
-                                          (my.message/send "bob" "hi")]
-                       :seon.cluster.agent/id "alice"
-                       :seon.cluster.run/id "r-1"
-                       :seon.cluster.run.form/ordinal 0
-                       :seon.cluster.message/at now
-                       :seon.cluster.message/trigger "m-0"
-                       :seon.config.message/max-chain limit})]
-        (is (= 1 (count (:seon.cluster.message/rows delivery)))
-            "the deliverable one is delivered")
-        (is (= [:seon.cluster.message/unknown-recipient]
-               (mapv :seon.error/kind (:seon.error/values delivery))))
-        (is (every? #(schema/valid-candidate-value? :seon.error/value %)
-                    (:seon.error/values delivery))
-            "a refusal is the ONE registered error shape, so the
-             recorder can commit it with no translation")))))
-
-(deftest an-absent-bound-delivers-nothing
-  ;; fail CLOSED: a messaging path with no bound is exactly the runaway
-  ;; the bound exists for, and `(> 1 nil)` would throw into the loop
-  (with-database
-    (fn [connection]
-      (let [delivery (message/delivery
-                      @connection
-                      {:my.message/value (my.message/send "bob" "hi")
-                       :seon.cluster.agent/id "alice"
-                       :seon.cluster.run/id "r-1"
-                       :seon.cluster.run.form/ordinal 0
-                       :seon.cluster.message/at now
-                       :seon.config.message/max-chain nil})]
-        (is (empty? (:seon.cluster.message/rows delivery)))
-        (is (= [:seon.cluster.message/no-limit]
-               (mapv :seon.error/kind (:seon.error/values delivery))))))))
-
 ;;; ---------------------------------------------------------------------------
 ;;; The chain — derived, and the human barrier that comes free with it
 ;;; ---------------------------------------------------------------------------
-
-(deftest a-message-from-outside-is-depth-zero
-  (with-database
-    (fn [connection]
-      (ask! connection "m-0" "alice" "hello")
-      (is (zero? (message/chain-depth @connection "m-0"))))))
-
-(deftest each-answering-hop-is-one-more
-  (with-database
-    (fn [connection]
-      (ask! connection "m-0" "alice" "ask bob")
-      (deliver! connection {:sender "alice" :trigger "m-0" :run "r-1"
-                            :value (my.message/send "bob" "how many?")})
-      (is (= 1 (message/chain-depth @connection "r-1-0-message-0")))
-      (deliver! connection {:sender "bob" :trigger "r-1-0-message-0"
-                            :run "r-2"
-                            :value (my.message/send "alice" "25")})
-      (is (= 2 (message/chain-depth @connection "r-2-0-message-0"))))))
-
-(deftest a-fresh-human-message-starts-a-new-chain
-  ;; THE BARRIER IS FREE. The quarry needed an explicit rule — count
-  ;; only inbound messages newer than the latest human message — and
-  ;; got it wrong once (a global count deadlocked routine delegation).
-  ;; Here a human message simply has no triggering transaction to walk
-  ;; back through, so the walk stops.
-  (with-database
-    (fn [connection]
-      (ask! connection "m-0" "alice" "round one")
-      (deliver! connection {:sender "alice" :trigger "m-0" :run "r-1"
-                            :value (my.message/send "bob" "one")})
-      (deliver! connection {:sender "bob" :trigger "r-1-0-message-0"
-                            :run "r-2"
-                            :value (my.message/send "alice" "two")})
-      (is (= 2 (message/chain-depth @connection "r-2-0-message-0")))
-      (ask! connection "m-1" "alice" "round two")
-      (is (zero? (message/chain-depth @connection "m-1"))
-          "a human's nudge resets the conversation by construction"))))
-
-(deftest a-run-with-no-recorded-trigger-starts-at-one
-  (with-database
-    (fn [connection]
-      (let [delivery (message/delivery
-                      @connection
-                      {:my.message/value (my.message/send "bob" "hi")
-                       :seon.cluster.agent/id "alice"
-                       :seon.cluster.run/id "r-1"
-                       :seon.cluster.run.form/ordinal 0
-                       :seon.cluster.message/at now
-                       :seon.config.message/max-chain 1})]
-        (is (= 1 (count (:seon.cluster.message/rows delivery)))
-            "one hop is allowed at a limit of one")))))
 
 (deftest the-trigger-of-a-run-is-read-from-its-own-transaction
   (with-database
