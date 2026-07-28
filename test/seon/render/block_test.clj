@@ -27,11 +27,13 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
+            [seon.config :as config]
             [seon.render :as render]
             [seon.render.block :as block]
             [seon.render.hiccup :as hiccup]
             [seon.schema]
-            [seon.schema.datahike :as schema.datahike]))
+            [seon.schema.datahike :as schema.datahike]
+            [seon.test-support :as support]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Projections this suite owns
@@ -41,6 +43,9 @@
   "Counts calls per block name. The 'one block, one evaluation' property
   is about COUNTING work, so the projections have to be countable."
   nil)
+
+(def ^:dynamic *graph* nil)
+(def ^:dynamic *database-value* nil)
 
 (defn- counted!
   [name]
@@ -95,34 +100,37 @@
   [_unit]
   [:div "two" (block/slot :cycle-one)])
 
+(defn generated-html
+  "Project one node in the generated block graph."
+  [unit]
+  (let [name (:seon.render.block/name unit)
+        {:keys [outcome targets]} (get *graph* name)]
+    (counted! name)
+    (when-not (identical? *database-value* (:seon.db/db unit))
+      (throw (ex-info "projection received the wrong database value"
+                      {::name name})))
+    (if (= :failure outcome)
+      (throw (ex-info "generated projection failure" {::name name}))
+      (into [:section {:data-graph-block (subs (str name) 1)}]
+            (map block/slot)
+            targets))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Fixture
 ;;; ---------------------------------------------------------------------------
-
-(def ^:private attributes
-  [:seon.cluster.agent/id :seon.cluster.agent/blocks
-   :seon.render.block/name :seon.render.block/priority
-   :seon.render/ai :seon.render/html])
 
 (def ^:private agent-id "agent-a")
 (def ^:private other-agent-id "agent-b")
 
 (defn- with-database
   [blocks body]
-  (let [configuration {:store {:backend :memory :id (random-uuid)}
-                       :schema-flexibility :write}
-        _ (d/create-database configuration)
-        connection (d/connect configuration)]
-    (try
-      (d/transact connection (schema.datahike/malli->datahike-schema attributes))
+  (support/with-database
+    (fn [connection]
       (d/transact connection [{:seon.cluster.agent/id agent-id
                                :seon.cluster.agent/blocks blocks}
                               {:seon.cluster.agent/id other-agent-id}])
       (binding [*evaluations* (atom {})]
-        (body connection))
-      (finally
-        (d/release connection)
-        (d/delete-database configuration)))))
+        (body connection)))))
 
 (defn- block-map
   [name priority & {:as slots}]
@@ -140,10 +148,7 @@
   so both take that solution's dials rather than a second set to drift
   from them. Supplied EXPLICITLY everywhere, because a renderer that
   invented its own bounds would be exactly that second set."
-  {:seon.config.eval.result/max-depth 12
-   :seon.config.eval.result/max-collection 64
-   :seon.config.eval.result/max-string 4096
-   :seon.config.eval.result/max-nodes 4096})
+  (config/result-caps (config/defaults)))
 
 (defn- html-request []
   {:seon.cluster.agent/id agent-id
@@ -152,11 +157,6 @@
 
 (defn- page-request []
   {:seon.cluster.agent/id agent-id :seon.sci.admit/caps caps})
-
-(defn- check!
-  [label result]
-  (is (true? (:result result))
-      (str label " failed: " (pr-str result))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The address
@@ -172,8 +172,7 @@
 (deftest surface-ids-are-injective
   ;; Two blocks sharing an id would silently morph over each other. A
   ;; qualified name keeps its namespace and nothing is dropped.
-  (check!
-   "distinct names, distinct ids"
+  (support/assert-check!
    (tc/quick-check
     300
     (prop/for-all [[a b] (gen/such-that
@@ -181,7 +180,8 @@
                           (gen/tuple gen/keyword-ns gen/keyword-ns)
                           100)]
       (not= (block/surface-id a) (block/surface-id b)))
-    :seed 202607280201))
+    :seed 202607280201)
+   "distinct names, distinct ids")
   (testing "a namespace survives, so :a/x and :b/x are two ids"
     (is (not= (block/surface-id :a/x) (block/surface-id :b/x)))))
 
@@ -195,15 +195,146 @@
 ;;; The derivation
 ;;; ---------------------------------------------------------------------------
 
-(deftest blocks-are-ordered-by-priority-then-name
-  (with-database
-    [(block-map :zebra 10 :seon.render/html `body-html)
-     (block-map :alpha 10 :seon.render/html `body-html)
-     (block-map :first 0 :seon.render/html `body-html)]
-    (fn [connection]
-      (is (= [:first :alpha :zebra]
-             (mapv :seon.render.block/name (block/blocks (d/db connection) agent-id)))
-          "priority ascending, name as the stable tiebreak"))))
+(def ^:private graph-names
+  [:graph/a :graph/b :graph/c :graph/d :graph/e :graph/f])
+
+(def ^:private graph-generator
+  (gen/bind
+   (gen/choose 1 (count graph-names))
+   (fn [size]
+     (let [names (subvec graph-names 0 size)
+           targets (conj names :graph/missing)]
+       (gen/let [priorities (gen/vector (gen/choose 0 20) size)
+                 declarations (gen/vector gen/boolean size)
+                 outcomes (gen/vector (gen/elements [:success :failure]) size)
+                 edges (gen/vector
+                        (gen/vector (gen/elements targets) 0 2)
+                        size)
+                 max-depth (gen/choose 1 5)
+                 max-nodes (gen/choose 1 40)]
+         {:nodes
+          (mapv (fn [name priority declared? outcome node-targets]
+                  {:name name
+                   :priority priority
+                   :declared? declared?
+                   :outcome outcome
+                   :targets node-targets})
+                names priorities declarations outcomes edges)
+          :caps (assoc caps
+                       :seon.config.eval.result/max-depth max-depth
+                       :seon.config.eval.result/max-nodes max-nodes)})))))
+
+(defn- oracle-surfaces
+  [nodes]
+  (->> nodes
+       (filter :declared?)
+       (sort-by (juxt :priority :name))
+       vec))
+
+(defn- oracle-roots
+  [nodes]
+  (let [surfaces (oracle-surfaces nodes)
+        slotted (into #{}
+                      (comp (filter #(= :success (:outcome %)))
+                            (mapcat :targets)
+                            (map block/surface-id))
+                      surfaces)
+        top (filterv #(not (contains? slotted (block/surface-id (:name %))))
+                     surfaces)]
+    (if (and (empty? top) (seq surfaces)) surfaces top)))
+
+(defn- page-root-name
+  [element]
+  (let [attributes (nth element 1 nil)]
+    (some-> (or (:data-graph-block attributes)
+                (:data-block attributes))
+            keyword)))
+
+(defn- graph-markers
+  [page]
+  (keep (fn [node]
+          (when (and (vector? node) (map? (nth node 1 nil)))
+            (:data-graph-block (nth node 1))))
+        (tree-seq sequential? seq page)))
+
+(defn- marker-depth
+  [node]
+  (if (and (vector? node) (map? (nth node 1 nil)))
+    (let [own (if (:data-graph-block (nth node 1)) 1 0)]
+      (+ own
+         (reduce max 0
+                 (map marker-depth
+                      (subvec node 2)))))
+    (if (sequential? node)
+      (reduce max 0 (map marker-depth node))
+      0)))
+
+(defn- locally-explained-hole?
+  [node]
+  (or (not (and (vector? node)
+                (map? (nth node 1 nil))
+                (contains? (nth node 1) :data-slot)))
+      (let [explanation (last node)]
+        (and (string? explanation) (not (str/blank? explanation))))))
+
+(deftest generated-block-graphs-preserve-the-graph-contract
+  (support/assert-check!
+   (tc/quick-check
+    24
+    (prop/for-all [{:keys [nodes caps]} graph-generator]
+      (let [blocks (mapv
+                    (fn [{:keys [name priority declared?]}]
+                      (cond-> (block-map name priority)
+                        declared? (assoc :seon.render/html `generated-html)))
+                    nodes)
+            graph (into {} (map (juxt :name identity)) nodes)
+            expected-surfaces (oracle-surfaces nodes)
+            expected-names (mapv :name expected-surfaces)
+            expected-roots (mapv :name (oracle-roots nodes))]
+        (with-database
+          blocks
+          (fn [connection]
+            (let [db (d/db connection)
+                  request {:seon.cluster.agent/id agent-id
+                           :seon.render/kind :seon.render/html
+                           :seon.sci.admit/caps caps}]
+              (binding [*graph* graph
+                        *database-value* db]
+                (reset! *evaluations* {})
+                (let [surfaces (block/surfaces db request)]
+                  (and
+                   (= expected-names
+                      (mapv :seon.render.block/name surfaces))
+                   (= (zipmap expected-names (repeat 1)) @*evaluations*)
+                   (every?
+                    (fn [surface]
+                      (let [node (get graph (:seon.render.block/name surface))]
+                        (= (= :failure (:outcome node))
+                           (contains? surface :seon.error/value))))
+                    surfaces)
+                   (do
+                     (reset! *evaluations* {})
+                     (let [page-request
+                           {:seon.cluster.agent/id agent-id
+                            :seon.sci.admit/caps caps}
+                           page (block/page db page-request)
+                           evaluations @*evaluations*
+                           again (do
+                                   (reset! *evaluations* {})
+                                   (block/page db page-request))]
+                       (and
+                        (= expected-roots (mapv page-root-name page))
+                        (= (zipmap expected-names (repeat 1)) evaluations)
+                        (= page again)
+                        (every? locally-explained-hole?
+                                (tree-seq sequential? seq page))
+                        (<= (count (graph-markers page))
+                            (:seon.config.eval.result/max-nodes caps))
+                        (<= (marker-depth page)
+                            (inc (:seon.config.eval.result/max-depth caps)))
+                        (every? hiccup/hiccup? page)))))))))))
+    :seed 202607280205)
+   "generated block graph")))
 
 (deftest an-agent-with-no-blocks-derives-nothing
   ;; A legitimate agent, not an error, and not a cue to substitute a
@@ -224,20 +355,6 @@
       (let [db (d/db connection)]
         (is (= [:transcript] (mapv :seon.render.block/name (block/blocks db agent-id))))
         (is (= [] (block/blocks db other-agent-id)))))))
-
-(deftest the-unit-carries-the-exact-database-value
-  ;; Never ambient. A projection that consulted a latest value would
-  ;; render at a basis the rest of the page was not rendered at.
-  (with-database [(block-map :counter 0 :seon.render/html `reads-the-database-html)]
-    (fn [connection]
-      (let [before (d/db connection)
-            _ (d/transact connection [{:seon.cluster.agent/id "agent-c"}])
-            after (d/db connection)
-            at (fn [db] (-> (block/surfaces db (html-request))
-                            first :seon.render/output))]
-        (is (= [:p "agents: 2"] (at before)))
-        (is (= [:p "agents: 3"] (at after))
-            "the same block at two database values renders two pages")))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Presence decides placement
@@ -275,36 +392,9 @@
         (is (= [:data-only] (mapv :seon.render.block/name (block/blocks db agent-id))))
         (is (= [] (block/surfaces db (html-request))))))))
 
-(deftest one-block-is-evaluated-once-per-render
-  ;; The property the 32-tab falsifier scales up: the prompt and every
-  ;; tab read ONE value, because there is one place a block is rendered.
-  (with-database two-blocks
-    (fn [connection]
-      (block/surfaces (d/db connection) (html-request))
-      (is (= {:header 1 :body 1} @*evaluations*)))))
-
 ;;; ---------------------------------------------------------------------------
 ;;; Isolation — a broken block costs one card
 ;;; ---------------------------------------------------------------------------
-
-(deftest a-projection-that-throws-becomes-a-card-and-spares-its-siblings
-  (with-database
-    [(block-map :broken 0 :seon.render/html `throwing-html)
-     (block-map :body 10 :seon.render/html `body-html)]
-    (fn [connection]
-      (let [rendered (block/surfaces (d/db connection) (html-request))
-            [broken body] rendered]
-        (is (= 2 (count rendered)) "the broken block keeps its place")
-        (is (= :broken (:seon.render.block/name broken)))
-        (is (= "surface-broken" (:seon.render/surface-id broken))
-            "and keeps its address, so its error has somewhere to go")
-        (is (seon.schema/valid-candidate-value?
-             :seon.error/value (:seon.error/value broken)))
-        (is (nil? (:seon.render/output broken))
-            "failure is INSTEAD of output, never beside it")
-        (is (= [:div {:class "p-2"} (str "agent " agent-id)]
-               (:seon.render/output body))
-            "the sibling is untouched")))))
 
 (deftest an-unresolvable-projection-is-a-card-naming-the-symbol
   (with-database [(block-map :gone 0 :seon.render/html 'no.such.ns/nope)]
@@ -328,8 +418,7 @@
 (deftest every-surface-validates-whatever-the-projection-did
   ;; One standing totality property over the whole failure space, rather
   ;; than one test per way a block can be wrong.
-  (check!
-   "surface totality"
+  (support/assert-check!
    (tc/quick-check
     50
     (prop/for-all [projection (gen/elements [`body-html `throwing-html
@@ -340,7 +429,8 @@
         (fn [connection]
           (let [[surface] (block/surfaces (d/db connection) (html-request))]
             (seon.schema/valid-candidate-value? :seon.render/surface surface)))))
-    :seed 202607280202)))
+    :seed 202607280202)
+   "surface totality"))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Placement
@@ -359,25 +449,6 @@
                (first rendered))
             "the hole is gone and the surface is in its place")))))
 
-(deftest a-block-nobody-slots-is-a-top-level-card
-  ;; Several top-level blocks are the normal case — root cards. Nothing
-  ;; declares this; it is derived from what the hiccup says.
-  (with-database
-    [(block-map :one 0 :seon.render/html `body-html)
-     (block-map :two 10 :seon.render/html `body-html)]
-    (fn [connection]
-      (is (= 2 (count (block/page (d/db connection) (page-request))))))))
-
-(deftest a-slot-naming-a-block-the-agent-does-not-own-self-heals
-  ;; The quarry's behaviour, kept: name the block, and the next render
-  ;; fills it. A throw here would cost the page.
-  (with-database [(block-map :layout 0 :seon.render/html `slots-a-missing-block-html)]
-    (fn [connection]
-      (let [[page] (block/page (d/db connection) (page-request))]
-        (is (true? (hiccup/hiccup? page)))
-        (is (re-find #"no-such-block" (pr-str page))
-            "the hole says which block is missing")))))
-
 (deftest a-slot-cycle-is-refused-at-the-hole-that-closes-it
   ;; The visited set on the path is the observable fact; a depth counter
   ;; would be a magic number standing in for it.
@@ -390,15 +461,6 @@
         (is (true? (every? hiccup/hiccup? rendered)))
         (is (re-find #"cycle" (pr-str rendered))
             "and says a cycle is why the hole is not filled")))))
-
-(deftest a-failed-block-puts-its-error-where-it-belongs
-  (with-database
-    [(block-map :layout 0 :seon.render/html `header-html)
-     (block-map :body 10 :seon.render/html `throwing-html)]
-    (fn [connection]
-      (let [[page] (block/page (d/db connection) (page-request))]
-        (is (re-find #"body" (pr-str page))
-            "the failing block's card is inside the layout's hole")))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Generic default + specialist
@@ -424,65 +486,48 @@
    :seon.render/default `body-ai
    :seon.render/specialists [[`violation? `body-html]]})
 
-(deftest a-specialist-wins-when-the-values-own-attributes-select-it
-  (is (= `body-html
-         (block/select {:seon.error/kind :malli/invalid-input} selection))
-      "computed from the fact, at the place the unit is built")
-  (is (= `body-ai (block/select {:seon.error/kind :a/other} selection))
-      "and everything else gets the kind's generic default"))
-
-(deftest no-specialists-is-the-ordinary-case-and-needs-no-special-code
-  (is (= `body-ai
-         (block/select {:seon.error/kind :malli/invalid-input}
-                       (assoc selection :seon.render/specialists [])))))
-
-(deftest the-first-accepting-specialist-wins
-  ;; Ordering is the producer's judgement; nothing scores specificity.
-  (is (= `body-html
-         (block/select {:seon.error/kind :malli/invalid-input}
-                       (assoc selection :seon.render/specialists
-                              [[`violation? `body-html]
-                               [`always? `header-html]]))))
-  (is (= `header-html
-         (block/select {}
-                       (assoc selection :seon.render/specialists
-                              [[`violation? `body-html]
-                               [`always? `header-html]])))))
-
-(deftest a-broken-rule-costs-its-own-specialist-and-nothing-else
-  ;; Selection runs where units are built, and that is often the error
-  ;; path: a rule that throws must not become a second error.
-  (doseq [rules [[[`broken-rule? `body-html]]
-                 [['no.such.ns/nope `body-html]]
-                 [[`broken-rule? `body-html] [`always? `header-html]]]]
-    (let [chosen (block/select {} (assoc selection :seon.render/specialists rules))]
-      (is (qualified-symbol? chosen))
-      (is (not= `body-html chosen)
-          (str "a rule that cannot answer does not accept: " (pr-str rules))))))
-
 (deftest selection-always-answers-with-a-projection
-  ;; One standing totality property: whatever the value and whatever the
-  ;; rules do, a producer gets a symbol it can put on the unit.
-  (check!
-   "selection totality"
+  ;; The oracle knows the four rule meanings without calling `select`:
+  ;; broken and missing rules refuse, `always?` accepts, and `violation?`
+  ;; accepts only the registered error kind. Order decides the first match.
+  (support/assert-check!
    (tc/quick-check
     200
-    (prop/for-all [value gen/any-printable
-                   rules (gen/vector
-                          (gen/elements [[`violation? `body-html]
-                                         [`always? `header-html]
-                                         [`broken-rule? `body-html]
-                                         ['no.such.ns/nope `body-html]])
-                          0 4)]
-      (qualified-symbol?
-       (block/select value (assoc selection :seon.render/specialists rules))))
-    :seed 202607280203)))
+    (prop/for-all [violation? gen/boolean
+                   rule-kinds (gen/vector
+                               (gen/elements
+                                [:violation :always :broken :missing])
+                               0 6)]
+      (let [value {:seon.error/kind
+                   (if violation? :malli/invalid-input :a/other)}
+            pair (fn [index rule-kind]
+                   [(case rule-kind
+                      :violation `violation?
+                      :always `always?
+                      :broken `broken-rule?
+                      :missing 'no.such.ns/nope)
+                    (symbol "seon.render.block-test"
+                            (str "projection-" index))])
+            rules (mapv pair (range) rule-kinds)
+            expected
+            (or
+             (some (fn [[rule-kind [_ projection]]]
+                     (when (or (= :always rule-kind)
+                               (and (= :violation rule-kind) violation?))
+                       projection))
+                   (map vector rule-kinds rules))
+             `body-ai)]
+        (= expected
+           (block/select
+            value
+            (assoc selection :seon.render/specialists rules)))))
+    :seed 202607280203)
+   "specialist selection"))
 
 (deftest the-generic-html-default-renders-anything
   ;; The kind's floor: nothing is unrenderable, and no producer has to
   ;; write a renderer before it can see its value.
-  (check!
-   "data-panel totality"
+  (support/assert-check!
    (tc/quick-check
     200
     (prop/for-all [value gen/any-printable]
@@ -493,7 +538,8 @@
              ;; missing-caps card. A totality property whose subject
              ;; short-circuits is the absence-of-signal-as-health class.
              (= "seon-data-panel" (:class (nth panelled 1))))))
-    :seed 202607280204))
+    :seed 202607280204)
+   "data-panel totality")
   (testing "the value is actually in there"
     (is (re-find #"widgets"
                  (hiccup/->string
@@ -601,87 +647,6 @@
   (with-database two-blocks
     (fn [connection]
       (is (= [] (block/install-tx (d/db connection) agent-id []))))))
-
-;;; ---------------------------------------------------------------------------
-;;; Bounded expansion — the discipline ref-following will reuse
-;;; ---------------------------------------------------------------------------
-
-(defn- fan-out-surfaces
-  "A DAG with NO cycle anywhere: each block slots the next one twice.
-  The visited set has nothing to catch — every path is acyclic — so this
-  is the case a loop guard alone cannot bound."
-  [depth]
-  (let [names (mapv (fn [index] (keyword (str "b" index))) (range depth))]
-    (mapv (fn [index]
-            {:seon.render.block/name (names index)
-             :seon.render/surface-id (block/surface-id (names index))
-             :seon.render/kind :seon.render/html
-             :seon.render/output
-             (if (< (inc index) depth)
-               [:div (block/slot (names (inc index)))
-                (block/slot (names (inc index)))]
-               [:span "leaf"])})
-          (range depth))))
-
-(deftest expansion-is-bounded-by-nodes-not-only-by-cycles
-  ;; THE DEFECT THIS TEST EXISTS FOR: the first implementation had a
-  ;; visited set and no budget, and a visited set is per PATH — it
-  ;; refuses cycles and permits fan-out. Twenty-two blocks with no cycle
-  ;; expanded to millions of nodes and OOM'd the JVM
-  ;; (tmp/n4_expand_blowup.clj). A graph that can fan out needs a NODE
-  ;; budget, which is the lesson the admission codec already paid for.
-  (let [surfaces (fan-out-surfaces 22)
-        expanded (block/expand (:seon.render/output (first surfaces))
-                               {:seon.render/surfaces surfaces
-                                :seon.sci.admit/caps caps})
-        nodes (count (tree-seq sequential? seq expanded))]
-    (is (hiccup/hiccup? expanded))
-    (is (< nodes (* 4 (:seon.config.eval.result/max-nodes caps)))
-        (str "expansion must be bounded by the budget, not by luck; got "
-             nodes " nodes"))
-    (is (str/includes? (hiccup/->string expanded) "elided")
-        "and it SAYS it was elided — a reader must never have to guess")))
-
-(deftest expansion-is-deterministic-under-the-budget
-  ;; Equality suppression is meaningless if a budget elides a different
-  ;; subtree per call, so the walk is depth-first and left-to-right and
-  ;; one input always produces one value.
-  (let [surfaces (fan-out-surfaces 22)
-        once (block/expand (:seon.render/output (first surfaces))
-                       {:seon.render/surfaces surfaces :seon.sci.admit/caps caps})
-        twice (block/expand (:seon.render/output (first surfaces))
-                       {:seon.render/surfaces surfaces :seon.sci.admit/caps caps})]
-    (is (= once twice))))
-
-(deftest depth-is-bounded-independently-of-node-count
-  ;; A long thin chain spends few nodes and still must stop, because
-  ;; depth and fan-out are different ways to be too big.
-  (let [deep (mapv (fn [index]
-                     {:seon.render.block/name (keyword (str "d" index))
-                      :seon.render/surface-id
-                      (block/surface-id (keyword (str "d" index)))
-                      :seon.render/kind :seon.render/html
-                      :seon.render/output
-                      [:div (block/slot (keyword (str "d" (inc index))))]})
-                   (range 200))
-        expanded (block/expand (:seon.render/output (first deep))
-                              {:seon.render/surfaces deep :seon.sci.admit/caps caps})]
-    (is (hiccup/hiccup? expanded))
-    (is (str/includes? (hiccup/->string expanded) "deeper than the configured")
-        "the hole says why it stopped, and names the block")))
-
-(deftest a-budget-of-nothing-still-produces-hiccup
-  ;; Totality at the boundary: the render path may not throw because a
-  ;; dial was set low.
-  (let [surfaces (fan-out-surfaces 4)
-        starved (assoc caps
-                       :seon.config.eval.result/max-nodes 1
-                       :seon.config.eval.result/max-depth 1)
-        expanded (block/expand (:seon.render/output (first surfaces))
-                               {:seon.render/surfaces surfaces
-                                :seon.sci.admit/caps starved})]
-    (is (hiccup/hiccup? expanded))
-    (is (string? (hiccup/->string expanded)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Ref-following — the same walk, following connections

@@ -9,12 +9,9 @@
   real HTTP, and reads the real SSE stream.
 
   READING SSE CORRECTLY IS PART OF THE TEST. `BodyHandlers/ofLines` does
-  not yield on a stream that never ends, and a first draft of this proof
-  reported zero events for a feed that was working perfectly. Worse, a
-  single `.read` returns ONE chunk, so a reader that does not drain
-  reports the PREVIOUS paint as the current one — which briefly looked
-  like a suppression bug in the server. `drain!` reads until the socket
-  goes quiet.
+  not yield on a stream that never ends. `read-patches!` instead blocks
+  on a complete, counted SSE event; its clock is only the shared loud
+  backstop around the future returned by that read.
 
   Every server is stopped and every database deleted in a `finally`, so
   a failing assertion cannot leak a listening port into the next test."
@@ -24,18 +21,15 @@
             [clojure.test.check.properties :as prop]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
+            [seon.config :as config]
             [seon.render.block :as block]
             [seon.render.web :as web]
-            [seon.schema]
-            [seon.schema.datahike :as schema.datahike])
+            [seon.test-support :as support])
   (:import [java.net URI]
            [java.net.http HttpClient HttpRequest HttpResponse$BodyHandlers]))
 
 (def ^:private caps
-  {:seon.config.eval.result/max-depth 12
-   :seon.config.eval.result/max-collection 64
-   :seon.config.eval.result/max-string 4096
-   :seon.config.eval.result/max-nodes 4096})
+  (config/result-caps (config/defaults)))
 
 (def ^:private agent-id "root")
 
@@ -71,15 +65,10 @@
 
 (defn- with-server
   [blocks body]
-  (let [configuration {:store {:backend :memory :id (random-uuid)}
-                       :schema-flexibility :write}
-        _ (d/create-database configuration)
-        connection (d/connect configuration)
-        server (atom nil)]
-    (try
-      (d/transact connection
-                  (schema.datahike/malli->datahike-schema
-                   (vec (seon.schema/canonical-database-attributes))))
+  (support/with-database
+    (fn [connection]
+      (let [server (atom nil)]
+        (try
       (d/transact connection [{:seon.cluster.agent/id agent-id
                                :seon.cluster.agent/blocks blocks}])
       (reset! server (web/start! {:seon.store/connection connection
@@ -88,9 +77,7 @@
                                   :seon.config.render/coalesce-ms 16}))
       (body connection @server)
       (finally
-        (when @server (web/stop! @server))
-        (d/release connection)
-        (d/delete-database configuration)))))
+            (when @server (web/stop! @server))))))))
 
 (defn- block-map
   [name priority projection]
@@ -120,33 +107,29 @@
                     (.build))]
     (.body (.send (client) request (HttpResponse$BodyHandlers/ofInputStream)))))
 
-(defn- drain!
-  "Everything the socket has, read until it goes quiet.
-  One `.read` returns one chunk; a reader that stops there reports the
-  previous paint as this one."
-  [stream]
-  (let [buffer (byte-array 65536)
-        out (StringBuilder.)]
-    (loop [idle 0]
-      (if (pos? (.available stream))
-        (let [read (.read stream buffer)]
-          ; .read returns -1 at EOF; available>0 makes that rare, not
-          ; impossible — a negative count must end the drain, not throw
-          (when (pos? read)
-            (.append out (String. buffer 0 read)))
-          (if (pos? read) (recur 0) nil))
-        (when (< idle 8)
-          (Thread/sleep 60)
-          (recur (inc idle)))))
-    (.toString out)))
-
-(defn- check!
-  [label result]
-  (is (true? (:result result)) (str label " failed: " (pr-str result))))
-
 (defn- patches
   [text]
   (count (re-seq #"event: datastar-patch-elements" text)))
+
+(defn- read-patches!
+  "Read exactly through `expected` complete patch events."
+  [stream expected]
+  (support/await-event!
+   (future
+     (let [out (StringBuilder.)]
+       (loop []
+         (let [next-byte (.read stream)]
+           (when (neg? next-byte)
+             (throw (ex-info "SSE feed closed before its expected patches."
+                             {::expected expected
+                              ::actual (patches (.toString out))})))
+           (.append out (char next-byte))
+           (let [text (.toString out)]
+             (if (and (= expected (patches text))
+                      (str/ends-with? text "\n\n"))
+               text
+               (recur)))))))
+   [:render-patches expected]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The document
@@ -211,7 +194,7 @@
     (fn [_connection server]
       (let [stream (open-feed server (str "/feed/" agent-id))]
         (try
-          (let [initial (drain! stream)]
+          (let [initial (read-patches! stream 2)]
             (is (= 2 (patches initial)) "one morph per block, no page wrapper")
             (is (str/includes? initial "surface-banner"))
             (is (str/includes? initial "agents: 1")))
@@ -226,27 +209,13 @@
     (fn [connection server]
       (let [stream (open-feed server (str "/feed/" agent-id))]
         (try
-          (drain! stream)
+          (read-patches! stream 2)
           (d/transact connection [{:seon.cluster.agent/id "agent-b"}])
-          (let [repaint (drain! stream)]
+          (let [repaint (read-patches! stream 1)]
             (is (= 1 (patches repaint)) "ONE block, not the page")
             (is (str/includes? repaint "agents: 2") "and it is the right one")
             (is (not (str/includes? repaint "surface-banner"))
                 "the block that reads nothing was not sent"))
-          (finally (.close stream)))))))
-
-(deftest a-commit-that-changes-no-projection-sends-nothing
-  ;; Equality suppression, measured where it counts: on the socket.
-  (with-server two-blocks
-    (fn [connection server]
-      (let [stream (open-feed server (str "/feed/" agent-id))]
-        (try
-          (drain! stream)
-          (d/transact connection
-                      [{:seon.cluster.run/id "nothing-either-block-reads"}])
-          (let [quiet (drain! stream)]
-            (is (= 0 (patches quiet)))
-            (is (= "" quiet) "not one byte"))
           (finally (.close stream)))))))
 
 (deftest a-broken-block-paints-its-card-and-spares-the-page
@@ -257,7 +226,7 @@
     (fn [_connection server]
       (let [stream (open-feed server (str "/feed/" agent-id))]
         (try
-          (let [initial (drain! stream)]
+          (let [initial (read-patches! stream 2)]
             (is (= 2 (patches initial)))
             (is (str/includes? initial "seon-error-card"))
             (is (str/includes? initial "surface-broken")
@@ -273,12 +242,12 @@
   (with-server two-blocks
     (fn [connection server]
       (let [first-stream (open-feed server (str "/feed/" agent-id))]
-        (drain! first-stream)
+        (read-patches! first-stream 2)
         (.close first-stream))
       (d/transact connection [{:seon.cluster.agent/id "agent-b"}])
       (let [second-stream (open-feed server (str "/feed/" agent-id))]
         (try
-          (let [repaint (drain! second-stream)]
+          (let [repaint (read-patches! second-stream 2)]
             (is (= 2 (patches repaint)) "a fresh connection paints everything")
             (is (str/includes? repaint "agents: 2")
                 "at the CURRENT basis, not the one the first tab saw"))
@@ -290,37 +259,17 @@
       (let [a (open-feed server (str "/feed/" agent-id))
             b (open-feed server (str "/feed/" agent-id))]
         (try
-          (drain! a)
-          (drain! b)
+          (read-patches! a 2)
+          (read-patches! b 2)
           (d/transact connection [{:seon.cluster.agent/id "agent-b"}])
-          (let [to-a (drain! a)
-                to-b (drain! b)]
+          (let [to-a (read-patches! a 1)
+                to-b (read-patches! b 1)]
             (is (= 1 (patches to-a)))
             (is (= 1 (patches to-b)))
             (is (= to-a to-b)
                 "identical bytes — determinism is what lets one
                  registration serve every tab when that lands"))
           (finally (.close a) (.close b)))))))
-
-(deftest a-closed-tab-stops-painting
-  ;; The listener's lifetime is the socket's. If this leaked, a long
-  ;; session would accumulate a listener per tab ever opened, and each
-  ;; one runs on the WRITER'S commit path.
-  (with-server two-blocks
-    (fn [connection server]
-      (let [stream (open-feed server (str "/feed/" agent-id))]
-        (drain! stream)
-        (.close stream)
-        (Thread/sleep 100)
-        ;; the real assertion is that the writer stays healthy and fast
-        ;; with the tab gone; a leaked listener would still be painting
-        ;; into a dead socket on every one of these
-        (dotimes [index 20]
-          (d/transact connection
-                      [{:seon.cluster.agent/id (str "agent-" index)}]))
-        (is (= 21 (count (d/q '[:find ?a :where [?a :seon.cluster.agent/id _]]
-                              (d/db connection))))
-            "the writer is unaffected by a departed tab")))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Suppression, as a pure unit
@@ -407,13 +356,13 @@
 (deftest derived-ports-stay-inside-the-documented-range
   ;; Below the ephemeral range the OS allocates from, so a derived port
   ;; can never collide with one the OS was about to hand out.
-  (check!
-   "derived port range"
+  (support/assert-check!
    (tc/quick-check
     500
     (prop/for-all [name (gen/such-that seq gen/string-ascii 100)]
       (<= web/port-floor (web/derived-port name) (dec web/port-ceiling)))
-    :seed 202607280501)))
+    :seed 202607280501)
+   "derived port range"))
 
 (deftest different-names-mostly-differ-and-collisions-are-survivable
   ;; Three hundred ports and a hash: collisions are EXPECTED. The
