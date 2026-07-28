@@ -225,14 +225,32 @@ and technical data remain available in the separate debug/data surfaces. This
 changes only the HTML projection—the agent's AI transcript remains
 byte-faithful.
 
-**The database browser pays for opened data.** `/data` uses the same Datastar
-Datastar feed and observed-read invalidation as every other live page. Its
-default navigator derives from installed schema only. Selecting an attribute
-opens a bounded AEVT window through `seon.db/index-datoms`; the URL carries the
-last visible index cursor, and the server reads only enough rows to render
-the page and prove whether a next page exists. It never scans every entity or
-transaction to manufacture counts. Domain attributes lead by default;
-framework attributes remain reachable explicitly.
+**The database browser pays for opened data.** `/data` is bounded expansion
+whose CURSOR says where to resume instead of eliding — the same caps and the
+same walk as a value panel, one keeping the tail and one discarding it.
+
+Navigation is a `get-in` path, and the cursor — path plus offset — lives in the
+URL. So a drilled position is a link somebody can send, reconnecting to one
+costs one derivation, and nothing stores or retracts where a reader is looking.
+Breadcrumbs are the path's own prefixes: the path IS the trail, so there is no
+history to keep.
+
+The window reports its honest total, because a reader must know a window is a
+window, and offers a resume offset exactly when there is somewhere to resume, so
+"is there a next page?" is key presence rather than arithmetic repeated at every
+call site. Ordering is derived and stable — an unstable order shows a row twice
+and never shows another.
+
+The cost of displaying a page does not depend on the size of what it links to.
+A child is summarised by what it IS, never by walking it. Selecting an attribute
+opens a bounded AEVT window through the same discipline; the URL carries the
+last visible cursor, and the server reads only enough to render the page and
+prove whether a next one exists. It never scans every entity or transaction to
+manufacture counts. Domain attributes lead by default; framework attributes
+remain reachable explicitly.
+
+A drilled page carries no feed: repainting a page under a reader would move the
+ground they are standing on, so reload is the refresh and the URL is the state.
 
 **Large context twins are summaries first.** Plan roots render as compact
 title/progress disclosures; only the focused root starts open, and its tree has
@@ -275,6 +293,41 @@ of blocks, not strings assembled beside the renderer. As domains gain AI, HTML,
 and log projections, prompt, page, and operational views become different
 bounded projections of the same units rather than parallel presentation
 systems.
+
+## Streamed replies — the one high-churn path
+
+A streamed reply is the only genuinely high-churn thing the UI shows, and it
+rides the ONE database path rather than a side channel. Partials land on
+cardinality-one, unindexed attributes carrying `:seon.db/no-history?`, written
+as COALESCED COMPLETE VALUES by an isolated non-blocking sink and retracted at
+the terminal in the same transaction that settles the real fact.
+
+Each clause is load-bearing. Complete values rather than deltas, because a
+consumer that missed a delta is permanently wrong while one that missed a
+snapshot is briefly behind. No history, because a token-by-token record of a
+reply that already exists in full is pure index amplification. Retracted at the
+terminal, so there is never an instant in which a partial and a settled reply
+both exist and something has to decide which is real.
+
+**The sink is isolated because it runs on the provider's socket thread.** It
+replaces one slot in a latest-wins mailbox and returns; a separate thread
+commits at a configured cadence. Presentation may lag and may DROP intermediate
+snapshots — both are correct — and it may never slow the model call. The
+governing invariant is the provider reference's own: partial display cannot
+affect transport, parsing, usage, or evaluation. A streamed call and a one-shot
+call return the same completion value, so nothing downstream can tell which
+transport ran.
+
+The live token count derives from the SAME fold that produces the text, never a
+second mechanism counting the same thing twice: the provider's own usage once it
+has sent one, and the chunk count until then, which is an approximation and is
+named as one.
+
+**Both are ordinary blocks.** The token counter and the streaming reply declare
+`:seon.render/html` and return hiccup like any other surface, and each is its
+own morph target. The highest-churn thing in the system needs no render
+machinery of its own — which is the reason those two were chosen as the
+exercises that prove the design.
 
 ## Slots and layouts
 
