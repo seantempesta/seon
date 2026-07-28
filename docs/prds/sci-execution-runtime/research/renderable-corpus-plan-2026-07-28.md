@@ -19,6 +19,18 @@ distance N)` — every hop rendered by its owner's projection, redirectable at
 any slot, distance implied 1. `/data` is re-grounded as `seon.data`, the
 namespace whose job is understanding and explaining all the data in the system.
 
+**OWNER RULING (2026-07-29, supersedes SB-3's row mechanism): no
+`:seon.render.kind/*` attribute family — "don't make a render kind
+attribute; it's implied from the caller, as that's what they are
+looking for."** Kind is the boundary (ui.md): the caller states what
+it wants, and the caller's EXISTING validation (the prompt path's
+string|nil contribution check, the web path's hiccup check) IS the
+acceptance test for discovered renderers. Discovery therefore matches
+input schema + a declared render output only; eligibility per kind is
+decided where the value arrives, not in stored rows. The contract
+authoring restates §discovery/eligibility accordingly; the name table
+loses the family.
+
 ## The three standing constraints this design is answerable to
 
 Recorded here because they are binding on every section below, and because the
