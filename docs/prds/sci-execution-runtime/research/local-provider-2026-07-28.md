@@ -185,4 +185,3 @@ no-auth OpenAI-compatible servers receive a named dummy credential, or accrete
 an explicit no-auth state to the one existing target/leaf contract so absence
 omits the header while hosted targets still fail closed. No provider-specific
 branch or second transport mechanism is warranted.
-
