@@ -474,11 +474,24 @@ QUARRY GOLD INVENTORY IN (7f403bace: 155 files/75k lines censused,
 36-row crosswalk): the remaining gold is the continuity/composition
 layer — turn evidence + blobs, derived context, plans + memory,
 collaboration, canvas/tools, schedules, Inspect integration;
-pod/self-host/CLJS stays lead. IN FLIGHT: projection-review
-experiment (real outputs for owner critique). NEXT QUEUE:
-fresh N4 launch (owner go pending); two-cluster proof (+ failover
-live drive rides it); released-connection family; dispatcher lands
-post-measurement; my.message rung. THEN: two-cluster proof; projection-review experiment;
+pod/self-host/CLJS stays lead. OWNER GO + PERFORMANCE BAR (night): "no N=1 attempts. This shit has
+to be fast. Like 60fps fast for very dynamic rendering" — the 16ms
+frame budget under churn is a DESIGN INPUT measured by a committed
+benchmark harness, never asserted; PORT the tailwind-CSS build
+system from the quarry (standalone if it rode the dead CLJS build);
+two named exercise goals prove the design: LIVE TOKEN COUNTS and
+STREAMING TOKENS to the interface (exposes the seam: seon.ai is
+one-shot — the streaming SSE path is a named seal-side revision
+composing with the failover work, partials land on the no-history
+churn attribute, counts derive from the stream). IN FLIGHT (two):
+the FRESH N4 agent drafts with all rulings baked (mine-don't-
+reinvent, blocks central, old look faster, polish rows, benchmark
+harness, problems page first); projection-review experiment (real
+outputs for owner critique). NEXT QUEUE: two-cluster proof (+
+failover live drive rides it); released-connection family;
+dispatcher lands post-measurement; my.message rung; then the gold
+order (turn evidence + blobs, derived context, plans + memory,
+collaboration, schedules, Inspect). THEN: two-cluster proof; projection-review experiment;
 steps 3-5. Earlier step-1 note follows:
 IN FLIGHT: the same agent applies authorized seal revisions
 (:seon.config.fault/*→error dial rename across five files; admit
