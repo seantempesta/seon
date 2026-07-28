@@ -78,14 +78,30 @@
 ;;; Contract
 ;;; ---------------------------------------------------------------------------
 
+(defn declaration?
+  "True when `value` is a projection declaration rather than data.
+
+  THREE SHAPES, and the narrowness is the mechanism rather than a
+  restriction: a qualified SYMBOL to resolve and apply, a STRING that is
+  its own output, or a VECTOR that is its own output. Anything else on a
+  `seon.render`-namespaced key is presentation data —
+  `:seon.render/priority 3` is the standing example, and admitting
+  numbers would silently turn it into a kind."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [value]
+  (or (qualified-symbol? value)
+      (string? value)
+      (vector? value)))
+
 (defn kinds
   "The output kinds `unit` declares.
-  Every key in the `seon.render` namespace whose value is a qualified
-  symbol. COMPUTED from the unit, so a producer that adds a kind is discoverable
-  without an edit here and without a registry. The router's own request
-  keys (`:seon.render/unit`, `:seon.render/kind`) can never be mistaken
-  for declarations — a map and a keyword are not qualified symbols —
-  which is why the rule needs no exclusion list.
+  Every key in the `seon.render` namespace whose value is a
+  `declaration?`. COMPUTED from the unit, so a producer that adds a kind
+  is discoverable without an edit here and without a registry. The
+  router's own request keys (`:seon.render/unit`, `:seon.render/kind`)
+  can never be mistaken for declarations — a map and a keyword are
+  neither symbol, string nor vector — which is why the rule needs no
+  exclusion list.
   Returns the empty set for a map that declares nothing; a unit with no
   projections is an ordinary value, not an error."
   {:malli/schema [:=> [:cat :seon.render/unit] [:set :seon.render/kind]]}
@@ -94,7 +110,7 @@
         (keep (fn [[key value]]
                 (when (and (qualified-keyword? key)
                            (= "seon.render" (namespace key))
-                           (qualified-symbol? value))
+                           (declaration? value))
                   key)))
         unit))
 
@@ -119,11 +135,22 @@
                   [:or :seon.render/rendered :seon.error/value]]}
   [{:seon.render/keys [unit kind]}]
   (let [declaration (get unit kind)]
-    (if-not (qualified-symbol? declaration)
+    (cond
+      (not (declaration? declaration))
       {:seon.error/kind ::kind-not-declared
        :seon.error/message (str "This unit declares no " kind " projection.")
        :seon.error/data {:seon.render/kind kind
                          :seon.render/kinds (kinds unit)}}
+
+      ;; A LITERAL IS ITS OWN OUTPUT. No resolution, nothing to invoke,
+      ;; and therefore nothing that can throw — a fixed string or a
+      ;; fixed hiccup vector is the answer, and a block that just says a
+      ;; fixed thing should not have to define a function to say it.
+      (not (qualified-symbol? declaration))
+      {:seon.render/kind kind
+       :seon.render/output declaration}
+
+      :else
       ;; the VAR, never a fn value taken once: re-evaluating the
       ;; projection's defn must change the next render
       (if-let [projection (try

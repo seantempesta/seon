@@ -135,15 +135,43 @@
            (:seon.render/kinds (:seon.error/data refused)))
         "the caller is told what it does have")))
 
-(deftest a-literal-declaration-is-not-yet-routable-and-says-so
-  ;; ui.md admits a VERBATIM STRING as an ai render. That accretion is
-  ;; deliberately out of step 1 (one :or in :seon.render/projection plus
-  ;; one branch), and this test pins today's honest refusal so the day
-  ;; it changes, it changes here first.
-  (let [refused (render/render (request (assoc (unit) :seon.render/ai
-                                               "a verbatim string")
-                                        :seon.render/ai))]
-    (is (= :seon.render/kind-not-declared (:seon.error/kind refused)))))
+(deftest a-literal-declaration-is-its-own-output
+  ;; The accretion this test's predecessor pinned the refusal for, in
+  ;; the file its comment said it would change in first (N4 package 2).
+  ;; A block that just says a fixed thing should not have to define a
+  ;; function to say it.
+  (testing "a verbatim string, for a prose kind"
+    (is (= {:seon.render/kind :seon.render/ai
+            :seon.render/output "a verbatim string"}
+           (render/render (request (assoc (unit) :seon.render/ai
+                                          "a verbatim string")
+                                   :seon.render/ai)))))
+  (testing "a literal vector, for a hiccup kind"
+    (is (= {:seon.render/kind :seon.render/html
+            :seon.render/output [:p "fixed"]}
+           (render/render (request (assoc (unit) :seon.render/html
+                                          [:p "fixed"])
+                                   :seon.render/html)))))
+  (testing "and a literal is discoverable as a kind like any declaration"
+    (is (contains? (render/kinds (assoc (unit) :seon.render/html [:p "fixed"]))
+                   :seon.render/html)))
+  (testing "nothing to resolve means nothing that can throw"
+    ;; the whole failure surface of a literal is empty, which is why it
+    ;; needs no error branch of its own
+    (is (nil? (:seon.error/kind
+               (render/render (request (assoc (unit) :seon.render/ai "x")
+                                       :seon.render/ai)))))))
+
+(deftest data-on-a-render-key-stays-data
+  ;; THE REASON THE ADMISSIBLE SHAPES ARE NARROW. `kinds` derives what a
+  ;; unit can become from the unit itself, so every shape admitted as a
+  ;; declaration turns some ordinary seon.render-namespaced value into a
+  ;; kind. A number, keyword, map or set declares nothing.
+  (doseq [value [3 :a-keyword {:a 1} #{:a} nil]]
+    (is (not (render/declaration? value))
+        (str "must stay data: " (pr-str value))))
+  (is (= #{:seon.render/ai :seon.render/log} (render/kinds (unit)))
+      ":seon.render/priority 3 is presentation data, not a projection"))
 
 (deftest an-unresolvable-symbol-is-a-value-naming-the-symbol
   (let [refused (render/render (request (assoc (unit) :seon.render/ai

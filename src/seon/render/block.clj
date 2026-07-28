@@ -54,7 +54,8 @@
   Crash walk: pure over a database value. Nothing here opens, commits or
   holds anything; a kill during a render loses hiccup nobody had sent,
   and the next render derives the same value from the same facts."
-  (:require [clojure.string :as str]
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [datahike.api :as d]
             [seon.render :as render]
             [seon.render.hiccup :as hiccup]
@@ -123,6 +124,23 @@
   ;; non-void element with a closing tag, so `<div id="surface-x"></div>`
   ;; is a stable morph target from the first paint.
   [:div {:id (surface-id name) :data-slot (subs (str name) 1)} ""])
+
+(defn entity-slot
+  "A hole for the ENTITY reached by `lookup`, to be filled by rendering it.
+
+  The second hole kind, and deliberately the same shape as the first:
+  filling a slot and following a connection are the same act, so they
+  are the same marker with a different key and the same bounded walk
+  fills both. `lookup` is anything `d/pull` accepts as an eid — a
+  `:db/id`, or a lookup ref like `[:seon.cluster.run/id \"run-7f21\"]`.
+
+  This is what makes a rendered unit EMBED its refs: a renderer that
+  wants the run behind `:seon.error/run` emits this, and expansion
+  renders that run in place, and whatever the run's own render embeds is
+  expanded in turn until the budget says stop."
+  {:malli/schema [:=> [:cat :any] :seon.render/hiccup]}
+  [lookup]
+  [:div {:data-ref (pr-str lookup)} ""])
 
 ;;; ---------------------------------------------------------------------------
 ;;; The derivation
@@ -273,6 +291,33 @@
 ;;; Placement
 ;;; ---------------------------------------------------------------------------
 
+(defn entity-unit
+  "One entity at `db`, as a unit the router can project.
+
+  A pulled entity IS a unit, and that is the whole reason ref-following
+  needs no new mechanism: the pull is a map of qualified keys, and if
+  the entity carries a stored `:seon.render/html` the router resolves it
+  exactly as it resolves a block's. The database value rides along under
+  `:seon.db/db`, so whatever the entity's renderer needs to query, it
+  queries at the same basis the rest of the page was rendered at.
+
+  Nested ref values arrive from `d/pull` as `{:db/id N}` maps, which the
+  hiccup grammar refuses — correctly, since a ref is not content. They
+  become expandable holes rather than printed maps: see `expand`.
+
+  Returns a flat error value when `lookup` resolves to nothing, because
+  a dangling ref is a fact about the database and not a reason to stop
+  rendering a page."
+  {:malli/schema [:=> [:cat :any :any] [:or :seon.render/unit :seon.error/value]]}
+  [db lookup]
+  (let [pulled (try (d/pull db '[*] lookup) (catch Throwable _ nil))]
+    (if (or (nil? pulled) (nil? (:db/id pulled)))
+      {:seon.error/kind ::no-such-entity
+       :seon.error/message (str "Nothing in the database answers to "
+                                (pr-str lookup) ".")
+       :seon.error/data {::lookup (pr-str lookup)}}
+      (assoc pulled :seon.db/db db))))
+
 (defn- error-card
   "A failed surface, as hiccup that keeps the block's address.
 
@@ -335,10 +380,10 @@
   Deterministic: depth-first, left to right, so one input always elides
   the same holes. A budget that elided a different subtree per call
   would make equality suppression meaningless."
-  {:malli/schema [:=> [:cat :seon.render/hiccup :seon.render/surfaces
-                       :seon.sci.admit/caps]
+  {:malli/schema [:=> [:cat :seon.render/hiccup :seon.render/expansion]
                   :seon.render/hiccup]}
-  [hiccup surfaces caps]
+  [hiccup {:keys [:seon.render/surfaces :seon.db/db]
+           caps :seon.sci.admit/caps}]
   (let [by-id (into {} (map (juxt :seon.render/surface-id identity)) surfaces)
         remaining (volatile! (long (:seon.config.eval.result/max-nodes caps)))
         max-depth (long (:seon.config.eval.result/max-depth caps))]
@@ -372,6 +417,61 @@
               (and (vector? node)
                    (map? (nth node 1 nil))
                    (contains? (nth node 1) :data-slot)))
+            (ref? [node]
+              (and (vector? node)
+                   (map? (nth node 1 nil))
+                   (contains? (nth node 1) :data-ref)))
+            (follow [hole visited depth]
+              ;; FOLLOWING A CONNECTION IS FILLING A SLOT. Same budget,
+              ;; same per-path visited set, same in-place refusals — the
+              ;; only difference is where the node comes from, and the
+              ;; entity graph can genuinely cycle where a block set
+              ;; merely fans out.
+              (let [encoded (:data-ref (nth hole 1))]
+                (cond
+                  (contains? visited encoded)
+                  (note hole (str "cycle: " encoded
+                                  " is already being expanded on this path"))
+
+                  (>= depth max-depth)
+                  (note hole (str "not expanded: " encoded
+                                  " is deeper than the configured depth"))
+
+                  (nil? db)
+                  (note hole (str "not expanded: " encoded
+                                  " needs a database value on the expansion"))
+
+                  :else
+                  (let [lookup (try (edn/read-string encoded)
+                                    (catch Throwable _ ::unreadable))
+                        unit (if (= ::unreadable lookup)
+                               {:seon.error/kind ::unreadable-ref
+                                :seon.error/message
+                                (str "This ref is not readable: " encoded)}
+                               (entity-unit db lookup))]
+                    (if (:seon.error/kind unit)
+                      (note hole (:seon.error/message unit))
+                      ;; the entity's OWN declaration if it has one, and
+                      ;; the kind's generic default if it does not — so a
+                      ;; ref to something nobody wrote a renderer for is
+                      ;; still legible, which is what makes /data work
+                      ;; with zero authoring
+                      (let [declared (contains? unit :seon.render/html)
+                            rendered
+                            (render/render
+                             {:seon.render/unit
+                              (if declared
+                                unit
+                                (assoc unit :seon.render/html
+                                       `data-panel
+                                       :seon.sci.admit/caps caps
+                                       :seon.render/value (dissoc unit :seon.db/db)))
+                              :seon.render/kind :seon.render/html})]
+                        (if (:seon.error/kind rendered)
+                          (note hole (:seon.error/message rendered))
+                          (walk (:seon.render/output rendered)
+                                (conj visited encoded)
+                                (inc depth)))))))))
             (walk [node visited depth]
               ;; every node counts, and the budget is checked BEFORE the
               ;; work rather than after: a check that fires once the
@@ -384,6 +484,7 @@
                  "elided — this page is larger than the configured caps"]
                 (cond
                   (slot? node) (fill node visited depth)
+                  (ref? node) (follow node visited depth)
                   ;; an element keeps its HEAD and its attributes: only
                   ;; children are walked. Walking the whole vector let an
                   ;; exhausted budget replace a `:div` TAG with an
@@ -458,7 +559,10 @@
     (mapv (fn [surface]
             (if-let [failure (:seon.error/value surface)]
               (error-card surface failure)
-              (expand (:seon.render/output surface) surfaces caps)))
+              (expand (:seon.render/output surface)
+                      {:seon.render/surfaces surfaces
+                       :seon.sci.admit/caps caps
+                       :seon.db/db db})))
           roots)))
 
 ;;; ---------------------------------------------------------------------------

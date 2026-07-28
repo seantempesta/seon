@@ -139,6 +139,16 @@
   [:seon.cluster.agent/id :seon.cluster.agent/id]
   [:seon.render/kind :seon.render/kind]]
 
+ ; What one bounded expansion needs. The database value is OPTIONAL
+ ; because block-slot expansion needs none; an entity ref without one is
+ ; refused in place, naming what it needed, rather than silently
+ ; rendering an empty hole.
+ :seon.render/expansion
+ [:map {:closed true}
+  [:seon.render/surfaces :seon.render/surfaces]
+  [:seon.sci.admit/caps :seon.sci.admit/caps]
+  [:seon.db/db {:optional true} :any]]
+
  ; What a page needs. Caps are REQUIRED, and they are the SAME four
  ; dials `seon.sci.admit` already takes — expansion is a walk over a
  ; graph that can fan out and can cycle, which is precisely the problem

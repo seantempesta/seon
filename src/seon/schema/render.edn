@@ -13,11 +13,40 @@
  ; unit and the kind a caller asks for. Nothing maps short names to keys,
  ; because a second naming is a second place to drift.
  :seon.render/kind :qualified-keyword
- ; The declaration: a fully qualified symbol naming the projection fn,
- ; resolved LATE on every render so a re-`defn` takes effect with no
- ; re-registration — the proven `:seon.ancestor/populate` /
- ; `:seon.cluster.loop/evaluate` / predicate-owner idiom.
+ ; The declaration. USUALLY a fully qualified symbol naming the
+ ; projection fn, resolved LATE on every render so a re-`defn` takes
+ ; effect with no re-registration — the proven `:seon.ancestor/populate`
+ ; / `:seon.cluster.loop/evaluate` / predicate-owner idiom.
+ ;
+ ; A SYMBOL, and only a symbol — because this schema is what the two
+ ; kind attributes are declared as, and a kind attribute is STORED. One
+ ; Datahike value type stores natively (`:db.type/symbol`) where a union
+ ; needs a pr-str codec on every read and write, which is the codec the
+ ; quarry had and this design deleted.
+ ;
+ ; Proven the hard way rather than reasoned about: widening this to
+ ; `[:or :qualified-symbol :string [:vector :any]]` made the bridge
+ ; derive `:db.type/string` from the union's first branch and every
+ ; block transaction refused. The durable/runtime split is not a
+ ; preference — the schema IS the durable side.
  :seon.render/projection :qualified-symbol
+
+ ; The RUNTIME affordance, which is deliberately not an attribute: a
+ ; unit built in memory may declare a literal that is its own output —
+ ; a verbatim string for a prose kind, a vector for a hiccup kind
+ ; (docs/seon/architecture/ui.md, "The block and its two renders"). This
+ ; is the accretion `seon.render`'s docstring scoped and deferred out of
+ ; step 1: a block that just says a fixed thing should not have to
+ ; define a function to say it.
+ ;
+ ; `seon.render/declaration?` is the code-level contract that admits
+ ; both, and the admissible SHAPES are narrow on purpose: `kinds`
+ ; derives what a unit can become from the unit itself, so every shape
+ ; admitted becomes a shape that turns an ordinary
+ ; `seon.render`-namespaced key into a KIND. `:seon.render/priority 3`
+ ; is presentation data and must stay data, so a number, keyword, map
+ ; or set declares nothing.
+ :seon.render/literal [:or :string [:vector :any]]
 
  ; `:any` twice, at this router's one genuinely polymorphic boundary and
  ; for the same reason value admission gives: IN, a unit is any map any

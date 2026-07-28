@@ -27,6 +27,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
+            [seon.render :as render]
             [seon.render.block :as block]
             [seon.render.hiccup :as hiccup]
             [seon.schema]
@@ -594,7 +595,8 @@
   ;; budget, which is the lesson the admission codec already paid for.
   (let [surfaces (fan-out-surfaces 22)
         expanded (block/expand (:seon.render/output (first surfaces))
-                               surfaces caps)
+                               {:seon.render/surfaces surfaces
+                                :seon.sci.admit/caps caps})
         nodes (count (tree-seq sequential? seq expanded))]
     (is (hiccup/hiccup? expanded))
     (is (< nodes (* 4 (:seon.config.eval.result/max-nodes caps)))
@@ -608,8 +610,10 @@
   ;; subtree per call, so the walk is depth-first and left-to-right and
   ;; one input always produces one value.
   (let [surfaces (fan-out-surfaces 22)
-        once (block/expand (:seon.render/output (first surfaces)) surfaces caps)
-        twice (block/expand (:seon.render/output (first surfaces)) surfaces caps)]
+        once (block/expand (:seon.render/output (first surfaces))
+                       {:seon.render/surfaces surfaces :seon.sci.admit/caps caps})
+        twice (block/expand (:seon.render/output (first surfaces))
+                       {:seon.render/surfaces surfaces :seon.sci.admit/caps caps})]
     (is (= once twice))))
 
 (deftest depth-is-bounded-independently-of-node-count
@@ -623,7 +627,8 @@
                       :seon.render/output
                       [:div (block/slot (keyword (str "d" (inc index))))]})
                    (range 200))
-        expanded (block/expand (:seon.render/output (first deep)) deep caps)]
+        expanded (block/expand (:seon.render/output (first deep))
+                              {:seon.render/surfaces deep :seon.sci.admit/caps caps})]
     (is (hiccup/hiccup? expanded))
     (is (str/includes? (hiccup/->string expanded) "deeper than the configured")
         "the hole says why it stopped, and names the block")))
@@ -636,6 +641,170 @@
                        :seon.config.eval.result/max-nodes 1
                        :seon.config.eval.result/max-depth 1)
         expanded (block/expand (:seon.render/output (first surfaces))
-                               surfaces starved)]
+                               {:seon.render/surfaces surfaces
+                                :seon.sci.admit/caps starved})]
     (is (hiccup/hiccup? expanded))
     (is (string? (hiccup/->string expanded)))))
+
+;;; ---------------------------------------------------------------------------
+;;; Ref-following — the same walk, following connections
+;;; ---------------------------------------------------------------------------
+
+(defn error-html
+  "A renderer that EMBEDS its ref rather than printing it. This is the
+  whole ref-following idiom: name the connection, and expansion renders
+  whatever is on the other end in place."
+  [unit]
+  [:div {:class "error"}
+   [:span (:seon.error/message unit)]
+   (when-let [run (:seon.error/run unit)]
+     (block/entity-slot (:db/id run)))])
+
+(defn form-html
+  "Points back at its run — which is how an entity graph cycles."
+  [unit]
+  [:div {:class "form"}
+   [:span (:seon.cluster.run.form/source unit)]
+   (when-let [run (:seon.cluster.run.form/run unit)]
+     (block/entity-slot (:db/id run)))])
+
+(defn run-html
+  [unit]
+  [:div {:class "run"}
+   [:span (str "run " (:seon.cluster.run/id unit))]
+   ;; a cardinality-many ref: every child becomes its own hole
+   (for [form (sort-by :db/id (:seon.cluster.run/forms unit))]
+     (block/entity-slot (:db/id form)))])
+
+(def ^:private ref-attributes
+  [:seon.cluster.agent/id
+   :seon.cluster.run/id :seon.cluster.run/agent :seon.cluster.run/opened-at
+   :seon.cluster.run/forms
+   :seon.cluster.run.form/id :seon.cluster.run.form/run
+   :seon.cluster.run.form/ordinal :seon.cluster.run.form/source
+   :seon.error/id :seon.error/kind :seon.error/message :seon.error/at
+   :seon.error/signature :seon.error/process
+   :seon.error/run
+   :seon.render/html])
+
+(defn- with-ref-database
+  [body]
+  (let [configuration {:store {:backend :memory :id (random-uuid)}
+                       :schema-flexibility :write}
+        _ (d/create-database configuration)
+        connection (d/connect configuration)]
+    (try
+      (d/transact connection
+                  (schema.datahike/malli->datahike-schema ref-attributes))
+      (d/transact connection
+                  [{:seon.cluster.agent/id agent-id}
+                   {:db/id -1
+                    :seon.cluster.run/id "run-7f21"
+                    :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
+                    :seon.cluster.run/opened-at #inst "2026-07-28T00:00:00.000-00:00"
+                    :seon.cluster.run/forms
+                    [{:seon.cluster.run.form/id "form-0"
+                      :seon.cluster.run.form/ordinal 0
+                      :seon.cluster.run.form/source "(+ 1 2)"}
+                     {:seon.cluster.run.form/id "form-1"
+                      :seon.cluster.run.form/ordinal 1
+                      :seon.cluster.run.form/source "(my.run/complete \"3\")"}]}
+                   {:seon.error/id "err-7f21"
+                    :seon.error/kind :seon.ai/timeout
+                    :seon.error/message "the model did not answer"
+                    :seon.error/at #inst "2026-07-28T00:00:01.000-00:00"
+                    :seon.error/signature "sig-1"
+                    :seon.error/process "1234-1700000000000"
+                    :seon.error/run -1}])
+      (body connection)
+      (finally
+        (d/release connection)
+        (d/delete-database configuration)))))
+
+(defn- expansion
+  [db]
+  {:seon.render/surfaces [] :seon.sci.admit/caps caps :seon.db/db db})
+
+(deftest a-rendered-unit-embeds-its-refs-as-units
+  ;; TASK #11's recursive falsifier, the owner's own example: an error,
+  ;; the run it interrupted, and that run's forms, as ONE expanded page.
+  ;; Nothing here is page-specific — it is the block walk following
+  ;; connections instead of names.
+  (with-ref-database
+    (fn [connection]
+      (d/transact connection
+                  [{:seon.error/id "err-7f21" :seon.render/html `error-html}
+                   {:seon.cluster.run/id "run-7f21" :seon.render/html `run-html}])
+      (let [db (d/db connection)
+            unit (block/entity-unit db [:seon.error/id "err-7f21"])
+            expanded (block/expand
+                      (:seon.render/output
+                       (render/render {:seon.render/unit unit
+                                       :seon.render/kind :seon.render/html}))
+                      (expansion db))
+            html (hiccup/->string expanded)]
+        (is (hiccup/hiccup? expanded))
+        (is (str/includes? html "the model did not answer") "the error")
+        (is (str/includes? html "run run-7f21") "its run, followed one hop")
+        (is (str/includes? html "(+ 1 2)") "and the run's forms, two hops")
+        (is (str/includes? html "my.run/complete") "every one of them")))))
+
+(deftest an-entity-with-no-renderer-still-renders
+  ;; What makes /data work with zero authoring: a ref to something
+  ;; nobody wrote a renderer for falls to the kind's generic default,
+  ;; which can project anything.
+  (with-ref-database
+    (fn [connection]
+      (d/transact connection
+                  [{:seon.error/id "err-7f21" :seon.render/html `error-html}])
+      (let [db (d/db connection)
+            unit (block/entity-unit db [:seon.error/id "err-7f21"])
+            expanded (block/expand
+                      (:seon.render/output
+                       (render/render {:seon.render/unit unit
+                                       :seon.render/kind :seon.render/html}))
+                      (expansion db))
+            html (hiccup/->string expanded)]
+        (is (str/includes? html "seon-data-panel")
+            "the run has no renderer, so the generic default projected it")
+        (is (str/includes? html "run-7f21")
+            "and its data is legible without anybody having authored it")))))
+
+(deftest a-dangling-ref-is-a-note-and-not-a-dead-page
+  (with-ref-database
+    (fn [connection]
+      (let [db (d/db connection)
+            expanded (block/expand [:div (block/entity-slot 99999999)]
+                                   (expansion db))]
+        (is (hiccup/hiccup? expanded))
+        (is (str/includes? (hiccup/->string expanded) "Nothing in the database")
+            "a dangling ref is a fact about the database, not a reason to stop")))))
+
+(deftest ref-following-without-a-database-refuses-in-place
+  (let [expanded (block/expand [:div (block/entity-slot 1)]
+                               {:seon.render/surfaces [] :seon.sci.admit/caps caps})]
+    (is (hiccup/hiccup? expanded))
+    (is (str/includes? (hiccup/->string expanded) "needs a database value"))))
+
+(deftest a-ref-cycle-is-refused-at-the-hole-that-closes-it
+  ;; THE REASON THE VISITED SET IS LOAD-BEARING HERE and merely helpful
+  ;; for blocks: a value tree cannot cycle, and an entity graph
+  ;; routinely does — a run points at its forms and each form points
+  ;; back at its run.
+  (with-ref-database
+    (fn [connection]
+      (d/transact connection
+                  [{:seon.cluster.run.form/id "form-0"
+                    :seon.cluster.run.form/run [:seon.cluster.run/id "run-7f21"]}])
+      (let [db (d/db connection)
+            run-id (:db/id (d/pull db [:db/id] [:seon.cluster.run/id "run-7f21"]))
+            form-id (:db/id (d/pull db [:db/id] [:seon.cluster.run.form/id "form-0"]))]
+        (d/transact connection
+                    [{:db/id run-id :seon.render/html `run-html}
+                     {:db/id form-id :seon.render/html `form-html}])
+        (let [db (d/db connection)
+              expanded (block/expand [:div (block/entity-slot run-id)]
+                                     (expansion db))]
+          (is (hiccup/hiccup? expanded))
+          (is (str/includes? (hiccup/->string expanded) "cycle")
+              "run → form → run stops where it closes"))))))
