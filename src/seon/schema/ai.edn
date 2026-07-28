@@ -105,7 +105,7 @@
  ; ONE ROW PER ATTEMPT, WRITTEN AFTER THE CALL, deliberately. A
  ; before-the-call `:running` row would be a second interruption
  ; mechanism for a fact nothing reads: a process that dies mid-call
- ; already leaves a claimed run that `work/interruptions` finds and the
+ ; already leaves a claimed run that `work/interruption` finds and the
  ; loop settles, and nothing re-calls either way. The honest cost is
  ; named: a crash mid-call leaves NO attempt row, so the chain says
  ; "the call was never recorded", not "the call never happened".

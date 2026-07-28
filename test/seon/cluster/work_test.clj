@@ -5,7 +5,7 @@
   lane makes these green by implementing `seon.cluster.work` ONLY —
   schemas and tests are byte-sealed.
 
-  The acceptance surface is EXHAUSTIVE, not sampled. `next-work`'s
+  The acceptance surface is EXHAUSTIVE, not sampled. `next-agent-work`'s
   domain is small and enumerable — the run's custody and plan state
   crossed with the trigger's answeredness — so every state is
   constructed as real committed facts in a real in-memory database and
@@ -135,7 +135,11 @@
                 :seon.cluster.agent/run [:seon.cluster.run/id run-id]]]))
 
 (def ^:private request
-  {:seon.cluster.run/process process
+  "The AGENT-SCOPED request (F2 §3.2). The global one died with the
+  central pass; the totality property is unchanged in strength — it
+  always was a per-agent question, and now it says so."
+  {:seon.cluster.agent/id agent-id
+   :seon.cluster.run/process process
    :seon.cluster.work/now now})
 
 ;;; ---------------------------------------------------------------------------
@@ -268,14 +272,14 @@
       (fn [connection]
         (build connection)
         (let [db (d/db connection)
-              derived (work/next-work db request)]
+              derived (work/next-agent-work db request)]
           (testing label
             (if (nil? expect)
               (is (nil? derived) "must derive idle")
               (is (= (into {} (remove (comp nil? val)) expect)
                      (into {} (remove (comp nil? val)) derived))))
-            (testing "and more-work? never disagrees with it"
-              (is (= (some? derived) (work/more-work? db request))))
+            (testing "and more-agent-work? never disagrees with it"
+              (is (= (some? derived) (work/more-agent-work? db request))))
             (testing "and the situation validates against its own schema"
               (when derived
                 (is (seon.schema/valid-candidate-value?
@@ -291,10 +295,10 @@
       (add-trigger! connection)
       (open-run! connection {:triggered? true})
       (let [db (d/db connection)]
-        (is (nil? (work/next-work db request))
+        (is (nil? (work/next-agent-work db request))
             "it is not work — nothing re-calls a lost paid call")
         (is (= run-id (:seon.cluster.run/id (work/interruption db agent-id)))
-            "it IS an interruption the loop must settle")))))
+            "it IS an interruption the turn proc must settle")))))
 
 (deftest a-planned-orphan-run-is-work-not-an-interruption
   (with-database
@@ -305,7 +309,7 @@
         (is (nil? (work/interruption db agent-id))
             "a planned run continues; it is not wreckage")
         (is (= :resume (:seon.cluster.work/situation
-                        (work/next-work db request))))))))
+                        (work/next-agent-work db request))))))))
 
 (deftest answeredness-is-transaction-metadata
   (with-database

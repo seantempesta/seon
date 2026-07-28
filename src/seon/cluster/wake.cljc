@@ -1,10 +1,10 @@
 (ns seon.cluster.wake
-  "The wake: a commit says LOOK, and the loop derives what to do.
+  "The wake: a commit says LOOK, and the woken pass derives from facts.
 
   This contract layer is fully implemented and live-proven.
 
   EVENT-DRIVEN, NOT POLLED. Datahike's own `listen!` fires on every
-  commit, so the loop never asks \"is there work?\" on a timer. The wake
+  commit, so nothing ever asks \"is there work?\" on a timer. The wake
   carries NO information — work is derived from facts, so a wake that
   lost its payload lost nothing, and one wake standing for three
   commits is correct rather than lossy.
@@ -31,23 +31,26 @@
   (`api/specification.cljc:1076-1078`): N3 never transacts from a
   callback at all.
 
-  THE PREDICATE HAS THREE TRAPS, all measured (probe A Q3, probe B Q10):
+  ROUTING HAS THREE TRAPS, all measured (probe A Q3, probe B Q10):
 
-  - `:db/txInstant` is in EVERY tx-data, so a predicate that looks for
-    \"any datom\" wakes on every commit including the loop's own;
-  - the wake set and the set of attributes the loop itself commits must
+  - `:db/txInstant` is in EVERY tx-data, so routing on \"any datom\"
+    would wake an agent on every commit including its own;
+  - the routed set and the set of attributes a turn itself commits must
     be DISJOINT, and that is a computed property rather than a reviewed
-    list (L8, L17). The wake set is `#{:seon.cluster.message/to}`; the
-    loop commits `:seon.cluster.run/*`, `:seon.cluster.run.form/*`,
-    `:seon.cluster.eval/*`, `:seon.cluster.agent/run`;
+    list (L8, L17). The routed set is `wake-attributes`; a turn commits
+    `:seon.cluster.run/*`, `:seon.cluster.run.form/*`,
+    `:seon.cluster.eval/*`, `:seon.cluster.agent/run`. The RENDER wake
+    is deliberately outside that property: it is per-report and
+    unconditional, and its consumer derives pages rather than work, so
+    it cannot make an idle cluster do anything;
   - an unchanged value emits no datom, so it emits no wake. Naming a
-    wake attribute whose value is idempotently re-asserted produces
-    ZERO wakes, silently. `:seon.cluster.message/to` is safe because a
-    new message is a new entity.
+    routed attribute whose value is idempotently re-asserted produces
+    ZERO wakes, silently. Both routed attributes are safe because a new
+    message and a new agent are each a new entity.
 
   A REFUSED TRANSACTION DOES NOT WAKE: dispatch is gated on
-  `(map? tx-report)` (`writer.cljc:372`), so a refusal cannot storm the
-  loop.
+  `(map? tx-report)` (`writer.cljc:372`), so a refusal cannot storm a
+  mailbox.
 
   BOOT IS ONE INJECTED WAKE, not a special path. A listener only fires
   on future commits, so work committed before this process started is
@@ -73,66 +76,21 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn wake-attributes
-  "The attributes whose commit means the loop should look.
-  One derivation, so the predicate and the disjointness property read
-  the same set."
+  "The attributes `route!` routes on — the ONE derivation of its set.
+
+  Re-grounded at F2 §3.3: it was `listen!`'s input, and `listen!` is
+  gone with the one-global-channel delivery. It survives because the
+  disjointness property (C2) needs two COMPUTED sets to compare rather
+  than one list to believe — this against
+  `seon.cluster.loop/committed-attributes` — so `route!`'s `case` can
+  never drift from the property silently.
+
+  Both are safe against the unchanged-value trap: a new message and a
+  new agent are each a new entity, so the datom always exists and the
+  wake always fires."
   {:malli/schema [:=> [:cat] :seon.cluster.wake/attributes]}
   []
-  ;; ONE attribute today: a new message pointed at an agent. It is the
-  ;; smallest set that is disjoint from everything the loop writes, and
-  ;; a new message is always a new entity — so the datom always exists
-  ;; and the wake always fires.
-  #{:seon.cluster.message/to})
-
-(defn wake?
-  "True when a transaction report touches a wake attribute (C1).
-  Pure over the report's `:tx-data`, which is a sequence of datoms
-  whose attribute is at index 1. `:db/txInstant` is present in every
-  report and is never a wake attribute, so the loop's own commits do
-  not wake it."
-  {:malli/schema [:=> [:cat :seon.cluster.wake/attributes :any] :boolean]}
-  [attributes report]
-  (boolean
-   (some (fn [datom] (contains? attributes (nth datom 1)))
-         (:tx-data report))))
-
-(defn listen!
-  "Register the wake handler on a connection (C3).
-  The handler is the four lines this namespace's docstring specifies,
-  and its two prohibitions are the contract: it offers a wake or, on
-  any throwable, offers a core fault — it NEVER throws and NEVER parks.
-  Returns the key it registered under so `unlisten!` needs no bookkeeping
-  elsewhere."
-  {:malli/schema [:=> [:cat :seon.cluster.wake/listen-request]
-                  :seon.cluster.wake/key]}
-  [{:keys [:seon.cluster.wake/connection :seon.cluster.wake/attributes
-           :seon.cluster.wake/channel :seon.cluster.wake/fault-channel
-           :seon.cluster.wake/key]}]
-  (d/listen
-   connection
-   key
-   ;; THE FOUR LINES. Everything about them is a prohibition:
-   ;; try/catch because an escaping exception hangs the committing
-   ;; caller forever (writer.cljc:384-386), offer! because parking puts
-   ;; the caller's commit on hold (probe B: 804 ms), and offer! again on
-   ;; the fault path for the same reason.
-   (fn [report]
-     (try
-       (when (wake? attributes report)
-         ;; `offer!` never rejects a (sliding-buffer 1) channel for
-         ;; being full — it drops the older wake, which is exactly
-         ;; right. So a false here means the channel is CLOSED: the proc
-         ;; is gone and a commit is going unnoticed. That is a fault,
-         ;; and reporting it is the other half of never throwing —
-         ;; a swallowed failure nobody hears about is an invisible one.
-         (when-not (async/offer! channel ::wake)
-           (async/offer! fault-channel
-                         (ex-info "the wake channel refused delivery"
-                                  {:seon.error/kind ::undeliverable-wake
-                                   ::key key}))))
-       (catch #?(:clj Throwable :cljs :default) failure
-         (async/offer! fault-channel failure)))))
-  key)
+  #{:seon.cluster.message/to :seon.cluster.agent/id})
 
 (defn route!
   "Register the ROUTING wake handler on a connection (F1 §4).

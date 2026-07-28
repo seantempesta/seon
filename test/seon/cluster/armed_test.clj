@@ -216,8 +216,8 @@
                             [?agent :seon.cluster.agent/id ?agent-id]]
                           @connection (:seon.error/id fact)))
                   "the fault arrived TAGGED with its agent — structural
-                   provenance from the error-channel join, no
-                   attributed-run query")
+                   provenance from the error-channel join, never a
+                   global attribution query")
               (is (= (:seon.cluster.run/process handle)
                      (:seon.error/process fact)))
               (is (re-matches #"^[0-9a-f]{64}$" (:seon.error/signature fact))))

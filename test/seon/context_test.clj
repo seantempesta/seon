@@ -858,9 +858,12 @@
                     :seon.sci.admit/caps caps}
             order (atom [])
             turn! (fn []
-                    (let [found (work/next-work
+                    ;; the AGENT-SCOPED derivation (F2 §3.2): this
+                    ;; fixture always drove one agent's turns
+                    (let [found (work/next-agent-work
                                  @connection
-                                 {:seon.cluster.run/process process
+                                 {:seon.cluster.agent/id "agent-a"
+                                  :seon.cluster.run/process process
                                   :seon.cluster.work/now (Date.)})]
                       (cluster.loop/turn {:seon.cluster.loop/cluster handle
                                           :seon.cluster.work/next found}

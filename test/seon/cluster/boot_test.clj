@@ -458,7 +458,7 @@
 (deftest a-dead-holders-run-is-unclaimed-by-the-time-start-returns
   ;; The live crash drill found this gap: `recover-tx` existed with no
   ;; caller, so a process that died holding a claimed run left the agent
-  ;; wedged — `work/next-work` sees a run held by someone else and
+  ;; wedged — `work/next-agent-work` sees a run held by someone else and
   ;; returns nothing, forever. Recovery is BY FACT: the drill measured
   ;; the dead holder's 60-second lease still in the future when the fix
   ;; fires, so nothing here waits a lease out.

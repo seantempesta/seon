@@ -587,31 +587,13 @@
                      (:seon.render.web/url served))))
     served))
 
-(defn- attributed-run
-  "The run this process holds and has not closed, or nil.
-  EXACT today because turns are serial within a cluster
-  (`loop.cljc:36-40`), so there is at most one — which is why the fault
-  committer can derive attribution instead of the loop having to carry
-  the current run in its proc state for the error path's benefit. The
-  day turns go concurrent this stops being exact and the run must ride
-  in `::flow/state`; that is a contract note, not a hypothetical."
-  [db process]
-  (d/q '[:find [?id ?agent-id]
-         :in $ ?process
-         :where
-         [?run :seon.cluster.run/process ?process]
-         [?run :seon.cluster.run/id ?id]
-         (not [?run :seon.cluster.run/closed-at _])
-         [?run :seon.cluster.run/agent ?agent]
-         [?agent :seon.cluster.agent/id ?agent-id]]
-       db process))
-
 (defn- tagged-run
   "The run the TAGGED agent points at and this process holds, or nil.
-  The per-agent successor of `attributed-run`: an agent graph's fault
-  arrives tagged with its agent (structural provenance from the
-  error-channel join), so attribution is that agent's one held run —
-  exact under concurrency, where the global query stopped being."
+  Attribution is STRUCTURAL: an agent graph's fault arrives tagged with
+  its agent (structural provenance from the error-channel join), so
+  attribution is that agent's one held run — exact under concurrency,
+  where the serial-era global query stopped being. That global query
+  (`attributed-run`) is deleted at F2 §3.3."
   [db agent-id process]
   (d/q '[:find ?id .
          :in $ ?agent-id ?process
@@ -627,9 +609,11 @@
   Everything it needs is read fresh: the dials from the config
   singleton, the attribution from the database value at the fault's
   own basis. A fault from an agent graph carries its agent as a
-  structural tag (F1 §6) and attributes through `tagged-run`; an
-  untagged fault (the cluster's own graph) falls back to
-  `attributed-run` until F2 retires it. It goes through
+  structural tag (F1 §6) and attributes through `tagged-run`. An
+  UNTAGGED fault — the cluster graph's own, from the armer or the
+  render proc — attributes to NO run, and that is correct rather than
+  missing: it is not a run's fault. The serial-era fallback query is
+  gone (F2 §3.3). It goes through
   `store/transact!`, which never throws, and it ignores its own
   outcome — if the database refuses the fault, the answer is not to
   fault about the fault (the recursion fence)."
@@ -637,10 +621,8 @@
   (try
     (let [db @connection
           dials (config/effective db cluster-name)
-          tagged (:seon.cluster.agent/id fault)
-          [run-id agent-id] (if tagged
-                              [(tagged-run db tagged process) tagged]
-                              (attributed-run db process))]
+          agent-id (:seon.cluster.agent/id fault)
+          run-id (when agent-id (tagged-run db agent-id process))]
       (store/transact!
        connection
        (error/commit-tx

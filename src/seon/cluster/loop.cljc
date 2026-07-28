@@ -1,41 +1,19 @@
 (ns seon.cluster.loop
-  "The run loop: one proc, one wake, one turn at a time.
+  "THE TURN: open → call → resume → close, and the custody law.
 
-  This contract layer is fully implemented and live-proven.
+  THERE IS NO LOOP HERE ANY MORE (F2 §3.1). The central serial pass —
+  settle-all → global `next-work` → turn → global `more-work?` rewake —
+  is DELETED. Every agent is its own flow graph, and the pass that
+  survives is `seon.cluster.agent/turn-step`: the same shape narrowed
+  to ONE agent, with per-agent orphan settling, `next-agent-work`, this
+  namespace's `turn`, and a self-rewake into that agent's own mailbox.
+  A global `next-work` was wrong the moment two agents could run.
 
-  AN ORDINARY `flow/process`, NOT A CUSTOM LAUNCHER. The wake arrives
-  through `::flow/in-ports` — real channel objects returned in initial
-  state, which Flow adds to the proc's own read set
-  (`reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj:219-232`)
-  — so Flow's control priority, addressed pause/resume/ping, error
-  reporting and continue-with-pre-step-state come free instead of being
-  reimplemented. `seon.flow/fault-committer-proc` is the in-house
-  precedent and the same shape. Consequence, to be landed with this:
-  `seon.flow/database-proc` and its helpers become dead.
+  The namespace keeps its name while its loop dies: the rename to
+  `seon.cluster.turn` is a separate atomic wave (F2 R5), because
+  mixing a rename into a cut blurs every diff the review depends on.
 
-  BUILT WITH A VAR — `(flow/process #'step {:workload :io})` — so
-  re-evaluating the transform updates a running proc with no graph
-  rebuild. An anonymous `flow/map->step` result does NOT reload; that
-  limit is measured and every N3 launcher inherits it.
-
-  `:workload :io` IS LOAD-BEARING. The loop blocks on the model call; a
-  `:compute` proc would occupy a bounded platform thread for its whole
-  duration. The eval is the compute half and reaches `:compute` through
-  `seon.flow/submit!!`, which is backpressure (a fixed-buffer channel)
-  and parallelism (the bounded executor) as two mechanisms rather than
-  the one Semaphore that used to conflate them.
-
-  ONE WAKE, ONE PASS, SELF-REWAKE. The transform pins ONE database
-  value, derives one piece of work, runs it, and — if more remains —
-  `offer!`s a wake into its own in-port. It cannot recurse unboundedly:
-  `offer!` on a `(sliding-buffer 1)` coalesces, and the pass is only
-  re-entered after the transform returns.
-
-  TURNS ARE SERIAL WITHIN A CLUSTER, deliberately for N3. The extension
-  point is named so it is not invented later: submit each turn to a
-  bounded `:io` class on the same work launcher, concurrency a config
-  fact. Do not build it here; measure the ceiling at the review and
-  decide against a number.
+  WHAT SURVIVES, and why it is the durable half:
 
   THE TERMINAL TRANSACTION IS ONE COMMIT carrying the receipt AND the
   interpreted disposition. Splitting them reintroduces a torn window
@@ -44,18 +22,16 @@
   value — under `store/transact!` that is a branch on a returned value,
   not a catch, which is strictly better.
 
-  NOTHING RETRIES A PAID CALL, and recovery is not a code path: the
-  loop only ever asks `seon.cluster.work/next-work` what to do, and a
+  NOTHING RETRIES A PAID CALL, and recovery is not a code path: a turn
+  only ever acts on what `next-agent-work` derived from facts, and a
   crashed run reaches it as ordinary facts. `interruption` is settled
   with no reply, and the agent's next prompt carries the one warning.
 
-  Crash walk (n3-plan §9.3 rows 1-12): every row is a state
-  `next-work`/`interruption` already answer, so this namespace's own
-  crash contract is short — it holds no durable state of its own, its
-  channel contents are discarded on stop (`flow/impl.clj:174-183`), and
-  a killed pass leaves exactly the facts its last committed transaction
-  wrote. The sealed suite drives the rows as kill positions in a
-  state-machine property."
+  Crash walk: every row is a state `next-agent-work`/`interruption`
+  already answer, so this namespace holds no durable state of its own
+  and a killed turn leaves exactly the facts its last committed
+  transaction wrote. The sealed suite drives the rows as kill positions
+  in a state-machine property, per agent."
   (:require [clojure.core.async :as async]
             [sci.core :as sci]
             [clojure.core.async.flow :as flow]
@@ -389,103 +365,6 @@
          [?form :seon.cluster.run.form/ordinal ?ordinal]
          [?form :seon.cluster.run.form/source ?source]]
        db run-id ordinal))
-
-(defn step
-  "The run-loop transform, in Flow's four arities.
-  `()` describes: `:workload :io`, no `:ins` (the wake is an in-port),
-  NO outs of its own, and a `:ping-map-fn` exposing the turn count.
-  The turn report goes out on `::flow/report` — flow's OWN observation
-  channel — rather than a declared out of ours. That is not a
-  preference: an out nobody connects makes `send-outputs` throw
-  `can't resolve channel with io-id` on every completed turn, and
-  because that throw lands on the error channel, it was invisible for
-  as long as nothing read it. Reports are observation, flow already
-  owns an observation channel with a sliding buffer and a monitor tap,
-  and using it means there is no out to leave unconnected.
-  `(args)` returns initial state carrying `::flow/in-ports {::wake ch}`
-  and the cluster handle captured at `create-flow`.
-  `(state transition)` unlistens on `::flow/stop`, then publishes the
-  orderly-stop completion. Flow invokes that lifecycle arity only after
-  the active transform has returned, so the marker means the whole pass
-  — including a model call or transaction — has ended.
-  `(state input-id message)` runs ONE pass: pin a database value, derive
-  work, do it, rewake if more remains."
-  ;; The zero-arity return is core.async.flow's OWN descriptor shape —
-  ;; the one genuinely third-party map here, so it stays open. Every
-  ;; shape that is ours is named and closed.
-  {:malli/schema [:function
-                  [:=> [:cat] [:map]]
-                  [:=> [:cat :seon.cluster.loop/cluster]
-                   :seon.cluster.loop/state]
-                  [:=> [:cat :seon.cluster.loop/state :keyword]
-                   :seon.cluster.loop/state]
-                  [:=> [:cat :seon.cluster.loop/state :keyword :any]
-                   [:tuple :seon.cluster.loop/state
-                    [:maybe [:map-of :keyword [:vector :some]]]]]]}
-  ([]
-   {:workload :io
-    :params {:seon.cluster.loop/cluster "the cluster this loop drives"}
-    :ins {}
-    :outs {}
-    :ping-map-fn (fn [state]
-                   (select-keys state [:seon.cluster.loop/turns]))})
-
-  ([cluster]
-   ;; the wake channel is created by the caller and handed over as an
-   ;; in-port: Flow adds it to this proc's own read set, which is what
-   ;; makes a custom launcher unnecessary
-   {::flow/in-ports {:seon.cluster.wake/wake
-                     (:seon.cluster.wake/channel cluster)}
-    :seon.cluster.loop/cluster cluster
-    :seon.cluster.loop/turns 0})
-
-  ([state transition]
-   (when (= ::flow/stop transition)
-     (let [cluster (:seon.cluster.loop/cluster state)]
-       (wake/unlisten! {:seon.cluster.wake/connection
-                        (:seon.store/branch-connection cluster)
-                        :seon.cluster.wake/key ::wake})
-       ;; Publish exactly once from the stop transition, never after each
-       ;; pass: an old pass marker could otherwise let orderly stop release
-       ;; the connection while a newer pass was active. A promise channel
-       ;; retains this value for the disarm even though Flow has already
-       ;; closed its own report and error channels.
-       (async/put! (:seon.cluster.loop/completion cluster) ::stopped)))
-   state)
-
-  ([state _input-id _message]
-   (let [cluster (:seon.cluster.loop/cluster state)
-         connection (:seon.store/branch-connection cluster)
-         now (Date.)
-         request {:seon.cluster.run/process
-                  (:seon.cluster.run/process cluster)
-                  :seon.cluster.work/now now}
-         ;; SETTLE BEFORE DERIVING. An orphaned run keeps its agent
-         ;; busy, so a pass that derived work first would find nothing
-         ;; to do for that agent and leave it wedged forever — which is
-         ;; exactly what the crash drill measured.
-         _ (doseq [orphan (work/interruptions @connection)]
-             (settle-interruption! cluster
-                                   (:seon.cluster.run/id orphan)
-                                   now))
-         ;; ONE database value for the derivation: everything this pass
-         ;; decides after settling, it decides against one basis
-         work (work/next-work @connection request)]
-     (if (nil? work)
-       [state nil]
-       (let [report (turn {:seon.cluster.loop/cluster cluster
-                           :seon.cluster.work/next work}
-                          now)]
-         ;; self-rewake, coalescing on the (sliding-buffer 1) in-port:
-         ;; it cannot recurse, because the pass is only re-entered after
-         ;; this transform returns
-         (when (work/more-work? @connection request)
-           (async/offer! (:seon.cluster.wake/channel cluster) ::wake))
-         [(update state :seon.cluster.loop/turns inc)
-          ;; flow's own report channel: observation, never a dependency.
-          ;; A dropped report costs nothing and no consumer can
-          ;; backpressure the loop.
-          {::flow/report [report]}])))))
 
 (defn settle-interruption!
   "Bury one orphaned run so its agent stops being busy.
@@ -1002,14 +881,14 @@
       ;; agent stops being busy.
       ;;
       ;; CLAIM FIRST WHEN WE DO NOT HOLD IT, and this is a fix, not a
-      ;; flourish: `next-work` derives `:close` for any open planned run
+      ;; flourish: `next-agent-work` derives `:close` for any open planned run
       ;; whose forms are all settled, INCLUDING one nobody holds — a run
       ;; released by `my.run/wait`, or one whose holder died after the
       ;; last receipt. `close-call` refuses a run it is not the holder
       ;; of (`::not-the-holder`), so those closes failed, the derivation
       ;; kept returning `:close`, and the self-rewake kept firing:
       ;; a HOT LIVELOCK committing one error fact per pass. Measured on
-      ;; the wait path — twelve passes, nine error facts, `next-work`
+      ;; the wait path — twelve passes, nine error facts, `next-agent-work`
       ;; still saying `:close`. Taking custody first is the same
       ;; takeover `settle-interruption!` already uses, and it is what
       ;; makes "only the holder may close a run" a rule the loop can

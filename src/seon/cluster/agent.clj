@@ -109,8 +109,8 @@
 (defn- held-run-id
   "The id of the run `agent-id` points at and `process` holds, or nil.
   The turn proc's ping-state derivation — the current run rides in
-  `::flow/state`, which is what retires the serial-dependent
-  `attributed-run` query (F2 deletes it)."
+  `::flow/state`, which is what retired the serial-dependent global
+  query F2 §3.3 deleted."
   [db agent-id process]
   (d/q '[:find ?id .
          :in $ ?agent-id ?process

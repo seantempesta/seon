@@ -226,8 +226,14 @@
    :seon.cluster.message/content :seon.cluster.message/at
    :seon.db/trigger])
 
-(def ^:private request {:seon.cluster.run/process process
-                        :seon.cluster.work/now now})
+(def ^:private request
+  "The AGENT-SCOPED request (F2 §3.2): the kill positions below are
+  per-agent facts and always were, so the crash walk derives through
+  `next-agent-work` with the same rows and the same expected
+  situations."
+  {:seon.cluster.agent/id "agent-a"
+   :seon.cluster.run/process process
+   :seon.cluster.work/now now})
 
 (defn- with-database [body]
   (let [configuration {:store {:backend :memory :id (random-uuid)}
@@ -304,7 +310,7 @@
     (with-database
       (fn [connection]
         (when state (commit-run! connection state))
-        (let [derived (work/next-work (d/db connection) request)]
+        (let [derived (work/next-agent-work (d/db connection) request)]
           (testing (str "crash walk row " row)
             (is (= expected (:seon.cluster.work/situation derived)))))))))
 
@@ -316,7 +322,7 @@
     (fn [connection]
       (commit-run! connection {:held? true :planned? true
                         :receipts [[0 :interrupted]]})
-      (let [derived (work/next-work (d/db connection) request)]
+      (let [derived (work/next-agent-work (d/db connection) request)]
         (is (= :resume (:seon.cluster.work/situation derived)))
         (is (= 1 (:seon.cluster.run.form/ordinal derived))
             "past the interrupted form, never back onto it")))))

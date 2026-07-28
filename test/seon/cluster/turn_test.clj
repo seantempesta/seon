@@ -169,8 +169,43 @@
         (d/release connection)
         (d/delete-database configuration)))))
 
-(defn- request [connection]
-  {:seon.cluster.run/process process :seon.cluster.work/now (Date.)})
+(defn- request
+  "The AGENT-SCOPED work request (F2 §3.2).
+  The global request died with the central pass; every site in this
+  suite already knows its agent, and the fixture's own agent is the
+  default. This suite asserts the TURN, which survives whole — so
+  re-pointing here is plumbing, not an oracle change."
+  ([connection] (request connection "agent-a"))
+  ([_connection agent-id]
+   {:seon.cluster.agent/id agent-id
+    :seon.cluster.run/process process
+    :seon.cluster.work/now (Date.)}))
+
+(defn- agent-ids
+  "Every agent in facts, oldest name first.
+  Production gives each of them its OWN turn proc; this suite drives
+  them in one thread, so the driver asks each agent's own derivation in
+  turn rather than asking a global one that no longer exists."
+  [db]
+  (sort (d/q '[:find [?id ...] :where [?e :seon.cluster.agent/id ?id]] db)))
+
+(defn- settle-orphans!
+  "Settle each agent's OWN orphan, the way its turn proc would."
+  [cluster connection now]
+  (doseq [agent-id (agent-ids @connection)]
+    (when-let [orphan (work/interruption @connection agent-id)]
+      (cluster.loop/settle-interruption! cluster
+                                         (:seon.cluster.run/id orphan)
+                                         now))))
+
+(defn- any-agent-work
+  "The first agent with work, derived through the AGENT-SCOPED
+  derivation. Suite plumbing: production has no global pass — each
+  agent's proc derives for itself — so this asks each in turn."
+  [connection]
+  (some (fn [agent-id]
+          (work/next-agent-work @connection (request connection agent-id)))
+        (agent-ids @connection)))
 
 (defn- drive-passes!
   "Run the loop's own pass — settle, then derive, then turn — until idle.
@@ -179,11 +214,8 @@
   (let [connection (:seon.store/branch-connection cluster)]
     (loop [passes 0]
       (let [now (Date.)]
-        (doseq [orphan (work/interruptions @connection)]
-          (cluster.loop/settle-interruption! cluster
-                                             (:seon.cluster.run/id orphan)
-                                             now))
-        (when-let [work (work/next-work @connection (request connection))]
+        (settle-orphans! cluster connection now)
+        (when-let [work (any-agent-work connection)]
           (when (< passes limit)
             (cluster.loop/turn {:seon.cluster.loop/cluster cluster
                                 :seon.cluster.work/next work}
@@ -196,7 +228,7 @@
   (let [connection (:seon.store/branch-connection cluster)]
     (loop [passes 0 reports []]
       (let [request (request connection)
-            work (work/next-work @connection request)]
+            work (any-agent-work connection)]
         (if (or (nil? work) (>= passes limit))
           reports
           (recur (inc passes)
@@ -307,7 +339,8 @@
 (deftest a-settled-orphan-stops-wedging-the-agent
   ;; The crash drill's headline: a process died holding a claimed,
   ;; unplanned run. Boot recovery released the dead CUSTODY, but until
-  ;; the loop settles the run the AGENT is still busy — next-work finds
+  ;; the turn proc settles the run the AGENT is still busy —
+  ;; next-agent-work finds
   ;; nothing to do for it and every later trigger goes unanswered
   ;; forever. This is that whole sequence, end to end.
   (with-cluster
@@ -323,10 +356,10 @@
                      {:seon.cluster.agent/id "agent-a"
                       :seon.cluster.agent/run [:seon.cluster.run/id "run-crashed"]}])
         (testing "the agent is WEDGED: it is busy, and nothing is work"
-          (is (nil? (work/next-work @connection (request connection))))
-          (is (= ["run-crashed"]
-                 (mapv :seon.cluster.run/id
-                       (work/interruptions @connection)))))
+          (is (nil? (work/next-agent-work @connection (request connection))))
+          (is (= "run-crashed"
+                 (:seon.cluster.run/id
+                  (work/interruption @connection "agent-a")))))
 
         ;; the loop's own pass settles it before deriving anything
         (with-redefs [ai/complete
@@ -338,7 +371,7 @@
 
         (testing "the orphan is settled — closed, and no longer an
                   interruption"
-          (is (empty? (work/interruptions @connection)))
+          (is (nil? (work/interruption @connection "agent-a")))
           (is (some? (d/q '[:find ?c . :in $ ?id :where
                             [?r :seon.cluster.run/id ?id]
                             [?r :seon.cluster.run/closed-at ?c]]
@@ -445,7 +478,7 @@
                                      [?e :seon.cluster.eval/ordinal _]]
                                    @connection)))))
             (testing "and the run is closed, so the agent is idle again"
-              (is (nil? (work/next-work @connection (request connection)))))))))))
+              (is (nil? (work/next-agent-work @connection (request connection)))))))))))
 
 (deftest a-completing-disposition-closes-in-the-terminal-transaction
   (with-cluster
@@ -490,7 +523,7 @@
                 "three passes and then IDLE — no separate close pass")
             (is (= [:released :released :closed]
                    (mapv :seon.cluster.loop/outcome reports)))
-            (is (nil? (work/next-work @connection (request connection)))
+            (is (nil? (work/next-agent-work @connection (request connection)))
                 "and nothing is derivable afterwards: no spin")
             (is (empty? (d/q '[:find ?e :where [?e :seon.error/kind _]]
                              @connection))
@@ -1036,7 +1069,7 @@
                                      #{process}
                                      :seon.cluster.run/now (Date.)}))
         (is (= :resume (:seon.cluster.work/situation
-                        (work/next-work @connection (request connection))))
+                        (work/next-agent-work @connection (request connection))))
             "the recovered planned run is ordinary :resume work")
         (binding [*evaluation* {:seon.cluster.eval/result-edn
                                 (pr-str (my.run/complete "3"))
@@ -1047,7 +1080,7 @@
                             [?r :seon.cluster.run/id ?id]
                             [?r :seon.cluster.run/closed-at ?c]]
                           @connection "run-p1")))
-          (is (nil? (work/next-work @connection (request connection)))
+          (is (nil? (work/next-agent-work @connection (request connection)))
               "and nothing re-derives — no livelock"))
         (testing "no error facts — the old path committed one per pass"
           (is (empty? (d/q '[:find ?e :where [?e :seon.error/id _]]
@@ -1070,15 +1103,15 @@
       (let [connection (:seon.store/branch-connection cluster)
             requests (atom [])]
         ;; pass 1: open + claim (the busy fence before the expensive part)
-        (let [work (work/next-work @connection (request connection))]
+        (let [work (work/next-agent-work @connection (request connection))]
           (is (= :open (:seon.cluster.work/situation work)))
           (cluster.loop/turn {:seon.cluster.loop/cluster cluster
                               :seon.cluster.work/next work}
                              (Date.)))
         (testing "the held run derives :call for its holder ONLY"
           (is (= :call (:seon.cluster.work/situation
-                        (work/next-work @connection (request connection)))))
-          (is (nil? (work/next-work @connection
+                        (work/next-agent-work @connection (request connection)))))
+          (is (nil? (work/next-agent-work @connection
                                     {:seon.cluster.run/process
                                      "some-other-process"
                                      :seon.cluster.work/now (Date.)}))
@@ -1161,7 +1194,7 @@
       (let [connection (:seon.store/branch-connection cluster)
             requests (atom [])]
         ;; pass 1: the loop opens a run on m-1 ("count the widgets")
-        (let [work (work/next-work @connection (request connection))]
+        (let [work (work/next-agent-work @connection (request connection))]
           (is (= :open (:seon.cluster.work/situation work)))
           (cluster.loop/turn {:seon.cluster.loop/cluster cluster
                               :seon.cluster.work/next work}
@@ -1178,7 +1211,7 @@
                       (recording-completer
                        requests
                        [{:seon.ai/text "(my.run/complete \"counted\")"}])]
-          (let [work (work/next-work @connection (request connection))]
+          (let [work (work/next-agent-work @connection (request connection))]
             (is (= :call (:seon.cluster.work/situation work)))
             (cluster.loop/turn {:seon.cluster.loop/cluster cluster
                                 :seon.cluster.work/next work}

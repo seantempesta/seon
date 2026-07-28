@@ -72,7 +72,7 @@
   []
   (let [connection (atom nil)
         state {:seon.cluster.loop/cluster {:seon.store/branch-connection connection}
-               :seon.cluster.loop/turns 7}]
+               :seon.cluster.agent/turns 7}]
     (reset! connection state)
     state))
 

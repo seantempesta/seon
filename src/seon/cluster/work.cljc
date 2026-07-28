@@ -1,11 +1,12 @@
 (ns seon.cluster.work
-  "What the loop should do next, derived from one database value.
+  "What ONE AGENT should do next, derived from one database value.
 
   This contract layer is fully implemented and live-proven.
 
   THIS IS THE RESUME MODEL, and it is a pure derivation rather than a
   recovery procedure. There is no dirty flag, no scan-requested atom, no
-  retry counter: the facts hold the work, and `next-work` reads them.
+  retry counter: the facts hold the work, and `next-agent-work` reads
+  them.
   Recovery is therefore not a code path — it is the same derivation
   running against a database that happens to carry a dead process's
   wreckage.
@@ -25,7 +26,7 @@
   - `:close` — an open run whose every form already has a terminal
     receipt. The fold is done. This is its own situation rather than a
     `:resume` carrying no ordinal, because fold-vs-close is a different
-    instruction to the loop and an instruction must be visible in the
+    instruction to the turn proc and an instruction must be visible in the
     value, never inferred from an absent key (seal revision,
     2026-07-27);
   - `nil` — idle.
@@ -33,14 +34,14 @@
   NO AUTO-RETRY, EVER (owner ruling, 2026-07-27 night). This is the
   clause that supersedes n3-plan §9.1's Option A recovery half: a run
   whose custody was released by recovery and which has NO plan digest
-  lost its paid model call, and the loop DOES NOT call again. The
+  lost its paid model call, and the turn DOES NOT call again. The
   interrupted run is settled and the agent adapts on its next trigger.
   A lost call is lost; the agent is told, not the call repeated.
 
   Consequently `:call` is reachable only for a run THIS process holds
   and opened in this pass. A run that is open, unclaimed and unplanned
   is not work — it is wreckage to settle, which is why
-  `interruption` exists and why `next-work` does not return it.
+  `interruption` exists and why `next-agent-work` does not return it.
 
   Crash walk (the kill positions of n3-plan §9.3, as this namespace
   answers them):
@@ -48,8 +49,9 @@
     unanswered, so the boot pass derives `:open`. A normal first turn;
   - kill after claim, before/during/after the model call: N2's
     `recover-tx` releases dead custody; the run is open, unclaimed,
-    unplanned. `next-work` does NOT return it — `interruption` does,
-    and the loop settles it with no reply. ONE paid call is lost and
+    unplanned. `next-agent-work` does NOT return it — `interruption`
+    does, and the turn proc settles it with no reply. ONE paid call is
+    lost and
     the agent is told;
   - kill after plan freeze, before form 0: `:resume` at ordinal 0;
   - kill mid-fold: `:resume` at the first ordinal lacking a terminal
@@ -90,17 +92,6 @@
     ;; nil anyway — right answer, wrong question, and instrumentation
     ;; named it the first time it ran.
     (when (and run (run/open? run)) run)))
-
-(defn- agents-with-work
-  "Every agent id that has an open run or an unanswered trigger."
-  [db]
-  (into (sorted-set)
-        (d/q '[:find [?agent-id ...]
-               :where
-               [?agent :seon.cluster.agent/id ?agent-id]
-               (or [?agent :seon.cluster.agent/run _]
-                   [_ :seon.cluster.message/to ?agent])]
-             db)))
 
 (defn- next-ordinal
   "The first form ordinal of `run` with no terminal receipt, or nil.
@@ -272,7 +263,7 @@
   preference: a held run outranks a trigger, because finishing what is
   started is what makes the busy fence mean anything.
   `:resume` carries the ordinal the fold restarts at — the first form
-  ordinal with no terminal receipt — so the loop never recomputes it;
+  ordinal with no terminal receipt — so a turn never recomputes it;
   when no such ordinal remains the situation is `:close`. The episode
   gate lives in the `:open` arm's trigger selection, so a deferred
   trigger simply derives no work — no consumer ever sees a decision to
@@ -320,40 +311,18 @@
   [db request]
   (some? (next-agent-work db request)))
 
-(defn next-work
-  "The ONE thing to do next on `db`, or nil when idle.
-  Pure, and since F1 exactly a `some` of `next-agent-work` over the
-  agents that have anything — one derivation, two scopes, so the
-  central pass and the per-agent procs can never disagree about what a
-  situation is. The global sorted `some` dies with the central pass
-  (F2)."
-  {:malli/schema [:=> [:cat :any :seon.cluster.work/request]
-                  [:maybe :seon.cluster.work/next]]}
-  [db {:keys [:seon.cluster.run/process :seon.cluster.work/now]}]
-  (some
-   (fn [agent-id]
-     (next-agent-work db {:seon.cluster.agent/id agent-id
-                          :seon.cluster.run/process process
-                          :seon.cluster.work/now now}))
-   (agents-with-work db)))
-
-(defn more-work?
-  "True when another pass would find work. The self-rewake predicate.
-  Exactly `(some? (next-work db request))` — stated as its own contract
-  because the loop's rewake must never drift from the derivation it
-  rewakes for."
-  {:malli/schema [:=> [:cat :any :seon.cluster.work/request] :boolean]}
-  [db request]
-  (some? (next-work db request)))
-
 (defn interruption
   "The open, unclaimed, unplanned run of `agent-id` on `db`, or nil.
   A run whose process died before the plan was frozen: its paid call is
-  lost and NOTHING re-calls it. The loop settles it with no reply so the
+  lost and NOTHING re-calls it. The turn settles it with no reply so the
   agent stops being busy, and the agent's next prompt carries the
-  warning. Returned separately from `next-work` because it is not work
-  — the difference between `continue this` and `bury this` must be
-  visible in the value, not in a flag."
+  warning. Returned separately from `next-agent-work` because it is not
+  work — the difference between `continue this` and `bury this` must be
+  visible in the value, not in a flag.
+
+  AGENT-SCOPED AND ALWAYS WAS: each turn proc settles its OWN orphan
+  before deriving, and the armer's arm-prime pass covers an agent with
+  no graph yet. The global plural died with the central pass (F2)."
   {:malli/schema [:=> [:cat :any :seon.cluster.agent/id]
                   [:maybe [:map [:seon.cluster.run/id :seon.cluster.run/id]]]]}
   [db agent-id]
@@ -362,32 +331,6 @@
                (nil? (:seon.cluster.run/process run))
                (nil? (:seon.cluster.run/plan-digest run)))
       {:seon.cluster.run/id (:seon.cluster.run/id run)})))
-
-(defn interruptions
-  "Every agent's open, unclaimed, unplanned run — the wreckage to settle.
-  The plural of `interruption`, and the loop's entry point: a pass
-  settles what a dead process left before it derives work, because an
-  unsettled orphan keeps its agent BUSY and no trigger for that agent
-  can ever be answered. One query rather than a scan, because the loop
-  runs it every pass."
-  {:malli/schema [:=> [:cat :any]
-                  [:vector [:map
-                            [:seon.cluster.agent/id :seon.cluster.agent/id]
-                            [:seon.cluster.run/id :seon.cluster.run/id]]]]}
-  [db]
-  (->> (d/q '[:find ?agent-id ?run-id
-              :where
-              [?agent :seon.cluster.agent/id ?agent-id]
-              [?agent :seon.cluster.agent/run ?run]
-              [?run :seon.cluster.run/id ?run-id]
-              (not [?run :seon.cluster.run/closed-at _])
-              (not [?run :seon.cluster.run/process _])
-              (not [?run :seon.cluster.run/plan-digest _])]
-            db)
-       (sort-by second)
-       (mapv (fn [[agent-id run-id]]
-               {:seon.cluster.agent/id agent-id
-                :seon.cluster.run/id run-id}))))
 
 (defn unanswered-triggers
   "The agent's trigger messages no run has answered, oldest first.

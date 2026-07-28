@@ -19,7 +19,6 @@
                           [:call [:map {:closed true} [:seon.cluster.work/situation [:= :call]] [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.agent/id :seon.cluster.agent/id]]]
                           [:open [:map {:closed true} [:seon.cluster.work/situation [:= :open]] [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.message/id :seon.cluster.message/id]]]
                           [:close [:map {:closed true} [:seon.cluster.work/situation [:= :close]] [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.agent/id :seon.cluster.agent/id]]]]
- :seon.cluster.work/request [:map {:closed true} [:seon.cluster.run/process :seon.cluster.run/process] [:seon.cluster.work/now :inst]]
  ; THE PER-AGENT DERIVATION'S REQUEST (F1): the same request narrowed
  ; to one agent. The episode dial is deliberately NOT here — it is a
  ; config fact the derivation reads from the database value itself, so
