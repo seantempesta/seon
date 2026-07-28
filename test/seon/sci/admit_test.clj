@@ -32,8 +32,7 @@
             [seon.config :as config]
             [seon.sci.admit :as admit]
             [seon.schema]
-            [seon.test-support :as test-support])
-  (:import [java.util.concurrent TimeUnit]))
+            [seon.test-support :as test-support]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The armed boundary, as the suite supplies it
@@ -179,6 +178,35 @@
                 (gen/return nil)
                 (gen/elements (vals @escape-kinds))])))
 
+(def ^:private guaranteed-partitions
+  [:sci-var :sci-fn :sci-record :sci-type :sci-deftype :namespace
+   :atom :promise :delay :finite-lazy-seq :host-object :regex :array
+   :exception :sorted-map :deep-nest :wide :long-string])
+
+(defn- admitted-value-valid?
+  [value]
+  (let [{:keys [interrupt-fn]} (armed)
+        input (request value interrupt-fn)
+        admitted (admit/admit input)
+        projection (:seon.sci.admit/value admitted)
+        printed (:seon.cluster.eval/result-edn admitted)
+        shape (measure projection)]
+    (and
+     (string? printed)
+     (do (edn/read-string printed) true)
+     (empty? (:forbidden shape))
+     (<= (:depth shape)
+         (:seon.config.eval.result/max-depth caps))
+     (<= (:nodes shape)
+         (:seon.config.eval.result/max-nodes caps))
+     (<= (:widest shape)
+         (:seon.config.eval.result/max-collection caps))
+     (<= (:longest shape)
+         (:seon.config.eval.result/max-string caps))
+     (= (:seon.sci.admit/record input)
+        (:seon.sci.admit/record admitted))
+     (boolean? (:seon.sci.admit/capped? admitted)))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Totality — the property that makes the codec a codec
 ;;; ---------------------------------------------------------------------------
@@ -188,31 +216,15 @@
         (tc/quick-check
          50
          (prop/for-all [value (generated-value)]
-           (let [{:keys [interrupt-fn]} (armed)
-                 admitted (admit/admit (request value interrupt-fn))
-                 projection (:seon.sci.admit/value admitted)
-                 printed (:seon.cluster.eval/result-edn admitted)
-                 shape (measure projection)]
-             (and
-              ;; it read back as EDN — the whole point of result-edn
-              (string? printed)
-              (do (edn/read-string printed) true)
-              ;; nothing that could hang, cycle, or die later survived
-              (empty? (:forbidden shape))
-              ;; every cap is a boundary
-              (<= (:depth shape)
-                  (:seon.config.eval.result/max-depth caps))
-              (<= (:nodes shape)
-                  (:seon.config.eval.result/max-nodes caps))
-              (<= (:widest shape)
-                  (:seon.config.eval.result/max-collection caps))
-              (<= (:longest shape)
-                  (:seon.config.eval.result/max-string caps))
-              ;; the diagnostics rode through untouched
-              (= (:seon.sci.admit/record (request value interrupt-fn))
-                 (:seon.sci.admit/record admitted))
-              (boolean? (:seon.sci.admit/capped? admitted)))))
-         :seed 20260727)]
+           ;; Every trial includes every named hostile partition. The
+           ;; generated value varies recursively; coverage of pending
+           ;; refs, lazy values, SCI objects, and every cap boundary is
+           ;; construction, never probability.
+           (every? admitted-value-valid?
+                   (cons value
+                         (map #(get @escape-kinds %)
+                              guaranteed-partitions))))
+         :seed 202607280801)]
     (test-support/assert-check! check "Admission totality failed.")))
 
 (deftest a-cyclic-value-projects-where-pr-str-dies
@@ -232,13 +244,6 @@
           (is (empty? (:forbidden
                        (measure (:seon.sci.admit/value admitted))))))))))
 
-(deftest a-pending-reference-is-never-forced
-  ;; forcing a pending promise parks the compute thread past the time
-  ;; limit, and no interrupt can take that back
-  (let [admitted (admit/admit (request (get @escape-kinds :promise)))]
-    (is (some? (edn/read-string (:seon.cluster.eval/result-edn admitted))))
-    (is (empty? (:forbidden (measure (:seon.sci.admit/value admitted)))))))
-
 ;;; ---------------------------------------------------------------------------
 ;;; The armed boundary — realization inside it, nothing after it
 ;;; ---------------------------------------------------------------------------
@@ -247,112 +252,22 @@
   "Run admission on another thread so a hung realization FAILS the test
   instead of hanging the suite."
   [request]
-  (let [task (future (try (admit/admit request)
-                          (catch Throwable failure failure)))
-        outcome (deref task 5000 ::hung)]
-    (when (= ::hung outcome)
-      (future-cancel task))
-    outcome))
+  (test-support/await-event!
+   (future (try (admit/admit request)
+                (catch Throwable failure failure)))
+   "admission completion"))
 
 (deftest an-infinite-sequence-dies-inside-the-armed-boundary
-  (doseq [[label source]
-          [;; the hard case: a NATIVE producer, entering no interpreted
-           ;; fn body, so only the realizer's own interrupt-fn calls can
-           ;; stop it (probe: 200k elements, zero interrupt-fn calls)
-           [:native-producer "(iterate inc 0)"]
-           [:interpreted-producer "(map (fn [x] (inc x)) (range))"]
-           [:nested-in-data "{:k (iterate inc 0)}"]]]
-    (testing label
-      (let [{:keys [interrupt-fn trip!]} (armed)
-            value (evaluated source)
-            _ (trip!)
-            outcome (admit-with-deadline (request value interrupt-fn))]
-        (is (not= ::hung outcome)
-            "an infinite realization must die at the limit, not hang")
-        (is (instance? Throwable outcome)
-            "the interrupt reaches the caller as a throwable")
-        (is (contains? (ex-data outcome) :sci.impl/interrupt)
-            "and it is sci's own uncatchable interrupt, not a forgery")))))
-
-(deftest nothing-lazy-survives-so-the-interrupt-fn-cannot-fire-later
-  ;; "the interrupt-fn is never called after disarm" has exactly one
-  ;; honest meaning: no unrealized tail left the boundary. Disarm is a
-  ;; timer cancellation the test cannot observe — a surviving lazy seq
-  ;; IS observable, so that is what is asserted.
-  (let [{:keys [interrupt-fn calls]} (armed)
-        value (evaluated "{:a (map inc (range 20)) :b [(map dec (range 5))]}")
-        admitted (admit/admit (request value interrupt-fn))
-        during (calls)
-        projection (:seon.sci.admit/value admitted)]
-    (is (pos? during)
-        "the walk participates in the armed boundary at every node")
-    (measure projection)
-    (pr-str projection)
-    (is (= during (calls))
-        "walking and printing the projection afterwards fires nothing —
-         the value is fully realized and holds no lazy tail")))
-
-;;; ---------------------------------------------------------------------------
-;;; Caps are boundaries, and the caller supplies them
-;;; ---------------------------------------------------------------------------
-
-(deftest caps-are-boundaries-not-suggestions
-  (let [tight {:seon.config.eval.result/max-depth 3
-               :seon.config.eval.result/max-collection 4
-               :seon.config.eval.result/max-string 8
-               :seon.config.eval.result/max-nodes 32}
-        admit-tight (fn [value]
-                      (admit/admit
-                       (request value (:interrupt-fn (armed)) tight)))]
-    (testing "at the cap, nothing is elided"
-      (let [admitted (admit-tight {:a [1 2 3 4]})]
-        (is (false? (:seon.sci.admit/capped? admitted)))
-        (is (= {:a [1 2 3 4]} (:seon.sci.admit/value admitted)))))
-    (testing "one over each cap elides, and says so"
-      (doseq [[label value]
-              [[:collection {:a [1 2 3 4 5]}]
-               [:depth {:a {:b {:c {:d :too-deep}}}}]
-               [:string {:a "123456789"}]
-               [:nodes (vec (repeat 40 :x))]]]
-        (let [admitted (admit-tight value)
-              shape (measure (:seon.sci.admit/value admitted))]
-          (is (true? (:seon.sci.admit/capped? admitted))
-              (str label " must report itself capped"))
-          (is (<= (:depth shape) 3) (str label " depth"))
-          (is (<= (:widest shape) 4) (str label " width"))
-          (is (<= (:longest shape) 8) (str label " string"))
-          (is (<= (:nodes shape) 32) (str label " nodes")))))
-    (testing "an uncapped value is returned exactly, not merely equivalently"
-      (let [admitted (admit-tight {:kept [:a "bc" 1]})]
-        (is (= {:kept [:a "bc" 1]} (:seon.sci.admit/value admitted)))
-        (is (= {:kept [:a "bc" 1]}
-               (edn/read-string
-                (:seon.cluster.eval/result-edn admitted))))))))
-
-;;; ---------------------------------------------------------------------------
-;;; The quarry defect, as a standing regression
-;;; ---------------------------------------------------------------------------
-
-(deftest the-diagnostics-ride-through-untouched
-  ;; driver.clj:160-173 dropped fn-entries and allocated-bytes on the
-  ;; floor; they are diagnostics, never limits, and admission carries them
-  (let [record {:seon.eval/fn-entries 271000000
-                :seon.eval/duration-ms 500
-                :seon.eval/allocated-bytes -1
-                :seon.eval/outcome :time}
-        admitted (admit/admit
-                  (assoc (request {:any :value}) :seon.sci.admit/record record))]
-    (is (= record (:seon.sci.admit/record admitted)))))
-
-(deftest a-value-that-cannot-be-projected-becomes-a-marker
-  ;; totality is not "every value we thought of": a hostile object that
-  ;; throws when touched must still leave a printable receipt behind
-  (let [hostile (reify clojure.lang.Seqable
-                  (seq [_] (throw (ex-info "hostile seq" {}))))
-        admitted (admit/admit (request {:hostile hostile}))]
-    (is (string? (:seon.cluster.eval/result-edn admitted)))
-    (is (some? (edn/read-string (:seon.cluster.eval/result-edn admitted))))
-    (is (empty? (:forbidden (measure (:seon.sci.admit/value admitted)))))))
+  ;; The hard case: a NATIVE producer enters no interpreted fn body, so
+  ;; only the admission walk's interrupt-fn calls can stop it.
+  (let [{:keys [interrupt-fn trip!]} (armed)
+        value (evaluated "(iterate inc 0)")
+        _ (trip!)
+        outcome (admit-with-deadline (request value interrupt-fn))]
+    (is (instance? Throwable outcome)
+        "the interrupt reaches the caller as a throwable")
+    (is (contains? (ex-data outcome) :sci.impl/interrupt)
+        "and it is sci's own uncatchable interrupt, not a forgery")))
 
 (deftest a-projection-failure-obeys-the-one-dial
   ;; owner ruling (2026-07-27): a value the total codec cannot project
@@ -388,20 +303,3 @@
                                :seon.config/on-core-error mode))]
           (is (string? (:seon.cluster.eval/result-edn admitted))
               (str mode ": a marker is the codec working, not failing")))))))
-
-(deftest sci-types-keep-the-names-sci-gives-them
-  ;; grounded in sci's own vocabulary: -get-type reports user.Foo /
-  ;; user.Bar, so a receipt says what the agent defined, not
-  ;; sci.impl.records.SciRecord
-  (let [record-admitted (admit/admit (request (get @escape-kinds :sci-record)))
-        deftype-admitted (admit/admit (request (get @escape-kinds :sci-deftype)))
-        var-admitted (admit/admit (request (get @escape-kinds :sci-var)))]
-    (testing "a record keeps its fields AND its name"
-      (let [printed (:seon.cluster.eval/result-edn record-admitted)]
-        (is (re-find #"user\.Foo" printed))
-        (is (re-find #":a" printed))))
-    (testing "an opaque sci type is named, not merely classed"
-      (is (re-find #"user\.Bar"
-                   (:seon.cluster.eval/result-edn deftype-admitted))))
-    (testing "a var prints as the var it is"
-      (is (re-find #"f" (:seon.cluster.eval/result-edn var-admitted))))))

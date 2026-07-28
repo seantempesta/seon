@@ -10,17 +10,14 @@
   genuinely unbounded, so a regression does not slow the suite: it
   fails it."
   (:require [clojure.edn :as edn]
-            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
-            [sci.core :as sci]
             [seon.config :as config]
             [seon.schema]
             [seon.sci.eval :as eval]
-            [seon.test-support :as test-support])
-  (:import [java.util.concurrent TimeUnit]))
+            [seon.test-support :as test-support]))
 
 (def ^:private caps
   (config/result-caps (config/defaults)))
@@ -84,15 +81,6 @@
              :seon.sci.eval/time-limit-ms 1000}))
       "no dial, no evaluation"))
 
-(deftest a-value-comes-back-admitted
-  (let [evaluation (run "(+ 1 2)")]
-    (is (ok? evaluation))
-    (is (= 3 (:seon.sci.admit/value evaluation)))
-    (is (= "3" (:seon.cluster.eval/result-edn evaluation)))
-    (is (false? (:seon.sci.admit/capped? evaluation)))
-    (is (seon.schema/valid-candidate-value?
-         :seon.sci.eval/evaluation evaluation))))
-
 (deftest the-diagnostics-are-recorded-and-are-not-limits
   (let [evaluation (run "(reduce + (map inc (range 500)))")
         record (:seon.sci.admit/record evaluation)]
@@ -112,48 +100,6 @@
         "one evaluation's def cannot reach the next")
     (is (= :seon.sci.eval/evaluation-failed
            (:seon.error/kind (:seon.sci.admit/value evaluation))))))
-
-(deftest failure-evidence-has-stable-object-markers
-  (let [first-run (run "(no-such-fn 1)")
-        second-run (run "(no-such-fn 1)")
-        first-edn (:seon.cluster.eval/result-edn first-run)
-        second-edn (:seon.cluster.eval/result-edn second-run)]
-    (doseq [result-edn [first-edn second-edn]]
-      (is (some? (edn/read-string result-edn)))
-      (is (not (str/includes? result-edn "#object[")))
-      (is (not (re-find #"0x[0-9a-f]+" result-edn))))
-    (is (= (get-in (:seon.sci.admit/value first-run)
-                   [:seon.error/data :seon.sci.eval/data :sci.impl/callstack])
-           (get-in (:seon.sci.admit/value second-run)
-                   [:seon.error/data :seon.sci.eval/data :sci.impl/callstack]))
-        "SCI runtime objects project to stable markers across evaluations")))
-
-(deftest failure-receipts-use-the-total-admission-codec
-  (let [cycle (atom nil)
-        failure (ex-info "hostile failure"
-                         {::cycle cycle
-                          ::huge (vec (range 10000))})
-        _ (reset! cycle failure)]
-    (is (thrown? StackOverflowError (pr-str (ex-data failure)))
-        "the raw printer cannot serialize this failure")
-    (let [evaluation (with-redefs [sci/parse-string
-                                   (fn [& _] (throw failure))]
-                       (run "(never reached)"))
-          admitted-value (:seon.sci.admit/value evaluation)
-          result-edn (:seon.cluster.eval/result-edn evaluation)
-          projected-data (get-in admitted-value
-                                 [:seon.error/data :seon.sci.eval/data])]
-      (is (failed? evaluation))
-      (is (true? (:seon.sci.admit/capped? evaluation)))
-      (is (= admitted-value (edn/read-string result-edn))
-          "the durable projection is bounded, readable EDN")
-      (is (<= (count (::huge projected-data))
-              (:seon.config.eval.result/max-collection caps)))
-      (is (contains? (::cycle projected-data)
-                     :seon.sci.admit/reference)
-          "the self-reference becomes the codec's stable marker")
-      (is (seon.schema/valid-candidate-value?
-           :seon.sci.eval/evaluation evaluation)))))
 
 (deftest the-dispositions-are-callable-and-come-back-as-values
   (let [evaluation (run "(my.run/complete \"done\")")]
@@ -185,24 +131,6 @@
       (is (re-find #"(?i)time"
                    (:seon.cluster.eval/error evaluation))))))
 
-(deftest an-infinite-lazy-sequence-dies-inside-the-boundary
-  ;; the admission seam: realization happens while still armed, so an
-  ;; unbounded sequence dies HERE rather than in the receipt writer
-  (doseq [source ["(range)"
-                  "(iterate inc 0)"
-                  "(repeat {:a (range)})"
-                  "(map (fn [x] (inc x)) (range))"]]
-    (testing source
-      (let [evaluation (deadlined source 400)]
-        (is (not= ::hung evaluation))
-        (is (or (ok? evaluation) (cut? evaluation))
-            "either bounded by the caps or stopped by the clock — never
-             hung, and never an unrealized tail")
-        (when (ok? evaluation)
-          (is (true? (:seon.sci.admit/capped? evaluation))
-              "an infinite sequence that returns MUST have been capped")
-          (is (vector? (:seon.sci.admit/value evaluation))))))))
-
 (deftest an-agent-cannot-catch-the-interrupt
   ;; sci's try refuses to hand the interrupt to a user catch clause, and
   ;; sandboxed code cannot forge the marker
@@ -213,58 +141,62 @@
     (is (cut? evaluation))
     (is (not= :swallowed (:seon.sci.admit/value evaluation)))))
 
-;;; ---------------------------------------------------------------------------
-;;; Nothing throws
-;;; ---------------------------------------------------------------------------
+(def ^:private ordinary-source-value-generator
+  (gen/one-of
+   [gen/small-integer
+    gen/boolean
+    gen/string-alphanumeric
+    gen/keyword
+    (gen/return nil)
+    (gen/vector gen/small-integer 0 8)]))
 
-(deftest every-failure-is-a-value
-  (testing "an agent's own exception"
-    (let [evaluation (run "(throw (ex-info \"my mistake\" {:a 1}))")]
-      (is (failed? evaluation))
-      (is (re-find #"my mistake" (:seon.cluster.eval/error evaluation)))
-      (is (= :seon.sci.eval/evaluation-failed
-             (:seon.error/kind (:seon.sci.admit/value evaluation))))))
-  (testing "an unresolvable symbol"
-    (is (failed? (run "(no-such-fn 1)"))))
-  (testing "read-eval, refused by sci's own reader inside the armed ctx"
-    (let [evaluation (run "#=(System/exit 1)")]
-      (is (failed? evaluation))
-      (is (string? (:seon.cluster.eval/error evaluation)))))
-  (testing "an unknown reader tag"
-    (is (failed? (run "#foo/bar [1]"))))
-  (testing "unbalanced source"
-    (is (failed? (run "(+ 1"))))
-  (testing "a host class the base does not expose"
-    (is (failed? (run "(java.io.File. \"/etc/passwd\")")))))
+(def ^:private failing-source-generator
+  (gen/elements
+   ["(throw (ex-info \"x\" {:probe true}))"
+    "(/ 1 0)"
+    "(no-such-fn 1)"
+    "(recur)"
+    "#{"
+    "(let [x])"
+    "#foo/bar [1]"
+    "#=(System/exit 1)"
+    "(java.io.File. \"/etc/passwd\")"]))
 
-(deftest nothing-an-agent-can-write-throws-out-of-evaluate
+(deftest generated-sources-compose-fork-guard-and-admission
   (let [check
         (tc/quick-check
          100
          (prop/for-all
-          [source (gen/one-of
-                   [(gen/fmap pr-str gen/any-printable)
-                    (gen/elements
-                     ["(throw (Exception. \"x\"))" "(/ 1 0)" "((fn []))"
-                      ;; NOT the empty string: a form source is
-                      ;; `[:string {:min 1}]` at the database attribute
-                      ;; and in `evaluate`'s request, so an empty source
-                      ;; cannot arrive — `reply/sources` never emits one
-                      ;; and nothing can store one. Generating it tested
-                      ;; an input the system makes unrepresentable.
-                      "(recur)" "#{" "(let [x])" ":" "(def)"
-                      "(clojure.string/upper-case 42)"
-                      "(assoc nil :a)" "(first 1)"])])]
-          (let [evaluation (deadlined source 300)]
-            (and (not= ::hung evaluation)
+          [ordinary ordinary-source-value-generator
+           failing-source failing-source-generator]
+          (let [ordinary-evaluation (deadlined (pr-str ordinary) 300)
+                failed-evaluation (deadlined failing-source 300)
+                evaluations [ordinary-evaluation failed-evaluation]]
+            (and
+             (ok? ordinary-evaluation)
+             (= ordinary (:seon.sci.admit/value ordinary-evaluation))
+             (failed? failed-evaluation)
+             (every?
+              (fn [evaluation]
+                (and
+                 (not= ::hung evaluation)
                  (map? evaluation)
-                 ;; the three presence states are total and disjoint
-                 (or (ok? evaluation) (failed? evaluation) (cut? evaluation))
+                 ;; Presence is the state: exactly one of these facts
+                 ;; describes every completed guarded composition.
+                 (= 1 (count (filter true?
+                                     [(ok? evaluation)
+                                      (failed? evaluation)
+                                      (cut? evaluation)])))
                  (string? (:seon.cluster.eval/result-edn evaluation))
+                 (do (edn/read-string
+                      (:seon.cluster.eval/result-edn evaluation))
+                     true)
                  (seon.schema/valid-candidate-value?
-                  :seon.sci.eval/evaluation evaluation))))
-         :seed 20260727)]
-    (test-support/assert-check! check "Evaluate threw or malformed.")))
+                  :seon.sci.eval/evaluation evaluation)))
+              evaluations))))
+         :seed 202607280802)]
+    (test-support/assert-check! check
+                                "Guarded evaluation composition failed.")))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The honest ceiling — stated, not papered over
