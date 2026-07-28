@@ -149,6 +149,40 @@
  ; because the ORDER is the meaning; the set it came from had none.
  :seon.render/surfaces [:vector :seon.render/surface]
 
+ ; ---------------------------------------------------------------------------
+ ; DISTANCE — how many hops of the neighborhood one render reaches
+ ; (owner ruling, 2026-07-28 post-midnight; seal revision to the request
+ ; shapes below).
+ ;
+ ; NO NEW NOUN AND NO NEW KIND: distance is a REQUEST PARAMETER threaded
+ ; to the renderers and to the one bounded expansion, exactly as caps and
+ ; the trusted inputs already are. "The neighborhood view" is therefore
+ ; the same page mechanism asked a different question, not a second one.
+ ;
+ ; THE CALL CONVENTION, and it is the whole design: distance is an
+ ; argument TO the renderer, never a property OF it. The renderer is
+ ; CALLED with the distance (present on the unit; IMPLIED 1 when absent,
+ ; and never required — a projection that ignores it is correct).
+ ; Reaching past its own unit is the renderer'S OWN COMPOSITIONAL ACT: it
+ ; includes a neighbor by DELEGATING to that neighbor's renderer —
+ ; mechanically, by emitting the ref hole `seon.render.block/entity-slot`
+ ; already produces — and the expansion DECREMENTS distance per hop, so
+ ; the neighbor is rendered at distance-1 and distance 0 is identity
+ ; only: no expansion at all.
+ ;
+ ; REDIRECTION AT THE SLOT: a ref hole may carry an explicit projection
+ ; symbol, and the neighbor is then rendered through that projection
+ ; instead of its own declaration — the "override at any point" half of
+ ; the ruling, routed through the ONE router like every other
+ ; declaration, and recorded where every projection choice is recorded:
+ ; in the emitting renderer's own output.
+ ;
+ ; ACCRETION, strictly. Absent means exactly today's behaviour: the
+ ; admission caps alone bound the walk. Distance never overrides those
+ ; caps — the depth and node dials remain the absolute bound, and
+ ; distance SELECTS WITHIN them.
+ :seon.render/distance [:int {:min 0}]
+
  ; What a caller asks for. The database value is a positional argument
  ; rather than a key, matching the landed `seon.problems/problems`
  ; signature — one convention for "pure over a database value", not two.
@@ -163,6 +197,7 @@
   [:seon.cluster.agent/id :seon.cluster.agent/id]
   [:seon.render/kind :seon.render/kind]
   [:seon.sci.admit/caps :seon.sci.admit/caps]
+  [:seon.render/distance {:optional true} :seon.render/distance]
   [:seon.ai/partial {:optional true} :seon.ai/partial]
   [:seon.cluster.run/live-processes {:optional true}
    :seon.cluster.run/live-processes]]
@@ -173,6 +208,7 @@
   [:seon.db/db :any]
   [:seon.cluster.agent/id :seon.cluster.agent/id]
   [:seon.sci.admit/caps :seon.sci.admit/caps]
+  [:seon.render/distance {:optional true} :seon.render/distance]
   [:seon.ai/partial {:optional true} :seon.ai/partial]
   [:seon.cluster.run/live-processes {:optional true}
    :seon.cluster.run/live-processes]]
@@ -181,10 +217,19 @@
  ; because block-slot expansion needs none; an entity ref without one is
  ; refused in place, naming what it needed, rather than silently
  ; rendering an empty hole.
+ ;
+ ; DISTANCE is optional here for the accretion's sake and NOT because
+ ; the two cases are equivalent: absent means the caps alone bound the
+ ; walk, which is exactly what this expansion did before the ruling;
+ ; present means each ref hop spends one, so a neighbor is rendered at
+ ; distance-1 and 0 follows nothing. `page` always supplies it (implied
+ ; 1 at the one builder), so the page path is distance-disciplined and a
+ ; bare `expand` call is unchanged.
  :seon.render/expansion
  [:map {:closed true}
   [:seon.render/surfaces :seon.render/surfaces]
   [:seon.sci.admit/caps :seon.sci.admit/caps]
+  [:seon.render/distance {:optional true} :seon.render/distance]
   [:seon.db/db {:optional true} :any]]
 
  ; What a page needs. Caps are REQUIRED, and they are the SAME four
@@ -196,6 +241,7 @@
  [:map {:closed true}
   [:seon.cluster.agent/id :seon.cluster.agent/id]
   [:seon.sci.admit/caps :seon.sci.admit/caps]
+  [:seon.render/distance {:optional true} :seon.render/distance]
   [:seon.cluster.run/live-processes {:optional true}
    :seon.cluster.run/live-processes]]
 

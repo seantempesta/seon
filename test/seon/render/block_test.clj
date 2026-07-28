@@ -211,8 +211,13 @@
                         (gen/vector (gen/elements targets) 0 2)
                         size)
                  max-depth (gen/choose 1 5)
-                 max-nodes (gen/choose 1 40)]
-         {:nodes
+                 max-nodes (gen/choose 1 40)
+                 ;; A SLOT IS NOT A HOP: this graph is all slots, so
+                 ;; whatever distance the page is asked for must not
+                 ;; change one element of it.
+                 distance (gen/choose 0 4)]
+         {:distance distance
+          :nodes
           (mapv (fn [name priority declared? outcome node-targets]
                   {:name name
                    :priority priority
@@ -290,7 +295,7 @@
   (support/assert-check!
    (tc/quick-check
     24
-    (prop/for-all [{:keys [nodes caps]} graph-generator]
+    (prop/for-all [{:keys [nodes caps distance]} graph-generator]
       (let [blocks (mapv
                     (fn [{:keys [name priority declared?]}]
                       (cond-> (block-map name priority)
@@ -330,9 +335,18 @@
                            evaluations @*evaluations*
                            again (do
                                    (reset! *evaluations* {})
-                                   (block/page db page-request))]
+                                   (block/page db page-request))
+                           ;; the same page, asked for a neighborhood it
+                           ;; has no connections to reach
+                           at-distance
+                           (do
+                             (reset! *evaluations* {})
+                             (block/page db (assoc page-request
+                                                   :seon.render/distance
+                                                   distance)))]
                        (and
                         (= expected-roots (mapv page-root-name page))
+                        (= page at-distance)
                         (= (zipmap expected-names (repeat 1)) evaluations)
                         (= page again)
                         (every? locally-explained-hole?
@@ -798,6 +812,141 @@
                                {:seon.render/surfaces [] :seon.sci.admit/caps caps})]
     (is (hiccup/hiccup? expanded))
     (is (str/includes? (hiccup/->string expanded) "needs a database value"))))
+
+;;; ---------------------------------------------------------------------------
+;;; Distance — the hops of neighborhood one render was asked for
+;;; (owner ruling, 2026-07-28 post-midnight; seal revision)
+;;; ---------------------------------------------------------------------------
+
+(defn- neighborhood
+  "The error, expanded at `hops`, as html. The seeded chain is the
+  owner's own example and is two hops deep: the error delegates to its
+  run, the run delegates to each of its forms."
+  [db hops]
+  (let [unit (block/entity-unit db [:seon.error/id "err-7f21"])]
+    (hiccup/->string
+     (block/expand
+      (:seon.render/output
+       (render/render {:seon.render/unit unit
+                       :seon.render/kind :seon.render/html}))
+      (cond-> (expansion db)
+        hops (assoc :seon.render/distance hops))))))
+
+(deftest distance-is-the-hops-a-render-may-spend
+  ;; Distance is an argument TO the renderer: `error-html` delegates
+  ;; unconditionally, and what the expansion FOLLOWS is what the request
+  ;; paid for. One hop reaches the run; two reach the run's forms.
+  (with-ref-database
+    (fn [connection]
+      (d/transact connection
+                  [{:seon.error/id "err-7f21" :seon.render/html `error-html}
+                   {:seon.cluster.run/id "run-7f21" :seon.render/html `run-html}])
+      (let [db (d/db connection)
+            at (fn [hops] (neighborhood db hops))]
+        (testing "distance 0 renders the unit itself and follows nothing"
+          (let [html (at 0)]
+            (is (str/includes? html "the model did not answer") "the error")
+            (is (not (str/includes? html "run run-7f21"))
+                "no hop was paid for, so no neighbor was rendered")
+            (is (str/includes? html "past the requested render distance")
+                "and the hole SAYS why it is empty")))
+        (testing "distance 1 reaches the neighbor and stops there"
+          (let [html (at 1)]
+            (is (str/includes? html "run run-7f21") "one hop, one neighbor")
+            (is (not (str/includes? html "(+ 1 2)"))
+                "the neighbor was rendered at distance 0, so it reached nothing")))
+        (testing "distance N reaches N hops"
+          (let [html (at 2)]
+            (is (str/includes? html "run run-7f21"))
+            (is (str/includes? html "(+ 1 2)") "the run's forms, two hops out")
+            (is (str/includes? html "my.run/complete"))))
+        (testing "more distance than the graph has is not an error"
+          (is (= (at 2) (at 7))
+              "the walk simply runs out of connections"))))))
+
+(deftest an-absent-distance-is-byte-identical-to-before-the-accretion
+  ;; THE ACCRETION PROOF: requires no more (a caller that says nothing
+  ;; gets exactly what it got) and provides no less. The caps alone bound
+  ;; a distance-free expansion, which is what this function always did.
+  (with-ref-database
+    (fn [connection]
+      (d/transact connection
+                  [{:seon.error/id "err-7f21" :seon.render/html `error-html}
+                   {:seon.cluster.run/id "run-7f21" :seon.render/html `run-html}])
+      (let [db (d/db connection)]
+        (is (= (neighborhood db nil) (neighborhood db 2))
+            "the seeded chain is two hops, so an unbounded walk equals it")
+        (is (str/includes? (neighborhood db nil) "my.run/complete")
+            "and it really did walk the whole chain")))))
+
+(deftest distance-never-overrides-the-admission-caps
+  ;; It SELECTS WITHIN them. A depth dial of 1 stops the walk however
+  ;; many hops the request was willing to pay for.
+  (with-ref-database
+    (fn [connection]
+      (d/transact connection
+                  [{:seon.error/id "err-7f21" :seon.render/html `error-html}
+                   {:seon.cluster.run/id "run-7f21" :seon.render/html `run-html}])
+      (let [db (d/db connection)
+            shallow (assoc caps :seon.config.eval.result/max-depth 1)
+            html (hiccup/->string
+                  (block/expand
+                   (:seon.render/output
+                    (render/render
+                     {:seon.render/unit (block/entity-unit
+                                         db [:seon.error/id "err-7f21"])
+                      :seon.render/kind :seon.render/html}))
+                   {:seon.render/surfaces []
+                    :seon.sci.admit/caps shallow
+                    :seon.render/distance 9
+                    :seon.db/db db}))]
+        (is (str/includes? html "run run-7f21") "one hop is within the depth")
+        (is (not (str/includes? html "(+ 1 2)"))
+            "the configured depth stopped the walk, not the distance")))))
+
+(defn shouted-html
+  "A different lens on the same neighbor — the redirect's target."
+  [unit]
+  [:div {:class "shouted"}
+   [:span (str "RUN " (:seon.cluster.run/id unit))]])
+
+(defn redirecting-html
+  "A renderer that steers ONE hop at its own slot."
+  [unit]
+  [:div {:class "error"}
+   [:span (:seon.error/message unit)]
+   (block/entity-slot (:db/id (:seon.error/run unit)) `shouted-html)])
+
+(deftest a-slot-may-steer-its-hop-to-another-projection
+  ;; Every hop is normally rendered by its owner's lens; the override
+  ;; point is the slot, and it routes through the ONE router like any
+  ;; other declaration.
+  (with-ref-database
+    (fn [connection]
+      (d/transact connection
+                  [{:seon.error/id "err-7f21" :seon.render/html `redirecting-html}
+                   {:seon.cluster.run/id "run-7f21" :seon.render/html `run-html}])
+      (let [db (d/db connection)
+            html (neighborhood db 2)]
+        (is (str/includes? html "RUN run-7f21")
+            "the hole's own projection won over the entity's declaration")
+        (is (not (str/includes? html "<span>run run-7f21"))
+            "the neighbor's own lens was not used")))))
+
+(deftest a-redirected-hop-needs-no-declaration-on-the-neighbor
+  ;; The override reaches an entity nobody wrote a renderer for, which is
+  ;; what makes "redirectable at any point" true rather than conditional:
+  ;; the run declares nothing and would have fallen to the generic panel.
+  (with-ref-database
+    (fn [connection]
+      (d/transact connection
+                  [{:seon.error/id "err-7f21"
+                    :seon.render/html `redirecting-html}])
+      (let [html (neighborhood (d/db connection) 1)]
+        (is (str/includes? html "RUN run-7f21")
+            "the steered projection ran")
+        (is (not (str/includes? html "seon-data-panel"))
+            "so the generic default was never reached")))))
 
 (deftest a-ref-cycle-is-refused-at-the-hole-that-closes-it
   ;; THE REASON THE VISITED SET IS LOAD-BEARING HERE and merely helpful

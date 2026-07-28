@@ -309,6 +309,44 @@ each named in §8):
    :seon.cluster.run/live-processes]]
 ```
 
+#### Seal revision 2026-07-28 post-midnight — `:seon.render/distance`
+
+Owner ruling (plan/README.md, "Ruling 2026-07-28 post-midnight" and "#2"):
+the ONE render request gains `:seon.render/distance` — how many hops of the
+neighborhood to render. No new kind and no new noun: a request parameter,
+threaded to the renderers and to the one bounded expansion exactly as caps
+and trusted inputs already are. Landed in `block.edn` as
+`:seon.render/distance [:int {:min 0}]`, optional on `surfaces-request`,
+`unit-request`, `page-request`, and `:seon.render/expansion`.
+
+**The call convention, verbatim as the spec:** distance is an argument TO the
+renderer, never a property OF it. The renderer is CALLED with the distance
+(present on the unit; implied 1 when absent, and never required — a
+projection that ignores it is correct). Reaching past its own unit is the
+renderer's own compositional act: it includes a neighbor by DELEGATING to
+that neighbor's renderer — mechanically, by emitting the ref hole
+`entity-slot` already produces — and the expansion DECREMENTS distance per
+hop, so the neighbor is rendered at distance-1 and distance 0 is identity
+only, no expansion. A slot is NOT a hop: filling a layout's holes is one
+unit assembling its own parts, so block-slot expansion spends nothing.
+
+**Redirection at the slot:** `entity-slot` gains a two-argument arity
+carrying an explicit projection symbol, and the neighbor is rendered through
+that projection instead of its own declaration — the "override at any point"
+half of the ruling, routed through the ONE router like every other
+declaration, and recorded where every projection choice is recorded: in the
+emitting renderer's own output.
+
+**Accretion, strictly.** Absent distance is exactly today's behavior — an
+expansion carrying none has no hop budget and is bounded by the admission
+caps alone. Distance never overrides those caps; the depth and node dials
+remain the absolute bound and distance selects within them. The implied 1 is
+written in exactly one place, `seon.render.block/distance`, which `unit`
+uses to put it on the unit and `page` uses to seed the expansion.
+
+Scope: DATA hops only (ref-following through the existing expansion). Code
+hops over the program graph remain N5's.
+
 `:seon.render/surface` (the union of two closed maps) is UNCHANGED in shape:
 `:seon.render/output` is `:any`, so a nil output already validates — omission
 needs no third arm (§8, supersession 1). `render.edn` is untouched.

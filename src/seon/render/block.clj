@@ -139,10 +139,45 @@
   This is what makes a rendered unit EMBED its refs: a renderer that
   wants the run behind `:seon.error/run` emits this, and expansion
   renders that run in place, and whatever the run's own render embeds is
-  expanded in turn until the budget says stop."
-  {:malli/schema [:=> [:cat :any] :seon.render/hiccup]}
-  [lookup]
-  [:div {:data-ref (pr-str lookup)} ""])
+  expanded in turn until the budget says stop.
+
+  EMITTING THIS IS HOW A RENDERER SPENDS DISTANCE (owner ruling,
+  2026-07-28 post-midnight). Distance is an argument the renderer
+  RECEIVES; reaching a neighbour is its own compositional act, performed
+  by DELEGATING — the neighbour is rendered by the neighbour's own
+  renderer, one hop cheaper, through the one router. A renderer that
+  emits no ref hole reaches nothing, whatever distance it was called
+  with, and that is correct rather than a bug.
+
+  The two-argument arity is THE OVERRIDE POINT: `projection` is a
+  qualified symbol the neighbour is rendered through INSTEAD of its own
+  declaration. Every hop is normally rendered by its owner's lens; a
+  caller that wants a different lens for one hop says so at the hole,
+  and the choice is recorded where every projection choice is recorded —
+  in the emitting renderer's own output."
+  {:malli/schema
+   [:function
+    [:=> [:cat :any] :seon.render/hiccup]
+    [:=> [:cat :any :seon.render/projection] :seon.render/hiccup]]}
+  ([lookup]
+   [:div {:data-ref (pr-str lookup)} ""])
+  ([lookup projection]
+   ;; the symbol is PRINTED, like the lookup beside it, because a hole
+   ;; is hiccup and hiccup attributes are strings on the way to a
+   ;; browser. `follow` reads it back with the same reader.
+   [:div {:data-ref (pr-str lookup) :data-projection (pr-str projection)} ""]))
+
+(defn distance
+  "The hops of neighborhood `request` asks for. THE ONE DEFAULT SITE.
+
+  Distance is IMPLIED 1 and never required, so every caller that says
+  nothing asks for the ordinary reach and no caller has to know the
+  number. This is the only place `1` is written: `unit` puts it on the
+  unit so a projection is CALLED with it, and `page` seeds the expansion
+  with it so the hops it spends are the hops that were asked for."
+  {:malli/schema [:=> [:cat :map] :seon.render/distance]}
+  [request]
+  (get request :seon.render/distance 1))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The derivation
@@ -306,11 +341,18 @@
   that consulted a latest value would render a page at a basis the rest
   of the page was not rendered at, and \"what the agent saw at turn N\"
   would stop being re-derivable. Every projection this repository ships
-  reads `:seon.db/db` or reads nothing."
+  reads `:seon.db/db` or reads nothing.
+
+  THE UNIT CARRIES ITS DISTANCE, which is what makes distance an
+  argument TO the renderer rather than a property of it: the projection
+  is CALLED with the hops it may spend and decides what to do with them,
+  and a projection that never looks is correct. Implied 1, applied here
+  and nowhere else."
   {:malli/schema [:=> [:cat :seon.render/unit-request :seon.render.block/block]
                   :seon.render/unit]}
   [request block]
   (merge block
+         {:seon.render/distance (distance request)}
          (select-keys request [:seon.db/db
                                :seon.cluster.agent/id
                                :seon.sci.admit/caps
@@ -421,6 +463,7 @@
                                   (select-keys request
                                                [:seon.cluster.agent/id
                                                 :seon.sci.admit/caps
+                                                :seon.render/distance
                                                 :seon.cluster.run/live-processes
                                                 :seon.ai/partial]))
                            block kind))))
@@ -517,13 +560,29 @@
   database value and a per-node router call); this function is that
   owner's discipline, proven on the closed case first.
 
+  DISTANCE IS SPENT HERE, one hop per followed CONNECTION (owner ruling,
+  2026-07-28 post-midnight). A ref hole is filled by rendering the
+  neighbour at distance-1, so a renderer called at distance 1 that
+  delegates reaches its neighbours and their delegations stop; distance
+  0 follows nothing at all and the hole says so. A block slot is NOT a
+  hop — filling a layout's holes is one unit finding its own parts, not
+  the neighbourhood widening — so slots spend nothing.
+
+  Distance is OPTIONAL and its absence is not a synonym for 1: an
+  expansion that carries none has no hop budget and is bounded by the
+  admission caps alone, which is exactly what this function did before
+  the ruling. `page` always supplies one. Distance never overrides the
+  caps either way — it selects within them, and the node budget below
+  remains the absolute bound.
+
   Deterministic: depth-first, left to right, so one input always elides
   the same holes. A budget that elided a different subtree per call
   would make equality suppression meaningless."
   {:malli/schema [:=> [:cat :seon.render/hiccup :seon.render/expansion]
                   :seon.render/hiccup]}
   [hiccup {:keys [:seon.render/surfaces :seon.db/db]
-           caps :seon.sci.admit/caps}]
+           caps :seon.sci.admit/caps
+           requested-distance :seon.render/distance}]
   (let [by-id (into {} (map (juxt :seon.render/surface-id identity)) surfaces)
         remaining (volatile! (long (:seon.config.eval.result/max-nodes caps)))
         max-depth (long (:seon.config.eval.result/max-depth caps))]
@@ -532,7 +591,7 @@
               ;; quarry's behaviour: name the block, and the next render
               ;; fills it.
               (conj (subvec hole 0 2) text))
-            (fill [hole visited depth]
+            (fill [hole visited depth hops]
               (let [id (:id (nth hole 1))
                     slot-name (:data-slot (nth hole 1))]
                 (cond
@@ -558,10 +617,15 @@
                       (nil? (get found :seon.render/output))
                       hole
 
+                      ;; A SLOT IS NOT A HOP: a layout finding its own
+                      ;; parts is one unit assembling itself, not the
+                      ;; neighbourhood widening, so `hops` rides through
+                      ;; unspent.
                       :else
                       (walk (:seon.render/output found)
                             (conj visited id)
-                            (inc depth)))
+                            (inc depth)
+                            hops))
                     (note hole (str "no block named " slot-name
                                     " — install one and this fills itself"))))))
             (slot? [node]
@@ -572,17 +636,27 @@
               (and (vector? node)
                    (map? (nth node 1 nil))
                    (contains? (nth node 1) :data-ref)))
-            (follow [hole visited depth]
+            (follow [hole visited depth hops]
               ;; FOLLOWING A CONNECTION IS FILLING A SLOT. Same budget,
               ;; same per-path visited set, same in-place refusals — the
               ;; only difference is where the node comes from, and the
               ;; entity graph can genuinely cycle where a block set
               ;; merely fans out.
-              (let [encoded (:data-ref (nth hole 1))]
+              ;;
+              ;; IT IS ALSO THE ONE PLACE DISTANCE IS SPENT: this hole is
+              ;; a renderer's delegation to a NEIGHBOUR, so the neighbour
+              ;; is called at distance-1 and whatever it delegates in
+              ;; turn is one cheaper again.
+              (let [encoded (:data-ref (nth hole 1))
+                    redirect (:data-projection (nth hole 1))]
                 (cond
                   (contains? visited encoded)
                   (note hole (str "cycle: " encoded
                                   " is already being expanded on this path"))
+
+                  (and hops (not (pos? hops)))
+                  (note hole (str "not expanded: " encoded
+                                  " is past the requested render distance"))
 
                   (>= depth max-depth)
                   (note hole (str "not expanded: " encoded
@@ -599,7 +673,20 @@
                                {:seon.error/kind ::unreadable-ref
                                 :seon.error/message
                                 (str "This ref is not readable: " encoded)}
-                               (entity-unit db lookup))]
+                               (entity-unit db lookup))
+                        ;; the hole's OWN projection, when it carries
+                        ;; one: every hop is normally rendered by its
+                        ;; owner's lens, and this is the override point
+                        ;; — one more declaration through the one
+                        ;; router, never a second dispatch
+                        steered (when redirect
+                                  (let [read (try (edn/read-string redirect)
+                                                  (catch Throwable _ nil))]
+                                    (when (qualified-symbol? read) read)))
+                        ;; the neighbour is CALLED with what it may
+                        ;; spend. Absent stays absent, so an expansion
+                        ;; with no budget hands the neighbour no key.
+                        remaining-hops (some-> hops dec)]
                     (if (:seon.error/kind unit)
                       (note hole (:seon.error/message unit))
                       ;; the entity's OWN declaration if it has one, and
@@ -607,14 +694,21 @@
                       ;; ref to something nobody wrote a renderer for is
                       ;; still legible, which is what makes /data work
                       ;; with zero authoring
-                      (let [declared (render/declaration?
-                                      (get unit :seon.render/html))
+                      (let [declared (or (some? steered)
+                                         (render/declaration?
+                                          (get unit :seon.render/html)))
+                            neighbour (cond-> unit
+                                        remaining-hops
+                                        (assoc :seon.render/distance
+                                               remaining-hops)
+                                        steered
+                                        (assoc :seon.render/html steered))
                             rendered
                             (render/render
                              {:seon.render/unit
                               (if declared
-                                unit
-                                (assoc unit :seon.render/html
+                                neighbour
+                                (assoc neighbour :seon.render/html
                                        `data-panel
                                        :seon.sci.admit/caps caps
                                        :seon.render/value (dissoc unit :seon.db/db)))
@@ -623,8 +717,9 @@
                           (note hole (:seon.error/message rendered))
                           (walk (:seon.render/output rendered)
                                 (conj visited encoded)
-                                (inc depth)))))))))
-            (walk [node visited depth]
+                                (inc depth)
+                                remaining-hops))))))))
+            (walk [node visited depth hops]
               ;; every node counts, and the budget is checked BEFORE the
               ;; work rather than after: a check that fires once the
               ;; subtree is already built has not bounded anything
@@ -635,8 +730,8 @@
                 [:span {:class "seon-expansion-elided"}
                  "elided — this page is larger than the configured caps"]
                 (cond
-                  (slot? node) (fill node visited depth)
-                  (ref? node) (follow node visited depth)
+                  (slot? node) (fill node visited depth hops)
+                  (ref? node) (follow node visited depth hops)
                   ;; an element keeps its HEAD and its attributes: only
                   ;; children are walked. Walking the whole vector let an
                   ;; exhausted budget replace a `:div` TAG with an
@@ -647,7 +742,7 @@
                                          (not (hiccup/raw? (nth node 1))))
                         prefix (subvec node 0 (if attributed? 2 1))]
                     (into prefix
-                          (map (fn [child] (walk child visited depth)))
+                          (map (fn [child] (walk child visited depth hops)))
                           (subvec node (count prefix))))
                   ;; a seq child stays a SEQ — turning it into a vector
                   ;; would make it look like an element with a non-tag
@@ -655,9 +750,10 @@
                   ;; because a lazy page is a page that renders somewhere
                   ;; else, later, on a thread nobody chose.
                   (sequential? node)
-                  (doall (map (fn [child] (walk child visited depth)) node))
+                  (doall (map (fn [child] (walk child visited depth hops))
+                              node))
                   :else node)))]
-      (walk hiccup #{} 0))))
+      (walk hiccup #{} 0 (some-> requested-distance long)))))
 
 (defn page
   "The agent's html page: the top-level surfaces, expanded, in order.
@@ -690,9 +786,14 @@
   {:malli/schema [:=> [:cat :any :seon.render/page-request] :seon.render/page]}
   [db {:keys [:seon.cluster.agent/id] caps :seon.sci.admit/caps :as request}]
   (let [agent-id id
+        ;; ONE distance for the whole page: the top-level renderers are
+        ;; CALLED with it and the expansion spends it, so what a block
+        ;; was told it could reach is exactly what expansion will follow.
+        hops (distance request)
         surfaces (surfaces db (merge {:seon.cluster.agent/id agent-id
                                       :seon.render/kind :seon.render/html
-                                      :seon.sci.admit/caps caps}
+                                      :seon.sci.admit/caps caps
+                                      :seon.render/distance hops}
                                      (select-keys request
                                                   [:seon.cluster.run/live-processes])))
         ;; every id some OTHER surface slots. Derived by looking at what
@@ -734,6 +835,7 @@
               (expand (:seon.render/output surface)
                       {:seon.render/surfaces surfaces
                        :seon.sci.admit/caps caps
+                       :seon.render/distance hops
                        :seon.db/db db})))
           roots)))
 
@@ -834,7 +936,11 @@
                                (filter #(= "seon.render" (namespace %)))
                                (filter #(nil? (get unit %))))
                               (keys unit))]
-                    (apply dissoc unit :seon.db/db
+                    ;; `:seon.render/distance` is the request parameter
+                    ;; the projection was CALLED with, not data the unit
+                    ;; owns — printing it back would make the accretion
+                    ;; visible in every generic panel.
+                    (apply dissoc unit :seon.db/db :seon.render/distance
                            (concat (render/kinds unit)
                                    omitted-render-keys))))
           ;; ONE bounding owner. `admit` already walks once, elides past
