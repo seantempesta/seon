@@ -61,6 +61,7 @@
             [clojure.core.async.flow :as flow]
             [datahike.api :as d]
             [seon.ai :as ai]
+            [seon.context :as context]
             [seon.cluster.message :as message]
             [seon.cluster.prompt :as prompt]
             [seon.cluster.reply :as reply]
@@ -130,7 +131,11 @@
          ;; belongs in the declared write set — and the class-killer
          ;; that asserts this set is installable is exactly what catches
          ;; a new entity family the boot path never learned about
-         :seon.ai/attempt]))
+         :seon.ai/attempt
+         ;; the pre-provider context capture and its contribution rows
+         ;; are turn-owned commits too (ruling 4, 2026-07-28)
+         :seon.context.capture/capture
+         :seon.context.contribution/contribution]))
 
 (defn disposition
   "The disposition an admitted eval value carries, or nil.
@@ -654,19 +659,34 @@
                               :error
                               :released)
                             0)))))
-            ;; THE TRIGGER THE RUN OPENED ON, read from the run's own
-            ;; creating transaction (`message/trigger`) — never re-asked
-            ;; from `unanswered-triggers`. The run's opening transaction
-            ;; ANSWERED its trigger, so the re-ask returned a DIFFERENT
-            ;; message whenever one had arrived between open and this
-            ;; call, and nil otherwise (which only prompted the right
-            ;; content because nil in a query pattern matches anything).
-            ;; One derivation, one owner: the recorded cause is the
-            ;; prompt's cause.
-            text (prompt/prompt @connection
-                                {:seon.cluster.agent/id agent-id
-                                 :seon.cluster.message/id
-                                 (message/trigger @connection run-id)})
+            ;; THE PROMPT REQUEST NAMES THE HELD RUN — `prompt` derives
+            ;; the trigger from the run's own creating transaction
+            ;; (`message/trigger`), never a re-asked queue: the recorded
+            ;; cause is the prompt's cause. One derivation, one owner.
+            rendered (prompt/prompt @connection
+                                    {:seon.cluster.run/id run-id
+                                     :seon.cluster.agent/id agent-id
+                                     :seon.sci.admit/caps
+                                     (:seon.sci.admit/caps cluster)})
+            ;; CAPTURE BEFORE THE PROVIDER (ruling 4, 2026-07-28): the
+            ;; exact prompt text, the rendered basis and the ordered
+            ;; contribution records commit in ONE turn-owned transaction
+            ;; BEFORE the unobservable remote call. Writer ordering then
+            ;; guarantees: no capture → the prompt was never derived;
+            ;; capture with no attempt row → the call may never have
+            ;; fired. Failover/backoff attempts inside this same pass
+            ;; REUSE this one capture — the same prompt bytes go out,
+            ;; and the backup's system segment is re-derivable from the
+            ;; committed primary error fact, never re-captured.
+            captured (store/transact!
+                      connection
+                      (context/capture-tx
+                       {:seon.cluster.run/id run-id
+                        :seon.cluster.prompt/rendered-context rendered}))
+            ;; THE EXACT-TEXT HANDOFF: the loop extracts the rendered
+            ;; text and alone places that string in `:seon.ai/prompt` —
+            ;; the bytes the capture recorded are the bytes sent.
+            text (:seon.cluster.prompt/text rendered)
             backup (:seon.ai/backup cluster)
             ;; DERIVED ONCE, and EMPTY whenever a backup exists. That is
             ;; the whole "backoff only on the no-backup path" rule, held
@@ -674,84 +694,90 @@
             schedule (if backup
                        []
                        (ai/delays (:seon.ai.retry/strategy cluster) rand))]
-        (loop [target (:seon.ai/primary cluster)
-               ordinal (attempts @connection run-id)
-               ;; ABSENT on the primary and on every backoff retry;
-               ;; present only on the backup, where it is both the role
-               ;; and the proof of which failure supplied its context
-               failover-from nil
-               delay-ms nil
-               waits schedule
-               system nil]
-          (let [completion (ai/complete
-                            (cond-> (assoc target :seon.ai/prompt text)
-                              system (assoc :seon.ai/system system)))
-                failure (when (:seon.error/kind completion) completion)
-                ;; a backup is only ever a target ONCE: the attempt that
-                ;; already failed over cannot fail over again, and that
-                ;; is what bounds a failover at exactly two calls
-                disposition (when failure
-                              (ai/disposition
-                               {:seon.error/value failure
-                                :seon.ai/backup? (and (some? backup)
-                                                      (nil? failover-from))}))
-                fact (record-attempt! cluster
-                                      (cond-> {:seon.ai/target target
-                                               :seon.cluster.run/id run-id
-                                               :seon.cluster.agent/id agent-id
-                                               :seon.ai.attempt/ordinal ordinal}
-                                        failure (assoc :seon.error/value failure)
-                                        failover-from
-                                        (assoc :seon.ai.attempt/failover-from
-                                               failover-from)
-                                        delay-ms
-                                        (assoc :seon.ai.attempt/delay-ms
-                                               delay-ms))
-                                      now)]
-            (cond
-              (nil? failure) (freeze! completion)
+        (if (refused! cluster captured now
+                      {:seon.cluster.agent/id agent-id
+                       :seon.cluster.run/id run-id})
+          ;; a refused capture ends the turn exactly as a refused plan
+          ;; freeze does — NO provider call without its durable evidence
+          (report :error 0)
+          (loop [target (:seon.ai/primary cluster)
+                 ordinal (attempts @connection run-id)
+                 ;; ABSENT on the primary and on every backoff retry;
+                 ;; present only on the backup, where it is both the role
+                 ;; and the proof of which failure supplied its context
+                 failover-from nil
+                 delay-ms nil
+                 waits schedule
+                 system nil]
+            (let [completion (ai/complete
+                              (cond-> (assoc target :seon.ai/prompt text)
+                                system (assoc :seon.ai/system system)))
+                  failure (when (:seon.error/kind completion) completion)
+                  ;; a backup is only ever a target ONCE: the attempt that
+                  ;; already failed over cannot fail over again, and that
+                  ;; is what bounds a failover at exactly two calls
+                  disposition (when failure
+                                (ai/disposition
+                                 {:seon.error/value failure
+                                  :seon.ai/backup? (and (some? backup)
+                                                        (nil? failover-from))}))
+                  fact (record-attempt! cluster
+                                        (cond-> {:seon.ai/target target
+                                                 :seon.cluster.run/id run-id
+                                                 :seon.cluster.agent/id agent-id
+                                                 :seon.ai.attempt/ordinal ordinal}
+                                          failure (assoc :seon.error/value failure)
+                                          failover-from
+                                          (assoc :seon.ai.attempt/failover-from
+                                                 failover-from)
+                                          delay-ms
+                                          (assoc :seon.ai.attempt/delay-ms
+                                                 delay-ms))
+                                        now)]
+              (cond
+                (nil? failure) (freeze! completion)
 
-              ;; THE RECORD REFUSED. Nothing else here is safe: a second
-              ;; paid call whose reason could not be committed is a call
-              ;; nobody could explain afterwards, and the backup's own
-              ;; context would have no fact to project.
-              (nil? fact) (fail! failure)
+                ;; THE RECORD REFUSED. Nothing else here is safe: a second
+                ;; paid call whose reason could not be committed is a call
+                ;; nobody could explain afterwards, and the backup's own
+                ;; context would have no fact to project.
+                (nil? fact) (fail! failure)
 
-              (= :failover-now disposition)
-              (recur backup
-                     (inc ordinal)
-                     (attempt-id run-id ordinal)
-                     nil
-                     waits
-                     ;; THE PROJECTION, over the fact that is now
-                     ;; durable — never a notice written at this call
-                     ;; site. The backup reads exactly what the agent,
-                     ;; the escalation owner and the log read.
-                     (:seon.render/output
-                      (render/render
-                       {:seon.render/unit
-                        (error/notice {:seon.error/fact fact
-                                       :seon.error/reason :failover})
-                        :seon.render/kind :seon.render/ai})))
-
-              (and (= :backoff disposition) (seq waits))
-              (do
-                ;; `:workload :io` is load-bearing here as well as at
-                ;; the model call: this proc may block, and the wait is
-                ;; bounded by a finite schedule rather than a loop
-                ;; condition
-                (Thread/sleep (long (first waits)))
-                (recur target
+                (= :failover-now disposition)
+                (recur backup
                        (inc ordinal)
+                       (attempt-id run-id ordinal)
                        nil
-                       (first waits)
-                       (rest waits)
-                       system))
+                       waits
+                       ;; THE PROJECTION, over the fact that is now
+                       ;; durable — never a notice written at this call
+                       ;; site. The backup reads exactly what the agent,
+                       ;; the escalation owner and the log read.
+                       (:seon.render/output
+                        (render/render
+                         {:seon.render/unit
+                          (error/notice {:seon.error/fact fact
+                                         :seon.error/reason :failover})
+                          :seon.render/kind :seon.render/ai})))
 
-              ;; `:fail`, and an exhausted schedule reaches the same
-              ;; place: the run closes with the error, and step 2's
-              ;; delivery machinery does the rest
-              :else (fail! failure)))))
+                (and (= :backoff disposition) (seq waits))
+                (do
+                  ;; `:workload :io` is load-bearing here as well as at
+                  ;; the model call: this proc may block, and the wait is
+                  ;; bounded by a finite schedule rather than a loop
+                  ;; condition
+                  (Thread/sleep (long (first waits)))
+                  (recur target
+                         (inc ordinal)
+                         nil
+                         (first waits)
+                         (rest waits)
+                         system))
+
+                ;; `:fail`, and an exhausted schedule reaches the same
+                ;; place: the run closes with the error, and step 2's
+                ;; delivery machinery does the rest
+                :else (fail! failure))))))
 
       ;; THE FOLD, in one turn, over ONE ctx. sci's fork copies the env,
       ;; so a ctx per FORM would lose every def between forms — the

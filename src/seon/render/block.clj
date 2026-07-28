@@ -55,10 +55,12 @@
   holds anything; a kill during a render loses hiccup nobody had sent,
   and the next render derives the same value from the same facts."
   (:require [clojure.edn :as edn]
+            [clojure.set :as set]
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.render :as render]
             [seon.render.hiccup :as hiccup]
+            [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.sci.admit :as admit]))
 
@@ -81,10 +83,10 @@
 
   INJECTIVE, and that is a requirement rather than an observation: two
   blocks sharing an id would silently morph over each other. A qualified
-  name keeps its namespace (`:my.plan/tree` → `\"surface-my.plan--tree\"`)
-  so `:a/x` and `:b/x` cannot collide, and every character outside
-  `[A-Za-z0-9._-]` is escaped rather than dropped — dropping is what
-  makes two different names one id."
+  name keeps its namespace (`:my.plan/tree` → `\"surface-my.plan_2f_tree\"`,
+  the `/` escaped as hex) so `:a/x` and `:b/x` cannot collide, and every
+  character outside `[A-Za-z0-9._-]` is escaped rather than dropped —
+  dropping is what makes two different names one id."
   {:malli/schema [:=> [:cat :seon.render.block/name] :seon.render/surface-id]}
   [name]
   ;; `[A-Za-z0-9.-]` pass through, so the ordinary case is unchanged and
@@ -146,13 +148,33 @@
 ;;; The derivation
 ;;; ---------------------------------------------------------------------------
 
-(defn blocks
-  "The agent's complete block set at `db`, ordered.
+(defn- band-ordinal
+  "The position of a block's band in the enum's own order.
+  The band order IS the registered enum's member order — computed from
+  the schema, never a second list here — and an absent band sorts as
+  `:dynamic`, the free tail, so most blocks declare nothing."
+  [block]
+  (let [bands (schema/enum-members :seon.render.block/band)]
+    (.indexOf ^java.util.List bands
+              (get block :seon.render.block/band :dynamic))))
 
-  ORDER IS DERIVED: `:seon.render.block/priority` ascending, with the block
-  name as a stable tiebreaker, so two derivations of one database value
-  are the same value. The stored collection is a SET and has no order to
-  lose.
+(defn- ordered
+  "One membership ordering: (band ordinal, priority, name).
+  Bands never cross; within a band, priority is a prior and the name
+  breaks ties, so two derivations of one database value are the same
+  value."
+  [blocks]
+  (vec (sort-by (juxt band-ordinal
+                      :seon.render.block/priority
+                      :seon.render.block/name)
+                blocks)))
+
+(defn blocks
+  "The agent's INSTALLED block set at `db`, ordered.
+
+  ORDER IS DERIVED: (band ordinal, priority, name) ascending, so two
+  derivations of one database value are the same value. The stored
+  collection is a SET and has no order to lose.
 
   ONE COLLECTION, no merge. Each agent owns its complete set, seeded at
   creation, so this is one pull and not a reconciliation against a
@@ -176,30 +198,123 @@
        sort
        (map (fn [entity]
               ;; the entity id is Datahike's, not ours; a block carrying
-              ;; it would not validate as one
-              (dissoc (d/pull db '[*] entity) :db/id)))
-       (sort-by (juxt :seon.render.block/priority :seon.render.block/name))
-       vec))
+              ;; it would not validate as one. The pull returns
+              ;; cardinality-many values as vectors; the declared-inputs
+              ;; attribute is a SET by schema, so it is restored at this
+              ;; one boundary rather than at every reader.
+              (let [pulled (dissoc (d/pull db '[*] entity) :db/id)]
+                (cond-> pulled
+                  (:seon.context/inputs pulled)
+                  (update :seon.context/inputs set)))))
+       ordered))
+
+(defn derived
+  "The agent's DERIVED current-namespace renderer blocks at `db`.
+
+  THE NAMED N5 EDGE (context-blocks contract §10): post-N5 this is
+  render-capable discovery over committed `:seon.fn`/`:seon.ns` facts —
+  one ordinary block shape per render-capable function row, the derived
+  name being the qualified keyword of the function symbol. Pre-N5 the
+  program graph commits no such facts, so the derived side is EMPTY BY
+  CONSTRUCTION — `[]`, not a stub that pretends. Derived candidates are
+  VALUES, never stored descriptors: a membership census transacts
+  nothing."
+  {:malli/schema [:=> [:cat :any :seon.cluster.agent/id]
+                  [:vector :seon.render.block/block]]}
+  [_db _agent-id]
+  [])
+
+(defn- refuse!
+  [rule data]
+  (throw (ex-info (str "blocks refused: " (name rule))
+                  (assoc data
+                         :seon.error/kind ::refused
+                         ::rule rule))))
+
+(defn membership
+  "The agent's ordered candidate blocks at `db`.
+
+  Installed component children plus, post-N5, derived
+  current-namespace renderers. THE ONLY JOIN. A derived name colliding with an installed name REFUSES loudly
+  naming both sources (ruling 3, 2026-07-28) — never precedence, never
+  a merge. Order is (band ordinal, priority, name); absent band sorts
+  `:dynamic`. Pre-N5 the derived side is empty by construction and this
+  equals `blocks`."
+  {:malli/schema [:=> [:cat :any :seon.cluster.agent/id]
+                  [:vector :seon.render.block/block]]}
+  [db agent-id]
+  (let [installed (blocks db agent-id)
+        found (derived db agent-id)
+        installed-names (into {} (map (juxt :seon.render.block/name identity))
+                              installed)]
+    (doseq [candidate found]
+      (when-let [holder (get installed-names
+                             (:seon.render.block/name candidate))]
+        (refuse! ::name-collision
+                 {:seon.render.block/name (:seon.render.block/name candidate)
+                  :seon.render.block/installed
+                  (into {} (filter (fn [[_ value]]
+                                     (render/declaration? value)))
+                        (select-keys holder (render/kinds holder)))
+                  :seon.render.block/derived
+                  (select-keys candidate (render/kinds candidate))})))
+    (ordered (into installed found))))
+
+(defn required-inputs
+  "The union of `:seon.context/inputs` over a membership.
+
+  What the request must carry before any projection runs."
+  {:malli/schema [:=> [:cat [:vector :seon.render.block/block]]
+                  [:set :qualified-keyword]]}
+  [membership]
+  (into #{} (mapcat :seon.context/inputs) membership))
+
+(defn assert-inputs!
+  "Refuse construction when a declared trusted input is absent.
+
+  The refusal fires BEFORE any projection runs, naming the block(s)
+  and the absent key(s). Never `#{}`, never \"assume alive\": the
+  per-consumer fence cards remain last-resort fences only. Returns nil
+  when the request satisfies every declaration."
+  {:malli/schema [:=> [:cat [:vector :seon.render.block/block] :map] :nil]}
+  [membership request]
+  (let [missing (set/difference (required-inputs membership)
+                                (set (keys request)))]
+    (when (seq missing)
+      (refuse! ::missing-input
+               {:seon.context/inputs missing
+                :seon.render.block/names
+                (into []
+                      (keep (fn [block]
+                              (when (seq (set/intersection
+                                          missing
+                                          (set (:seon.context/inputs block))))
+                                (:seon.render.block/name block))))
+                      membership)}))
+    nil))
 
 (defn unit
   "The unit `seon.render/render` receives for one block.
 
-  The block's own map, plus the exact immutable database value under
-  `:seon.db/db` and the agent under `:seon.cluster.agent/id`. That is
-  the whole composition — a block IS a unit, and the projection reads
-  what it needs from the unit it is handed.
+  The block's own map plus the request's database value, agent id,
+  caps, and — when supplied — the live-process snapshot. ONE builder
+  for prompt, page, debug and capture, so every projection, AI
+  admission, generic panel and bounded expansion sees the SAME caps
+  and the SAME snapshot.
 
   THE DATABASE VALUE IS PART OF THE UNIT, never ambient. A projection
   that consulted a latest value would render a page at a basis the rest
   of the page was not rendered at, and \"what the agent saw at turn N\"
   would stop being re-derivable. Every projection this repository ships
   reads `:seon.db/db` or reads nothing."
-  {:malli/schema [:=> [:cat :any :seon.cluster.agent/id :seon.render.block/block]
+  {:malli/schema [:=> [:cat :seon.render/unit-request :seon.render.block/block]
                   :seon.render/unit]}
-  [db agent-id block]
-  (assoc block
-         :seon.db/db db
-         :seon.cluster.agent/id agent-id))
+  [request block]
+  (merge block
+         (select-keys request [:seon.db/db
+                               :seon.cluster.agent/id
+                               :seon.sci.admit/caps
+                               :seon.cluster.run/live-processes])))
 
 (defn surface
   "Render one block into one kind. Never throws.
@@ -228,15 +343,15 @@
   serializer elided a bare map child and the page looked fine
   (`src-old/seon/ui/html.cljc`, `render-content`'s map branch and its
   own flag). Here the block gets an error card with its name on it."
-  {:malli/schema [:=> [:cat :any :seon.cluster.agent/id :seon.render.block/block
+  {:malli/schema [:=> [:cat :seon.render/unit-request :seon.render.block/block
                        :seon.render/kind]
                   :seon.render/surface]}
-  [db agent-id block kind]
+  [request block kind]
   (let [name (:seon.render.block/name block)
         base {:seon.render.block/name name
               :seon.render/surface-id (surface-id name)
               :seon.render/kind kind}
-        rendered (render/render {:seon.render/unit (unit db agent-id block)
+        rendered (render/render {:seon.render/unit (unit request block)
                                  :seon.render/kind kind})]
     (cond
       ;; the landed router already named what is broken; passing its
@@ -284,15 +399,27 @@
   block rather than one per projection."
   {:malli/schema [:=> [:cat :any :seon.render/surfaces-request]
                   :seon.render/surfaces]}
-  [db {:keys [:seon.cluster.agent/id :seon.render/kind]}]
-  (into []
-        (comp
-         ;; A DECLARATION DECIDES PLACEMENT — omission, not an error. A
-         ;; nil value and an absent key both say nothing about the kind.
-         (filter (fn [block]
-                   (render/declaration? (get block kind))))
-         (map (fn [block] (surface db id block kind))))
-        (blocks db id)))
+  [db {:keys [:seon.cluster.agent/id :seon.render/kind] :as request}]
+  (let [candidates (membership db id)]
+    ;; the request builder refuses BEFORE any projection runs when the
+    ;; membership declares a trusted input the request omits. The
+    ;; database value is positional and always present, so it satisfies
+    ;; a declaration by construction.
+    (assert-inputs! candidates (assoc request :seon.db/db db))
+    (into []
+          (comp
+           ;; A DECLARATION DECIDES PLACEMENT — omission, not an error. A
+           ;; nil value and an absent key both say nothing about the kind.
+           (filter (fn [block]
+                     (render/declaration? (get block kind))))
+           (map (fn [block]
+                  (surface (merge {:seon.db/db db}
+                                  (select-keys request
+                                               [:seon.cluster.agent/id
+                                                :seon.sci.admit/caps
+                                                :seon.cluster.run/live-processes]))
+                           block kind))))
+          candidates)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Placement
@@ -413,8 +540,19 @@
 
                   :else
                   (if-let [found (by-id id)]
-                    (if-let [failure (:seon.error/value found)]
-                      (error-card found failure)
+                    (cond
+                      (:seon.error/value found)
+                      (error-card found (:seon.error/value found))
+
+                      ;; OMISSION: the projection had nothing to say
+                      ;; (nil under `get` — ruling 1, 2026-07-28). The
+                      ;; hole IS the identified wrapper element, so it
+                      ;; stays as-is and a later non-nil render morphs
+                      ;; it in place.
+                      (nil? (get found :seon.render/output))
+                      hole
+
+                      :else
                       (walk (:seon.render/output found)
                             (conj visited id)
                             (inc depth)))
@@ -544,10 +682,13 @@
   never again: after that the pipeline patches the ONE block that
   changed."
   {:malli/schema [:=> [:cat :any :seon.render/page-request] :seon.render/page]}
-  [db {:keys [:seon.cluster.agent/id] caps :seon.sci.admit/caps}]
+  [db {:keys [:seon.cluster.agent/id] caps :seon.sci.admit/caps :as request}]
   (let [agent-id id
-        surfaces (surfaces db {:seon.cluster.agent/id agent-id
-                               :seon.render/kind :seon.render/html})
+        surfaces (surfaces db (merge {:seon.cluster.agent/id agent-id
+                                      :seon.render/kind :seon.render/html
+                                      :seon.sci.admit/caps caps}
+                                     (select-keys request
+                                                  [:seon.cluster.run/live-processes])))
         ;; every id some OTHER surface slots. Derived by looking at what
         ;; the hiccup says, which is what makes `layout-vs-surface is a
         ;; role` executable rather than aspirational.
@@ -572,8 +713,18 @@
         ;; the hole that closes it.
         roots (if (and (empty? top) (seq surfaces)) surfaces top)]
     (mapv (fn [surface]
-            (if-let [failure (:seon.error/value surface)]
-              (error-card surface failure)
+            (cond
+              (:seon.error/value surface)
+              (error-card surface (:seon.error/value surface))
+
+              ;; OMISSION keeps its identified wrapper element — the
+              ;; same shape `slot` emits — so the morph target survives
+              ;; the render that had nothing to say and a later non-nil
+              ;; render morphs in place (ruling 1, 2026-07-28).
+              (nil? (get surface :seon.render/output))
+              (slot (:seon.render.block/name surface))
+
+              :else
               (expand (:seon.render/output surface)
                       {:seon.render/surfaces surfaces
                        :seon.sci.admit/caps caps

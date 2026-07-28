@@ -202,16 +202,17 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- surfaces-of
-  [db agent-id]
+  [db agent-id caps]
   (block/surfaces db {:seon.cluster.agent/id agent-id
-                      :seon.render/kind :seon.render/html}))
+                      :seon.render/kind :seon.render/html
+                      :seon.sci.admit/caps caps}))
 
 (defn- paint!
   "Derive, suppress, and patch. Returns the new delivered map.
   Patches ONE element per changed block: the morph target is the block."
   [generator db agent-id caps delivered]
   (let [{:seon.render.web/keys [patches] :as repaint}
-        (changed delivered (surfaces-of db agent-id) caps db)]
+        (changed delivered (surfaces-of db agent-id caps) caps db)]
     (doseq [[_id html] patches]
       ;; default patch mode is `outer`, which is what a complete morph of
       ;; one element wants; the id rides in the element itself

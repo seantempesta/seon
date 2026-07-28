@@ -1,64 +1,47 @@
 (ns seon.cluster.prompt
   "The prompt is a projection of the database, not a stored artifact.
 
-  This contract layer is fully implemented and live-proven.
+  THE PROMPT FORMATTER IS A RENDER-UNIT APPLICATION, never a parallel
+  system (context-blocks contract, sealed 2026-07-28). This namespace
+  keeps exactly four jobs: block SELECTION (the agent's membership, AI
+  declarations only), AI-contribution VALIDATION (string | nil | flat
+  error), ORDERED REDUCTION, and the returned rendered-context value.
+  Every prose piece it used to own is a named block whose stored
+  `:seon.render/ai` symbol points at a `seon.context` projection
+  through the ONE router — so replacing a block's projection symbol
+  changes the next prompt with no edit here, and the same membership →
+  unit → router derivation serves the prompt, the page, debug and the
+  capture at one database value, one cap set, one snapshot.
 
-  A pure function of a database value and an agent. Nothing is stored,
-  nothing is cached, and the context-block machinery is a later rung —
-  reaching for it here is how a rung overruns. The prompt is five
-  derived pieces, each present exactly while the facts that cause it
-  are:
+  THE REQUEST NAMES THE HELD RUN — never a message id. The run's
+  creating transaction recorded its exact trigger as `:seon.db/trigger`
+  tx-meta and `seon.cluster.message/trigger` reads it back, so a later
+  queued message can never replace the recorded cause (plan review
+  finding 6, repaired).
 
-  1. the trigger's content — what the agent was asked, and WHO asked
-     when the sender is another agent (`:seon.cluster.message/from`;
-     its absence means the human or the error recorder, and then the
-     prompt names no sender rather than inventing one);
-  2. the agent's namespace — where its `defn`s land, stated as a fact
-     about where evaluation ALREADY happens rather than as something to
-     arrange. The first live drive's model read `your namespace is X`
-     and dutifully emitted `(in-ns X)`, which failed; the fix was to
-     evaluate there by construction (`seon.sci.eval/agent-namespace`,
-     the one derivation shared with the evaluator) and to say so;
-  3. THE INTERRUPTED WARNING, when a prior run was cut;
-  4. THE POPULATION — the other agents in this cluster, so delegation
-     is possible at all. Two sentences, derived from a query, and the
-     minimum that makes `my.message/send` usable; anything richer about
-     each peer belongs to the context-block rung;
-  5. THE PAUSE NOTE the agent left itself, when its previous run ended
-     in `my.run/wait`. This is the continuity a delegating agent needs
-     and the only continuity it has: a new run has a fresh sci ctx and
-     a freshly derived prompt, so a reply that says only \"25\" is
-     unanswerable without the note that says what 25 was for.
+  VALIDATION IS THE THREE-VALUED RULE (rulings 1 and 3, 2026-07-28):
 
-  THE WARNING IS THE WHOLE RESUME PRESENTATION. One derived sentence,
-  never per-eval markers (the s3 crash model), and it has two sources
-  because a crash has two shapes:
+  - a STRING contribution is admitted against the request's caps — the
+    one bound; a projection cannot flood the prompt;
+  - NIL contributes no text and no record — nil-punning omission, and
+    an empty string is the same nothing;
+  - a FLAT ERROR VALUE contributes a bounded, block-named statement —
+    the agent is told its context is incomplete, never silently handed
+    a shorter prompt — and the record carries the flat value exactly.
 
-  - a run whose fold was cut mid-plan: N2's `interrupted-warning`
-    derives the ordinal and how many results are missing
-    (`src/seon/cluster/run.cljc:102-138`). The honest wording is that
-    the interrupted form's effect MAY have happened — rows 6 and 7 of
-    the crash walk are indistinguishable from the facts, and claiming
-    otherwise would be a lie the agent then reasons from;
-  - a run cut BEFORE its plan existed: the paid model call was lost and
-    nothing re-called it (the night ruling). There are no receipts to
-    derive from, so the warning comes from the settled run itself. An
-    agent that is never told about this case simply sees its request
-    vanish;
-  - a run that ENDED before its plan existed because the turn failed —
-    a lost model call, an unreadable reply. `:seon.cluster.run/error`
-    carries why, and the next prompt says it. The live drive is the
-    argument: an error value that only existed in a returned map left
-    an operator reproducing the call by hand to find out what happened.
+  The returned text is EXACTLY the reduction of the contribution texts
+  joined by \"\\n\\n\"; no consumer reruns a projection to reconstruct
+  metadata — capture, debug and token accounting all read the records.
 
-  Nothing about this is stored, so nothing about it can go stale: the
-  warning is present exactly while the facts that cause it are."
-  (:require [clojure.edn :as edn]
-            [clojure.string :as str]
-            [datahike.api :as d]
-            [seon.cluster.run :as run]
-            [seon.sci.eval :as sci.eval]
-            [seon.schema.edn :as schema.edn]))
+  Nothing about this is stored, so nothing about it can go stale: every
+  sentence is present exactly while the facts that cause it are."
+  (:require [clojure.string :as str]
+            [seon.cluster.message :as message]
+            [seon.context :as context]
+            [seon.render :as render]
+            [seon.render.block :as block]
+            [seon.schema.edn :as schema.edn]
+            [seon.sci.admit :as admit]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — src/seon/schema/prompt.edn
@@ -67,221 +50,138 @@
 (schema.edn/load! {})
 
 ;;; ---------------------------------------------------------------------------
-;;; The pieces, each derived
+;;; Validation — string | nil | flat error
 ;;; ---------------------------------------------------------------------------
-
-(defn- trigger-content
-  [db message-id]
-  (d/q '[:find ?content .
-         :in $ ?message-id
-         :where
-         [?message :seon.cluster.message/id ?message-id]
-         [?message :seon.cluster.message/content ?content]]
-       db message-id))
-
-(defn- trigger-sender
-  "The agent that sent the trigger, or nil when it came from outside.
-  ABSENCE IS THE ANSWER, not a missing value to fill in: a message with
-  no `from` is the human's or the error recorder's, and the prompt says
-  \"you have been asked\" rather than naming a sender it would have to
-  invent."
-  [db message-id]
-  (d/q '[:find ?agent-id .
-         :in $ ?message-id
-         :where
-         [?message :seon.cluster.message/id ?message-id]
-         [?message :seon.cluster.message/from ?agent]
-         [?agent :seon.cluster.agent/id ?agent-id]]
-       db message-id))
-
-(defn- peers
-  "Every OTHER agent in this cluster, by id, ordered.
-  Derived on every prompt, so an agent created a minute ago is
-  addressable a minute later and one that never existed is never named.
-  This is the whole of \"who can I talk to\" for now: the context-block
-  machinery that would say more about each of them is a later rung, and
-  a prompt that reached for it here would be that rung overrunning."
-  [db agent-id]
-  (->> (d/q '[:find [?id ...]
-              :where [?agent :seon.cluster.agent/id ?id]]
-            db)
-       (remove #{agent-id})
-       sort
-       vec))
-
-(defn- previous-run
-  "The agent's most recent run OTHER than the one being planned, or nil.
-  The warning is about the LAST run, not any run: an agent cut once,
-  recovered, and working for a week is not still interrupted.
-
-  EXCLUDING THE RUN BEING PLANNED is the whole correction, and it
-  was measured rather than reasoned: the loop CLAIMS BEFORE it calls the
-  model, so by the time a prompt is derived the agent's newest run is
-  the one this prompt is for. Taking the newest run therefore inspected
-  a run with no receipts and no error and found nothing to warn about —
-  the warning was derivable before the run opened and gone after it, so
-  the live agent never saw it. The run being planned is exactly the one
-  the agent POINTER names, so excluding that leaves the run the warning
-  is actually about. When no run is open (a prompt derived before the
-  claim, as a probe or a test does) nothing is excluded and the newest
-  run is the previous one — the same answer by the same rule."
-  [db agent-id]
-  (let [current (d/q '[:find ?id .
-                       :in $ ?agent-id
-                       :where
-                       [?agent :seon.cluster.agent/id ?agent-id]
-                       [?agent :seon.cluster.agent/run ?run]
-                       [?run :seon.cluster.run/id ?id]]
-                     db agent-id)]
-    (->> (d/q '[:find [(pull ?run [*]) ...]
-                :in $ ?agent-id
-                :where
-                [?agent :seon.cluster.agent/id ?agent-id]
-                [?run :seon.cluster.run/agent ?agent]]
-              db agent-id)
-         (remove #(= current (:seon.cluster.run/id %)))
-         (sort-by #(inst-ms (:seon.cluster.run/opened-at %)))
-         last)))
-
-(defn- run-receipts
-  [db run-id]
-  (d/q '[:find [(pull ?receipt [*]) ...]
-         :in $ ?run-id
-         :where
-         [?run :seon.cluster.run/id ?run-id]
-         [?receipt :seon.cluster.eval/run ?run]]
-       db run-id))
-
-(defn- run-forms
-  [db run-id]
-  (d/q '[:find [(pull ?form [*]) ...]
-         :in $ ?run-id
-         :where
-         [?run :seon.cluster.run/id ?run-id]
-         [?form :seon.cluster.run.form/run ?run]]
-       db run-id))
-
-(defn- interrupted-sentence
-  "The ONE warning sentence for `agent-id`, or nil when nothing was cut.
-  Two shapes, one sentence — and both say MAY, because rows 6 and 7 of
-  the crash walk are indistinguishable from the facts and a confident
-  claim would be a lie the agent then reasons from."
-  [db agent-id]
-  (when-let [previous (previous-run db agent-id)]
-    (let [run-id (:seon.cluster.run/id previous)]
-      (if-let [cut (run/interrupted-warning (run-forms db run-id)
-                                            (run-receipts db run-id))]
-        (str "Your previous run was interrupted at form "
-             (:seon.cluster.eval/ordinal cut)
-             ". That form's effect may have happened; "
-             (:seon.cluster.run/missing-results cut)
-             " result(s) are missing. Nothing was retried — adapt from here.")
-        ;; no receipts to derive from: the run was cut before its plan
-        ;; existed, so the model call was lost and nothing re-called it
-        (cond
-          ;; the turn failed for a reason we recorded — say the reason
-          (:seon.cluster.run/error previous)
-          (str "Your previous request did not run: "
-               (:seon.cluster.run/error previous)
-               " Nothing was retried, and nothing you asked for ran.")
-
-          (and (nil? (:seon.cluster.run/plan-digest previous))
-               (some? (:seon.cluster.run/closed-at previous)))
-          (str "Your previous request was interrupted before you replied, "
-               "and nothing was retried. Nothing you asked for ran."))))))
-
-(defn- paused-sentence
-  "The note the agent left itself when it paused, or nil.
-  CONTINUITY WITH NO MEMORY RUNG. A delegating agent's problem is that
-  its next run is a different run: the sci ctx is gone, the prompt is
-  derived fresh, and the reply that finally arrives says only \"25\".
-  `my.run/wait` already promised the fix in its own docstring — \"the
-  note is for the human and for the agent's own next prompt\" — and this
-  is that promise kept. Nothing new is stored: the disposition IS the
-  last form's admitted value, so the note is already durable in that
-  form's `result-edn`, and this reads it back.
-
-  Total by construction: unreadable EDN, a value that is not a wait,
-  and a run with no receipts all answer nil, because a prompt that
-  threw would take the turn down with it."
-  [db agent-id]
-  (when-let [previous (previous-run db agent-id)]
-    (let [last-value
-          (some->> (run-receipts db (:seon.cluster.run/id previous))
-                   (sort-by :seon.cluster.eval/ordinal)
-                   last
-                   :seon.cluster.eval/result-edn
-                   (#(try (edn/read-string %)
-                          (catch #?(:clj Throwable :cljs :default) _ nil))))]
-      (when (and (map? last-value)
-                 (= :wait (:my.run/disposition last-value)))
-        (str "You paused your previous run, leaving yourself this note: "
-             (:my.run/note last-value))))))
 
 (defn- refuse!
   [rule data]
   (throw (ex-info (str "prompt refused: " (name rule))
                   (assoc data :seon.error/kind ::refused ::rule rule))))
 
+(defn- bound
+  "One string, bounded by the request's one cap set. The SAME admission
+  codec that bounds eval results and generic panels — a second set of
+  size dials here would drift from the first."
+  [caps text]
+  (:seon.sci.admit/value
+   (admit/admit {:seon.sci.admit/value text
+                 :seon.sci.admit/caps caps
+                 ;; nothing is armed: this is not an eval, and
+                 ;; admission's bounds are the whole guard here
+                 :seon.sci.admit/interrupt-fn (fn [])
+                 :seon.config/on-core-error :log})))
+
+(defn- contribution
+  "One block's validated AI contribution record, or nil for omission.
+  Text is ALWAYS present on a record — a failed block contributes a
+  bounded, block-named statement rather than silence (silent omission
+  is confabulation fuel); `:seon.error/value` presence IS \"failed\"."
+  [caps block rendered]
+  (let [name (:seon.render.block/name block)
+        declaration (get block :seon.render/ai)
+        output (get rendered :seon.render/output)
+        failure (cond
+                  (:seon.error/kind rendered) rendered
+
+                  ;; the one check the router cannot make: the ai
+                  ;; kind's grammar is prose, and this is its consumer
+                  (and (some? output) (not (string? output)))
+                  {:seon.error/kind ::not-text
+                   :seon.error/message
+                   (str "The " name " block's ai render returned something "
+                        "that is not text.")
+                   :seon.error/data
+                   {:seon.render.block/name name
+                    ::shape #?(:clj (.getName (class output))
+                               :cljs (pr-str (type output)))}}
+
+                  :else nil)
+        text (cond
+               failure (bound caps
+                              (str "The " name " context block failed to "
+                                   "render, so your context is incomplete "
+                                   "here: " (:seon.error/message failure)))
+               ;; nil-punning omission — and an empty string is the
+               ;; same nothing (a record's text is `{:min 1}` by seal)
+               (or (nil? output) (str/blank? output)) nil
+               :else (bound caps output))]
+    (when text
+      (cond-> {:seon.render.block/name name
+               :seon.render/kind :seon.render/ai
+               :seon.context.contribution/text text
+               :seon.context.contribution/hash (context/contribution-hash text)
+               :seon.context.contribution/tokens
+               (context/contribution-tokens text)
+               :seon.context.contribution/band
+               (get block :seon.render.block/band :dynamic)}
+        (qualified-symbol? declaration)
+        (assoc :seon.render/projection declaration)
+        failure
+        (assoc :seon.error/value failure)))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Contract
 ;;; ---------------------------------------------------------------------------
 
 (defn prompt
-  "The prompt for one agent answering one trigger, derived from `db`.
-  Pure and total: an agent with no history and a clean trigger gets the
-  trigger's content and its namespace; an agent whose last run was cut
-  gets exactly one additional warning sentence. Refuses `::no-trigger`
-  when the named message does not exist — a prompt with nothing to
-  answer is a caller bug, not an agent outcome."
+  "The rendered context for the agent holding the request's run,
+  derived from `db`. Selection → one router request per AI-declaring
+  block in membership order → validation (string | nil | flat error) →
+  ordered reduction.
+
+  - The trigger is the HELD RUN's recorded cause: `message/trigger`
+    reads the run's creating transaction's `:seon.db/trigger`. Refuses
+    `::no-trigger` when that transaction names none — a prompt with
+    nothing to answer is a caller bug, not an agent outcome.
+  - Refuses at request construction (`assert-inputs!`) when the
+    membership declares a trusted input the request omits — before any
+    projection runs.
+
+  Returns {text, contributions, db}. The text is EXACTLY the reduction
+  of the contribution texts joined by \"\\n\\n\"."
   {:malli/schema [:=> [:cat :any :seon.cluster.prompt/request]
-                  :seon.cluster.prompt/text]}
-  [db {:keys [:seon.cluster.agent/id :seon.cluster.message/id]
-       :as request}]
-  (let [agent-id (:seon.cluster.agent/id request)
-        message-id (:seon.cluster.message/id request)
-        content (or (trigger-content db message-id)
-                    (refuse! ::no-trigger request))
-        sender (trigger-sender db message-id)
-        others (peers db agent-id)]
-    (->> [(str "You are agent " agent-id
-               ". Your namespace is my.agents." agent-id
-               " — defns you write land there.")
-          ;; WHO ELSE EXISTS, and it is a fact rather than an
-          ;; encouragement: an agent that is never told the population
-          ;; cannot delegate, and one told about an agent that does not
-          ;; exist writes a message the driver has to refuse. Omitted
-          ;; entirely when it is alone — the sentence is present exactly
-          ;; while the facts that cause it are.
-          ;; THE EXAMPLE USES A REAL ID, and that is not polish. The
-          ;; first live drive's model read "your namespace is
-          ;; my.agents.alice" two lines above "other agents: bob" and
-          ;; wrote (my.message/send "my.agents.bob" …) — an agent this
-          ;; cluster does not have. The delivery rule refused it
-          ;; correctly and recorded the fact, but alice had already
-          ;; completed believing she had asked. A prompt that shows the
-          ;; agent the exact string to pass cannot be read that way.
-          (when (seq others)
-            (str "Other agents in this cluster, by id: "
-                 (str/join ", " others)
-                 ". To ask one for something, return "
-                 "(my.message/send \"" (first others)
-                 "\" \"what you want to say\") from a form — that "
-                 "delivers it and wakes them. Use the bare id exactly as "
-                 "listed above; it is not a namespace. Their answer "
-                 "comes back to you later as a new request, so pause "
-                 "with my.run/wait after asking. Return a vector of "
-                 "sends to message several."))
-          (interrupted-sentence db agent-id)
-          (paused-sentence db agent-id)
-          (if sender
-            (str "Agent " sender " sent you:\n\n" content)
-            (str "You have been asked:\n\n" content))
-          (str "Reply with Clojure forms to run, in order. "
-               "Finish with (my.run/complete \"your reply\") when you are "
-               "done, or (my.run/wait \"why\") to pause this run — pause "
-               "when you are waiting on another agent, and put everything "
-               "you will need to finish into the note, because your next "
-               "run starts fresh and that note is what it reads.")]
-         (remove nil?)
-         (str/join "\n\n"))))
+                  :seon.cluster.prompt/rendered-context]}
+  [db request]
+  (let [run-id (:seon.cluster.run/id request)
+        agent-id (:seon.cluster.agent/id request)
+        caps (:seon.sci.admit/caps request)
+        _ (or (message/trigger db run-id)
+              (refuse! ::no-trigger request))
+        candidates (block/membership db agent-id)
+        _ (block/assert-inputs! candidates (assoc request :seon.db/db db))
+        unit-request (merge {:seon.db/db db}
+                            (select-keys request
+                                         [:seon.cluster.agent/id
+                                          :seon.sci.admit/caps
+                                          :seon.cluster.run/live-processes]))
+        records
+        (into []
+              (comp
+               ;; A DECLARATION DECIDES PLACEMENT — an html-only widget
+               ;; costs the prompt zero tokens.
+               (filter (fn [candidate]
+                         (render/declaration?
+                          (get candidate :seon.render/ai))))
+               (keep (fn [candidate]
+                       ;; the unit for `:trigger` must carry the held
+                       ;; run id: one more qualified key on the open
+                       ;; unit map, read by `get`
+                       (contribution
+                        caps candidate
+                        (render/render
+                         {:seon.render/unit
+                          (assoc (block/unit unit-request candidate)
+                                 :seon.cluster.run/id run-id)
+                          :seon.render/kind :seon.render/ai})))))
+              candidates)
+        contributions
+        (into []
+              (map-indexed
+               (fn [position record]
+                 (assoc record
+                        :seon.context.contribution/position (long position))))
+              records)]
+    {:seon.cluster.prompt/text
+     (str/join "\n\n" (map :seon.context.contribution/text contributions))
+     :seon.context/contributions contributions
+     :seon.db/db db}))
